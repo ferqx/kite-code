@@ -2,7 +2,11 @@
 
 会话文件不放开整个 Profile。[输入文件适配器](../tools/input-files.ts)仅允许所选消息引用的准确原件读取；[输出适配器](../tools/session-outputs.ts)仅允许当前会话的登记文件或准确输出目录中的 create-only 新文件；[方案适配器](../tools/plan-files.ts)只接受 Planning 当前登记的准确目标。各适配器在原授权与派发链核全部父子 policy leaves、能力定义／版本、原输入及目标 revision，仍保真实工作区信任、取消和 native 身份核验。Plan 模式的草稿写例外仅限可信宿主识别的当前方案目的；普通项目／输出写入不享受例外，文件存在和 Markdown 中的“已批准”也不授执行权。
 
-默认产品策略声明可信 `toolDispatchOrder: model`，由 Agent 冻结为 Run 的批次准入顺序；审批等待不能让后续免审工具提前派发，拒绝取消真实未开始兄弟。实际 dispatch 后仍可并发执行，不增加累计 Tool 数量门槛。子权限与 planning 包装保该标记，Service 只透传装配；自定义 Permissions 没有声明时保通用独立并行能力。普通已知参数／策略失败仍可交给模型纠正，不能混同用户明确拒绝、未知效果或取消。
+默认产品策略声明可信 `toolDispatchOrder: model`，由 Agent 冻结为 Run 的批次准入顺序；审批等待不能让后续免审工具提前派发，人工明确拒绝取消真实未开始兄弟。实际 dispatch 后仍可并发执行，不增加累计 Tool 数量门槛。子权限与 planning 包装保该标记，Service 只透传装配；自定义 Permissions 没有声明时保通用独立并行能力。普通已知参数／策略失败仍可交给模型纠正，不能混同用户明确拒绝、未知效果或取消。
+
+自动审核的明确拒绝只拒绝准确目标，不取消原 Command。[InteractionGate](../execution/interactions.ts)以内部 `AuthorizationCheckRejectedError` 复用 `permission_denied`；[Tool 执行](../execution/index.ts)只有确认 adapter 未调用、派发未提交时才保存可读拒绝原因及未执行事实。该失败释放原准入顺序，下一模型取得原 call ID 配对的完整反馈，继续原授权路径；后续调用仍各自审核，相同参数的连续失败仍受原五次失败上限约束。人工明确 deny 仍沿原 `cancelCommand + approval_denied` 终止原工作，取消、未知效果、失败保存和恢复禁止重放的规则保持。Action／Job沿原闭合错误结果，不改变MCP未启动证明。对应决策见[自动拒绝分流](../../../../.agents/notes/implemented/bug-fix/2026-10-25-automatic-rejection-preserves-authorized-work.md)。
+
+2026-10-25，macOS arm64／Bun1.4.2，`bfdb6a273`加本次工作树：[自动审核](../../test/isolated/execution/authorization-check.test.ts)、[顺序准入](../../test/isolated/execution/tool-dispatch-admission.test.ts)、[并行清理](../../test/isolated/execution/parallel-tools.test.ts)、[动态模式](../../test/isolated/execution/live-permission-mode.test.ts)与[grant](../../test/isolated/execution/permission-grants.test.ts)五个完整文件48项通过；同原Command零重放断言补充后专项通过。原[SIGKILL混合恢复](../../test/isolated/recovery/parallel-resume-runtime.test.ts)、[审核上下文](../../test/isolated/permissions/check-context.test.ts)与[模型合同](../../test/isolated/context/model-context.test.ts)另10项通过。Agent／Service类型、文档与边界检查通过。默认Service的真实SDK／Files整文件11项证据归[Service owner](../../../../apps/service/README.md)，Provider为本地受控服务，未新做真实付费模型或安装版资格。
 
 本模块拥有 Kite 的三策略规则与 Shell 命令分析，公开入口为 `@kite-ai/agent/permissions` 和 `@kite-ai/agent/permissions/shell`。Service 读取可信宿主事实并装配这些工厂；HTTP、客户端和配置正文不产生权限。用户合同归[工具和授权](../../../../docs/handbook/features/tools-and-approvals.md)，本次边界及证据归[实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
 

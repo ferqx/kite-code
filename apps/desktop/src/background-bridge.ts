@@ -72,6 +72,8 @@ export type NativeBackgroundChild = {
     unavailable?: true;
     runs: NativeRunFact[];
     tools: NativeToolMessageFact[];
+    /** Original live Shell inputs only; never Tool receipts or control authority. */
+    liveTools?: NativeToolMessageFact[];
     executions: NativeToolExecution[];
   };
   control?: {

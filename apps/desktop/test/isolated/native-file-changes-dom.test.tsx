@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
-import { NativeFileChanges } from '../../src/native-file-changes';
+import { NativeFileChanges, NativeOutputFile } from '../../src/native-file-changes';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 test('retained FileChanges mounts only through the selected changes tab, reads all metadata pages and lazy saved bodies, and routes the selected editor by observation ID', async () => {
@@ -170,7 +170,7 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
     expect(dom.window.document.querySelector('.diff-added')!.textContent).toContain('+saved new');
     expect(dom.window.document.body.textContent).toContain('差异预览已截断');
     await act(async () => {
-      button('written.txt').click();
+      button('打开当前文件：written.txt').click();
     });
     expect(requests.filter((request) => request.method === 'fileChanges.open').at(-1)).toEqual({
       method: 'fileChanges.open',
@@ -183,7 +183,7 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
       render();
     });
     await act(async () => {
-      button('written.txt').click();
+      button('打开当前文件：written.txt').click();
     });
     expect(requests.filter((request) => request.method === 'fileChanges.open').at(-1)).toEqual({
       method: 'fileChanges.open',
@@ -221,6 +221,121 @@ test('retained FileChanges mounts only through the selected changes tab, reads a
     await act(async () => {
       root.unmount();
     });
+    restoreLayout();
+    Object.assign(globalThis, prior);
+    dom.window.close();
+  }
+});
+
+test('tool delivery snapshots use the named shared viewport while retaining original paging, close and current-file actions', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
+  const restoreLayout = prepareDesktopDom(dom);
+  const prior = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const host = dom.window.document.getElementById('root')!;
+  const root = createRoot(host);
+  const requests: NativeRequest[] = [];
+  const first = '原交付第一段\nUnicode 漢字🙂\n';
+  const nextOffset = new TextEncoder().encode(first).byteLength;
+  const tail = '原交付最后一段\nSAVED_SNAPSHOT_TAIL';
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    async request(input) {
+      requests.push(input);
+      if (input.method === 'fileChanges.detail')
+        return {
+          kind: 'fileChanges.detail',
+          changeId: input.changeId,
+          text: input.offset === nextOffset ? tail : first,
+          snapshot: true,
+          offset: input.offset ?? 0,
+          nextOffset: input.offset === nextOffset ? null : nextOffset,
+        };
+      return null;
+    },
+  };
+  const button = (text: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (entry) => entry.textContent === text,
+    )!;
+  try {
+    await act(async () =>
+      root.render(
+        <NativeOutputFile
+          bridge={bridge}
+          generation={7}
+          editor="textedit"
+          entry={{
+            changeId: 'original-delivery',
+            messageId: 'original-tool',
+            path: 'report.txt',
+            preview: 'available',
+            openable: true,
+            snapshot: true,
+          }}
+        />,
+      ),
+    );
+    expect(requests).toEqual([]);
+    const details = host.querySelector('details')!;
+    await act(async () => {
+      details.open = true;
+      details.dispatchEvent(new dom.window.Event('toggle'));
+    });
+    const viewport = host.querySelector<HTMLElement>('[aria-label="交付文件历史内容"]')!;
+    expect(viewport.getAttribute('data-slot')).toBe('scroll-area-viewport');
+    expect(viewport.getAttribute('role')).toBe('region');
+    expect(viewport.getAttribute('tabindex')).toBe('0');
+    expect(viewport.classList.contains('scroll-fade-y')).toBe(true);
+    expect(viewport.closest('.tool-snapshot-scroll')).not.toBeNull();
+    viewport.focus();
+    expect(dom.window.document.activeElement).toBe(viewport);
+    const pre = viewport.querySelector<HTMLPreElement>('pre.tool-file-snapshot')!;
+    expect(pre.textContent).toBe(first);
+    expect(pre.style.whiteSpace).toBe('pre-wrap');
+    expect(pre.style.overflowWrap).toBe('anywhere');
+    expect(pre.style.overflow).toBe('');
+    expect(pre.style.maxHeight).toBe('');
+    expect(pre.getAttribute('tabindex')).toBeNull();
+    await act(async () => button('读取下一段').click());
+    expect(host.querySelector('[aria-label="交付文件历史内容"] pre')?.textContent).toBe(tail);
+    expect(button('读取下一段')).toBeUndefined();
+    await act(async () => button('回到开头').click());
+    expect(host.querySelector('[aria-label="交付文件历史内容"] pre')?.textContent).toBe(first);
+    const reads = requests.filter((entry) => entry.method === 'fileChanges.detail');
+    expect(reads.map((entry) => entry.offset)).toEqual([0, nextOffset, 0]);
+    expect(
+      reads.every((entry) => entry.changeId === 'original-delivery' && entry.generation === 7),
+    ).toBe(true);
+    await act(async () => button('打开当前文件：report.txt').click());
+    expect(requests.filter((entry) => entry.method === 'fileChanges.open')).toEqual([
+      {
+        method: 'fileChanges.open',
+        generation: 7,
+        changeId: 'original-delivery',
+        editor: 'textedit',
+      },
+    ]);
+    await act(async () => {
+      details.open = false;
+      details.dispatchEvent(new dom.window.Event('toggle'));
+    });
+    expect(host.querySelector('[aria-label="交付文件历史内容"]')).toBeNull();
+    expect(
+      requests.filter((entry) => entry.method === 'fileChanges.close').map((entry) => entry.readId),
+    ).toEqual(reads.map((entry) => entry.readId));
+    expect(requests.every((entry) => entry.method.startsWith('fileChanges.'))).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
     restoreLayout();
     Object.assign(globalThis, prior);
     dom.window.close();

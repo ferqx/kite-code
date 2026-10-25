@@ -1,21 +1,25 @@
 import { expect, test } from 'bun:test';
+import type { JobDefinition, ToolContext } from '@kite-ai/agent/extensions';
+import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AgentClient, Execution, Message } from '@kite-ai/client';
 import { DesktopDiagnosticsProvider, SessionPage, ToolActivity } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createModelToolSurface } from '../../../../packages/agent/src/model-tools';
 import { NativeToolMessages } from '../../electron/tool-messages';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import {
   desktopToolMessage,
   desktopToolPresentation,
+  groupNativeToolMessages,
   liveToolMessages,
   NativeLiveToolMessage,
   NativeToolMessage,
   useNativeToolMessages,
 } from '../../src/native-tool-messages';
 import { desktopTranscript } from '../../src/native-transcript';
-import type { NativeToolMessagePage } from '../../src/tool-messages-bridge';
+import type { NativeToolMessageFact, NativeToolMessagePage } from '../../src/tool-messages-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 test('collaboration tool labels use exact new definitions and versions without inferring an Agent outcome', () => {
@@ -35,6 +39,1196 @@ test('collaboration tool labels use exact new definitions and versions without i
       'accepted',
     ),
   ).toMatchObject({ status: 'completed', title: '创建子 Agent' });
+});
+
+test('a live long command survives queued approvals, View refresh and receipt-first takeover without borrowing execution state', async () => {
+  const f = fixture(),
+    command = `printf start\n${'雪🙂'.repeat(3000)}\nprintf end`;
+  const run = {
+    id: 'live-run',
+    originCommandId: 'start-live',
+    originStoreId: 'store',
+    sessionId: 's',
+    isActive: true,
+    status: 'running' as const,
+    createdAt: 0,
+    finishedAt: null,
+    reason: null,
+  };
+  let execution: Execution = {
+    id: 'live-command',
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: run.id,
+    kind: 'tool',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    status: 'planned',
+    toolCallId: 'live-call',
+    toolInput: { key: 'original', command },
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: null,
+  };
+  let selected = { ...selection(), runs: [run], executions: [execution] };
+  const history = new Map<string, Message>([
+    [
+      'model',
+      {
+        id: 'model',
+        seq: '1',
+        role: 'assistant',
+        status: 'incomplete',
+        firstOutput: 'tool_calls',
+        sessionId: 's',
+        runId: run.id,
+        content: '',
+        toolCalls: [],
+      },
+    ],
+  ]);
+  let gets = 0,
+    releaseCommand!: () => void,
+    releaseReceipt!: () => void;
+  let commandSignal: AbortSignal | undefined;
+  const commandGate = new Promise<void>((resolve) => {
+    releaseCommand = resolve;
+  });
+  const receiptGate = new Promise<void>((resolve) => {
+    releaseReceipt = resolve;
+  });
+  const client = {
+    verifyConnection: async () => {},
+    getExecution: async (_id: string, options?: { signal?: AbortSignal }) => {
+      gets++;
+      if (gets === 2) {
+        commandSignal = options?.signal;
+        await commandGate;
+      }
+      if (history.has('receipt')) await receiptGate;
+      return execution;
+    },
+  } as unknown as AgentClient;
+  const scope = {
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    storeId: 'store',
+    sessionId: 's',
+    workspaceId: 'w',
+  };
+  const manager = new NativeToolMessages(
+    client,
+    () => scope,
+    () => history,
+    () => selected.executions,
+  );
+  const requests: NativeRequest[] = [];
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      requests.push(request);
+      if (request.method === 'toolMessages.list') return manager.list(request);
+      if (request.method === 'toolMessages.close') manager.close(request.readId);
+      return null;
+    },
+  } as NativeBridge;
+  let projected: ReturnType<typeof groupNativeToolMessages> = [];
+  function Harness({ selected, messages }: { selected: NativeSelection; messages: Message[] }) {
+    const facts = useNativeToolMessages({
+      bridge,
+      generation: 1,
+      selection: selected,
+      historyEpoch: 0,
+      messages,
+      observationRevision: selected.viewGeneration,
+    });
+    const transcript = desktopTranscript({
+      messages,
+      runs: selected.runs,
+      tools: facts.entries,
+      executions: selected.executions,
+      storeId: 'store',
+      sessionId: 's',
+    });
+    projected = groupNativeToolMessages([
+      ...transcript.messages,
+      ...liveToolMessages(selected, messages, false, facts.entries).map((item) => item.message),
+    ]);
+    return (
+      <SessionPage
+        workspaces={[]}
+        sessionLabel="live Shell"
+        readingKey="live-command"
+        loading={false}
+        connected
+        connectionLabel="local"
+        actions={{}}
+        messages={projected}
+      />
+    );
+  }
+  const render = () =>
+    act(async () =>
+      f.root.render(<Harness selected={selected} messages={[...history.values()]} />),
+    );
+  try {
+    await render();
+    expect(gets).toBe(2);
+    expect(projected.find((model) => model.role === 'tool')?.shell?.commandPreview).toContain(
+      'printf start',
+    );
+    const aggregate = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    await act(async () => aggregate.click());
+    const row = f.host.querySelector<HTMLButtonElement>(
+      '.tool-activity-steps button.tool-activity-summary',
+    )!;
+    await act(async () => row.click());
+    const card = f.host.querySelector('.shell-output'),
+      viewport = f.host.querySelector('.shell-output-viewport');
+    const phases: Execution['authorization'][] = [
+      {
+        dispatched: false,
+        check: {
+          executionId: 'check',
+          status: 'running',
+          decision: 'unavailable',
+          reason: 'checking',
+          requireApproval: true,
+        },
+      },
+      {
+        dispatched: false,
+        human: {
+          interactionId: 'approval',
+          state: 'pending',
+          revision: '1',
+          acceptedDecisionRevision: null,
+          accepted: false,
+          decision: null,
+        },
+      },
+      { dispatched: true },
+    ];
+    for (const [index, authorization] of phases.entries()) {
+      execution = { ...execution, status: index === 2 ? 'running' : 'planned', authorization };
+      selected = {
+        ...selected,
+        viewGeneration: index + 2,
+        viewLoading: index === 1,
+        executions: [execution],
+      };
+      await render();
+      expect(gets).toBe(2);
+      expect(commandSignal?.aborted).toBe(false);
+      expect(f.host.querySelector('.shell-output') === card).toBe(true);
+    }
+    selected = { ...selected, viewLoading: false };
+    await act(async () => releaseCommand());
+    await render();
+    expect(gets).toBe(3);
+    expect(projected.find((model) => model.role === 'tool')?.shell?.command).toBe(command);
+    expect(projected.find((model) => model.role === 'tool')?.status).toBe('running');
+    expect(projected.find((model) => model.role === 'tool')?.approval).toBeUndefined();
+    expect(f.host.querySelector('.shell-output-viewport') === viewport).toBe(true);
+    const raw = JSON.stringify({
+      ref: {
+        key: 'original',
+        extensionId: 'builtin.shell',
+        originStoreId: 'store',
+        sessionId: 's',
+        commandId: 'start',
+        executionId: 'job',
+      },
+      execution: {
+        id: 'job',
+        sessionId: 's',
+        originStoreId: 'store',
+        kind: 'job',
+        definitionId: 'shell.command',
+        definitionVersion: '1',
+        status: 'succeeded',
+        result: { outcome: 'succeeded', content: 'Shell succeeded', details: { exitCode: 0 } },
+      },
+      stdout: 'done\n',
+      stderr: '',
+      stdoutBytes: '5',
+      stderrBytes: '0',
+      droppedBytes: '0',
+      truncated: false,
+      timedOut: false,
+    });
+    execution = {
+      ...execution,
+      status: 'succeeded',
+      resultRevision: '1',
+      result: { outcome: 'succeeded', content: raw, details: JSON.parse(raw) },
+    };
+    selected = { ...selected, executions: [execution] };
+    history.set('receipt', {
+      id: 'receipt',
+      seq: '2',
+      role: 'tool',
+      status: 'complete',
+      sessionId: 's',
+      runId: run.id,
+      toolCallId: 'live-call',
+      sourceIds: [execution.id],
+      content: raw,
+    });
+    await render();
+    const pending = projected.find((model) => model.id === 'receipt')!;
+    expect(pending.shell?.command).toBe(command);
+    expect(pending.shell?.jobStatus).toBeUndefined();
+    expect(pending.status).toBeUndefined();
+    expect(pending.approval).toBeUndefined();
+    expect(f.host.querySelector('.tool-activity-steps button.tool-activity-summary') === row).toBe(
+      true,
+    );
+    expect(row.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => releaseReceipt());
+    await render();
+    expect(projected.find((model) => model.id === 'receipt')?.shell).toMatchObject({
+      command,
+      jobStatus: 'succeeded',
+      stdout: 'done\n',
+    });
+    expect(f.host.querySelector('.shell-output') === card).toBe(true);
+    expect(f.host.querySelector('.shell-output-viewport') === viewport).toBe(true);
+    expect(
+      requests.filter((request) => request.method === 'toolMessages.list' && request.executionIds),
+    ).toHaveLength(3);
+  } finally {
+    releaseCommand();
+    releaseReceipt();
+    manager.release();
+    await f.close();
+  }
+});
+
+test('live command pagination resumes when another tool changes the target list', async () => {
+  const f = fixture();
+  const command = `printf original\n${'雪🙂'.repeat(5000)}`;
+  const run = {
+    id: 'run',
+    originCommandId: 'start',
+    originStoreId: 'store',
+    sessionId: 's',
+    isActive: true,
+    status: 'running' as const,
+    createdAt: 0,
+    finishedAt: null,
+    reason: null,
+  };
+  const makeExecution = (id: string, command: string): Execution => ({
+    id,
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: run.id,
+    kind: 'tool',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    status: 'running',
+    toolCallId: `call-${id}`,
+    toolInput: { key: id, command },
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: null,
+  });
+  const original = makeExecution('original', command);
+  const sibling = makeExecution('sibling', 'printf sibling');
+  const newcomer = makeExecution('newcomer', 'printf newcomer');
+  let selected = { ...selection(), runs: [run], executions: [original, sibling] };
+  let originalGets = 0,
+    siblingGets = 0,
+    release!: () => void;
+  let signal: AbortSignal | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const client = {
+    verifyConnection: async () => {},
+    getExecution: async (id: string, options?: { signal?: AbortSignal }) => {
+      if (id === original.id && ++originalGets === 2) {
+        signal = options?.signal;
+        await gate;
+      }
+      if (id === sibling.id) siblingGets++;
+      return [original, sibling, newcomer].find((execution) => execution.id === id)!;
+    },
+  } as unknown as AgentClient;
+  const scope = {
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    storeId: 'store',
+    sessionId: 's',
+    workspaceId: 'w',
+  };
+  const manager = new NativeToolMessages(
+    client,
+    () => scope,
+    () => new Map(),
+    () => selected.executions,
+  );
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method === 'toolMessages.list') return manager.list(request);
+      if (request.method === 'toolMessages.close') manager.close(request.readId);
+      return null;
+    },
+  } as NativeBridge;
+  let facts: NativeToolMessageFact[] = [];
+  function PaginationHarness({ selected }: { selected: NativeSelection }) {
+    const read = useNativeToolMessages({
+      bridge,
+      generation: 1,
+      selection: selected,
+      historyEpoch: 0,
+      messages: [],
+      observationRevision: selected.viewGeneration,
+    });
+    facts = read.entries;
+    return null;
+  }
+  const render = () => act(async () => f.root.render(<PaginationHarness selected={selected} />));
+  try {
+    await render();
+    expect(originalGets).toBe(2);
+    expect(
+      facts.find((fact) => fact.executionId === original.id)?.shellInput?.command,
+    ).toBeUndefined();
+    expect(facts.find((fact) => fact.executionId === sibling.id)?.shellInput?.command).toBe(
+      'printf sibling',
+    );
+    selected = { ...selected, viewGeneration: 2, executions: [original, sibling, newcomer] };
+    await render();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => release());
+    expect(facts.find((fact) => fact.executionId === original.id)?.shellInput?.command).toBe(
+      command,
+    );
+    expect(facts.find((fact) => fact.executionId === newcomer.id)?.shellInput?.command).toBe(
+      'printf newcomer',
+    );
+    expect(siblingGets).toBe(1);
+  } finally {
+    release();
+    manager.release();
+    await f.close();
+  }
+});
+
+function ShellMetadataHarness({
+  bridge,
+  messages,
+  selected = selection(),
+}: {
+  bridge: NativeBridge;
+  messages: Message[];
+  selected?: NativeSelection;
+}) {
+  const facts = useNativeToolMessages({
+    bridge,
+    generation: 1,
+    selection: selected,
+    historyEpoch: 0,
+    messages,
+    observationRevision: 0,
+  });
+  return (
+    <>
+      <output data-testid="shell-facts">
+        {JSON.stringify({
+          loading: facts.loading,
+          error: facts.error,
+          entries: facts.entries,
+          pending: [...facts.pendingMessageIds],
+        })}
+      </output>
+      {messages
+        .filter((value) => value.role === 'tool')
+        .map((value) => {
+          const fact = facts.entries.find((entry) => entry.messageId === value.id);
+          return (
+            <NativeToolMessage
+              key={value.id}
+              message={
+                fact
+                  ? desktopToolMessage(fact, value.id, value.content)
+                  : { id: value.id, role: 'tool', text: value.content, settled: true }
+              }
+            />
+          );
+        })}
+      <button type="button" onClick={facts.retry}>
+        retry
+      </button>
+    </>
+  );
+}
+
+test('the exact saved Shell request is readable before Model history completes and visible conflicts still revoke its presentation', async () => {
+  const f = fixture(),
+    command = 'printf first\nprintf second\n',
+    stdout = 'first\nsecond\n';
+  const jobDefinition: JobDefinition = {
+    id: 'shell.command',
+    version: '1',
+    description: 'unused registration',
+    inputSchema: { type: 'object' },
+    async start() {
+      throw Error('no_process_start');
+    },
+    observe() {
+      throw Error('no_process_observe');
+    },
+    async cancel() {
+      throw Error('no_process_cancel');
+    },
+    async dispose() {},
+  };
+  const shell = createShellExtension({ job: jobDefinition });
+  const surface = createModelToolSurface(
+    {
+      modelId: 'fixture',
+      requestId: 'model-request',
+      messages: [],
+      tools: shell.tools!.map((tool) => ({
+        id: tool.id,
+        definitionVersion: tool.version,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      })),
+    },
+    new Map(shell.tools!.map((tool) => [tool.id, tool])),
+  );
+  const call = surface.decode({
+    id: 'actual-call',
+    name: 'shell_execute',
+    arguments: JSON.stringify({ key: 'exact-command', command }),
+  });
+  expect(call.name).toBe('shell.execute');
+  const ref = {
+    key: 'exact-command',
+    extensionId: 'builtin.shell',
+    sessionId: 's',
+    originStoreId: 'store',
+    commandId: 'job-start',
+    executionId: 'actual-job',
+  };
+  const job = {
+    id: ref.executionId,
+    kind: 'job',
+    definitionId: 'shell.command',
+    definitionVersion: '1',
+    sessionId: 's',
+    originStoreId: 'store',
+    status: 'succeeded',
+    result: { outcome: 'succeeded', content: 'Shell succeeded', details: { exitCode: 0 } },
+  };
+  const result = await shell
+    .tools!.find((tool) => tool.id === 'shell.execute')!
+    .execute(JSON.parse(call.arguments), {
+      signal: new AbortController().signal,
+      records: { get: async () => null, write: async () => {} },
+      operations: {
+        ensure: async () => ref,
+        wait: async () => job,
+        readOutput: async () => ({
+          highWaterSeq: '1',
+          items: [
+            {
+              executionId: ref.executionId,
+              seq: '1',
+              throughSeq: '1',
+              stream: 'stdout',
+              content: stdout,
+              droppedBytes: null,
+            },
+          ],
+        }),
+      },
+    } as unknown as ToolContext);
+  const declaration: Message = {
+    id: 'actual-model',
+    seq: '10',
+    role: 'assistant',
+    status: 'incomplete',
+    sessionId: 's',
+    runId: 'actual-run',
+    content: '',
+    firstOutput: 'tool_calls',
+    toolCalls: [],
+  };
+  const receipt: Message = {
+    id: 'actual-receipt',
+    seq: '20',
+    role: 'tool',
+    status: 'complete',
+    sessionId: 's',
+    runId: 'actual-run',
+    content: result.content,
+    toolCallId: call.id,
+    sourceIds: ['actual-tool'],
+  };
+  const sibling: Message = {
+    ...receipt,
+    id: 'file-receipt',
+    seq: '21',
+    toolCallId: undefined,
+    sourceIds: ['file-tool'],
+    content: 'file content',
+  };
+  const execution: Execution = {
+    id: 'actual-tool',
+    kind: 'tool',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    sessionId: 's',
+    runId: 'actual-run',
+    originStoreId: 'store',
+    status: 'succeeded',
+    result: JSON.parse(JSON.stringify(result)) as Execution['result'],
+    resultRevision: '1',
+    toolCallId: call.id,
+    toolInput: JSON.parse(call.arguments),
+    cancelRequestedAt: null,
+  };
+  const fileExecution: Execution = {
+    ...execution,
+    id: 'file-tool',
+    definitionId: 'files.read',
+    definitionVersion: '5',
+    toolCallId: undefined,
+    result: { outcome: 'succeeded', content: sibling.content },
+  };
+  const history = new Map([declaration, receipt, sibling].map((message) => [message.id, message]));
+  const gets: string[] = [],
+    requests: NativeRequest[] = [];
+  let fail = false;
+  let gate: Promise<void> | undefined, release!: () => void;
+  const client = {
+    verifyConnection: async () => {},
+    getExecution: async (id: string) => {
+      gets.push(id);
+      if (id === execution.id) await gate;
+      if (fail && id === execution.id) throw Error('read_unavailable');
+      return id === execution.id ? execution : fileExecution;
+    },
+  } as unknown as AgentClient;
+  const scope = {
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    storeId: 'store',
+    sessionId: 's',
+    workspaceId: 'w',
+  };
+  const manager = new NativeToolMessages(
+    client,
+    () => scope,
+    () => history,
+  );
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      requests.push(request);
+      if (request.method === 'toolMessages.list') return manager.list(request);
+      if (request.method === 'toolMessages.close') manager.close(request.readId);
+      return null;
+    },
+  } as NativeBridge;
+  const render = () =>
+    act(async () =>
+      f.root.render(<ShellMetadataHarness bridge={bridge} messages={[...history.values()]} />),
+    );
+  const facts = () =>
+    JSON.parse(f.host.querySelector('[data-testid="shell-facts"]')!.textContent!) as {
+      entries: NativeToolMessageFact[];
+      pending: string[];
+      error?: string;
+    };
+  try {
+    await render();
+    expect(gets).toEqual(['actual-tool', 'file-tool']);
+    expect(facts().entries.find((fact) => fact.messageId === receipt.id)?.shellInput?.command).toBe(
+      command,
+    );
+    expect(facts().pending).toEqual([]);
+    const item = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    await act(async () => item.click());
+    const card = f.host.querySelector('.shell-output')!;
+    expect(card.querySelector('.shell-console-output')?.textContent).toBe(stdout);
+    history.set(declaration.id, { ...declaration, status: 'complete', toolCalls: [call] });
+    await render();
+    expect(gets).toEqual(['actual-tool', 'file-tool']);
+    const fact = facts().entries.find((fact) => fact.messageId === receipt.id)!;
+    expect(fact.shellInput?.command).toBe(command);
+    expect(fact.shellResultVerified).toBe(true);
+    expect(f.host.querySelector('.shell-output') === card).toBe(true);
+    expect(item.getAttribute('aria-expanded')).toBe('true');
+    expect(card.querySelector('.shell-command-text')?.textContent).toBe(command);
+    expect(card.querySelector('.shell-console-output')?.textContent).toBe(stdout);
+    expect(card.textContent).not.toContain('"execution"');
+    const unrelated = {
+      ...declaration,
+      id: 'unrelated-model',
+      seq: '30',
+      content: 'new prose',
+      status: 'incomplete' as const,
+    };
+    history.set(unrelated.id, unrelated);
+    await render();
+    history.set(unrelated.id, { ...unrelated, status: 'complete' });
+    await render();
+    expect(gets).toEqual(['actual-tool', 'file-tool']);
+    expect(requests.filter((request) => request.method === 'toolMessages.list')).toHaveLength(1);
+    // An earlier streamed Model may later expose a duplicate original call ID.
+    const duplicate = { ...declaration, id: 'older-model', seq: '9' };
+    history.set(duplicate.id, duplicate);
+    await render();
+    expect(gets).toHaveLength(2);
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    history.set(duplicate.id, { ...duplicate, status: 'complete', toolCalls: [call] });
+    await render();
+    expect(gets).toEqual(['actual-tool', 'file-tool', 'actual-tool']);
+    expect(
+      facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+    ).toBeUndefined();
+    expect(
+      facts().entries.find((entry) => entry.messageId === receipt.id)?.shellResultVerified,
+    ).toBeUndefined();
+    expect(facts().pending).toEqual([]);
+    expect(f.host.querySelector('.shell-output') === card).toBe(true);
+    expect(item.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => release());
+    gate = undefined;
+    expect(facts().error).toBeUndefined();
+    expect(
+      facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+    ).toBeUndefined();
+    expect(card.textContent).toContain(result.content);
+    history.delete(duplicate.id);
+    await render();
+    expect(gets).toHaveLength(4);
+    expect(
+      facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+    ).toBe(command);
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    history.set(duplicate.id, { ...duplicate, status: 'complete', toolCalls: [call] });
+    await render();
+    expect(gets).toHaveLength(5);
+    fail = true;
+    await act(async () => release());
+    gate = undefined;
+    expect(facts().error).toBeDefined();
+    expect(
+      facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+    ).toBeUndefined();
+    expect(facts().entries.some((entry) => entry.messageId === sibling.id)).toBe(true);
+    expect(gets.filter((id) => id === fileExecution.id)).toHaveLength(1);
+    history.delete(duplicate.id);
+    await render();
+    expect(gets).toHaveLength(5); // Failed reads require the existing explicit retry.
+    expect(facts().error).toBeDefined();
+    fail = false;
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((node) => node.textContent === 'retry')!
+        .click(),
+    );
+    expect(facts().error).toBeUndefined();
+    expect(
+      facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+    ).toBe(command);
+    // A duplicate streamed or unreadable call stays disqualifying after Main replies.
+    const recoveredItem = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    if (recoveredItem.getAttribute('aria-expanded') !== 'true')
+      await act(async () => recoveredItem.click());
+    const recoveredCard = f.host.querySelector('.shell-output');
+    expect(recoveredCard).not.toBeNull();
+    for (const state of [
+      { status: 'incomplete' as const },
+      { status: 'complete' as const, contentFormat: 'unsupported' as const },
+    ]) {
+      gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      history.set(duplicate.id, { ...duplicate, ...state, toolCalls: [call] });
+      await render();
+      expect(
+        facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+      ).toBeUndefined();
+      await act(async () => release());
+      gate = undefined;
+      expect(facts().error).toBeUndefined();
+      expect(
+        facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+      ).toBeUndefined();
+      expect(f.host.querySelector('.shell-output') === recoveredCard).toBe(true);
+      expect(recoveredItem.getAttribute('aria-expanded')).toBe('true');
+      history.delete(duplicate.id);
+      await render();
+      expect(
+        facts().entries.find((entry) => entry.messageId === receipt.id)?.shellInput?.command,
+      ).toBe(command);
+    }
+    // No original source and future versions remain readable without busy retries.
+    history.delete(declaration.id);
+    history.delete(unrelated.id);
+    await render();
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((node) => node.textContent === 'retry')!
+        .click(),
+    );
+    const noSourceReads = gets.length;
+    expect(facts().pending).toEqual([]);
+    for (let index = 0; index < 3; index++) {
+      history.set('foreign-model', {
+        ...declaration,
+        id: 'foreign-model',
+        runId: 'other-run',
+        status: 'complete',
+        content: String(index),
+        toolCalls: [call],
+      });
+      await render();
+    }
+    expect(gets).toHaveLength(noSourceReads);
+    expect(f.host.querySelector('.shell-console-output')?.textContent).toBe(stdout);
+    execution.definitionVersion = '9';
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((node) => node.textContent === 'retry')!
+        .click(),
+    );
+    const futureReads = gets.length;
+    history.set(declaration.id, { ...declaration, status: 'complete', toolCalls: [call] });
+    await render();
+    expect(gets).toHaveLength(futureReads);
+    expect(facts().pending).toEqual([]);
+    expect(facts().entries.find((entry) => entry.messageId === receipt.id)?.definitionVersion).toBe(
+      '9',
+    );
+    expect(requests.some((request) => request.method === 'toolMessages.close')).toBe(true);
+  } finally {
+    fail = false;
+    manager.release();
+    await f.close();
+  }
+});
+
+test('Shell command continuations retain verified siblings and the same disclosure, then publish only the full original command', async () => {
+  const f = fixture(),
+    command = `echo begin\n${'雪🙂'.repeat(1200)}\necho end`;
+  const values = [
+    message('command', 'original Shell receipt'),
+    message('sibling', 'original file receipt'),
+  ];
+  let release!: (page: NativeToolMessagePage) => void;
+  const requests: NativeRequest[] = [];
+  let continuation: Extract<NativeRequest, { method: 'toolMessages.list' }> | undefined;
+  const makePage = (request: Extract<NativeRequest, { method: 'toolMessages.list' }>) => {
+    const page = pageFor(request, 's');
+    page.entries = request.messageIds.map(
+      (id): NativeToolMessageFact =>
+        id === 'sibling'
+          ? {
+              messageId: id,
+              executionId: `e-${id}`,
+              definitionId: 'files.read',
+              definitionVersion: '5',
+              status: 'succeeded',
+              resultRevision: '1',
+              target: '/workspace/readme.md',
+            }
+          : {
+              messageId: id,
+              executionId: `e-${id}`,
+              definitionId: 'shell.execute',
+              definitionVersion: '1',
+              status: 'succeeded',
+              resultRevision: '1',
+              shellInput: request.commandOffsets
+                ? {
+                    operation: 'execute',
+                    shellId: 'original',
+                    command: command.slice(1000),
+                    commandOffset: 1000,
+                    commandNextOffset: null,
+                  }
+                : {
+                    operation: 'execute',
+                    shellId: 'original',
+                    command: command.slice(0, 1000),
+                    commandOffset: 0,
+                    commandNextOffset: 1000,
+                  },
+            },
+    );
+    return page;
+  };
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      requests.push(request);
+      if (request.method !== 'toolMessages.list') return null;
+      if (!request.commandOffsets) return makePage(request);
+      continuation = request;
+      return new Promise<NativeToolMessagePage>((resolve) => {
+        release = resolve;
+      });
+    },
+  } as NativeBridge;
+  const facts = () =>
+    JSON.parse(f.host.querySelector('[data-testid="shell-facts"]')!.textContent!) as {
+      loading: boolean;
+      entries: NativeToolMessageFact[];
+      error?: string;
+      pending: string[];
+    };
+  try {
+    await act(async () =>
+      f.root.render(<ShellMetadataHarness bridge={bridge} messages={values} />),
+    );
+    expect(continuation?.messageIds).toEqual(['command']);
+    expect(continuation?.commandOffsets).toEqual({ command: 1000 });
+    expect(facts().loading).toBe(true);
+    expect(facts().pending).toEqual(['command']);
+    expect(
+      facts().entries.find((entry) => entry.messageId === 'command')?.shellInput?.command,
+    ).toBeUndefined();
+    expect(facts().entries.find((entry) => entry.messageId === 'sibling')?.target).toBe(
+      '/workspace/readme.md',
+    );
+    const disclosure = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    await act(async () => disclosure.click());
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => release(makePage(continuation!)));
+    expect(facts().loading).toBe(false);
+    expect(facts().pending).toEqual([]);
+    expect(facts().error).toBeUndefined();
+    expect(
+      facts().entries.find((entry) => entry.messageId === 'command')?.shellInput?.command,
+    ).toBe(command);
+    expect(f.host.querySelector('button.tool-activity-summary')).toBe(disclosure);
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.shell-command-text')?.textContent).toContain(command);
+    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain(
+      'original Shell receipt',
+    );
+    expect(requests.filter((request) => request.method === 'toolMessages.list')).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
+test('bad Shell continuation offsets retain checked metadata and raw results; retry and selection release never reuse partial commands', async () => {
+  const f = fixture(),
+    values = [message('command', 'original raw result'), message('sibling', 'file record')];
+  const requests: NativeRequest[] = [];
+  let mode: 'bad-initial' | 'bad' | 'retry' | 'late' = 'bad-initial';
+  let late!: (page: NativeToolMessagePage) => void;
+  let lateRequest: Extract<NativeRequest, { method: 'toolMessages.list' }> | undefined;
+  const makePage = (
+    request: Extract<NativeRequest, { method: 'toolMessages.list' }>,
+    sessionId = 's',
+  ) => {
+    const page = pageFor(request, sessionId);
+    page.entries = page.entries.map((entry) =>
+      entry.messageId === 'command'
+        ? {
+            ...entry,
+            definitionId: 'shell.execute',
+            shellInput: {
+              operation: 'execute',
+              shellId: 'original',
+              command: request.commandOffsets ? 'end' : 'begin',
+              commandOffset: request.commandOffsets
+                ? mode === 'bad'
+                  ? 999
+                  : 5
+                : mode === 'bad-initial'
+                  ? 999
+                  : 0,
+              commandNextOffset: request.commandOffsets ? null : 5,
+            },
+          }
+        : { ...entry, definitionId: 'files.read', definitionVersion: '5', target: 'original.md' },
+    );
+    return page;
+  };
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      requests.push(request);
+      if (request.method !== 'toolMessages.list') return null;
+      if (mode === 'late' && request.commandOffsets) {
+        lateRequest = request;
+        return new Promise<NativeToolMessagePage>((resolve) => {
+          late = resolve;
+        });
+      }
+      return makePage(request, request.viewSelection === 3 ? 'later' : 's');
+    },
+  } as NativeBridge;
+  const facts = () =>
+    JSON.parse(f.host.querySelector('[data-testid="shell-facts"]')!.textContent!) as {
+      loading: boolean;
+      entries: NativeToolMessageFact[];
+      error?: string;
+    };
+  const render = (selected = selection(), messages = values) =>
+    act(async () =>
+      f.root.render(
+        <ShellMetadataHarness bridge={bridge} messages={messages} selected={selected} />,
+      ),
+    );
+  try {
+    await render();
+    expect(facts().error).toBeDefined();
+    expect(facts().loading).toBe(false);
+    expect(
+      facts().entries.find((entry) => entry.messageId === 'command')?.shellInput?.command,
+    ).toBeUndefined();
+    expect(facts().entries.find((entry) => entry.messageId === 'sibling')?.target).toBe(
+      'original.md',
+    );
+    const button = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    await act(async () => button.click());
+    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain(values[0]!.content);
+    mode = 'bad';
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((node) => node.textContent === 'retry')!
+        .click(),
+    );
+    expect(facts().error).toBeDefined();
+    expect(
+      facts().entries.find((entry) => entry.messageId === 'command')?.shellInput?.command,
+    ).toBeUndefined();
+    expect(facts().entries.find((entry) => entry.messageId === 'sibling')?.target).toBe(
+      'original.md',
+    );
+    mode = 'retry';
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((node) => node.textContent === 'retry')!
+        .click(),
+    );
+    expect(facts().error).toBeUndefined();
+    expect(
+      facts().entries.find((entry) => entry.messageId === 'command')?.shellInput?.command,
+    ).toBe('beginend');
+    mode = 'late';
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
+        .find((node) => node.textContent === 'retry')!
+        .click(),
+    );
+    expect(lateRequest).toBeDefined();
+    expect(facts().loading).toBe(true);
+    mode = 'retry';
+    const changed = values.map((value) => ({
+      ...value,
+      sessionId: 'later',
+      content: 'new original record',
+    }));
+    await render(selection('later', 3), changed);
+    expect(requests).toContainEqual({
+      method: 'toolMessages.close',
+      generation: 1,
+      readId: lateRequest!.readId,
+    });
+    await act(async () => late(makePage(lateRequest!)));
+    expect(
+      facts().entries.find((entry) => entry.messageId === 'command')?.shellInput?.command,
+    ).toBe('beginend');
+    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain('new original record');
+    expect(f.host.querySelector('.shell-output pre')?.textContent).not.toContain(
+      'original raw result',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('the exact Native Tool keeps its reading identity and open Shell card from live carrier through unverified and verified receipts', async () => {
+  const f = fixture();
+  const run = {
+    id: 'reading-run',
+    originStoreId: 'store',
+    sessionId: 's',
+    isActive: true,
+    status: 'running' as const,
+    createdAt: 0,
+    finishedAt: null,
+    reason: null,
+  };
+  const execution: Execution = {
+    id: 'reading-tool',
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: run.id,
+    kind: 'tool',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    status: 'running',
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: null,
+  };
+  const selected = { ...selection(), runs: [run], executions: [execution] };
+  const live = liveToolMessages(selected, [] as Message[])[0]!.message;
+  const ref = {
+    extensionId: 'builtin.shell',
+    key: 'original-command',
+    sessionId: 's',
+    originStoreId: 'store',
+    commandId: 'original',
+    executionId: 'original-job',
+  };
+  const command = 'printf first\nprintf second\n';
+  const raw = JSON.stringify({
+    ref,
+    execution: {
+      id: ref.executionId,
+      sessionId: 's',
+      originStoreId: 'store',
+      kind: 'job',
+      definitionId: 'shell.command',
+      definitionVersion: '1',
+      status: 'succeeded',
+      result: { outcome: 'succeeded', content: 'Shell succeeded', details: { exitCode: 0 } },
+    },
+    stdout: 'final output\n',
+    stderr: '',
+    stdoutBytes: '13',
+    stderrBytes: '0',
+    droppedBytes: '0',
+    truncated: false,
+    timedOut: false,
+  });
+  const receipt: Message = {
+    id: 'reading-receipt',
+    seq: '2',
+    role: 'tool',
+    status: 'complete',
+    runId: run.id,
+    sessionId: 's',
+    content: raw,
+    sourceIds: [execution.id],
+  };
+  const declaration: Message = {
+    id: 'reading-model',
+    seq: '1',
+    role: 'assistant',
+    status: 'complete',
+    sessionId: 's',
+    runId: run.id,
+    content: '',
+    firstOutput: 'tool_calls',
+  };
+  const fact: NativeToolMessageFact = {
+    messageId: receipt.id,
+    executionId: execution.id,
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    status: 'succeeded',
+    resultRevision: '1',
+    shellInput: {
+      operation: 'execute',
+      shellId: ref.key,
+      command,
+      commandOffset: 0,
+      commandNextOffset: null,
+    },
+    shellResultVerified: true,
+  };
+  const projected = (tools: NativeToolMessageFact[]) =>
+    groupNativeToolMessages(
+      desktopTranscript({
+        messages: [declaration, receipt],
+        runs: [run],
+        tools,
+        executions: [execution],
+        storeId: 'store',
+        sessionId: 's',
+      }).messages,
+    );
+  const render = (models: ReturnType<typeof projected>) =>
+    act(async () =>
+      f.root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="Native Shell identity"
+          readingKey="native-shell-identity"
+          loading={false}
+          connected
+          connectionLabel="local"
+          actions={{}}
+          messages={models}
+        />,
+      ),
+    );
+  try {
+    const initial = groupNativeToolMessages([live]);
+    await render(initial);
+    const aggregate = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    await act(async () => aggregate.click());
+    const item = f.host.querySelector<HTMLButtonElement>(
+      '.tool-activity-steps button.tool-activity-summary',
+    )!;
+    await act(async () => item.click());
+    const shellCard = f.host.querySelector('.shell-output')!;
+    expect(item.getAttribute('aria-expanded')).toBe('true');
+    const pending = projected([]),
+      pendingTool = pending.find((model) => model.id === receipt.id)!;
+    expect(pendingTool.id).not.toBe(live.id);
+    expect(pendingTool.presentationKey).toBe(live.presentationKey);
+    expect(pendingTool.shell).toEqual({ operation: 'execute' });
+    expect(pendingTool.status).toBeUndefined();
+    expect(pendingTool.presentationGroupId).toBe(initial[0]!.presentationGroupId);
+    await render(pending);
+    expect(f.host.querySelector('.tool-activity-steps button.tool-activity-summary') === item).toBe(
+      true,
+    );
+    expect(item.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.shell-output') === shellCard).toBe(true);
+    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain(raw);
+    await render(projected([fact]));
+    expect(f.host.querySelector('.tool-activity-steps button.tool-activity-summary') === item).toBe(
+      true,
+    );
+    expect(item.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.shell-output') === shellCard).toBe(true);
+    expect(f.host.querySelector('.shell-command-text')?.textContent).toBe(command);
+    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain('final output\n');
+    expect(f.host.querySelectorAll('.shell-output')).toHaveLength(1);
+    expect(projected([fact]).find((model) => model.id === receipt.id)?.id).toBe(receipt.id);
+    const scoped = desktopTranscript({
+      messages: [
+        {
+          ...receipt,
+          originMessage: {
+            storeId: 'other-store',
+            sessionId: 's',
+            runId: run.id,
+            messageId: 'origin',
+          },
+        },
+      ],
+      runs: [run],
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    }).messages[0]!;
+    expect(scoped.presentationKey).toBeUndefined();
+  } finally {
+    await f.close();
+  }
 });
 
 function fixture() {
@@ -158,7 +1352,7 @@ const pageFor = (
   })),
 });
 
-test('the retained tool UI shows exact failures, Shell acceptance and expandable original results; unknown versions remain literal and escaped', async () => {
+test('the retained tool UI shows exact failures and unverified Shell original results without claiming acceptance; unknown versions remain literal and escaped', async () => {
   const f = fixture(),
     requests: NativeRequest[] = [];
   const values = [
@@ -178,21 +1372,29 @@ test('the retained tool UI shows exact failures, Shell acceptance and expandable
     );
   try {
     await render();
-    expect(f.host.querySelector('.tool-activity-step.failed')?.textContent).toContain(
-      '读取missing.txt失败',
-    );
-    expect(f.host.querySelector('.tool-activity-step.failed')?.querySelector('button')).toBeNull();
-    expect(
-      f.host.querySelector('.tool-activity-step.failed')?.querySelector('.tool-step-preview'),
-    ).toBeNull();
+    const failed = [...f.host.querySelectorAll('.tool-activity')].find((node) =>
+      node.textContent?.includes('missing.txt'),
+    )!;
+    expect(failed.textContent).toContain('读取missing.txt失败');
+    expect(failed.querySelector('button.file-link')).toBeNull();
+    expect(failed.querySelector('.tool-step-preview')).toBeNull();
+    expect(f.host.textContent).not.toContain('file_not_found');
+    const failedToggle = failed.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    expect(failedToggle.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => failedToggle.click());
+    expect(failed.textContent).toContain('file_not_found');
+    await act(async () => failedToggle.click());
     expect(f.host.textContent).not.toContain('file_not_found');
     const shell = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('启动后台 Shell'),
+      button.textContent?.includes('启动命令'),
     )!;
     expect(shell).toBeDefined();
     expect(f.host.textContent).not.toContain('已退出');
     await act(async () => shell.click());
-    expect(f.host.querySelector('.tool-detail')?.textContent).toBe(values[0]!.content);
+    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain(values[0]!.content);
+    expect(f.host.querySelector('.shell-result')?.textContent).toBe('启动结果未提供');
+    expect(f.host.querySelector('.shell-result-icon')).toBeNull();
+    expect(f.host.textContent).not.toContain('已受理');
     const future = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
       button.textContent?.includes('task · 9'),
     )!;
@@ -206,8 +1408,8 @@ test('the retained tool UI shows exact failures, Shell acceptance and expandable
     expect(f.host.querySelector('img')).toBeNull();
     await act(async () => shell.click());
     expect(
-      [...f.host.querySelectorAll('.tool-detail')].some(
-        (entry) => entry.textContent === values[0]!.content,
+      [...f.host.querySelectorAll('.shell-output pre')].some((entry) =>
+        entry.textContent?.includes(values[0]!.content),
       ),
     ).toBe(false);
     expect(requests.filter((request) => request.method === 'toolMessages.list')).toHaveLength(1);
@@ -522,8 +1724,8 @@ test('a mixed Native exploration batch shows the dispatched read as active while
         />,
       ),
     );
-    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toContain('正在读取');
-    expect(f.host.querySelector('.tool-activity-summary')?.textContent).not.toContain('等待执行');
+    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toContain('读取文件');
+    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件搜索内容');
     expect(f.host.querySelector('.tool-activity.is-running')).not.toBeNull();
     expect(f.host.querySelector('.tool-activity-step.running')?.textContent).toContain('执行中');
     expect(f.host.querySelector('.tool-activity-step.queued')?.textContent).toContain('等待执行');
@@ -587,7 +1789,7 @@ test('Native execution labels preserve automatic check, human approval and refus
       expect(f.host.textContent).toContain(item.label);
       expect(f.host.textContent).not.toContain('等待执行');
       expect(f.host.textContent).not.toContain('执行中');
-      if (item.status === 'failed') expect(f.host.textContent).toContain('未执行');
+      if (item.status === 'failed') expect(f.host.textContent).not.toContain('未执行');
     }
   } finally {
     await f.close();
@@ -689,13 +1891,15 @@ test('verified freshness rejections stay neutral in the real Native grouped tran
     );
     await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
     const group = f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
-    expect(group.textContent).toContain('读取 1 次');
-    expect(group.textContent).toContain('重新评估 4 项');
-    expect(group.textContent).toContain('失败 1 项');
-    expect(group.textContent).not.toContain('失败 5 项');
+    expect(group.textContent).toContain('读取文件');
+    expect(group.textContent).toBe('读取文件');
     await act(async () => group.click());
     expect(f.host.querySelectorAll('.tool-activity-step.not_executed')).toHaveLength(4);
-    expect(f.host.querySelectorAll('.tool-activity-step.failed')).toHaveLength(1);
+    expect(
+      f.host.querySelectorAll(
+        '.tool-activity-steps > .tool-activity > button[data-status="error"]',
+      ),
+    ).toHaveLength(1);
     expect(f.host.textContent?.match(/上下文已更新，此次未执行/g)).toHaveLength(2);
     expect(f.host.textContent?.match(/工具信息已更新，此次未执行/g)).toHaveLength(2);
     expect(f.host.textContent).not.toContain('context_refresh_required');

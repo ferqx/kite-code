@@ -12,6 +12,7 @@ import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
+import { groupNativeToolMessages } from '../../src/native-tool-messages';
 import {
   desktopTranscript,
   nativePendingInputMessage,
@@ -312,7 +313,7 @@ test('the original Conversation owns collapsed Run history, adjacent exploration
     expect(f.host.querySelector('[data-message-id="before"] .message-meta') === null).toBe(true);
     expect(f.host.querySelector('.agent-turn-final .message-meta')).not.toBeNull();
     const activity = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
-    expect(activity.textContent).toContain('2');
+    expect(activity.textContent).toContain('读取文件');
     await act(async () => activity.click());
     expect(f.host.querySelectorAll('.tool-activity-steps .tool-activity-step')).toHaveLength(2);
     const paths = [
@@ -823,6 +824,124 @@ test('the original final reply copies only the automatically verified body and a
   }
 });
 
+test('an empty tool-first preview with nonzero body bytes retains its actual Native body reader and prose boundary', async () => {
+  const f = fixture();
+  const content = '确实存在的已保存正文，空预览仍必须读取并显示。';
+  const contentBytes = String(new TextEncoder().encode(content).length);
+  let reads = 0;
+  try {
+    for (const complete of [false, true]) {
+      const original: Message = {
+        ...message('nonzero-body', 'assistant', '2', complete ? '真实正文预览' : ''),
+        status: complete ? 'complete' : 'incomplete',
+        firstOutput: 'tool_calls',
+        sourceIds: ['body-model'],
+        outputBody: {
+          kind: 'model_output',
+          executionId: 'body-model',
+          complete,
+          contentBytes,
+          reasoningBytes: '0',
+          toolCallCount: complete ? 1 : 0,
+        },
+      };
+      const transcript = desktopTranscript({
+        messages: [
+          { ...message('a', 'tool', '1', 'receipt a'), sourceIds: ['e-a'] },
+          original,
+          { ...message('b', 'tool', '3', 'receipt b'), sourceIds: ['e-b'] },
+        ],
+        runs: [{ ...run(), status: 'running', isActive: true, finishedAt: null }],
+        tools: [tool('a'), tool('b')],
+        storeId: 'store',
+        sessionId: 's',
+      });
+      expect(transcript.messages.find((entry) => entry.id === original.id)).toMatchObject({
+        role: 'assistant',
+        text: complete ? '真实正文预览' : '',
+        settled: complete,
+      });
+      expect(transcript.messages.find((entry) => entry.id === original.id)?.presentation).not.toBe(
+        'hidden',
+      );
+      if (complete) {
+        // Classification alone must never claim a nonzero body is tool-only.
+        // An empty final preview does not acquire new body-reader admission.
+        const emptyPreview = desktopTranscript({
+          messages: [{ ...original, content: '' }],
+          runs: [run()],
+          tools: [],
+          storeId: 'store',
+          sessionId: 's',
+        });
+        expect(emptyPreview.messages[0]?.presentation).not.toBe('hidden');
+      }
+      const snapshot: ModelOutputSnapshot = {
+        storeId: 'store',
+        sessionId: 's',
+        rootSessionId: 's',
+        runId: 'r',
+        executionId: 'body-model',
+        originCommandId: 'c',
+        rootWorkCommandId: 'c',
+        rootWorkSeq: '1',
+        attempt: 1,
+        status: complete ? 'succeeded' : 'running',
+        bodyHash: 'a'.repeat(64),
+        bodyBytes: '1',
+        contentBytes,
+        reasoningBytes: '0',
+        snapshotCursor: '1',
+        output: {
+          content,
+          reasoning: '',
+          toolCalls: complete ? [{ id: 'call-other', name: 'files.read', arguments: '{}' }] : [],
+          complete,
+        },
+      };
+      let release!: (value: ModelOutputSnapshot) => void;
+      await act(async () =>
+        f.root.render(
+          <Conversation
+            messages={groupNativeToolMessages(transcript.messages)}
+            turnActivity={transcript.turnActivity}
+            loading={false}
+            selected
+            connected
+            saveReading={() => {}}
+            renderMessageContent={(model) =>
+              model.id === original.id ? (
+                <NativeModelOutputMessage
+                  message={original}
+                  storeId="store"
+                  onRead={() => {
+                    reads++;
+                    return new Promise((resolve) => {
+                      release = resolve;
+                    });
+                  }}
+                />
+              ) : (
+                <MessageContent text={model.text} />
+              )
+            }
+          />,
+        ),
+      );
+      expect(reads).toBe(complete ? 2 : 1);
+      const reader = f.host.querySelector('.model-output-message');
+      expect(reader).not.toBeNull();
+      expect(f.host.querySelectorAll('.tool-activity-aggregate')).toHaveLength(2);
+      await act(async () => release(snapshot));
+      expect(f.host.querySelector('.model-output-message')).toBe(reader);
+      expect(reader?.textContent).toContain(content);
+      expect(f.host.querySelectorAll('.tool-activity-aggregate')).toHaveLength(2);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('Native reveals live preview appends but an explicit incomplete full-body read stays static', async () => {
   const f = fixture();
   const animations: string[] = [];
@@ -1145,9 +1264,14 @@ test('original ask receipts show human answers and cancellation of information w
       ),
     );
     expect(f.host.querySelector('.agent-turn')!.getAttribute('data-turn-status')).toBe('running');
+    const aggregate = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    expect(aggregate.textContent).toContain('询问用户');
+    await act(async () => aggregate.click());
     expect(f.host.textContent).toContain('已取消回答');
     const receipts = [
-      ...f.host.querySelectorAll<HTMLButtonElement>('button.tool-activity-summary'),
+      ...f.host.querySelectorAll<HTMLButtonElement>(
+        '.tool-activity-steps button.tool-activity-summary',
+      ),
     ];
     expect(receipts).toHaveLength(2);
     await act(async () => receipts[0]!.click());

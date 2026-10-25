@@ -45,6 +45,7 @@ import {
 } from './authorization-refresh';
 import {
   type AcceptedAuthorization,
+  AuthorizationCheckRejectedError,
   AuthorizationDeniedError,
   InteractionGate,
 } from './interactions';
@@ -1563,16 +1564,18 @@ export class UnifiedExecution {
                 ? 'cancelled'
                 : 'failed',
         content:
-          !attempted &&
-          !dispatched &&
-          error instanceof AuthorizationDeniedError &&
-          error.reason === 'plan_approval_required'
-            ? 'Plan mode is read-only. This Tool was not dispatched. No file was written by this call.'
-            : error instanceof ToolDispatchCancelledError
-              ? error.code
-              : error instanceof AgentError
+          !attempted && !dispatched && error instanceof AuthorizationCheckRejectedError
+            ? `Automatic approval did not authorize this tool; it was not executed. Reason: ${error.reason}\nContinue only the originally authorized work. Do not bypass this refusal through another tool or path.`
+            : !attempted &&
+                !dispatched &&
+                error instanceof AuthorizationDeniedError &&
+                error.reason === 'plan_approval_required'
+              ? 'Plan mode is read-only. This Tool was not dispatched. No file was written by this call.'
+              : error instanceof ToolDispatchCancelledError
                 ? error.code
-                : 'tool_failed',
+                : error instanceof AgentError
+                  ? error.code
+                  : 'tool_failed',
         details: {
           code:
             error instanceof AgentError || error instanceof ToolDispatchCancelledError

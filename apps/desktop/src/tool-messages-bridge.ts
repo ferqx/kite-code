@@ -1,5 +1,17 @@
 import type { Execution, Message, Run } from '@kite-ai/client';
 
+/** Budget for added command fragments; existing metadata retains the original IPC response cap. */
+export const nativeToolMessagePageBytes = 524288;
+export const nativeShellCommandChunkBytes = 8192;
+export type NativeShellInput = {
+  operation: 'execute' | 'launch' | 'read' | 'wait' | 'stop';
+  shellId?: string;
+  /** Original command fragment; offsets count UTF-16 units without splitting a code point. */
+  command?: string;
+  commandOffset?: number;
+  commandNextOffset?: number | null;
+};
+
 export type NativeToolMessageScope = {
   generation: number;
   viewSelection: number;
@@ -18,6 +30,11 @@ export type NativeToolMessageFact = Pick<
   decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   /** Display only: unique original Model call fields, or its known version's directory default. */
   target?: string;
+  shellInput?: NativeShellInput;
+  /** Exact request owner for a scoped live input; never a result or control capability. */
+  inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };
+  /** Exact known Shell result content equals its saved structured details. */
+  shellResultVerified?: boolean;
   /** Original PDF page image metadata, loaded through the same bounded image reader. */
   images?: { name: string; reference: { mediaType: string; size: string } }[];
   /** Read-only original Execution authorization; never a grant or answer capability. */
@@ -176,6 +193,9 @@ export type NativeToolMessageRequest =
       historyEpoch: number;
       readId: string;
       messageIds: string[];
+      commandOffsets?: Record<string, number>;
+      /** Current-scope observed live Tools; messageIds must be empty for this mode. */
+      executionIds?: string[];
     }
   | {
       method: 'toolMessages.runs';

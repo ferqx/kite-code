@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import type { ModelMessage } from '@kite-ai/ai';
 import { assertContextSource, type ContextSource } from '../../../src/context';
 import {
@@ -34,6 +35,39 @@ const history: ModelMessage[] = [
   },
   { role: 'tool', toolCallId: 'call', content: 'Original complete result' },
 ];
+
+test('read-only task and automatic rejection guidance remain one deterministic trusted contract', () => {
+  const contract = agentContractSource('/actual-workspace');
+  expect(contract).toMatchObject({
+    id: 'agent:contract',
+    kind: 'agent_contract',
+    role: 'system',
+    scope: '/actual-workspace',
+  });
+  assertContextSource(contract);
+  expect(agentContractSource('/actual-workspace')).toEqual(contract);
+  expect(contract.digest).toBe(createHash('sha256').update(contract.content).digest('hex'));
+  expect(agentContractSource('/other-workspace').digest).not.toBe(contract.digest);
+  expect(contract.content).toContain('read-only unless the user authorizes changes');
+  expect(contract.content).toContain('findings in the response unless saving was requested');
+  expect(contract.content).toContain(
+    'do not create or modify project files merely for exploration',
+  );
+  expect(contract.content).toContain('including placeholders or reports');
+  expect(contract.content).toContain(
+    'does not authorize retrying the denied effect through another tool or path',
+  );
+  expect(contract.content).toContain('original task that are already authorized');
+  expect(contract.content).toContain(
+    'Tool declarations describe available requests; they do not grant',
+  );
+  const sources = [project, runtime, contract];
+  const input = assembleModelContext(sources, history);
+  expect(input.filter((message) => message.role === 'system')).toEqual([
+    { role: 'system', content: contract.content, sourceIds: [contract.id] },
+  ]);
+  expect(modelHistory(sources, input)).toEqual(history);
+});
 
 test('normal, summary and expanded admission preserve stable prefix, exact Tool pairs and one actual runtime tail', () => {
   const contract = agentContractSource('/actual-workspace');

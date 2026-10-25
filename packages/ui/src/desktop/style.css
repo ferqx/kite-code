@@ -3163,6 +3163,8 @@ body {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+  /* A rotating 16px square needs space beyond its resting bounds. */
+  margin-inline: 4px;
   color: inherit;
 }
 .kite-client .tool-activity-marker-content {
@@ -3207,6 +3209,9 @@ body {
 .kite-client .tool-activity-title {
   flex-shrink: 0;
 }
+.kite-client .tool-activity-aggregate {
+  --tool-aggregate-max-height: 400px;
+}
 .kite-client .tool-command {
   font-size: inherit;
 }
@@ -3217,9 +3222,41 @@ body {
 .kite-client .tool-step-status,
 .kite-client .tool-approval {
   flex: none;
-  font-size: inherit;
+  font-size: 13px;
   line-height: 18px;
-  color: inherit;
+  color: var(--muted-foreground);
+}
+.kite-client .tool-approval-approved {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 18px;
+  opacity: 0.65;
+  border-radius: var(--button-radius);
+}
+.kite-client .tool-approval-approved svg {
+  width: 14px;
+  height: 14px;
+}
+.kite-client .tool-approval-approved:hover,
+.kite-client .tool-approval-approved:focus-visible {
+  opacity: 1;
+}
+.kite-client .tool-approval-approved:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+[data-slot="tooltip-content"].tool-approval-tooltip {
+  font-size: 13px;
+  line-height: 18px;
+}
+.kite-client .tool-activity-aggregate > .tool-activity-summary .tool-activity-marker-content {
+  flex: 0 1 auto;
+  min-width: min(4em, 100%);
+}
+.kite-client .tool-activity-aggregate > .tool-activity-summary .tool-activity-title {
+  flex-shrink: 1;
 }
 .kite-client .managed-shell-summary {
   display: inline-flex;
@@ -3248,6 +3285,39 @@ body {
   margin: 0;
   padding: var(--conversation-tool-gap) 0 0;
   list-style: none;
+}
+.kite-client .tool-activity-aggregate > .tool-activity-content .tool-activity-steps {
+  gap: 0;
+}
+.kite-client .tool-activity-scroll {
+  /* Keep the 32px disclosure header inside the aggregate's total height. */
+  max-height: calc(var(--tool-aggregate-max-height) - 32px);
+  min-width: 0;
+}
+.kite-client
+  :is(
+    .tool-activity-viewport,
+    .tool-detail-viewport,
+    .tool-diff-viewport,
+    .shell-output-viewport,
+    .subagent-process-viewport
+  ) {
+  height: auto;
+  max-height: inherit;
+  overscroll-behavior: contain;
+  border-inline-end: 10px solid transparent;
+}
+.kite-client
+  :is(
+    .tool-activity-viewport,
+    .tool-detail-viewport,
+    .tool-diff-viewport,
+    .shell-output-viewport,
+    .subagent-process-viewport
+  )
+  > div {
+  width: 100%;
+  table-layout: fixed;
 }
 .kite-client .collapsible-motion-content {
   overflow: hidden;
@@ -3361,22 +3431,36 @@ body {
   display: none;
 }
 .kite-client .subagent-process {
-  @apply scroll-fade-y;
   margin: 0;
   max-height: 320px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+}
+.kite-client .tool-activity-aggregate .subagent-process {
+  max-height: calc(var(--tool-aggregate-max-height) - 64px);
 }
 
 .kite-client .tool-detail {
-  @apply scroll-fade-y;
   margin: 0;
   padding: 8px 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
+  overflow: visible;
+}
+.kite-client .tool-detail-scroll {
   max-height: 320px;
-  overflow: auto;
+  min-width: 0;
+}
+.kite-client .tool-snapshot-scroll {
+  max-height: 480px;
+  min-width: 0;
+}
+.kite-client .tool-file-snapshot {
+  margin: 0;
+  overflow: visible;
+}
+.kite-client .tool-activity-aggregate .tool-detail-scroll {
+  /* Leave room for the aggregate header and the expanded tool's own row. */
+  max-height: calc(var(--tool-aggregate-max-height) - 64px);
 }
 .kite-client .turn-failure .tool-activity-title,
 .kite-client .turn-failure .tool-activity-marker-icon {
@@ -3403,77 +3487,142 @@ body {
 .kite-client .turn-failure-details dd {
   margin: 0;
 }
+/* Keep the command header fixed while the output owns the scroll viewport. */
+.kite-client .shell-activity {
+  /* Do not let a nowrap command widen Radix's intrinsic table wrapper. */
+  contain: inline-size;
+}
+.kite-client .shell-activity > .tool-activity-summary .tool-activity-title {
+  font-weight: 500;
+}
+.kite-client .shell-activity > .tool-activity-summary .tool-command {
+  flex: 0 1 auto;
+  font: inherit;
+}
 .kite-client .shell-output {
   position: relative;
   margin: 4px 0 8px;
-  padding: 16px 16px 48px;
-  background: var(--background);
-  border: 0;
+  padding: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
+  color: var(--muted-foreground);
+}
+.kite-client .shell-output-header {
+  min-height: 32px;
+  align-items: flex-start;
+  padding: 4px 12px;
+}
+.kite-client .shell-output-title {
+  flex: 1;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+}
+.kite-client .shell-command-text {
+  font: 13px / 22px var(--font-mono, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .kite-client .shell-output pre {
-  @apply scroll-fade-y;
   margin: 0;
-  padding: 0;
-  max-height: 256px;
-  overflow: auto;
+  padding: 4px 12px 10px;
+  max-height: none;
+  overflow: visible;
+  mask-image: none;
+  animation: none;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: 13px / 22px var(--font-mono, monospace);
-  color: var(--foreground);
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  color: var(--muted-foreground);
+}
+.kite-client .shell-command-preview-label {
+  font: 12px / 18px var(--font-ui);
+}
+.kite-client .shell-original-record {
+  padding: 4px 12px 10px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 22px;
+}
+.kite-client .shell-original-record > p {
+  margin: 0;
+}
+.kite-client .shell-prompt {
+  color: var(--muted-foreground);
+}
+.kite-client .shell-output-scroll {
+  max-height: 256px;
+  min-width: 0;
+}
+.kite-client .tool-activity-aggregate .shell-output-scroll {
+  /* Keep output compact; the full multiline header is readable in the outer aggregate. */
+  max-height: calc(var(--tool-aggregate-max-height) - 148px);
 }
 .kite-client .shell-output [data-slot="code-block-code"] {
   font: inherit;
   white-space: inherit;
   overflow-wrap: inherit;
 }
+.kite-client .shell-output-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  min-height: 32px;
+  padding: 4px 12px 6px;
+}
 .kite-client .shell-result {
-  position: absolute;
-  bottom: 12px;
-  left: 16px;
-  right: 16px;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-inline-start: auto;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 13px;
   line-height: 18px;
-  color: inherit;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
 }
-.kite-client .shell-result::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  margin-right: 8px;
+.kite-client .shell-result-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
 }
-.kite-client .shell-output[data-status="completed"] .shell-result::before {
-  background: var(--success);
-}
-.kite-client .shell-output[data-status="running"] .shell-result::before {
-  background: var(--attention-foreground);
-}
-.kite-client
-  .shell-output:is([data-status="failed"], [data-status="rejected"])
-  .shell-result::before {
-  background: var(--destructive);
-}
-.kite-client .shell-output[data-status="failed"] .shell-result {
+.kite-client .shell-output[data-status="failed"] .shell-result,
+.kite-client .shell-output[data-status="unknown"] .shell-result {
   color: var(--destructive);
 }
-.kite-client .shell-latest {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  height: 24px;
-  background: var(--background);
-  font-size: 12px;
-}
 .kite-client .tool-activity .diff-output {
-  max-height: 320px;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
+  mask-image: none;
+  animation: none;
   margin: 4px 0 8px;
   border-radius: var(--radius);
+}
+.kite-client .tool-diff-scroll {
+  max-height: 440px;
+  min-width: 0;
+}
+.kite-client .tool-diff-scroll .diff-output {
+  max-height: none;
+  overflow: visible;
+  mask-image: none;
+  animation: none;
+}
+.kite-client .tool-activity .tool-diff-scroll {
+  max-height: 320px;
+}
+.kite-client .tool-activity-aggregate .tool-diff-scroll {
+  max-height: calc(var(--tool-aggregate-max-height) - 64px);
 }
 .kite-client .context-compacted {
   margin: 8px 0;

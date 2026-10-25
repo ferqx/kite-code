@@ -94,6 +94,7 @@ export function NativeChildDetail({
           : undefined,
         messages,
         executionUnconfirmed,
+        facts?.presentation?.liveTools,
       ),
     [facts, storeId, messages, executionUnconfirmed],
   );
@@ -192,6 +193,7 @@ export function NativeChildDetail({
     group,
     controls,
   ) => {
+    const aggregate = !!group[0]?.presentationGroupId || group.length > 1;
     const unverified = new Set(
       group
         .filter(
@@ -207,22 +209,28 @@ export function NativeChildDetail({
       onToggle: (open: boolean) => void,
     ) => (
       <ToolActivity
+        aggregate={false}
         unverified
         messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
         expanded={expanded}
         onToggle={onToggle}
-        activityId={group.length === 1 ? controls.activityId : model.id}
+        activityId={
+          !aggregate && group.length === 1
+            ? controls.activityId
+            : (model.presentationKey ?? model.id)
+        }
         restoredExpanded={controls.restoredExpanded}
         renderChildren={() => renderMessage(model)}
       />
     );
     return (
       <>
-        {unverified.size && group.length === 1 ? (
+        {unverified.size && !aggregate && group.length === 1 ? (
           originalTool(group[0]!, controls.expanded, controls.onToggle)
         ) : (
           <ToolActivity
             {...controls}
+            aggregate={aggregate}
             unverified={unverified.size > 0}
             messages={group.map((model) =>
               unverified.has(model.id)
@@ -233,8 +241,8 @@ export function NativeChildDetail({
               unverified.has(model.id)
                 ? originalTool(
                     group.find((original) => original.id === model.id)!,
-                    controls.expandedItems[model.id],
-                    (open) => controls.onToggleItem(model.id, open),
+                    controls.expandedItems[model.presentationKey ?? model.id],
+                    (open) => controls.onToggleItem(model.presentationKey ?? model.id, open),
                   )
                 : undefined
             }

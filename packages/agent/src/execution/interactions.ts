@@ -30,6 +30,13 @@ export class AuthorizationDeniedError extends AgentError {
   }
 }
 
+/** A checker refusal is a denied tool decision, never a human request to stop work. */
+export class AuthorizationCheckRejectedError extends AuthorizationDeniedError {
+  constructor(reason: string) {
+    super('permission_denied', reason);
+  }
+}
+
 /** Exact saved cancellation of an information-only Question, never an effect result. */
 export class QuestionCancelledError extends AgentError {
   readonly interaction: Readonly<InteractionRecord>;
@@ -368,18 +375,8 @@ export class InteractionGate {
             ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
           } satisfies AcceptedAuthorization;
         if (checked.decision === 'approve_once') checkedGrant = checked.checkExecutionId;
-        if (checked.decision === 'reject') {
-          const command = await this.store.getCommand(execution.originCommandId);
-          if (!command) throw new AgentError('command_not_found');
-          await this.store.cancelCommand({
-            expectedStoreId: scope.expectedStoreId,
-            commandId: `authorization-check-decline-${checked.checkExecutionId}`,
-            sessionId: command.sessionId,
-            targetCommandId: command.id,
-            subjectId: command.subjectId,
-          });
-          throw new AuthorizationDeniedError('approval_denied', checked.reason);
-        }
+        if (checked.decision === 'reject')
+          throw new AuthorizationCheckRejectedError(checked.reason);
         if (scope.final && !checkedGrant && !execution.interactionBinding)
           throw new AgentError('authorization_refresh_required');
       }

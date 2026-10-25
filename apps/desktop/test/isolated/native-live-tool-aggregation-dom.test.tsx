@@ -67,10 +67,13 @@ function fixture() {
   });
   let revision = 1;
   let executions: Execution[] = [];
+  const executionFacts = new Map<string, Execution>();
   const runs: Run[] = [backgroundItem().run!];
   const messages: Message[] = [];
   const listeners = new Set<(event: NativeEvent) => void>();
   const pending: (() => void)[] = [];
+  const pendingHistory: (() => void)[] = [];
+  let holdHistory = false;
   const requests: NativeRequest[] = [];
   let executionOwner: 'held' | 'unheld' | 'unknown' | undefined;
   let directoryUnavailable = false;
@@ -147,8 +150,16 @@ function fixture() {
           return state();
         case 'directory':
           return directory();
-        case 'messages':
-          return { messages: [...messages], nextAfterSeq: null, highWaterSeq: request.upperSeq! };
+        case 'messages': {
+          const page = {
+            messages: structuredClone(messages),
+            nextAfterSeq: null,
+            highWaterSeq: request.upperSeq!,
+          };
+          if (holdHistory)
+            return new Promise((resolve) => pendingHistory.push(() => resolve(page)));
+          return page;
+        }
         case 'draft.read':
           return {
             id: 'root',
@@ -195,7 +206,7 @@ function fixture() {
                 scope: scope!,
                 entries: request.messageIds.flatMap((messageId) => {
                   const receipt = messages.find((message) => message.id === messageId);
-                  const execution = executions.find((item) => item.id === receipt?.sourceIds?.[0]);
+                  const execution = executionFacts.get(receipt?.sourceIds?.[0] ?? '');
                   return execution
                     ? [
                         {
@@ -278,6 +289,7 @@ function fixture() {
     },
     async start(items = [tool(1), tool(2), tool(3)], extraRuns: Run[] = []) {
       executions = items;
+      for (const item of items) executionFacts.set(item.id, item);
       runs.push(...extraRuns);
       await publish();
     },
@@ -292,7 +304,42 @@ function fixture() {
         content: '目录已了解，接着查看应用入口。',
       });
       executions = [...executions, ...items];
+      for (const item of items) executionFacts.set(item.id, item);
       await publish();
+    },
+    async appendToolCallModel() {
+      messages.push({
+        id: 'tool-call-model',
+        role: 'assistant',
+        status: 'incomplete',
+        sessionId: 'root',
+        runId: 'parent-run',
+        seq: String(messages.length + 1),
+        sourceIds: ['tool-call-model-execution'],
+        firstOutput: 'tool_calls',
+        content: '',
+      });
+      await publish();
+    },
+    async finishToolCallModelAndStart(items: Execution[]) {
+      const model = messages.find((message) => message.id === 'tool-call-model')!;
+      model.status = 'complete';
+      model.toolCalls = items.map((item) => ({
+        id: item.toolCallId!,
+        name: item.definitionId,
+        arguments: JSON.stringify(item.toolInput ?? {}),
+      }));
+      holdHistory = true;
+      executions = [...executions, ...items];
+      for (const item of items) executionFacts.set(item.id, item);
+      await publish();
+      await until(() => pendingHistory.length > 0);
+    },
+    async releaseHistory() {
+      holdHistory = false;
+      await act(async () => {
+        for (const release of pendingHistory.splice(0)) release();
+      });
     },
     async settleWithoutReceipt(index: number) {
       const execution = executions.find((item) => item.id === `execution-${index}`)!;
@@ -301,7 +348,7 @@ function fixture() {
       execution.result = { content: raw };
       await publish();
     },
-    async complete(index: number, unknown = false) {
+    async complete(index: number, unknown = false, retainInView = true) {
       const execution = executions.find((item) => item.id === `execution-${index}`)!;
       execution.status = unknown ? 'outcome_unknown' : 'succeeded';
       execution.resultRevision = '1';
@@ -316,6 +363,7 @@ function fixture() {
         toolCallId: execution.toolCallId,
         content: JSON.stringify({ result: raw, execution: execution.id }),
       });
+      if (!retainInView) executions = executions.filter((item) => item !== execution);
       await publish();
       await until(() => pending.length > 0);
     },
@@ -334,6 +382,7 @@ function fixture() {
     },
     async close() {
       await act(async () => {
+        for (const release of pendingHistory.splice(0)) release();
         for (const release of pending.splice(0)) release();
         root.unmount();
       });
@@ -381,13 +430,85 @@ test('Native exploration starts as one collapsed activity and retains it across 
     collapsed(f.host);
     await f.flush();
     collapsed(f.host);
-    expect(f.host.textContent).toContain('读取 3 次');
+    expect(f.host.textContent).toContain('读取文件');
+    expect(f.host.textContent).not.toContain('已完成 3 项');
     // Each tool now has a complete receipt; the accurate parent Run is still active.
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
     const response = f.host.querySelector('.response-status')!;
     expect(response.textContent).toBe('正在回复…');
     expect(response.closest('.agent-turn')?.lastElementChild).toBe(response);
     expect(f.host.querySelectorAll('.message.assistant')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Native mixed tool activity keeps its first shell through receipt eviction and delayed metadata', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.start([tool(1, { definitionId: 'shell.launch', definitionVersion: '1' })]);
+    collapsed(f.host);
+    const summary = f.host.querySelector('button.tool-activity-summary');
+    await f.toggle();
+    await f.start([
+      tool(1, { definitionId: 'shell.launch', definitionVersion: '1' }),
+      tool(2, { definitionId: 'files.write', definitionVersion: '2' }),
+      tool(3, { definitionId: 'custom.remote', definitionVersion: '99' }),
+    ]);
+    expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(3);
+    // The bounded View can evict the original Execution before the independent
+    // receipt metadata read returns. Aggregation must not depend on its label.
+    for (const index of [3, 1, 2]) {
+      await f.complete(index, false, false);
+      expect(topActivities(f.host)).toHaveLength(1);
+      expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+      expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(3);
+      expect(f.host.textContent).not.toContain(raw);
+      await f.flush();
+      expect(topActivities(f.host)).toHaveLength(1);
+      expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+      expect(summary?.getAttribute('aria-expanded')).toBe('true');
+      expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(3);
+      expect(f.host.textContent).not.toContain(raw);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('a tool-call-only Model remains inside one Native activity while its history completion trails the next View tool', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.start([tool(1)]);
+    await f.complete(1);
+    await f.flush();
+    collapsed(f.host);
+    const summary = f.host.querySelector('button.tool-activity-summary');
+    await f.appendToolCallModel();
+    collapsed(f.host);
+    expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+    expect(f.host.querySelectorAll('.model-output-message')).toHaveLength(0);
+    await f.finishToolCallModelAndStart([tool(2, { status: 'running' })]);
+    // The current View has admitted Tool B, while the independent history GET
+    // still retains its source Model as an incomplete empty assistant message.
+    collapsed(f.host);
+    expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+    expect(summary?.textContent).toBe('读取文件');
+    await f.releaseHistory();
+    collapsed(f.host);
+    expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+    await f.toggle();
+    expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);
+    await f.complete(2);
+    await f.flush();
+    expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+    expect(summary?.getAttribute('aria-expanded')).toBe('true');
+    expect(summary?.textContent).not.toContain('执行中');
+    expect(f.host.textContent).not.toContain(raw);
   } finally {
     await f.close();
   }
@@ -410,7 +531,8 @@ test.each([
     ]);
     collapsed(f.host);
     const summary = f.host.querySelector('button.tool-activity-summary');
-    expect(summary?.textContent).toContain('正在搜索内容');
+    expect(summary?.textContent).toContain('搜索内容读取文件');
+    expect(summary?.textContent).toBe('搜索内容读取文件');
     expect(f.host.textContent).not.toContain(`files.search · ${version}`);
     await f.toggle();
     expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);
@@ -429,8 +551,8 @@ test.each([
       expect(f.host.textContent).not.toContain(raw);
     }
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
-    expect(summary?.textContent).toContain('读取 1 次');
-    expect(summary?.textContent).toContain('搜索 1 次');
+    expect(summary?.textContent).toContain('搜索内容读取文件');
+    expect(summary?.textContent).not.toContain('已完成 2 项');
   } finally {
     await f.close();
   }
@@ -586,7 +708,7 @@ test('Native readable stage prose separates exploration activities without shari
   }
 });
 
-test('Native exploration does not aggregate another Run, foreign Store, or unknown definition version into the current activity', async () => {
+test('Native tools aggregate unknown definitions but retain Run and Store boundaries', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -594,29 +716,33 @@ test('Native exploration does not aggregate another Run, foreign Store, or unkno
       [
         tool(1),
         tool(2),
+        tool(5, { definitionId: 'files.search', definitionVersion: '99' }),
         tool(3, { runId: 'other-run' }),
         tool(4, { originStoreId: 'foreign-store' }),
-        tool(5, { definitionId: 'files.search', definitionVersion: '99' }),
       ],
       [{ ...backgroundItem().run!, id: 'other-run' }],
     );
-    expect(f.host.querySelectorAll('.conversation .tool-activity')).toHaveLength(3);
+    expect(topActivities(f.host)).toHaveLength(2);
     expect(f.host.textContent).not.toContain('foreign-store');
-    expect(f.host.textContent).toContain('files.search · 99');
     expect(f.host.querySelectorAll('.tool-activity-steps')).toHaveLength(0);
     await f.toggle();
-    expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);
+    expect(f.host.textContent).toContain('files.search · 99');
+    expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(3);
     expect(f.host.querySelector('.tool-activity-steps')?.textContent).not.toContain(
       'file-execution-3.ts',
     );
     expect(f.host.querySelector('.tool-activity-steps')?.textContent).not.toContain(
       'file-execution-4.ts',
     );
-    expect(f.host.querySelector('.tool-activity-steps')?.textContent).not.toContain('99');
+    expect(f.host.querySelector('.tool-activity-steps')?.textContent).toContain('99');
     await f.toggle();
     await f.complete(5, true);
     await f.flush();
-    expect(f.host.textContent).toContain('结果未知');
+    expect(f.host.querySelector('button.tool-activity-summary')?.textContent).not.toContain(
+      '结果未知',
+    );
+    await f.toggle();
+    expect(f.host.querySelector('.tool-activity-steps')?.textContent).toContain('结果未知');
     expect(f.host.textContent).not.toContain(raw);
   } finally {
     await f.close();

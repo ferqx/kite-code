@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createConfigurationSnapshot } from '@kite-ai/agent/config';
-import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
+import type { BackgroundExecutionItem, Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
 import type { NativeBackgroundChild } from '../../src/background-bridge';
@@ -67,6 +67,7 @@ function fixture(
   const source = backgroundItem(1, true);
   const item = {
     ...source,
+    sourceTool: undefined as BackgroundExecutionItem['sourceTool'],
     run: {
       ...source.run!,
       configuration: {
@@ -270,9 +271,10 @@ function fixture(
             },
             entries: request.messageIds.map((messageId) => ({
               messageId,
-              executionId: 'parent-spawn-tool',
-              definitionId: 'task.spawn',
-              definitionVersion: '1',
+              executionId:
+                messageId === 'parent-read-receipt' ? 'parent-read-tool' : 'parent-spawn-tool',
+              definitionId: messageId === 'parent-read-receipt' ? 'files.read' : 'task.spawn',
+              definitionVersion: messageId === 'parent-read-receipt' ? '4' : '1',
               status: 'succeeded' as const,
               resultRevision: '1',
             })),
@@ -450,6 +452,25 @@ function fixture(
   return {
     host,
     copied,
+    groupedParentCarrier() {
+      item.sourceTool = {
+        id: 'parent-spawn-tool',
+        definitionId: 'task.spawn',
+        definitionVersion: '1',
+      };
+      item.execution.parentExecutionId = item.sourceTool.id;
+      parentHistory.push({
+        id: 'parent-read-receipt',
+        sessionId: 'root',
+        runId: item.run!.id,
+        seq: '4',
+        role: 'tool',
+        status: 'complete',
+        sourceIds: ['parent-read-tool'],
+        content: 'Original read receipt',
+      });
+      item.rootSession.nextSeq = '5';
+    },
     childBody: (body: NonNullable<typeof childBody>) => {
       childBody = body;
       item.childSession!.nextSeq = body.upperSeq;
@@ -1814,6 +1835,37 @@ test('Native reconciles an unowned parent and its child detail without hiding sa
   }
 });
 
+test('a child carrier inside a mixed tool activity still opens its exact read-only detail', async () => {
+  const f = fixture(true, true);
+  f.groupedParentCarrier();
+  try {
+    await f.releaseMetadata();
+    await f.render();
+    await f.click('Original');
+    await f.waitForText('创建子 Agent读取文件');
+    const summary = f.host.querySelector<HTMLButtonElement>(
+      '.conversation button.tool-activity-summary',
+    )!;
+    expect(summary).not.toBeNull();
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => summary.click());
+    const child = f.host.querySelector<HTMLButtonElement>(
+      '.conversation .tool-activity-steps button[aria-label="查看子 Agent 详情：Live child"]',
+    )!;
+    expect(child).not.toBeNull();
+    expect(f.host.querySelector('.conversation .tool-activity-steps')?.children).toHaveLength(2);
+    await act(async () => child.click());
+    await f.waitForText('Child prefix');
+    expect(f.host.querySelector('.session-tab-child')?.textContent).toContain('Child prefix');
+    expect(f.requests.some((request) => request.method === 'background.child.open')).toBe(true);
+    expect(
+      f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
+    ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a completed child uses the shared collapsed process, concise exploration and verified final reply while preserving its parent', async () => {
   const f = fixture();
   const reply = '# Child final answer\n\n**Verified** child reply 雪🙂\r\n',
@@ -1941,8 +1993,8 @@ test('a completed child uses the shared collapsed process, concise exploration a
     expect(f.host.textContent).toContain('Child process explanation');
     const exploration = child.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
     expect(exploration).not.toBeNull();
-    expect(exploration.textContent).toContain('读取 1 次');
-    expect(exploration.textContent).toContain('搜索 1 次');
+    expect(exploration.textContent).toContain('读取文件搜索内容');
+    expect(exploration.textContent).not.toContain('已完成 2 项');
     expect(child.textContent).not.toContain('files.search · 3');
     await act(async () => exploration.click());
     expect(child.querySelectorAll('.tool-activity-steps .tool-activity-step')).toHaveLength(2);

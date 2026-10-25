@@ -71,7 +71,14 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'extensions.lookup': ['commandId'],
   'toolMessages.contextUsage': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.usage': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
-  'toolMessages.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
+  'toolMessages.list': [
+    'readId',
+    'messageIds',
+    'viewSelection',
+    'historyEpoch',
+    'commandOffsets',
+    'executionIds',
+  ],
   'toolMessages.runs': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.close': ['readId'],
   'interactionHistory.open': ['readId', 'viewSelection', 'historyEpoch'],
@@ -676,14 +683,46 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       method === 'toolMessages.usage' ||
       method === 'toolMessages.contextUsage') &&
     (!Array.isArray(input.messageIds) ||
-      input.messageIds.length < 1 ||
+      input.messageIds.length <
+        (method === 'toolMessages.list' && input.executionIds !== undefined ? 0 : 1) ||
       input.messageIds.length > 32 ||
       !input.messageIds.every(resourceId) ||
       new Set(input.messageIds).size !== input.messageIds.length)
   )
     throw Error('invalid_native_request');
+  if (
+    method === 'toolMessages.list' &&
+    input.executionIds !== undefined &&
+    (!Array.isArray(input.executionIds) ||
+      input.executionIds.length < 1 ||
+      input.executionIds.length > 32 ||
+      (input.messageIds as unknown[]).length !== 0 ||
+      !input.executionIds.every(resourceId) ||
+      new Set(input.executionIds).size !== input.executionIds.length)
+  )
+    throw Error('invalid_native_request');
   if (method === 'toolMessages.contextUsage' && (input.messageIds as unknown[]).length !== 1)
     throw Error('invalid_native_request');
+  if (method === 'toolMessages.list' && input.commandOffsets !== undefined) {
+    const offsets = input.commandOffsets;
+    if (
+      !offsets ||
+      typeof offsets !== 'object' ||
+      Array.isArray(offsets) ||
+      Object.entries(offsets).some(
+        ([id, offset]) =>
+          !(
+            input.executionIds !== undefined
+              ? (input.executionIds as string[]).map((id) => `native-execution:${id}`)
+              : (input.messageIds as string[])
+          ).includes(id) ||
+          !Number.isSafeInteger(offset) ||
+          Number(offset) < 0 ||
+          Number(offset) > 524288,
+      )
+    )
+      throw Error('invalid_native_request');
+  }
   if (
     (method === 'fileChanges.detail' || method === 'fileChanges.open') &&
     !resourceId(input.changeId)

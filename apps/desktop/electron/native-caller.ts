@@ -369,7 +369,46 @@ export class NativeCaller {
       () => this.requirePrivateData(),
       () => this.changed(),
     );
-    this.toolMessages = new NativeToolMessages(client, messageScope, () => this.observedMessages);
+    this.toolMessages = new NativeToolMessages(
+      client,
+      messageScope,
+      () => this.observedMessages,
+      () => {
+        const scope = messageScope();
+        if (!scope) return [];
+        const fresh = this.controller.snapshot;
+        const snapshot =
+          fresh?.sessionId === scope.sessionId
+            ? fresh
+            : this.lastView?.selection === scope.viewSelection
+              ? this.lastView.snapshot
+              : undefined;
+        if (
+          !snapshot ||
+          snapshot.sessionId !== scope.sessionId ||
+          snapshot.view.storeId !== scope.storeId
+        )
+          return [];
+        const runs = new Set(
+          snapshot.view.runs
+            .filter(
+              (run) =>
+                run.isActive &&
+                run.originStoreId === scope.storeId &&
+                run.sessionId === scope.sessionId,
+            )
+            .map((run) => run.id),
+        );
+        return snapshot.view.executions.filter(
+          (execution) =>
+            execution.kind === 'tool' &&
+            execution.originStoreId === scope.storeId &&
+            execution.sessionId === scope.sessionId &&
+            !!execution.runId &&
+            runs.has(execution.runId),
+        );
+      },
+    );
     this.imageReads = new NativeInputImageReads(client, messageScope, () => this.observedMessages);
     this.interactionHistory = new NativeInteractionHistoryReads(client, messageScope);
     this.extensions = new NativeExtensions(

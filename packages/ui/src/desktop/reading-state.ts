@@ -53,6 +53,11 @@ export function pruneReadingState(
     valid.add(message.id);
     valid.add(`activity:${message.id}`);
     valid.add(`activity-group:${message.id}`);
+    if (message.presentationKey) {
+      valid.add(message.presentationKey);
+      valid.add(`activity:${message.presentationKey}`);
+      valid.add(`activity-group:${message.presentationKey}`);
+    }
     if (message.presentationGroupId) valid.add(`activity-group:${message.presentationGroupId}`);
     if (message.turnId) addTurn(message.turnId);
     for (const step of message.steps ?? []) valid.add(`subagent-step:${step.id}`);
