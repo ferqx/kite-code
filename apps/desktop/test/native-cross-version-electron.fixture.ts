@@ -985,11 +985,14 @@ try {
         (globalThis as Globals).versionPhysical = [];
       });
       await launched.page
-        .getByRole('button', { name: `移除 ${witness.name}`, exact: true })
+        .getByRole('button', { name: `${witness.name} 更多操作`, exact: true })
         .locator('..')
         .hover();
       await launched.page
-        .getByRole('button', { name: `移除 ${witness.name}`, exact: true })
+        .getByRole('button', { name: `${witness.name} 更多操作`, exact: true })
+        .click();
+      await launched.page
+        .getByRole('menuitem', { name: `移除 ${witness.name}`, exact: true })
         .click();
       const unknownState = await waitState(
         launched.page,

@@ -84,6 +84,10 @@ body {
   --diagram-accent: #4b68b1;
   --diagram-secondary: #478079;
   --destructive: #a13e3e;
+  --destructive-fill: #dc2626;
+  --destructive-fill-hover: #b91c1c;
+  --destructive-fill-pressed: #991b1b;
+  --permission-full-foreground: #b45309;
   --success: #287a4f;
   --attention-background: #f5e6c8;
   --attention-foreground: #714700;
@@ -189,6 +193,17 @@ body {
   }
   .button:active:not(:disabled) {
     background: var(--control-pressed);
+  }
+  .button[data-variant="destructive"] {
+    border-color: transparent;
+    background: var(--destructive-fill);
+    color: #fff;
+  }
+  .button[data-variant="destructive"]:hover:not(:disabled) {
+    background: var(--destructive-fill-hover);
+  }
+  .button[data-variant="destructive"]:active:not(:disabled) {
+    background: var(--destructive-fill-pressed);
   }
   .button:disabled,
   :where(.interaction-area) button:disabled,
@@ -443,7 +458,7 @@ body {
       .space-row,
       .session-row,
       .space-new-session,
-      .space-remove,
+      .space-more,
       .connection .button
     ) {
     height: 32px;
@@ -1277,10 +1292,10 @@ body {
     background-color: transparent;
     color: var(--muted-foreground);
   }
-  .permission-trigger-danger,
-  .permission-trigger-danger:hover:not(:disabled),
-  .permission-trigger-danger:focus-visible {
-    color: var(--destructive);
+  .permission-trigger-full,
+  .permission-trigger-full:hover:not(:disabled),
+  .permission-trigger-full:focus-visible {
+    color: var(--permission-full-foreground);
   }
   .permission-trigger:disabled {
     opacity: 0.55;
@@ -1298,8 +1313,8 @@ body {
     background-color: var(--control-hover);
     color: var(--foreground);
   }
-  .composer[data-session-loading="true"] .permission-trigger-danger:disabled:hover {
-    color: var(--destructive);
+  .composer[data-session-loading="true"] .permission-trigger-full:disabled:hover {
+    color: var(--permission-full-foreground);
   }
   .composer [data-model-picker][aria-busy="true"] .model-trigger:disabled {
     pointer-events: auto;
@@ -1375,13 +1390,13 @@ body {
   .permission-menu-divider {
     background: var(--border);
   }
-  .permission-menu-item-danger,
-  .permission-menu-item-danger:focus,
-  .permission-menu-item-danger[data-highlighted],
-  .permission-menu-item-danger > svg,
-  .permission-menu-item-danger .permission-menu-copy > span,
-  .permission-menu-item-danger .permission-menu-copy small {
-    color: var(--destructive);
+  .permission-menu-item-full,
+  .permission-menu-item-full:focus,
+  .permission-menu-item-full[data-highlighted],
+  .permission-menu-item-full > svg,
+  .permission-menu-item-full .permission-menu-copy > span,
+  .permission-menu-item-full .permission-menu-copy small {
+    color: var(--permission-full-foreground);
   }
   .permission-menu-copy {
     display: flex;
@@ -1399,9 +1414,6 @@ body {
     color: var(--muted-foreground);
     font-size: 11px;
     line-height: 14px;
-  }
-  .permission-menu-item-danger .permission-menu-copy small {
-    opacity: 0.88;
   }
   .composer-action {
     flex: none;
@@ -1965,9 +1977,11 @@ body {
 .kite-client .space-heading {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   border-radius: var(--button-radius);
 }
+.kite-client .space-heading.selected,
+.kite-client .space-heading[data-menu-active],
 .kite-client .space-heading:hover {
   background: var(--control-hover);
 }
@@ -1983,42 +1997,76 @@ body {
   flex: 1;
   min-width: 0;
 }
-.kite-client :where(.space-new-session, .space-remove) {
+.kite-client :where(.space-new-session, .space-more) {
   flex: none;
 }
+.kite-client .space-heading :is(.space-new-session, .space-more) > svg {
+  width: 14px;
+  height: 14px;
+}
 .kite-client .nav-label .space-add,
-.kite-client .space-heading :where(.space-new-session, .space-remove) {
+.kite-client .space-heading :where(.space-new-session, .space-more) {
   color: var(--muted-foreground);
 }
 .kite-client .nav-label .space-add:is(:hover, :focus-visible):not(:disabled),
 .kite-client
   .space-heading
-  :where(.space-new-session, .space-remove):is(:hover, :focus-visible):not(:disabled) {
+  :where(.space-new-session, .space-more):is(:hover, :focus-visible):not(:disabled) {
   color: var(--foreground);
 }
 .kite-client .nav-label .space-add,
-.kite-client .space-heading :is(.space-new-session, .space-remove) {
+.kite-client .space-heading :is(.space-new-session, .space-more) {
   opacity: 0;
   pointer-events: none;
 }
 .kite-client :is(.nav-label:hover, .nav-label:focus-within) .space-add,
+.kite-client .space-heading[data-menu-active] :is(.space-new-session, .space-more),
 .kite-client
   :is(.space-heading:hover, .space-heading:focus-within)
-  :is(.space-new-session, .space-remove) {
+  :is(.space-new-session, .space-more) {
   opacity: 1;
   pointer-events: auto;
 }
 @media (hover: none) {
   .kite-client .nav-label .space-add,
-  .kite-client .space-heading :is(.space-new-session, .space-remove) {
+  .kite-client .space-heading :is(.space-new-session, .space-more) {
     opacity: 1;
     pointer-events: auto;
   }
 }
-.kite-client :where(.space-add, .space-new-session, .space-remove):disabled {
+.kite-client :where(.space-add, .space-new-session, .space-more):disabled {
   pointer-events: none;
 }
 .kite-client .space-name-muted {
+  color: var(--muted-foreground);
+}
+.sidebar-menu,
+.sidebar-menu * {
+  box-sizing: border-box;
+}
+.sidebar-menu {
+  width: max-content;
+  min-width: min(160px, calc(100vw - 32px));
+  max-width: min(240px, calc(100vw - 32px));
+  padding: 5px;
+  font-size: var(--select-font-size);
+  line-height: var(--select-line-height);
+  color: var(--foreground);
+}
+.sidebar-menu :is([role="menuitem"], [role="menuitemradio"]) {
+  min-height: var(--select-min-height);
+  padding-block: var(--select-padding-block);
+  font-size: inherit;
+  line-height: inherit;
+}
+.sidebar-menu [role="menuitem"] {
+  padding-inline: var(--select-padding-inline);
+}
+.sidebar-menu-label {
+  padding: 6px var(--select-padding-inline);
+  font-size: inherit;
+  font-weight: 400;
+  line-height: inherit;
   color: var(--muted-foreground);
 }
 .kite-client .sidebar-sessions > nav {
@@ -2049,6 +2097,7 @@ body {
   --diagram-accent: #9aafe6;
   --diagram-secondary: #85b9b2;
   --destructive: #e0a198;
+  --permission-full-foreground: #fb923c;
   --success: #82c9a0;
   --attention-background: #4b3518;
   --attention-foreground: #ffe0a3;
@@ -3473,54 +3522,74 @@ body {
 }
 
 .full-permission-dialog {
-  width: min(460px, calc(100vw - 32px));
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 32px));
   max-width: none;
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
   gap: 20px;
   padding: 24px;
+  border-radius: 12px;
+  transition-property: opacity, transform;
+}
+.full-permission-header {
+  gap: 12px;
 }
 .full-permission-title {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: var(--destructive);
+  color: var(--foreground);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
 }
 .full-permission-title-icon {
   width: 20px;
   height: 20px;
   flex: none;
+  color: inherit;
 }
 .full-permission-description {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  line-height: 1.5;
+  gap: 0;
+  font-size: 14px;
+  line-height: 22px;
 }
 .full-permission-intro {
   margin: 0;
 }
-.full-permission-risk-notice {
-  padding: 12px 14px;
-  border-left: 3px solid var(--destructive);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--destructive) 5%, var(--card));
-}
-.full-permission-risk-heading {
-  color: var(--destructive);
-  font-size: 12px;
-}
-.full-permission-risk-copy {
-  margin: 5px 0 0;
+.full-permission-risks {
+  display: grid;
+  gap: 8px;
+  margin: 20px 0 0;
+  padding: 0 0 0 18px;
+  list-style: disc outside;
   color: var(--foreground);
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
 }
-.full-permission-limit {
+.full-permission-dialog .full-permission-risks > li {
   margin: 0;
+  padding-left: 2px;
+}
+.full-permission-dialog .full-permission-risks > li::marker {
   color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 10px;
+}
+.full-permission-footer {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 0;
+  border: 0;
+}
+.full-permission-footer > button {
+  min-height: 32px;
+  padding: 5px 12px;
+  font-weight: 400;
+  box-shadow: none;
 }
 .kite-client .approval-actions {
   display: flex;

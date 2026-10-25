@@ -84,6 +84,8 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 [普通页面回归](test/isolated/native-new-conversation-dom.test.tsx)保旧历史、缺替代行和独立同文的展示兼容。[真实普通 Electron 回归](test/isolated/native-human-input-electron.test.ts)使用实际 Main/Service/SQLite 与受控业务 Provider、关闭产品调试入口，核首次为用户→实际回复、正常退出冷重开零新提交，以及同文重交仍为独立用户→回复；SQL 不生成 raw/decision/processing，新请求无分类调用。
 
+2026-10-25，新对话准备闪烁修复：Windows x64／Bun1.4.3，原[新对话DOM回归](test/isolated/native-new-conversation-dom.test.tsx)82项／1666断言、Desktop类型检查与定向Biome通过，新增暂停读取期间的目标展示、同项目控件节点保持、失败禁发及重试恢复断言。实际NativeDesktop／共享CSS在隔离浏览器中逐步观察重复点击→读取暂停→完成、其他空间→全局默认空间→迟到读取返回；目标高亮与项目名直接更新，重复点击期间分支节点保留，选择器不变淡，草稿保持，原请求不覆盖后选空间，页面无错误。该夹具使用模拟NativeBridge，覆盖此前仅共享SessionPage夹具遗漏的宿主异步准备过程，不替代完整安装版Electron或真实IPC验收。
+
 ## 普通客户端与测试诊断
 
 Native 启动、目录与子 Agent、安排任务、分支、模型／提供商／MCP／Skills 设置、扩展能力、文件差异、上下文、交互记录和完整日志／输出读取均不插入临时加载文案，刷新同样不追加“正在核对”提示。已有正文、静态控件标签、图片文件名和预览占位保持，忙碌由原转圈、控件禁用及 `aria-busy` 表达；共享模型输入／输出遵循 [UI owner](../../packages/ui/README.md#原桌面展示层)。会话观察失败、历史不完整和原申请回执丢失由后台自动重读或查询原 ID，普通页面不再在消息区外追加异常文案、临时重试／核对按钮或通用错误弹窗。已读正文和草稿保留；真实执行失败和未知结果保留在原输入、轮次或工具消息中。设置、启动与空间管理等独立业务错误仍在所属界面处理，敏感内容确认、完整读取和写入准入不变。测试等待使用实际区域的忙碌状态，不能以加载文案消失推断完整读取成功。
@@ -619,7 +621,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 普通客户端不显示移除的在途过程段落：本地忙碌状态与持久申请的 `submitting` 投影均不向 `SessionPage.notices` 插入文字，原操作禁用、原生确认和目录更新保留。`unknown`／`failed` 及无法核实结果继续显示必要提示；“查看结果”只查原申请，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖等待／刷新期间无额外提示、输入节点与草稿保持、原 ID 查询、成功目录更新及失败边界。
 
-原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的空间行移除按钮继续使用原悬浮／键盘焦点交互。[Main](electron/main.ts) 显示原生确认，默认和取消均为「保留空间」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他空间的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
+原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的空间行将移除入口收进更多菜单，新对话与更多图标均为14px并沿原悬浮／键盘焦点显示；选择“移除空间”才调用原回调。[Main](electron/main.ts) 显示原生确认，默认和取消均为「保留空间」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他空间的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
 
 [Store 批量事务](../../packages/agent/src/storage/sqlite/workspace-removal.ts) 一次保存全部根及子 Session tombstone、停止边界和原 Workspace receipt，目录同时隐藏；它不逐条等待，不冒充资源停止。回复丢失／不可信则保存 unknown，重开只展示原申请，明确点击「查看结果」才用原 Store／Workspace／Command GET；其他 Store／主体在 HTTP 前拒绝，不改绑、不自动再提交。可信 4xx 显示未移除。目录状态未核实或私有申请不能保存时拒绝新移除。
 
@@ -643,7 +645,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 [NativeDesktop](src/native.tsx)直接消费原 SessionPage 的欢迎标题、项目／分支菜单与 Composer，不展示任务建议卡片。全局及项目新对话入口只进入准备页，不创建空 Session；用户直接编辑草稿。准备草稿和已有 Session 未保存草稿分别保留，页面、项目及分支选择不清空原文。实际模型目录由 [NativeModelPicker](src/native-model-picker.tsx)经独立只读 `conversation.models.read` 读取全局配置。普通客户端读取期间只将原模型选择区标为 `aria-busy` 并禁用模型／发送操作，不在工具栏插入加载段落，避免会话切到准备页后先增高再收缩；输入与独立草稿保留，真实目录失败仍显示原错误。选择项目只读取其分支，不重挂目录或改变全局默认，首次发送仍核所选项目实际配置和支持档位。原 Full 风险确认保留；本次权限选择在创建原 Session 后、首条输入前应用，不写项目默认。
 
-全局“新对话”按当前目录顺序默认选择第一个已登记空间，空间行内入口仍使用明确的空间ID；切入准备时清除上次分支选择，再沿原 `chooseWorkspace` 读取真实分支，读取期间不能发送。无当前会话的启动准备从本次完整目录的首项初始化，使用已读目录事实，避免闭包尚未更新导致默认选择遗漏；页面意图变化后不再应用旧的初始化选择。没有空间时保持未选与可编辑草稿，发送禁用。普通目录刷新不覆盖当前手动选择，重新从全局入口进入才按最新顺序重置。2026-10-19 Windows／Bun1.4.3、`f734245a`加当前改动：三项新增实际Native DOM回归在原实现均失败，修复后通过，核目录延迟、首项重排、空目录、显式入口、手动选择、迟到分支与首次发送的准确空间；连同新对话及启动两个整文件27项／700断言、Desktop类型检查和Biome通过。此为实际组件DOM证据，未复验完整安装窗口。
+全局“新对话”按当前目录顺序默认选择第一个已登记空间，空间行内入口仍使用明确的空间ID；点击时直接用当前目录确认的目标ID更新项目展示与空间高亮，不先清成未选状态；同一空间重进保留已有分支展示节点，切换目标才清除旧分支事实。切入准备仍重置用户上次选择的分支，再沿原 `chooseWorkspace` 读取真实分支，读取期间不能发送；首条发送还要求分支事实匹配当前Store与空间。当前读取失败会撤销旧分支事实，保留目标项目名及草稿，重新点击入口核实成功后才恢复发送；过期请求不清后来目标的分支事实。无当前会话的启动准备从本次完整目录的首项初始化，使用已读目录事实，避免闭包尚未更新导致默认选择遗漏；页面意图变化后不再应用旧的初始化选择。没有空间时保持未选与可编辑草稿，发送禁用。普通目录刷新不覆盖当前手动选择，重新从全局入口进入才按最新顺序重置。2026-10-19 Windows／Bun1.4.3、`f734245a`加当前改动：三项新增实际Native DOM回归在原实现均失败，修复后通过，核目录延迟、首项重排、空目录、显式入口、手动选择、迟到分支与首次发送的准确空间；连同新对话及启动两个整文件27项／700断言、Desktop类型检查和Biome通过。此为实际组件DOM证据，未复验完整安装窗口。
 
 [NativeConversation](electron/conversation.ts)负责有限编排，复用原 NativeCaller 创建意图、私有草稿、permission controller、caller journal 和 DesktopInput。发送前冻结创建五元身份、输入 Command、原文、模型／effort、Plan 与权限；先保存未来原 Session 的准确草稿，再执行原创建。准备的权限 controller 与正在阅读的选择分别持有观察，迟到结果不抢回后来页面。首次明确发送时按原 Session 绑定的项目与宿主读取范围准备授权，不追加独立范围确认；准备失败保留 Session 和原文，未知回执不继续输入，沿原权限申请查询。
 

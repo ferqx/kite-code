@@ -1523,6 +1523,10 @@ function NativeDesktopContent({
       setNewWorkspace(workspaceId);
       setNewBranch(value);
       setTargetBranch(undefined);
+    } catch (cause) {
+      if (nonce === contextIntent.current && generation.current === current)
+        setNewBranch(undefined);
+      throw cause;
     } finally {
       if (nonce === contextIntent.current) setContextBusy(false);
     }
@@ -1536,10 +1540,13 @@ function NativeDesktopContent({
     if (newPermission === undefined && selection?.permissions)
       setNewPermission(selection.permissions.mode.mode);
     if (firstRef.current?.result?.phase !== 'unknown' && !pending) setFirstSubmission(undefined);
-    setNewWorkspace('');
-    setNewBranch(undefined);
-    setTargetBranch(undefined);
     const target = workspaceId ?? directory?.workspaces[0]?.id;
+    // The directory already identifies the target. Branch reads qualify sending,
+    // rather than temporarily clearing the project shown by the page and sidebar.
+    setNewWorkspace(target ?? '');
+    if (target !== newWorkspace || newBranch?.storeId !== directory?.storeId)
+      setNewBranch(undefined);
+    setTargetBranch(undefined);
     if (target) void report(() => chooseWorkspace(target), true, true);
     else {
       contextIntent.current++;
@@ -1752,6 +1759,8 @@ function NativeDesktopContent({
       !bridge ||
       !directory ||
       !newWorkspace ||
+      newBranch?.workspaceId !== newWorkspace ||
+      newBranch.storeId !== directory.storeId ||
       !newModelReady.ready ||
       (!newDraft.trim() &&
         !imageDrafts.get(newImageScope).length &&
@@ -3970,6 +3979,8 @@ function NativeDesktopContent({
               sending,
               sendDisabled:
                 !newWorkspace ||
+                newBranch?.workspaceId !== newWorkspace ||
+                newBranch.storeId !== directory.storeId ||
                 contextBusy ||
                 !newModelReady.ready ||
                 firstSubmission?.result?.phase === 'unknown',

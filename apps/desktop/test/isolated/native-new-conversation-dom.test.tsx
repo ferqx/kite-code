@@ -137,6 +137,7 @@ function fixture(
     releaseDirectory: (() => void) | undefined,
     holdBranch = false,
     releaseBranch: (() => void) | undefined;
+  let rejectBranch = false;
   let selectionPresent = !options.withoutSelection;
   let selected = 'a',
     release: ((value: NativeConversationResult) => void) | undefined;
@@ -379,6 +380,10 @@ function fixture(
             releaseBranch = resolve;
           });
         }
+        if (rejectBranch) {
+          rejectBranch = false;
+          throw Error('workspace_observation_unavailable');
+        }
         return result;
       }
       if (
@@ -464,7 +469,7 @@ function fixture(
   };
   Object.defineProperty(dom.window, 'kiteNative', { value: bridge });
   const find = (name: string) =>
-    [...host.querySelectorAll<HTMLElement>('button,[role="menuitemradio"]')].find(
+    [...host.querySelectorAll<HTMLElement>('button,[role="menuitemradio"],[role="menuitem"]')].find(
       (item) => item.textContent === name || item.getAttribute('aria-label') === name,
     );
   const click = async (name: string) =>
@@ -513,6 +518,9 @@ function fixture(
     },
     holdBranch: () => {
       holdBranch = true;
+    },
+    rejectBranch: () => {
+      rejectBranch = true;
     },
     releaseBranch: () => act(async () => releaseBranch?.()),
     holdModels: () => {
@@ -2643,7 +2651,7 @@ test('a held permission change preserves the send icon while genuine input submi
     const icon = () => [...send.querySelectorAll('path')].map((path) => path.getAttribute('d'));
     const initialIcon = icon();
     const edit = f.host.querySelector<HTMLButtonElement>('.space-new-session')!;
-    const remove = f.host.querySelector<HTMLButtonElement>('.space-remove')!;
+    const more = f.host.querySelector<HTMLButtonElement>('.space-more')!;
     expect(send.disabled).toBe(false);
     await act(async () => {
       const trigger = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
@@ -2660,13 +2668,13 @@ test('a held permission change preserves the send icon while genuine input submi
     expect(send.getAttribute('aria-busy')).toBeNull();
     expect(icon()).toEqual(initialIcon);
     expect(f.host.querySelector('.space-new-session')).toBe(edit);
-    expect(f.host.querySelector('.space-remove')).toBe(remove);
+    expect(f.host.querySelector('.space-more')).toBe(more);
     expect(edit.disabled).toBe(true);
-    expect(remove.disabled).toBe(true);
+    expect(more.disabled).toBe(true);
     await act(async () => {
       send.click();
       edit.click();
-      remove.click();
+      more.click();
     });
     expect(f.selected()).toBe('a');
     expect(f.calls.some((call) => call.method === 'submit')).toBe(false);
@@ -2677,7 +2685,7 @@ test('a held permission change preserves the send icon while genuine input submi
     expect(send.disabled).toBe(false);
     expect(icon()).toEqual(initialIcon);
     expect(edit.disabled).toBe(false);
-    expect(remove.disabled).toBe(false);
+    expect(more.disabled).toBe(false);
     await act(async () => send.click());
     expect(send.disabled).toBe(true);
     expect(send.getAttribute('aria-busy')).toBe('true');
@@ -2889,6 +2897,82 @@ test('startup preparation selects the default first space after directory loadin
   }
 });
 
+test('preparation displays its target throughout branch reads and preserves same-project controls on repeated clicks', async () => {
+  const f = fixture();
+  const project = () => f.host.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
+  const branch = () => f.host.querySelector<HTMLButtonElement>('[aria-label="分支"]');
+  const current = () =>
+    [...f.host.querySelectorAll('.sidebar [aria-current="page"]')].map((e) => e.textContent);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    f.holdBranch();
+    await f.click('新对话');
+    expect(project().textContent).toBe('Workspace');
+    expect(project().disabled).toBe(true);
+    expect(current()).toEqual(['Workspace']);
+    await f.releaseBranch();
+    await f.edit('stable draft');
+    const projectNode = project(),
+      branchNode = branch();
+    expect(branchNode?.textContent).toBe('main');
+    for (let i = 0; i < 2; i++) {
+      f.holdBranch();
+      await f.click('新对话');
+      expect(project()).toBe(projectNode);
+      expect(branch()).toBe(branchNode);
+      expect(project().textContent).toBe('Workspace');
+      expect(branch()?.textContent).toBe('main');
+      expect(current()).toEqual(['Workspace']);
+      expect(project().disabled).toBe(true);
+      expect(f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')?.disabled).toBe(
+        true,
+      );
+      expect(promptValue(f.input())).toBe('stable draft');
+      await f.releaseBranch();
+      expect(project()).toBe(projectNode);
+      expect(branch()).toBe(branchNode);
+      expect(current()).toEqual(['Workspace']);
+      expect(project().disabled).toBe(false);
+    }
+    f.holdBranch();
+    await f.click('在 Ordinary directory 中新建对话');
+    expect(project().textContent).toBe('Ordinary directory');
+    expect(current()).toEqual(['Ordinary directory']);
+    expect(branch()).toBeNull();
+    await f.releaseBranch();
+    expect(current()).toEqual(['Ordinary directory']);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
+  } finally {
+    await f.releaseBranch();
+    await f.close();
+  }
+});
+
+test('failed branch verification cannot enable first send from retained project display and can be retried', async () => {
+  const f = fixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('新对话');
+    await f.edit('unsent draft');
+    f.rejectBranch();
+    await f.click('新对话');
+    expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe('Workspace');
+    expect(f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')?.disabled).toBe(
+      true,
+    );
+    await f.click('发送首条消息');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
+    expect(promptValue(f.input())).toBe('unsent draft');
+    await f.click('新对话');
+    expect(f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')?.disabled).toBe(
+      false,
+    );
+    expect(f.host.querySelector('[aria-label="分支"]')?.textContent).toBe('main');
+  } finally {
+    await f.close();
+  }
+});
+
 test('a pending default first space cannot override a later project entry and the default owns the first send', async () => {
   const f = fixture();
   const project = () => f.host.querySelector('[aria-label="项目空间"]')?.textContent;
@@ -2898,6 +2982,8 @@ test('a pending default first space cannot override a later project entry and th
     await f.edit('the original draft');
     f.holdBranch();
     await f.click('新对话');
+    expect(project()).toBe('Workspace');
+    expect(f.host.querySelector('.sidebar [aria-current="page"]')?.textContent).toBe('Workspace');
     expect(f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')?.disabled).toBe(
       true,
     );
@@ -4464,12 +4550,19 @@ test('workspace removal keeps normal progress silent and retains original unknow
     await f.edit('保留草稿 雪🙂');
     const editor = f.input()!;
     const row = f.host.querySelector('.workspace-group')!;
-    const remove = row.querySelector<HTMLButtonElement>('.space-remove')!;
+    const more = row.querySelector<HTMLButtonElement>('.space-more')!;
     const notices = () => f.host.querySelectorAll('main > [role="status"], main > [role="alert"]');
     const text = () => f.host.body.textContent ?? '';
-    await act(async () => remove.click());
+    await act(async () => {
+      more.focus();
+      more.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(0);
+    await f.click('移除 Workspace');
     await f.until(() => f.calls.some((call) => call.method === 'state'));
-    expect(remove.disabled).toBe(true);
+    expect(more.disabled).toBe(true);
     expect(text()).not.toContain('正在移除');
     expect(notices()).toHaveLength(0);
     expect(f.input()).toBe(editor);

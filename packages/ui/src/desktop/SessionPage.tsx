@@ -496,6 +496,13 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       <aside className="sidebar" aria-label="空间与会话">
         <Sidebar
           workspaces={props.workspaces}
+          selectedWorkspace={
+            !props.workbench && !props.scheduledTasks
+              ? props.workspaces.find(
+                  (workspace) => workspace.id === props.newConversation?.workspace,
+                )?.id
+              : undefined
+          }
           selected={
             props.newConversation || props.workbench || props.scheduledTasks
               ? undefined

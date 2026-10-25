@@ -51,6 +51,7 @@ export function sessionTime(value?: string) {
 export interface DirectoryProps {
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
+  selectedWorkspace?: string;
   busy?: boolean;
   mutationBusy?: boolean;
   defaultExpanded?: boolean;
@@ -68,6 +69,10 @@ function Workspace({
 }) {
   const [expanded, setExpanded] = useState(props.defaultExpanded ?? workspace.state === 'loaded');
   const [visibleCount, setVisibleCount] = useState(5);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [tooltipNeedsHover, setTooltipNeedsHover] = useState(false);
+  const heading = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLElement>(null);
   const id = useId();
   const sessions = [...workspace.sessions]
@@ -75,11 +80,22 @@ function Workspace({
     .slice(0, visibleCount);
   return (
     <section className="workspace-group">
-      <Tooltip>
+      <Tooltip
+        open={tooltipOpen && !moreOpen && !tooltipNeedsHover}
+        onOpenChange={(open) => setTooltipOpen(open && !moreOpen && !tooltipNeedsHover)}
+      >
         <TooltipTrigger asChild>
-          <div className="space-heading">
+          <div
+            ref={heading}
+            className={`space-heading${props.selectedWorkspace === workspace.id ? ' selected' : ''}`}
+            data-menu-active={moreOpen || undefined}
+            onPointerEnter={() => {
+              if (!moreOpen) setTooltipNeedsHover(false);
+            }}
+          >
             <Button
               className="space-row"
+              aria-current={props.selectedWorkspace === workspace.id ? 'page' : undefined}
               aria-expanded={expanded}
               aria-controls={id}
               onClick={() => {
@@ -102,7 +118,7 @@ function Workspace({
               <Button
                 className="ghost space-new-session"
                 variant="ghost"
-                size="icon-sm"
+                size="icon-xs"
                 aria-label={`在 ${workspace.label} 中新建对话`}
                 title="新对话"
                 disabled={props.mutationBusy}
@@ -112,26 +128,56 @@ function Workspace({
               </Button>
             )}
             {props.onRemove && (
-              <Button
-                className="ghost space-remove"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`移除 ${workspace.label}`}
-                title="移除空间"
-                disabled={props.busy || props.mutationBusy}
-                onClick={() => props.onRemove?.(workspace.id)}
+              <DropdownMenu
+                open={moreOpen}
+                onOpenChange={(open) => {
+                  setMoreOpen(open);
+                  setTooltipOpen(false);
+                  setTooltipNeedsHover(true);
+                }}
               >
-                <HugeiconsIcon icon={Delete02Icon} />
-              </Button>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="ghost space-more"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`${workspace.label} 更多操作`}
+                    title="更多操作"
+                    disabled={props.busy || props.mutationBusy}
+                  >
+                    <HugeiconsIcon icon={MoreHorizontalIcon} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="sidebar-menu"
+                  aria-label={`${workspace.label} 更多操作`}
+                  onCloseAutoFocus={(event) => {
+                    if (!heading.current?.matches(':hover')) event.preventDefault();
+                  }}
+                >
+                  <DropdownMenuItem
+                    className="space-remove"
+                    aria-label={`移除 ${workspace.label}`}
+                    disabled={props.busy || props.mutationBusy}
+                    onSelect={() => props.onRemove?.(workspace.id)}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} />
+                    移除空间
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </TooltipTrigger>
-        <TooltipContent className="kite-client directory-tooltip" side="right" sideOffset={8}>
-          <strong>{workspace.label}</strong>
-          {(workspace.state === 'loaded' || workspace.sessions.length > 0) && (
-            <span>{workspace.sessionCount} 个会话</span>
-          )}
-        </TooltipContent>
+        {!moreOpen && !tooltipNeedsHover && (
+          <TooltipContent className="kite-client directory-tooltip" side="right" sideOffset={8}>
+            <strong>{workspace.label}</strong>
+            {(workspace.state === 'loaded' || workspace.sessions.length > 0) && (
+              <span>{workspace.sessionCount} 个会话</span>
+            )}
+          </TooltipContent>
+        )}
       </Tooltip>
       <div className="sidebar-sessions" hidden={!expanded}>
         {workspace.state === 'unavailable' && (
@@ -249,14 +295,15 @@ export function Sidebar({
   connectionLabel: string;
   activePage?: 'conversation' | 'newConversation' | 'workbench' | 'scheduledTasks';
 }) {
+  const newConversationSelected = activePage === 'newConversation' && !props.selectedWorkspace;
   return (
     <>
       {(actions.newSession || actions.workbench || actions.scheduledTasks) && (
         <nav className="primary-navigation" aria-label="主要导航">
           {actions.newSession && (
             <Button
-              className={activePage === 'newConversation' ? 'new-session selected' : 'new-session'}
-              aria-current={activePage === 'newConversation' ? 'page' : undefined}
+              className={newConversationSelected ? 'new-session selected' : 'new-session'}
+              aria-current={newConversationSelected ? 'page' : undefined}
               variant="ghost"
               disabled={props.busy || props.mutationBusy}
               onClick={actions.newSession}
@@ -342,7 +389,7 @@ export function Sidebar({
                 <HugeiconsIcon icon={MoreHorizontalIcon} aria-label="更多操作" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="w-56">
+            <DropdownMenuContent side="top" align="start" className="sidebar-menu">
               {actions.settings && (
                 <DropdownMenuGroup>
                   <DropdownMenuItem onSelect={actions.settings}>设置</DropdownMenuItem>
@@ -351,7 +398,7 @@ export function Sidebar({
               {actions.settings && actions.theme && <DropdownMenuSeparator />}
               {actions.theme && (
                 <DropdownMenuGroup>
-                  <DropdownMenuLabel>主题</DropdownMenuLabel>
+                  <DropdownMenuLabel className="sidebar-menu-label">主题</DropdownMenuLabel>
                   <DropdownMenuRadioGroup
                     aria-label="主题"
                     value={actions.theme.value}
