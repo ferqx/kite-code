@@ -236,6 +236,7 @@ const MessageItem = memo(function MessageItem({
         key={message.id}
         className="subagent-process"
         fade="y"
+        chainScroll
         viewportClassName="subagent-process-viewport"
         viewportProps={{
           role: 'region',

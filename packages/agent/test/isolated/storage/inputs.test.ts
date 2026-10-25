@@ -122,6 +122,45 @@ async function dispatch(f: Awaited<ReturnType<typeof fixture>>, id: string) {
   });
 }
 
+test('ordinary starts seal input provenance in each message before Run observation and preserve it cold', async () => {
+  const f = await fixture();
+  try {
+    await f.finish();
+    await f.store.acceptCommand({
+      ...f.base,
+      commandId: 'second-work',
+      request: { kind: 'run.start', content: 'original' },
+    });
+    const second = await f.store.startRun({
+      ...f.write,
+      commandId: 'second-work',
+      configuration: {},
+    });
+    const expected = [
+      { runId: f.run.id, originCommandId: 'work', sourceIds: ['work'], content: 'original' },
+      {
+        runId: second.id,
+        originCommandId: 'second-work',
+        sourceIds: ['second-work'],
+        content: 'original',
+      },
+    ];
+    expect(await f.store.listMessages('s')).toMatchObject(expected);
+    await f.store.startRun({ ...f.write, commandId: 'second-work', configuration: {} });
+    expect(await f.store.listMessages('s')).toHaveLength(2);
+    await f.store.close();
+    const cold = await openSqliteStore(f.profile);
+    try {
+      expect(await cold.listMessages('s')).toMatchObject(expected);
+      expect((await cold.getView('s')).messages).toMatchObject(expected);
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('message first-publication time survives streamed updates, finalization and cold reads; legacy time requires complete original logs', async () => {
   const before = Date.now();
   const f = await fixture();

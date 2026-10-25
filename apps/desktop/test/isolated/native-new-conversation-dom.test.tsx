@@ -1198,9 +1198,10 @@ test('ordinary saved input takes over its local user message only with matching 
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
-    await f.edit('ordinary original input 雪🙂', '当前会话私有草稿');
+    await f.edit('ordinary original input 雪🙂\n\n', '当前会话私有草稿');
     await f.click('发送明确的新轮次');
     expect(submitted?.intent.kind).toBe('run.start');
+    expect(submitted?.intent.content).toBe('ordinary original input 雪🙂');
     const commandId = submitted!.intent.commandId;
     const message: Message = {
       id: 'ordinary-saved-input',
@@ -1250,6 +1251,71 @@ test('ordinary saved input takes over its local user message only with matching 
     await f.click('Original A');
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
     expect(f.host.querySelector('.message.user')!.textContent).toContain('durable original input');
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a second saved ordinary input replaces delivery before its Run enters the View', async () => {
+  const first: Message = {
+    id: 'prior-user',
+    sessionId: 'a',
+    runId: 'prior-run',
+    seq: '1',
+    role: 'user',
+    status: 'complete',
+    content: 'same explicit input',
+    originCommandId: 'prior-command',
+    sourceIds: ['prior-command'],
+  };
+  const f = fixture(true, true, 'accept_edits', { messages: [first], runs: [] });
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
+  bridge.request = async (input) => {
+    if (input.method !== 'submit') return request(input);
+    submitted = input;
+    f.calls.push(input);
+    return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit(first.content, '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
+    const second: Message = {
+      ...first,
+      id: 'second-user',
+      runId: 'second-run',
+      seq: '2',
+      originCommandId: submitted!.intent.commandId,
+      sourceIds: [submitted!.intent.commandId],
+    };
+    // An inherited record with the same command spelling is not this Store's input.
+    await f.publishMessages(
+      [
+        first,
+        {
+          ...second,
+          originMessage: {
+            storeId: 'source-store',
+            sessionId: 'source-session',
+            messageId: 'source-message',
+            runId: 'source-run',
+          },
+        },
+      ],
+      [],
+    );
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(3);
+    await f.publishMessages([first, second], []);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
+    expect(f.host.querySelector('.delivery-status')).toBeNull();
+    await f.click('Other B');
+    await f.click('Original A');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
     expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
   } finally {
     await f.close();
@@ -3081,7 +3147,7 @@ test('first send clears and renders original text; late failure cannot steal ano
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
-    await f.edit('first raw\n雪🙂');
+    await f.edit('first raw\n雪🙂\n\n');
     await act(async () => {
       const send = f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')!;
       expect(send).not.toBeNull();
@@ -3105,11 +3171,12 @@ test('first send clears and renders original text; late failure cannot steal ano
       )!;
       item.click();
     });
-    expect(promptValue(f.input('当前会话私有草稿'))).toBe('first raw\n雪🙂');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('first raw\n雪🙂\n\n');
     expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(0);
     expect(send.creation.workspaceId).toBe('w');
     expect(send.creation.title).toBe('');
     expect(send.intent.modelId).toBe('model');
+    expect(send.intent.content).toBe('first raw\n雪🙂');
     await f.click('发送明确的新轮次');
     expect(f.host.querySelector('.composer-action')!.getAttribute('aria-busy')).toBe('true');
     const retry = [...f.calls]

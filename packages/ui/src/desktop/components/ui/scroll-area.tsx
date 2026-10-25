@@ -6,6 +6,8 @@ import { cn } from '../../lib/utils';
 type ScrollAreaProps = React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> & {
   orientation?: 'vertical' | 'horizontal' | 'both';
   fade?: 'x' | 'y' | false;
+  /** Continue vertical wheel input in an ancestor when this reader reaches its edge. */
+  chainScroll?: boolean;
   viewportRef?: React.Ref<HTMLDivElement>;
   viewportClassName?: string;
   viewportProps?: Omit<
@@ -24,37 +26,89 @@ const ScrollArea = React.forwardRef<
       children,
       orientation = 'vertical',
       fade = false,
+      chainScroll = false,
       viewportRef,
       viewportClassName,
       viewportProps,
       ...props
     },
     ref,
-  ) => (
-    <ScrollAreaPrimitive.Root
-      data-slot="scroll-area"
-      ref={ref}
-      className={cn('relative overflow-hidden', className)}
-      {...props}
-    >
-      <ScrollAreaPrimitive.Viewport
-        data-slot="scroll-area-viewport"
-        ref={viewportRef}
-        className={cn(
-          'h-full w-full rounded-[inherit]',
-          fade === 'x' && 'scroll-fade-x',
-          fade === 'y' && 'scroll-fade-y',
-          viewportClassName,
-        )}
-        {...viewportProps}
+  ) => {
+    const viewport = React.useRef<HTMLDivElement>(null);
+    const bindViewport = React.useCallback(
+      (node: HTMLDivElement | null) => {
+        viewport.current = node;
+        if (typeof viewportRef === 'function') viewportRef(node);
+        else if (viewportRef) viewportRef.current = node;
+      },
+      [viewportRef],
+    );
+    React.useEffect(() => {
+      const element = viewport.current;
+      if (!chainScroll || !element) return;
+      const view = element.ownerDocument.defaultView!;
+      const canScroll = (node: HTMLElement, delta: number) =>
+        /^(auto|scroll)$/.test(view.getComputedStyle(node).overflowY) &&
+        (delta < 0
+          ? node.scrollTop > 0
+          : node.scrollTop + node.clientHeight < node.scrollHeight - 1);
+      const wheel = (event: WheelEvent) => {
+        if (
+          event.defaultPrevented ||
+          !event.cancelable ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          !event.deltaY ||
+          event.deltaX !== 0
+        )
+          return;
+        // A nested code/output reader that can still move owns its native wheel.
+        for (let node = event.target as HTMLElement | null; node; node = node.parentElement) {
+          if (canScroll(node, event.deltaY)) return;
+          if (node === element) break;
+        }
+        for (let node = element.parentElement; node; node = node.parentElement) {
+          if (!canScroll(node, event.deltaY)) continue;
+          const unit =
+            event.deltaMode === 2
+              ? node.clientHeight
+              : event.deltaMode === 1
+                ? Number.parseFloat(view.getComputedStyle(element).lineHeight) || 16
+                : 1;
+          event.preventDefault();
+          node.scrollTop += event.deltaY * unit;
+          return;
+        }
+      };
+      element.addEventListener('wheel', wheel, { passive: false });
+      return () => element.removeEventListener('wheel', wheel);
+    }, [chainScroll]);
+    return (
+      <ScrollAreaPrimitive.Root
+        data-slot="scroll-area"
+        ref={ref}
+        className={cn('relative overflow-hidden', className)}
+        {...props}
       >
-        {children}
-      </ScrollAreaPrimitive.Viewport>
-      {orientation !== 'horizontal' && <ScrollBar />}
-      {orientation !== 'vertical' && <ScrollBar orientation="horizontal" />}
-      <ScrollAreaPrimitive.Corner />
-    </ScrollAreaPrimitive.Root>
-  ),
+        <ScrollAreaPrimitive.Viewport
+          data-slot="scroll-area-viewport"
+          ref={bindViewport}
+          className={cn(
+            'h-full w-full rounded-[inherit]',
+            fade === 'x' && 'scroll-fade-x',
+            fade === 'y' && 'scroll-fade-y',
+            viewportClassName,
+          )}
+          {...viewportProps}
+        >
+          {children}
+        </ScrollAreaPrimitive.Viewport>
+        {orientation !== 'horizontal' && <ScrollBar />}
+        {orientation !== 'vertical' && <ScrollBar orientation="horizontal" />}
+        <ScrollAreaPrimitive.Corner />
+      </ScrollAreaPrimitive.Root>
+    );
+  },
 );
 ScrollArea.displayName = ScrollAreaPrimitive.Root.displayName;
 

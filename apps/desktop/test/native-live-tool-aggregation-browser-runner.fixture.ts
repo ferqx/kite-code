@@ -1966,6 +1966,43 @@ try {
         { header: initial.header, viewportTop: initial.viewportTop, footer: initial.footer },
         'internal scrolling moved aggregate title, outer reading or input',
       );
+      // Wheel chaining must work in both directions after the inner reader reaches
+      // its limit. A shorter window makes the actual conversation overflow too.
+      await page.setViewportSize({ width, height: 620 });
+      const conversation = page.locator('.conversation:visible .conversation-viewport');
+      const wheelBoundary = async (direction: 'up' | 'down') => {
+        await viewport.evaluate((node, direction) => {
+          const outer = node.closest<HTMLElement>('.conversation-viewport')!;
+          outer.scrollTop = direction === 'up' ? 50 : 0;
+          node.scrollTop = direction === 'up' ? 0 : node.scrollHeight;
+        }, direction);
+        await page.waitForTimeout(150);
+        const point = await viewport.evaluate((node) => {
+          const box = node.getBoundingClientRect();
+          const outer = node.closest<HTMLElement>('.conversation-viewport')!;
+          const clip = outer.getBoundingClientRect();
+          return {
+            x: box.x + 40,
+            y: Math.max(box.top, clip.top) + 25,
+            before: outer.scrollTop,
+            inner: node.scrollTop,
+            max: node.scrollHeight - node.clientHeight,
+            overscroll: getComputedStyle(node).overscrollBehaviorY,
+          };
+        });
+        const before = point.before;
+        await page.mouse.move(point.x, point.y);
+        await page.mouse.wheel(0, direction === 'up' ? -180 : 180);
+        await page.waitForTimeout(200);
+        const after = await conversation.evaluate((node) => node.scrollTop);
+        assert.ok(
+          direction === 'up' ? after < before : after > before,
+          `aggregate ${direction} boundary trapped the conversation wheel (${JSON.stringify(point)} -> ${after})`,
+        );
+        await stage(`long-wheel-chain-${direction}`);
+        return { before, after };
+      };
+      const wheelChaining = { up: await wheelBoundary('up'), down: await wheelBoundary('down') };
       const samples = await page.evaluate(() => window.liveAggregationSamples);
       await cdp.send('Page.stopScreencast');
       report.cases.push({
@@ -1980,6 +2017,7 @@ try {
           pageDownTop,
           endTop,
           aggregatePointer,
+          wheelChaining,
           aggregateEndFade,
           failureTail,
           approvalTail,

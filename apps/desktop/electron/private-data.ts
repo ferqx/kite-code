@@ -13,6 +13,7 @@ import type {
   NativeDraft,
   NativeRecoveryIntent,
 } from '../src/native-bridge';
+import { promptTextForSend } from '../src/prompt-text';
 import {
   assertAnswerRecords,
   type NativeAnswerData,
@@ -653,7 +654,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       intent.scope.workspaceId === saved.workspaceId &&
       intent.scope.sessionId === saved.rootSessionId &&
       'content' in intent.request &&
-      intent.request.content === saved.content &&
+      (intent.request.content === saved.content ||
+        intent.request.content === promptTextForSend(saved.content)) &&
       callerTextDigest(saved.content) === proof.textDigest
     );
   }

@@ -749,6 +749,7 @@ function ShellOutput({
         orientation="both"
         fade="y"
         viewportRef={viewport}
+        chainScroll
         viewportClassName="shell-output-viewport"
         viewportProps={{
           role: 'region',
@@ -1185,6 +1186,7 @@ export function ToolActivity({
               <ScrollArea
                 className="tool-activity-scroll"
                 fade="y"
+                chainScroll
                 viewportClassName="tool-activity-viewport"
                 viewportProps={{ role: 'region', 'aria-label': '工具执行明细', tabIndex: 0 }}
               >
@@ -1269,6 +1271,7 @@ export function ToolActivity({
                 <ScrollArea
                   className="tool-detail-scroll"
                   fade="y"
+                  chainScroll
                   viewportClassName="tool-detail-viewport"
                   viewportProps={{ role: 'region', 'aria-label': detailLabel, tabIndex: 0 }}
                 >
@@ -1287,6 +1290,7 @@ export function ToolActivity({
                       <ScrollArea
                         className="tool-detail-scroll"
                         fade="y"
+                        chainScroll
                         viewportClassName="tool-detail-viewport"
                         viewportProps={{
                           role: 'region',

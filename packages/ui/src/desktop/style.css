@@ -3304,7 +3304,8 @@ body {
   ) {
   height: auto;
   max-height: inherit;
-  overscroll-behavior: contain;
+  /* At a detail boundary, continue scrolling its aggregate and conversation. */
+  overscroll-behavior: contain auto;
   border-inline-end: 10px solid transparent;
 }
 .kite-client

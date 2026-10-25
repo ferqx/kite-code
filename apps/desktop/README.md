@@ -78,13 +78,17 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 ## 真实输入消息的唯一展示
 
-新消息直接进入当前主 Agent；首次发送保留一条用户消息及实际 Agent 回复，没有额外的“关联工作”判定答复。运行中引导进入原轮次安全检查点，排队等待仍沿原队列；UI 不靠过滤新回复掩盖重复。相同正文的两次提交保持两个独立输入，冷重开只读取原历史。普通输入的本地投递占位在原持久用户消息到达后交接；仅有 `sourceIds` 的原 `run.start` 消息也须核同 Store／Session／Run 与准确原 Command，不按正文比较或合并独立提交。Run 状态先于历史到达时，本地输入仍按原 Command 绑定该轮次，位于该轮状态、工具和回复之前；连续引导输入按原输入身份保存因果前驱，前条从本地转为持久消息时也不反转后条。
+首次发送与已有会话的引导／后续输入在构造原意图时共用 [promptTextForSend](src/prompt-text.ts)，只去掉末尾连续 CR／LF；发送占位与实际消息使用相同正文，编辑草稿保留原字节以供失败恢复及版本比较。Main 的自动草稿证明、[caller journal](electron/caller-journal.ts)准入和[私有草稿消费](electron/private-data.ts)允许原文或仅去尾换行的正文对应；仍核准确 Store／Session／草稿 revision 及原文 SHA，不因转换清除后来编辑。旧请求原文继续可读，不改写历史。纯函数、[Native DOM](test/isolated/native-new-conversation-dom.test.tsx)、[Main](test/native-caller.test.ts)和[真实 Node 冷读](test/isolated/native-prompt-draft-store.test.ts)分别验证转换、发送／恢复、原证明与受理后的持久清理。2026-10-25，Windows x64／Bun1.4.3：上述四文件125项、Desktop类型及定向Biome通过。隔离生产页面实际观察三个尾部换行的首发与续发、占位接管、草稿清空和回复完成；Native 请求及受控 Responses wire 均保留两个内部换行与两个尾部空格，末尾 CR／LF 为零，证据归本机既有 `.cache/session-files-browser-96f83a8f-934d-4d39-829c-3f094948e584/newline-*-send.json`。浏览器夹具的假草稿 ID 先前不符合正式 SHA 形状，首轮失败后按现有 Main 单测对齐该替身，未放宽生产校验；真实持久清理由 Node 用例单独证明，仍不代证完整 Electron 安装包。
+
+新消息直接进入当前主 Agent；首次发送保留一条用户消息及实际 Agent 回复，没有额外的“关联工作”判定答复。运行中引导进入原轮次安全检查点，排队等待仍沿原队列；UI 不靠过滤新回复掩盖重复。相同正文的两次提交保持两个独立输入，冷重开只读取原历史。普通输入的本地投递占位在原持久用户消息到达后交接。新 `run.start` 消息在原事务保存 `originCommandId`，历史先于 Run View 到达时也能核对原提交并立即接管，不短暂多出用户消息；此路径同样适用于 Responses；带 `originMessage` 的继承记录不能消费当前 Store 的投递占位。旧历史中仅有 `sourceIds` 的原 `run.start` 消息也须核同 Store／Session／Run 与准确原 Command，不按正文比较或合并独立提交。Run 状态先于历史到达时，本地输入仍按原 Command 绑定该轮次，位于该轮状态、工具和回复之前；连续引导输入按原输入身份保存因果前驱，前条从本地转为持久消息时也不反转后条。
 
 旧处理／业务双记录继续通过 [呈现投影](src/native-presentation.ts)消费准确 `Message.humanInput` 证明，只有本次读取含同 Session／原输入／公开提交身份的替代 Message 才合并副本。业务对象在原输入位置呈现，保原 ID/seq/Run/正文/附件；不改 SQL 顺序、不删除原历史、不按正文去重，Fork 只映射本分支已封存的替代行。证明来源归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
 [普通页面回归](test/isolated/native-new-conversation-dom.test.tsx)保旧历史、缺替代行和独立同文的展示兼容。[真实普通 Electron 回归](test/isolated/native-human-input-electron.test.ts)使用实际 Main/Service/SQLite 与受控业务 Provider、关闭产品调试入口，核首次为用户→实际回复、正常退出冷重开零新提交，以及同文重交仍为独立用户→回复；SQL 不生成 raw/decision/processing，新请求无分类调用。
 
 2026-10-25，新对话准备闪烁修复：Windows x64／Bun1.4.3，原[新对话DOM回归](test/isolated/native-new-conversation-dom.test.tsx)82项／1666断言、Desktop类型检查与定向Biome通过，新增暂停读取期间的目标展示、同项目控件节点保持、失败禁发及重试恢复断言。实际NativeDesktop／共享CSS在隔离浏览器中逐步观察重复点击→读取暂停→完成、其他空间→全局默认空间→迟到读取返回；目标高亮与项目名直接更新，重复点击期间分支节点保留，选择器不变淡，草稿保持，原请求不覆盖后选空间，页面无错误。该夹具使用模拟NativeBridge，覆盖此前仅共享SessionPage夹具遗漏的宿主异步准备过程，不替代完整安装版Electron或真实IPC验收。
+
+2026-10-25，Windows x64／Bun1.4.3：连续输入修复在独立 Profile 的 NativeCaller→HTTP→SQLite 与本机受控 Responses SSE 页面观察到旧版第二次发送的额外用户占位；补齐原提交身份后，连续同文发送分别由一条持久用户消息接管，流式回复、完成及重载读回保持原顺序，重载未增加模型请求。Store 与 Native DOM 回归分别核相同正文的新 Command、幂等重查、冷读和 Run View 迟到；证据保留在本机 `.cache/session-files-browser-96f83a8f-934d-4d39-829c-3f094948e584`。浏览器桥与受控模型不代证完整 Electron IPC、真实远端模型或安装包。
 
 ## 普通客户端与测试诊断
 
@@ -377,6 +381,8 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 [原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)、[Main 文件端口](test/native-file-changes.test.ts)和原[源码外窗口](test/isolated/native-bundle.test.ts)核默认与临时选择分离、旧scope、预览／全文／关闭、准确路径／frame和首次／冷读；窗口只核可用路径按钮及真实缺失目标拒绝，不实际启动 OS 编辑器。输入、实际通过与旧错误见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原消息文件路径与常规摘要)，完整PC／installed全路径／其他平台和阶段退出仍按原条件核对。
 
 ## 原工具过程与结果阅读
+
+工具阅读区启用共享 ScrollArea 的纵向边界交接：内层仍能滚动时保留原生滚动，到顶／到底或没有溢出时交给最近可滚动祖先。2026-10-25，Windows x64／Chrome155.0.8059.85 的[长聚合浏览器夹具](test/native-live-tool-aggregation-browser-runner.fixture.ts)在亮色1280px与暗色780px通过原内部滚动、长异常全文、键盘、开合及新增上下边界断言；实际逐步观察内层→外层→反向回顶，输入区保持固定。过程帧与报告在本机 `.cache/native-live-tool-aggregation-3KpaNM`；无页面错误。该页面消费生产组件和隔离 NativeBridge，不代证完整 Electron 或其他平台。输入／Native DOM 与共享 UI 的五文件定向组合130项通过；追加来源隔离与卸载监听清理后，Native输入83项及滚动文件3项分别复验通过。Agent、UI、Desktop类型、定向Biome、文档、统一边界和测试归属检查通过；Biome保留输入测试原有两项字符串拼接提示。
 
 [工具消息适配器](src/native-tool-messages.tsx)为准确 `task.spawn`／`task.follow_up`／`task.message`／`task.events`／`task.list`／`task.interrupt` v1 提供可读标签，未知版本保原 ID／version。创建／追问工具终态只表示这次调用结束，不将其当作 child 业务完成。现有准确授权投影继续优先人工 pending，批准与执行效果分开；[工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)验证新标签及未来版本保守展示。
 

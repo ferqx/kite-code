@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ScrollArea } from '../../src/desktop/components/ui/scroll-area';
 import { FileChanges, FileDiff } from '../../src/desktop/FileChanges';
 import type { Message } from '../../src/desktop/types';
 
@@ -77,6 +78,89 @@ function message(id: string, stdout: string): Message {
     toolResult: { ok: true, stdout },
   };
 }
+
+test('nested tool wheels retain native scrolling and hand edge input to one capable ancestor', async () => {
+  await withDom(async ({ host, render }) => {
+    const tree = (enabled: boolean) => (
+      <div data-outer style={{ overflowY: 'auto' }}>
+        <ScrollArea chainScroll={enabled} viewportClassName="group">
+          <ScrollArea
+            chainScroll={enabled}
+            viewportClassName="detail"
+            viewportProps={{ style: { lineHeight: '20px' } }}
+          >
+            <span data-target>complete tool output</span>
+          </ScrollArea>
+        </ScrollArea>
+      </div>
+    );
+    await render(tree(true));
+    const outer = host.querySelector<HTMLElement>('[data-outer]')!;
+    const group = host.querySelector<HTMLElement>('.group')!;
+    const detail = host.querySelector<HTMLElement>('.detail')!;
+    const target = host.querySelector<HTMLElement>('[data-target]')!;
+    for (const [node, height, content] of [
+      [outer, 200, 1000],
+      [group, 100, 400],
+      [detail, 100, 400],
+    ] as const)
+      Object.defineProperties(node, {
+        clientHeight: { value: height, configurable: true },
+        scrollHeight: { value: content, configurable: true },
+      });
+    const wheel = async (options: WheelEventInit = {}) => {
+      const event = new target.ownerDocument.defaultView!.WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 25,
+        ...options,
+      });
+      await act(async () => target.dispatchEvent(event));
+      return event.defaultPrevented;
+    };
+    detail.scrollTop = 50;
+    group.scrollTop = 50;
+    outer.scrollTop = 100;
+    expect(await wheel()).toBe(false);
+    expect(group.scrollTop).toBe(50);
+    expect(outer.scrollTop).toBe(100);
+    detail.scrollTop = 300;
+    expect(await wheel()).toBe(true);
+    expect(group.scrollTop).toBe(75);
+    expect(outer.scrollTop).toBe(100);
+    group.scrollTop = 300;
+    expect(await wheel()).toBe(true);
+    expect(outer.scrollTop).toBe(125);
+    detail.scrollTop = group.scrollTop = 0;
+    expect(await wheel({ deltaY: -25 })).toBe(true);
+    expect(outer.scrollTop).toBe(100);
+    Object.defineProperty(detail, 'scrollHeight', { value: 100, configurable: true });
+    Object.defineProperty(group, 'scrollHeight', { value: 100, configurable: true });
+    expect(await wheel({ deltaMode: 1, deltaY: 2 })).toBe(true);
+    expect(outer.scrollTop).toBe(140);
+    expect(await wheel({ deltaMode: 2, deltaY: 1 })).toBe(true);
+    expect(outer.scrollTop).toBe(340);
+    for (const options of [
+      { ctrlKey: true },
+      { shiftKey: true },
+      { deltaX: 50 },
+      { deltaX: 5 },
+      { cancelable: false },
+    ])
+      expect(await wheel(options)).toBe(false);
+    expect(outer.scrollTop).toBe(340);
+    outer.scrollTop = 800;
+    expect(await wheel()).toBe(false);
+    await render(tree(false));
+    outer.scrollTop = 100;
+    expect(await wheel()).toBe(false);
+    expect(outer.scrollTop).toBe(100);
+    await render(tree(true));
+    await render(null);
+    expect(await wheel()).toBe(false);
+    expect(outer.scrollTop).toBe(100);
+  });
+});
 
 test('tool diff keeps complete lines in a named focusable shared viewport with vertical fade', async () => {
   await withDom(async ({ host, render }) => {

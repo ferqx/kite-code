@@ -31,6 +31,8 @@ Public root run.start and input.follow_up accept the optional string enum reason
 
 ## 真实输入与工作选择
 
+普通 `run.start` 与追加输入一样，在原消息事务内保存准确 `originCommandId`，并保留 `sourceIds`。公开历史及冷读直接返回原提交身份，客户端不必等待独立 Run View 才能接管投递占位；不按正文去重，不修改已有历史或增加业务执行。真实输入回归见[Store 输入测试](../../../../test/isolated/storage/inputs.test.ts)。
+
 普通输入直接沿原 `run.start/input.steer/input.follow_up` → 普通 Run/Message → Model/Tool 执行链。Runtime 不生成 `human.input`、`human.input.decision` 或无工具解释轮，也不按正文做 pause/stop/continue/replace 的预处理。引导使用原活动 Run，排队输入等前驱终态后单独应用；相同正文的新 Command 不去重，单个 Command 重试只返回原回执。[真实 Runtime 回归](../../../../test/isolated/business/task/human-work-runtime.test.ts)核请求次数、SQL 记录、输入顺序、队列撤回与冷读取。
 
 rootWork ID/seq 是准确执行因果，不作为普通会话新消息的自然语言归属。当前授权父 Tool 可管理已有直接 child；child 的 queued 引导仍绑定该 child 原 carrier 的因果，而源 Tool 保准确当前父执行。新轮次采用当前显式模型配置，旧 Run、旧工具和未知效果不因正文“继续”而恢复。

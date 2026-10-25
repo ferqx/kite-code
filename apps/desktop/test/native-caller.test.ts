@@ -2836,7 +2836,7 @@ test('Native stopped-target refusal retains failed input and draft without an un
       generation,
       sessionId: 's',
       revision: 0,
-      content: 'keep exact body 雪🙂',
+      content: 'keep exact body 雪🙂\r\n\n',
     });
     const result = await caller.invoke({
       method: 'submit',
@@ -2860,8 +2860,12 @@ test('Native stopped-target refusal retains failed input and draft without an un
       }),
     ]);
     expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toMatchObject(
-      { content: 'keep exact body 雪🙂', revision: 1 },
+      { content: 'keep exact body 雪🙂\r\n\n', revision: 1 },
     );
+    expect(data.callers()[0]?.intent.draft).toMatchObject({
+      revision: '1',
+      textDigest: callerTextDigest('keep exact body 雪🙂\r\n\n'),
+    });
     expect(writes).toBe(1);
     expect(gets).toBe(0);
   } finally {

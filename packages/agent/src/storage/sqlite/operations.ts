@@ -1562,6 +1562,7 @@ export class SqliteOperations {
                 ...(request.images ? { images: request.images } : {}),
                 ...(request.files ? { files: request.files } : {}),
                 sourceIds: [input.commandId],
+                originCommandId: input.commandId,
               },
               'user',
             );
