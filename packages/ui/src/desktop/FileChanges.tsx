@@ -76,6 +76,7 @@ export function FileDiff({ message }: { message: Message }) {
       orientation="both"
       fade="y"
       className="tool-diff-scroll"
+      chainScroll
       viewportClassName="tool-diff-viewport"
       viewportProps={{ role: 'region', 'aria-label': '文件差异', tabIndex: 0 }}
     >

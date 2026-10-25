@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
 import type {} from './session-shell-browser.fixture';
+import { verifySessionShellGeometry } from './session-shell-geometry.fixture';
 
 // Explicit standalone fixture; it never loads Service, user data or the production diagnostics.
 const directory = import.meta.dir;
@@ -97,9 +98,13 @@ const writes = new Set([
   'draft.write',
 ]);
 try {
+  report.cases.push(
+    ...(await verifySessionShellGeometry(browser, server.url.toString(), artifact)),
+  );
   for (const theme of ['light', 'dark'] as const) {
     const page = await browser.newPage({
-      viewport: { width: 1440, height: 1000 },
+      // This segment exercises the docked environment controls; narrow layouts are covered above.
+      viewport: { width: 1920, height: 1000 },
       colorScheme: theme,
       reducedMotion: 'no-preference',
       locale: 'zh-CN',

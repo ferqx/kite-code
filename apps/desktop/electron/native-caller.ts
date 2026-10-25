@@ -24,6 +24,7 @@ import type {
   NativeResult,
   NativeState,
 } from '../src/native-bridge';
+import { promptTextForSend } from '../src/prompt-text';
 import { NativeAnswerJournal } from './answer-journal';
 import { NativeBackground } from './background';
 import {
@@ -2329,7 +2330,10 @@ export class NativeCaller {
             workspaceId: snapshot.view.session.workspaceId,
             rootSessionId: request.sessionId,
           });
-          if (saved.content === request.intent.content)
+          if (
+            saved.content === request.intent.content ||
+            promptTextForSend(saved.content) === request.intent.content
+          )
             draftProof = {
               id: saved.id,
               revision: String(saved.revision),

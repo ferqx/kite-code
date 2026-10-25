@@ -4,10 +4,15 @@ import type {
   NativeBridge,
   NativeModelSettingsFacts,
   NativeReasoningEffort,
+  NativeRecommendedModel,
   NativeSelection,
 } from './native-bridge';
 import { useNativeDiagnostics } from './native-diagnostics';
 import { NativeDisplayCache } from './native-display-cache';
+import {
+  readNativeRecommendedModel,
+  rememberNativeRecommendedModel,
+} from './native-model-preference';
 
 export type NativeModelChoice = { modelId?: string; reasoningEffort?: NativeReasoningEffort };
 
@@ -138,6 +143,12 @@ export class NativeModelSnapshots {
     this.observe(scope);
     this.entries.set(scope.displayKey, facts);
   }
+  recommend(scope: ReturnType<typeof nativeModelScope>, choice: NativeRecommendedModel) {
+    if (this.boundary !== scope.boundary) return;
+    const key = JSON.stringify(['preparing', undefined, undefined]);
+    const facts = this.entries.get(key);
+    if (facts) this.entries.set(key, { ...facts, recommendedModel: choice });
+  }
 }
 export type NativePreparedModels = {
   key: string;
@@ -168,7 +179,13 @@ export async function prepareNativeModels(
       throw Error('model_selection_unavailable');
     if (scope.storeId !== undefined && response.storeId !== scope.storeId)
       throw Error('store_identity_mismatch');
-    return { key: scope.readKey, facts: response, error: '' };
+    return {
+      key: scope.readKey,
+      facts: preparing
+        ? { ...response, recommendedModel: readNativeRecommendedModel(response.storeId) }
+        : response,
+      error: '',
+    };
   } catch (cause) {
     return { key: scope.readKey, error: errorCode(cause) ?? 'model_selection_unavailable' };
   }
@@ -211,6 +228,7 @@ export function NativeModelPicker({
     reading: boolean;
     error: string;
   }>();
+  const [saveError, setSaveError] = useState<string>();
   const preparedState =
     prepared?.key === readKey && (!prepared.facts || prepared.facts.storeId === scope.storeId)
       ? { ...prepared, reading: false }
@@ -232,17 +250,24 @@ export function NativeModelPicker({
         model.configured &&
         (!protocol.protocol || modelProtocol(model) === protocol.protocol),
     ) ?? [];
+  const recommendation = preparing ? facts?.recommendedModel : undefined;
+  const recommended = models.find((model) => model.id === recommendation?.modelId);
   const requestedId = value.modelId ?? (preparing ? undefined : facts?.selectedModelId);
-  const selected = models.find((model) => model.id === requestedId);
+  const selectedId = requestedId ?? recommended?.id;
+  const selected = models.find((model) => model.id === selectedId);
   const supported = selected?.reasoningEffortChoices ?? [];
   const previousEffort = preparing ? undefined : previousSessionEffort(selection, selected?.id);
-  const requestEffort = value.reasoningEffort ?? previousEffort;
+  const recommendedEffort =
+    preparing && value.modelId === undefined && recommended?.id === selected?.id
+      ? recommendation?.reasoningEffort
+      : undefined;
+  const requestEffort = value.reasoningEffort ?? previousEffort ?? recommendedEffort;
   const effort = requestEffort ?? selected?.reasoningEffort;
   const allowedEffort =
     requestEffort === undefined ||
     supported.includes(requestEffort) ||
     (value.reasoningEffort === undefined &&
-      (previousEffort === 'none' || previousEffort === 'minimal'));
+      (requestEffort === 'none' || requestEffort === 'minimal'));
   const ready =
     !!selected && allowedEffort && !protocol.unavailable && !reading && !error && !disabled;
   const readyId = ready ? selected?.id : undefined;
@@ -283,6 +308,21 @@ export function NativeModelPicker({
       sequence.current++;
     };
   }, [readKey, bridge, prepared]);
+  function remember(choice: NativeModelChoice, effectiveEffort?: NativeReasoningEffort | null) {
+    onChange(choice);
+    if (!facts || !choice.modelId) return;
+    const recommendation = {
+      modelId: choice.modelId,
+      ...(effectiveEffort == null ? {} : { reasoningEffort: effectiveEffort }),
+    };
+    try {
+      rememberNativeRecommendedModel(facts.storeId, recommendation);
+      snapshots.recommend(scope, recommendation);
+      setSaveError(undefined);
+    } catch {
+      setSaveError(readKey);
+    }
+  }
   function choose(modelId: string) {
     if (
       !reading &&
@@ -291,7 +331,11 @@ export function NativeModelPicker({
       !protocol.unavailable &&
       models.some((model) => model.id === modelId)
     )
-      onChange({ modelId });
+      remember(
+        { modelId },
+        (preparing ? undefined : previousSessionEffort(selection, modelId)) ??
+          models.find((model) => model.id === modelId)?.reasoningEffort,
+      );
   }
   function setEffort(reasoningEffort: NativeReasoningEffort) {
     if (
@@ -303,11 +347,14 @@ export function NativeModelPicker({
       !supported.includes(reasoningEffort)
     )
       return;
-    onChange({
-      ...value,
-      ...(value.modelId === undefined ? { modelId: selected.id } : {}),
+    remember(
+      {
+        ...value,
+        ...(value.modelId === undefined ? { modelId: selected.id } : {}),
+        reasoningEffort,
+      },
       reasoningEffort,
-    });
+    );
   }
   return (
     <section
@@ -338,14 +385,11 @@ export function NativeModelPicker({
           if (id !== undefined) choose(id);
         }}
         onReasoningEffortChange={(effort) => setEffort(effort)}
-        modelSelectionHint={
-          protocol.protocol
-            ? `此会话使用 ${protocol.protocol === 'responses' ? 'Responses' : 'Chat Completions'}，切换协议请新建会话。`
-            : undefined
-        }
+        modelSelectionHint={protocol.protocol ? '仅显示当前对话可用的模型' : undefined}
       />
       {protocol.unavailable && <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}
+      {saveError === readKey && <p role="alert">未能记住推荐模型与思考程度，请重新选择。</p>}
       {!reading && !error && !selected && (requestedId || diagnostics) && (
         <p role="alert">
           {requestedId ? `所选模型 ${requestedId} 当前不可用，请重新选择。` : '请选择模型。'}

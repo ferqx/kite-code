@@ -139,15 +139,30 @@ try {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.addInitScript(() => {
       window.streamAudit = { animations: [], appends: [], frames: [], mutations: [], stable: [] };
-      const animate = Element.prototype.animate;
-      Element.prototype.animate = function (keyframes, options) {
-        if (typeof options === 'object' && options.duration === 240)
-          window.streamAudit.animations.push({
-            text: this.textContent ?? '',
-            time: performance.now(),
-            delay: Number(options.delay ?? 0),
-          });
-        return animate.call(this, keyframes, options);
+      const paintRange = (name: string, range: AbstractRange) => {
+        const source = [...document.querySelectorAll('style')]
+          .map((style) => style.textContent ?? '')
+          .find((text) => text.includes(`::highlight(${name})`));
+        const at = Number(
+          source
+            ?.slice(source.indexOf(`::highlight(${name})`))
+            .match(/--kite-reveal-time\) - ([\d.]+)/)?.[1],
+        );
+        const origin = range.startContainer.parentElement!;
+        return { at, origin };
+      };
+      const setHighlight = CSS.highlights.set.bind(CSS.highlights);
+      CSS.highlights.set = (name, highlight) => {
+        if (name.startsWith('kite-reveal-') && !CSS.highlights.has(name))
+          for (const range of highlight) {
+            const { at, origin } = paintRange(name, range);
+            window.streamAudit.animations.push({
+              text: range.toString(),
+              time: performance.now(),
+              delay: at - Number(origin.style.getPropertyValue('--kite-reveal-time')),
+            });
+          }
+        return setHighlight(name, highlight);
       };
       const sample = () => {
         const viewport = document.querySelector<HTMLElement>('.conversation-viewport');
@@ -165,15 +180,17 @@ try {
               document.querySelector('.conversation-cache-entry')?.getAttribute('aria-busy') ===
               'true',
             status: document.querySelector('.response-status')?.textContent ?? '',
-            opacity: document
-              .getAnimations()
-              .filter(
-                (animation) =>
-                  animation.effect instanceof KeyframeEffect &&
-                  animation.effect.getTiming().duration === 240,
-              )
-              .map((animation) =>
-                Number(getComputedStyle((animation.effect as KeyframeEffect).target!).opacity),
+            opacity: [...CSS.highlights.entries()]
+              .filter(([name]) => name.startsWith('kite-reveal-'))
+              .flatMap(([name, highlight]) =>
+                [...highlight].map((range) => {
+                  const origin = range.startContainer.parentElement!;
+                  const color = getComputedStyle(origin, `::highlight(${name})`).color;
+                  const alpha =
+                    color.match(/\/\s*([\d.]+)\s*\)$/) ??
+                    color.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/);
+                  return alpha ? Number(alpha[1]) : 1;
+                }),
               ),
           });
         requestAnimationFrame(() => setTimeout(sample, 0));
@@ -227,6 +244,52 @@ try {
       );
       await ready('a', needle);
     };
+    let wrappingChecks = 0;
+    for (const text of [
+      '星？是想说些什么，还是不小心发出来的？我在呢。'.repeat(6),
+      'AVATAR office affinity, final text rendering should preserve wrapping. '.repeat(5),
+      '中文回复包含 English、数字 12345、标点（测试）与 emoji 👩🏽‍💻，文本完成时不应重新换行。'.repeat(
+        4,
+      ),
+    ]) {
+      await append(`\n\n${text.slice(0, 1)}`);
+      await append(text.slice(1));
+      const wrapping = await page.evaluate(() => {
+        const paragraph = [...document.querySelectorAll<HTMLElement>('.typeset-chat > p')].at(-1)!;
+        const reference = document.createElement('p');
+        reference.textContent = paragraph.textContent;
+        reference.style.cssText = 'position:fixed;visibility:hidden;top:0;left:0;margin:0';
+        paragraph.after(reference);
+        const originalWidth = paragraph.style.width,
+          differences = [];
+        const lines = (element: HTMLElement) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const box = element.getBoundingClientRect();
+          return {
+            height: box.height,
+            lines: new Set(
+              [...range.getClientRects()].map((rect) => Math.round(rect.top - box.top)),
+            ).size,
+          };
+        };
+        try {
+          for (let width = 180; width <= 740; width += 2) {
+            paragraph.style.width = reference.style.width = `${width}px`;
+            const live = lines(paragraph),
+              complete = lines(reference);
+            if (Math.abs(live.height - complete.height) > 0.02 || live.lines !== complete.lines)
+              differences.push({ width, live, complete });
+          }
+        } finally {
+          paragraph.style.width = originalWidth;
+          reference.remove();
+        }
+        return differences;
+      });
+      assert.deepEqual(wrapping, [], 'live reveal changed natural text wrapping');
+      wrappingChecks += 281;
+    }
     for (const [index, text] of [
       '，流式新增',
       '文字逐渐出现',
@@ -261,7 +324,7 @@ try {
         'characters were not staggered',
       );
       assert.ok(
-        animations.every((animation) => animation.delay <= 180),
+        animations.every((animation) => animation.delay <= 180.000001),
         'reveal backlog exceeded its bound',
       );
     }
@@ -395,6 +458,7 @@ try {
       window.renderPerformanceFixture.automaticBody('mount');
     });
     await page.waitForFunction(() => window.renderPerformanceFixture.automaticState().pending);
+    assert.equal(await page.getByText('回复未完成', { exact: true }).count(), 0);
     await page.evaluate(() => window.renderPerformanceFixture.automaticBody('first'));
     await page.waitForFunction(
       () =>
@@ -443,10 +507,82 @@ try {
       variant.reduced ? '' : '，逐字新增🙂',
     );
     assert.equal(automatic.state.copied, automatic.state.second);
+    assert.ok(
+      automatic.frames.every((frame) => !frame.text.includes('回复未完成')),
+      'live automatic body briefly inserted an incomplete-output warning',
+    );
+    const firstBodyHandoff = await page.evaluate(async () => {
+      const samples: { top: number; height: number; warning: boolean; text: string }[] = [];
+      const sample = () => {
+        const body = document.querySelector('.typeset-chat')!;
+        const rect = body.getBoundingClientRect();
+        samples.push({
+          top: rect.top,
+          height: rect.height,
+          warning: document
+            .querySelector('.model-output-message')!
+            .textContent!.includes('回复未完成'),
+          text: body.textContent!,
+        });
+      };
+      sample();
+      window.renderPerformanceFixture.automaticBody('seal');
+      for (let frame = 0; frame < 35; frame++) {
+        await new Promise(requestAnimationFrame);
+        if (frame === 8) window.renderPerformanceFixture.automaticBody('sealed');
+        sample();
+      }
+      return samples;
+    });
+    assert.ok(firstBodyHandoff.every((sample) => !sample.warning));
+    assert.ok(firstBodyHandoff.every((sample) => sample.text === automatic.state.second));
+    assert.ok(
+      firstBodyHandoff.every(
+        (sample) =>
+          sample.top === firstBodyHandoff[0]!.top && sample.height === firstBodyHandoff[0]!.height,
+      ),
+      'body moved while a live prefix became sealed',
+    );
     await page.screenshot({ path: path.join(artifact, `${label}-automatic-complete.png`) });
+    await page.evaluate(() => window.renderPerformanceFixture.firstReply('thinking'));
+    await page.waitForFunction(
+      () => document.querySelector('.response-status')?.textContent === '正在思考…',
+    );
+    await page.waitForTimeout(150);
+    const firstReply = await page.evaluate(async () => {
+      window.renderPerformanceFixture.firstReply('body');
+      const samples: {
+        bodyTop: number;
+        contentHeight: number;
+        turnHeight: number;
+        scrollTop: number;
+      }[] = [];
+      for (let frame = 0; frame < 40; frame++) {
+        await new Promise(requestAnimationFrame);
+        const body = document.querySelector<HTMLElement>('.agent-turn .typeset-chat');
+        if (!body) continue;
+        samples.push({
+          bodyTop: body.getBoundingClientRect().top,
+          contentHeight: document.querySelector('.agent-turn-content')!.getBoundingClientRect()
+            .height,
+          turnHeight: document.querySelector('.agent-turn')!.getBoundingClientRect().height,
+          scrollTop: document.querySelector('.conversation-viewport')!.scrollTop,
+        });
+      }
+      return samples;
+    });
+    assert.ok(firstReply.length >= 25);
+    for (const sample of firstReply)
+      assert.deepEqual(
+        sample,
+        firstReply[0],
+        'first reply replayed process expansion after becoming visible',
+      );
+    await page.screenshot({ path: path.join(artifact, `${label}-first-reply.png`) });
     assert.deepEqual(errors, []);
     report.cases.push({
       label,
+      wrappingChecks,
       animationCount,
       manual,
       errors,
@@ -454,6 +590,8 @@ try {
       reads: await page.evaluate(() => window.renderPerformanceFixture.reads()),
       ...audit,
       automatic,
+      firstBodyHandoff,
+      firstReply,
     });
     await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
     await checkpoint(`${label}:complete`);

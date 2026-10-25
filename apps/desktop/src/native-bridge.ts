@@ -220,6 +220,7 @@ export type NativeConversationResult = {
   code?: string;
 };
 export type NativeGrantFacts = { observationId: number; page: PermissionGrantPage };
+export type NativeRecommendedModel = { modelId: string; reasoningEffort?: NativeReasoningEffort };
 export type NativeModelSettingsFacts = {
   kind: 'settings.models';
   observationId: number;
@@ -230,6 +231,7 @@ export type NativeModelSettingsFacts = {
   errors: string[];
   defaultModelId: string | null;
   selectedModelId?: string;
+  recommendedModel?: NativeRecommendedModel;
   models: {
     id: string;
     provider?: string;

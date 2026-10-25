@@ -15,6 +15,8 @@ export function sessionSwitchBridge(
     sameModel?: boolean;
     modelErrors?: Record<string, string>;
     modelNames?: Record<string, string>;
+    replyParagraphs?: number;
+    protocol?: 'chat-completions' | 'responses';
   } = {},
 ) {
   const base = backgroundShellItem();
@@ -54,11 +56,30 @@ export function sessionSwitchBridge(
           pending.set(phase, queue);
         });
   const session = () => sessions.find((value) => value.id === selected)!;
+  const protocol = options.protocol;
   const run = () => ({
     ...base.run!,
     id: `run-${selected}`,
     sessionId: selected,
     isActive: options.active ?? true,
+    ...(protocol
+      ? {
+          configuration: {
+            modelId: `model-${options.sameModel ? 'a' : selected}`,
+            snapshot: {
+              version: 1,
+              digest: 'a'.repeat(64),
+              configuration: {
+                models: ['a', 'b'].map((id) => ({
+                  id: `model-${id}`,
+                  provider: 'compatible',
+                  protocol,
+                })),
+              },
+            },
+          },
+        }
+      : {}),
   });
   const state = (): NativeState => ({
     generation: 1,
@@ -184,7 +205,13 @@ export function sessionSwitchBridge(
                 role: 'assistant',
                 status: 'complete',
                 seq: '2',
-                content: `Reply ${id}`,
+                content: [
+                  `Reply ${id}`,
+                  ...Array.from(
+                    { length: options.replyParagraphs ?? 0 },
+                    (_, index) => `第${index + 1}段历史正文，供实际滚动与阅读位置回归使用。`,
+                  ),
+                ].join('\n\n'),
                 sourceIds: [`model-${id}`],
               },
             ],
@@ -219,7 +246,8 @@ export function sessionSwitchBridge(
                 : {}),
               models: ['a', 'b'].map((model) => ({
                 id: `model-${model}`,
-                provider: 'fixture',
+                provider: protocol ? 'compatible' : 'fixture',
+                ...(protocol ? { protocol } : {}),
                 model: options.modelNames?.[model] ?? `Model ${model.toUpperCase()}`,
                 configured: true,
                 enabled: true,

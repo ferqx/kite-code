@@ -305,6 +305,119 @@ test('a live long command survives queued approvals, View refresh and receipt-fi
   }
 });
 
+test('live command pagination resumes when another tool changes the target list', async () => {
+  const f = fixture();
+  const command = `printf original\n${'雪🙂'.repeat(5000)}`;
+  const run = {
+    id: 'run',
+    originCommandId: 'start',
+    originStoreId: 'store',
+    sessionId: 's',
+    isActive: true,
+    status: 'running' as const,
+    createdAt: 0,
+    finishedAt: null,
+    reason: null,
+  };
+  const makeExecution = (id: string, command: string): Execution => ({
+    id,
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: run.id,
+    kind: 'tool',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    status: 'running',
+    toolCallId: `call-${id}`,
+    toolInput: { key: id, command },
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: null,
+  });
+  const original = makeExecution('original', command);
+  const sibling = makeExecution('sibling', 'printf sibling');
+  const newcomer = makeExecution('newcomer', 'printf newcomer');
+  let selected = { ...selection(), runs: [run], executions: [original, sibling] };
+  let originalGets = 0,
+    siblingGets = 0,
+    release!: () => void;
+  let signal: AbortSignal | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const client = {
+    verifyConnection: async () => {},
+    getExecution: async (id: string, options?: { signal?: AbortSignal }) => {
+      if (id === original.id && ++originalGets === 2) {
+        signal = options?.signal;
+        await gate;
+      }
+      if (id === sibling.id) siblingGets++;
+      return [original, sibling, newcomer].find((execution) => execution.id === id)!;
+    },
+  } as unknown as AgentClient;
+  const scope = {
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    storeId: 'store',
+    sessionId: 's',
+    workspaceId: 'w',
+  };
+  const manager = new NativeToolMessages(
+    client,
+    () => scope,
+    () => new Map(),
+    () => selected.executions,
+  );
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method === 'toolMessages.list') return manager.list(request);
+      if (request.method === 'toolMessages.close') manager.close(request.readId);
+      return null;
+    },
+  } as NativeBridge;
+  let facts: NativeToolMessageFact[] = [];
+  function PaginationHarness({ selected }: { selected: NativeSelection }) {
+    const read = useNativeToolMessages({
+      bridge,
+      generation: 1,
+      selection: selected,
+      historyEpoch: 0,
+      messages: [],
+      observationRevision: selected.viewGeneration,
+    });
+    facts = read.entries;
+    return null;
+  }
+  const render = () => act(async () => f.root.render(<PaginationHarness selected={selected} />));
+  try {
+    await render();
+    expect(originalGets).toBe(2);
+    expect(
+      facts.find((fact) => fact.executionId === original.id)?.shellInput?.command,
+    ).toBeUndefined();
+    expect(facts.find((fact) => fact.executionId === sibling.id)?.shellInput?.command).toBe(
+      'printf sibling',
+    );
+    selected = { ...selected, viewGeneration: 2, executions: [original, sibling, newcomer] };
+    await render();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => release());
+    expect(facts.find((fact) => fact.executionId === original.id)?.shellInput?.command).toBe(
+      command,
+    );
+    expect(facts.find((fact) => fact.executionId === newcomer.id)?.shellInput?.command).toBe(
+      'printf newcomer',
+    );
+    expect(siblingGets).toBe(1);
+  } finally {
+    release();
+    manager.release();
+    await f.close();
+  }
+});
+
 function ShellMetadataHarness({
   bridge,
   messages,

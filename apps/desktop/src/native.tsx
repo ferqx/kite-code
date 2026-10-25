@@ -118,6 +118,7 @@ import {
 import { NativeTranscriptDisplay } from './native-transcript-display';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
+import { promptTextForSend } from './prompt-text';
 
 const imageScope = (storeId: string | undefined, sessionId: string) =>
   JSON.stringify([storeId, sessionId]);
@@ -130,6 +131,7 @@ function savedNativeInput(
 ) {
   return (
     message.role === 'user' &&
+    !message.originMessage &&
     message.sessionId === scope.sessionId &&
     selection?.storeId === scope.storeId &&
     selection.session.id === scope.sessionId &&
@@ -231,6 +233,7 @@ function NativeDesktopContent({
   const [newPermission, setNewPermission] = useState<'accept_edits' | 'auto' | 'full'>();
   const [newPlanMode, setNewPlanMode] = useState(false);
   const [newChoice, setNewChoice] = useState<NativeModelChoice>({});
+  const [newModelRevision, setNewModelRevision] = useState(0);
   const [newModelReady, setNewModelReady] = useState<{
     ready: boolean;
     choice?: NativeModelChoice;
@@ -1536,6 +1539,9 @@ function NativeDesktopContent({
     }
   }
   function prepareConversation(workspaceId?: string) {
+    setNewChoice({});
+    setNewModelReady({ ready: false });
+    setNewModelRevision((value) => value + 1);
     rememberDraft();
     pageIntent.current++;
     setScheduledTasksView(false);
@@ -1750,7 +1756,7 @@ function NativeDesktopContent({
       value.phase !== 'accepted' &&
       newDraftRevision.current === original.preparationRevision
     )
-      setNewDraft((draft) => draft || original.text);
+      setNewDraft((draft) => draft || original.draft.content);
     if (value.code && value.code !== 'conversation_continue_explicit') {
       setBusinessError(false);
       setError(value.code);
@@ -1786,7 +1792,7 @@ function NativeDesktopContent({
         title: '',
       },
       commandId: crypto.randomUUID(),
-      text: newDraft,
+      text: promptTextForSend(newDraft),
       draft: { content: newDraft },
       preparationRevision: newDraftRevision.current,
       imageScope: newImageScope,
@@ -1836,7 +1842,7 @@ function NativeDesktopContent({
         };
         if (firstRef.current?.commandId === original.commandId) {
           setFirstSubmission({ ...original, result: value });
-          setNewDraft((draft) => draft || original.text);
+          setNewDraft((draft) => draft || original.draft.content);
         }
         throw cause;
       }
@@ -1848,7 +1854,7 @@ function NativeDesktopContent({
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
     const draftKey = imageScope(selection.storeId, selection.session.id);
     const submittedDraft = draftCache.current.get(draftKey) ?? { content: draft };
-    const submittedText = submittedDraft.content;
+    const submittedText = promptTextForSend(submittedDraft.content);
     if (!submittedText.trim() && !images.length && !files.length) return;
     if (images.some((image) => image.loading || image.error)) return;
     const imageIds = images.map((image) => image.id);
@@ -1932,7 +1938,7 @@ function NativeDesktopContent({
               nonce === viewIntent.current &&
               current === generation.current
             )
-              setDraft((draft) => draft || original.text);
+              setDraft((draft) => draft || original.draft.content);
           }
           throw cause;
         }
@@ -2101,7 +2107,7 @@ function NativeDesktopContent({
       selected.current === original.creation.sessionId
     ) {
       draftCache.current.set(key, original.draft);
-      setDraft((current) => current || original.text);
+      setDraft((current) => current || original.draft.content);
       firstAcceptedDraft.current = undefined;
     }
   }, [firstSubmission, state?.inputSubmissions, selection]);
@@ -4000,6 +4006,7 @@ function NativeDesktopContent({
               options: (
                 <>
                   <NativeModelPicker
+                    key={JSON.stringify([directory.storeId, newModelRevision])}
                     snapshots={modelSnapshots.current}
                     bridge={bridge}
                     generation={state.generation}

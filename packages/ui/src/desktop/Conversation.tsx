@@ -236,6 +236,7 @@ const MessageItem = memo(function MessageItem({
         key={message.id}
         className="subagent-process"
         fade="y"
+        chainScroll
         viewportClassName="subagent-process-viewport"
         viewportProps={{
           role: 'region',
@@ -320,6 +321,7 @@ const MessageItem = memo(function MessageItem({
       </article>
     );
   const timestamp = formatMessageTime(message.createdAtMs, metadataNow);
+  const responding = showResponseStatus && message.role === 'assistant' && !message.settled;
   return (
     <article
       className={cn(
@@ -420,7 +422,7 @@ const MessageItem = memo(function MessageItem({
       {agentMessage && !agentMessage.contentComplete && (
         <p role="status">消息正文暂不可完整读取。</p>
       )}
-      {showResponseStatus && message.role === 'assistant' && !message.settled && (
+      {responding && !showMetadata && (
         <small className="response-status" role="status">
           <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
             正在回复…
@@ -428,23 +430,33 @@ const MessageItem = memo(function MessageItem({
         </small>
       )}
       {showMetadata && (
-        <footer className="message-meta">
-          {copyText && (
-            <MessageCopyButton
-              text={copyText}
-              copyRole={copyRole}
-              writeClipboardText={writeClipboardText}
-            />
-          )}
-          {timestamp ? (
-            <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
-              <span aria-hidden="true">{timestamp.label}</span>
-              <span className="sr-only">{timestamp.full}</span>
-            </time>
+        <footer className={cn('message-meta', responding && 'message-meta-responding')}>
+          {responding ? (
+            <small className="response-status" role="status">
+              <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
+                正在回复…
+              </span>
+            </small>
           ) : (
-            <span className="message-time" title="没有可核实的消息记录时间">
-              时间未知
-            </span>
+            <>
+              {copyText && (
+                <MessageCopyButton
+                  text={copyText}
+                  copyRole={copyRole}
+                  writeClipboardText={writeClipboardText}
+                />
+              )}
+              {timestamp ? (
+                <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
+                  <span aria-hidden="true">{timestamp.label}</span>
+                  <span className="sr-only">{timestamp.full}</span>
+                </time>
+              ) : (
+                <span className="message-time" title="没有可核实的消息记录时间">
+                  时间未知
+                </span>
+              )}
+            </>
           )}
         </footer>
       )}

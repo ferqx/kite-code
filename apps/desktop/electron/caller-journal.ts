@@ -15,6 +15,7 @@ import type {
   NativeCallerMetadata,
   NativeCallerRecord,
 } from '../src/native-bridge';
+import { promptTextForSend } from '../src/prompt-text';
 import type { PrivateData } from './private-data';
 export const callerCanonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(callerCanonical).join(',')}]`;
@@ -277,7 +278,8 @@ export class NativeCallerJournal {
         String(original.revision) !== draft.revision ||
         callerTextDigest(original.content) !== draft.textDigest ||
         !('content' in request) ||
-        request.content !== original.content
+        (request.content !== original.content &&
+          request.content !== promptTextForSend(original.content))
       )
         throw Error('caller_draft_unavailable');
     }

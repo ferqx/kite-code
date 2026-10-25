@@ -1,6 +1,15 @@
 import { expect, test } from 'bun:test';
 import type { NativeSelection } from '../src/native-bridge';
 import { nativeTextIntent } from '../src/native-input';
+import { promptTextForSend } from '../src/prompt-text';
+
+test('submitted prompts remove every final LF or CRLF without trimming Markdown whitespace', () => {
+  for (const ending of ['', '\n', '\n\n\n', '\r\n', '\r\n\r\n', '\r\n\n\r']) {
+    expect(promptTextForSend(`  first  \n\n雪🙂 last  ${ending}`)).toBe('  first  \n\n雪🙂 last  ');
+  }
+  expect(promptTextForSend('\n\r\n')).toBe('');
+  expect(promptTextForSend('text\n \n\n')).toBe('text\n ');
+});
 
 test('Native text during compression/reset binds follow-up to the original Run and selection; ordinary active work steers', () => {
   const selection = {

@@ -1,6 +1,7 @@
-import { memo, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, type ReactNode, useLayoutEffect, useRef } from 'react';
 import type { Components, ExtraProps } from 'react-markdown';
 import { isClosedDiagramFence } from './markdown-diagram';
+import { StreamingTextReveal } from './streaming-text-reveal';
 
 type Node = {
   type: string;
@@ -37,87 +38,6 @@ const MarkdownElement = memo(
   (previous, next) => sameMarkup(previous.node, next.node),
 );
 
-/** One browser animation per visible character; React never updates per animation frame. */
-function RevealedText({
-  children,
-  delay,
-  step,
-}: {
-  children: string;
-  delay: number;
-  step: number;
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const attempted = useRef(false);
-  const letters = useMemo(() => [...graphemes.segment(children)], [children]);
-  useLayoutEffect(() => {
-    // Activity reconnects layout effects when a cached conversation returns.
-    if (attempted.current) return;
-    attempted.current = true;
-    const element = ref.current;
-    const motion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    if (!element?.animate || motion?.matches || document.hidden || element.closest('[hidden]'))
-      return;
-    const animations = new Set(
-      [...element.children].map((letter, index) =>
-        letter.animate([{ opacity: 0 }, { opacity: 1 }], {
-          duration: 240,
-          delay: Math.min(MAX_REVEAL_DELAY_MS, delay + index * step),
-          fill: 'backwards',
-          easing: 'ease-out',
-        }),
-      ),
-    );
-    const reduce = () => {
-      if (motion?.matches) for (const animation of animations) animation.cancel();
-    };
-    const release = () => motion?.removeEventListener('change', reduce);
-    motion?.addEventListener('change', reduce);
-    for (const animation of animations) {
-      const complete = () => {
-        animation.onfinish = animation.oncancel = null;
-        animations.delete(animation);
-        if (animations.size === 0) release();
-      };
-      animation.onfinish = animation.oncancel = complete;
-    }
-    return () => {
-      release();
-      for (const animation of animations) animation.cancel();
-    };
-  }, [delay, step]);
-  return (
-    <span ref={ref}>
-      {letters.map(({ segment, index: offset }) => (
-        <span key={offset}>{segment}</span>
-      ))}
-    </span>
-  );
-}
-
-function graphemeStart(text: string, offset: number) {
-  if (!/[^\p{ASCII}]/u.test(text)) return offset;
-  return graphemes.segment(text).containing(offset)?.index ?? offset;
-}
-
-function textRun(
-  text: string,
-  revealFrom: number | undefined,
-  offset = 0,
-  delay = 0,
-  step = REVEAL_STEP_MS,
-): ReactNode[] {
-  if (revealFrom === undefined || revealFrom >= text.length) return [text];
-  // A newly completed combining sequence/emoji stays in one shaping run.
-  if (graphemeStart(text, revealFrom) < revealFrom) return [text];
-  return [
-    text.slice(0, revealFrom),
-    <RevealedText key={offset + revealFrom} delay={delay} step={step}>
-      {text.slice(revealFrom)}
-    </RevealedText>,
-  ];
-}
-
 const MarkdownText = memo(
   function MarkdownText({
     children,
@@ -131,38 +51,30 @@ const MarkdownText = memo(
     revealStep?: number;
   }) {
     const text = typeof children === 'string' ? children : '';
-    let [rendered, setRendered] = useState(() => ({
-      text,
-      runs: textRun(text, revealFrom, 0, revealDelay, revealStep),
-    }));
-    if (rendered.text !== text) {
-      const previous = rendered;
-      rendered = {
+    // The owner appends CharacterData without replacing the reader's existing text ranges.
+    const initial = useRef(text);
+    const element = useRef<HTMLSpanElement>(null);
+    const reveal = useRef<StreamingTextReveal | undefined>(undefined);
+    useLayoutEffect(() => () => reveal.current?.dispose(), []);
+    useLayoutEffect(() => {
+      if (!element.current) return;
+      reveal.current ??= new StreamingTextReveal(element.current);
+      const boundary =
+        revealFrom === undefined
+          ? undefined
+          : graphemes.segment(text).containing(revealFrom)?.index;
+      reveal.current.update(
         text,
-        runs:
-          text.startsWith(previous.text) &&
-          graphemeStart(text, previous.text.length) === previous.text.length
-            ? previous.runs.concat(
-                textRun(
-                  text.slice(previous.text.length),
-                  revealFrom === undefined
-                    ? undefined
-                    : Math.max(0, revealFrom - previous.text.length),
-                  previous.text.length,
-                  revealDelay,
-                  revealStep,
-                ),
-              )
-            : [text],
-      };
-      setRendered(rendered);
-    }
-    return rendered.runs;
+        boundary === revealFrom ? revealFrom : undefined,
+        revealDelay,
+        revealStep,
+      );
+    }, [text, revealFrom, revealDelay, revealStep]);
+    return <span ref={element}>{initial.current}</span>;
   },
   (previous, next) => previous.children === next.children,
 );
-
-// Synthetic HAST elements return fragments; no wrapper boxes enter the document.
+// Element memo boundaries return fragments; each text node keeps one ordinary inline span.
 export const incrementalMarkdownComponents = {
   'kite-markdown-element': MarkdownElement,
   'kite-markdown-text': MarkdownText,
@@ -189,6 +101,8 @@ export function incrementalMarkdown({
     );
     const wrap = (node: Node): Node => {
       if (node.type === 'text') {
+        // Formatting whitespace between list/table blocks cannot contain an inline element.
+        if (!node.value?.trim()) return node;
         const start = node.position?.start.offset,
           end = node.position?.end.offset;
         const suffix =

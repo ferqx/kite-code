@@ -223,9 +223,6 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
               </div>
             )}
             {!selected && <p className="model-effort-unavailable">请先选择模型</p>}
-            {props.modelSelectionHint && (
-              <p className="model-effort-unavailable">{props.modelSelectionHint}</p>
-            )}
           </div>
         ) : (
           <Tabs
@@ -306,6 +303,9 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                 </TabsContent>
               ))}
             </div>
+            {props.modelSelectionHint && (
+              <p className="model-selection-hint">{props.modelSelectionHint}</p>
+            )}
           </Tabs>
         )}
       </PopoverContent>

@@ -24,13 +24,14 @@ const checked: string[] = [];
 try {
   for (const phase of ['accepted', 'applied', 'unknown', 'rejected'] as const) {
     const scope = { storeId: 'store', workspaceId: 'workspace', rootSessionId: phase };
-    const saved = data.save(scope, 0, `原提示词 ${phase} 雪🙂\r\n`);
+    const content = `原提示词 ${phase} 雪🙂  `;
+    const saved = data.save(scope, 0, `${content}\r\n\n\r\n`);
     assert.equal(saved.consumedFrom, undefined);
     const request: StartCommandRequest = {
       kind: 'run.start',
       expectedStoreId: scope.storeId,
       commandId: phase,
-      content: saved.content,
+      content,
     };
     const callerScope = {
       storeId: scope.storeId,

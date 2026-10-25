@@ -137,7 +137,25 @@ test('unscoped legacy streaming keeps its original message response fallback', (
     expect(document.querySelector('.message.assistant .response-status')?.textContent).toBe(
       '正在回复…',
     );
+    expect(document.querySelectorAll('.message.assistant .message-meta')).toHaveLength(1);
+    expect(
+      document
+        .querySelector('.response-status')
+        ?.parentElement?.classList.contains('message-meta-responding'),
+    ).toBe(true);
+    expect(document.querySelector('.message.assistant .message-time')).toBeNull();
+    expect(document.querySelector('.message.assistant .message-copy')).toBeNull();
   });
+  inspect(
+    [{ ...assistant('legacy', true), turnId: undefined, finalReply: true }],
+    undefined,
+    (document) => {
+      expect(document.querySelector('.message-meta-responding')).toBeNull();
+      expect(document.querySelectorAll('.message.assistant .message-meta')).toHaveLength(1);
+      expect(document.querySelector('.message.assistant .message-time')).not.toBeNull();
+      expect(document.querySelector('.response-status')).toBeNull();
+    },
+  );
 });
 
 test('manual process collapse, model completion, tools, approval wait and later model retain the same bottom response until actual termination', async () => {

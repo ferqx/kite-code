@@ -504,9 +504,9 @@ test('the title toggle and sidebar state change in the panel animation frame wit
   }
 });
 
-test('environment docking starts at its measured layout, keeps late content stable and animates later width changes', async () => {
+test('environment only auto-opens with enough right gutter, keeps late content stable and respects manual toggles', async () => {
   const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
-  let width = 1200;
+  let width = 1560;
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
     return this.classList.contains('session-view')
       ? new dom.window.DOMRect(0, 0, width, 800)
@@ -536,18 +536,58 @@ test('environment docking starts at its measured layout, keeps late content stab
     expect(sessionView().classList.contains('environment-information-docked')).toBe(true);
     expect(sessionView().classList.contains('environment-information-animated')).toBe(false);
 
-    await resizeView(1000);
+    await resizeView(1559);
     expect(sessionView().classList.contains('environment-information-closed')).toBe(true);
     expect(sessionView().classList.contains('environment-information-animated')).toBe(true);
+    await resizeView(1560);
+    expect(sessionView().classList.contains('environment-information-docked')).toBe(true);
+    await resizeView(1200);
+    expect(sessionView().classList.contains('environment-information-closed')).toBe(true);
     await click('显示环境信息');
     expect(sessionView().classList.contains('environment-information-overlay')).toBe(true);
     await click('隐藏环境信息');
     expect(sessionView().classList.contains('environment-information-closed')).toBe(true);
-    await resizeView(1200);
+    await resizeView(1560);
     expect(sessionView().classList.contains('environment-information-closed')).toBe(true);
     await click('显示环境信息');
     expect(sessionView().classList.contains('environment-information-docked')).toBe(true);
     expect(sessionView().classList.contains('environment-information-animated')).toBe(true);
+  } finally {
+    dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
+  }
+});
+
+test('new conversations start with environment closed unless the full right gutter fits', async () => {
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  let width = 1200;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return this.classList.contains('session-view')
+      ? new dom.window.DOMRect(0, 0, width, 800)
+      : originalRect.call(this);
+  };
+  try {
+    for (width of [390, 1092, 1200, 1559, 1560, 1800]) {
+      await render({
+        readingKey: 'new-conversation',
+        selected: undefined,
+        newConversation: {
+          projects: [],
+          workspace: '',
+          busy: false,
+          onProject: () => {},
+          onAddProject: () => {},
+          onBranch: () => {},
+          onRefreshBranch: () => {},
+        },
+        environmentInformation: <aside className="environment-information">环境信息</aside>,
+      });
+      const view = document.querySelector('.session-view')!;
+      expect(view.classList.contains('environment-information-docked')).toBe(width >= 1560);
+      expect(view.classList.contains('environment-information-closed')).toBe(width < 1560);
+      expect(view.classList.contains('environment-information-animated')).toBe(false);
+      await act(() => root!.unmount());
+      root = undefined;
+    }
   } finally {
     dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
   }
