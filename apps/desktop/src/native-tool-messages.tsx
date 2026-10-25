@@ -21,8 +21,8 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'files.read_path': [['1', '2'], '读取'],
   'files.write': [['2', '3'], '写入'],
   'files.edit': [['2'], '修改'],
-  'files.glob': [['2'], '查找文件'],
-  'files.search': [['2', '3', '4'], '搜索内容'],
+  'files.glob': [['2', '3'], '查找文件'],
+  'files.search': [['2', '3', '4', '5'], '搜索内容'],
   'files.list': [['1'], '列出目录'],
   'shell.launch': [['1'], '启动后台 Shell'],
   'shell.execute': [['1'], '运行命令'],
@@ -46,7 +46,7 @@ const exploration = new Set([
   'files.list',
 ]);
 
-/** Classification is display-only and requires an exact supported definition version. */
+/** Names follow stable IDs; structured presentation still requires a supported version. */
 export function desktopToolPresentation(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion'>,
 ): Pick<DesktopMessage, 'toolName' | 'title' | 'presentation' | 'shell'> {
@@ -71,7 +71,7 @@ export function desktopToolPresentation(
           } as Record<string, string>
         )[fact.definitionId] ?? fact.definitionId)
       : undefined,
-    title: known ? label![1] : `${fact.definitionId} · ${fact.definitionVersion}`,
+    title: label?.[1] ?? fact.definitionId,
     ...(known && fact.definitionId.startsWith('shell.')
       ? {
           shell: {

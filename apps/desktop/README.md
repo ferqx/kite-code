@@ -392,11 +392,15 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 原工具过程与结果阅读
 
+[工具呈现](src/native-tool-messages.tsx)按稳定定义ID决定已知工具名称，名称不依赖定义版本白名单；`glob@3/search@5`及后续未知版本继续显示“查找文件／搜索内容”。结构化结果、Shell操作、问答归属和特定探索分类仍按准确受支持版本判断，未知版本保原结果阅读，不从友好名称推断权限或终态。[元数据回归](test/native-tool-messages.test.ts)及[真实组件DOM回归](test/isolated/native-tool-messages-dom.test.tsx)覆盖旧版、当前版和未登记的999版本；完全未知ID继续显示原工具ID，但常规名称同样不附加版本号；准确版本仍保留在原始记录与内部格式核验中。取舍见[连续工具呈现Note](../../.agents/notes/implemented/bug-fix/2026-10-25-native-contiguous-tool-aggregation.md)。
+
+2026-10-25，Windows x64／Bun1.4.3，`d33ac7cec`加名称修复：上述两份完整回归43项1523断言、Desktop typecheck与文档检查通过。隔离生产组件页面逐步观察当前版本→模拟999版本→结果保存→切回，逐项名称始终可读；未知格式保留通用动作摘要，不套用旧结构。临时入口为本机`.cache/tool-version-labels-server.ts`，未来版截图为`.cache/tool-version-names-future.png`；该页面没有连接用户数据、Service或真实工具，不代表完整Electron或权限流程资格。版本升级的明确用户确认规则归[根AGENTS](../../AGENTS.md)，本轮不继续升级工具版本。
+
 Native 对 `web_fetch@1` 沿准确版本表投影“读取网页”及网页图标；Main 的 [tool-message-fact](electron/tool-message-fact.ts)只从唯一、同来源、完整的原调用提取 `url` 到既有有界 `target` 字段，缺失、冲突或未来版本不借结果标题补目标。[metadata 回归](test/native-tool-messages.test.ts)核这条边界。实际展示由[共享工具 owner](../../packages/ui/README.md#原桌面展示层)负责：网站／路径省略查询等敏感部分，成功不展示网页正文，失败只将具体工具行标红、聚合标题保持普通颜色，原异常仍可单独展开。仅改变读取与呈现，不修改普通 Tool、授权、网络超时、结果或模型正文。Native DOM 与原 long-group 浏览器 fixture 沿相同生产组件核准入事实、逐项开合、成功正文缺席、失败标题颜色和真实异常阅读；测试只在隔离夹具中开启，不添加普通客户端调试入口。
 
 工具阅读区启用共享 ScrollArea 的纵向边界交接：内层仍能滚动时保留原生滚动，到顶／到底或没有溢出时交给最近可滚动祖先。2026-10-25，Windows x64／Chrome155.0.8059.85 的[长聚合浏览器夹具](test/native-live-tool-aggregation-browser-runner.fixture.ts)在亮色1280px与暗色780px通过原内部滚动、长异常全文、键盘、开合及新增上下边界断言；实际逐步观察内层→外层→反向回顶，输入区保持固定。过程帧与报告在本机 `.cache/native-live-tool-aggregation-3KpaNM`；无页面错误。该页面消费生产组件和隔离 NativeBridge，不代证完整 Electron 或其他平台。输入／Native DOM 与共享 UI 的五文件定向组合130项通过；追加来源隔离与卸载监听清理后，Native输入83项及滚动文件3项分别复验通过。Agent、UI、Desktop类型、定向Biome、文档、统一边界和测试归属检查通过；Biome保留输入测试原有两项字符串拼接提示。
 
-[工具消息适配器](src/native-tool-messages.tsx)为准确 `task.spawn`／`task.follow_up`／`task.message`／`task.events`／`task.list`／`task.interrupt` v1 提供可读标签，未知版本保原 ID／version。创建／追问工具终态只表示这次调用结束，不将其当作 child 业务完成。现有准确授权投影继续优先人工 pending，批准与执行效果分开；[工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)验证新标签及未来版本保守展示。
+[工具消息适配器](src/native-tool-messages.tsx)为准确 `task.spawn`／`task.follow_up`／`task.message`／`task.events`／`task.list`／`task.interrupt` v1 提供可读标签；已知定义的未知版本仍保留可读名称，但不沿用v1结构化解释。创建／追问工具终态只表示这次调用结束，不将其当作 child 业务完成。现有准确授权投影继续优先人工 pending，批准与执行效果分开；[工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)验证新标签及未来版本保守展示。
 
 [六工具真实窗口门禁](test/isolated/native-collaboration-bundle.test.ts)使用 source-free macOS Electron、真实 Service/Runtime/SQLite 和隔离 mock Provider：普通父轮结束后两个 child 独立待批，只批准 A 不执行 B；稳定 A Session 续接到新 Run，旧 A 答复和旧卡停止均拒绝且不改投 A2，批准 A2 后只产生它的效果；准确停止 B 后迟到批准无效果，冷重开零 Provider 重放。实际 1 项通过，15 次 Provider 请求，原进程退出及候选独占 lease 均核实。审批只在准确根 Session/Run 的活动交互时隐藏主输入；child 待批仍保留原卡和父输入。[DOM 回归](test/isolated/native-interaction-composer-dom.test.tsx)保留原根审批入口。本机隔离窗口证据不表示付费 Provider 或 Windows/Linux 资格。
 
@@ -464,7 +468,7 @@ Chrome生产组件／编译CSS在浅1280／深780px核工具聚合200px、viewpo
 
 2026-10-24，搜索定义 v4 复用同一探索展示，v2/v3 历史继续可读。[运行期聚合 DOM](test/isolated/native-live-tool-aggregation-dom.test.tsx)逐阶段核 v3/v4 搜索＋读取从派发、settling、延迟回执和 metadata 接管保持同一节点与展开状态。同日 macOS arm64／Chrome155.0.8059.86 的隔离生产组件浏览器夹具已改用真实 v4 搜索定义，六组阶段覆盖两种 metadata 顺序、初次／切换、深浅主题、4／40轮及缓存返回；733张过程帧和171个正文可见 RAF 采样均通过原节点、顺序、几何、滚动及输入位置检查，页面错误0。人工核延迟占位、亮色搜索聚合及暗色缓存返回；证据在 `.cache/native-history-presentation-f4b6uR/report.json` 和帧目录。该证据为隔离组件与受控 bridge，不代表完整安装版、真实模型或其他平台；原 CSS 嵌套 keyframes 提示保留。以下旧证据仍仅覆盖其原版本及场景。
 
-2026-10-23，搜索定义 v3 继续使用已知探索展示；历史 v2 保留同样展示，未知版本仍保守显示原定义，不并入探索。准确已知搜索映射为共享 `search_content`，使搜索／读取聚合显示各自次数。新增运行期回归核搜索＋读取从活动、settling 无回执、逐项回执和延迟 metadata 接管始终保同一聚合 DOM 与手动展开；主会话与子详情沿同一投影，后者保留父草稿和只读范围。相关 live aggregation／transcript／navigation 整文件共56项1333断言通过，Desktop typecheck与定向Biome通过。
+2026-10-23，搜索定义 v3 继续使用已知探索展示；历史 v2 保留同样展示，当时未知版本保守显示原定义；当前名称沿本节稳定ID规则，仍不按未知格式并入探索。准确已知搜索映射为共享 `search_content`，使搜索／读取聚合显示各自次数。新增运行期回归核搜索＋读取从活动、settling 无回执、逐项回执和延迟 metadata 接管始终保同一聚合 DOM 与手动展开；主会话与子详情沿同一投影，后者保留父草稿和只读范围。相关 live aggregation／transcript／navigation 整文件共56项1333断言通过，Desktop typecheck与定向Biome通过。
 
 同次 macOS arm64／Chrome155.0.8059.86 的[隔离历史浏览器夹具](test/native-history-presentation-browser-runner.fixture.ts)改用真实 v3 搜索＋读取，六组覆盖两种metadata到达顺序、初次／切换、深浅主题、4／40轮及缓存返回。逐阶段截图与RAF帧核首次正文展示后消息因果顺序、DOM、几何、滚动／输入区位置保持，搜索聚合未闪回generic；六组均通过、页面错误0，证据在本机 `.cache/native-history-presentation-o4dtrD/report.json` 与帧目录。人工检查延迟读取占位和亮／暗最终聚合，未发现重复或跳位。本次仅为隔离生产组件和受控桥接验证，不代表完整安装版、真实模型、其他平台或所有实时推送分段资格；原嵌套 `@keyframes` CSS编译提示保留。
 

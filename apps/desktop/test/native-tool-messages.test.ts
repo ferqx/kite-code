@@ -119,7 +119,44 @@ test('current and saved workspace write versions retain their known Native prese
     ).toMatchObject({ toolName: 'write_file', title: '写入' });
   expect(
     desktopToolPresentation({ definitionId: 'files.write', definitionVersion: 'future' }),
-  ).toMatchObject({ title: 'files.write · future', toolName: undefined });
+  ).toMatchObject({ title: '写入', toolName: undefined });
+});
+
+test('current and saved file discovery versions keep readable labels and exploration grouping', () => {
+  for (const [definitionId, versions, toolName, title] of [
+    ['files.glob', ['2', '3'], 'files.glob', '查找文件'],
+    ['files.search', ['2', '3', '4', '5'], 'search_content', '搜索内容'],
+  ] as const) {
+    for (const definitionVersion of versions)
+      expect(desktopToolPresentation({ definitionId, definitionVersion })).toMatchObject({
+        toolName,
+        title,
+        presentation: 'exploration',
+      });
+    expect(desktopToolPresentation({ definitionId, definitionVersion: 'future' })).toEqual({
+      toolName: undefined,
+      title,
+    });
+  }
+});
+
+test('future known tools keep stable names without borrowing structured semantics', () => {
+  for (const [definitionId, title] of [
+    ['files.read', '读取'],
+    ['files.edit', '修改'],
+    ['files.list', '列出目录'],
+    ['shell.execute', '运行命令'],
+    ['ask_user', '询问用户'],
+    ['task.spawn', '创建子 Agent'],
+  ] as const)
+    expect(desktopToolPresentation({ definitionId, definitionVersion: '999' })).toEqual({
+      toolName: undefined,
+      title,
+    });
+  expect(desktopToolPresentation({ definitionId: 'new.tool', definitionVersion: '999' })).toEqual({
+    toolName: undefined,
+    title: 'new.tool',
+  });
 });
 
 test('Web Fetch rows use the supported definition and only a unique original call supplies the URL', async () => {
@@ -128,7 +165,7 @@ test('Web Fetch rows use the supported definition and only a unique original cal
   ).toMatchObject({ toolName: 'web_fetch', title: '读取网页' });
   expect(
     desktopToolPresentation({ definitionId: 'web_fetch', definitionVersion: 'future' }),
-  ).toMatchObject({ toolName: undefined, title: 'web_fetch · future' });
+  ).toMatchObject({ toolName: undefined, title: '读取网页' });
   const f = fixture();
   try {
     for (const id of ['verified', 'future', 'missing']) {

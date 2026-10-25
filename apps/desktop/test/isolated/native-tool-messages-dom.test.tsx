@@ -1395,8 +1395,8 @@ test('the retained tool UI shows exact failures and unverified Shell original re
     expect(f.host.querySelector('.shell-result')?.textContent).toBe('启动结果未提供');
     expect(f.host.querySelector('.shell-result-icon')).toBeNull();
     expect(f.host.textContent).not.toContain('已受理');
-    const future = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('task · 9'),
+    const future = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.querySelector('.tool-label')?.textContent === 'task',
     )!;
     await act(async () => future.click());
     expect(f.host.textContent).toContain('结果未知');
@@ -1643,6 +1643,41 @@ const statusSelection = (executions: Execution[]): NativeSelection => ({
     },
   ],
   executions,
+});
+
+test('current and future file discovery versions keep readable live and saved row names', async () => {
+  const f = fixture();
+  try {
+    for (const [definitionId, definitionVersion, title] of [
+      ['files.glob', '3', '查找文件'],
+      ['files.search', '5', '搜索内容'],
+      ['files.glob', '999', '查找文件'],
+      ['files.search', '999', '搜索内容'],
+    ] as const) {
+      const execution = { ...statusExecution(definitionId, 'dispatching'), definitionVersion };
+      const [live] = liveToolMessages(statusSelection([execution]), []);
+      await act(async () =>
+        f.root.render(<NativeLiveToolMessage {...live!} unavailable={false} />),
+      );
+      expect(f.host.textContent).toContain(title);
+      expect(f.host.textContent).not.toContain(definitionId);
+      await act(async () =>
+        f.root.render(
+          <NativeToolMessage
+            message={desktopToolMessage(
+              { ...execution, status: 'succeeded' },
+              execution.id,
+              '原始工具结果',
+            )}
+          />,
+        ),
+      );
+      expect(f.host.textContent).toContain(title);
+      expect(f.host.textContent).not.toContain(definitionId);
+    }
+  } finally {
+    await f.close();
+  }
 });
 
 for (const definitionId of ['files.read', 'files.edit', 'files.write', 'task.list']) {
