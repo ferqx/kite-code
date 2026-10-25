@@ -1366,8 +1366,16 @@ for (const impact of ['default', 'schedule', 'both'] as const) {
       expect(f.panelHost.textContent).toContain('不会自动选择替代模型');
       expect(f.panelHost.textContent).not.toContain('private-model');
       expect(f.dom.window.document.activeElement).toBe(f.button('取消'));
-      if (impact !== 'schedule')
+      if (impact !== 'schedule') {
         expect(f.panelHost.textContent).toContain('此提供商包含当前全局默认模型，暂时无法删除。');
+        expect(f.panelHost.textContent).toContain('~/.kite-code/kite-code.jsonc 中将 model');
+        expect(f.panelHost.textContent).toContain('其他已启用模型的“提供商别名:模型名”');
+        expect(f.panelHost.textContent).toContain('models/modelId 格式的配置改');
+        expect(f.panelHost.textContent).toContain('再关闭并重新打开设置');
+        expect(f.panelHost.textContent).toContain('输入区选择模型或禁用模型不会更改全局默认');
+      } else {
+        expect(f.panelHost.textContent).not.toContain('~/.kite-code/kite-code.jsonc');
+      }
       if (impact !== 'default') {
         expect(f.panelHost.textContent).toContain('每日报告');
         expect(f.panelHost.textContent).toContain('每周总结');

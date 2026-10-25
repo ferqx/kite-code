@@ -223,6 +223,7 @@ export function NativeProviderSettings({
     [reading, setReading] = useState(false),
     [writing, setWriting] = useState(false);
   const [local, setLocal] = useState<NativeProviderSubmission[]>([]);
+  const [lookupCompletion, setLookupCompletion] = useState(0);
   const identity = `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
   const awaitingOriginal = useRef<SentProviderChange | undefined>(
     sentProviderChanges.get(bridge)?.get(identity),
@@ -244,6 +245,8 @@ export function NativeProviderSettings({
     pendingSaved: undefined as NativeProviderSubmission | undefined,
   });
   const notified = useRef(new Set<string>());
+  const pendingWatchers = useRef(new Map<string, NativeProviderSubmission>());
+  const handledTerminals = useRef(new Set<string>());
   const recoveryAction = useRef<() => Promise<void>>(async () => {});
   const recoveryContext = useRef<{ originals: NativeProviderSubmission[]; storeId?: string }>({
     originals: [],
@@ -351,6 +354,12 @@ export function NativeProviderSettings({
         : '选择服务商预设';
   function remember(submission: NativeProviderSubmission) {
     settleSent(submission);
+    if (
+      current.current === identity &&
+      submission.storeId === recoveryContext.current.storeId &&
+      ['applied', 'failed'].includes(submission.phase)
+    )
+      handledTerminals.current.add(JSON.stringify([submission.storeId, submission.commandId]));
     setLocal((values) => [
       ...values.filter((entry) => entry.commandId !== submission.commandId),
       submission,
@@ -529,6 +538,8 @@ export function NativeProviderSettings({
       pendingSaved: undefined,
     };
     awaitingOriginal.current = sentProviderChanges.get(bridge)?.get(identity);
+    pendingWatchers.current.clear();
+    handledTerminals.current.clear();
     setAwaitingOriginalRecord(!!awaitingOriginal.current);
     if (awaitingOriginal.current) requireRecovery('network_outcome_unknown');
     previousRevision.current = revision;
@@ -561,6 +572,63 @@ export function NativeProviderSettings({
     previousRevision.current = revision;
     void read();
   }, [revision]);
+  // A lookup owned by a closed view can settle through Main's watcher after reopening.
+  // Reconcile only an exact original observed pending in this view; never replay it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Watcher identity/phase and flight completion drive reconciliation, not refreshed facts or callbacks.
+  useEffect(() => {
+    const storeId = recoveryContext.current.storeId;
+    if (!mounted.current || current.current !== identity || !storeId) return;
+    const visible = new Set<string>();
+    let settled = false;
+    for (const entry of originals) {
+      if (entry.storeId !== storeId) continue;
+      const key = JSON.stringify([entry.storeId, entry.commandId]);
+      visible.add(key);
+      if (['submitting', 'unknown'].includes(entry.phase)) {
+        pendingWatchers.current.set(key, entry);
+        continue;
+      }
+      const pending = pendingWatchers.current.get(key);
+      if (
+        !pending ||
+        !['applied', 'failed'].includes(entry.phase) ||
+        !matchesProviderChange(pending, entry)
+      )
+        continue;
+      // The active request owns its reply. If that reply is lost, reconsider the
+      // watcher after its flight ends; a handled reply must not trigger a second GET.
+      if (flight.current) continue;
+      pendingWatchers.current.delete(key);
+      if (handledTerminals.current.has(key)) continue;
+      handledTerminals.current.add(key);
+      settleSent(entry);
+      if (awaitingOriginal.current && matchesProviderChange(awaitingOriginal.current, entry)) {
+        awaitingOriginal.current = undefined;
+        setAwaitingOriginalRecord(false);
+      }
+      if (entry.phase === 'applied') {
+        notifyApplied(entry);
+        recovery.current.pendingSaved = entry;
+      }
+      requireRecovery();
+      settled = true;
+    }
+    for (const key of pendingWatchers.current.keys())
+      if (!visible.has(key)) pendingWatchers.current.delete(key);
+    if (settled) {
+      setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
+      // Do not borrow a GET that began before this terminal receipt.
+      void read(undefined, true);
+    }
+  }, [
+    identity,
+    recoveryKey,
+    writing,
+    lookupCompletion,
+    facts?.storeId,
+    selection?.storeId,
+    models?.facts?.storeId,
+  ]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: A single timer reads the latest current-scope originals, never frozen watcher props.
   useEffect(() => {
     scheduleRecovery();
@@ -919,7 +987,12 @@ export function NativeProviderSettings({
           setError(`提供商更改正在后台核对：${safeError(cause)}`);
         }
       } finally {
-        if (mounted.current && current.current === original) flight.current = false;
+        if (mounted.current && current.current === original) {
+          flight.current = false;
+          // Background lookups do not set writing. Revisit a watcher that arrived
+          // during their flight even when the lookup's own reply was lost.
+          setLookupCompletion((value) => value + 1);
+        }
       }
     } else if (recovery.current.needsRead) await read();
   };
@@ -1162,7 +1235,10 @@ export function NativeProviderSettings({
                         <p>不会自动选择替代模型，也不会修改已经开始的运行。</p>
                         {connection.defaultModelIds?.length ? (
                           <p className="provider-notice provider-notice-error" role="alert">
-                            此提供商包含当前全局默认模型，暂时无法删除。
+                            此提供商包含当前全局默认模型，暂时无法删除。 请先在
+                            ~/.kite-code/kite-code.jsonc 中将 model
+                            改为其他已启用模型的“提供商别名:模型名”（models/modelId 格式的配置改
+                            modelId），再关闭并重新打开设置。输入区选择模型或禁用模型不会更改全局默认。
                           </p>
                         ) : (
                           <p>不影响当前全局默认模型。</p>

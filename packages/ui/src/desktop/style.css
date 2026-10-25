@@ -2536,7 +2536,7 @@ body {
   color: var(--foreground);
   font-size: inherit;
 }
-.kite-client .typeset-chat .markdown-code-block:has(.markdown-diagram) {
+.kite-client .typeset-chat .markdown-code-block:has(.markdown-diagram-scroll) {
   background: transparent;
 }
 .kite-client .markdown-code-block [data-slot="code-block-header"] {

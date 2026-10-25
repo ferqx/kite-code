@@ -91,7 +91,10 @@ export function NativeGeneralSettings({
         <div className="settings-row">
           <span>
             <strong>当前默认模型</strong>
-            <small>更改模型与 Provider 请前往对应分类</small>
+            <small>
+              模型启停与连接配置请前往“提供商与模型”；全局默认请在 ~/.kite-code/kite-code.jsonc
+              中修改。
+            </small>
           </span>
           <span className="settings-value">
             {facts

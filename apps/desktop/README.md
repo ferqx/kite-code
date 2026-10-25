@@ -1259,7 +1259,7 @@ Service声明`message_changes`时，同一连续scope随后调用[Client](../../
 
 Service 为 applied 模型更新回执持久保存准确 `postReadSet`；[Main](electron/configuration.ts)仅接受同一热提交、Store、generation 与完整选择身份的 `afterCommandId`，核下一次 GET 四字段与该证明完全一致后生成新 observation。动态模型来源变化或外部写入导致不一致则停止队列，不把普通 GET 当成旧 CAS 的重试依据；renderer 不接收原 readSet。历史无证明回执和冷 journal 仍能查询原结果，只能普通读取恢复，不能续接旧队列。
 
-保存响应和状态通知同时缺失时，先只读查询Main现有state，核generation、Store、准确observationId与完整非秘密operation，只有唯一匹配原记录才取得commandId；无ID、foreign或歧义不会猜测、普通GET也不能解除未知锁。自动恢复与原保存结果通知分别处理。Model和Provider只在“需要恢复→有效新事实”的边沿刷新对端，正常GET不互刷；提供商保存成功后的刷新强制取得发布后的新观察，不复用较早在途GET。自动lookup不借调用当下的editorVersion关闭后来打开的编辑器，不回填或重基草稿；只有原applied结果通知一次onSaved，failed恢复不冒充保存成功。自动重试保留旧错误直到读取成功，避免重试期间反复闪现。准确只读但无诊断的事实停止轮询并继续只读；权限、身份或私有journal错误停止当前恢复，不能凭旧事实放权。
+保存响应和状态通知同时缺失时，先只读查询Main现有state，核generation、Store、准确observationId与完整非秘密operation，只有唯一匹配原记录才取得commandId；无ID、foreign或歧义不会猜测、普通GET也不能解除未知锁。自动恢复与原保存结果通知分别处理。Model和Provider只在“需要恢复→有效新事实”的边沿刷新对端，正常GET不互刷；提供商保存成功后的刷新强制取得发布后的新观察，不复用较早在途GET。自动lookup不借调用当下的editorVersion关闭后来打开的编辑器，不回填或重基草稿；只有原applied结果通知一次onSaved，failed恢复不冒充保存成功。关闭旧页后的原查询若通过 Main watcher 在重开页确认终态，只处理本页先前观察到的同 Store、commandId、observationId 和 operation；强制新 GET 同步连接及模型，重复／历史／外来终态不触发互刷，旧编辑草稿保持原资格且不重发保存。自动重试保留旧错误直到读取成功，避免重试期间反复闪现。准确只读但无诊断的事实停止轮询并继续只读；权限、身份或私有journal错误停止当前恢复，不能凭旧事实放权。
 
 controller 生命周期独立于设置组件，常规页的默认摘要读取也使用独立 manager，不与队列共享 observation／close。关闭设置移除订阅但继续保存已接受队列；同 bridge 与完整 scope 重开复用活跃 worker，不额外启动普通模型读取。空闲普通 reader 关闭即取消释放。切换 scope 清除旧的未派发尾部，迟到回执只完成原提交，不替换新页面事实。关闭窗口或退出进程后的恢复仍沿原 journal／unknown 合同，不宣称内存队列跨进程保存。
 
@@ -1365,6 +1365,8 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 
 ## Native Provider 与下一次模型选择
+
+统一页移除默认卡片后，默认引用导致的删除保护仍保留；[删除确认](src/native-provider-settings.tsx)明确指向用户文件的 `model`（装配格式为 `modelId`）及关闭重开后的重新核对，不再让用户寻找不存在的默认改选控件。[常规摘要](src/native-general-settings.tsx)同样区分模型启停／连接设置与文件中的全局默认。具体操作见[模型手册](../../docs/handbook/features/models-and-configuration.md#配置范围)；[Provider DOM](test/native-provider-settings-dom.test.tsx)覆盖提示和禁止提交并存，[原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)覆盖常规指引。该提示不恢复桌面默认编辑入口，不改变默认引用、删除保护或后端权限。
 
 会话首次实际 Run 后，[模型选择器](src/native-model-picker.tsx)从原有序 View 的首 Run 封存配置读取 Responses／Chat Completions 协议，只在原列表提供同协议候选；思考面板不显示协议提示；仅在模型列表底部以12px辅助文字显示“仅显示当前对话可用的模型”。同协议模型与连接仍可选择，effort 从下一轮生效，活动 Run 保持原值。首次实际 Run 前不限制协议，准备拒绝没有 Run 时也不提前绑定；首配置无法核实或原所选路由协议已变时保留当前标签并明确不可用，不跳到晚 Run、不静默回退另一协议。Core 视图额外保留最早实际 Run，超过200轮及冷重建同样有效；恢复后的旧 Store 出处由原准入 View 保留。服务端独立校验归[Service owner](../service/README.md#会话模型协议)，不以客户端过滤代替准备守卫。
 

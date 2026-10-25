@@ -109,6 +109,8 @@ test('retained General card reads the accurate configuration default and never s
       'compatible · config-default',
     );
     expect(f.host.textContent).not.toContain('temporary-choice');
+    expect(f.host.textContent).toContain('模型启停与连接配置请前往“提供商与模型”');
+    expect(f.host.textContent).toContain('全局默认请在 ~/.kite-code/kite-code.jsonc');
     const editor = f.host.querySelector('select')!;
     await act(async () => {
       editor.value = 'zed';

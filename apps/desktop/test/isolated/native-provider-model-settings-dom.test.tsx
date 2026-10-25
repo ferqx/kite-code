@@ -165,13 +165,14 @@ function fixture(request: NativeBridge['request']) {
   const render = (
     providerSubmissions: NativeProviderSubmission[] = [],
     modelSubmissions: NativeModelSettingsSubmission[] = [],
+    selected = selection,
   ) =>
     act(async () =>
       root.render(
         <NativeProviderModelSettings
           bridge={bridge}
           generation={1}
-          selection={selection}
+          selection={selected}
           storeId="store"
           providerSubmissions={providerSubmissions}
           modelSubmissions={modelSubmissions}
@@ -1192,5 +1193,266 @@ test('a model mutation without a result or watcher blocks peer provider writes u
     nativeModelToggleQueue(f.bridge, 1, '1/store/selected/1', 'store').detach(true);
     originalState.resolve(null);
     await f.close();
+  }
+});
+
+for (const terminal of ['applied', 'failed'] as const) {
+  test(`a reopened cold Provider ${terminal} watcher refreshes both peers once without replaying or rebasing a draft`, async () => {
+    const state = configuration();
+    const clock = providerSyncClock();
+    const lookup = deferred<NativeProviderSubmission>();
+    const original: NativeProviderSubmission = {
+      kind: 'settings.providers.submission',
+      commandId: 'closed-view-original',
+      storeId: 'store',
+      observationId: 4,
+      operation: {
+        kind: 'remove',
+        provider: 'compatible',
+        connectionId: 'connection-b',
+        baseURL: 'https://same.invalid/v1',
+        modelNames: [],
+        credential: 'none',
+      },
+      phase: 'unknown',
+    };
+    const f = fixture(async (input) => {
+      if (input.method === 'settings.providers.read') return structuredClone(state.providers);
+      if (input.method === 'settings.models.read') return structuredClone(state.models);
+      if (input.method === 'settings.providers.lookup') return lookup.promise;
+      return null;
+    });
+    try {
+      await f.render([original]);
+      await clock.fire();
+      await f.hide();
+      await f.render([original]);
+      await act(async () =>
+        f.element
+          .querySelector<HTMLButtonElement>('.provider-instance button[aria-label^="编辑 "]')!
+          .click(),
+      );
+      await f.edit('提供商名称', 'Keep this newer draft');
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(2);
+      expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(2);
+      state.providers.observationId++;
+      state.models.observationId++;
+      if (terminal === 'applied') {
+        state.providers.providers[0]!.connections.pop();
+        state.models.models = state.models.models.filter((model) => model.id !== 'b');
+      }
+      await act(async () => lookup.resolve({ ...original, phase: terminal }));
+      // Main's terminal watcher reaches the new component, not the closed lookup owner.
+      await f.render([{ ...original, phase: terminal }]);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(3);
+      expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(3);
+      expect(f.saved).toBe(terminal === 'applied' ? 1 : 0);
+      expect(f.element.querySelectorAll('.provider-instance')).toHaveLength(
+        terminal === 'applied' ? 1 : 2,
+      );
+      expect(f.field('提供商名称').value).toBe('Keep this newer draft');
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      expect(f.element.querySelector('[aria-label="待确认的提供商更改"]')).toBeNull();
+      await f.render([{ ...original, phase: terminal }]);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(3);
+      expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(3);
+      expect(f.saved).toBe(terminal === 'applied' ? 1 : 0);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toEqual([
+        { method: 'settings.providers.lookup', generation: 1, commandId: original.commandId },
+      ]);
+      expect(
+        f.calls.some((call) =>
+          [
+            'settings.providers.save',
+            'settings.models.enabled',
+            'settings.models.default',
+          ].includes(call.method),
+        ),
+      ).toBe(false);
+      expect(clock.pending).toBe(0);
+    } finally {
+      lookup.resolve({ ...original, phase: terminal });
+      await f.close();
+      clock.close();
+    }
+  });
+}
+
+test('a terminal Provider watcher supersedes an older GET and never accepts its late facts', async () => {
+  const state = configuration();
+  const clock = providerSyncClock();
+  const oldRead = deferred<NativeProviderSettingsFacts>();
+  const original: NativeProviderSubmission = {
+    kind: 'settings.providers.submission',
+    commandId: 'watcher-before-read',
+    storeId: 'store',
+    observationId: 4,
+    operation: {
+      kind: 'remove',
+      provider: 'compatible',
+      connectionId: 'connection-b',
+      baseURL: 'https://same.invalid/v1',
+      modelNames: [],
+      credential: 'none',
+    },
+    phase: 'unknown',
+  };
+  let reads = 0;
+  const before = structuredClone(state.providers);
+  const f = fixture(async (input) => {
+    if (input.method === 'settings.providers.read') {
+      if (++reads === 1) return oldRead.promise;
+      return structuredClone(state.providers);
+    }
+    if (input.method === 'settings.models.read') return structuredClone(state.models);
+    return null;
+  });
+  try {
+    await f.render([original]);
+    state.providers.providers[0]!.connections.pop();
+    state.providers.observationId++;
+    state.models.models = state.models.models.filter((model) => model.id !== 'b');
+    state.models.observationId++;
+    await f.render([{ ...original, phase: 'applied' }]);
+    expect(reads).toBe(2);
+    expect(f.saved).toBe(1);
+    expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(2);
+    expect(f.element.querySelectorAll('.provider-instance')).toHaveLength(1);
+    await act(async () => oldRead.resolve(before));
+    expect(f.element.querySelectorAll('.provider-instance')).toHaveLength(1);
+    expect(reads).toBe(2);
+    expect(f.saved).toBe(1);
+    expect(clock.pending).toBe(0);
+  } finally {
+    oldRead.resolve(before);
+    await f.close();
+    clock.close();
+  }
+});
+
+test('foreign, mismatched and stale-view Provider terminals cannot start a recovery read or notify peers', async () => {
+  const state = configuration();
+  const clock = providerSyncClock();
+  const original: NativeProviderSubmission = {
+    kind: 'settings.providers.submission',
+    commandId: 'current-original',
+    storeId: 'store',
+    observationId: 4,
+    operation: {
+      kind: 'remove',
+      provider: 'compatible',
+      connectionId: 'connection-b',
+      baseURL: 'https://same.invalid/v1',
+      modelNames: [],
+      credential: 'none',
+    },
+    phase: 'unknown',
+  };
+  const f = fixture(async (input) =>
+    input.method === 'settings.providers.read'
+      ? structuredClone(state.providers)
+      : input.method === 'settings.models.read'
+        ? structuredClone(state.models)
+        : null,
+  );
+  try {
+    await f.render([original]);
+    await f.render([
+      original,
+      { ...original, commandId: 'foreign-original', storeId: 'other-store', phase: 'applied' },
+    ]);
+    await f.openModels('Same service', 1);
+    expect(f.toggle('b').disabled).toBe(true);
+    expect(f.saved).toBe(0);
+    expect(f.calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(1);
+    for (const mismatch of [
+      { ...original, observationId: 5, phase: 'applied' as const },
+      {
+        ...original,
+        operation: { ...original.operation, connectionId: 'connection-a' },
+        phase: 'applied' as const,
+      },
+    ]) {
+      await f.render([original]);
+      await f.render([mismatch]);
+      expect(f.saved).toBe(0);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(1);
+    }
+    await f.render([original]);
+    await f.render([{ ...original, phase: 'applied' }], [], {
+      storeId: 'store',
+      session: { id: 'new-session', workspaceId: 'w' },
+      viewSelection: 2,
+    } as NativeSelection);
+    // Only the new identity's ordinary initial observations are allowed.
+    expect(f.calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(2);
+    expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(2);
+    expect(f.saved).toBe(0);
+    expect(
+      f.calls.some((call) => call.method.endsWith('.lookup') || call.method.endsWith('.save')),
+    ).toBe(false);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+test('a terminal Provider watcher survives a lost reply from the active automatic lookup', async () => {
+  const state = configuration();
+  const clock = providerSyncClock();
+  let reject!: (reason: Error) => void;
+  const lookup = new Promise<NativeProviderSubmission>((_resolve, fail) => {
+    reject = fail;
+  });
+  const original: NativeProviderSubmission = {
+    kind: 'settings.providers.submission',
+    commandId: 'watcher-before-lost-reply',
+    storeId: 'store',
+    observationId: 4,
+    operation: {
+      kind: 'remove',
+      provider: 'compatible',
+      connectionId: 'connection-b',
+      baseURL: 'https://same.invalid/v1',
+      modelNames: [],
+      credential: 'none',
+    },
+    phase: 'unknown',
+  };
+  const f = fixture(async (input) => {
+    if (input.method === 'settings.providers.read') return structuredClone(state.providers);
+    if (input.method === 'settings.models.read') return structuredClone(state.models);
+    if (input.method === 'settings.providers.lookup') return lookup;
+    return null;
+  });
+  try {
+    await f.render([original]);
+    await clock.fire();
+    state.providers.providers[0]!.connections.pop();
+    state.providers.observationId++;
+    state.models.models = state.models.models.filter((model) => model.id !== 'b');
+    state.models.observationId++;
+    await f.render([{ ...original, phase: 'applied' }]);
+    expect(f.saved).toBe(0);
+    await act(async () => reject(Error('network_outcome_unknown')));
+    expect(f.saved).toBe(1);
+    expect(f.calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(2);
+    expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(2);
+    expect(f.element.querySelectorAll('.provider-instance')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toHaveLength(1);
+    expect(
+      f.calls.some((call) =>
+        ['settings.providers.save', 'settings.models.enabled', 'settings.models.default'].includes(
+          call.method,
+        ),
+      ),
+    ).toBe(false);
+    expect(clock.pending).toBe(0);
+  } finally {
+    reject(Error('network_outcome_unknown'));
+    await f.close();
+    clock.close();
   }
 });

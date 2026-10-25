@@ -12,6 +12,24 @@ const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'markdown-content-browser-'));
 const output = path.join(artifact, 'dist');
+async function checkDiagramSurface(page: import('playwright').Page) {
+  const surface = await page.evaluate(() => {
+    const root = document.querySelector('.typeset-chat')!;
+    const diagram = root.querySelector('.markdown-code-block:has(.markdown-diagram)')!;
+    const code = root.querySelector('.markdown-code-block:not(:has(.markdown-diagram))')!;
+    return {
+      rendered: Boolean(diagram.querySelector('.markdown-diagram-scroll')),
+      background: getComputedStyle(diagram).backgroundColor,
+      codeBackground: getComputedStyle(code).backgroundColor,
+    };
+  });
+  assert.equal(
+    surface.background,
+    surface.rendered ? 'rgba(0, 0, 0, 0)' : surface.codeBackground,
+    'only the rendered diagram is transparent; source and fallback retain the code surface',
+  );
+  return surface;
+}
 async function checkMessageStyles(page: import('playwright').Page) {
   const styles = await page.evaluate(() => {
     const root = document.querySelector('.typeset-chat')!;
@@ -54,7 +72,6 @@ async function checkMessageStyles(page: import('playwright').Page) {
       code: read('.markdown-code-block:not(:has(.markdown-diagram))'),
       pre: read('.markdown-code-block:not(:has(.markdown-diagram)) pre'),
       header: read('[data-slot="code-block-header"]'),
-      diagram: read('.markdown-code-block:has(.markdown-diagram)'),
       quote,
       quoteContrast:
         (Math.max(quoteLuminance, backgroundLuminance) + 0.05) /
@@ -92,7 +109,7 @@ async function checkMessageStyles(page: import('playwright').Page) {
   assert.equal(styles.code.border, '0px');
   assert.equal(styles.pre.border, '0px');
   assert.equal(styles.header.border, '0px');
-  assert.equal(styles.diagram.background, transparent);
+  const diagram = await checkDiagramSurface(page);
   assert.equal(styles.quote.leftBorder, '2px');
   assert.equal(styles.quote.background, transparent);
   assert.ok(styles.quoteContrast >= 4.5, 'quoted text remains readable against the page');
@@ -142,7 +159,7 @@ async function checkMessageStyles(page: import('playwright').Page) {
     'underline',
   );
   await link.blur();
-  return styles;
+  return { ...styles, diagram };
 }
 // Check decoded pixels, not just theme variables present in an SVG stylesheet.
 async function diagramInk(page: import('playwright').Page) {
@@ -259,6 +276,7 @@ if (process.argv.includes('--serve')) {
       await diagram.waitFor();
       await diagram.evaluate(async (image) => (image as HTMLImageElement).decode());
       assert.ok(await diagram.evaluate((image) => (image as HTMLImageElement).naturalWidth > 0));
+      await checkDiagramSurface(page);
       await page.getByRole('button', { name: '暂停读取', exact: true }).click();
       assert.equal(
         await page.locator('.markdown-source-toggle').getAttribute('aria-disabled'),
@@ -336,6 +354,7 @@ if (process.argv.includes('--serve')) {
         }
       }
       await page.getByRole('button', { name: '源码', exact: true }).click();
+      await checkDiagramSurface(page);
       const source = await page.locator('.markdown-diagram pre').textContent();
       await page
         .locator('.markdown-code-block')
@@ -347,16 +366,20 @@ if (process.argv.includes('--serve')) {
       await page.getByRole('heading', { name: '另一会话', exact: true }).waitFor();
       await page.getByRole('button', { name: '切换会话', exact: true }).click();
       assert.equal(await page.locator('.markdown-diagram pre').textContent(), source);
+      await checkDiagramSurface(page);
       await page.getByRole('button', { name: '图表', exact: true }).click();
       await diagram.waitFor();
+      await checkDiagramSurface(page);
       await page.getByRole('button', { name: '错误源码', exact: true }).click();
       await page.getByText('图表暂时无法解析，请查看源码').waitFor();
       assert.equal(await page.locator('.markdown-diagram pre').textContent(), 'graph TD\nA[\n');
+      await checkDiagramSurface(page);
       await page.getByRole('button', { name: '流程图', exact: true }).click();
       await diagram.waitFor();
       await page.getByRole('button', { name: '外部资源', exact: true }).click();
       await page.getByText('图表含自定义样式或交互内容，请查看源码').waitFor();
       assert.equal(await diagram.count(), 0);
+      await checkDiagramSurface(page);
       const editor = page.getByRole('textbox', { name: 'Markdown 样式输入', exact: true });
       await editor.press('ControlOrMeta+End');
       await editor.press('End');
