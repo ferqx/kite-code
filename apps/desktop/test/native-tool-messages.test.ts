@@ -223,8 +223,15 @@ test('Native MCP names come only from exact saved metadata; failed metadata neve
   };
   let pageVersion = version,
     label = name,
+    labelComplete = true,
+    descriptorBytes = '100',
     foreign = false,
     unavailable = false;
+  let artifactReads = 0;
+  f.client.readArtifact = async () => {
+    artifactReads++;
+    throw Error('unexpected descriptor read');
+  };
   const queries: string[] = [];
   f.client.queryExtension = async (sessionId, extensionId, query) => {
     expect(sessionId).toBe('s');
@@ -272,9 +279,9 @@ test('Native MCP names come only from exact saved metadata; failed metadata neve
                     definitionId,
                     definitionVersion: pageVersion,
                     label,
-                    labelComplete: true,
+                    labelComplete,
                     descriptorHash: hash,
-                    descriptorBytes: '100',
+                    descriptorBytes,
                     manifest: ref,
                   },
                 ],
@@ -304,6 +311,14 @@ test('Native MCP names come only from exact saved metadata; failed metadata neve
     unavailable = foreign = false;
     pageVersion = version;
     label = name;
+    labelComplete = false;
+    descriptorBytes = String(256 * 1024 + 1);
+    const capped = (await f.list(['mcp'])).entries[0]!;
+    expect(capped.status).toBe('failed');
+    expect(capped.label).toBeUndefined();
+    expect(artifactReads).toBe(0);
+    labelComplete = true;
+    descriptorBytes = '100';
     const originalQuery = f.client.queryExtension;
     let start!: () => void, release!: () => void;
     const started = new Promise<void>((resolve) => {
@@ -325,6 +340,198 @@ test('Native MCP names come only from exact saved metadata; failed metadata neve
   } finally {
     f.manager.release();
   }
+});
+
+for (const [snapshots, tools] of [
+  [5, 1024],
+  [64, 0],
+] as const)
+  test(`optional MCP labels bound a page shared across tools (${snapshots} snapshots, ${tools} tools)`, async () => {
+    const f = fixture(),
+      hash = 'a'.repeat(64);
+    for (const id of ['first', 'second'])
+      f.add(
+        id,
+        'failed',
+        id,
+        `mcp.docs.${createHash('sha256').update(JSON.stringify(id)).digest('hex').slice(0, 32)}`,
+      );
+    f.add('file', 'succeeded', 'file', 'files.read');
+    let queries = 0;
+    const keys = Array.from(
+      { length: snapshots },
+      (_, index) => `tools/${String(index + 1).padStart(64, '0')}`,
+    );
+    const origin = (index: number) => ({
+      originStoreId: 'store',
+      sessionId: 's',
+      serverId: 'docs',
+      configDigest: hash,
+      connectionExecutionId: 'connection',
+      publisherExecutionId: `publisher${index}`,
+      generation: index + 1,
+    });
+    const ref = (index: number) => ({
+      id: 'index',
+      hash,
+      size: '100',
+      mediaType: 'application/json; charset=utf-8',
+      scope: { kind: 'execution', id: `publisher${index}` },
+    });
+    const signals: AbortSignal[] = [];
+    f.client.queryExtension = async (sessionId, extensionId, query, input, options) => {
+      queries++;
+      signals.push(options!.signal!);
+      const request = input as { afterKey?: string; recordKey?: string; afterIndex?: number };
+      const start = request.afterKey ? keys.indexOf(request.afterKey) + 1 : 0;
+      const index = keys.indexOf(request.recordKey ?? '');
+      const afterIndex = request.afterIndex ?? 0;
+      return [
+        {
+          extensionId,
+          contentType:
+            query === 'mcp.tools.snapshots' ? 'builtin.mcp.tools.snapshots' : 'builtin.mcp.tools',
+          contentVersion: 1,
+          summary: 'saved metadata',
+          actions: [],
+          artifactRefs: [],
+          payload:
+            query === 'mcp.tools.snapshots'
+              ? {
+                  version: 1,
+                  sessionId,
+                  items: keys.slice(start, start + 32).map((recordKey, offset) => ({
+                    recordKey,
+                    sourceRecordKey: 'source/original',
+                    origin: origin(start + offset),
+                    availability: 'available',
+                    reason: null,
+                    toolCount: tools,
+                    index: ref(start + offset),
+                  })),
+                  nextAfterKey: start + 32 < keys.length ? keys[start + 31]! : null,
+                }
+              : {
+                  version: 1,
+                  recordKey: keys[index]!,
+                  binding: { ...origin(index), indexDigest: hash },
+                  availability: 'available',
+                  reason: null,
+                  toolCount: tools,
+                  startIndex: afterIndex,
+                  entries: Array.from(
+                    { length: Math.min(32, tools - afterIndex) },
+                    (_, offset) => ({
+                      index: afterIndex + offset,
+                      definitionId: `mcp.docs.${createHash('sha256')
+                        .update(JSON.stringify(`another_tool_${afterIndex + offset}`))
+                        .digest('hex')
+                        .slice(0, 32)}`,
+                      definitionVersion: '1',
+                      label: `another_tool_${afterIndex + offset}`,
+                      labelComplete: true,
+                      descriptorHash: hash,
+                      descriptorBytes: '100',
+                      manifest: ref(index),
+                    }),
+                  ),
+                  nextIndex: afterIndex + 32 < tools ? afterIndex + 32 : null,
+                  complete: afterIndex + 32 >= tools,
+                  live: false,
+                  currentGeneration: null,
+                },
+        },
+      ] as Awaited<ReturnType<AgentClient['queryExtension']>>;
+    };
+    try {
+      const page = await f.list(['first', 'second', 'file']);
+      expect(queries).toBe(32);
+      expect(signals.every((signal) => signal === signals[0] && signal.aborted)).toBe(true);
+      expect(
+        page.entries.map(({ messageId, status, label }) => ({ messageId, status, label })),
+      ).toEqual([
+        { messageId: 'first', status: 'failed', label: undefined },
+        { messageId: 'second', status: 'failed', label: undefined },
+        { messageId: 'file', status: 'succeeded', label: undefined },
+      ]);
+    } finally {
+      f.manager.release();
+    }
+  });
+
+test('optional MCP deadline aborts only its GET and preserves page and sibling receipts', async () => {
+  const f = fixture();
+  f.add('mcp', 'failed', 'mcp', `mcp.docs.${'a'.repeat(32)}`);
+  f.add('file', 'succeeded', 'file', 'files.read');
+  let start!: () => void;
+  const started = new Promise<void>((resolve) => {
+    start = resolve;
+  });
+  let labelSignal: AbortSignal | undefined;
+  let aborted = false;
+  const receiptSignals: AbortSignal[] = [];
+  const originalExecution = f.client.getExecution;
+  f.client.getExecution = async (id, options) => {
+    expect(options?.signal?.aborted).toBe(false);
+    receiptSignals.push(options!.signal!);
+    return originalExecution(id, options);
+  };
+  f.client.queryExtension = async (_sessionId, _extensionId, _query, _input, options) => {
+    labelSignal = options!.signal!;
+    start();
+    return new Promise((_resolve, reject) => {
+      labelSignal!.addEventListener(
+        'abort',
+        () => {
+          aborted = true;
+          reject(labelSignal!.reason);
+        },
+        { once: true },
+      );
+    });
+  };
+  try {
+    const pending = f.list(['mcp', 'file']);
+    await started;
+    expect((await f.list(['file'])).entries[0]?.status).toBe('succeeded');
+    const page = await pending;
+    expect(aborted).toBe(true);
+    expect(receiptSignals.every((signal) => signal !== labelSignal)).toBe(true);
+    expect(
+      page.entries.map(({ messageId, status, label }) => ({ messageId, status, label })),
+    ).toEqual([
+      { messageId: 'mcp', status: 'failed', label: undefined },
+      { messageId: 'file', status: 'succeeded', label: undefined },
+    ]);
+  } finally {
+    f.manager.release();
+  }
+});
+
+test('closing MCP label reads forwards cancellation without publishing fallback to a retired page', async () => {
+  const f = fixture();
+  f.add('mcp', 'failed', 'mcp', `mcp.docs.${'a'.repeat(32)}`);
+  let start!: () => void;
+  const started = new Promise<void>((resolve) => {
+    start = resolve;
+  });
+  let labelSignal: AbortSignal | undefined;
+  f.client.queryExtension = async (_sessionId, _extensionId, _query, _input, options) => {
+    labelSignal = options!.signal!;
+    start();
+    return new Promise((_resolve, reject) => {
+      labelSignal!.addEventListener('abort', () => reject(labelSignal!.reason), { once: true });
+    });
+  };
+  const pending = f.list(['mcp']);
+  const outcome = pending.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await started;
+  f.manager.release();
+  expect(await outcome).toMatchObject({ code: 'native_selection_changed' });
+  expect(labelSignal?.aborted).toBe(true);
 });
 
 test('Web Fetch rows use the supported definition and only a unique original call supplies the URL', async () => {
