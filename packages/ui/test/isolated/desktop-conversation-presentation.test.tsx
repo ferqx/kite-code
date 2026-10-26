@@ -7,7 +7,9 @@ import {
   useConversationReadActive,
 } from '../../src/conversation-activity';
 import type { Conversation as ConversationType } from '../../src/desktop/Conversation';
+import { ConversationCache } from '../../src/desktop/ConversationCache';
 import type { Message } from '../../src/desktop/types';
+import { controlCacheAccounting } from '../conversation-cache-accounting.fixture';
 
 type Props = ComponentProps<typeof ConversationType>;
 let Conversation: typeof ConversationType;
@@ -24,7 +26,7 @@ const smallHistory = (): Message[] =>
     },
   ]).flat();
 
-async function fixture(messages = smallHistory(), customBodies = true) {
+async function fixture(messages = smallHistory(), customBodies = true, cached = false) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -73,6 +75,7 @@ async function fixture(messages = smallHistory(), customBodies = true) {
   Conversation ??= (await import('../../src/desktop/Conversation')).Conversation;
   const host = dom.window.document.getElementById('root')!;
   const root = createRoot(host);
+  const accounting = cached ? controlCacheAccounting(dom.window) : undefined;
   const calls: string[] = [];
   const clicks: string[] = [];
   function Gate({ message, prefix = '' }: { message: Message; prefix?: string }) {
@@ -105,27 +108,57 @@ async function fixture(messages = smallHistory(), customBodies = true) {
   };
   let resume = 0;
   let readActive = false;
+  let cacheId = 'a';
+  let cacheLoading = false;
   return {
     host,
     dom,
     calls,
     clicks,
     Gate,
-    async render(update: Partial<Props> & { resume?: number; readActive?: boolean } = {}) {
-      const { resume: nextResume, readActive: nextReadActive, ...updates } = update;
+    async render(
+      update: Partial<Props> & {
+        resume?: number;
+        readActive?: boolean;
+        cacheId?: string;
+        cacheLoading?: boolean;
+      } = {},
+    ) {
+      const {
+        resume: nextResume,
+        readActive: nextReadActive,
+        cacheId: nextCacheId,
+        cacheLoading: nextCacheLoading,
+        ...updates
+      } = update;
       if (nextResume !== undefined) resume = nextResume;
       if (nextReadActive !== undefined) readActive = nextReadActive;
+      if (nextCacheId !== undefined) cacheId = nextCacheId;
+      if (nextCacheLoading !== undefined) cacheLoading = nextCacheLoading;
       Object.assign(props, updates);
       await act(async () =>
         root.render(
-          <ConversationActivityContext value={{ resume, readActive }}>
-            <Conversation {...props} />
-          </ConversationActivityContext>,
+          cached ? (
+            <ConversationCache
+              identity={cacheId}
+              loading={cacheLoading}
+              visible
+              cache={{ scope: 'presentation-test', revision: '1', readActive }}
+            >
+              <Conversation key={cacheId} {...props} />
+            </ConversationCache>
+          ) : (
+            <ConversationActivityContext value={{ resume, readActive }}>
+              <Conversation {...props} />
+            </ConversationActivityContext>
+          ),
         ),
       );
+      if (accounting) await act(async () => accounting.flush());
     },
     async close() {
       await act(async () => root.unmount());
+      accounting?.restore();
       dom.window.close();
       for (const [key, descriptor] of original) {
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -172,6 +205,110 @@ test('closed history resumes and updates leaf read admission without reprojectin
     await f.close();
   }
 });
+
+for (const [initiallyOpen, lazyHistory] of [
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+] as const) {
+  test(`${initiallyOpen ? 'initial' : 'newly added'} default-open processes restore on the same cached DOM without reprojecting stable resumes (lazy history: ${lazyHistory})`, async () => {
+    const initial: Message[] = [
+      ...(lazyHistory
+        ? Array.from(
+            { length: 220 },
+            (_, index): Message => ({
+              id: `history-${index}`,
+              role: 'user',
+              text: `Earlier question ${index}`,
+              settled: true,
+            }),
+          )
+        : []),
+      { id: 'user', role: 'user', text: 'Question', settled: true },
+    ];
+    const messages: Message[] = [
+      ...initial,
+      {
+        id: 'tool:read',
+        turnId: 'run',
+        role: 'tool',
+        toolName: 'files.read',
+        text: 'Tool',
+        settled: false,
+      },
+    ];
+    const turnActivity: Props['turnActivity'] = { turnId: 'run', status: 'running' };
+    let toolCalls = 0;
+    const renderToolActivity: Props['renderToolActivity'] = () => {
+      toolCalls++;
+      return <div data-host-tools="">Live tool body</div>;
+    };
+    const f = await fixture(initiallyOpen ? messages : initial, false, true);
+    const leave = () =>
+      f.render({ cacheId: 'b', cacheLoading: false, messages: [], turnActivity: undefined });
+    const resume = () => f.render({ cacheId: 'a', cacheLoading: true, readActive: false });
+    const refresh = () =>
+      f.render({ cacheLoading: false, readActive: true, messages, turnActivity });
+    try {
+      await f.render({
+        lazyHistory,
+        renderToolActivity,
+        turnActivity: initiallyOpen ? turnActivity : undefined,
+      });
+      if (lazyHistory) {
+        expect(f.host.querySelectorAll('[data-conversation-entry-key]').length).toBeLessThan(100);
+        expect(f.host.textContent).not.toContain('Earlier question 0');
+      }
+      if (!initiallyOpen) await f.render({ messages, turnActivity });
+      const process = f.host.querySelector('.agent-turn-process')!;
+      const summary = process.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+      expect(summary.getAttribute('aria-expanded')).toBe('true');
+      expect(process.hasAttribute('data-restored-expanded')).toBe(initiallyOpen);
+      // The first render can add its own marker; settle that signature before
+      // measuring whether an already-restored projection is reused.
+      if (initiallyOpen) await f.render();
+      await leave();
+      expect(process.isConnected).toBe(false);
+      const beforeResume = toolCalls;
+      await resume();
+      expect(f.host.querySelector('.agent-turn-process')).toBe(process);
+      expect(process.getAttribute('data-restored-expanded')).toBe('true');
+      expect(summary.getAttribute('aria-expanded')).toBe('true');
+      expect(toolCalls).toBe(beforeResume + (initiallyOpen ? 0 : 1));
+      const restoredCalls = toolCalls;
+      for (let index = 0; index < 2; index++) {
+        await leave();
+        await resume();
+        expect(f.host.querySelector('.agent-turn-process')).toBe(process);
+        expect(process.getAttribute('data-restored-expanded')).toBe('true');
+        expect(toolCalls).toBe(restoredCalls);
+      }
+      await refresh();
+      await act(async () => summary.click());
+      await f.render();
+      expect(summary.getAttribute('aria-expanded')).toBe('false');
+      expect(process.hasAttribute('data-restored-expanded')).toBe(false);
+      const closedCalls = toolCalls;
+      await leave();
+      await resume();
+      expect(summary.getAttribute('aria-expanded')).toBe('false');
+      expect(process.hasAttribute('data-restored-expanded')).toBe(false);
+      expect(toolCalls).toBe(closedCalls);
+      await refresh();
+      await act(async () => summary.click());
+      await f.render();
+      expect(summary.getAttribute('aria-expanded')).toBe('true');
+      expect(process.hasAttribute('data-restored-expanded')).toBe(false);
+      await leave();
+      await resume();
+      expect(f.host.querySelector('.agent-turn-process')).toBe(process);
+      expect(process.getAttribute('data-restored-expanded')).toBe('true');
+    } finally {
+      await f.close();
+    }
+  });
+}
 
 test('changed message bytes, host renderers and current Turn facts replace the projected content', async () => {
   const messages = smallHistory();

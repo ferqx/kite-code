@@ -608,10 +608,14 @@ export function Conversation({
     },
     [lazyHistory],
   );
+  const committedOpenTurns = useRef<readonly string[]>([]);
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
     restore.current = true;
     for (const [id, open] of Object.entries(expanded)) if (open) restoredExpanded.current.add(id);
+    // Default-open live processes have no explicit expanded entry. Restore their
+    // markers too, invalidating the projection only when a marker was missing.
+    for (const id of committedOpenTurns.current) restoredExpanded.current.add(id);
   }
   useEffect(() => {
     const element = viewport.current;
@@ -1101,7 +1105,7 @@ export function Conversation({
         </div>
       );
     };
-    const renderEntry = (entry: (typeof entries)[number]) => {
+    const renderEntry = (entry: (typeof entries)[number], openTurns: string[]) => {
       if (!entry.turnId)
         return (
           <Fragment key={entry.key}>{entry.groups.map((group) => renderGroup(group))}</Fragment>
@@ -1196,6 +1200,7 @@ export function Conversation({
       // container so the old process cannot repaint during its exit animation.
       const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
       const open = expanded[turnKey] ?? !settled;
+      if (showProcess && open) openTurns.push(turnKey);
       // Cold history and restored readings start at their full height. Replaying
       // the default-open process moves the transcript for the entire animation.
       // A later user toggle removes this marker and keeps the normal animation.
@@ -1352,11 +1357,12 @@ export function Conversation({
     entryKeys.current = keys;
     rangeRef.current = lazyHistory ? range : undefined;
   }
-  const entryContent = useMemo(() => {
+  const { entryContent, openTurns } = useMemo(() => {
+    const openTurns: string[] = [];
     const visible = lazyHistory
       ? projection.entries.slice(range.start, range.end)
       : projection.entries;
-    return visible.map((entry) =>
+    const entryContent = visible.map((entry) =>
       lazyHistory ? (
         <div
           key={entry.key}
@@ -1364,13 +1370,17 @@ export function Conversation({
           data-conversation-entry-key={entry.key}
           data-entry-kind={entry.turnId ? 'turn' : (entry.groups[0]?.[0]?.role ?? 'other')}
         >
-          {projection.renderEntry(entry)}
+          {projection.renderEntry(entry, openTurns)}
         </div>
       ) : (
-        projection.renderEntry(entry)
+        projection.renderEntry(entry, openTurns)
       ),
     );
+    return { entryContent, openTurns };
   }, [projection, lazyHistory, range.start, range.end]);
+  useLayoutEffect(() => {
+    committedOpenTurns.current = openTurns;
+  }, [openTurns]);
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
