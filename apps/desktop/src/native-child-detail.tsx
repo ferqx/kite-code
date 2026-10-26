@@ -307,7 +307,9 @@ export function NativeChildDetail({
                 }
               : undefined
           }
-          loading={!facts && (!detail || detail.loading)}
+          // A failed first read is still unverified history, not an empty conversation.
+          // Retained facts remain readable while the environment retries in the background.
+          loading={!facts}
           selected
           connected
           initialReading={readings.get(readingKey)}

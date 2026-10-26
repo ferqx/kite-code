@@ -2584,8 +2584,17 @@ export class AgentRuntime {
           complete: snapshot.complete,
         };
     signal?.throwIfAborted();
-    const { continuation: _private, ...output } = fullOutput as typeof fullOutput & {
-      continuation?: Json;
+    // Hash the public projection itself; private replay metadata must not make
+    // the HTTP schema change the body after its digest has been computed.
+    const output = {
+      content: fullOutput.content,
+      reasoning: fullOutput.reasoning,
+      toolCalls: fullOutput.toolCalls.map(({ id, name, arguments: args }) => ({
+        id,
+        name,
+        arguments: args,
+      })),
+      complete: fullOutput.complete,
     };
     const bytes = Buffer.from(canonicalJson(output as unknown as Json));
     const { modelId: _modelId, confirmation: _confirmation, ...identity } = snapshot.identity;

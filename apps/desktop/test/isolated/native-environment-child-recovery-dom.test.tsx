@@ -13,6 +13,7 @@ import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 test('a failed child read recovers without cancelling a slow retry at the next backoff tick', async () => {
   const dom = new JSDOM('<div id="root"/>', { pretendToBeVisual: true });
+  const restoreLayout = prepareDesktopDom(dom);
   const keys = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const prior = keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
   Object.assign(globalThis, {
@@ -93,6 +94,7 @@ test('a failed child read recovers without cancelling a slow retry at the next b
     },
   };
   let environment!: ReturnType<typeof useNativeEnvironment>;
+  const pendingFrames: { busy: string | null; welcome: boolean }[] = [];
   function Harness() {
     environment = useNativeEnvironment({
       bridge,
@@ -111,7 +113,28 @@ test('a failed child read recovers without cancelling a slow retry at the next b
       unavailable: false,
       onChanged: async () => {},
     });
-    return environment.card;
+    useLayoutEffect(() => {
+      if (!environment.child?.facts)
+        pendingFrames.push({
+          busy:
+            dom.window.document
+              .querySelector('[aria-label="会话消息"]')
+              ?.getAttribute('aria-busy') ?? null,
+          welcome: !!dom.window.document.querySelector('.welcome'),
+        });
+    });
+    return (
+      <NativeChildDetail
+        child={environment.child}
+        generation={1}
+        storeId="store"
+        sessionId="child"
+        executionId={item.execution.id}
+        readActive
+        onRefresh={environment.refreshChild}
+        onTitleChange={() => {}}
+      />
+    );
   }
   const wait = async (milliseconds: number) =>
     act(async () => {
@@ -121,6 +144,10 @@ test('a failed child read recovers without cancelling a slow retry at the next b
     await act(async () => root.render(<Harness />));
     await act(async () => environment.openChild('child', item.execution.id));
     expect(environment.child?.error).toBe('fixture_child_read_failed');
+    const viewport = dom.window.document.querySelector('[aria-label="会话消息"]')!;
+    expect(viewport.getAttribute('aria-busy')).toBe('true');
+    expect(dom.window.document.querySelector('.welcome')).toBeNull();
+    expect(dom.window.document.querySelector('[aria-label="正在加载聊天"]')).not.toBeNull();
     const deadline = Date.now() + 3000;
     while (opens < 2 && Date.now() < deadline) await wait(25);
     expect(opens).toBe(2);
@@ -129,17 +156,25 @@ test('a failed child read recovers without cancelling a slow retry at the next b
     await wait(1250);
     expect(opens).toBe(2);
     expect(closed).not.toContain(retriedReadId);
+    expect(viewport.getAttribute('aria-busy')).toBe('true');
+    expect(dom.window.document.querySelector('.welcome')).toBeNull();
     await act(async () => release());
     await wait(20);
     expect(environment.child?.loading).toBe(false);
     expect(environment.child?.error).toBeUndefined();
     expect(environment.child?.facts?.session.id).toBe('child');
+    // Only a successfully verified empty log can admit the empty-history state.
+    expect(viewport.getAttribute('aria-busy')).toBe('false');
+    expect(dom.window.document.querySelector('.welcome')).not.toBeNull();
+    expect(pendingFrames.length).toBeGreaterThan(2);
+    expect(pendingFrames.every((frame) => frame.busy === 'true' && !frame.welcome)).toBe(true);
     await wait(1100);
     expect(opens).toBe(2);
     expect(dom.window.document.body.textContent).not.toContain('fixture_child_read_failed');
   } finally {
     release();
     await act(async () => root.unmount());
+    restoreLayout();
     dom.window.close();
     for (const [key, descriptor] of prior) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

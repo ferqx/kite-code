@@ -152,13 +152,17 @@ function endpoint(
     },
   };
 }
-function binding(baseURL: string, modelId = 'gpt-5') {
+function binding(
+  baseURL: string,
+  modelId = 'gpt-5',
+  protocol: 'responses' | 'chat-completions' = 'responses',
+) {
   return createSdkModelAdapter({
     models: new Map([
       [
         'bound',
         createCompatibleModelBinding({
-          protocol: 'responses',
+          protocol,
           name: 'openai',
           modelId,
           baseURL,
@@ -172,6 +176,7 @@ async function fixture(
   options: {
     root?: string;
     modelId?: string;
+    protocol?: 'responses' | 'chat-completions';
     tools?: ToolDefinition[];
     permissions?: Permissions;
   } = {},
@@ -183,7 +188,7 @@ async function fixture(
   const runtime = createRuntime({
     store,
     artifacts: createArtifactStore({ profile, store }),
-    model: binding(baseURL, options.modelId),
+    model: binding(baseURL, options.modelId, options.protocol),
     modelId: 'bound',
     permissions: options.permissions ?? {
       authorize: async () => ({ allowed: true, revision: 'local-test-only' }),
@@ -338,6 +343,154 @@ function validateHistory(
         .filter((row) => row.role === 'assistant')
         .some((row) => JSON.stringify(row).includes(item.output)),
     ).toBe(false);
+}
+
+for (const protocol of ['responses', 'chat-completions'] as const) {
+  test(`${protocol} mapped Tool output survives public HTTP digest verification and cold private replay`, async () => {
+    const records: Item[] = [];
+    const errors: string[] = [];
+    const counter = { effects: 0 };
+    const privateReasoning = 'sealed-mapped-reasoning';
+    const text =
+      protocol === 'responses' ? 'Read mapped tool.' : 'Chat mapped output 中文🙂 '.repeat(4096);
+    const publicArgs = JSON.stringify({ display_label: 'mapped', value: 1 });
+    const internalArgs = { label: 'mapped', value: 1 };
+    const mapped: ToolDefinition = {
+      ...tool(counter),
+      model: { name: 'record_item', parameterNames: { label: 'display_label' } },
+      async execute(input) {
+        expect(input).toEqual({ label: 'mapped', value: 1 });
+        counter.effects++;
+        return { outcome: 'succeeded', content: 'mapped-effect' };
+      },
+    };
+    const provider = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as Item;
+        const index = records.length;
+        records.push(body);
+        try {
+          expect(new URL(request.url).pathname).toBe(
+            protocol === 'responses' ? '/v1/responses' : '/v1/chat/completions',
+          );
+          if (index > 0) {
+            if (protocol === 'responses') {
+              expect(body.input).toContainEqual({
+                type: 'function_call',
+                call_id: 'mapped-call',
+                name: 'record_item',
+                arguments: publicArgs,
+              });
+              expect(ciphertext(body as Body)).toContain(privateReasoning);
+            } else {
+              const calls = (body.messages as Item[]).find((message) =>
+                Array.isArray(message.tool_calls),
+              )?.tool_calls as Item[];
+              expect(calls).toHaveLength(1);
+              expect(calls[0]).toMatchObject({
+                id: 'mapped-call',
+                type: 'function',
+                function: { name: 'record_item' },
+              });
+              expect(JSON.parse((calls[0]!.function as Item).arguments as string)).toEqual(
+                JSON.parse(publicArgs),
+              );
+            }
+          }
+          if (protocol === 'responses') {
+            const turn =
+              index === 0
+                ? {
+                    id: 'mapped-first',
+                    encrypted: privateReasoning,
+                    text: [text],
+                    calls: [{ id: 'mapped-call', name: 'record_item', arguments: publicArgs }],
+                  }
+                : { id: `mapped-next-${index}`, text: ['Mapped complete.'] };
+            return new Response(encodeFrames(responseFrames(turn, body)), {
+              headers: { 'content-type': 'text/event-stream' },
+            });
+          }
+          const frame = (delta: Item, finish_reason: string | null = null) =>
+            `data: ${JSON.stringify({ id: `chat-mapped-${index}`, object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+          const delta =
+            index === 0
+              ? {
+                  content: text,
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'mapped-call',
+                      type: 'function',
+                      function: { name: 'record_item', arguments: publicArgs },
+                    },
+                  ],
+                }
+              : { content: 'Mapped complete.' };
+          return new Response(
+            `${frame(delta)}${frame({}, index === 0 ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        } catch (error) {
+          errors.push(String(error));
+          return Response.json(
+            { error: { message: 'mapped output fixture failed' } },
+            { status: 400 },
+          );
+        }
+      },
+    });
+    let f = await fixture(`http://127.0.0.1:${provider.port}/v1`, { protocol, tools: [mapped] });
+    try {
+      await start(f);
+      const view = await finished(f.client);
+      expect(view.commandRun.status).toBe('completed');
+      expect(errors).toEqual([]);
+      expect(counter.effects).toBe(1);
+      const first = view.executions.find(
+        (execution) =>
+          execution.kind === 'model' && (execution.result as Item).finishReason === 'tool_calls',
+      )!;
+      const history = await f.client.listMessages('s');
+      expect(
+        history.find((message) => message.outputBody?.executionId === first.id)?.outputBody
+          ?.complete,
+      ).toBe(true);
+      // The real Client verifies the semantic hash/bytes after Runtime and HTTP projection.
+      const output = await f.client.getModelOutput('s', first.id);
+      expect(output.output).toEqual({
+        content: text,
+        reasoning: '',
+        complete: true,
+        toolCalls: [{ id: 'mapped-call', name: 'fixture.record', arguments: expect.any(String) }],
+      });
+      expect(JSON.parse(output.output.toolCalls[0]!.arguments)).toEqual(internalArgs);
+      expect(JSON.stringify(output)).not.toContain(privateReasoning);
+      expect(output.output.toolCalls[0]).not.toHaveProperty('model');
+      const root = f.root;
+      const originalHash = output.bodyHash;
+      await f.close(false);
+      f = await fixture(`http://127.0.0.1:${provider.port}/v1`, {
+        root,
+        protocol,
+        tools: [mapped],
+      });
+      expect((await f.client.getModelOutput('s', first.id)).bodyHash).toBe(originalHash);
+      expect(records).toHaveLength(2);
+      // A later request must still restore the original Model name/parameter mapping;
+      // Responses must also retain its sealed continuation across the cold reopen.
+      await start(f, 'cold-mapped', 's', 'New task: check saved mapped history');
+      expect((await finished(f.client, 'cold-mapped')).commandRun.status).toBe('completed');
+      expect(errors).toEqual([]);
+      expect(records).toHaveLength(3);
+      expect(counter.effects).toBe(1);
+    } finally {
+      await f.close();
+      provider.stop(true);
+    }
+  }, 30_000);
 }
 
 test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented calls, usage, cold continuation and binding isolation', async () => {

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
-const [outdir, root, executablePath, control, mode] = process.argv.slice(2) as string[];
+const [outdir, root, executablePath, control, protocol, mode] = process.argv.slice(2) as string[];
 const app = await _electron.launch({
   executablePath,
   args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
@@ -91,6 +91,79 @@ try {
     }, kind);
   }
   phase = 'instrument';
+  await page.evaluate(() => {
+    const host = globalThis as typeof globalThis & {
+      childStreamProcess?: {
+        observations: number;
+        welcomeFrames: number;
+        duplicateFrames: number;
+        stages: { phase: string; text: string; busy: string | null }[];
+      };
+    };
+    const process = {
+      observations: 0,
+      welcomeFrames: 0,
+      duplicateFrames: 0,
+      stages: [] as { phase: string; text: string; busy: string | null }[],
+    };
+    host.childStreamProcess = process;
+    const observe = () => {
+      const child = document.querySelector('.session-tab-child .conversation');
+      if (!child) return;
+      process.observations++;
+      const text = child.textContent ?? '';
+      if (child.querySelector('.welcome')) process.welcomeFrames++;
+      if (
+        ['CHILD_A_INITIAL_TAIL', 'CHILD_B_INITIAL_TAIL'].some(
+          (marker) => text.split(marker).length > 2,
+        )
+      )
+        process.duplicateFrames++;
+    };
+    new MutationObserver(observe).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+  });
+  const capture = async (stage: 'first' | 'live' | 'complete') => {
+    const result = await page.evaluate((phase) => {
+      const child = document.querySelector('.session-tab-child .conversation');
+      const process = (
+        globalThis as typeof globalThis & {
+          childStreamProcess: {
+            observations: number;
+            welcomeFrames: number;
+            duplicateFrames: number;
+            stages: { phase: string; text: string; busy: string | null }[];
+          };
+        }
+      ).childStreamProcess;
+      process.stages.push({
+        phase,
+        text: (child?.textContent ?? '').slice(-220),
+        busy: child?.querySelector('.conversation-viewport')?.getAttribute('aria-busy') ?? null,
+      });
+      return process;
+    }, stage);
+    assert.ok(result.observations > 0, 'child DOM mutations were observed throughout navigation');
+    assert.equal(
+      result.welcomeFrames,
+      0,
+      'unread child history never becomes a new conversation welcome',
+    );
+    assert.equal(
+      result.duplicateFrames,
+      0,
+      'streamed child messages do not duplicate across handoff',
+    );
+    await page.screenshot({ path: join(root!, `child-stream-${stage}.png`) });
+    writeFileSync(
+      join(root!, 'child-stream-process.json'),
+      JSON.stringify({ protocol, ...result }, null, 2),
+    );
+  };
   await app.evaluate(() => {
     const global = globalThis as typeof globalThis & {
       childStreamReads: {
@@ -174,6 +247,11 @@ try {
     );
   });
   phase = 'send';
+  const model = page.locator('[data-model-picker] [data-model-trigger]');
+  await model.click();
+  await page.getByRole('button', { name: '选择模型，当前 未选择', exact: true }).click();
+  await page.getByRole('option', { name: '选择模型 fixture', exact: true }).click();
+  await page.keyboard.press('Escape');
   await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill('STREAM_PARENT');
   const send = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
   await until(() => send.isEnabled(), Boolean, 'send enabled');
@@ -485,6 +563,7 @@ try {
   );
   const firstChild = first.includes('CHILD_A_INITIAL_TAIL') ? 'CHILD_A' : 'CHILD_B';
   assert.equal(firstChild, tasks[0]!.prompt, 'rendered child matches its exact parent Tool prompt');
+  await capture('first');
   const liveDelays: number[] = [];
   for (let tick = 0; tick < 5; tick++) {
     const marker = `${firstChild}_LIVE_${tick}`;
@@ -500,6 +579,7 @@ try {
     liveDelays.push(Date.now() - sent);
     console.error('live_tick', tick, Date.now() - sent, (await state()).environmentRevision);
   }
+  await capture('live');
   if (mode === 'capture') {
     const screenshot = join(tmpdir(), 'kite-native-child-stream-after.png');
     await page.screenshot({ path: screenshot });
@@ -526,8 +606,14 @@ try {
     appended.set(secondChild, [secondTail]);
     await close();
     const baselineProviderCalls = (await count()).calls;
-    assert.equal(baselineProviderCalls.filter((call) => call === 'CHILD_A').length, 1);
-    assert.equal(baselineProviderCalls.filter((call) => call === 'CHILD_B').length, 1);
+    assert.equal(
+      baselineProviderCalls.filter((call) => call === 'CHILD_A').length,
+      protocol === 'responses' ? 2 : 1,
+    );
+    assert.equal(
+      baselineProviderCalls.filter((call) => call === 'CHILD_B').length,
+      protocol === 'responses' ? 2 : 1,
+    );
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
     const waitForFiniteReads = () =>
@@ -984,6 +1070,7 @@ try {
         (value) => value.includes(`${expected}_DONE`),
         `completed ${expected} history preserves final tail`,
       );
+      if (index === 0) await capture('complete');
       await close();
     }
     // Normal child completion may create legitimate parent report turns. Snapshot
@@ -1002,8 +1089,8 @@ try {
     for (const child of ['CHILD_A', 'CHILD_B'])
       assert.equal(
         completedCalls.filter((call) => call === child).length,
-        1,
-        'original child Model executes exactly once',
+        protocol === 'responses' ? 2 : 1,
+        'each original child Model step executes exactly once',
       );
   }
 } catch (cause) {
