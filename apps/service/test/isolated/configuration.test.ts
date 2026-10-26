@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { browserToolIds } from '@kite-ai/agent/browser';
 import {
   createCredentialVault,
   createTemporaryCredentialBackend,
@@ -478,7 +479,22 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     const names = (requests[0]!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );
-    expect(names).toHaveLength(15);
+    const browserViews = await child.handle.client.queryExtension(
+      'session',
+      'builtin.browser',
+      'browser.view',
+      {},
+    );
+    expect(browserViews.length).toBeLessThanOrEqual(1);
+    if (browserViews.length)
+      expect(browserViews[0]!.payload).toMatchObject({
+        state: 'unavailable',
+        error: expect.any(String),
+      });
+    const browserNames = browserViews.length
+      ? []
+      : browserToolIds.map((id) => id.replace('.', '_'));
+    expect(names).toHaveLength(15 + browserNames.length);
     expect([...names].sort()).toEqual(
       [
         'ask_user',
@@ -496,6 +512,7 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
         'wait_agent_events',
         'list_agents',
         'interrupt_agent',
+        ...browserNames,
       ].sort(),
     );
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
@@ -509,7 +526,7 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       cursor: { type: 'string' },
     });
     expect(search.function.parameters.properties).not.toHaveProperty('after');
-    expect(new Set(names).size).toBe(15);
+    expect(new Set(names).size).toBe(15 + browserNames.length);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
       (

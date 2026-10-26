@@ -100,6 +100,17 @@ export function builtinCapability(
   planningId: string,
   definitionVersion?: string,
 ): { effects: readonly CapabilityEffect[]; safeRead: boolean; internalRecordOnly?: true } {
+  if (extensionId === 'builtin.browser' && definitionVersion === '1') {
+    if (kind === 'tool' && definitionId === 'browser.snapshot')
+      return { effects: ['read'], safeRead: true };
+    if (kind === 'tool' && definitionId === 'browser.open')
+      return { effects: ['process', 'network', 'unknown', 'record_write'], safeRead: false };
+    if (kind === 'job' && definitionId === 'browser.session')
+      return { effects: ['process', 'network', 'unknown'], safeRead: false };
+    if (kind === 'action' && definitionId === 'browser.select')
+      return { effects: ['record_write'], safeRead: false };
+    return { effects: ['network', 'unknown'], safeRead: false };
+  }
   if (kind === 'action' && extensionId === planningId)
     return { effects: [planningEffect(definitionId)], safeRead: false };
   if (kind === 'action' && extensionId === 'builtin.files')

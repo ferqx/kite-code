@@ -49,6 +49,7 @@
 - [根入口](src/index.ts)：`createRuntime`，import 不打开资源。Runtime 的短命令受理与异步运行分开；模型和工具等待不占控制入口。
 - [扩展入口](src/extensions/index.ts)：具版本 Tool/Action/Query、JSON schema、公开内容 envelope 与有限操作。扩展只获得当前 Session、自有 namespace 的记录 CAS、公开 Run/Execution 和受控子工具；不取得 SQL、owner 或完整运行状态。
 - [权限策略与 Shell 授权](src/permissions/README.md)：独立 `@kite-ai/agent/permissions` 与 `/permissions/shell`，统一三策略、权限约束、Shell AST/危险拒绝、摘要和最终 scope；Service 只注入宿主事实，Loop 保持通用授权接口。
+- [Agent Browser](src/tools/browser/README.md)：`@kite-ai/agent/browser` 的普通 Tool／Job／Query／Action，固定上游原生协议、整树监督、最新帧及人工接管；当前仅 Linux 适配已实现且真实联调待验证，macOS／Windows unavailable，普通填写不适用于凭据。
 - [普通问题入口](src/tools/ask-user/README.md)：`@kite-ai/agent/ask-user` 的纯工厂通过原 `requestInput` 提供 1–3 题、原选项和自由回答，并将原答案解释为模型与历史文案；默认选择及 child 禁用归 Service。
 - [计划与 receipt 验证入口](src/business/planning/README.md)：显式业务工厂、真实用户计划审阅、来源绑定的步骤回执、required 判定和准确 waiver；共享扩展端口与唯一 Loop。完整文件/Artifact/命令/MCP 验证及自动修复继续按该 owner 范围实施。
 - [Store 端口](src/storage/port.ts)：宿主使用的具名查询和事务；[记录](src/storage/types.ts)保存业务事实，非完整内存 State。

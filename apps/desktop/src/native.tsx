@@ -34,6 +34,11 @@ import {
   ToolActivity,
 } from '@kite-ai/ui/desktop';
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AgentBrowserPanel } from './agent-browser-panel';
+import {
+  AgentBrowserPresentation,
+  agentBrowserPresentationKeys,
+} from './agent-browser-presentation';
 import type { DesktopEditor } from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
@@ -224,6 +229,8 @@ function NativeDesktopContent({
   const [settingsEditorHost, setSettingsEditorHost] = useState<HTMLDivElement | null>(null);
   const settingsEditorControl = useRef<{ close: () => void } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
+  const agentBrowserPresentation = useRef(new AgentBrowserPresentation());
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [newDraft, setNewDraft] = useState('');
@@ -667,6 +674,7 @@ function NativeDesktopContent({
   }
   async function select(sessionId: string, keepCurrentDraft = true, keepTaskPage = false) {
     if (!bridge || readLifecycle.current.quitting) return;
+    setAgentBrowserOpen(false);
     if (keepCurrentDraft) rememberDraft();
     const firstHandoff =
       preparing && !keepCurrentDraft && firstRef.current?.creation.sessionId === sessionId;
@@ -928,6 +936,14 @@ function NativeDesktopContent({
         : undefined,
     [state?.selection, historyState.phase],
   );
+  useEffect(() => {
+    if (preparing || scheduledTasksView || settingsOpen) return;
+    const keys = agentBrowserPresentationKeys(selection, selected.current);
+    if (agentBrowserPresentation.current.observe(keys)) {
+      setToolsOpen(false);
+      setAgentBrowserOpen(true);
+    }
+  }, [selection, preparing, scheduledTasksView, settingsOpen]);
   // Selection counters govern IO, not the identity of an already observed display label.
   const selectionHandoff =
     !!selectionRead.current && selected.current !== state?.selection?.session.id;
@@ -1574,6 +1590,7 @@ function NativeDesktopContent({
     pageIntent.current++;
     setScheduledTasksView(false);
     setToolsOpen(false);
+    setAgentBrowserOpen(false);
     setPreparing(true);
     if (newPermission === undefined && selection?.permissions)
       setNewPermission(selection.permissions.mode.mode);
@@ -1616,6 +1633,7 @@ function NativeDesktopContent({
       setPreparing(true);
       setScheduledTasksView(false);
       setToolsOpen(false);
+      setAgentBrowserOpen(false);
       setNewWorkspace('');
       setNewBranch(undefined);
       setTargetBranch(undefined);
@@ -1673,6 +1691,7 @@ function NativeDesktopContent({
         setPreparing(true);
         setScheduledTasksView(false);
         setToolsOpen(false);
+        setAgentBrowserOpen(false);
         // The host returns the actual registered identity, never a guessed new directory item.
         const value = await bridge.request({
           method: 'conversation.branch',
@@ -3869,6 +3888,7 @@ function NativeDesktopContent({
           pageIntent.current++;
           setPreparedModels(undefined);
           setToolsOpen(false);
+          setAgentBrowserOpen(false);
           setScheduledTasksView(true);
         },
         theme,
@@ -3940,12 +3960,30 @@ function NativeDesktopContent({
               <DesktopButton
                 variant="ghost"
                 aria-expanded={toolsOpen}
-                onClick={() => setToolsOpen(!toolsOpen)}
+                onClick={() => {
+                  setAgentBrowserOpen(false);
+                  setToolsOpen(!toolsOpen);
+                }}
               >
                 会话工具
               </DesktopButton>
             </NativeDiagnostic>
           )}
+          {!scheduledTasksView &&
+            !preparing &&
+            selection?.canReadExtensions &&
+            !selection.session.parentSessionId && (
+              <DesktopButton
+                variant="ghost"
+                aria-expanded={agentBrowserOpen}
+                onClick={() => {
+                  setToolsOpen(false);
+                  setAgentBrowserOpen(!agentBrowserOpen);
+                }}
+              >
+                Agent 浏览器
+              </DesktopButton>
+            )}
           <NativeDiagnostic>
             <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
               设置
@@ -4320,42 +4358,84 @@ function NativeDesktopContent({
       }
       readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
       detailPanel={
-        diagnostics && toolsOpen
+        agentBrowserOpen && selection && state && !preparing && !scheduledTasksView
           ? {
-              label: '会话与任务',
+              label: 'Agent 浏览器',
               content: (
-                <>
-                  {renderSessionTools()}
-                  {selection && state && (
-                    <NativeExtensions
-                      key={JSON.stringify([
-                        state.generation,
-                        selection.viewSelection,
-                        state.historyEpoch,
-                        selection.storeId,
-                        selection.session.id,
-                        selection.session.contextSelectionId,
-                      ])}
-                      bridge={bridge}
-                      scope={{
-                        generation: state.generation,
-                        viewSelection: selection.viewSelection ?? selection.viewGeneration,
-                        historyEpoch: state.historyEpoch ?? 0,
-                        storeId: selection.storeId,
-                        sessionId: selection.session.id,
-                        workspaceId: selection.session.workspaceId,
-                        contextSelectionId: selection.session.contextSelectionId,
-                      }}
-                      submissions={state.callerSubmissions}
-                      canRead={selection.canReadExtensions === true}
-                      canInvoke={selection.canInvokeExtensions === true}
-                    />
-                  )}
-                </>
+                <AgentBrowserPanel
+                  key={JSON.stringify([
+                    state.generation,
+                    selection.viewSelection,
+                    state.historyEpoch,
+                    selection.storeId,
+                    selection.session.id,
+                    selection.session.contextSelectionId,
+                  ])}
+                  bridge={bridge}
+                  scope={{
+                    generation: state.generation,
+                    viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                    historyEpoch: state.historyEpoch ?? 0,
+                    storeId: selection.storeId,
+                    sessionId: selection.session.id,
+                    workspaceId: selection.session.workspaceId,
+                    contextSelectionId: selection.session.contextSelectionId,
+                  }}
+                  canRead={selection.canReadExtensions === true}
+                  canInvoke={selection.canInvokeExtensions === true}
+                  visible={!settingsOpen}
+                  submissions={state.callerSubmissions}
+                  onQuote={(quote) => {
+                    if (
+                      generation.current !== state.generation ||
+                      selected.current !== selection.session.id
+                    )
+                      return;
+                    const key = imageScope(selection.storeId, selection.session.id);
+                    if (draftOwner.current !== key) return;
+                    const previous = draftCache.current.get(key)?.content ?? draft;
+                    changeDraft(`${previous}${previous ? '\n\n' : ''}${quote}`);
+                  }}
+                />
               ),
-              onClose: () => setToolsOpen(false),
+              onClose: () => setAgentBrowserOpen(false),
             }
-          : undefined
+          : diagnostics && toolsOpen
+            ? {
+                label: '会话与任务',
+                content: (
+                  <>
+                    {renderSessionTools()}
+                    {selection && state && (
+                      <NativeExtensions
+                        key={JSON.stringify([
+                          state.generation,
+                          selection.viewSelection,
+                          state.historyEpoch,
+                          selection.storeId,
+                          selection.session.id,
+                          selection.session.contextSelectionId,
+                        ])}
+                        bridge={bridge}
+                        scope={{
+                          generation: state.generation,
+                          viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                          historyEpoch: state.historyEpoch ?? 0,
+                          storeId: selection.storeId,
+                          sessionId: selection.session.id,
+                          workspaceId: selection.session.workspaceId,
+                          contextSelectionId: selection.session.contextSelectionId,
+                        }}
+                        submissions={state.callerSubmissions}
+                        canRead={selection.canReadExtensions === true}
+                        canInvoke={selection.canInvokeExtensions === true}
+                      />
+                    )}
+                  </>
+                ),
+                onClose: () => setToolsOpen(false),
+              }
+            : undefined
       }
       overlays={
         <>

@@ -1,0 +1,121 @@
+.agent-browser-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  font-size: 13px;
+}
+.agent-browser-panel p {
+  margin: 0;
+}
+.agent-browser-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-browser-panel input,
+.agent-browser-panel textarea,
+.agent-browser-panel select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+.agent-browser-status,
+.agent-browser-location,
+.agent-browser-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-browser-status > span,
+.agent-browser-location > span,
+.agent-browser-help,
+.agent-browser-selection > span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.agent-browser-location > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-browser-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-browser-frame {
+  display: block;
+  position: relative;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  cursor: crosshair;
+}
+.agent-browser-frame:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.agent-browser-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.agent-browser-region {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid #2563eb;
+  box-sizing: border-box;
+}
+.agent-browser-region > span {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: #fff;
+  background: #1d4ed8;
+  min-width: 16px;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+.agent-browser-region.is-selected {
+  border: 2px solid #e11d48;
+  background: #e11d4820;
+}
+.agent-browser-region.is-selected > span {
+  background: #be123c;
+}
+.agent-browser-selection {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.agent-browser-navigate {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+}
+.agent-browser-navigate label {
+  flex: 1;
+}
+.agent-browser-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: 6px;
+}

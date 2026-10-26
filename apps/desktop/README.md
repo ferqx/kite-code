@@ -370,6 +370,18 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 2026-10-20 Windows x64／Bun 1.4.3／Electron 44.3.0／Node 24.15.0，在 `5dba8a6b` 工作树既有输入加本轮 diff 上执行：`bun test --parallel=1 --max-concurrency=1 packages/ui/test/desktop-page.test.tsx packages/ui/test/isolated/desktop-sidebar.test.tsx packages/ui/test/isolated/desktop-session-tabs.test.tsx apps/desktop/test/native-browser-bridge.test.ts apps/desktop/test/native-file-changes.test.ts apps/desktop/test/isolated/native-file-changes-dom.test.tsx` 的对应分组共33项／419断言通过；上述隔离 Electron 命令另通过1项及实际窗口断言，核真实前进／后退／刷新、独立 Cookie、无应用／Node接口、外来 frame 拒绝、同标签弹窗、下载拒绝、宽窄保留和关闭／换会话销毁。亮暗新标签页截图核标签条、地址栏、工具留白和无 header 下边框；UI／Desktop typecheck、定向 Biome、文档和边界检查通过。窗口隐藏运行，不代证原生网页与系统材质合成、外部站点兼容、macOS／Linux 或安装制品；未调用模型。Tailwind 对既有嵌套 keyframes 的优化 warning 保留，普通客户端未增加测试入口。
 
+## Agent 浏览器观察与人工操作
+
+这是独立于上节手动网页标签的受管浏览器观察面板，不接管 WebContentsView，也不添加另一套 Agent Loop。产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#agent-浏览器)，能力装配与真实资源分别由 [Service](../service/README.md#受管-browser-默认装配)和 [Agent Browser](../../packages/agent/src/tools/browser/README.md)负责。当前只有 Linux 原生监督适配已实现，真实 Chrome／Electron 联调尚未取得资格；macOS／Windows 明确不可用，不是仅缺测试。
+
+[Native 主页面](src/native.tsx)在普通主会话提供“Agent 浏览器”入口，不受测试诊断开关控制。[自动呈现](src/agent-browser-presentation.ts)只接受当前已核实 Store／Session 内 `browser.session@1` 的 dispatching／running Job，排除 child、foreign、取消中和未完成选择的记录。每个准确 Job 在当前 renderer 生命周期内最多自动打开一次；用户关闭面板不因同一记录重读而重新打开。换会话、准备新会话或进入安排任务收起面板，不改变浏览器 Job。
+
+[Observer](src/agent-browser-observer.ts)沿原 Main Extension 读取身份调用 `browser.view`，只持一份最新帧；隐藏、设置覆盖、不可见或卸载时释放观察句柄并撤销旧操作资格。[View decoder](src/agent-browser-view.ts)核 envelope、generation／seq、帧和选取引用；页面内容不能提供新的读取或执行权。人工 handoff／resume／input／select／close 仍走原 Action 和持久 Command，未知只查原 commandId；原提交跨面板重开继续查询，不重发输入。主进程和公开 HTTP 协议未增加浏览器专用旁路。
+
+[Panel](src/agent-browser-panel.tsx)把截图点击转换为实际图片范围内的元素选择，不直接点击网页；明确“点击所选元素”或“填入所选元素”才提交操作。页面变化使旧引用失效；“引用到对话”把页面、元素、帧身份和用户备注加入同一 Session 的已有草稿，尚未发送。普通填写值进入耐久会话记录，面板明确提示不支持密码、验证码或其他凭据；该提示不是自动识别／脱敏功能，也不能把临时 Profile 当作凭据安全通道。
+
+[Observer 回归](test/agent-browser-observer.test.ts)、[View 回归](test/agent-browser-view.test.ts)和[呈现回归](test/agent-browser-presentation.test.ts)核读身份、未知结果、换代、引用与自动打开；[面板 DOM](test/isolated/agent-browser-dom.test.tsx)和[主页面 DOM](test/isolated/agent-browser-native-dom.test.tsx)沿[隔离 Main 夹具](test/agent-browser.fixture.ts)核接管→选择→草稿→明确输入→失效→交还、隐藏释放和不可用平台。上述夹具不证明真实 Chrome、Unix socket、Electron IPC 或安装制品。云环境实际私有 Unix socket 执行被拒绝，另一个执行通道未能启动；不从 DOM 或固定模型测试授予平台可用资格。
+
 ## 原文件变更面板与编辑器
 
 [NativeFileChanges](src/native-file-changes.tsx)将原 [FileChanges / FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)接到 SessionPage 标签页首页的“变更”工具，复用行号、高亮、展开与焦点行为。它只在变更标签选中且侧栏可见时扫描当前已读完整历史的工具消息，每批32项；展开一项才读取原结果正文。目录扫描与单项 GET 各有自己的 read ID；折叠、切换标签、关闭侧栏、切换会话、detach 或 history epoch 更换只释放相应读取，不取消执行。测试诊断的会话工具仍使用独立 RightSidebar；与标签栏互切先卸载旧 reader，不保活隐藏工具内容。

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -79,6 +80,10 @@ import {
 import { createWorkspaceAssembly } from './assembly';
 import type { ProcessHostConfiguration } from './bootstrap';
 import {
+  type BrowserConfigurationOptions,
+  createBrowserConfiguration,
+} from './browser-configuration';
+import {
   type ChildRole,
   createChildConfiguration,
   readSkillSelection,
@@ -132,6 +137,7 @@ import {
 import { resolveWebTransport } from './web-fetch-proxy';
 
 export type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
+export type { BrowserConfigurationOptions } from './browser-configuration';
 export type { ChildRole } from './child-configuration';
 export type { SummaryCompressionOptions } from './compression-configuration';
 export { createSummaryCompressor } from './compression-configuration';
@@ -250,6 +256,8 @@ export function createDefaultProcessConfiguration(options: {
   shell?: ShellConfigurationOptions;
   /** Trusted per-hop network policy/admission; JSONC can only select the ordinary Tool. */
   webFetch?: WebFetchConfigurationOptions;
+  /** Trusted browser assets and host ceiling; JSONC may only select existing Tool IDs. */
+  browser?: BrowserConfigurationOptions | false;
   knownToolIds?: readonly string[];
   allowedToolCapabilities?: readonly string[];
 }): ProcessHostConfiguration {
@@ -277,6 +285,14 @@ export function createDefaultProcessConfiguration(options: {
   );
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
   const describeDefaultTask = createDefaultTaskRequestClassifier(options.child ? [] : childRoles);
+  const browser = createBrowserConfiguration({
+    configuration: options.browser,
+    privateDirectory: join(
+      process.platform === 'win32' ? tmpdir() : '/tmp',
+      `kite-ab-${process.getuid?.() ?? 'user'}-${options.profile.profileAccessKey.slice(0, 16)}`,
+    ),
+  });
+  const browserTools = new Map((browser.extension.tools ?? []).map((tool) => [tool.id, tool]));
   let shellOptions = options.shell ? structuredClone(options.shell) : undefined;
   if (shellOptions?.host)
     shellOptions = {
@@ -286,9 +302,15 @@ export function createDefaultProcessConfiguration(options: {
         protectedRoots: [
           ...new Set([...shellOptions.host.protectedRoots, dirname(userConfiguration.path)]),
         ],
+        readonlyAssets: [
+          ...new Set([...shellOptions.host.readonlyAssets, ...browser.runtimeAssets]),
+        ],
         protectedFiles: [
           ...new Set([
             ...(shellOptions.host.protectedFiles ?? []),
+            // Linux masks this exact private parent, even before the first Browser Job.
+            join(browser.privateDirectory, 'private'),
+            ...(shellOptions.platform === 'darwin' ? [browser.privateDirectory] : []),
             ...(codexProtectionPath === undefined ? [] : [codexProtectionPath]),
           ]),
         ],
@@ -357,7 +379,11 @@ export function createDefaultProcessConfiguration(options: {
     afterTurn ? { afterTurn: { enabled: true } } : {},
   );
   const configurationDefaults = options.ordinaryHostTools
-    ? ordinaryHostConfigurationDefaults(options.shell !== undefined, task.extension !== undefined)
+    ? ordinaryHostConfigurationDefaults(
+        options.shell !== undefined,
+        task.extension !== undefined,
+        browser.available,
+      )
     : defaultConfiguration;
   const planning = createPlanningValidation(
     planningOptions,
@@ -434,6 +460,8 @@ export function createDefaultProcessConfiguration(options: {
       pdf.worker,
       pdf.checksum,
       ...pdf.dependencies,
+      browser.privateDirectory,
+      ...browser.runtimeAssets,
       ...(options.runtimeAssets ?? []),
     ];
   };
@@ -465,6 +493,7 @@ export function createDefaultProcessConfiguration(options: {
     planning.extension,
     files.extension,
     pathFilesExtension,
+    browser.extension,
     ...(task.extension ? [task.extension] : []),
   ];
   const sourceOptions = options.mcpSources;
@@ -720,6 +749,12 @@ export function createDefaultProcessConfiguration(options: {
         safeRead: capability.safeRead,
       });
     }
+  for (const capability of browser.capabilities)
+    if (capability.kind === 'job')
+      globalCapabilities.set(
+        JSON.stringify([capability.kind, capability.definitionId, capability.definitionVersion]),
+        capability,
+      );
   const globalDefaultPolicy = createPermissionPolicy({
     readPolicy: (request) =>
       currentPolicy(
@@ -817,6 +852,7 @@ export function createDefaultProcessConfiguration(options: {
       planningSnapshot: Json;
       mcpSourceSnapshot: Json;
       webSnapshot: Json;
+      browserSnapshot: Json;
       runIdentity: { runId: string; sessionId: string };
     },
   ) => {
@@ -846,6 +882,8 @@ export function createDefaultProcessConfiguration(options: {
       const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
       if (project.webFetch !== undefined)
         throw new ConfigurationError('web_configuration_user_only');
+      if (user.browser !== undefined || project.browser !== undefined)
+        throw new ConfigurationError('browser_configuration_host_owned');
       const current = explicitConfiguration(explicit);
       const request = command.request as { modelId?: string; reasoningEffort?: ReasoningEffort };
       if (selection) current.modelId = selection.modelId;
@@ -1044,13 +1082,14 @@ export function createDefaultProcessConfiguration(options: {
         task.tools.values(),
         shellTools.values(),
         webTools.values(),
+        browserTools.values(),
         mcp.tools.values(),
       ]);
       const assembly = await createWorkspaceAssembly({
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser, pathFilesExtension],
+        externallyRegisteredExtensions: [askUser, pathFilesExtension, browser.extension],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
@@ -1062,6 +1101,7 @@ export function createDefaultProcessConfiguration(options: {
           ...task.tools.keys(),
           ...shellToolIds,
           ...web.toolIds,
+          ...browser.toolIds,
           ...mcp.tools.keys(),
           selectedSources.directoryToolId,
           ...(workflowFlags.skillActivation && workflowFlags.skillWorkflow ? workflowToolIds : []),
@@ -1211,6 +1251,11 @@ export function createDefaultProcessConfiguration(options: {
             planningSnapshotDigest(
               (assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null) as unknown as Json,
             ) !== planningSnapshotDigest(recovery.webSnapshot) ||
+            planningSnapshotDigest(
+              (assembly.toolIds.some((id) => browserTools.has(id))
+                ? browser.snapshot
+                : null) as Json,
+            ) !== planningSnapshotDigest(recovery.browserSnapshot) ||
             workflowSnapshotDigest(workflow.snapshot as unknown as Json) !==
               workflowSnapshotDigest(recovery.workflowSnapshot) ||
             !recovery.planningSnapshot ||
@@ -1272,7 +1317,14 @@ export function createDefaultProcessConfiguration(options: {
                       capability.definitionId === tool.id &&
                       capability.definitionVersion === tool.version,
                   )
-                : undefined;
+                : extension.id === browser.extension.id
+                  ? browser.capabilities.find(
+                      (capability) =>
+                        capability.kind === 'tool' &&
+                        capability.definitionId === tool.id &&
+                        capability.definitionVersion === tool.version,
+                    )
+                  : undefined;
             actual.set(
               key('tool', tool.id, tool.version),
               hostCapability ?? {
@@ -1299,15 +1351,27 @@ export function createDefaultProcessConfiguration(options: {
               planning.extension.id,
               job.version,
             );
-            actual.set(key('job', job.id, job.version), {
-              kind: 'job',
-              definitionId: job.id,
-              definitionVersion: job.version,
-              revision: `${extension.id}:${extension.version}:${job.version}`,
-              effects: capability.effects,
-              hardAllowed: true,
-              safeRead: capability.safeRead,
-            });
+            const hostCapability =
+              extension.id === browser.extension.id
+                ? browser.capabilities.find(
+                    (description) =>
+                      description.kind === 'job' &&
+                      description.definitionId === job.id &&
+                      description.definitionVersion === job.version,
+                  )
+                : undefined;
+            actual.set(
+              key('job', job.id, job.version),
+              hostCapability ?? {
+                kind: 'job',
+                definitionId: job.id,
+                definitionVersion: job.version,
+                revision: `${extension.id}:${extension.version}:${job.version}`,
+                effects: capability.effects,
+                hardAllowed: true,
+                safeRead: capability.safeRead,
+              },
+            );
           }
         }
         // The exact file adapter may invoke the selected Planning owner's existing Action.
@@ -1713,6 +1777,7 @@ export function createDefaultProcessConfiguration(options: {
             shell: shell.snapshot,
             pathFiles: pathFiles.snapshot,
             web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null,
+            browser: assembly.toolIds.some((id) => browserTools.has(id)) ? browser.snapshot : null,
             task: {
               ...task.snapshot,
               tools: task.snapshot.tools.filter((tool) => assembly.toolIds.includes(tool.id)),
@@ -1912,6 +1977,7 @@ export function createDefaultProcessConfiguration(options: {
         workflowSnapshot: snapshot.skillWorkflow ?? null,
         planningSnapshot: snapshot.planning ?? null,
         webSnapshot: snapshot.web ?? null,
+        browserSnapshot: snapshot.browser ?? null,
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
         mcpSourceSnapshot:
           snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)
@@ -1993,6 +2059,8 @@ export function createDefaultProcessConfiguration(options: {
       explicit: () => explicitConfiguration(explicit),
       allowedCapabilities: options.allowedToolCapabilities,
       workflowBindings: async ({ workspaceRoot, effective, toolIds }) => {
+        if (effective.browser !== undefined)
+          throw new ConfigurationError('browser_configuration_host_owned');
         task.validateSelection(toolIds);
         mcp.select(
           effective.mcp?.filter(
@@ -2011,7 +2079,7 @@ export function createDefaultProcessConfiguration(options: {
           workspaceRoot,
           profile: options.profile,
           externallyRegisteredFileTools: files.tools,
-          externallyRegisteredExtensions: [askUser, pathFilesExtension],
+          externallyRegisteredExtensions: [askUser, pathFilesExtension, browser.extension],
           toolIds,
           toolConfigurations: effective.tools,
           skills: [],
@@ -2021,6 +2089,7 @@ export function createDefaultProcessConfiguration(options: {
             ...task.tools.keys(),
             ...shellToolIds,
             ...web.toolIds,
+            ...browser.toolIds,
             ...mcp.tools.keys(),
             ...workflowToolIds,
           ],

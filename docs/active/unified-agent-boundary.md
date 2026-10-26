@@ -160,6 +160,12 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 [`client`](../../packages/client/README.md)只依赖生成 schema 和网络能力；[`ui`](../../packages/ui/README.md)消费公开投影、React 与便携展示控件，不知道参考扩展业务。SSE 的 ready/heartbeat 不推进 cursor；变化应用成功后确认，过滤范围的 checkpoint 只来自一致页。快照页不代表全局事件应用成功，切换 scope 需要相应水位。reset 后先冻结原 Store 的全局集合基线，再完整重读所需事实；SDK `startAfter` 仅设置重开 scan 起点，保留原 ACK，不将单对象 snapshotCursor 冒充全局应用。validated `onReady` 可确认流准入并等待应用准备，仍不 ACK；正常 EOF 且 ACK 尚未到达重读基线时沿原起点重开。原 Store 改变、读取失败或未完成时不解除对应写门禁，也不重发业务意图。
 
+受管 Agent Browser 沿 [Service 默认装配](../../apps/service/README.md#受管-browser-默认装配) → [Agent Browser Extension／Controller](../../packages/agent/src/tools/browser/README.md) → 原 `browser.session` Job 与进程监督，Native 沿既有 Extension Query／Action 和 Main 已核实 scope 观察／操作。它不复用下述手动网页的 WebContentsView，不新增模型 Loop、Core 业务表或专用 IPC／HTTP 控制旁路。`browser.view` 只读且不启动资源；网页、renderer、工具参数不能提供 Session authority、原生路径、CDP 或登录状态文件。宿主禁用是权限硬上限，Full 模式和 JSONC 不能解除。
+
+`browser.open` 通过原 operations.ensure 绑定准确 key／URL 和 Job 申请；其余 Tool／人工 Action 先保存准确输入摘要的 pending 意图，再派发。已完成同 key 可重读，遗留 pending、输入冲突、发送后丢回应／取消／超时不能重放或换 key 重试。人工接管先撤销新的模型操作资格并更换 generation，等待原在途操作边界后以新页面观察交接；上游 pause、CLI 退出、侧栏隐藏均不是进程树停止证明。资源和未知 owner 保留到真实整树及本地句柄清理确认；停止不回滚网站效果。普通 fill 值进入原 Tool／Action 的耐久会话历史，不是凭据安全通道，不能用临时 Profile 或仅保存最新画面推导秘密不留存。
+
+当前原生监督只实现 Linux x64／arm64、Bun；macOS／Windows 明确 unavailable，Linux 真实 Chrome／Electron 联调仍待资格。沙箱预查拒绝上游会自动 no-sandbox 的宿主；PID namespace 只证明进程所有权。原生同时准入、生命周期、NDJSON、帧与私有目录采样停止预算归上述 Browser owner；目录采样不是 OS 硬配额，不能保证无超调，也没有禁用自动站点下载。Native 的观察可见性、准确引用和草稿交接归[Desktop owner](../../apps/desktop/README.md#agent-浏览器观察与人工操作)；界面与替身测试不能授予原生平台资格。
+
 Native 会话浏览器属于用户操作的独立窗口能力，不经 Agent／Service 执行。Main 的封闭浏览器 IPC 只接受当前主窗口准确 mainFrame／renderer URL，地址和有限几何校验后创建最多8个隔离 WebContentsView。网页使用独立内存 session、无应用 preload、无 Node／webview／权限申请，不继承应用 Cookie、业务 IPC 或文件打开资格；顶层导航只支持 HTTP／HTTPS，仅资源类型为 WebSocket 的无凭据 ws／wss 请求可作为网页子资源通过；下载及外部协议导航仍拒绝。标签关闭、会话变化、root 导航／崩溃和窗口退出释放旧 view，显示 metadata 不构成 authority。当前实现、测试及平台限制见 [Desktop owner](../../apps/desktop/README.md#会话标签页与内置浏览器)，原 Files reader 继续核独立 scope。
 
 正式 Native 已复用 [UI 的原桌面展示层](../../packages/ui/README.md#原桌面展示层)，SessionPage、侧栏、消息区、输入框、右侧栏与样式由纯展示 owner 维护；[Desktop adapter](../../apps/desktop/src/native-presentation.ts)只映射实际公共事实。有限宿主 slot 接原完整正文与写入回调，打开右侧工具不卸载消息区。旧 Host/Runtime/私有存储没有迁入此层。声明的 CSS export 必须解析到实际仓库资产，缺失、越界与旧目标仍拒绝；CSS 不作为 TypeScript 执行模块，实际编译资产闭包另由候选 manifest 和窗口验收证明。显式 UI 构建脚本属于 I/O 宿主，UI source 经 export/import 到达该脚本时仍按便携依赖检查；不存在整个 UI workspace 的 I/O 豁免。

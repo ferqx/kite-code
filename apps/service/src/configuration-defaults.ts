@@ -1,3 +1,4 @@
+import { browserToolIds } from '@kite-ai/agent/browser';
 import { shellToolIds } from '@kite-ai/agent/permissions/shell';
 
 /** Minimal embedded-host defaults; registrations do not imply capability selection. */
@@ -12,7 +13,11 @@ export const defaultConfiguration = {
 /** Ordinary packaged clients have a useful tool surface before any tool settings exist.
  * Selection never grants execution permission, and absent host capabilities stay unavailable.
  */
-export function ordinaryHostConfigurationDefaults(shellAvailable: boolean, taskAvailable: boolean) {
+export function ordinaryHostConfigurationDefaults(
+  shellAvailable: boolean,
+  taskAvailable: boolean,
+  browserAllowed = true,
+) {
   return {
     ...defaultConfiguration,
     tools: [
@@ -27,6 +32,7 @@ export function ordinaryHostConfigurationDefaults(shellAvailable: boolean, taskA
         'files.search',
         ...(shellAvailable ? shellToolIds : []),
         'web_fetch',
+        ...(browserAllowed ? browserToolIds : []),
         ...(taskAvailable
           ? [
               'task.spawn',

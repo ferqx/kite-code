@@ -39,6 +39,16 @@ Windows daemon 在本进程首次完整准入后，把原 live artifact owner �
 
 `GET /v1/sessions/{id}/inputs` 的有限 response request 联合包括 steer、follow-up 和 Core 已接受的 `result.include`；只读投影保原 selection／execution／result revision／target Run，继续按原 seq 分页供兼容读取。接口不能过滤掉 result include 来迁就客户端显示；TUI 只把文本输入显示为队列并正常推进所有 cursor。Runtime checkpoint 与可变更队列使用上面的独立顺序 reader，原普通输入写路由与权限保持；[真实混合页回归](test/isolated/pending-inputs.test.ts)核旧读取的完整原申请与零重执行。
 
+## 受管 Browser 默认装配
+
+[Browser 装配](src/browser-configuration.ts)把固定 `agent-browser@0.39.4` 原生程序接入现有 `builtin.browser` Extension。普通 CLI／TUI／Desktop 在受支持平台且所需资产齐备时默认选入 `browser.open/navigate/snapshot/click/fill/scroll/close`；最小嵌入宿主仍只默认选择 `ask_user`。用户可沿原 `tools` 选择、禁用或移除这些 ID，但不能提供 executable、启动参数、CDP、普通浏览器 Profile 或认证路径；用户／Workspace 的 `browser` 配置与非空 Tool options 拒绝。可信宿主的 `browser:false` 是实际权限上限，JSONC 和 Full 模式不能解除。
+
+启动、配置准备和 `browser.view` Query 不启动或安装浏览器。默认只定位固定版本包内原生程序与系统标准位置的 Chrome／Chromium；当前受管进程边界要求 Linux 原生 init 与 bubblewrap；共用被动宿主检查拒绝会使上游自动关闭 Chrome sandbox 的 root／container／CI 环境及不可核实的系统信息。缺资产、未支持平台或上述宿主拒绝投影明确 unavailable，不默认向模型选择不可用工具，也不能使整个 Service 启动失败；用户显式选入时仍由实际 host capability 返回准确不可用原因。首次获准的 `browser.open` 才启动有界 Job；底层协议、私有环境、临时独立 Profile 与进程树停止证明归 [Agent Browser](../../packages/agent/src/tools/browser/README.md)。程序资产进入原 Files／Shell 运行时保护集合；短私有 socket/profile 根按 Profile 身份派生，连同未来子目录受保护，不使用用户日常浏览器数据。
+
+一个 Service 共享原 controller；Run 只保存已选定义、宿主配置指纹并在恢复时复核，不在 Run disposer 或客户端卸载时关闭浏览器。生命周期由原 `browser.session` Job、取消与 Runtime 关闭负责。全局 Extension Query／Action 直接使用现有公开入口供 Native Browser 面板观察与控制，不新增 SQL、Core 循环或 HTTP 协议。配置准备失败仍只释放本次 assembly／Workflow／Web 自有资源，不误释放其他 Run 正在使用的 Browser Job。
+
+[装配回归](test/isolated/browser-configuration.test.ts)覆盖默认与嵌入选择、宿主关闭上限、无副作用 Query、缺资产状态、真实 Service／SDK 工具目录、显式禁用、版本、不可信配置拒绝、恢复指纹复核及后来创建的私有目录读取拒绝；真实页面操作与资源生命周期由 Agent Browser 测试负责，二者不代证其他平台或 installed 发布资格。
+
 ## 默认装配与业务规则归属
 
 普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含 `files.read_path`（模型名称 `read_user_file`），使模型可以读取用户明确引用的普通工作区外文件；`files.write_path/edit_path` 不随此默认开启。显式禁用／移除仍生效，嵌入式最小默认保持仅 `ask_user`。工具可见不等于执行授权：外部读取继续经过准确目标、原生身份、当前权限和 protected/private 检查，既不扩大工作区文件工具的根，也不加载外部目录的项目说明。[默认装配回归](test/isolated/configuration.test.ts)以真实 paired Service／SDK／原生文件读取核默认选择、外部完整结果进入下一 Model，以及显式禁用；[工作区越界回归](test/isolated/assembly-file-denial.test.ts)仍核误用 `read_file` 的普通失败。缺选原因与只读范围归[Note](../../.agents/notes/implemented/bug-fix/2026-10-19-default-external-file-read.md)，原生真实模型附件资格归 [Desktop owner](../desktop/README.md#markdown-与附件输入)。
