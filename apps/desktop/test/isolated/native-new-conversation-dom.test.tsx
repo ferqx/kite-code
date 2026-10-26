@@ -3248,6 +3248,7 @@ test('original global/project preparation and page navigation retain independent
     expect(promptValue(f.input())).toBe('prepare draft');
     await f.click('在 Workspace 中新建对话');
     expect(f.host.querySelector('[aria-label="分支"]')?.textContent).toContain('main');
+    // Every explicit preparation entry rechecks the current global recommendation.
     expect(f.calls.filter((call) => call.method === 'conversation.models.read')).toHaveLength(3);
     await f.click('在 Ordinary directory 中新建对话');
     expect(f.host.querySelector('[aria-label="分支"]')).toBeNull();
@@ -3336,6 +3337,7 @@ test('first send clears and renders original text; late failure cannot steal ano
     expect(send.creation.title).toBe('');
     expect(send.intent.modelId).toBe('model');
     expect(send.intent.content).toBe('first raw\n雪🙂');
+    expect(send.draftLineEndings).toBe('\n\n');
     await f.click('发送明确的新轮次');
     expect(f.host.querySelector('.composer-action')!.getAttribute('aria-busy')).toBe('true');
     const retry = [...f.calls]
@@ -3346,6 +3348,8 @@ test('first send clears and renders original text; late failure cannot steal ano
     >;
     expect(retry.creation).toEqual(send.creation);
     expect(retry.intent.commandId).not.toBe(send.intent.commandId);
+    expect(retry.intent.content).toBe(send.intent.content);
+    expect(retry.draftLineEndings).toBe(send.draftLineEndings);
     await f.resolve('accepted');
     expect(f.host.querySelector('.composer-action')!.hasAttribute('aria-busy')).toBe(false);
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('');

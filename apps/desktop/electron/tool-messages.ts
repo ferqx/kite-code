@@ -10,7 +10,7 @@ import {
   nativeToolMessagePageBytes,
   presentableRun,
 } from '../src/tool-messages-bridge';
-import { nativeMcpToolLabel } from './mcp-tool-label';
+import { NativeMcpToolLabelBudget, nativeMcpToolLabel } from './mcp-tool-label';
 import {
   nativeLiveShellInputFact,
   nativeToolMessageEligible,
@@ -355,6 +355,7 @@ export class NativeToolMessages {
       throw new ClientError('invalid_native_request');
     const lease = this.open(input),
       { scope } = lease;
+    const labelBudget = new NativeMcpToolLabelBudget(lease.abort.signal);
     try {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
@@ -434,7 +435,7 @@ export class NativeToolMessages {
                 execution,
                 scope.storeId,
                 scope.sessionId,
-                lease.abort.signal,
+                labelBudget,
               ).catch(() => {
                 this.check(lease);
                 return undefined;
@@ -462,6 +463,7 @@ export class NativeToolMessages {
         throw new ClientError('tool_message_page_too_large');
       return page;
     } finally {
+      labelBudget.close();
       this.close(input.readId);
     }
   }

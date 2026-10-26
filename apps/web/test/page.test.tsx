@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import { type BrowserView, ClientError, type Message } from '@kite-ai/client';
+import {
+  type BrowserView,
+  ClientError,
+  type Message,
+  type ModelOutputSnapshot,
+} from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
@@ -75,6 +80,7 @@ async function fixture(
     active?: boolean;
     wrongIdentity?: boolean;
     modelOutput?: boolean;
+    partialOutput?: boolean;
     restoredOutput?: boolean;
   } = {},
 ) {
@@ -120,6 +126,11 @@ async function fixture(
     outputHold: undefined as Promise<void> | undefined,
     outputRequest: undefined as { sessionId: string; executionId: string } | undefined,
     outputBody: 'FULL RECORDED ANSWER exact tail',
+    outputComplete: !options.partialOutput,
+    outputStatus: (options.partialOutput
+      ? 'running'
+      : 'succeeded') as ModelOutputSnapshot['status'],
+    omitModel: false,
     wrongOutputSession: false,
   };
   Object.defineProperty(dom.window.navigator, 'clipboard', {
@@ -158,6 +169,18 @@ async function fixture(
       if (state.readIdentityFailure) throw new ClientError('browser_identity_mismatch');
       if (state.fail) throw new ClientError('browser_read_unavailable');
       const result = view(id, state.active);
+      if (options.modelOutput && !state.omitModel)
+        result.executions.push({
+          id: 'model',
+          sessionId: id,
+          runId: `run-${id}`,
+          kind: 'model',
+          definitionId: 'model',
+          definitionVersion: '1',
+          status: state.outputStatus,
+          resultRevision: '1',
+          cancelRequestedAt: null,
+        });
       if (options.restoredOutput) result.storeId = 'restored-store';
       if (state.extra) result.session.nextSeq = '202';
       return result;
@@ -171,6 +194,7 @@ async function fixture(
               ...(options.modelOutput
                 ? {
                     content: 'OUTPUT PREVIEW',
+                    status: state.outputComplete ? ('complete' as const) : ('incomplete' as const),
                     ...(options.restoredOutput
                       ? {
                           runId: null,
@@ -185,7 +209,7 @@ async function fixture(
                     outputBody: {
                       kind: 'model_output' as const,
                       executionId: 'model',
-                      complete: true,
+                      complete: state.outputComplete,
                       contentBytes: String(new TextEncoder().encode(state.outputBody).length),
                       reasoningBytes: '0',
                       toolCallCount: 0,
@@ -214,13 +238,18 @@ async function fixture(
         rootWorkCommandId: 'command',
         rootWorkSeq: '1',
         attempt: 1,
-        status: 'succeeded',
+        status: state.outputStatus,
         bodyHash: 'a'.repeat(64),
         bodyBytes: '1',
         contentBytes: String(new TextEncoder().encode(state.outputBody).length),
         reasoningBytes: '0',
         snapshotCursor: '1',
-        output: { content: state.outputBody, reasoning: '', toolCalls: [], complete: true },
+        output: {
+          content: state.outputBody,
+          reasoning: '',
+          toolCalls: [],
+          complete: state.outputComplete,
+        },
       };
     },
     async closeBrowserSession() {
@@ -264,6 +293,32 @@ async function fixture(
     },
   };
 }
+
+test('automatic live output rechecks an unchanged body when its Model or owning Run terminates', async () => {
+  for (const omitModel of [false, true]) {
+    const f = await fixture({ modelOutput: true, partialOutput: true, active: true });
+    try {
+      f.state.omitModel = omitModel;
+      await f.click(f.button('Workspace'));
+      await settle(() => !!f.dom.window.document.querySelector('a[href="/sessions/a"]'));
+      await f.choose('a');
+      await settle(() => f.state.outputReads === 1);
+      const article = f.dom.window.document.querySelector('[data-message-id="a-201"]')!;
+      expect(article.textContent).not.toContain('回复未完成');
+      expect(article.textContent).toContain(f.state.outputBody);
+      f.state.outputStatus = 'cancelled';
+      f.state.active = !omitModel;
+      await settle(() => article.textContent!.includes('回复未完成'));
+      expect(f.dom.window.document.querySelector('[data-message-id="a-201"]')).toBe(article);
+      expect(f.state.outputReads).toBe(2);
+      expect(article.textContent).toContain(f.state.outputBody);
+      await act(async () => Bun.sleep(250));
+      expect(f.state.outputReads).toBe(2);
+    } finally {
+      await f.close();
+    }
+  }
+});
 
 test('React browser page navigates directory, renders all 201 history messages and preserves exact failure/unknown statuses without write controls', async () => {
   const f = await fixture();

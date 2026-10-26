@@ -539,6 +539,8 @@ export type NativeRequest =
       generation: number;
       creation: NativeCreation['input'];
       intent: StartCommandRequest;
+      /** Private preparation only; appended to intent.content when retaining the original draft. */
+      draftLineEndings?: string;
       permissionMode?: 'accept_edits' | 'auto' | 'full';
       imageIds?: readonly string[];
       fileIds?: readonly string[];

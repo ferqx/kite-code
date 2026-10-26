@@ -1,6 +1,11 @@
 import { type BrowserWorkspaceList, ClientError, type Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
-import { completeRunReplies, ModelOutputMessage, SafeMessageMarkdown } from '@kite-ai/ui';
+import {
+  completeRunReplies,
+  ModelOutputMessage,
+  modelOutputTerminalObserved,
+  SafeMessageMarkdown,
+} from '@kite-ai/ui';
 import { MessageCopyButton, TooltipProvider } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BackgroundExecutions } from './background';
@@ -742,6 +747,11 @@ export function WebPage({
                               autoRead
                               autoReadRetry
                               message={message}
+                              terminalObserved={modelOutputTerminalObserved(
+                                message,
+                                snapshot.view.executions,
+                                runFacts.runs,
+                              )}
                               storeId={snapshot.view.storeId}
                               suspended={suspended || !pageVisible}
                               canReadRestoredOrigin={client.serverInfo?.capabilities?.includes(

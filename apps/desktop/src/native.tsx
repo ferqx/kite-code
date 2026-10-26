@@ -2,6 +2,7 @@ import type { Message } from '@kite-ai/client';
 import {
   InteractionCard,
   ModelInputs,
+  modelOutputTerminalObserved,
   PermissionGrantsPanel,
   PermissionPanel,
   PermissionSubmissionStatus,
@@ -1844,6 +1845,9 @@ function NativeDesktopContent({
           generation: current,
           creation: original.creation,
           intent: firstIntent(original.commandId, original.text, original.files),
+          ...(original.draft.content.length > original.text.length
+            ? { draftLineEndings: original.draft.content.slice(original.text.length) }
+            : {}),
           imageIds: original.imageIds,
           fileIds: original.files?.filter((file) => file.prepared).map((file) => file.id),
           permissionMode: original.permissionMode,
@@ -1933,6 +1937,9 @@ function NativeDesktopContent({
             generation: current,
             creation: original.creation,
             intent,
+            ...(submittedDraft.content.length > submittedText.length
+              ? { draftLineEndings: submittedDraft.content.slice(submittedText.length) }
+              : {}),
             permissionMode: original.permissionMode,
             imageIds,
             fileIds: files.filter((file) => file.prepared).map((file) => file.id),
@@ -3319,6 +3326,11 @@ function NativeDesktopContent({
         ])}
         message={message}
         storeId={selection.storeId}
+        terminalObserved={modelOutputTerminalObserved(
+          message,
+          selection.executions,
+          runMessages.runs,
+        )}
         canReadRestoredOrigin
         openFile={(path) => {
           if (!openable || selected.current !== selection.session.id) return;

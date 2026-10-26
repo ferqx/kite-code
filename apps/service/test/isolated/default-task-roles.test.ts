@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
 import { AgentError } from '@kite-ai/agent';
+import type { ToolContext } from '@kite-ai/agent/extensions';
+import { createFileTools, type WorkspaceFiles } from '@kite-ai/agent/files';
 import { createChildConfiguration } from '../../src/child-configuration';
 import { createTaskConfiguration, defaultTaskRoles } from '../../src/task-configuration';
 
@@ -133,6 +135,60 @@ test('default children exclude the exact root clarification tool while retaining
     expect(result.toolIds).toContain('planning.read');
     expect(result.toolIds).toContain('files.read');
     expect(result.toolIds?.includes('shell.launch')).toBe(role === 'worker' || role === 'code');
+  }
+});
+
+test('public spawn presets retain current builtin file discovery definitions and reject untrusted bindings', async () => {
+  // Construction is pure: use the actual definitions without performing file IO.
+  const current = createFileTools({} as WorkspaceFiles).map(({ id, version }) => ({
+    extensionId: 'builtin.files',
+    id,
+    version,
+  }));
+  const spawn = createTaskConfiguration(defaultTaskRoles).tools.get('task.spawn')!;
+  const configured = createChildConfiguration({
+    roles: defaultTaskRoles,
+    async resolve(_input, selection) {
+      return { model, snapshot: null, modelId: selection.modelId, toolIds: selection.role.toolIds };
+    },
+  });
+  for (const role of ['explore', 'plan', 'review']) {
+    let selected: string | undefined;
+    const result = await spawn.execute({ prompt: 'Inspect the current files.', preset: role }, {
+      executionId: `spawn-${role}`,
+      operations: {
+        async ensure({ request }) {
+          if (request.kind !== 'agent') throw new Error('expected_agent_request');
+          selected = request.configurationId;
+          return { childSessionId: `child-${role}` };
+        },
+      },
+    } as ToolContext);
+    expect(result.outcome).toBe('succeeded');
+    expect(selected).toBe(role);
+    const request = input(selected!, []);
+    const resolve = (parentTools: typeof current) =>
+      configured.resolveChildRunConfiguration!({
+        ...request,
+        parentTools,
+        parentRun: {
+          ...request.parentRun!,
+          configuration: { modelId: 'actual-parent', tools: parentTools },
+        },
+      });
+    expect((await resolve(current)).toolIds).toEqual([
+      'files.read',
+      'files.list',
+      'files.glob',
+      'files.search',
+    ]);
+    expect(
+      (await resolve(current.map((tool) => ({ ...tool, extensionId: 'custom.same-name' }))))
+        .toolIds,
+    ).toEqual([]);
+    expect(
+      (await resolve(current.map((tool) => ({ ...tool, version: 'future' })))).toolIds,
+    ).toEqual([]);
   }
 });
 

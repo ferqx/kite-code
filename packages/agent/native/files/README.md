@@ -24,11 +24,15 @@ cap-std 本身不是本项目全部安全规则的替代：其 Windows metadata 
 
 Windows 的目录身份核实不是 POSIX directory fsync，不作断电持久性承诺；末次 baseline 复核与非合作编辑器之间仍不是原子 filesystem CAS。普通 Workspace 的既有 ACL 不修改。严格外部路径、字节恢复和普通 Workspace 默认读取保持原差别。
 
+Linux 的 cap-std 目录能力使用 `O_PATH`，不能直接 fsync。目录 sync 只沿原 Dir 以固定 `.`、read／`O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` 取得可读 FD，先登记到同一 owner，再核准确 device/inode 与目录种类、fsync 并显式关闭；关闭未知优先保留原结果未知及完整父链。没有按绝对路径重开、权限回退或忽略同步错误；文件 sync、macOS 原有 sync 与 Windows 身份复核不变。
+
 ABI `kite-files:2/cap-std:4.0.3` 增加内部 `create-directory` 打开种类，只创建原父能力下的单个新目录。POSIX 用 `create_dir_with(0700)` 后 no-follow 打开；Windows 以 `FILE_CREATE` 取得原目录 HANDLE，使用本人私有 DACL，先登记再核身份，取得未知保原父链。既有目录冲突返回 `EEXIST`，不在 native 内跟随或重试。上层仅对新建工作区文件补父目录，详细范围和失败语义归 [Files owner](../../src/tools/files/README.md#新建文件的父目录与失败反馈)。系统权限拒绝保留 `EACCES`，不再混为一般 IO 错误。
 
 ## 构建与验证
 
-在本目录执行 `cargo test --locked --lib` 验证 Windows 真实8.3根别名拒绝、取得后确认未知与关闭未知保原父链／不重试，以及实际发布后确认失败。故障口只在 Rust `cfg(test)` 制品内存在，普通 Node-API ABI 没有开启参数。
+在本目录执行 `cargo test --locked --lib -- --test-threads=1` 验证本机资源边界。Unix 的嵌套关闭故障核相对父链、原 FD 和整个 owner 在显式关闭及 Drop 后仍被保留；Windows 另核真实8.3根别名拒绝、嵌套目录取得后确认未知、关闭未知不重试，以及实际发布后确认失败。owner 一旦进入 uncertain，任何子句柄关闭都在 OS 调用前拒绝；不能只保根与绝对祖先，或在 close/Drop 中先释放相对父链再检查 uncertain。故障口只在 Rust `cfg(test)` 制品内存在，普通 Node-API ABI 没有开启参数；其他平台的测试源码或编译检查不算该平台实际执行证据。
+
+2026-10-25，Linux x64／Rust1.97.1、`aefb4747` 加本次 owner guard／目录 sync 修复，上述命令3项通过；核真实 root／嵌套目录 sync、原目录改名并由同名新目录替换后仍保原能力、probe 关闭未知、故障后零额外 OS close，以及显式 close 和 Drop 后原 FD／完整 owner 保留。修复前的 `aefb4747` 和隔离构建的 `ee7ad8c6` 均实测目录 fsync 为 `EBADF`，这是既有 Linux 后端缺口，不是新父目录功能引入的回归。另在隔离 crate 副本仅移除 Unix guard，嵌套关闭测试正常编译后在祖先 close 返回成功处失败，确认回归能检出原释放缺口。Windows 嵌套取得／关闭测试本轮仅更新源码，未执行 Windows 原生测试；不据此宣称该平台验收。
 
 [原生能力测试](../../test/isolated/files/native-addon.test.ts)实际核 private temporary ACL、原生身份、create-only／replace、hardlink、junction 和删除；[完整 Windows 工具](../../test/isolated/files/windows.test.ts)、[外部工具](../../test/isolated/files/path-files.test.ts)与[检查点](../../test/isolated/file-checkpoints/capture.test.ts)继续经过原 TS 引擎和 Runtime。[GC 整例](../../test/isolated/files/native-path-lifetime.test.ts)在 Node-API 边界前后强制 GC，保准确 bytes 与对象身份。
 

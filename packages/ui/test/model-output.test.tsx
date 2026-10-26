@@ -3,7 +3,11 @@ import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/cl
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ModelOutputMessage, type ModelOutputMessageProps } from '../src';
+import {
+  ModelOutputMessage,
+  type ModelOutputMessageProps,
+  modelOutputTerminalObserved,
+} from '../src';
 import { useConversationReadActive } from '../src/conversation-activity';
 import { ConversationCache } from '../src/desktop/ConversationCache';
 import { controlCacheAccounting } from './conversation-cache-accounting.fixture';
@@ -52,6 +56,57 @@ export function outputFixture(content = 'Full answer tail', complete = true) {
   };
   return { message, snapshot };
 }
+test('terminal read hints require the original Model or owning Run, never absence or another source', () => {
+  const { message } = outputFixture('partial', false);
+  const execution = {
+    id: 'model',
+    sessionId: 'a',
+    runId: 'run-a',
+    kind: 'model' as const,
+    status: 'cancelled' as const,
+  };
+  const run = { id: 'run-a', sessionId: 'a', status: 'cancelled' as const };
+  expect(modelOutputTerminalObserved(message, [], [])).toBe(false);
+  expect(modelOutputTerminalObserved(message, [execution], [])).toBe(true);
+  expect(modelOutputTerminalObserved(message, [], [run])).toBe(true);
+  for (const changed of [
+    { id: 'foreign' },
+    { sessionId: 'foreign' },
+    { runId: 'foreign' },
+    { kind: 'tool' as const },
+    { status: 'running' as const },
+  ])
+    expect(modelOutputTerminalObserved(message, [{ ...execution, ...changed }], [])).toBe(false);
+  for (const changed of [
+    { id: 'foreign' },
+    { sessionId: 'foreign' },
+    { status: 'cancelling' as const },
+  ])
+    expect(modelOutputTerminalObserved(message, [], [{ ...run, ...changed }])).toBe(false);
+  const fork = {
+    ...message,
+    sessionId: 'fork',
+    runId: 'fork-run',
+    originMessage: {
+      storeId: 'store',
+      sessionId: 'a',
+      runId: 'run-a',
+      messageId: 'source',
+    },
+  };
+  expect(modelOutputTerminalObserved(fork, [execution], [])).toBe(true);
+  expect(
+    modelOutputTerminalObserved(fork, [], [{ ...run, id: 'fork-run', sessionId: 'fork' }]),
+  ).toBe(false);
+  expect(
+    modelOutputTerminalObserved(
+      { ...fork, originMessage: { ...fork.originMessage, runId: null } },
+      [execution],
+      [run],
+    ),
+  ).toBe(false);
+  expect(modelOutputTerminalObserved(outputFixture().message, [execution], [run])).toBe(false);
+});
 test('host verified snapshots render immediately, suspend safely, and reject mismatched bodies', async () => {
   const f = await domFixture(),
     data = outputFixture('Verified child tail🙂');
@@ -457,6 +512,77 @@ test('automatic replies reserve incomplete warnings for verified terminal output
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
       complete.snapshot.output.content,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('terminal lifecycle refreshes an unchanged live body once and rejects the retired read', async () => {
+  const f = await domFixture(),
+    partial = outputFixture('Unchanged interrupted response', false);
+  const reads: { signal: AbortSignal; resolve: (value: ModelOutputSnapshot) => void }[] = [];
+  const props: ModelOutputMessageProps = {
+    autoRead: true,
+    message: partial.message,
+    storeId: 'store',
+    onRead: ({ signal }) => new Promise((resolve) => reads.push({ signal, resolve })),
+  };
+  try {
+    await f.render(props);
+    expect(reads).toHaveLength(1);
+    await f.render({ ...props, terminalObserved: true });
+    expect(reads).toHaveLength(2);
+    expect(reads[0]!.signal.aborted).toBe(true);
+    expect(f.host.textContent).not.toContain('回复未完成');
+    await act(async () => reads[0]!.resolve({ ...partial.snapshot, status: 'running' }));
+    expect(f.host.textContent).not.toContain(partial.snapshot.output.content);
+    await act(async () => reads[1]!.resolve(partial.snapshot));
+    expect(f.host.textContent).toContain('回复未完成');
+    for (let index = 0; index < 3; index++)
+      await f.render({ ...props, message: { ...partial.message }, terminalObserved: true });
+    expect(reads).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
+test('terminal refresh is qualified, bounded after failure, and resumes an interrupted refresh', async () => {
+  const f = await domFixture(),
+    partial = outputFixture('Verified live prefix', false);
+  const reads: { signal: AbortSignal; resolve: (value: ModelOutputSnapshot) => void }[] = [];
+  const published: (string | undefined)[] = [];
+  const props: ModelOutputMessageProps = {
+    autoRead: true,
+    message: partial.message,
+    storeId: 'store',
+    onContent: (text) => published.push(text),
+    onRead: ({ signal }) => new Promise((resolve) => reads.push({ signal, resolve })),
+  };
+  try {
+    await f.render(props);
+    await act(async () => reads[0]!.resolve({ ...partial.snapshot, status: 'running' }));
+    await f.render({ ...props, terminalObserved: true, readActive: false });
+    expect(reads).toHaveLength(1);
+    expect(published.at(-1)).toBeUndefined();
+    await f.render({ ...props, terminalObserved: true });
+    expect(reads).toHaveLength(2);
+    await f.render({ ...props, terminalObserved: true, readActive: false });
+    expect(reads[1]!.signal.aborted).toBe(true);
+    await f.render({ ...props, terminalObserved: true });
+    expect(reads).toHaveLength(3);
+    await act(async () => reads[1]!.resolve(partial.snapshot));
+    expect(f.host.textContent).not.toContain('回复未完成');
+    await act(async () => reads[2]!.resolve({ ...partial.snapshot, executionId: 'foreign' }));
+    expect(f.host.textContent).not.toContain('回复未完成');
+    expect(f.host.textContent).toContain('完整回复读取失败');
+    for (let index = 0; index < 3; index++)
+      await f.render({ ...props, message: { ...partial.message }, terminalObserved: true });
+    expect(reads).toHaveLength(3);
+    expect(published.filter((text) => text !== undefined)).toEqual([
+      partial.snapshot.output.content,
+      partial.snapshot.output.content,
+      partial.snapshot.output.content,
+    ]);
   } finally {
     await f.close();
   }

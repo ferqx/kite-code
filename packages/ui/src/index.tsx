@@ -220,7 +220,11 @@ export {
   ModelInputs,
   readModelDirectory,
 } from './model-input';
-export { ModelOutputMessage, type ModelOutputMessageProps } from './model-output';
+export {
+  ModelOutputMessage,
+  type ModelOutputMessageProps,
+  modelOutputTerminalObserved,
+} from './model-output';
 export {
   type PermissionFacts,
   type PermissionGrantFacts,

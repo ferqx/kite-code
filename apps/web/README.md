@@ -99,7 +99,7 @@ bfcache 的 `pagehide.persisted` 保留现有 React document、选择和阅读 m
 
 ## 原 Model 输出全文
 
-History 的公开 `outputBody` 只表示原输出身份与完整性／长度。普通会话具备 `model_outputs` 能力时自动只读原 Session／Execution 的完整已记录正文；Browser Client 验证完整传输和正文后，共享 `ModelOutputMessage` 再核对当前消息身份。正文不附预览／全文标题或查看／收起按钮，完整读取通过后才提供全文复制。失败或取消的输出保留已记录的未完成正文及明确提示，不能借此批准 Tool calls；普通会话不展示原始工具调用详情或 reasoning 正文，读取仍核其原长度。
+History 的公开 `outputBody` 只表示原输出身份与完整性／长度。普通会话具备 `model_outputs` 能力时自动只读原 Session／Execution 的完整已记录正文；Browser Client 验证完整传输和正文后，共享 `ModelOutputMessage` 再核对当前消息身份。正文不附预览／全文标题或查看／收起按钮，完整读取通过后才提供全文复制。失败或取消的输出保留已记录的未完成正文及明确提示，不能借此批准 Tool calls；普通会话不展示原始工具调用详情或 reasoning 正文，读取仍核其原长度。正文不变但准确Model或已有原Run事实转为终态时，沿[共享reader的有界刷新](../../packages/ui/README.md)重新读取一次；状态提示不代替新snapshot的原身份／完整正文验证，不新增轮询。[页面回归](test/page.test.tsx)覆盖Model与缺席Model的Run两条路径。
 
 明确 profile restore 后当前 Store B只负责 Cookie/页面准入，原会话及 sealed Fork正文保持 Store A出处。[Core Model snapshot](../../packages/agent/src/storage/sqlite/model-output.ts)在一致读事务核真实 Execution／Run／Command／rootWork、原 Model Message与private output head，再核原 scope完整 Artifact；[Browser reader](../../packages/client/src/browser.ts)核当前 Store、准确 source Session／Execution与完整 EOF/hash。Web只在此 `model_outputs` reader具备时提供共享组件的 `canReadRestoredOrigin`，沿 sealed originMessage原 Session/Run读取，不从有限View目录推导原来源。组件仍核当前 Store、原 Session／Run／Execution、状态、完整性、实际 UTF-8 content/reasoning长度与 Tool数量；未具备该证明的共享宿主缺省拒绝foreign origin。没有新增 Core/API、重标原来源或旧工作的执行权。
 

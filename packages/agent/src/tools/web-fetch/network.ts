@@ -311,7 +311,7 @@ async function requestPinned(
     };
   return new Promise<Omit<WebResponse, 'addresses' | 'admissionRevision'>>(
     (resolveResponse, reject) => {
-      let cleanBody: (() => void) | undefined;
+      let failBody: (() => void) | undefined;
       const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
         url,
         {
@@ -358,7 +358,6 @@ async function requestPinned(
             agent.destroy();
             tunnel?.destroy();
           };
-          cleanBody = cleanup;
           const stream = new ReadableStream<Uint8Array>({
             start(controller) {
               const fail = () => {
@@ -368,6 +367,9 @@ async function requestPinned(
                 }
                 cleanup();
               };
+              // A completed encoded message may not emit aborted when its decoder is destroyed.
+              // Settle the Web body before cleanup removes its abort listener.
+              failBody = fail;
               source.on('data', (chunk: Buffer) => {
                 if (finished) return;
                 size += chunk.byteLength;
@@ -417,7 +419,7 @@ async function requestPinned(
       );
       let streamAbort: (() => void) | undefined;
       const abort = () => {
-        cleanBody?.();
+        failBody?.();
         request.destroy();
         agent.destroy();
         tunnel?.destroy();

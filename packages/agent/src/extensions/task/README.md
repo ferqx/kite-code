@@ -2,6 +2,8 @@
 
 只读角色的内置文件白名单同时识别原 `files.read@4` 与默认宿主的 `files.read@5`；版本5增加已绑定上传原件和 PDF 读取，仍须准确 Session／来源及原文件权限。未知版本、write/edit 和自定义同名定义不会因此取得只读资格。子会话只获得自己的会话文件清单上下文，不从父路径字符串继承父会话的可写目录或 Plan 批准。
 
+普通 `spawn_agent` 的 `explore`／`plan`／`review` 预设也沿同一白名单核当前父定义，保留 `files.glob@3` 与 `files.search@5` 的文件发现能力；旧合格版本继续可用，不能仅按工具名称接纳未来版本或自定义 owner。[默认角色回归](../../../../../apps/service/test/isolated/default-task-roles.test.ts)使用实际 Files 工厂声明，核公开 spawn 预设选择、当前搜索工具保留及未知 owner／版本拒绝，避免只用旧手写版本掩盖目录升级遗漏。
+
 子 Agent 协作 V1.1 的六工具、稳定协作者、普通会话直接输入、可靠结果接纳及运行中审批模式跟随已交付。产品行为归[执行手册](../../../../../docs/handbook/features/execution.md)，80项合同与实际运行证据归[测试 owner](../../../../../tests/README.md#子-agent-协作-v11-验证)，长期取舍归[稳定协作者决定](../../../../../.agents/notes/implemented/architecture/2026-10-18-stable-agent-collaboration-and-human-work-selection.md)。后续普通父轮次的 follow-up/message/interrupt 按当前父 Tool 授权及真实直接父子关系核验；目录 `workRelation` 仅表达技术执行出处，不额外限制同会话协作。以下历史接口说明只适用于实际封存工具和可信内部调用。
 
 普通模型目录只展示 `spawn_agent / send_agent_message / follow_up_agent / wait_agent_events / list_agents / interrupt_agent`。spawn 仅要求 `prompt`，可选显示名称 `task_name`；默认通用 child；只有可信工厂登记的 prompt 预设才出现 `preset`。`task_name` 不参与查找、权限或去重。对应准确内部 Tool ID 为 `task.spawn / task.message / task.follow_up / task.events / task.list / task.interrupt`，均为 v1。旧 `task/task.execute/task_read/task_wait/task_cancel/send_message/followup_task/list_agents/interrupt_agent/wait_agents/wait_agent` 保留可信内部调用及原历史恢复定义，全部隐藏于当前模型目录；没有旧名称 alias。

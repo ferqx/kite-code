@@ -13,6 +13,24 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
 static RETAINED: Mutex<Vec<Owner>> = Mutex::new(Vec::new());
+#[cfg(test)]
+thread_local! {
+    static FAIL_CLOSE: std::cell::Cell<i32> = const { std::cell::Cell::new(-1) };
+    static FAIL_NEXT_CLOSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static CLOSE_ATTEMPTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+fn close_object(fd: i32) -> bool {
+    #[cfg(test)]
+    {
+        CLOSE_ATTEMPTS.with(|n| n.set(n.get() + 1));
+        if FAIL_CLOSE.with(|target| target.get() == fd)
+            || FAIL_NEXT_CLOSE.with(|value| value.replace(false))
+        {
+            return false;
+        }
+    }
+    unsafe { libc::close(fd) == 0 }
+}
 fn component(value: &str) -> Result<()> {
     if value.is_empty()
         || value == "."
@@ -315,6 +333,48 @@ impl Owner {
         file.write_all(bytes).map_err(io_error)
     }
     pub fn sync(&mut self, id: u32) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if matches!(&self.entry(id)?.object, Object::Directory(_)) {
+            // cap-std directory capabilities use O_PATH on Linux, which cannot be fsynced.
+            // Reopen only "." under the original capability, never its ambient pathname.
+            self.verify_root()?;
+            let identity = self.stat(id)?.identity();
+            let probe = self
+                .serial
+                .checked_add(1)
+                .ok_or_else(|| fail("file_io_failed"))?;
+            let mut options = OpenOptions::new();
+            options
+                .read(true)
+                .follow(FollowSymlinks::No)
+                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+            let file = self
+                .entry(id)?
+                .object
+                .dir()?
+                .open_with(".", &options)
+                .map_err(io_error)?;
+            // add registers before metadata checks. Even if those checks fail, close this
+            // exact registered FD; an uncertain close takes precedence and retains the owner.
+            let result = self
+                .add(
+                    Object::Directory(ManuallyDrop::new(Dir::from_std_file(file.into_std()))),
+                    false,
+                )
+                .and_then(|opened| {
+                    let actual = self.stat(opened)?;
+                    if actual.kind != "directory" || actual.identity() != identity {
+                        return Err(fail("file_changed"));
+                    }
+                    self.verify_root()?;
+                    if unsafe { libc::fsync(self.entry(opened)?.object.raw()) } != 0 {
+                        return Err(io_error(std::io::Error::last_os_error()));
+                    }
+                    Ok(())
+                });
+            self.close_id(probe)?;
+            return result;
+        }
         if unsafe { libc::fsync(self.entry(id)?.object.raw()) } != 0 {
             return Err(io_error(std::io::Error::last_os_error()));
         }
@@ -390,6 +450,10 @@ impl Owner {
         Ok(entries)
     }
     fn close_id(&mut self, id: u32) -> Result<()> {
+        // Any unknown resource pins the whole original owner, including relative parents.
+        if self.uncertain {
+            return Err(fail("file_close_unknown"));
+        }
         let entry = self
             .entries
             .get_mut(&id)
@@ -397,7 +461,7 @@ impl Owner {
         if entry.uncertain {
             return Err(fail("file_close_unknown"));
         }
-        if unsafe { libc::close(entry.object.raw()) } != 0 {
+        if !close_object(entry.object.raw()) {
             entry.uncertain = true;
             self.uncertain = true;
             return Err(fail("file_close_unknown"));
@@ -455,5 +519,189 @@ impl Drop for Owner {
             self.closed = true;
             RETAINED.lock().unwrap().push(retained);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn root(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("kite-files-{label}-{}-{nonce}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        fs::canonicalize(root).unwrap()
+    }
+
+    #[test]
+    fn nested_close_unknown_retains_entire_owner_through_disposal() {
+        let root = root("nested-close");
+        let mut owner = Owner::new(root.to_string_lossy().into(), vec![], false).unwrap();
+        let parent = owner
+            .open_at(
+                owner.root(),
+                "parent".into(),
+                "create-directory".into(),
+                true,
+            )
+            .unwrap();
+        let child = owner
+            .open_at(parent, "child".into(), "create-directory".into(), true)
+            .unwrap();
+        let id = owner
+            .open_at(child, "temporary".into(), "temporary".into(), false)
+            .unwrap();
+        let fd = owner.entry(id).unwrap().object.raw();
+        FAIL_CLOSE.with(|value| value.set(fd));
+        assert_eq!(
+            owner.close_handle(id).unwrap_err().reason,
+            "file_close_unknown"
+        );
+        let attempts = CLOSE_ATTEMPTS.with(|n| n.get());
+        for ancestor in [child, parent] {
+            assert_eq!(
+                owner.close_handle(ancestor).unwrap_err().reason,
+                "file_close_unknown"
+            );
+            assert!(owner.entries.contains_key(&ancestor));
+        }
+        assert_eq!(owner.close().unwrap_err().reason, "file_close_unknown");
+        drop(owner);
+        assert_eq!(CLOSE_ATTEMPTS.with(|n| n.get()), attempts);
+        let mut owner = {
+            let mut retained = RETAINED.lock().unwrap();
+            let index = retained
+                .iter()
+                .position(|owner| owner.path == root)
+                .unwrap();
+            retained.remove(index)
+        };
+        for original in [owner.root(), parent, child, id] {
+            let entry = owner.entries.get(&original).unwrap();
+            assert_ne!(
+                unsafe { libc::fcntl(entry.object.raw(), libc::F_GETFD) },
+                -1
+            );
+        }
+        // Only this test confirms the injected still-live FD; production has no reset port.
+        FAIL_CLOSE.with(|value| value.set(-1));
+        assert_eq!(unsafe { libc::close(fd) }, 0);
+        unsafe {
+            owner.entries.get_mut(&id).unwrap().object.forget();
+        }
+        owner.entries.remove(&id);
+        owner.uncertain = false;
+        owner.close().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn directory_sync_uses_original_root_and_nested_capabilities() {
+        let root = root("directory-sync");
+        let mut owner = Owner::new(root.to_string_lossy().into(), vec![], false).unwrap();
+        owner.sync(owner.root()).unwrap();
+        assert_eq!(owner.entries.len(), 1);
+        let parent = owner
+            .open_at(
+                owner.root(),
+                "parent".into(),
+                "create-directory".into(),
+                true,
+            )
+            .unwrap();
+        let child = owner
+            .open_at(parent, "child".into(), "create-directory".into(), true)
+            .unwrap();
+        let original = owner.stat(child).unwrap().identity();
+        fs::rename(root.join("parent/child"), root.join("parent/moved")).unwrap();
+        fs::create_dir(root.join("parent/child")).unwrap();
+        for directory in [owner.root(), parent, child] {
+            owner.sync(directory).unwrap();
+            assert_eq!(owner.entries.len(), 3);
+        }
+        assert_eq!(owner.stat(child).unwrap().identity(), original);
+        let replacement = owner
+            .open_at(parent, "child".into(), "directory".into(), true)
+            .unwrap();
+        assert_ne!(owner.stat(replacement).unwrap().identity(), original);
+        let file = owner
+            .open_at(child, "temporary".into(), "temporary".into(), false)
+            .unwrap();
+        owner.write(file, b"original capability").unwrap();
+        owner.sync(file).unwrap();
+        owner.close().unwrap();
+        assert_eq!(
+            fs::read(root.join("parent/moved/temporary")).unwrap(),
+            b"original capability"
+        );
+        assert!(!root.join("parent/child/temporary").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn directory_sync_close_unknown_retains_probe_and_original_chain() {
+        let root = root("directory-sync-close");
+        let mut owner = Owner::new(root.to_string_lossy().into(), vec![], false).unwrap();
+        let parent = owner
+            .open_at(
+                owner.root(),
+                "parent".into(),
+                "create-directory".into(),
+                true,
+            )
+            .unwrap();
+        let child = owner
+            .open_at(parent, "child".into(), "create-directory".into(), true)
+            .unwrap();
+        FAIL_NEXT_CLOSE.with(|value| value.set(true));
+        assert_eq!(owner.sync(child).unwrap_err().reason, "file_close_unknown");
+        let probe = owner.serial;
+        let fd = owner.entries.get(&probe).unwrap().object.raw();
+        let attempts = CLOSE_ATTEMPTS.with(|n| n.get());
+        assert_eq!(
+            owner.close_handle(child).unwrap_err().reason,
+            "file_close_unknown"
+        );
+        assert_eq!(
+            owner.close_handle(parent).unwrap_err().reason,
+            "file_close_unknown"
+        );
+        assert_eq!(owner.close().unwrap_err().reason, "file_close_unknown");
+        drop(owner);
+        assert_eq!(CLOSE_ATTEMPTS.with(|n| n.get()), attempts);
+        let mut owner = {
+            let mut retained = RETAINED.lock().unwrap();
+            let index = retained
+                .iter()
+                .position(|owner| owner.path == root)
+                .unwrap();
+            retained.remove(index)
+        };
+        for original in [owner.root(), parent, child, probe] {
+            assert_ne!(
+                unsafe {
+                    libc::fcntl(
+                        owner.entries.get(&original).unwrap().object.raw(),
+                        libc::F_GETFD,
+                    )
+                },
+                -1
+            );
+        }
+        // Only this test resolves the injected still-live sync FD.
+        assert_eq!(unsafe { libc::close(fd) }, 0);
+        unsafe {
+            owner.entries.get_mut(&probe).unwrap().object.forget();
+        }
+        owner.entries.remove(&probe);
+        owner.uncertain = false;
+        owner.close().unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }
