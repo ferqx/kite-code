@@ -813,6 +813,14 @@ test('a renderer compiled without diagnostics cannot expose aggregates or child 
     await f.open();
     await f.waitForText('Child prefix');
     expect(f.host.textContent).toContain('Child prefix');
+    const environmentIcon = f.host.querySelector('[aria-label="环境信息"] [data-child-icon]')!;
+    const tabIcon = f.host.querySelector('[role="tab"] [data-child-icon]')!;
+    expect(tabIcon.getAttribute('data-child-icon')).toBe(
+      environmentIcon.getAttribute('data-child-icon'),
+    );
+    expect(tabIcon.getAttribute('data-child-color')).toBe(
+      environmentIcon.getAttribute('data-child-color'),
+    );
     expect(f.host.textContent).not.toContain('已完整读取子日志至固定序号');
     expect(f.host.textContent).not.toContain('original-child-run');
   } finally {
@@ -906,7 +914,7 @@ test('the same child reuses its sidebar tab and switching to the browser retires
       });
     const readId = f.heldId();
     expect(readId).toBeDefined();
-    await f.click('新标签页');
+    await f.click('新建标签页');
     expect(f.host.querySelector('.session-tab-child') === null).toBe(true);
     expect(
       f.requests.some(
@@ -1862,6 +1870,16 @@ test('a child carrier inside a mixed tool activity still opens its exact read-on
     expect(f.host.querySelector('.conversation .tool-activity-steps')?.children).toHaveLength(2);
     await act(async () => child.click());
     await f.waitForText('Child prefix');
+    expect(f.host.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(f.host.querySelector('[role="tab"]')?.textContent).toBe('Live child');
+    const messageIcon = child.querySelector('[data-child-icon]')!;
+    const tabIcon = f.host.querySelector('[role="tab"] [data-child-icon]')!;
+    expect(tabIcon.getAttribute('data-child-icon')).toBe(
+      messageIcon.getAttribute('data-child-icon'),
+    );
+    expect(tabIcon.getAttribute('data-child-color')).toBe(
+      messageIcon.getAttribute('data-child-color'),
+    );
     expect(f.host.querySelector('.session-tab-child')?.textContent).toContain('Child prefix');
     expect(f.requests.some((request) => request.method === 'background.child.open')).toBe(true);
     expect(
@@ -1982,6 +2000,9 @@ test('a completed child uses the shared collapsed process, concise exploration a
     await f.open();
     await f.waitForText('Child final answer');
     const child = f.host.querySelector('.session-tab-child')!;
+    expect(child.querySelector('.native-child-detail-heading')).toBeNull();
+    expect(child.textContent).not.toContain('刷新子日志');
+    expect(child.textContent).not.toContain('子 Agent 会话仅供查看。');
     const final = child.querySelector('.agent-turn-final');
     expect(final).not.toBeNull();
     expect(final!.querySelector('h1')!.textContent).toBe('Child final answer');
@@ -2032,7 +2053,7 @@ test('a completed child uses the shared collapsed process, concise exploration a
       ...completedBody,
       presentation: { ...completedBody.presentation!, unavailable: true },
     });
-    await f.click('刷新子日志');
+    await f.updateParent('Parent transcript');
     await f.waitForText('无法核对子会话轮次或工具状态');
     expect(
       child.querySelector('.agent-turn-final .message-copy')!.getAttribute('aria-disabled'),

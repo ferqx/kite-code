@@ -141,6 +141,9 @@ export function environmentDisplay(
     rows.push({
       executionId: e.id,
       ...(item.childSession?.title ? { displayName: item.childSession.title } : {}),
+      ...(e.childSessionId
+        ? { childAgentIdentity: JSON.stringify([e.originStoreId, e.childSessionId]) }
+        : {}),
       kind: e.childSessionId ? 'subagent' : 'shell',
       status,
       cleanupConfirmed: false,
@@ -185,7 +188,12 @@ export function useNativeEnvironment({
   submissions?: readonly NativeCallerMetadata[];
   onChanged: () => Promise<void>;
   /** A tab host may route navigation before activating this hook's one visible child reader. */
-  onOpenChild?: (sessionId: string, executionId: string, title: string) => void;
+  onOpenChild?: (
+    sessionId: string,
+    executionId: string,
+    title: string,
+    childAgentIdentity?: string,
+  ) => void;
 }) {
   const diagnostics = useNativeDiagnostics();
   const recovery = useRef(new NativeSessionRecovery());
@@ -860,10 +868,13 @@ export function useNativeEnvironment({
               if (!onOpenChild) return void openChild(sessionId, executionId);
               if (!bridge || !scope || unavailable || paused || awaitingFreshRead || !executionId)
                 return;
-              const title = display?.rows.find(
-                (row) => row.executionId === executionId,
-              )?.displayName;
-              onOpenChild(sessionId, executionId, title ?? '子 Agent');
+              const row = display?.rows.find((row) => row.executionId === executionId);
+              onOpenChild(
+                sessionId,
+                executionId,
+                row?.displayName ?? '子 Agent',
+                row?.childAgentIdentity,
+              );
             },
             onRefresh: () => setRefresh((value) => value + 1),
           }}

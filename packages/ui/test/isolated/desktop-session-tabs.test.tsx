@@ -1,6 +1,7 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, useEffect, useState } from 'react';
+import { childAgentAppearance } from '../../src/desktop/ApprovalHeader';
 import type { SessionChildTabRequest, SessionChildTarget } from '../../src/desktop/SessionTabs';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -219,6 +220,8 @@ test('responsive resize retains tabs; switching session releases their native re
   await render('other');
   expect(released.sort()).toEqual(ids.sort());
   expect(mounted - closed).toBe(0);
+  expect(browserIds()).toHaveLength(0);
+  await click('标签页');
   expect(browserIds()).toHaveLength(1);
   expect(ids).not.toContain(browserIds()[0]);
 });
@@ -342,15 +345,27 @@ test('child requests reuse exact carrier tabs and only the visible selected chil
   childMounted = childClosed = 0;
   childChanges.length = 0;
   released.length = 0;
-  const first = { requestId: 1, sessionId: 'child', executionId: 'original', title: 'First task' };
+  const first = {
+    requestId: 1,
+    sessionId: 'child',
+    executionId: 'original',
+    title: 'First task',
+    childAgentIdentity: JSON.stringify(['store', 'child']),
+  };
   await render('s', false, false, first);
   expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('false');
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  expect(browserIds()).toHaveLength(0);
+  const icon = document.querySelector('[role="tab"] [data-child-icon]')!;
+  const appearance = childAgentAppearance(first.childAgentIdentity);
+  expect(icon.getAttribute('data-child-icon')).toBe(String(appearance.icon));
+  expect(icon.getAttribute('data-child-color')).toBe(String(appearance.color));
   expect(document.querySelector('.session-tab-child')!.textContent).toBe('Child child / original');
   expect(childMounted - childClosed).toBe(1);
   expect(childChanges.at(-1)).toEqual({ sessionId: 'child', executionId: 'original' });
   await render('s', false, false, { ...first, requestId: 2, title: 'Updated task' });
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(document.querySelector('[role="tab"] [data-child-icon]')).toBe(icon);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
   expect(childMounted).toBe(1);
 
   await render('s', false, false, {
@@ -359,10 +374,14 @@ test('child requests reuse exact carrier tabs and only the visible selected chil
     executionId: 'later',
     title: 'Later task',
   });
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(3);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  for (const decoration of document.querySelectorAll('[role="tab"] [data-child-icon]')) {
+    expect(decoration.getAttribute('data-child-icon')).toBe(String(appearance.icon));
+    expect(decoration.getAttribute('data-child-color')).toBe(String(appearance.color));
+  }
   expect(childMounted - childClosed).toBe(1);
   expect(childChanges.at(-1)).toEqual({ sessionId: 'child', executionId: 'later' });
-  await selectTab('新标签页');
+  await click('新建标签页');
   expect(childMounted - childClosed).toBe(0);
   expect(childChanges.at(-1)).toBeUndefined();
   await selectTab('Updated task');
@@ -384,14 +403,38 @@ test('child requests reuse exact carrier tabs and only the visible selected chil
   expect(childMounted - childClosed).toBe(0);
   expect(childChanges.at(-1)).toBeUndefined();
   expect(released).toHaveLength(1);
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(0);
+});
+
+test('child navigation after closing the final tab does not create an empty browser page', async () => {
+  childMounted = childClosed = 0;
+  released.length = 0;
+  const child = { requestId: 1, sessionId: 'child', executionId: 'task', title: 'Child task' };
+  await render();
+  expect(browserIds()).toHaveLength(0);
+  for (const requestId of [1, 2]) {
+    await render('s', false, false, { ...child, requestId });
+    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    expect(browserIds()).toHaveLength(0);
+    expect(childMounted - childClosed).toBe(1);
+    await click('关闭标签页：Child task');
+    expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('true');
+    expect(document.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(childMounted - childClosed).toBe(0);
+  }
+  expect(released).toHaveLength(0);
+  await click('标签页');
+  expect(browserIds()).toHaveLength(1);
+  await render('s', false, false, { ...child, requestId: 3 });
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(browserIds()).toHaveLength(1);
 });
 
 test('full tabs reject a new child with feedback while an existing child can still be selected', async () => {
   childMounted = childClosed = 0;
   const first = { requestId: 10, sessionId: 'child', executionId: 'original', title: 'First task' };
   await render('s', false, false, first);
-  for (let i = 0; i < 6; i++) await click('新建标签页');
+  for (let i = 0; i < 7; i++) await click('新建标签页');
   expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
   expect(childMounted - childClosed).toBe(0);
   await render('s', false, false, {

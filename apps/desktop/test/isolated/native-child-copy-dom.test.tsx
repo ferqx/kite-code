@@ -142,7 +142,6 @@ async function fixture(
               sessionId={facts.session.id}
               executionId={options.executionId}
               readActive={options.readActive ?? true}
-              onRefresh={() => {}}
               onTitleChange={() => {}}
               writeClipboardText={writer}
             />,

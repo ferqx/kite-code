@@ -131,7 +131,6 @@ test('a failed child read recovers without cancelling a slow retry at the next b
         sessionId="child"
         executionId={item.execution.id}
         readActive
-        onRefresh={environment.refreshChild}
         onTitleChange={() => {}}
       />
     );
@@ -308,7 +307,6 @@ test('automatic child retries retain verified messages through repeated child an
         sessionId="child"
         executionId={item.execution.id}
         readActive
-        onRefresh={() => environment.openChild('child', item.execution.id)}
         onTitleChange={() => {}}
       />
     );
@@ -434,7 +432,6 @@ test('child live Shell commands keep the same expanded row through fresh snapsho
           sessionId="child"
           executionId={item.execution.id}
           readActive
-          onRefresh={() => {}}
           onTitleChange={() => {}}
           writeClipboardText={async (text) => {
             writes.push(text);
@@ -447,7 +444,7 @@ test('child live Shell commands keep the same expanded row through fresh snapsho
     await act(async () =>
       host.querySelector<HTMLButtonElement>('.tool-activity-aggregate button')!.click(),
     );
-    const row = host.querySelector<HTMLElement>('.shell-activity')!;
+    let row = host.querySelector<HTMLElement>('.shell-activity')!;
     expect(row).not.toBeNull();
     await act(async () => row.querySelector<HTMLButtonElement>('button')!.click());
     const commandNode = row.querySelector('.shell-command-text')!;
@@ -466,9 +463,8 @@ test('child live Shell commands keep the same expanded row through fresh snapsho
 
     facts = { ...facts, presentation: { ...facts.presentation!, liveTools: [] } };
     await render();
-    expect(host.querySelector('.shell-activity') === row).toBe(true);
-    expect(row.querySelector('.shell-command-text')).toBeNull();
-    expect(row.querySelector('[data-slot="code-block-copy-button"]')).toBeNull();
+    expect(host.querySelector('.shell-activity') === null).toBe(true);
+    expect(host.querySelector('[data-slot="code-block-copy-button"]') === null).toBe(true);
 
     const preview = `${command}…`;
     facts = {
@@ -485,7 +481,7 @@ test('child live Shell commands keep the same expanded row through fresh snapsho
       },
     };
     await render();
-    expect(host.querySelector('.shell-activity') === row).toBe(true);
+    row = host.querySelector('.shell-activity')!;
     expect(row.querySelector('.shell-command-text')?.textContent).toBe(preview);
     expect(row.querySelector('.shell-command-preview-label')?.textContent).toContain('命令摘要');
     expect(row.querySelector('[data-slot="code-block-copy-button"]')).toBeNull();

@@ -108,6 +108,7 @@ import { useNativeTheme } from './native-theme';
 import {
   groupNativeToolMessages,
   liveToolMessages,
+  NativeToolPresentation,
   useNativeToolMessages,
 } from './native-tool-messages';
 import {
@@ -1107,13 +1108,14 @@ function NativeDesktopContent({
     onChanged: async () => {
       await report(refresh, false);
     },
-    onOpenChild: (sessionId, executionId, title) => {
+    onOpenChild: (sessionId, executionId, title, childAgentIdentity) => {
       setChildTabRequest({
         parent: childParent,
         requestId: ++childTabSequence.current,
         sessionId,
         executionId,
         title,
+        childAgentIdentity,
       });
     },
   });
@@ -2321,9 +2323,16 @@ function NativeDesktopContent({
     rejectedInputs,
     replyDisplayScope,
   ]);
+  const toolPresentation = useRef(new NativeToolPresentation());
   const messageModels = useMemo(() => {
-    const models = preparing ? [] : [...transcript.messages];
-    models.push(...liveTools.map((entry) => entry.message));
+    const models = preparing
+      ? []
+      : toolPresentation.current.project(
+          replyDisplayScope,
+          transcript.messages,
+          toolMessages.entries,
+          liveTools,
+        );
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
       // Run observation can arrive before persisted user history. Keep the
@@ -2428,6 +2437,7 @@ function NativeDesktopContent({
   }, [
     preparing,
     transcript.messages,
+    toolMessages.entries,
     liveTools,
     pendingInputModels,
     inputDeliveries,
@@ -3301,6 +3311,10 @@ function NativeDesktopContent({
                 sessionId: result.childSessionId,
                 executionId: result.executionId,
                 title: result.name,
+                childAgentIdentity: JSON.stringify([
+                  message.originMessage?.storeId ?? selection.storeId,
+                  result.childSessionId,
+                ]),
               });
             }}
           >
@@ -3406,6 +3420,7 @@ function NativeDesktopContent({
                     sessionId: activity.sessionId,
                     executionId: activity.executionId,
                     title: activity.childAgent.name,
+                    childAgentIdentity: activity.childAgent.identity,
                   }),
               }
             : undefined,
@@ -3804,7 +3819,6 @@ function NativeDesktopContent({
             !selection.viewLoading &&
             !directory?.unavailable
           }
-          onRefresh={environment.refreshChild}
           onTitleChange={onTitleChange}
           readingCache={childReadings.current}
           writeClipboardText={window.kiteNative?.writeClipboardText}

@@ -264,7 +264,7 @@ try {
   if (await showEnvironment.isVisible()) await showEnvironment.click();
   const environment = page.getByRole('region', { name: '环境信息', exact: true });
   await environment.locator(`[data-execution-id="${completed.id}"]`).getByRole('button').click();
-  await page.getByText('子 Agent 会话仅供查看。', { exact: true }).waitFor();
+  await page.getByRole('region', { name: '子 Agent 详情', exact: true }).waitFor();
   await page.getByText(/^已完整读取子日志至固定序号 /).waitFor();
   assert.equal(
     (await state()).selection!.session.id,

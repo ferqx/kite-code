@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ApprovalHeader } from '../../src/desktop/ApprovalHeader';
+import { BackgroundExecutions } from '../../src/desktop/BackgroundExecutions';
 import { Conversation } from '../../src/desktop/Conversation';
 import { type ChildAgentActivity, ToolActivity } from '../../src/desktop/ToolActivity';
 import type { Message } from '../../src/desktop/types';
@@ -18,6 +19,61 @@ const receipt: Message = {
   settled: true,
   status: 'completed',
 };
+test('environment child rows share the stable message and approval icon across names and statuses', () => {
+  const identity = JSON.stringify(['store', 'child']);
+  for (const status of ['running', 'completed', 'restored'] as const) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <>
+          <ApprovalHeader
+            child={{ identity, name: 'Original' }}
+            index={0}
+            count={1}
+            onPrevious={() => {}}
+            onNext={() => {}}
+          />
+          <ToolActivity
+            messages={[receipt]}
+            childAgent={{ identity, name: 'Original' }}
+            onToggle={() => {}}
+            renderChildren={() => null}
+          />
+          <BackgroundExecutions
+            currentOnly
+            executions={[
+              {
+                executionId: 'task',
+                kind: 'subagent',
+                displayName: status === 'running' ? 'Original' : 'Renamed',
+                childAgentIdentity: identity,
+                status,
+                cleanupConfirmed: false,
+              },
+            ]}
+            subagentDetails={{
+              sessionIdsByExecutionId: new Map([['task', 'child']]),
+              onOpen: () => {},
+              onRefresh: () => {},
+            }}
+          />
+        </>,
+      ),
+    );
+    const icons = dom.window.document.querySelectorAll('[data-child-icon]');
+    expect(icons).toHaveLength(3);
+    for (const icon of icons) {
+      expect(icon.getAttribute('data-child-icon')).toBe(icons[0]!.getAttribute('data-child-icon'));
+      expect(icon.getAttribute('data-child-color')).toBe(
+        icons[0]!.getAttribute('data-child-color'),
+      );
+    }
+    expect(
+      dom.window.document.querySelector('.background-execution-detail > [data-child-icon]'),
+    ).not.toBeNull();
+    dom.window.close();
+  }
+});
+
 test('child tool history keeps its operation and DOM across legacy lifecycle observations without mounting its receipt reader', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const keys = [

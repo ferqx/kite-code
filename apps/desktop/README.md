@@ -396,6 +396,14 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 原工具过程与结果阅读
 
+[目标提取](src/tool-request-target.ts)在已支持定义／版本中只选择明确的文件路径、查找／搜索条件及范围、目录、MCP查询／服务／资源／提示词、计划与Skill引用，目标最多4096个完整Unicode码点。不打印工具正文或任意扩展参数；无单一可读目标的验证记录、空输入读取及任意远端工具不猜字段。Shell继续走原命令分片和结果证明，网页显示继续沿共享UI去掉凭据／查询部分。
+
+[实时工具适配](src/native-tool-messages.tsx)只在原Store／Session的活动Run中，从已有公开Execution输入提取展示目标；子详情的 [execution投影](src/tool-messages-bridge.ts)只加有界target，不传输入payload或控制资格。保存的ModelOutput可将消息中的toolCalls留空，Main的 [原请求核验](electron/tool-message-fact.ts)因此在同原Execution／来源／Run／toolCallId且没有可见匹配声明时读取原Execution输入；可见调用重复、未完整、错定义或错调用不能绕过原门禁。缓存订阅同来源调用变化，冲突在重读完成前撤下目标，失败保原结果；文件打开仍独立由原成功文件目标reader授予。实现取舍沿[连续工具呈现Note](../../.agents/notes/implemented/bug-fix/2026-10-25-native-contiguous-tool-aggregation.md)。[目标表回归](test/tool-request-target.test.ts)、[实际工具DOM](test/isolated/native-tool-targets-dom.test.tsx)与[元数据DOM](test/isolated/native-tool-messages-dom.test.tsx)覆盖现行参数、父／子详情、排队→运行→省略Model声明的终态及冲突撤销；实际执行结果另记于本节。
+
+具体工具行先经过 [完整元数据门禁](src/native-tool-messages.tsx)：首次请求、回执或命令分片的展示事实未齐时不生成该条具体消息，完整一条才显示一条，不以全局loading阻塞其他完整工具。完整请求可以在排队或执行中显示，不等执行终态；合法空输入、参数非法的真实失败及未知schema不因没有target而被误判为未完成。子详情只投影inputReady与有界target，不传原参数payload。NativeToolPresentation仅保留同scope、同presentationKey已展示的完整消息，供回执独立核验期间阅读，不补不完整字段、不冒称成功；来源冲突或live输入资格撤销均清除旧展示，不保留或恢复命令复制。长目标沿原单行省略，悬停可看完整展示文字。
+
+2026-10-26，macOS arm64／Bun1.4.2，当前已执行：目标字段表34项／73断言、Main元数据30项／1268断言、完整元数据与准确交接DOM14项／162断言、实际Native聚合11项／421断言、子详情恢复3项／54断言通过；UI／Desktop typecheck、定向Biome、文档、边界和测试归属检查通过。隔离浏览器使用生产Conversation／ToolActivity和真实投影函数，核9类工具的首次metadata未齐→分批2条→完整9条，以及排队／运行、回执核验与来源撤销；深浅主题×1280／390px×单项／聚合共72阶段图及4张末项图，100次DOM变化／1264帧没有只有标题的半条工具行，目标title完整、手动阅读位置保持，无新增操作或页面错误。报告在本机 `.cache/tool-target-browser-F6ZKZc/report.json`。该快照夹具证明首次／分批门禁，已完整消息的准确交接保留另由Native组件及缓存DOM验证；不代证完整Electron IPC、Service、真实模型或安装版。扩展回归中的四项旧折叠、动画或旧版本名称失败以修改前源码复现，未计为通过。
+
 工具结果沿用户确认的原位展开方案：保留轻量工具行、连续工具聚合与原阅读身份，点击对应项在原位置阅读结果，不新增右侧工具详情页。计划、验证与 MCP 发现／资源工具按稳定 ID 显示可读动作名，结构化解释和对应图标仍需支持的准确版本；未知定义保原名称。正式 MCP 代理在元数据未核实时显示“MCP 工具”，已保存回执通过 [本地名称 reader](electron/mcp-tool-label.ts)读取原 `mcp.tools.snapshots`／`mcp.tools`，核 Store、Session、定义版本、快照绑定及原名称 hash 后显示 `MCP · 原工具名称`。名称预览不完整时沿公共 descriptor reader 读取原完整材料；没有匹配、元数据失败或外来源历史保持通用名称及原结果，不借当前远端目录猜名称。每页工具回执的可选名称共用最多32次元数据／制品读取、从首次名称查询起250ms期限及256KiB完整descriptor预算；超限或超时仅降级名称，不撤回原结果或取消同页／并行回执读取，避免历史目录扫描阻塞首次正文。所有查询只读本地保存事实，不连接或调用 MCP；读取关闭及换会话继续取消所属 GET，迟到名称不得发布到新会话。[元数据回归](test/native-tool-messages.test.ts)覆盖多快照／大目录的共享上限、超时原结果与并行页保全、descriptor限额及关闭取消。
 
 展开详情的 Home／End 保留内层原生滚动，并让相应首／尾边缘进入外层阅读区的可见窗口，避免聚合内差异滚到底部后末行仍被外层裁住。聚合总高、正文完整性、折叠选择和输入位置仍沿原规则；鼠标滚轮与横向阅读保持原边界交接。
@@ -827,6 +835,20 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 [Main 生命周期隔离测试](test/isolated/native-main-scheduling-lifecycle.test.ts)运行真实 Main 模块与调度器、有限宿主端口和 SQLite，核 opening／重载交叠及创建回执排空次序；它不代证真实 Electron 或原生进程退出。[存储与时区测试](test/isolated/scheduled-tasks.test.ts)、[实际固定模型 Service 与审批测试](test/scheduled-task-runner.test.ts)、[IPC](test/native-scheduled-ipc.test.ts)、[页面导航](test/isolated/native-scheduled-tasks-dom.test.tsx)、[hook](test/isolated/native-scheduled-hook-dom.test.tsx)和[共享 DOM](../../packages/ui/test/isolated/scheduled-tasks.test.tsx)覆盖对应断言；[DB10实际备份恢复](../../packages/agent/test/isolated/maintenance/desktop-schedules-profile.test.ts)核旧字节、恢复 Store 与零重放。实现决策见[Note](../../.agents/notes/implemented/architecture/2026-10-15-desktop-local-scheduled-tasks.md)。这些证据不授予 macOS／Windows 发布或安装资格。
 
 ## Native 当前会话环境信息与子详情
+
+环境行将原 Store／子 Session 组合交给共享 `ChildAgentIcon`，与工具消息及审批使用相同稳定身份，不按标题、状态或本次 carrier 重新分配。恢复历史沿原 Store 保持外观；无法导航的已知子会话仍显示图标，缺身份时使用通用子 Agent 图标。显示、点击与停止资格仍分别由原 metadata 和回调决定。
+
+环境行、工具消息和子结果入口打开详情时，同步把该原身份交给共享SessionTabs的`childAgentIdentity`，标签图标使用同一分配；结果历史沿原消息Store，环境恢复历史沿原Execution Store。该装饰字段不参与Session／Execution去重或读取准入，标签改名仍保留同一图标节点，SVG沿共享14px尺寸。
+
+同日标签图标补齐：[共享标签回归](../../packages/ui/test/isolated/desktop-session-tabs.test.tsx)10项／174断言、[Native导航](test/isolated/native-session-navigation-dom.test.tsx)定向2项／40断言及UI／Desktop typecheck通过。Chrome隔离夹具在深浅主题×800／390px×运行／完成八组合核标签、环境卡与审批的图标分配、实测颜色和14×14px尺寸完全一致，重命名保持，原环境详情点击正常、无横向溢出及页面错误；证据在本机 `.cache/child-tab-icon-yxMPRQ/report.json`。该范围使用生产共享组件与environmentDisplay，不代证完整Electron或安装版。
+
+2026-10-26，macOS arm64／Bun1.4.2，环境行图标修复：[共享子Agent展示](../../packages/ui/test/isolated/desktop-agent-activity.test.tsx)3项／1266断言、[Native环境卡](test/native-background-panel.test.tsx)12项／288断言及UI／Desktop typecheck通过。生产组件、实际environmentDisplay与共享样式在本机Chrome隔离夹具中观察深浅主题×800／390px×运行／完成八组状态，重命名后图标和颜色仍与审批一致，SVG实测14×14px、无横向溢出，八次原详情点击正常；无导航目标时也保留图标。报告在本机 `.cache/environment-child-icon-GilZs4/report.json`。该范围不代证完整Electron或安装版。
+
+[NativeChildDetail](src/native-child-detail.tsx)直接显示共享 Conversation，顶部不再渲染“刷新子日志”按钮、只读说明或对应占位。日志更新与失败后的重读继续由原 environment reader 自动处理；子详情的只读权限、复制资格及标签关闭释放规则保持。共享标签模型按入口创建，首次点击子 Agent 消息只打开对应详情；关闭最后一页后重新点击子 Agent 也不预建空白网页，已有网页仍保留。
+
+2026-10-26，macOS arm64／Bun1.4.2，本次顶部移除工作树：[导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)定向1项／43断言与[自动恢复](test/isolated/native-environment-child-recovery-dom.test.tsx)3项／56断言通过。普通[Electron 子详情](test/isolated/native-child-stream-electron.test.ts)的 Responses 范围通过，实际观察首次打开、流式追加、完成重入三阶段；100次父／子导航记录630次DOM变化，零欢迎页／重复消息，reader峰值2、关闭后为0。截图与过程记录保存在本机 `dist/acceptance/child-detail-header-20261026/responses`。使用本机受控 Provider，不增加外部真实模型或安装包资格。[复制回归](test/isolated/native-child-copy-dom.test.tsx)2项通过、2项失败；两项失败以修改前组件和测试复现，未计为通过。
+
+同日修复多余空白网页标签：[共享标签生命周期](../../packages/ui/test/isolated/desktop-session-tabs.test.tsx)10项／167断言与 Native 导航定向5项／130断言通过，覆盖消息点击、重复打开、末页关闭后重开及保留已有网页。上述普通 Electron Responses 范围重新通过，首次打开只有一个子详情标签，100次导航及三阶段截图均无额外空白网页；613次DOM变化无欢迎页／重复消息，关闭后在读为0。证据在本机 `dist/acceptance/child-detail-tabs-20261026/responses`，仍限该隔离受控环境。
 
 [引导交接组合回归](test/isolated/native-new-conversation-dom.test.tsx)通过真实 Composer、DesktopInput、回环 HTTP、SQLite 和 Runtime／固定 Adapter，核引导 POST 已落库但回执丢失后，切到另一会话编辑草稿，再重连仅查询原 Command；原输入只出现一次、下一模型请求原文和来源各一次，另一草稿保持。另核提交与原 Turn 完成的两个顺序：受理归原 Run，目标先结束则保留草稿，不自动改成后续输入。[阅读回归](../../packages/ui/test/isolated/desktop-conversation-scroll.test.tsx)在受控 DOM 几何下核离底选区、sending→saved、增量回复、终态折叠和回会话的锚点／展开状态；这类确定性证据不冒称完整 Electron 视口资格。
 

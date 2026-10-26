@@ -234,7 +234,7 @@ try {
         .click();
       await page
         .locator('.session-tab-child')
-        .getByRole('button', { name: '刷新子日志', exact: true })
+        .getByRole('region', { name: '子 Agent 详情', exact: true })
         .waitFor();
       assert.equal(
         await page.locator('.conversation').count(),

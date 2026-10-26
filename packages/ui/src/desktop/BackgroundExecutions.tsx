@@ -1,5 +1,6 @@
 import { ArrowRight01Icon, BotIcon, TerminalIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import { ChildAgentIcon } from './ApprovalHeader';
 import { useDesktopDiagnostics } from './diagnostics';
 import { Button } from './ui';
 
@@ -7,6 +8,8 @@ export interface BackgroundExecutionSummary {
   readonly activity?: string;
   readonly executionId: string;
   readonly displayName?: string;
+  /** Stable original Store/child Session decoration; grants no navigation or control. */
+  readonly childAgentIdentity?: string;
   readonly kind: 'shell' | 'service' | 'subagent';
   readonly status:
     | 'queued'
@@ -186,6 +189,14 @@ function ExecutionGroup({
             const name =
               execution.displayName ??
               (diagnostics ? execution.executionId : kindLabel(execution.kind));
+            const childIcon =
+              execution.kind === 'subagent' ? (
+                execution.childAgentIdentity ? (
+                  <ChildAgentIcon identity={execution.childAgentIdentity} />
+                ) : (
+                  <HugeiconsIcon icon={BotIcon} aria-hidden="true" />
+                )
+              ) : null;
             return (
               <li key={execution.executionId} data-execution-id={execution.executionId}>
                 <span className="background-execution-identity">
@@ -197,11 +208,15 @@ function ExecutionGroup({
                       aria-label={`查看子 Agent 详情：${name}`}
                       onClick={() => subagentDetails?.onOpen(childSessionId, execution.executionId)}
                     >
-                      <span>{name}</span>
+                      {childIcon}
+                      <span className="background-execution-name">{name}</span>
                       <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
                     </button>
                   ) : execution.displayName || !diagnostics ? (
-                    <span className="background-execution-name">{name}</span>
+                    <span className="background-execution-label">
+                      {childIcon}
+                      <span className="background-execution-name">{name}</span>
+                    </span>
                   ) : (
                     <code>{execution.executionId}</code>
                   )}

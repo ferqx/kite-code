@@ -431,6 +431,7 @@ function SessionPageContent({
     const opened = childTabOpener.current(
       { sessionId: request.sessionId, executionId: request.executionId },
       request.title,
+      request.childAgentIdentity,
     );
     setTabLimitKey(opened ? undefined : props.readingKey);
     detailClose.current?.();
@@ -894,7 +895,10 @@ function SessionPageContent({
                         title="标签页"
                         aria-controls="session-tabs"
                         onClick={() => {
-                          if (!tabsOpen) props.detailPanel?.onClose();
+                          if (!tabsOpen) {
+                            if (tabModel.tabs.length === 0) tabModel.addBrowser();
+                            props.detailPanel?.onClose();
+                          }
                           changeTabsOpen(!tabsOpen);
                         }}
                       >

@@ -5,6 +5,7 @@ import {
   type NativeToolMessageFact,
   nativeShellCommandChunkBytes,
 } from '../src/tool-messages-bridge';
+import { nativeToolRequestTarget } from '../src/tool-request-target';
 import { nativeToolImages } from './tool-images';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -51,39 +52,6 @@ function callInput(
     return undefined;
   }
 }
-function target(
-  input: Record<string, unknown> | undefined,
-  definitionId: string,
-  definitionVersion: string,
-) {
-  if (
-    input &&
-    definitionId === 'files.list' &&
-    definitionVersion === '1' &&
-    (input.path === undefined || input.path === '')
-  )
-    return '.';
-  const key =
-    definitionId === 'web_fetch' && definitionVersion === '1'
-      ? 'url'
-      : definitionId === 'shell.launch' || definitionId === 'shell.execute'
-        ? 'command'
-        : definitionId.startsWith('shell.')
-          ? 'shellId'
-          : definitionId === 'files.glob'
-            ? 'pattern'
-            : definitionId === 'files.search'
-              ? 'text'
-              : definitionId.startsWith('files.')
-                ? 'path'
-                : undefined;
-  const target = key ? input?.[key] : undefined;
-  // A request target remains text; even a known Files request does not grant a file action.
-  if (typeof target !== 'string') return undefined;
-  const points = [...target];
-  return points.slice(0, 4096).join('') + (points.length > 4096 ? '…' : '');
-}
-
 function shellInput(
   execution: Execution,
   input: Record<string, unknown> | undefined,
@@ -166,7 +134,7 @@ export function nativeLiveShellInputFact(
     definitionVersion: execution.definitionVersion,
     status: execution.status,
     resultRevision: execution.resultRevision,
-    target: target(input, execution.definitionId, execution.definitionVersion),
+    target: nativeToolRequestTarget(input, execution.definitionId, execution.definitionVersion),
     shellInput: shell,
     inputSource: {
       storeId: execution.originStoreId,
@@ -177,19 +145,21 @@ export function nativeLiveShellInputFact(
   };
 }
 
-function savedShellInput(
+function savedToolInput(
   execution: Execution,
   message: Message,
   messages: readonly Message[],
   sessionId: string,
 ) {
   if (
-    execution.definitionVersion !== '1' ||
-    !['shell.execute', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].includes(
-      execution.definitionId,
-    ) ||
     !message.toolCallId ||
-    execution.toolCallId !== message.toolCallId
+    execution.toolCallId !== message.toolCallId ||
+    (nativeToolRequestTarget(
+      execution.toolInput,
+      execution.definitionId,
+      execution.definitionVersion,
+    ) === undefined &&
+      !(execution.definitionVersion === '1' && execution.definitionId.startsWith('shell.')))
   )
     return;
   const original = source(message);
@@ -296,11 +266,19 @@ export function nativeToolMessageFact({
   const history = [...messages];
   let call =
     callInput(message, execution.definitionId, history, sessionId) ??
-    savedShellInput(execution, message, history, sessionId);
+    savedToolInput(execution, message, history, sessionId);
+  if (execution.toolCallId !== undefined && execution.toolCallId !== message.toolCallId)
+    call = undefined;
   if (
-    execution.definitionId.startsWith('shell.') &&
-    execution.toolCallId !== undefined &&
-    execution.toolCallId !== message.toolCallId
+    call &&
+    execution.toolInput !== undefined &&
+    !execution.definitionId.startsWith('shell.') &&
+    nativeToolRequestTarget(call, execution.definitionId, execution.definitionVersion) !==
+      nativeToolRequestTarget(
+        execution.toolInput,
+        execution.definitionId,
+        execution.definitionVersion,
+      )
   )
     call = undefined;
   const details = object(result.details);
@@ -333,6 +311,18 @@ export function nativeToolMessageFact({
     result.content === details.code
       ? (details.code as 'context_refresh_required' | 'capability_refresh_required')
       : undefined;
+  const requestTarget = nativeToolRequestTarget(
+    shell && ['execute', 'launch'].includes(shell.operation) && shell.command === undefined
+      ? undefined
+      : call,
+    execution.definitionId,
+    execution.definitionVersion,
+  );
+  const expectedTarget = nativeToolRequestTarget(
+    execution.toolInput,
+    execution.definitionId,
+    execution.definitionVersion,
+  );
   return {
     messageId: message.id,
     executionId: execution.id,
@@ -342,13 +332,8 @@ export function nativeToolMessageFact({
     resultRevision: execution.resultRevision,
     ...(result.modelImages !== undefined ? { images: nativeToolImages(execution) } : {}),
     ...(decisionRefresh ? { decisionRefresh } : {}),
-    target: target(
-      shell && ['execute', 'launch'].includes(shell.operation) && shell.command === undefined
-        ? undefined
-        : call,
-      execution.definitionId,
-      execution.definitionVersion,
-    ),
+    target: requestTarget,
+    ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),
     ...(shell ? { shellInput: shell } : {}),
     ...(shell?.shellId &&
     call &&

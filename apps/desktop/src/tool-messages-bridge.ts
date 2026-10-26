@@ -1,4 +1,5 @@
 import type { Execution, Message, Run } from '@kite-ai/client';
+import { nativeToolRequestTarget } from './tool-request-target';
 
 /** Budget for added command fragments; existing metadata retains the original IPC response cap. */
 export const nativeToolMessagePageBytes = 524288;
@@ -28,8 +29,10 @@ export type NativeToolMessageFact = Pick<
   executionId: string;
   /** Core-confirmed pre-dispatch freshness rejection; the original Execution remains failed. */
   decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
-  /** Display only: unique original Model call fields, or its known version's directory default. */
+  /** Display only: verified original request fields, or its known version's directory default. */
   target?: string;
+  /** Original request presentation is still being verified; never publish a partial tool row. */
+  inputPending?: boolean;
   /** Name verified against original saved MCP metadata; display only. */
   label?: string;
   shellInput?: NativeShellInput;
@@ -126,14 +129,16 @@ export type NativeToolExecution = Pick<
   | 'resultRevision'
   | 'authorization'
   | 'cancelRequestedAt'
->;
+> & { target?: string; inputReady?: boolean };
 
 export function nativeRunFact(run: NativeRunFact): NativeRunFact {
   const { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason } = run;
   return { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason };
 }
 
-export function nativeToolExecution(execution: NativeToolExecution): NativeToolExecution {
+export function nativeToolExecution(
+  execution: NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>,
+): NativeToolExecution {
   const {
     id,
     originStoreId,
@@ -159,6 +164,10 @@ export function nativeToolExecution(execution: NativeToolExecution): NativeToolE
     resultRevision,
     authorization,
     cancelRequestedAt,
+    target: definitionId.startsWith('shell.')
+      ? undefined
+      : nativeToolRequestTarget(execution.toolInput, definitionId, definitionVersion),
+    inputReady: execution.toolInput !== undefined,
   };
 }
 

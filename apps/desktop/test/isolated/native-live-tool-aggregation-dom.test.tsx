@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { Execution, Message, Run } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { nativeLiveShellInputFact } from '../../electron/tool-message-fact';
 import type {
   NativeBridge,
   NativeEvent,
@@ -204,23 +205,29 @@ function fixture() {
                 kind: 'toolMessages.page',
                 readId: request.readId,
                 scope: scope!,
-                entries: request.messageIds.flatMap((messageId) => {
-                  const receipt = messages.find((message) => message.id === messageId);
-                  const execution = executionFacts.get(receipt?.sourceIds?.[0] ?? '');
-                  return execution
-                    ? [
-                        {
-                          messageId,
-                          executionId: execution.id,
-                          definitionId: execution.definitionId,
-                          definitionVersion: execution.definitionVersion,
-                          status: execution.status,
-                          resultRevision: execution.resultRevision,
-                          target: `file-${execution.id}.ts`,
-                        },
-                      ]
-                    : [];
-                }),
+                entries: request.executionIds
+                  ? request.executionIds.flatMap((id) => {
+                      const execution = executionFacts.get(id);
+                      const fact = execution && nativeLiveShellInputFact(execution);
+                      return fact ? [fact] : [];
+                    })
+                  : request.messageIds.flatMap((messageId) => {
+                      const receipt = messages.find((message) => message.id === messageId);
+                      const execution = executionFacts.get(receipt?.sourceIds?.[0] ?? '');
+                      return execution
+                        ? [
+                            {
+                              messageId,
+                              executionId: execution.id,
+                              definitionId: execution.definitionId,
+                              definitionVersion: execution.definitionVersion,
+                              status: execution.status,
+                              resultRevision: execution.resultRevision,
+                              target: `file-${execution.id}.ts`,
+                            },
+                          ]
+                        : [];
+                    }),
               }),
             ),
           );
@@ -447,12 +454,19 @@ test('Native mixed tool activity keeps its first shell through receipt eviction 
   const f = fixture();
   try {
     await f.render();
-    await f.start([tool(1, { definitionId: 'shell.launch', definitionVersion: '1' })]);
+    const shell = tool(1, {
+      definitionId: 'shell.launch',
+      definitionVersion: '1',
+      toolInput: { key: 'aggregation-shell', command: 'printf aggregate' },
+    });
+    await f.start([shell]);
+    expect(topActivities(f.host)).toHaveLength(0);
+    await f.flush();
     collapsed(f.host);
     const summary = f.host.querySelector('button.tool-activity-summary');
     await f.toggle();
     await f.start([
-      tool(1, { definitionId: 'shell.launch', definitionVersion: '1' }),
+      shell,
       tool(2, { definitionId: 'files.write', definitionVersion: '2' }),
       tool(3, { definitionId: 'custom.remote', definitionVersion: '99' }),
     ]);

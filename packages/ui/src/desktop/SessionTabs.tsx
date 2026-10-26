@@ -2,16 +2,17 @@ import {
   Add01Icon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
+  BotIcon,
   Cancel01Icon,
   Globe02Icon,
   PanelRightCloseIcon,
   RefreshIcon,
   SourceCodeIcon,
-  UserGroupIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { ChildAgentIcon } from './ApprovalHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Button } from './ui';
 
@@ -30,6 +31,7 @@ export interface SessionChildTarget {
 export interface SessionChildTabRequest extends SessionChildTarget {
   readonly requestId: number;
   readonly title: string;
+  readonly childAgentIdentity?: string;
 }
 
 export interface SessionChildPageProps extends SessionChildTarget {
@@ -49,7 +51,12 @@ export interface SessionTabsProps {
 
 type SessionTab =
   | { id: string; kind: 'browser' | 'changes'; title: string }
-  | ({ id: string; kind: 'child'; title: string } & SessionChildTarget);
+  | ({
+      id: string;
+      kind: 'child';
+      title: string;
+      childAgentIdentity?: string;
+    } & SessionChildTarget);
 export interface SessionTabsModel {
   readonly tabs: readonly SessionTab[];
   readonly active: string;
@@ -57,7 +64,11 @@ export interface SessionTabsModel {
   readonly title: (id: string, title: string) => void;
   readonly addBrowser: () => void;
   readonly openChanges: () => void;
-  readonly openChild: (target: SessionChildTarget, title: string) => boolean;
+  readonly openChild: (
+    target: SessionChildTarget,
+    title: string,
+    childAgentIdentity?: string,
+  ) => boolean;
   readonly closeTab: (id: string) => void;
 }
 const maxTabs = 8;
@@ -146,8 +157,7 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
 }
 
 function initialTabs(scope: string) {
-  const tab = newBrowserTab();
-  return { scope, tabs: [tab], selected: tab.id };
+  return { scope, tabs: [] as SessionTab[], selected: '' };
 }
 /** Lives above the responsive panel Group so resizing cannot discard tabs or browsing history. */
 export function useSessionTabs(
@@ -184,7 +194,7 @@ export function useSessionTabs(
     [],
   );
   const { tabs, selected } = current;
-  const active = tabs.some((tab) => tab.id === selected) ? selected : tabs[0]!.id;
+  const active = tabs.some((tab) => tab.id === selected) ? selected : (tabs[0]?.id ?? '');
   const title = (id: string, value: string) => {
     const name = value.trim().slice(0, 80) || '新标签页';
     setState((value) => {
@@ -210,14 +220,18 @@ export function useSessionTabs(
     const tab: SessionTab = { id: 'changes', kind: 'changes', title: '变更' };
     setState((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
   };
-  const openChild = (target: SessionChildTarget, title: string) => {
+  const openChild = (target: SessionChildTarget, title: string, childAgentIdentity?: string) => {
     const id = `child-${JSON.stringify([target.sessionId, target.executionId ?? null])}`;
+    const existing = tabs.find((tab) => tab.id === id);
     if (!tabs.some((tab) => tab.id === id) && tabs.length >= maxTabs) return false;
     const tab: SessionTab = {
       ...target,
       id,
       kind: 'child',
       title: title.trim().slice(0, 80) || '子 Agent',
+      childAgentIdentity:
+        childAgentIdentity ??
+        (existing?.kind === 'child' ? existing.childAgentIdentity : undefined),
     };
     setState((value) => ({
       ...value,
@@ -230,12 +244,12 @@ export function useSessionTabs(
   };
   const closeTab = (id: string) => {
     const index = tabs.findIndex((tab) => tab.id === id);
-    let remaining = tabs.filter((tab) => tab.id !== id);
-    if (!remaining.length) remaining = [newBrowserTab()];
+    const remaining = tabs.filter((tab) => tab.id !== id);
     setState((value) => ({
       ...value,
       tabs: remaining,
-      selected: active === id ? remaining[Math.min(index, remaining.length - 1)]!.id : active,
+      selected:
+        active === id ? (remaining[Math.min(index, remaining.length - 1)]?.id ?? '') : active,
     }));
   };
   return {
@@ -301,15 +315,19 @@ export function SessionTabs({
             {tabs.map((tab) => (
               <div className="session-tab" data-active={tab.id === active} key={tab.id}>
                 <TabsTrigger value={tab.id} title={tab.title}>
-                  <HugeiconsIcon
-                    icon={
-                      tab.kind === 'browser'
-                        ? Globe02Icon
-                        : tab.kind === 'child'
-                          ? UserGroupIcon
-                          : SourceCodeIcon
-                    }
-                  />
+                  {tab.kind === 'child' && tab.childAgentIdentity ? (
+                    <ChildAgentIcon identity={tab.childAgentIdentity} />
+                  ) : (
+                    <HugeiconsIcon
+                      icon={
+                        tab.kind === 'browser'
+                          ? Globe02Icon
+                          : tab.kind === 'child'
+                            ? BotIcon
+                            : SourceCodeIcon
+                      }
+                    />
+                  )}
                   <span>{tab.title}</span>
                 </TabsTrigger>
                 <Button

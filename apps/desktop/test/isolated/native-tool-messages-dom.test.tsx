@@ -1231,6 +1231,103 @@ test('the exact Native Tool keeps its reading identity and open Shell card from 
   }
 });
 
+test('a saved file target is revoked immediately when a later visible call conflicts, then restored from its exact request', async () => {
+  const f = fixture();
+  const path = '/workspace/中文 空格🙂.md';
+  const model: Message = {
+    id: 'model',
+    sessionId: 's',
+    runId: 'run',
+    seq: '1',
+    role: 'assistant',
+    status: 'complete',
+    content: '',
+    toolCalls: [],
+  };
+  const receipt: Message = {
+    id: 'receipt',
+    sessionId: 's',
+    runId: 'run',
+    seq: '2',
+    role: 'tool',
+    status: 'complete',
+    content: 'saved read',
+    toolCallId: 'original-call',
+    sourceIds: ['file-tool'],
+  };
+  const execution: Execution = {
+    id: 'file-tool',
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'run',
+    kind: 'tool',
+    definitionId: 'files.read',
+    definitionVersion: '5',
+    status: 'succeeded',
+    toolCallId: 'original-call',
+    toolInput: { path },
+    result: { outcome: 'succeeded', content: receipt.content },
+    resultRevision: '1',
+    cancelRequestedAt: null,
+  };
+  const history = new Map([model, receipt].map((value) => [value.id, value]));
+  let gate: Promise<void> | undefined;
+  let release!: () => void;
+  const manager = new NativeToolMessages(
+    {
+      verifyConnection: async () => {},
+      getExecution: async () => {
+        await gate;
+        return execution;
+      },
+    } as unknown as AgentClient,
+    () => ({
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      storeId: 'store',
+      sessionId: 's',
+      workspaceId: 'w',
+    }),
+    () => history,
+  );
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method === 'toolMessages.list') return manager.list(request);
+      if (request.method === 'toolMessages.close') manager.close(request.readId);
+      return null;
+    },
+  } as NativeBridge;
+  const render = () =>
+    act(async () =>
+      f.root.render(
+        <Harness bridge={bridge} selected={selection()} messages={[...history.values()]} />,
+      ),
+    );
+  try {
+    await render();
+    expect(f.host.querySelector('.tool-step-target')?.textContent).toBe(path);
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const call = { id: 'original-call', name: 'files.read', arguments: JSON.stringify({ path }) };
+    history.set(model.id, { ...model, toolCalls: [call, { ...call }] });
+    await render();
+    expect(f.host.querySelector('.tool-step-target')).toBeNull();
+    await act(async () => release());
+    gate = undefined;
+    expect(f.host.querySelector('.tool-step-target')).toBeNull();
+    history.set(model.id, model);
+    await render();
+    expect(f.host.querySelector('.tool-step-target')?.textContent).toBe(path);
+    expect(f.host.querySelector('.file-link')).toBeNull();
+  } finally {
+    release?.();
+    manager.release();
+    await f.close();
+  }
+});
+
 function fixture() {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
