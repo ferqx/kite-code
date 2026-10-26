@@ -375,7 +375,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 `SessionPage` 的薄入口持有原 `useSessionTabs`；会话scope改变时，标签页原有状态重置只重跑该入口，页面内容组件保持同一挂载位置。浏览器关闭、child读取与最后标签页收栏仍走原生命周期，避免为性能改写标签页所有权。
 
-`Conversation` 将消息分组与 entry JSX 投影按原消息、Turn、renderer、展开状态和恢复标记复用；缓存 resume／读取资格变化不重复构造未变正文，叶组件仍通过原 Context 立即更新操作门禁。`loading` 往返会刷新恢复标记，外层滚动、选择和 observer 生命周期仍独立执行。[投影回归](test/isolated/desktop-conversation-presentation.test.tsx)核40条原消息的 renderer 调用次数、真实消息／回调／Turn更新、手动展开和仅loading往返后的原阅读位置。
+`Conversation` 将消息分组与 entry JSX 投影按原消息、Turn、renderer、展开状态和恢复标记复用；缓存 resume／读取资格变化不重复构造未变正文，叶组件仍通过原 Context 立即更新操作门禁。已提交投影另保留当前展开的轮次过程ID，resume时补齐默认展开但未显式选择的活动轮次标记；只有缺失标记才重新投影，已标记页面反复返回仍命中原投影。`loading` 往返会刷新恢复标记，外层滚动、选择和 observer 生命周期仍独立执行。[投影回归](test/isolated/desktop-conversation-presentation.test.tsx)核40条原消息的 renderer 调用次数、真实消息／回调／Turn更新、初始及后来新增的默认展开轮次在实际缓存往返后的原DOM与标记、重复恢复零重投影、手动开合和仅loading往返后的原阅读位置。
 
 `Conversation` 可供主会话和当前子详情同时显示；Cmd／Ctrl+A 先按事件目标、焦点和已有选区选择唯一可见阅读区，避免两份 document 监听覆盖彼此，输入框和编辑器仍使用自身快捷键。[复制与选区回归](test/isolated/desktop-message-copy.test.tsx)覆盖两区同时显示、隐藏、输入和单区回退。宿主通过 `ConversationActivityContext` 提供当前读取资格，保留正文不会恢复复制或正文读取；子详情的已核事实和资格由 Native 管理。
 

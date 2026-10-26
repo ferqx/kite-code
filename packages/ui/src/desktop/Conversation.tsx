@@ -541,10 +541,14 @@ export function Conversation({
   const restore = useRef(true);
   const [following, setFollowing] = useState(reading.current.follow);
   const [expanded, setExpanded] = useState(reading.current.expanded);
+  const committedOpenTurns = useRef<readonly string[]>([]);
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
     restore.current = true;
     for (const [id, open] of Object.entries(expanded)) if (open) restoredExpanded.current.add(id);
+    // Default-open live processes have no explicit expanded entry. Restore their
+    // markers too, invalidating the projection only when a marker was missing.
+    for (const id of committedOpenTurns.current) restoredExpanded.current.add(id);
   }
   useEffect(() => {
     const element = viewport.current;
@@ -657,7 +661,8 @@ export function Conversation({
   }).current;
   const restoredMarkerSignature = JSON.stringify([...restoredExpanded.current].sort());
   // biome-ignore lint/correctness/useExhaustiveDependencies: Marker ref contents and the loading-driven restore lifecycle both invalidate the retained projection.
-  const { entryContent, empty, busy } = useMemo(() => {
+  const { entryContent, empty, busy, openTurns } = useMemo(() => {
+    const openTurns: string[] = [];
     const visibleToolIds = new Set(
       messages.filter(isVisibleTool).map((message) => message.id.slice(5)),
     );
@@ -1095,6 +1100,7 @@ export function Conversation({
       // container so the old process cannot repaint during its exit animation.
       const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
       const open = expanded[turnKey] ?? !settled;
+      if (showProcess && open) openTurns.push(turnKey);
       // Cold history and restored readings start at their full height. Replaying
       // the default-open process moves the transcript for the entire animation.
       // A later user toggle removes this marker and keeps the normal animation.
@@ -1205,7 +1211,7 @@ export function Conversation({
               message.role === 'system') &&
               !message.settled)),
       );
-    return { entryContent: entries.map(renderEntry), empty: entries.length === 0, busy };
+    return { entryContent: entries.map(renderEntry), empty: entries.length === 0, busy, openTurns };
   }, [
     messages,
     turnActivity,
@@ -1223,6 +1229,9 @@ export function Conversation({
     restoredMarkerSignature,
     loading,
   ]);
+  useLayoutEffect(() => {
+    committedOpenTurns.current = openTurns;
+  }, [openTurns]);
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
