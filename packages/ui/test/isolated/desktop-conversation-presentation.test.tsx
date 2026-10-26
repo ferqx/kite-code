@@ -237,23 +237,26 @@ test('explicit expansion and restoration markers invalidate projection while man
   };
   try {
     await f.render({ renderToolActivity: tools });
-    expect(toolCalls).toBe(1);
+    expect(toolCalls).toBe(0);
+    expect(f.host.querySelector('[data-host-tools]')).toBeNull();
     const summary = () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
     const process = () => f.host.querySelector('.agent-turn-process')!;
     await act(async () => summary().click());
-    expect(toolCalls).toBe(2);
+    expect(toolCalls).toBe(1);
     expect(summary().getAttribute('aria-expanded')).toBe('true');
     expect(process().hasAttribute('data-restored-expanded')).toBe(false);
     await f.render({ resume: 1 });
-    expect(toolCalls).toBe(3);
+    expect(toolCalls).toBe(2);
     expect(process().getAttribute('data-restored-expanded')).toBe('true');
     expect(summary().getAttribute('aria-expanded')).toBe('true');
     await act(async () => summary().click());
+    const beforeReopen = toolCalls;
     await act(async () => summary().click());
-    expect(toolCalls).toBe(5);
+    expect(toolCalls).toBe(beforeReopen + 1);
     expect(process().hasAttribute('data-restored-expanded')).toBe(false);
+    const beforeResume = toolCalls;
     await f.render({ resume: 2 });
-    expect(toolCalls).toBe(6);
+    expect(toolCalls).toBe(beforeResume + 1);
     expect(process().getAttribute('data-restored-expanded')).toBe('true');
     expect(f.host.querySelector('[data-host-tools]')?.textContent).toBe('Tool');
   } finally {

@@ -39,6 +39,7 @@ import {
   TraceLine,
   TraceTitle,
 } from './components/ui/trace';
+import { DeferredProcessContent } from './DeferredProcessContent';
 import { useDesktopDiagnostics } from './diagnostics';
 import { FileDiff } from './FileChanges';
 import { cn } from './lib/utils';
@@ -991,10 +992,14 @@ export function ToolActivity({
   // A failed original Tool receipt always keeps its own failure presentation.
   const agent = !grouped && !itemIssue && message.status !== 'cancelled' ? childAgent : undefined;
   const open = expanded ?? false;
-  const children =
-    agent || grouped || webSuccess
-      ? []
-      : messages.map((item) => renderChildren(item.id.slice(5), true));
+  let projectedChildren: ReactNode[] | undefined;
+  const getChildren = () => {
+    projectedChildren ??=
+      agent || grouped || webSuccess
+        ? []
+        : messages.map((item) => renderChildren(item.id.slice(5), true));
+    return projectedChildren;
+  };
   const approval = grouped ? undefined : approvalLabel(message);
   const pendingReview = messages.some(
     (item) => !executionUnconfirmed(item) && !item.settled && automaticChecking(item),
@@ -1022,7 +1027,7 @@ export function ToolActivity({
       !!ask ||
       message.toolName === 'task' ||
       !!message.text ||
-      children.some(Boolean));
+      getChildren().some(Boolean));
   const label = grouped
     ? activityLabel(messages)
     : ask
@@ -1235,129 +1240,147 @@ export function ToolActivity({
           </TraceLine>
         )}
         {!agent && !webSuccess && (
-          <TraceCollapsibleContent className="tool-activity-content">
-            {grouped && (
-              <ScrollArea
-                className="tool-activity-scroll"
-                fade="y"
-                chainScroll
-                viewportClassName="tool-activity-viewport"
-                viewportProps={{ role: 'region', 'aria-label': '工具执行明细', tabIndex: 0 }}
-              >
-                <Trace className="tool-activity-steps">
-                  {messages.map((item) => (
-                    <Fragment key={item.presentationKey ?? item.id}>
-                      {renderItem?.(item) ??
-                        (!hasToolIssue(item) &&
-                        [
-                          'read_file',
-                          'search_content',
-                          'search_files',
-                          'glob',
-                          'read_mcp_resource',
-                        ].includes(item.toolName ?? '') ? (
-                          <ToolRow
-                            message={item}
-                            openFile={openFileForMessage ? openFileForMessage(item) : openFile}
-                          />
-                        ) : (
-                          <ToolActivity
-                            messages={[item]}
-                            expanded={expandedItems?.[item.presentationKey ?? item.id]}
-                            onToggle={(next) =>
-                              onToggleItem?.(item.presentationKey ?? item.id, next)
-                            }
-                            activityId={item.presentationKey ?? item.id}
-                            restoredExpanded={restoredExpanded}
-                            openFile={openFile}
-                            openFileForMessage={openFileForMessage}
-                            childDetail={childDetailForMessage?.(item)}
-                            renderChildren={renderChildren}
-                          />
+          <DeferredProcessContent
+            component={TraceCollapsibleContent}
+            className="tool-activity-content"
+            open={Boolean(open && canExpand)}
+            render={() => {
+              const children = getChildren();
+              return (
+                <>
+                  {grouped && (
+                    <ScrollArea
+                      className="tool-activity-scroll"
+                      fade="y"
+                      chainScroll
+                      viewportClassName="tool-activity-viewport"
+                      viewportProps={{ role: 'region', 'aria-label': '工具执行明细', tabIndex: 0 }}
+                    >
+                      <Trace className="tool-activity-steps">
+                        {messages.map((item) => (
+                          <Fragment key={item.presentationKey ?? item.id}>
+                            {renderItem?.(item) ??
+                              (!hasToolIssue(item) &&
+                              [
+                                'read_file',
+                                'search_content',
+                                'search_files',
+                                'glob',
+                                'read_mcp_resource',
+                              ].includes(item.toolName ?? '') ? (
+                                <ToolRow
+                                  message={item}
+                                  openFile={
+                                    openFileForMessage ? openFileForMessage(item) : openFile
+                                  }
+                                />
+                              ) : (
+                                <ToolActivity
+                                  messages={[item]}
+                                  expanded={expandedItems?.[item.presentationKey ?? item.id]}
+                                  onToggle={(next) =>
+                                    onToggleItem?.(item.presentationKey ?? item.id, next)
+                                  }
+                                  activityId={item.presentationKey ?? item.id}
+                                  restoredExpanded={restoredExpanded}
+                                  openFile={openFile}
+                                  openFileForMessage={openFileForMessage}
+                                  childDetail={childDetailForMessage?.(item)}
+                                  renderChildren={renderChildren}
+                                />
+                              ))}
+                          </Fragment>
                         ))}
-                    </Fragment>
-                  ))}
-                </Trace>
-              </ScrollArea>
-            )}
-            {shell && (
-              <ShellOutput
-                message={message}
-                metadataPending={metadataPending}
-                originalContent={unverified && children.some(Boolean) ? children : undefined}
-              />
-            )}
-            {hasDiff && <FileDiff message={message} />}
-            {ask && (
-              <div className="tool-ask-answers">
-                {ask.cancelled || message.status === 'cancelled' ? (
-                  <span>{ask.cancelled ? '已取消回答' : '已取消'}</span>
-                ) : askMultiple ? (
-                  ask.questions.map((question, index) => (
-                    <div className="tool-ask-answer" key={question.id}>
-                      <span className="tool-ask-prefix">{index + 1}. </span>
-                      <span className="tool-ask-text">
-                        {question.question.replace(/[：:]\s*$/, '')}：
-                        {ask.answers?.[question.id] ?? '尚未回答'}
-                      </span>
+                      </Trace>
+                    </ScrollArea>
+                  )}
+                  {shell && (
+                    <ShellOutput
+                      message={message}
+                      metadataPending={metadataPending}
+                      originalContent={unverified && children.some(Boolean) ? children : undefined}
+                    />
+                  )}
+                  {hasDiff && <FileDiff message={message} />}
+                  {ask && (
+                    <div className="tool-ask-answers">
+                      {ask.cancelled || message.status === 'cancelled' ? (
+                        <span>{ask.cancelled ? '已取消回答' : '已取消'}</span>
+                      ) : askMultiple ? (
+                        ask.questions.map((question, index) => (
+                          <div className="tool-ask-answer" key={question.id}>
+                            <span className="tool-ask-prefix">{index + 1}. </span>
+                            <span className="tool-ask-text">
+                              {question.question.replace(/[：:]\s*$/, '')}：
+                              {ask.answers?.[question.id] ?? '尚未回答'}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="tool-ask-answer">
+                          <span className="tool-ask-prefix">回答：</span>
+                          <span className="tool-ask-text">
+                            {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                  ))
-                ) : (
-                  <div className="tool-ask-answer">
-                    <span className="tool-ask-prefix">回答：</span>
-                    <span className="tool-ask-text">
-                      {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-            {!grouped &&
-              (!ask || itemIssue) &&
-              !shell &&
-              (!edit || itemIssue) &&
-              (!read || itemIssue) &&
-              (message.toolName !== 'task' || itemIssue) &&
-              !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
-              (itemIssue
-                ? toolDetailText(message)
-                : message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
-                <ScrollArea
-                  className="tool-detail-scroll"
-                  fade="y"
-                  chainScroll
-                  viewportClassName="tool-detail-viewport"
-                  viewportProps={{ role: 'region', 'aria-label': detailLabel, tabIndex: 0 }}
-                >
-                  <pre className="tool-detail">
-                    {itemIssue
+                  )}
+                  {!grouped &&
+                    (!ask || itemIssue) &&
+                    !shell &&
+                    (!edit || itemIssue) &&
+                    (!read || itemIssue) &&
+                    (message.toolName !== 'task' || itemIssue) &&
+                    !(
+                      message.status === 'cancelled' && message.text === 'Tool execution cancelled.'
+                    ) &&
+                    (itemIssue
                       ? toolDetailText(message)
-                      : message.toolResult?.stderr || message.toolResult?.stdout || message.text}
-                  </pre>
-                </ScrollArea>
-              )}
-            <div className="tool-activity-children">
-              {shell
-                ? null
-                : unverified || !message.toolName
-                  ? children.some(Boolean) && (
+                      : message.toolResult?.stderr ||
+                        message.toolResult?.stdout ||
+                        message.text) && (
                       <ScrollArea
                         className="tool-detail-scroll"
                         fade="y"
                         chainScroll
                         viewportClassName="tool-detail-viewport"
-                        viewportProps={{
-                          role: 'region',
-                          'aria-label': '工具原始记录',
-                          tabIndex: 0,
-                        }}
+                        viewportProps={{ role: 'region', 'aria-label': detailLabel, tabIndex: 0 }}
                       >
-                        {children}
+                        <pre className="tool-detail">
+                          {itemIssue
+                            ? toolDetailText(message)
+                            : message.toolResult?.stderr ||
+                              message.toolResult?.stdout ||
+                              message.text}
+                        </pre>
                       </ScrollArea>
-                    )
-                  : children}
-            </div>
-          </TraceCollapsibleContent>
+                    )}
+                  <div className="tool-activity-children">
+                    {shell
+                      ? null
+                      : unverified || !message.toolName
+                        ? children.some(Boolean) && (
+                            <ScrollArea
+                              className="tool-detail-scroll"
+                              fade="y"
+                              chainScroll
+                              viewportClassName="tool-detail-viewport"
+                              viewportProps={{
+                                role: 'region',
+                                'aria-label': '工具原始记录',
+                                tabIndex: 0,
+                              }}
+                            >
+                              {children}
+                            </ScrollArea>
+                          )
+                        : children}
+                  </div>
+                </>
+              );
+            }}
+          />
         )}
       </article>
     </TraceCollapsible>

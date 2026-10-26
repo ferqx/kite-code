@@ -13,13 +13,22 @@ import {
 } from 'react';
 import { useConversationActivity } from '../conversation-activity';
 import { ClipboardWriteContext, CodeCopyEligibilityContext } from './clipboard';
-import {
-  AnimatedCollapsibleContent,
-  Collapsible,
-  CollapsibleTrigger,
-} from './components/ui/collapsible';
+import { Collapsible, CollapsibleTrigger } from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
 import { ScrollArea } from './components/ui/scroll-area';
+import {
+  type ConversationScrollAnchor,
+  type ConversationWindow,
+  type ConversationWindowRange,
+  captureConversationScrollAnchor,
+  createConversationWindow,
+  expandConversationWindow,
+  jumpConversationWindowToLatest,
+  resolveConversationWindow,
+  restoreConversationScrollAnchor,
+  scheduleConversationWindowLoad,
+} from './conversation-window';
+import { DeferredProcessContent } from './DeferredProcessContent';
 import { useDesktopDiagnostics } from './diagnostics';
 import { cn } from './lib/utils';
 import { MessageContent } from './MessageContent';
@@ -36,6 +45,7 @@ export interface ReadingState {
   top: number;
   follow: boolean;
   expanded: Record<string, boolean>;
+  anchor?: ConversationScrollAnchor;
 }
 
 export interface ToolActivityState {
@@ -469,6 +479,7 @@ export function Conversation({
   messages: incomingMessages,
   loading: historyLoading,
   initialPresentationPending = false,
+  lazyHistory = false,
   turnActivity: incomingTurnActivity,
   requiredSubagentWait,
   selected,
@@ -489,6 +500,8 @@ export function Conversation({
   loading: boolean;
   /** First mount waits for host-owned grouping; an already readable tree stays live. */
   initialPresentationPending?: boolean;
+  /** Native limits cold large-history mounting; data and read admission stay host-owned. */
+  lazyHistory?: boolean;
   turnActivity?: TurnActivity;
   requiredSubagentWait?: boolean;
   selected: boolean;
@@ -520,11 +533,11 @@ export function Conversation({
   const readingActivity = useConversationActivity();
   const diagnostics = useDesktopDiagnostics();
   const previousResume = useRef(readingActivity.resume);
-  const viewport = useRef<HTMLDivElement>(null);
+  const viewport = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
   const writtenScrollTop = useRef<number | undefined>(undefined);
-  const writeScroll = useCallback((element: HTMLDivElement, top: number) => {
+  const writeScroll = useCallback((element: HTMLElement, top: number) => {
     element.scrollTop = top;
     // Use the browser's clamped value, not scrollHeight. The scroll event may
     // arrive after another chunk has changed that height.
@@ -541,6 +554,60 @@ export function Conversation({
   const restore = useRef(true);
   const [following, setFollowing] = useState(reading.current.follow);
   const [expanded, setExpanded] = useState(reading.current.expanded);
+  const [windowState, setWindowState] = useState<ConversationWindow>();
+  const rangeRef = useRef<ConversationWindowRange | undefined>(undefined);
+  const entryKeys = useRef<readonly string[]>([]);
+  const mountedEntries = useRef(new Set<string>());
+  const knownEntries = useRef(new Set<string>());
+  const pendingLoad = useRef<
+    | {
+        anchor?: ConversationScrollAnchor;
+        top: number;
+        cancel: () => void;
+        committed: boolean;
+      }
+    | undefined
+  >(undefined);
+  const loadWindow = useCallback(
+    (direction: 'before' | 'after') => {
+      const element = viewport.current;
+      const range = rangeRef.current;
+      const view = element?.ownerDocument.defaultView;
+      if (
+        !lazyHistory ||
+        !element ||
+        !range ||
+        !view ||
+        pendingLoad.current ||
+        !(direction === 'before' ? range.hasBefore : range.hasAfter)
+      )
+        return;
+      reading.current.follow = false;
+      setFollowing(false);
+      const request = {
+        anchor: captureConversationScrollAnchor(element),
+        top: element.scrollTop,
+        cancel: () => {},
+        committed: false,
+      };
+      pendingLoad.current = request;
+      request.cancel = scheduleConversationWindowLoad(view, () => {
+        if (pendingLoad.current !== request || !viewport.current) return;
+        const latest = rangeRef.current;
+        if (!latest) return;
+        const next = expandConversationWindow(entryKeys.current, latest.state, direction);
+        if (next === latest.state) {
+          pendingLoad.current = undefined;
+          return;
+        }
+        request.anchor = captureConversationScrollAnchor(viewport.current);
+        request.top = viewport.current.scrollTop;
+        request.committed = true;
+        setWindowState(next);
+      });
+    },
+    [lazyHistory],
+  );
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
     restore.current = true;
@@ -618,6 +685,8 @@ export function Conversation({
   currentTurn.current = turnActivity?.turnId;
   useLayoutEffect(
     () => () => {
+      pendingLoad.current?.cancel();
+      pendingLoad.current = undefined;
       restore.current = true;
       save.current(
         currentMessages.current
@@ -633,12 +702,19 @@ export function Conversation({
     const observer = new ResizeObserver(() => {
       // Child-local body reads and collapse animations do not commit Conversation.
       // ResizeObserver runs before paint; delaying this write exposes the old tail for a frame.
-      if (reading.current.follow) writeScroll(element, element.scrollHeight);
+      if (reading.current.follow && !rangeRef.current?.hasAfter)
+        writeScroll(element, element.scrollHeight);
+      else if (
+        lazyHistory &&
+        reading.current.anchor &&
+        restoreConversationScrollAnchor(element, reading.current.anchor)
+      )
+        writeScroll(element, element.scrollTop);
     });
     observer.observe(element);
     if (content.current) observer.observe(content.current);
     return () => observer.disconnect();
-  }, [loading, writeScroll]);
+  }, [loading, writeScroll, lazyHistory]);
   // After each content/layout commit, follow only while the reader is at the bottom.
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -646,10 +722,33 @@ export function Conversation({
       restore.current = true;
       return;
     }
+    const pending = pendingLoad.current;
+    if (pending?.committed) {
+      pendingLoad.current = undefined;
+      if (pending.anchor) {
+        const offset = pending.anchor.offset - (element.scrollTop - pending.top);
+        if (restoreConversationScrollAnchor(element, { ...pending.anchor, offset }))
+          writeScroll(element, element.scrollTop);
+      }
+    }
     if (restore.current || reading.current.follow) {
-      writeScroll(element, reading.current.follow ? element.scrollHeight : reading.current.top);
+      if (reading.current.follow) writeScroll(element, element.scrollHeight);
+      else if (
+        lazyHistory &&
+        reading.current.anchor &&
+        restoreConversationScrollAnchor(element, reading.current.anchor)
+      )
+        writeScroll(element, element.scrollTop);
+      else writeScroll(element, reading.current.top);
       restore.current = false;
     }
+    if (lazyHistory && !reading.current.follow)
+      reading.current.anchor = captureConversationScrollAnchor(element) ?? reading.current.anchor;
+    const range = rangeRef.current;
+    mountedEntries.current = new Set(
+      range ? entryKeys.current.slice(range.start, range.end) : entryKeys.current,
+    );
+    knownEntries.current = new Set(entryKeys.current);
   });
   const onToggle = useRef((id: string, open: boolean) => {
     restoredExpanded.current.delete(id);
@@ -657,7 +756,7 @@ export function Conversation({
   }).current;
   const restoredMarkerSignature = JSON.stringify([...restoredExpanded.current].sort());
   // biome-ignore lint/correctness/useExhaustiveDependencies: Marker ref contents and the loading-driven restore lifecycle both invalidate the retained projection.
-  const { entryContent, empty, busy } = useMemo(() => {
+  const projection = useMemo(() => {
     const visibleToolIds = new Set(
       messages.filter(isVisibleTool).map((message) => message.id.slice(5)),
     );
@@ -669,7 +768,9 @@ export function Conversation({
     for (const message of messages) {
       if (message.role !== 'tool' || !message.presentationOwner) continue;
       const owner = message.presentationOwner.subagentId;
-      childTools.set(owner, [...(childTools.get(owner) ?? []), message]);
+      const group = childTools.get(owner);
+      if (group) group.push(message);
+      else childTools.set(owner, [message]);
     }
     const childWithUniqueSteps = (child: Message): Message => {
       if (child.role !== 'subagent') return child;
@@ -1098,7 +1199,14 @@ export function Conversation({
       // Cold history and restored readings start at their full height. Replaying
       // the default-open process moves the transcript for the entire animation.
       // A later user toggle removes this marker and keeps the normal animation.
-      if (restore.current && open) restoredExpanded.current.add(turnKey);
+      if (
+        open &&
+        (restore.current ||
+          (lazyHistory &&
+            knownEntries.current.has(entry.key) &&
+            !mountedEntries.current.has(entry.key)))
+      )
+        restoredExpanded.current.add(turnKey);
       const statusContent = (
         <span
           className="agent-turn-status-label"
@@ -1156,11 +1264,15 @@ export function Conversation({
                     </Button>
                   </CollapsibleTrigger>
                 </div>
-                <AnimatedCollapsibleContent className="agent-turn-content">
-                  <section className="agent-turn-process-messages" aria-label="本轮处理过程">
-                    {processGroups.map((group) => renderGroup(group, 'process'))}
-                  </section>
-                </AnimatedCollapsibleContent>
+                <DeferredProcessContent
+                  open={open}
+                  className="agent-turn-content"
+                  render={() => (
+                    <section className="agent-turn-process-messages" aria-label="本轮处理过程">
+                      {processGroups.map((group) => renderGroup(group, 'process'))}
+                    </section>
+                  )}
+                />
               </div>
             </Collapsible>
           )}
@@ -1205,7 +1317,7 @@ export function Conversation({
               message.role === 'system') &&
               !message.settled)),
       );
-    return { entryContent: entries.map(renderEntry), empty: entries.length === 0, busy };
+    return { entries, renderEntry, empty: entries.length === 0, busy };
   }, [
     messages,
     turnActivity,
@@ -1222,20 +1334,55 @@ export function Conversation({
     onToggle,
     restoredMarkerSignature,
     loading,
+    lazyHistory,
   ]);
+  const { empty, busy } = projection;
+  const keys = useMemo(() => projection.entries.map((entry) => entry.key), [projection.entries]);
+  const initialWindow =
+    windowState ??
+    createConversationWindow(keys, {
+      anchorKey: !reading.current.follow ? reading.current.anchor?.entryKey : undefined,
+      legacyManual: !reading.current.follow && !reading.current.anchor,
+    });
+  const range = resolveConversationWindow(keys, initialWindow, {
+    followTail: reading.current.follow,
+  });
+  if (lazyHistory && !loading && windowState !== range.state) setWindowState(range.state);
+  if (!loading) {
+    entryKeys.current = keys;
+    rangeRef.current = lazyHistory ? range : undefined;
+  }
+  const entryContent = useMemo(() => {
+    const visible = lazyHistory
+      ? projection.entries.slice(range.start, range.end)
+      : projection.entries;
+    return visible.map((entry) =>
+      lazyHistory ? (
+        <div
+          key={entry.key}
+          className="conversation-entry"
+          data-conversation-entry-key={entry.key}
+          data-entry-kind={entry.turnId ? 'turn' : (entry.groups[0]?.[0]?.role ?? 'other')}
+        >
+          {projection.renderEntry(entry)}
+        </div>
+      ) : (
+        projection.renderEntry(entry)
+      ),
+    );
+  }, [projection, lazyHistory, range.start, range.end]);
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
-        <ScrollArea
-          type="always"
-          className="conversation"
-          viewportRef={viewport}
-          viewportClassName="conversation-viewport"
-          viewportProps={{
-            role: 'region',
-            'aria-label': '会话消息',
-            'aria-busy': loading || busy,
-            onScroll: () => {
+        <div className="conversation">
+          <section
+            ref={viewport}
+            className="conversation-viewport"
+            aria-label="会话消息"
+            aria-busy={loading || busy}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: Native scroll regions need keyboard scrolling and selection shortcuts.
+            tabIndex={0}
+            onScroll={() => {
               const element = viewport.current;
               if (!element || loading || restore.current) return;
               if (
@@ -1247,40 +1394,64 @@ export function Conversation({
               // Resume only at the actual bottom. A wider near-bottom zone
               // makes the following-state commit snap a manual scroll to the tail.
               // scrollTop is fractional while the two heights are rounded.
-              const follow = element.scrollHeight - element.clientHeight - element.scrollTop <= 1;
+              const remaining = element.scrollHeight - element.clientHeight - element.scrollTop;
+              const follow = !rangeRef.current?.hasAfter && remaining <= 1;
               reading.current = {
+                ...reading.current,
                 top: element.scrollTop,
                 follow,
                 expanded: reading.current.expanded,
+                anchor:
+                  lazyHistory && !follow ? captureConversationScrollAnchor(element) : undefined,
               };
+              if (pendingLoad.current) {
+                pendingLoad.current.anchor = captureConversationScrollAnchor(element);
+                pendingLoad.current.top = element.scrollTop;
+              }
               setFollowing(follow);
-            },
-          }}
-        >
-          <div ref={content} className="reading-column">
-            {!loading &&
-              (empty ? (
-                <div className="welcome">
-                  <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
-                  <p>
-                    {emptyState?.detail ??
-                      (selected
-                        ? '描述你的目标，或写下需要一起解决的问题。'
-                        : connected
-                          ? '选择已有会话，或为新的工作创建一个会话。'
-                          : '选择本地项目，连接你的模型与工具。')}
-                  </p>
+              if (element.scrollTop <= 200) loadWindow('before');
+              else if (remaining <= 200) loadWindow('after');
+            }}
+          >
+            <div ref={content} className="reading-column">
+              {!loading && lazyHistory && range.hasBefore && (
+                <div className="conversation-history-boundary">
+                  <Button variant="ghost" onClick={() => loadWindow('before')}>
+                    加载更早消息
+                  </Button>
                 </div>
-              ) : (
-                entryContent
-              ))}
-            {!loading && selected && requiredSubagentWait && (
-              <Marker className="mt-4" role="status">
-                <MarkerContent>正在等待子 Agent 结果</MarkerContent>
-              </Marker>
-            )}
-          </div>
-        </ScrollArea>
+              )}
+              {!loading &&
+                (empty ? (
+                  <div className="welcome">
+                    <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
+                    <p>
+                      {emptyState?.detail ??
+                        (selected
+                          ? '描述你的目标，或写下需要一起解决的问题。'
+                          : connected
+                            ? '选择已有会话，或为新的工作创建一个会话。'
+                            : '选择本地项目，连接你的模型与工具。')}
+                    </p>
+                  </div>
+                ) : (
+                  entryContent
+                ))}
+              {!loading && lazyHistory && range.hasAfter && (
+                <div className="conversation-history-boundary">
+                  <Button variant="ghost" onClick={() => loadWindow('after')}>
+                    加载后续消息
+                  </Button>
+                </div>
+              )}
+              {!loading && selected && requiredSubagentWait && (
+                <Marker className="mt-4" role="status">
+                  <MarkerContent>正在等待子 Agent 结果</MarkerContent>
+                </Marker>
+              )}
+            </div>
+          </section>
+        </div>
         {loading && (
           <div className="conversation-loading" role="status" aria-label="正在加载聊天">
             <HugeiconsIcon aria-hidden="true" data-icon="kite-loading" icon={KiteIcon} />
@@ -1296,6 +1467,14 @@ export function Conversation({
               onClick={() => {
                 const element = viewport.current;
                 if (!element) return;
+                pendingLoad.current?.cancel();
+                pendingLoad.current = undefined;
+                reading.current.follow = true;
+                reading.current.anchor = undefined;
+                if (lazyHistory) {
+                  restore.current = true;
+                  setWindowState(jumpConversationWindowToLatest(entryKeys.current));
+                }
                 writeScroll(element, element.scrollHeight);
                 reading.current = { ...reading.current, follow: true, top: element.scrollTop };
                 setFollowing(true);

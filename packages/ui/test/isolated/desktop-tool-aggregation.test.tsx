@@ -3,10 +3,33 @@ import { JSDOM } from 'jsdom';
 import { act, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Conversation } from '../../src/desktop/Conversation';
-import { DesktopDiagnosticsProvider } from '../../src/desktop/diagnostics';
-import { ToolActivity, ToolRow } from '../../src/desktop/ToolActivity';
 import type { Message } from '../../src/desktop/types';
+
+// Radix chooses its layout-effect implementation at module initialization.
+// Importing it as SSR would leave that hook permanently disabled after JSDOM
+// is installed, hiding real disclosure lifecycle behavior from these DOM tests.
+const bootstrap = new JSDOM('<!doctype html>');
+const bootstrapGlobals = (['window', 'document'] as const).map(
+  (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
+);
+Object.defineProperty(globalThis, 'window', {
+  value: bootstrap.window,
+  configurable: true,
+  writable: true,
+});
+Object.defineProperty(globalThis, 'document', {
+  value: bootstrap.window.document,
+  configurable: true,
+  writable: true,
+});
+const { Conversation } = await import('../../src/desktop/Conversation');
+const { DesktopDiagnosticsProvider } = await import('../../src/desktop/diagnostics');
+const { ToolActivity, ToolRow } = await import('../../src/desktop/ToolActivity');
+for (const [key, descriptor] of bootstrapGlobals) {
+  if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+  else Reflect.deleteProperty(globalThis, key);
+}
+bootstrap.window.close();
 
 const tool = (id: string, status: NonNullable<Message['status']> = 'queued'): Message => ({
   id: `tool:${id}`,
@@ -39,18 +62,27 @@ async function withConversation(
     'navigator',
     'IS_REACT_ACT_ENVIRONMENT',
     'getComputedStyle',
+    'HTMLElement',
+    'ResizeObserver',
     'requestAnimationFrame',
     'cancelAnimationFrame',
   ] as const;
   const previous = keys.map(
     (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
   );
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
   for (const [key, value] of Object.entries({
     window: dom.window,
     document: dom.window.document,
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    HTMLElement: dom.window.HTMLElement,
+    ResizeObserver: ResizeObserverStub,
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
   }))

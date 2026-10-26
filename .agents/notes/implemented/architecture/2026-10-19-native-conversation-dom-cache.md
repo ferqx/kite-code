@@ -39,6 +39,8 @@ Status: implemented
 
 ## Consequences
 
+[主会话按消息加载](2026-10-26-desktop-progressive-history.md)在超过100个可见entry时只初挂末40条，上滚补入；成本仍按实际保留树完整计量，预算和读取隔离不变。同resource重新登记采用不可变token，旧注销不能移除新登记或缓存owner释放责任。
+
 命中预算内的会话复用原 DOM，后台新内容仍会正常更新。未完成成本准备、真实内容变化后尚未重新计量、淘汰、超预算、窗口重载、generation／Store 替换及布局树重建仍可能重新挂载，不承诺任意长度、无限会话或零内存增长。数据及正文只在当前窗口内保留，不持久化 DOM，不恢复执行、审批或模型派发。
 
 当前产品行为和证据归[桌面手册](../../../../docs/handbook/clients/desktop/README.md)、[UI owner](../../../../packages/ui/README.md)与[Native owner](../../../../apps/desktop/README.md)。

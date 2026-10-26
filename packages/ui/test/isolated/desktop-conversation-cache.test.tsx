@@ -65,12 +65,14 @@ async function fixture() {
     nodes = 0,
     mediaBytes = 0,
     withViewport = false,
+    repeatMediaRegistration = false,
   }: {
     id: string;
     text: string;
     nodes?: number;
     mediaBytes?: number;
     withViewport?: boolean;
+    repeatMediaRegistration?: boolean;
   }) {
     const readable = useConversationReadActive();
     const retention = useConversationResourceRetention();
@@ -80,11 +82,14 @@ async function fixture() {
         released.push(id);
         unregister();
       };
-      const unregister = retention.retain({ bytes: mediaBytes, release });
+      const resource = { bytes: mediaBytes, release };
+      const original = retention.retain(resource);
+      const unregister = repeatMediaRegistration ? retention.retain(resource) : original;
+      if (repeatMediaRegistration) original();
       return () => {
         if (!retention.isPaused()) release();
       };
-    }, [id, mediaBytes, retention]);
+    }, [id, mediaBytes, repeatMediaRegistration, retention]);
     const [count, setCount] = useState(0);
     const element = useRef<HTMLElement>(null);
     const viewport = useRef<HTMLDivElement>(null);
@@ -177,6 +182,7 @@ async function fixture() {
         mediaBytes?: number;
         accounted?: boolean;
         withViewport?: boolean;
+        repeatMediaRegistration?: boolean;
       } = {},
     ) {
       await act(async () =>
@@ -203,6 +209,7 @@ async function fixture() {
                 nodes={options.nodes}
                 mediaBytes={options.mediaBytes}
                 withViewport={options.withViewport}
+                repeatMediaRegistration={options.repeatMediaRegistration}
               />
             </ConversationCache>
           </Profiler>,
@@ -346,6 +353,22 @@ test('retained media participates in the entry and total budgets and is released
   } finally {
     await f.close();
   }
+});
+
+test('a stale resource unregister cannot omit the current resource from budget eviction or unmount release', async () => {
+  const f = await fixture();
+  try {
+    const options = { mediaBytes: 6 * 1024 * 1024, repeatMediaRegistration: true };
+    const a = await f.render('a', options);
+    await f.render('b', options);
+    await f.render('c', options);
+    await f.render('d');
+    expect(a.isConnected).toBe(false);
+    expect(f.released).toEqual(['a']);
+  } finally {
+    await f.close();
+  }
+  expect(f.released).toEqual(['a', 'b', 'c']);
 });
 
 test('unchanged commits and admitted warm switches do not scan the DOM in their layout path', async () => {

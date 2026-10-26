@@ -5,7 +5,77 @@ import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ConversationActivityContext } from '../../src/conversation-activity';
 import { Conversation } from '../../src/desktop/Conversation';
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockFooter,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from '../../src/desktop/components/ui/code-block';
 import { MessageContent } from '../../src/desktop/MessageContent';
+
+test('CodeBlock parts retain local header and footer relationships, sizes and exact content', () => {
+  const source = '  exact 漢字🙂\n\n    next\n';
+  const html = renderToStaticMarkup(
+    <section>
+      {(['default', 'sm'] as const).map((size) =>
+        [
+          { header: false, footer: false },
+          { header: true, footer: false },
+          { header: false, footer: true },
+          { header: true, footer: true },
+        ].map(({ header, footer }) => (
+          <CodeBlock key={`${size}-${header}-${footer}`} size={size}>
+            {header && (
+              <CodeBlockHeader>
+                <CodeBlockTitle>Title</CodeBlockTitle>
+              </CodeBlockHeader>
+            )}
+            <CodeBlockActions>Actions</CodeBlockActions>
+            <CodeBlockContent data-header={header} data-footer={footer}>
+              {source}
+            </CodeBlockContent>
+            {footer && <CodeBlockFooter>Footer</CodeBlockFooter>}
+          </CodeBlock>
+        )),
+      )}
+      <CodeBlock>
+        <CodeBlockHeader>Outer header</CodeBlockHeader>
+        <CodeBlock>
+          <CodeBlockContent data-independent="">Nested content</CodeBlockContent>
+        </CodeBlock>
+        <CodeBlockFooter>Outer footer</CodeBlockFooter>
+      </CodeBlock>
+    </section>,
+  );
+  const dom = new JSDOM(html);
+  try {
+    const contents = [...dom.window.document.querySelectorAll('pre[data-header]')];
+    expect(contents).toHaveLength(8);
+    for (const content of contents) {
+      expect(content.textContent).toBe(source);
+      expect(content.closest('[data-slot="code-block"]')?.getAttribute('data-size')).toMatch(
+        /^(default|sm)$/,
+      );
+      expect(content.matches('[data-slot="code-block-header"] ~ pre')).toBe(
+        content.getAttribute('data-header') === 'true',
+      );
+      expect(content.matches(':has(~ [data-slot="code-block-footer"])')).toBe(
+        content.getAttribute('data-footer') === 'true',
+      );
+    }
+    const nested = dom.window.document.querySelector('pre[data-independent]')!;
+    expect(nested.matches('[data-slot="code-block-header"] ~ pre')).toBe(false);
+    expect(nested.matches(':has(~ [data-slot="code-block-footer"])')).toBe(false);
+    expect(nested.parentElement?.getAttribute('data-slot')).toBe('code-block');
+    expect(nested.querySelector('[data-slot="code-block-code"]')?.textContent).toBe(
+      'Nested content',
+    );
+  } finally {
+    dom.window.close();
+  }
+});
 
 test('Markdown code blocks retain language, unknown labels, indentation, exact text and inline semantics', () => {
   const html = renderToStaticMarkup(

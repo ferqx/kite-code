@@ -139,6 +139,7 @@ function CodeBlockContent({
   startLine?: number;
   codeClassName?: string;
 }) {
+  // Presence padding follows local parts; descendant group :has() invalidates the whole transcript.
   return (
     <pre
       data-slot="code-block-content"
@@ -149,7 +150,7 @@ function CodeBlockContent({
       tabIndex={0}
       style={{ counterReset: `line ${startLine - 1}`, ...style }}
       className={cn(
-        'min-h-0 min-w-0 scroll-fade-x scrollbar-thin overflow-auto px-3 py-3 text-start font-mono leading-relaxed outline-none group-has-data-[slot=code-block-footer]/code-block:pb-2 group-has-data-[slot=code-block-header]/code-block:pt-2 group-data-[size=sm]/code-block:px-2.5 group-data-[size=sm]/code-block:py-2.5 group-data-[size=sm]/code-block:group-has-data-[slot=code-block-header]/code-block:pt-1.5 data-wrap:scroll-fade-y data-wrap:wrap-break-word data-wrap:whitespace-pre-wrap',
+        'min-h-0 min-w-0 scroll-fade-x scrollbar-thin overflow-auto px-3 py-3 text-start font-mono leading-relaxed outline-none has-[~[data-slot=code-block-footer]]:pb-2 [[data-slot=code-block-header]~&]:pt-2 group-data-[size=sm]/code-block:px-2.5 group-data-[size=sm]/code-block:py-2.5 group-data-[size=sm]/code-block:has-[~[data-slot=code-block-footer]]:pb-2.5 group-data-[size=sm]/code-block:[[data-slot=code-block-header]~&]:pt-1.5 data-wrap:scroll-fade-y data-wrap:wrap-break-word data-wrap:whitespace-pre-wrap',
         className,
       )}
       {...props}

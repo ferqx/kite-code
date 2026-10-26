@@ -130,6 +130,18 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 ## 原桌面展示层
 
+[Conversation](src/desktop/Conversation.tsx)的主消息区采用可聚焦、具名的原生滚动section，保留原跟随／手动阅读／全选和缓存viewport身份，不再装配主消息区的Radix content包装、thumb轮询与scrollbar ResizeObserver。`SessionPage`在已有首次布局／窗口resize测量中按真实原生滚动条占位同步正文、输入区和准备页留白，overlay与传统滚动条不硬用同一宽度；只在值改变时写CSS变量，原工具详情的独立ScrollArea继续按各自reader规则工作。
+
+Native 的 SessionPage 在有页面缓存时开启 `lazyHistory`，共享默认调用关闭。[窗口策略](src/desktop/conversation-window.ts)按实际可见 entry 分组计数：首次不超过100条完整挂载，超过100条只挂载末40条；折叠 turn 内的工具记录不逐项计数。向上接近200px边界或点击“加载更早消息”，经RAF后的task补20条。窗口保留已经挂载的内容，后续流式跨100条不会突然裁掉旧消息；点击“回到最新消息”可重新选择末40条。每条回复仍沿完整Markdown pipeline显示，不做正文段落拆分。
+
+窗口只保留稳定entry keys及顺序，不缓存宿主投影闭包。补入前记录可见entry和相对viewport的偏移，提交后按该锚点恢复，避免以scrollHeight差值混入同时追加的消息高度。手动阅读及正文晚到的高度变化也保持锚点；冷重建时在原锚点附近挂载40条，允许向前／向后补入，旧版仅像素阅读记录完整挂载一次以保持其坐标。离开／Activity暂停取消所属frame与task，迟到回调不能接管新页面。Ctrl/Cmd+A只选择已加载的消息正文，保持即时响应；未挂载历史不进入DOM选择。
+
+[DeferredProcessContent](src/desktop/DeferredProcessContent.tsx)使默认折叠的turn过程和[ToolActivity](src/desktop/ToolActivity.tsx)聚合明细在首次展开时才调用内部投影工厂。冷关闭不创建Content，展开后继续使用原Radix退出动画及卸载；关闭动画期间采用当前事实，不冻结旧身份或factory。原来关闭的Radix内容本就不挂载reader，本次减少的是提前构造明细和空Content的工作；不改变读取、审批、复制与恢复资格。
+
+主消息区使用上述原生viewport，嵌套详情保留各自ScrollArea。CodeBlock的header／footer间距选择器限定在同一个块内，避免外层`group:has()`使追加消息反复失效整棵turn样式树；默认及small尺寸的间距和现有Shell／Markdown覆盖规则保持。成本登记以不可变token区分同resource的新旧登记，迟到注销不能删除新登记或owner释放责任；DOM缓存预算和完整成本测量准入不变。
+
+[窗口策略](test/isolated/desktop-conversation-window.test.ts)、[真实Conversation DOM](test/isolated/desktop-conversation-window-dom.test.tsx)、[滚动](test/isolated/desktop-conversation-scroll.test.tsx)与[原展示](test/isolated/desktop-conversation-presentation.test.tsx)核阈值、尾部、双向补入、锚点、已加载全选、取消及展开恢复；[折叠工厂](test/isolated/desktop-deferred-process.test.tsx)、[工具聚合](test/isolated/desktop-tool-aggregation.test.tsx)、[成本](test/isolated/conversation-cache-cost.test.ts)和[缓存](test/isolated/desktop-conversation-cache.test.tsx)保留各自生命周期与身份断言。取舍归[按消息加载Note](../../.agents/notes/implemented/architecture/2026-10-26-desktop-progressive-history.md)，实际性能与限制归[Desktop owner](../../apps/desktop/README.md#大会话首次构建)。
+
 工具详情继续在原项下展开，文件差异、Shell、问题与通用结果各自保留已有 reader。公共 [ScrollArea](src/desktop/components/ui/scroll-area.tsx) 的 `chainScroll` 还保护键盘边缘阅读：仅在 viewport 自身接到无修饰 Home／End 时，在原生滚动后将该边缘移入可滚动祖先的可见窗口；若相应展开动画仍在进行，等待其真实结束再核一次当前焦点和边缘。其他按键、焦点转移或卸载使旧定位失效，不拦截子控件、选择快捷键或取消原生默认行为。原400px聚合上限和输出跟随不变。[滚动回归](test/isolated/desktop-file-diff-scroll.test.tsx)核边缘可见性、无重复位移及子控件隔离；实际像素仍由 Desktop 浏览器旅程验证。
 
 TUI [通用工具结果](src/tui/ink/ToolCardBlock.tsx)保留单行300／多行每行200字符、最多五行的有界预览；任一字符或行裁切均显示省略提示与 `Ctrl+E` 完整已保存结果入口，截取沿完整字素边界，不拆开代理对或组合 emoji。未截断内容不显示提示，原结果和执行目录读取保持完整。该规则不改变文件 diff、问答或 Shell 的各自呈现。
@@ -254,7 +266,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。`autoRead` 失败保留原文和错误说明，不发布未核验的全文复制内容；缺省不提供“重新读取”按钮，Web 的显式 `autoReadRetry` 差异见下文正文读取契约，Native 保持缺省。显式完整 reader 沿用原操作。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 
-[Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；保持单个代码容器，显式语言按token高亮，不拆行；Mermaid图表使用同一标题与准确源码复制，正文仍走固定Markdown parser与安全规则。语言标题和复制操作由 Code Block parts 组合，行内代码与表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。
+[Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；保持单个代码容器，显式语言按token高亮，不拆行；Mermaid图表使用同一标题与准确源码复制，正文仍走固定Markdown parser与安全规则。语言标题和复制操作由 Code Block parts 组合，行内代码与表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。 CodeBlock的Header／Footer间距通过同父前置／后续兄弟关系决定，取消3条无界group-has样式规则，避免长消息分批追加时将整个agent-turn反复标为样式失效；保留default／sm及现有Shell／Markdown的最终padding覆盖，源码复制与读取准入不参与这些选择器。
 
 [Clipboard context 与 hook](src/desktop/clipboard.tsx)复用原消息复制生命周期；Conversation 提供宿主 port，正文内的代码复制同时消费原 `copyText` 资格，包含自定义正文 reader 子树。预览或未核实最终回复不提供代码复制，已核实正文关闭后撤销；停用、换文或换 port 的迟到结果失效，已完成反馈沿原两秒截止时间保留。复制不从 DOM 重建文本，不新开宿主或业务接口。
 

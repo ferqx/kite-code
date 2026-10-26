@@ -172,3 +172,55 @@ test('an equal-text replacement that detaches the active walker node restarts in
     f.close();
   }
 });
+
+test('reusing a resource identity cannot let an old release remove its current registration', () => {
+  const f = fixture();
+  try {
+    f.cost.start();
+    f.flush();
+    const original = f.cost.snapshot()!;
+    const resource = { bytes: 10, release() {} };
+    const releaseOld = f.cost.retain(resource);
+    resource.bytes = 12;
+    expect(f.cost.snapshot()).toEqual({ ...original, bytes: original.bytes + 10 });
+    const releaseNew = f.cost.retain(resource);
+    expect(releaseOld()).toBe(false);
+    expect(f.cost.snapshot()).toEqual({ ...original, bytes: original.bytes + 12 });
+    // Equal byte counts are still separate registrations with separate release tokens.
+    const releaseCurrent = f.cost.retain(resource);
+    expect(releaseNew()).toBe(false);
+    expect(f.cost.snapshot()).toEqual({ ...original, bytes: original.bytes + 12 });
+    expect(releaseCurrent()).toBe(true);
+    expect(releaseCurrent()).toBe(false);
+    expect(f.cost.snapshot()).toEqual(original);
+    expect(f.tasks.size).toBe(0);
+    expect(f.scans).toBe(1);
+  } finally {
+    f.close();
+  }
+});
+
+test('stop clears registrations and old releases cannot affect a restarted owner', () => {
+  const f = fixture();
+  try {
+    f.cost.start();
+    const stale = f.tasks.values().next().value!;
+    const resource = { bytes: 10, release() {} };
+    const releaseOld = f.cost.retain(resource);
+    f.cost.stop();
+    expect(f.tasks.size).toBe(0);
+    f.cost.start();
+    f.flush();
+    expect(f.cost.snapshot()).toEqual({ nodes: 2, bytes: 200 });
+    const releaseCurrent = f.cost.retain(resource);
+    stale();
+    expect(releaseOld()).toBe(false);
+    expect(f.cost.snapshot()).toEqual({ nodes: 2, bytes: 210 });
+    expect(f.tasks.size).toBe(0);
+    expect(releaseCurrent()).toBe(true);
+    expect(f.cost.snapshot()).toEqual({ nodes: 2, bytes: 200 });
+    expect(f.scans).toBe(1);
+  } finally {
+    f.close();
+  }
+});

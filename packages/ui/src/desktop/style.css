@@ -761,25 +761,16 @@ body {
     overflow-anchor: none;
     scrollbar-gutter: stable;
   }
-  .conversation > [data-slot="scroll-area-scrollbar"] {
-    width: var(--conversation-scrollbar-width);
-    z-index: 3;
+  .conversation-viewport {
+    /* SessionPage measures the native reserved space, including overlay tracks. */
+    scrollbar-width: auto;
     -webkit-app-region: no-drag;
-  }
-  .conversation-viewport[data-radix-scroll-area-viewport] {
-    scrollbar-gutter: auto;
-    border-right: var(--conversation-scrollbar-width) solid transparent;
   }
   /* Keep the reading column's track space before its viewport is mounted. */
   .conversation-footer,
   .new-conversation-welcome,
   .conversation-jump {
     border-right: var(--conversation-scrollbar-width) solid transparent;
-  }
-  .conversation-viewport > div {
-    display: block;
-    width: 100%;
-    min-width: 0;
   }
   .message,
   input,
@@ -803,6 +794,14 @@ body {
     overflow: clip;
     overflow-clip-margin: 5px;
     padding-bottom: 24px;
+  }
+  .conversation-entry {
+    min-width: 0;
+  }
+  .conversation-history-boundary {
+    display: flex;
+    justify-content: center;
+    padding-block: 8px;
   }
   .welcome {
     padding: clamp(24px, 8vh, 100px) 8px;
@@ -923,6 +922,9 @@ body {
   .agent-turn-final .message.assistant:has(> .message-meta),
   .agent-turn-process-messages .message.assistant:has(> .message-meta),
   .reading-column
+    > .message-group
+    > .message.assistant[data-final-reply="false"]:has(> .message-meta),
+  .conversation-entry
     > .message-group
     > .message.assistant[data-final-reply="false"]:has(> .message-meta) {
     margin-bottom: calc(var(--icon-button-size-sm) + var(--message-meta-offset) + 8px);
@@ -3144,16 +3146,29 @@ body {
   > .response-status {
   margin-top: var(--conversation-mixed-gap);
 }
-.kite-client :is(.reading-column, .agent-turn-process-messages) > .tool-activity {
+.kite-client
+  :is(.reading-column, .conversation-entry, .agent-turn-process-messages)
+  > .tool-activity {
   margin-block: 0;
 }
-.kite-client .reading-column > .message-group:has(> .message.assistant[data-final-reply="false"]) {
+.kite-client .reading-column > .message-group:has(> .message.assistant[data-final-reply="false"]),
+.kite-client
+  .conversation-entry
+  > .message-group:has(> .message.assistant[data-final-reply="false"]) {
   margin-block: 0;
 }
-.kite-client .reading-column > .message-group > .message.assistant[data-final-reply="false"] {
+.kite-client .reading-column > .message-group > .message.assistant[data-final-reply="false"],
+.kite-client .conversation-entry > .message-group > .message.assistant[data-final-reply="false"] {
   margin-bottom: 0;
 }
-.kite-client :is(.reading-column, .agent-turn-process-messages) > .tool-activity + .tool-activity {
+.kite-client
+  :is(.reading-column, .conversation-entry, .agent-turn-process-messages)
+  > .tool-activity
+  + .tool-activity,
+.kite-client
+  .conversation-entry[data-entry-kind="tool"]
+  + .conversation-entry[data-entry-kind="tool"]
+  > .tool-activity {
   margin-top: var(--conversation-tool-gap);
 }
 .kite-client
@@ -3163,13 +3178,25 @@ body {
 .kite-client
   :is(.reading-column, .agent-turn-process-messages)
   > .tool-activity
-  + .message-group:has(> .message.assistant) {
+  + .message-group:has(> .message.assistant),
+.kite-client
+  .conversation-entry[data-entry-kind="assistant"]
+  + .conversation-entry[data-entry-kind="tool"]
+  > .tool-activity,
+.kite-client
+  .conversation-entry[data-entry-kind="tool"]
+  + .conversation-entry[data-entry-kind="assistant"]
+  > .message-group {
   margin-top: var(--conversation-mixed-gap);
 }
 .kite-client
   :is(.reading-column, .agent-turn-process-messages)
   > .message-group:has(> .message.assistant)
-  + .message-group:has(> .message.assistant) {
+  + .message-group:has(> .message.assistant),
+.kite-client
+  .conversation-entry[data-entry-kind="assistant"]
+  + .conversation-entry[data-entry-kind="assistant"]
+  > .message-group {
   margin-top: var(--conversation-block-gap);
 }
 .kite-client .tool-activity-summary {

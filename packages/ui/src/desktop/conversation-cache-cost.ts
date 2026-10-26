@@ -6,6 +6,7 @@ const NODES_PER_TASK = 1024;
 
 export type ConversationCacheCostSnapshot = { bytes: number; nodes: number };
 export type ConversationCacheCostScheduler = (task: () => void) => () => void;
+type ResourceCost = { readonly bytes: number };
 
 function changesCost(records: MutationRecord[], measured: boolean) {
   return records.some((record) => {
@@ -36,7 +37,7 @@ export class ConversationCacheCost {
   private cancel?: () => void;
   private revision = 0;
   private measured?: { revision: number; bytes: number; nodes: number };
-  private resources = new Map<RetainedConversationResource, number>();
+  private resources = new Map<RetainedConversationResource, ResourceCost>();
   private resourceBytes = 0;
   private changed?: () => void;
   private schedule: ConversationCacheCostScheduler;
@@ -94,20 +95,25 @@ export class ConversationCacheCost {
     this.remove(resource);
     const bytes =
       Number.isFinite(resource.bytes) && resource.bytes >= 0 ? resource.bytes : Infinity;
-    this.resources.set(resource, bytes);
+    const entry = { bytes };
+    this.resources.set(resource, entry);
     this.resourceBytes += bytes;
     this.changed?.();
-    return () => this.remove(resource);
+    return () => {
+      if (this.resources.get(resource) !== entry) return false;
+      this.remove(resource);
+      return true;
+    };
   }
 
   remove(resource: RetainedConversationResource) {
-    const bytes = this.resources.get(resource);
-    if (bytes === undefined) return;
+    const entry = this.resources.get(resource);
+    if (!entry) return;
     this.resources.delete(resource);
     // Invalid estimates remain conservative without Infinity - Infinity becoming NaN.
     this.resourceBytes = Number.isFinite(this.resourceBytes)
-      ? this.resourceBytes - bytes
-      : [...this.resources.values()].reduce((sum, value) => sum + value, 0);
+      ? this.resourceBytes - entry.bytes
+      : [...this.resources.values()].reduce((sum, value) => sum + value.bytes, 0);
   }
 
   private drain(notify = true) {

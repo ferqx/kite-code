@@ -5,11 +5,8 @@ import { createRoot } from 'react-dom/client';
 import type { ReadingState } from '../../src/desktop/Conversation';
 import type { Message } from '../../src/desktop/types';
 
-test('ScrollArea Conversation follows, restores manual reading and retires active thumb RAF/observers/listeners on immediate repeated unmount', async () => {
-  const dom = new JSDOM(
-    '<!doctype html><style>[data-slot="scroll-area-scrollbar"] { padding: 1px; }</style><div id="root"></div>',
-    { pretendToBeVisual: true },
-  );
+test('native Conversation follows, restores manual reading and retires its observers/listeners on immediate repeated unmount', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
     'document',
@@ -148,11 +145,13 @@ test('ScrollArea Conversation follows, restores manual reading and retires activ
     expect(!!host.querySelector('.welcome')).toBe(false);
     await render(0);
     let viewport = host.querySelector<HTMLDivElement>('.conversation-viewport')!;
-    expect(viewport.getAttribute('role')).toBe('region');
+    expect(viewport.tagName).toBe('SECTION');
     expect(viewport.getAttribute('aria-label')).toBe('会话消息');
     expect(viewport.getAttribute('aria-busy')).toBe('true');
     expect(viewport.querySelector('.reading-column')).not.toBeNull();
-    expect(host.querySelector('[data-radix-scroll-area-viewport]')).toBe(viewport);
+    expect(viewport.tabIndex).toBe(0);
+    expect(host.querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
+    expect(host.querySelector('[data-slot="scroll-area-scrollbar"]')).toBeNull();
     Object.defineProperties(viewport, {
       scrollHeight: { get: () => height },
       clientHeight: { value: 100 },
@@ -291,25 +290,15 @@ test('ScrollArea Conversation follows, restores manual reading and retires activ
     for (let index = 1; index <= 100; index++) {
       await render(index);
       const node = host.querySelector<HTMLDivElement>('.conversation-viewport')!;
-      const scrollbar = host.querySelector<HTMLElement>('[data-slot="scroll-area-scrollbar"]')!;
       Object.defineProperties(node, {
         scrollHeight: { value: 1000 },
         offsetHeight: { value: 100 },
         clientHeight: { value: 100 },
       });
-      Object.defineProperty(scrollbar, 'clientHeight', { value: 100 });
-      await act(async () => {
-        resize(scrollbar);
-        for (const [id, callback] of [...frames]) {
-          frames.delete(id);
-          callback(0);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      });
-      expect(host.querySelector('[data-slot="scroll-area-thumb"]')).not.toBeNull();
+      expect(host.querySelector('[data-slot="scroll-area-thumb"]')).toBeNull();
       await act(async () => node.dispatchEvent(new dom.window.Event('scroll')));
-      // Exercise the library's live polling loop before immediate navigation.
-      expect(frames.size).toBeGreaterThan(0);
+      // Native scrollbars do not keep a JavaScript thumb polling loop alive.
+      expect(frames.size).toBe(0);
       expect(observers.size).toBeGreaterThanOrEqual(1);
       expect(keydown.size).toBe(1);
       // Follow resizes before paint without leaving a frame behind at navigation.

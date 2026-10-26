@@ -126,8 +126,7 @@ function CacheEntry({
       resources.add(resource);
       const unregister = cost.retain(resource);
       return () => {
-        resources.delete(resource);
-        unregister();
+        if (unregister()) resources.delete(resource);
       };
     },
     [resources, cost],

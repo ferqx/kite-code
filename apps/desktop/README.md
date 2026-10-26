@@ -537,6 +537,41 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 会话消息渲染验证
 
+### 大会话首次构建
+
+Native 的页面缓存路径为[共享Conversation](../../packages/ui/README.md#原桌面展示层)开启按消息加载：首次可见分组超过100条挂载末40条，上滚每次补20条；不超过100条完整显示。仅已加载内容参加全选，每条回复完整渲染。已完成turn默认折叠的过程及工具聚合明细延迟到首次展开构造；Native消息EOF、Run／Tool首次结构事实、正文读取和操作资格仍由原owner核实，不因窗口化跳过历史或获得权限。Web／TUI默认行为保持，没有增加普通dev／prod调试入口。
+
+[独立初始渲染夹具](test/initial-render-performance-browser-runner.fixture.ts)运行实际NativeDesktop与生产CSS、隔离NativeBridge，正文已随Message就绪；测量可信click到CDP PNG合成器首个可读帧，另记DOM就绪、loader退出、最长任务、可信输入往返及切走时序，不把DOM出现或RAF当作绘制。它不代表真实Main／SQLite、自动全文读取FIFO、完整安装版或跨平台性能。私有探针只存在于测试构建。
+
+本轮曾采用完整历史隐藏分批构建，保留其历史证据：[原决定](../../.agents/notes/archived/architecture/2026-10-26-desktop-initial-render-staging.md)。2026-10-26，macOS arm64／Apple M4 Pro14核、Bun1.4.2、React19.2.7、Chrome155.0.8059.86 Headless／1440×800，基线`2777f7b81`的production600轮首个可读帧1066ms、最长任务995ms；dev为1229／1120ms。首轮分批构建将峰值降至273／392ms，但首读增至3169／5519ms，高频更新dev样本约24秒；单条600章节后来曾达到13–14秒。用户随后确定改为消息级按需加载，本轮不再使用完整隐藏构建或正文根块分片。历史报告为本机`.cache/initial-render-prod-wAx4yZ`、`initial-render-dev-liUf3w`、`initial-render-prod-QkF0Jp`、`initial-render-dev-HgmjKJ`、`initial-render-dev-1vJ043`、`initial-render-prod-PR3MEc`与`initial-render-dev-FaNLSI`，不得作为当前窗口实现的性能资格。
+
+当前窗口策略、折叠工厂和原生滚动条取舍归[按消息加载Note](../../.agents/notes/implemented/architecture/2026-10-26-desktop-progressive-history.md)。单条回复仍可能形成同步大任务；此限制由用户选定的“每条完整显示”边界保留。
+
+2026-10-26最终消息窗口，环境与上述基线相同（macOS arm64／M4 Pro14核、Chrome155、1440×800、diagnostics=false）。以下为可信click到实际PNG首个可读画面的单次样本，历史EOF完整读取360／1200条，而初屏仅挂载40个entry、40条消息、1703个元素，不能把它等同于全历史已进入DOM：
+
+| 构建／历史轮数 | 首个可读帧 | 首读前最长任务 | 最大可信输入往返 |
+| --- | --- | --- | --- |
+| production／180 | 89.57ms | 未记录≥50ms长任务 | 53ms |
+| production／600 | 118.77ms | 61ms | 78ms |
+| dev／180 | 115.46ms | 64ms | 67ms |
+| dev／600 | 129.37ms | 73ms | 76ms |
+
+对应`.cache/initial-render-prod-Ip7Ehj`、`initial-render-prod-7cBR5a`及`initial-render-dev-ZzN4em`（均位于本机`.cache/`）保存源码hash、时序、逐帧PNG和window journey。已逐阶段复看加载、末轮首次呈现、上滚与手动阅读、回到最新；40→60→80保原节点和锚点，600轮production两次补入最大位移0.0625px，manual追加0px；其余组均≤0.5px。仅已加载内容全选、到底连续追加3轮、全新running Run流式到完成、manual窗口不挂载新尾部及跳回最新均通过。
+
+持续40ms刷新metadata／80ms尾正文的600轮样本，production首读105.66ms／最长53ms，dev129.82ms／74ms，0个正文落后于已提交输入的可读帧；夹具在首读后继续至少3次真实增量，不为凑更新延迟首读。报告为`.cache/initial-render-prod-UXM2uM`与`initial-render-dev-PZ2qsY`。普通冷开40ms后发送可信切走请求，production点击排队52.40ms／切走到Small实际绘制75.02ms，dev38.60／69.00ms；完整first与cancel两场分别见`.cache/initial-render-prod-Wz5zoi`和`initial-render-dev-xj8G42`。held旧历史后切走再释放的独立场景保新页面，见`.cache/initial-render-prod-ra1Yau`，不把held无渲染的时序替代普通冷开取消。
+
+阈值浏览器场景中100条全部挂载，后续跨100保已有内容；102条冷开40条，见`.cache/initial-render-prod-PoW2Lq`与`initial-render-prod-JI4M9f`，101边界另由真实Conversation DOM回归核对。20个工具／轮的6轮共有132条原始记录却仅12个entry，未启窗口且折叠过程0次完整工具结果／source-input读取；60轮1320条原始记录／120entry则初挂40条，首读173.78ms，同样未提前全文读取。报告为`.cache/initial-render-prod-aY7t4H`与`initial-render-prod-W3aU9M`。单条600章节仍完整挂载，首读1251ms、最长任务774ms、最大可信输入往返1214ms，途中切走排队1199ms，见`.cache/initial-render-prod-brkrle`；此边界并未取得无阻塞资格，也没有保留此前13秒的正文分片构建。
+
+原100次热切换门槛P95≤32ms保持。最终Chrome production／dev分别21.510986／30.549805ms，Electron production／dev分别18.933105／31.452881ms，四组均100次、errors为空；报告为`.cache/session-cache-performance-production-JjRRZE`、`development-TpEeQ6`、`production-vmt3hd`、`development-pJ3XUv`（后三个同属`.cache/session-cache-performance-`前缀）。较早完整暂存实现的Electron dev32.186035ms失败样本`.cache/session-cache-performance-development-pCZqoX`仍保留，不能用四舍五入称其通过；上述是改为消息窗口后的新源码资格。
+
+原生布局补充以最终production制品验证首次可见及首次隐藏后显示两组：overlay实际占位0，正文／输入区中心一致，PageUp与可信滚轮正常，宽代码及32列表格各自横滚120px而外层为0、1440px页面无横溢、外层阅读top不变、页面错误0。报告和过程截图为`.cache/progressive-history-geometry-report.json`及同名前缀两PNG；宽内容由隔离DOM夹具构造，不是用户历史。原版／最终编译CSS的CodeBlock default／small×header／footer八组合实际四边padding精确相同，见`.cache/code-block-padding-report.json`；发现并修正small footer从旧10px变8px的差异后取得此结果。上述为Chrome隔离Native及Electron隔离renderer资格，没有读取用户Store或调用真实Provider，不代表完整安装版／真实Service正文FIFO或其他平台性能。
+
+最终13个完整定向文件196项／5469断言通过（窗口、滚动、展示、折叠工厂、工具聚合、缓存、成本、CodeBlock、reasoning、turn-response、SessionPage及Native发送／接管）。Native整文件的定位期间发现无布局树的滚动条probe触发JSDOM停顿，原HEAD对照86项通过；测量改为仅在可布局树执行并在首次可见RO补测后，原86项／1889断言通过，未放宽期限或断言。最后补充RO与small footer的范围分别由上述真实布局／CSS对照和CodeBlock整文件复验，其余无相关变化的定向结果复用。UI／Desktop类型、实际变更文件Biome、文档结构／影响、统一边界及测试归属检查通过。
+
+### 小会话缓存与原有渲染回归
+
+首轮初始构建改动后，按下述原夹具四组各100次普通热切换复测，沿原精确P95≤32ms门槛：Chrome production21.703857ms、dev30.509033ms；Electron production17.772705ms、dev31.846924ms。产物分别为本机`.cache/session-cache-performance-production-0YmFZC`、`development-PyY54f`、`production-pe93u8`、`development-OLSFpE`（后三者同属`.cache/session-cache-performance-*`前缀）。全部仍保原DOM、阅读位置与操作门禁断言。dev最初两次在warm admission因Vite启动优化触发第二次初始导航被拒，`development-dHD2VH`与`development-FS7lqq`均cases=0，不计为时延样本；相同源码和旧runner的后续有效运行通过，未改runner或放宽门槛。
+
 当前缓存复用官方Activity与原portal，非当前页面上限8项；私有CacheHost作为portal前置的React sibling，在后代layout之前接入原容器，去掉attached状态驱动的第二次可见恢复。共享预算、后台分片成本和未知条目退出策略归[UI owner](../../packages/ui/README.md#原桌面展示层)。[NativeDirectoryProjection](src/native-presentation.ts)属于单个窗口，只保当前目录索引；新目录单次分组并复用未变会话／空间对象，同一目录的选择刷新只核旧、新会话摘要，Store变化清空旧映射。Sidebar按空间／标题／会话行memo并仅在该组sessions改变时排序，选中切换仅更新旧、新两行；[SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)的稳定事件代理读取最新已提交回调，操作存在性变化仍立即更新入口，避免以忽略回调的memo隐藏授权撤销。[目录回归](test/native-directory.test.tsx)与[导航回归](../../packages/ui/test/isolated/desktop-sidebar.test.tsx)分别核投影身份／实际状态变化和回调更新／撤销。普通跨根会话导航先建立展示hold与撤销旧操作资格，再通过[绘制机会](src/native-presentation-frame.ts)的RAF后下一task启动Main选择；同会话刷新、首条投递接管和child不延后。随后仍核原nonce／generation／epoch，隐藏窗口跳过等待，帧暂停由100ms deadline收束；这是一帧调度机会，不作为已绘制证明。[时序回归](test/native-presentation-frame.test.ts)以可控队列核RAF本身不释放、post-frame task释放及deadline清理。
 
 标签页scope重置由SessionPage薄入口持有，原页面内容不再因该render-phase状态接管重算；原`useSessionTabs`及browser／child清理保持。环境动画状态已空时不发空更新；existing-session模型选择器的ready回调只更新仍匹配Session／generation／viewIntent的选择，退出会话的回调不触发旧页面更新，首条准备分支保持。[页面回归](../../packages/ui/test/isolated/desktop-session-page-render.test.tsx)核连续scope切换每次只算一次内容、外壳原节点与准确browser关闭，原标签页回归继续覆盖最后标签关闭和child生命周期。

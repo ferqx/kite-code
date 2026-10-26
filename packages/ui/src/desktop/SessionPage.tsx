@@ -51,6 +51,25 @@ const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
 const ENVIRONMENT_INFORMATION_MIN_WIDTH = 844 + 2 * 344 + 28;
 const MemoizedSidebar = memo(Sidebar);
 
+/** Overlay and classic native scrollbars reserve different amounts of space. */
+function syncConversationScrollbarGutter(element: HTMLElement) {
+  if (!element.getBoundingClientRect().width) return;
+  const probe = element.ownerDocument.createElement('div');
+  probe.className = 'conversation-viewport';
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText =
+    'position:absolute;visibility:hidden;pointer-events:none;contain:strict;width:100px;height:100px;overflow:scroll;border:0;padding:0';
+  element.append(probe);
+  const width = probe.offsetWidth;
+  const gutter = Math.max(0, width - probe.clientWidth);
+  probe.remove();
+  // A hidden or unmeasurable tree cannot distinguish an overlay track from no layout.
+  if (!width) return;
+  const value = `${gutter}px`;
+  if (element.style.getPropertyValue('--conversation-scrollbar-width') !== value)
+    element.style.setProperty('--conversation-scrollbar-width', value);
+}
+
 /** Stable event delegates use only the latest committed host operations. */
 function useNavigationCallbacks(
   props: Pick<SessionPageProps, 'actions' | 'onOpen' | 'onExpand'>,
@@ -510,7 +529,10 @@ function SessionPageContent({
       environmentMeasured.current = true;
       setEnvironmentFits(fits);
     };
-    const measure = () => update(element.getBoundingClientRect().width);
+    const measure = () => {
+      syncConversationScrollbarGutter(element);
+      update(element.getBoundingClientRect().width);
+    };
     let frame: number | undefined;
     const measureAfterLayout = () => {
       if (frame !== undefined) cancelAnimationFrame(frame);
@@ -525,8 +547,11 @@ function SessionPageContent({
         ? undefined
         : new ResizeObserver((entries) => {
             const entry = entries[0];
-            if (entry?.contentRect.width) update(entry.contentRect.width);
-            else measureAfterLayout();
+            if (entry?.contentRect.width) {
+              if (!element.style.getPropertyValue('--conversation-scrollbar-width'))
+                syncConversationScrollbarGutter(element);
+              update(entry.contentRect.width);
+            } else measureAfterLayout();
           });
     observer?.observe(element);
     window.addEventListener('resize', measureAfterLayout);
@@ -695,6 +720,7 @@ function SessionPageContent({
       renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
       turnActivity={props.turnActivity}
+      lazyHistory={keepAlive}
       loading={props.loading}
       initialPresentationPending={props.initialPresentationPending}
       requiredSubagentWait={props.requiredSubagentWait}
