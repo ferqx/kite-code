@@ -10,7 +10,12 @@ import type {
   NativeResult,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
+import {
+  nextDesktopPresentation,
+  prepareDesktopDom,
+  promptValue,
+  setPromptText,
+} from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const initialGlobals = {
@@ -178,6 +183,7 @@ function fixture(
       );
       expect(button).toBeDefined();
       button!.click();
+      if (button!.classList.contains('session-row')) await nextDesktopPresentation(dom);
     });
   return {
     dom,

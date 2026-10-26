@@ -1,5 +1,6 @@
 import { Copy01Icon, CopyXIcon, Tick02Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import { memo, useMemo } from 'react';
 import { useTextCopy } from './clipboard';
 import { Button } from './ui';
 
@@ -16,6 +17,33 @@ export function MessageCopyButton({
   disabled?: boolean;
 }) {
   const { copyState, copyMessage, readActive } = useTextCopy(text, writeClipboardText, disabled);
+  return useMemo(
+    () => (
+      <CopyButtonView
+        copyState={copyState}
+        copyRole={copyRole}
+        copyMessage={copyMessage}
+        readActive={readActive}
+        disabled={disabled}
+      />
+    ),
+    [copyState, copyRole, copyMessage, readActive, disabled],
+  );
+}
+
+const CopyButtonView = memo(function CopyButtonView({
+  copyState,
+  copyRole,
+  copyMessage,
+  readActive,
+  disabled,
+}: {
+  copyState: ReturnType<typeof useTextCopy>['copyState'];
+  copyRole?: 'user' | 'assistant';
+  copyMessage: () => Promise<void>;
+  readActive: boolean;
+  disabled: boolean;
+}) {
   const copyLabel =
     copyState === 'copied'
       ? '已复制消息'
@@ -42,4 +70,4 @@ export function MessageCopyButton({
       />
     </Button>
   );
-}
+});

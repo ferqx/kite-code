@@ -129,6 +129,63 @@ async function resize(narrow: boolean) {
     viewport.dispatchEvent(new dom.window.Event('change'));
   });
 }
+
+test('retained navigation calls the latest committed host callbacks and removes withdrawn operations', async () => {
+  const calls: string[] = [];
+  const workspaces: SessionPageProps['workspaces'] = [
+    {
+      id: 'w',
+      label: 'Workspace',
+      state: 'loaded',
+      sessionCount: 2,
+      sessions: [
+        { sessionId: 'a', displayName: 'Session A', status: 'idle' },
+        { sessionId: 'b', displayName: 'Session B', status: 'idle' },
+      ],
+    },
+  ];
+  const present = (revision: number) =>
+    render({
+      workspaces,
+      selected: 'a',
+      onOpen: (id) => calls.push(`${revision}:open:${id}`),
+      actions: {
+        newSession: () => calls.push(`${revision}:new`),
+        newWorkspaceSession: (id) => calls.push(`${revision}:workspace:${id}`),
+      },
+    });
+  await present(1);
+  const other = document.querySelector<HTMLButtonElement>('[aria-label="Session B"]')!;
+  const create = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === '新对话',
+  )!;
+  const workspaceCreate = document.querySelector<HTMLButtonElement>(
+    '[aria-label="在 Workspace 中新建对话"]',
+  )!;
+  await act(() => {
+    other.click();
+    create.click();
+    workspaceCreate.click();
+  });
+  expect(calls).toEqual(['1:open:b', '1:new', '1:workspace:w']);
+  await present(2);
+  expect(document.querySelector('[aria-label="Session B"]')).toBe(other);
+  expect(document.querySelector('[aria-label="在 Workspace 中新建对话"]')).toBe(workspaceCreate);
+  await act(() => {
+    other.click();
+    create.click();
+    workspaceCreate.click();
+  });
+  expect(calls.slice(3)).toEqual(['2:open:b', '2:new', '2:workspace:w']);
+  await render({ workspaces, selected: 'a', actions: {} });
+  expect(document.querySelector('[aria-label="在 Workspace 中新建对话"]')).toBeNull();
+  expect(
+    [...document.querySelectorAll('button')].some((button) => button.textContent === '新对话'),
+  ).toBe(false);
+  expect(other.disabled).toBe(true);
+  await act(() => other.click());
+  expect(calls).toHaveLength(6);
+});
 async function click(label: string) {
   const button = document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   expect(button).not.toBeNull();

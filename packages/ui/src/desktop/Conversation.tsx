@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -654,539 +655,574 @@ export function Conversation({
     restoredExpanded.current.delete(id);
     setExpanded((values) => (values[id] === open ? values : { ...values, [id]: open }));
   }).current;
-  const visibleToolIds = new Set(
-    messages.filter(isVisibleTool).map((message) => message.id.slice(5)),
-  );
-  const allToolIds = new Set(
-    messages.filter((message) => message.role === 'tool').map((message) => message.id.slice(5)),
-  );
-  const children = new Map<string, Message[]>();
-  const childTools = new Map<string, Message[]>();
-  for (const message of messages) {
-    if (message.role !== 'tool' || !message.presentationOwner) continue;
-    const owner = message.presentationOwner.subagentId;
-    childTools.set(owner, [...(childTools.get(owner) ?? []), message]);
-  }
-  const childWithUniqueSteps = (child: Message): Message => {
-    if (child.role !== 'subagent') return child;
-    const toolIds = new Set(childTools.get(child.id.slice(9))?.map((tool) => tool.id));
-    return {
-      ...child,
-      steps: child.steps?.filter(
-        (step) => !step.toolCallId || !toolIds.has(`tool:${step.toolCallId}`),
-      ),
+  const restoredMarkerSignature = JSON.stringify([...restoredExpanded.current].sort());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Marker ref contents and the loading-driven restore lifecycle both invalidate the retained projection.
+  const { entryContent, empty, busy } = useMemo(() => {
+    const visibleToolIds = new Set(
+      messages.filter(isVisibleTool).map((message) => message.id.slice(5)),
+    );
+    const allToolIds = new Set(
+      messages.filter((message) => message.role === 'tool').map((message) => message.id.slice(5)),
+    );
+    const children = new Map<string, Message[]>();
+    const childTools = new Map<string, Message[]>();
+    for (const message of messages) {
+      if (message.role !== 'tool' || !message.presentationOwner) continue;
+      const owner = message.presentationOwner.subagentId;
+      childTools.set(owner, [...(childTools.get(owner) ?? []), message]);
+    }
+    const childWithUniqueSteps = (child: Message): Message => {
+      if (child.role !== 'subagent') return child;
+      const toolIds = new Set(childTools.get(child.id.slice(9))?.map((tool) => tool.id));
+      return {
+        ...child,
+        steps: child.steps?.filter(
+          (step) => !step.toolCallId || !toolIds.has(`tool:${step.toolCallId}`),
+        ),
+      };
     };
-  };
-  for (const message of messages) {
-    if (
-      message.role !== 'subagent' ||
-      !message.parentToolCallId ||
-      !allToolIds.has(message.parentToolCallId)
-    )
-      continue;
-    const group = children.get(message.parentToolCallId) ?? [];
-    group.push(message);
-    children.set(message.parentToolCallId, group);
-  }
-  const childDetail = (child: Message) => {
-    if (child.role !== 'subagent' || !child.id.startsWith('subagent:')) return undefined;
-    const childSessionId = childSessionIdsByTaskId?.get(child.id.slice('subagent:'.length));
-    if (!childSessionId || !onOpenChildSession) return undefined;
-    return {
-      label: child.title || '子 Agent',
-      onOpen: () => onOpenChildSession(childSessionId),
-    };
-  };
-  const parentTaskDetail = (message: Message, groupSize: number) => {
-    if (message.toolName !== 'task' || groupSize !== 1) return undefined;
-    const candidates = children.get(message.id.slice(5));
-    return candidates?.length === 1 ? childDetail(candidates[0]!) : undefined;
-  };
-  const askToolIds = new Set(
-    messages
-      .filter((message) => message.systemKind === 'ask')
-      .map((message) => message.ask?.toolCallId)
-      .filter(Boolean),
-  );
-  const structural = (message: Message) =>
-    message.role === 'thinking' ||
-    message.systemKind === 'turn_timing' ||
-    message.systemKind === 'turn_terminal';
-  const visible = new Set(
-    messages.filter((message) => {
-      if (structural(message)) return false;
-      if (message.role !== 'tool' && message.presentation === 'hidden') return false;
-      if (renderMessage) return true;
-      if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
-      if (message.role === 'system')
-        return message.systemKind === 'ask' || message.settled || !!message.status;
-      if (message.role === 'tool') return isVisibleTool(message);
-      if (message.role === 'subagent')
-        return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
-      return (
-        !message.settled || !!message.text || (message.role === 'user' && !!message.hasAttachments)
-      );
-    }),
-  );
-  const visibleTurns = new Set([...visible].map(processTurnId).filter(Boolean));
-  const anchors = new Map<string, Message>();
-  for (const message of messages) {
-    if (structural(message) && message.turnId && !anchors.has(message.turnId))
-      anchors.set(message.turnId, message);
-  }
-  if (turnActivity && !anchors.has(turnActivity.turnId))
-    anchors.set(turnActivity.turnId, {
-      id: `activity-anchor:${turnActivity.turnId}`,
-      turnId: turnActivity.turnId,
-      role: 'system',
-      systemKind: 'turn_timing',
-      text: '',
-      settled: ['completed', 'failed', 'cancelled'].includes(turnActivity.status),
-    });
-  const anchoredTurns = new Set<string>();
-  // A hidden-only Turn still needs its status in chronological position. Keep
-  // one structural anchor only when no readable message already owns that Turn;
-  // hidden reasoning must not split otherwise contiguous exploration tools.
-  const shown: Message[] = [];
-  for (const message of messages) {
-    if (visible.has(message)) {
-      shown.push(message);
-      const anchor = message.turnId && anchors.get(message.turnId);
-      // Native seals timing/terminal markers after all history. The exact user
-      // identity keeps a no-output Turn before subsequent conversation rounds.
+    for (const message of messages) {
       if (
-        message.role === 'user' &&
-        !processTurnId(message) &&
-        anchor &&
+        message.role !== 'subagent' ||
+        !message.parentToolCallId ||
+        !allToolIds.has(message.parentToolCallId)
+      )
+        continue;
+      const group = children.get(message.parentToolCallId) ?? [];
+      group.push(message);
+      children.set(message.parentToolCallId, group);
+    }
+    const childDetail = (child: Message) => {
+      if (child.role !== 'subagent' || !child.id.startsWith('subagent:')) return undefined;
+      const childSessionId = childSessionIdsByTaskId?.get(child.id.slice('subagent:'.length));
+      if (!childSessionId || !onOpenChildSession) return undefined;
+      return {
+        label: child.title || '子 Agent',
+        onOpen: () => onOpenChildSession(childSessionId),
+      };
+    };
+    const parentTaskDetail = (message: Message, groupSize: number) => {
+      if (message.toolName !== 'task' || groupSize !== 1) return undefined;
+      const candidates = children.get(message.id.slice(5));
+      return candidates?.length === 1 ? childDetail(candidates[0]!) : undefined;
+    };
+    const askToolIds = new Set(
+      messages
+        .filter((message) => message.systemKind === 'ask')
+        .map((message) => message.ask?.toolCallId)
+        .filter(Boolean),
+    );
+    const structural = (message: Message) =>
+      message.role === 'thinking' ||
+      message.systemKind === 'turn_timing' ||
+      message.systemKind === 'turn_terminal';
+    const visible = new Set(
+      messages.filter((message) => {
+        if (structural(message)) return false;
+        if (message.role !== 'tool' && message.presentation === 'hidden') return false;
+        if (renderMessage) return true;
+        if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
+        if (message.role === 'system')
+          return message.systemKind === 'ask' || message.settled || !!message.status;
+        if (message.role === 'tool') return isVisibleTool(message);
+        if (message.role === 'subagent')
+          return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
+        return (
+          !message.settled ||
+          !!message.text ||
+          (message.role === 'user' && !!message.hasAttachments)
+        );
+      }),
+    );
+    const visibleTurns = new Set([...visible].map(processTurnId).filter(Boolean));
+    const anchors = new Map<string, Message>();
+    for (const message of messages) {
+      if (structural(message) && message.turnId && !anchors.has(message.turnId))
+        anchors.set(message.turnId, message);
+    }
+    if (turnActivity && !anchors.has(turnActivity.turnId))
+      anchors.set(turnActivity.turnId, {
+        id: `activity-anchor:${turnActivity.turnId}`,
+        turnId: turnActivity.turnId,
+        role: 'system',
+        systemKind: 'turn_timing',
+        text: '',
+        settled: ['completed', 'failed', 'cancelled'].includes(turnActivity.status),
+      });
+    const anchoredTurns = new Set<string>();
+    // A hidden-only Turn still needs its status in chronological position. Keep
+    // one structural anchor only when no readable message already owns that Turn;
+    // hidden reasoning must not split otherwise contiguous exploration tools.
+    const shown: Message[] = [];
+    for (const message of messages) {
+      if (visible.has(message)) {
+        shown.push(message);
+        const anchor = message.turnId && anchors.get(message.turnId);
+        // Native seals timing/terminal markers after all history. The exact user
+        // identity keeps a no-output Turn before subsequent conversation rounds.
+        if (
+          message.role === 'user' &&
+          !processTurnId(message) &&
+          anchor &&
+          !visibleTurns.has(message.turnId) &&
+          !anchoredTurns.has(message.turnId)
+        ) {
+          anchoredTurns.add(message.turnId);
+          shown.push(anchor);
+        }
+      } else if (
+        structural(message) &&
+        message.turnId &&
         !visibleTurns.has(message.turnId) &&
         !anchoredTurns.has(message.turnId)
       ) {
         anchoredTurns.add(message.turnId);
-        shown.push(anchor);
+        shown.push(message);
       }
-    } else if (
-      structural(message) &&
-      message.turnId &&
-      !visibleTurns.has(message.turnId) &&
-      !anchoredTurns.has(message.turnId)
-    ) {
-      anchoredTurns.add(message.turnId);
-      shown.push(message);
     }
-  }
-  const runningToolTurns = new Set<string>();
-  const thinkingTurns = new Set<string>();
-  for (const message of messages) {
-    if (!message.turnId) continue;
-    // An earlier interrupted Model prefix does not own the current attempt's
-    // phase. Ordered model messages supersede that Turn's older thought marker.
-    if (message.role === 'assistant' || message.role === 'thinking') {
-      if (message.role === 'thinking' && !message.settled) thinkingTurns.add(message.turnId);
-      else thinkingTurns.delete(message.turnId);
+    const runningToolTurns = new Set<string>();
+    const thinkingTurns = new Set<string>();
+    for (const message of messages) {
+      if (!message.turnId) continue;
+      // An earlier interrupted Model prefix does not own the current attempt's
+      // phase. Ordered model messages supersede that Turn's older thought marker.
+      if (message.role === 'assistant' || message.role === 'thinking') {
+        if (message.role === 'thinking' && !message.settled) thinkingTurns.add(message.turnId);
+        else thinkingTurns.delete(message.turnId);
+      }
+      if (message.settled) continue;
+      if (message.role === 'tool') runningToolTurns.add(message.turnId);
     }
-    if (message.settled) continue;
-    if (message.role === 'tool') runningToolTurns.add(message.turnId);
-  }
-  const finalReplyByTurn = new Map<string, Message>();
-  const timingByTurn = new Map(
-    messages
-      .filter((message) => message.systemKind === 'turn_timing' && message.turnId)
-      .map((message) => [message.turnId!, message]),
-  );
-  const terminalByTurn = new Map(
-    messages
-      .filter((message) => message.systemKind === 'turn_terminal' && message.turnId)
-      .map((message) => [message.turnId!, message.turnTerminalStatus]),
-  );
-  for (const message of shown) {
-    if (
-      message.role === 'assistant' &&
-      message.turnId &&
-      message.settled &&
-      message.finalReply &&
-      message.text
-    )
-      finalReplyByTurn.set(message.turnId, message);
-  }
-  const assistantTurnCopies = new Map(
-    [...finalReplyByTurn.values()].map((message) => [
-      message.id,
-      message.copyText === null ? undefined : (message.copyText ?? message.text),
-    ]),
-  );
-  // Contiguous tools share one activity regardless of definition or result
-  // metadata. A readable message or different Turn starts another activity.
-  const groups: Message[][] = [];
-  for (const message of shown) {
-    const previous = groups.at(-1);
-    if (
-      !renderMessage &&
-      message.role === 'tool' &&
-      previous?.[0]?.role === 'tool' &&
-      previous[0].turnId === message.turnId
-    )
-      previous.push(message);
-    else groups.push([message]);
-  }
-  // Exact Turn identities bound a process. Unscoped non-user messages between
-  // two parts of that same Turn stay in their original order inside it.
-  const entries: { key: string; turnId?: string; groups: Message[][] }[] = [];
-  const seenTurnIds = new Set<string>();
-  const unscoped: Message[][] = [];
-  const flushUnscoped = () => {
-    for (const group of unscoped) entries.push({ key: group[0]!.id, groups: [group] });
-    unscoped.length = 0;
-  };
-  for (const group of groups) {
-    const message = group[0]!;
-    // A durable child result is a readable conversation event, including between
-    // two phases of the same parent Run. Never absorb it into process collapse.
-    if (message.systemKind === 'agent_result') {
-      flushUnscoped();
-      entries.push({ key: message.id, groups: [group] });
-      continue;
+    const finalReplyByTurn = new Map<string, Message>();
+    const timingByTurn = new Map(
+      messages
+        .filter((message) => message.systemKind === 'turn_timing' && message.turnId)
+        .map((message) => [message.turnId!, message]),
+    );
+    const terminalByTurn = new Map(
+      messages
+        .filter((message) => message.systemKind === 'turn_terminal' && message.turnId)
+        .map((message) => [message.turnId!, message.turnTerminalStatus]),
+    );
+    for (const message of shown) {
+      if (
+        message.role === 'assistant' &&
+        message.turnId &&
+        message.settled &&
+        message.finalReply &&
+        message.text
+      )
+        finalReplyByTurn.set(message.turnId, message);
     }
-    const turnId = processTurnId(message);
-    if (!turnId && message.role !== 'user') {
-      unscoped.push(group);
-      continue;
+    const assistantTurnCopies = new Map(
+      [...finalReplyByTurn.values()].map((message) => [
+        message.id,
+        message.copyText === null ? undefined : (message.copyText ?? message.text),
+      ]),
+    );
+    // Contiguous tools share one activity regardless of definition or result
+    // metadata. A readable message or different Turn starts another activity.
+    const groups: Message[][] = [];
+    for (const message of shown) {
+      const previous = groups.at(-1);
+      if (
+        !renderMessage &&
+        message.role === 'tool' &&
+        previous?.[0]?.role === 'tool' &&
+        previous[0].turnId === message.turnId
+      )
+        previous.push(message);
+      else groups.push([message]);
     }
-    const previous = entries.at(-1);
-    if (turnId && previous?.turnId === turnId) {
-      previous.groups.push(...unscoped, group);
+    // Exact Turn identities bound a process. Unscoped non-user messages between
+    // two parts of that same Turn stay in their original order inside it.
+    const entries: { key: string; turnId?: string; groups: Message[][] }[] = [];
+    const seenTurnIds = new Set<string>();
+    const unscoped: Message[][] = [];
+    const flushUnscoped = () => {
+      for (const group of unscoped) entries.push({ key: group[0]!.id, groups: [group] });
       unscoped.length = 0;
-      continue;
+    };
+    for (const group of groups) {
+      const message = group[0]!;
+      // A durable child result is a readable conversation event, including between
+      // two phases of the same parent Run. Never absorb it into process collapse.
+      if (message.systemKind === 'agent_result') {
+        flushUnscoped();
+        entries.push({ key: message.id, groups: [group] });
+        continue;
+      }
+      const turnId = processTurnId(message);
+      if (!turnId && message.role !== 'user') {
+        unscoped.push(group);
+        continue;
+      }
+      const previous = entries.at(-1);
+      if (turnId && previous?.turnId === turnId) {
+        previous.groups.push(...unscoped, group);
+        unscoped.length = 0;
+        continue;
+      }
+      flushUnscoped();
+      entries.push({
+        key: turnId
+          ? seenTurnIds.has(turnId)
+            ? `turn:${turnId}:after:${message.id}`
+            : `turn:${turnId}`
+          : message.id,
+        turnId,
+        groups: [group],
+      });
+      if (turnId) seenTurnIds.add(turnId);
     }
     flushUnscoped();
-    entries.push({
-      key: turnId
-        ? seenTurnIds.has(turnId)
-          ? `turn:${turnId}:after:${message.id}`
-          : `turn:${turnId}`
-        : message.id,
-      turnId,
-      groups: [group],
-    });
-    if (turnId) seenTurnIds.add(turnId);
-  }
-  flushUnscoped();
-  if (
-    turnActivity &&
-    ['queued', 'running', 'waiting', 'cancelling', 'recovery_required', 'cancelled'].includes(
-      turnActivity.status,
-    ) &&
-    !seenTurnIds.has(turnActivity.turnId)
-  ) {
-    entries.push({
-      key: `turn:${turnActivity.turnId}`,
-      turnId: turnActivity.turnId,
-      groups: [],
-    });
-  }
-  const lastEntryByTurn = new Map(
-    entries.filter((entry) => entry.turnId).map((entry) => [entry.turnId, entry]),
-  );
-  const renderGroup = (
-    group: Message[],
-    placement: 'standalone' | 'process' | 'result' = 'standalone',
-  ) => {
-    const message = group[0]!;
-    if (structural(message)) return null;
-    if (renderMessage)
-      return (
+    if (
+      turnActivity &&
+      ['queued', 'running', 'waiting', 'cancelling', 'recovery_required', 'cancelled'].includes(
+        turnActivity.status,
+      ) &&
+      !seenTurnIds.has(turnActivity.turnId)
+    ) {
+      entries.push({
+        key: `turn:${turnActivity.turnId}`,
+        turnId: turnActivity.turnId,
+        groups: [],
+      });
+    }
+    const lastEntryByTurn = new Map(
+      entries.filter((entry) => entry.turnId).map((entry) => [entry.turnId, entry]),
+    );
+    const renderGroup = (
+      group: Message[],
+      placement: 'standalone' | 'process' | 'result' = 'standalone',
+    ) => {
+      const message = group[0]!;
+      if (structural(message)) return null;
+      if (renderMessage)
+        return (
+          <div key={message.presentationKey ?? message.id} className="message-group">
+            <article className={`message ${message.role}`} aria-label={`${message.role} 消息`}>
+              {renderMessage(message)}
+            </article>
+          </div>
+        );
+      // A host-provided group starts with its first tool, before metadata arrives.
+      // Its disclosure and DOM survive subsequent receipts and additional tools.
+      const aggregate = group.length > 1 || !!message.presentationGroupId;
+      const activityKey = aggregate
+        ? `activity-group:${message.presentationGroupId ?? message.presentationKey ?? message.id}`
+        : `activity:${message.presentationKey ?? message.id}`;
+      if (message.role === 'tool' && renderToolActivity)
+        return (
+          <Fragment key={activityKey}>
+            {renderToolActivity(group, {
+              aggregate,
+              expanded: expanded[activityKey],
+              activityId: activityKey,
+              restoredExpanded: restoredExpanded.current,
+              expandedItems: expanded,
+              onToggle: (open) => onToggle(activityKey, open),
+              onToggleItem: onToggle,
+            })}
+          </Fragment>
+        );
+      return message.role === 'tool' ? (
+        <ToolActivity
+          key={activityKey}
+          messages={group}
+          aggregate={aggregate}
+          suppressGenericFailure={
+            message.toolName === 'task' &&
+            (children.get(message.id.slice(5)) ?? []).some(
+              (child) =>
+                child.role === 'subagent' &&
+                ['failed', 'interrupted', 'cancelled'].includes(child.status ?? '') &&
+                !!child.text?.trim(),
+            )
+          }
+          expanded={expanded[activityKey]}
+          activityId={activityKey}
+          restoredExpanded={restoredExpanded.current}
+          expandedItems={expanded}
+          onToggleItem={onToggle}
+          onToggle={(open) => onToggle(activityKey, open)}
+          openFile={openFile}
+          childDetail={parentTaskDetail(message, group.length)}
+          childDetailForMessage={(item) => parentTaskDetail(item, 1)}
+          renderChildren={(toolCallId, taskExpanded) =>
+            children
+              .get(toolCallId)
+              ?.map((child) =>
+                child.role === 'subagent' ? (
+                  <MessageItem
+                    key={child.id}
+                    message={childWithUniqueSteps(child)}
+                    inlineProcess
+                    childTools={childTools.get(child.id.slice(9))}
+                    expandedItems={expanded}
+                    restoredExpanded={restoredExpanded.current}
+                    expanded={expanded[child.id]}
+                    showProcess={taskExpanded}
+                    onToggle={onToggle}
+                    openFile={openFile}
+                  />
+                ) : null,
+              )
+          }
+        />
+      ) : (
         <div key={message.presentationKey ?? message.id} className="message-group">
-          <article className={`message ${message.role}`} aria-label={`${message.role} 消息`}>
-            {renderMessage(message)}
-          </article>
+          <MessageItem
+            message={childWithUniqueSteps(message)}
+            childDetail={childDetail(message)}
+            childTools={
+              message.role === 'subagent' ? childTools.get(message.id.slice(9)) : undefined
+            }
+            expandedItems={expanded}
+            restoredExpanded={restoredExpanded.current}
+            expanded={expanded[message.id]}
+            onToggle={onToggle}
+            openFile={openFile}
+            writeClipboardText={writeClipboardText}
+            renderContent={renderMessageContent}
+            renderAttachments={renderMessageAttachments}
+            showResponseStatus={placement === 'standalone'}
+            showMetadata={placement !== 'process' || message.role === 'user'}
+            copyText={
+              message.role === 'user' && message.settled && !message.delivery && message.text
+                ? message.copyText === null
+                  ? undefined
+                  : (message.copyText ?? message.text)
+                : assistantTurnCopies.get(message.id)
+            }
+            copyRole={message.role === 'user' ? 'user' : 'assistant'}
+          />
         </div>
       );
-    // A host-provided group starts with its first tool, before metadata arrives.
-    // Its disclosure and DOM survive subsequent receipts and additional tools.
-    const aggregate = group.length > 1 || !!message.presentationGroupId;
-    const activityKey = aggregate
-      ? `activity-group:${message.presentationGroupId ?? message.presentationKey ?? message.id}`
-      : `activity:${message.presentationKey ?? message.id}`;
-    if (message.role === 'tool' && renderToolActivity)
+    };
+    const renderEntry = (entry: (typeof entries)[number]) => {
+      if (!entry.turnId)
+        return (
+          <Fragment key={entry.key}>{entry.groups.map((group) => renderGroup(group))}</Fragment>
+        );
+      const finalGroup = entry.groups.find(
+        ([message]) => message?.role === 'assistant' && message.settled && message.finalReply,
+      );
+      const failureGroups = entry.groups.filter(([message]) => !!message && isTurnFailure(message));
+      const processGroups = entry.groups.filter(
+        (group) => group !== finalGroup && !failureGroups.includes(group) && !structural(group[0]!),
+      );
+      const activity = turnActivity?.turnId === entry.turnId ? turnActivity : undefined;
+      const timing = timingByTurn.get(entry.turnId);
+      const terminalStatus = terminalByTurn.get(entry.turnId);
+      const active =
+        !terminalStatus &&
+        (activity && !activity.unavailable
+          ? isLiveTurn(activity)
+          : !turnActivity &&
+            entry.groups.some((group) => group.some((message) => !message.settled)));
+      const failed =
+        activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
+      const cancelled =
+        activity?.status === 'cancelled' ||
+        terminalStatus === 'cancelled' ||
+        processGroups.some((group) =>
+          group.some((message) => message.role === 'assistant' && message.status === 'cancelled'),
+        );
+      const aborted = terminalStatus === 'aborted';
+      const runningTool = runningToolTurns.has(entry.turnId);
+      const thinking = thinkingTurns.has(entry.turnId);
+      const completed =
+        !failed &&
+        !cancelled &&
+        !aborted &&
+        (!!finalGroup || terminalStatus === 'completed' || activity?.status === 'completed');
+      // The Run owns response activity across model/tool/approval phases. A
+      // temporary observation failure is not a terminal fact. Only the last
+      // entry for an exact Turn carries its indicator, outside process collapse.
+      const lastTurnEntry = entry === lastEntryByTurn.get(entry.turnId);
+      const responding =
+        lastTurnEntry &&
+        !terminalStatus &&
+        (activity
+          ? isLiveTurn(activity)
+          : active && !completed && !failed && !cancelled && !aborted);
+      const finishedDuration =
+        lastTurnEntry && completed
+          ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
+          : undefined;
+      const responseLabel =
+        active && thinking && !runningTool && (!activity || activity.status === 'running')
+          ? '正在思考…'
+          : '正在回复…';
+      const label = !lastTurnEntry
+        ? '处理过程'
+        : diagnostics &&
+            !terminalStatus &&
+            activity?.executionUnconfirmed &&
+            isOngoingTurn(activity)
+          ? '执行状态待核实'
+          : diagnostics && !terminalStatus && activity?.unavailable
+            ? '上次确认状态'
+            : failed
+              ? '本轮失败'
+              : cancelled
+                ? '已停止'
+                : aborted
+                  ? '已中断'
+                  : completed
+                    ? finishedDuration === undefined
+                      ? '已完成'
+                      : '用时'
+                    : activity?.status === 'recovery_required'
+                      ? '需要恢复'
+                      : activity?.status === 'cancelling'
+                        ? '正在停止'
+                        : activity?.status === 'waiting'
+                          ? '正在等待'
+                          : activity?.status === 'queued'
+                            ? '等待处理'
+                            : '处理过程';
+      const showProcess = processGroups.length > 0;
+      // A settled Turn starts a new reading state even when no final reply was
+      // confirmed. Its process closes once, then the reader's choice persists.
+      const settled =
+        !!terminalStatus ||
+        !!finalGroup ||
+        failureGroups.length > 0 ||
+        ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '');
+      // Settlement regroups the final reply outside the process. Start a new
+      // container so the old process cannot repaint during its exit animation.
+      const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
+      const open = expanded[turnKey] ?? !settled;
+      // Cold history and restored readings start at their full height. Replaying
+      // the default-open process moves the transcript for the entire animation.
+      // A later user toggle removes this marker and keeps the normal animation.
+      if (restore.current && open) restoredExpanded.current.add(turnKey);
+      const statusContent = (
+        <span
+          className="agent-turn-status-label"
+          role={active && label !== '处理过程' ? 'status' : undefined}
+        >
+          {label}
+          {lastTurnEntry && (
+            <TurnElapsed
+              startedAtMs={timing?.turnStartedAtMs}
+              finishedAtMs={timing?.turnFinishedAtMs}
+              prefix={finishedDuration !== undefined ? ' ' : ' · 用时 '}
+            />
+          )}
+        </span>
+      );
       return (
-        <Fragment key={activityKey}>
-          {renderToolActivity(group, {
-            aggregate,
-            expanded: expanded[activityKey],
-            activityId: activityKey,
-            restoredExpanded: restoredExpanded.current,
-            expandedItems: expanded,
-            onToggle: (open) => onToggle(activityKey, open),
-            onToggleItem: onToggle,
-          })}
-        </Fragment>
-      );
-    return message.role === 'tool' ? (
-      <ToolActivity
-        key={activityKey}
-        messages={group}
-        aggregate={aggregate}
-        suppressGenericFailure={
-          message.toolName === 'task' &&
-          (children.get(message.id.slice(5)) ?? []).some(
-            (child) =>
-              child.role === 'subagent' &&
-              ['failed', 'interrupted', 'cancelled'].includes(child.status ?? '') &&
-              !!child.text?.trim(),
-          )
-        }
-        expanded={expanded[activityKey]}
-        activityId={activityKey}
-        restoredExpanded={restoredExpanded.current}
-        expandedItems={expanded}
-        onToggleItem={onToggle}
-        onToggle={(open) => onToggle(activityKey, open)}
-        openFile={openFile}
-        childDetail={parentTaskDetail(message, group.length)}
-        childDetailForMessage={(item) => parentTaskDetail(item, 1)}
-        renderChildren={(toolCallId, taskExpanded) =>
-          children
-            .get(toolCallId)
-            ?.map((child) =>
-              child.role === 'subagent' ? (
-                <MessageItem
-                  key={child.id}
-                  message={childWithUniqueSteps(child)}
-                  inlineProcess
-                  childTools={childTools.get(child.id.slice(9))}
-                  expandedItems={expanded}
-                  restoredExpanded={restoredExpanded.current}
-                  expanded={expanded[child.id]}
-                  showProcess={taskExpanded}
-                  onToggle={onToggle}
-                  openFile={openFile}
-                />
-              ) : null,
-            )
-        }
-      />
-    ) : (
-      <div key={message.presentationKey ?? message.id} className="message-group">
-        <MessageItem
-          message={childWithUniqueSteps(message)}
-          childDetail={childDetail(message)}
-          childTools={message.role === 'subagent' ? childTools.get(message.id.slice(9)) : undefined}
-          expandedItems={expanded}
-          restoredExpanded={restoredExpanded.current}
-          expanded={expanded[message.id]}
-          onToggle={onToggle}
-          openFile={openFile}
-          writeClipboardText={writeClipboardText}
-          renderContent={renderMessageContent}
-          renderAttachments={renderMessageAttachments}
-          showResponseStatus={placement === 'standalone'}
-          showMetadata={placement !== 'process' || message.role === 'user'}
-          copyText={
-            message.role === 'user' && message.settled && !message.delivery && message.text
-              ? message.copyText === null
-                ? undefined
-                : (message.copyText ?? message.text)
-              : assistantTurnCopies.get(message.id)
+        <section
+          key={entry.key}
+          className="agent-turn"
+          data-turn-status={
+            failed
+              ? 'failed'
+              : cancelled
+                ? 'cancelled'
+                : aborted
+                  ? 'aborted'
+                  : (terminalStatus ?? activity?.status ?? (active ? 'running' : 'unknown'))
           }
-          copyRole={message.role === 'user' ? 'user' : 'assistant'}
-        />
-      </div>
-    );
-  };
-  const renderEntry = (entry: (typeof entries)[number]) => {
-    if (!entry.turnId)
-      return <Fragment key={entry.key}>{entry.groups.map((group) => renderGroup(group))}</Fragment>;
-    const finalGroup = entry.groups.find(
-      ([message]) => message?.role === 'assistant' && message.settled && message.finalReply,
-    );
-    const failureGroups = entry.groups.filter(([message]) => !!message && isTurnFailure(message));
-    const processGroups = entry.groups.filter(
-      (group) => group !== finalGroup && !failureGroups.includes(group) && !structural(group[0]!),
-    );
-    const activity = turnActivity?.turnId === entry.turnId ? turnActivity : undefined;
-    const timing = timingByTurn.get(entry.turnId);
-    const terminalStatus = terminalByTurn.get(entry.turnId);
-    const active =
-      !terminalStatus &&
-      (activity && !activity.unavailable
-        ? isLiveTurn(activity)
-        : !turnActivity && entry.groups.some((group) => group.some((message) => !message.settled)));
-    const failed =
-      activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
-    const cancelled =
-      activity?.status === 'cancelled' ||
-      terminalStatus === 'cancelled' ||
-      processGroups.some((group) =>
-        group.some((message) => message.role === 'assistant' && message.status === 'cancelled'),
-      );
-    const aborted = terminalStatus === 'aborted';
-    const runningTool = runningToolTurns.has(entry.turnId);
-    const thinking = thinkingTurns.has(entry.turnId);
-    const completed =
-      !failed &&
-      !cancelled &&
-      !aborted &&
-      (!!finalGroup || terminalStatus === 'completed' || activity?.status === 'completed');
-    // The Run owns response activity across model/tool/approval phases. A
-    // temporary observation failure is not a terminal fact. Only the last
-    // entry for an exact Turn carries its indicator, outside process collapse.
-    const lastTurnEntry = entry === lastEntryByTurn.get(entry.turnId);
-    const responding =
-      lastTurnEntry &&
-      !terminalStatus &&
-      (activity ? isLiveTurn(activity) : active && !completed && !failed && !cancelled && !aborted);
-    const finishedDuration =
-      lastTurnEntry && completed
-        ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
-        : undefined;
-    const responseLabel =
-      active && thinking && !runningTool && (!activity || activity.status === 'running')
-        ? '正在思考…'
-        : '正在回复…';
-    const label = !lastTurnEntry
-      ? '处理过程'
-      : diagnostics && !terminalStatus && activity?.executionUnconfirmed && isOngoingTurn(activity)
-        ? '执行状态待核实'
-        : diagnostics && !terminalStatus && activity?.unavailable
-          ? '上次确认状态'
-          : failed
-            ? '本轮失败'
-            : cancelled
-              ? '已停止'
-              : aborted
-                ? '已中断'
-                : completed
-                  ? finishedDuration === undefined
-                    ? '已完成'
-                    : '用时'
-                  : activity?.status === 'recovery_required'
-                    ? '需要恢复'
-                    : activity?.status === 'cancelling'
-                      ? '正在停止'
-                      : activity?.status === 'waiting'
-                        ? '正在等待'
-                        : activity?.status === 'queued'
-                          ? '等待处理'
-                          : '处理过程';
-    const showProcess = processGroups.length > 0;
-    // A settled Turn starts a new reading state even when no final reply was
-    // confirmed. Its process closes once, then the reader's choice persists.
-    const settled =
-      !!terminalStatus ||
-      !!finalGroup ||
-      failureGroups.length > 0 ||
-      ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '');
-    // Settlement regroups the final reply outside the process. Start a new
-    // container so the old process cannot repaint during its exit animation.
-    const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
-    const open = expanded[turnKey] ?? !settled;
-    // Cold history and restored readings start at their full height. Replaying
-    // the default-open process moves the transcript for the entire animation.
-    // A later user toggle removes this marker and keeps the normal animation.
-    if (restore.current && open) restoredExpanded.current.add(turnKey);
-    const statusContent = (
-      <span
-        className="agent-turn-status-label"
-        role={active && label !== '处理过程' ? 'status' : undefined}
-      >
-        {label}
-        {lastTurnEntry && (
-          <TurnElapsed
-            startedAtMs={timing?.turnStartedAtMs}
-            finishedAtMs={timing?.turnFinishedAtMs}
-            prefix={finishedDuration !== undefined ? ' ' : ' · 用时 '}
-          />
-        )}
-      </span>
-    );
-    return (
-      <section
-        key={entry.key}
-        className="agent-turn"
-        data-turn-status={
-          failed
-            ? 'failed'
-            : cancelled
-              ? 'cancelled'
-              : aborted
-                ? 'aborted'
-                : (terminalStatus ?? activity?.status ?? (active ? 'running' : 'unknown'))
-        }
-      >
-        {showProcess && (
-          <Collapsible
-            key={turnKey}
-            asChild
-            open={open}
-            onOpenChange={(next) => onToggle(turnKey, next)}
-          >
-            <div
-              className="agent-turn-process"
-              data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
+        >
+          {showProcess && (
+            <Collapsible
+              key={turnKey}
+              asChild
+              open={open}
+              onOpenChange={(next) => onToggle(turnKey, next)}
             >
-              <div className="agent-turn-summary-row">
-                <CollapsibleTrigger asChild>
-                  <Button
-                    className="agent-turn-summary"
-                    variant="ghost"
-                    aria-label={`${finishedDuration === undefined ? label : `用时 ${formatTurnElapsed(finishedDuration)}`}，${open ? '收起' : '展开'}本轮处理过程`}
-                  >
-                    {statusContent}
-                    <HugeiconsIcon
-                      className="agent-turn-chevron"
-                      icon={ArrowDown01Icon}
-                      aria-hidden="true"
-                      data-icon="inline-end"
-                    />
-                  </Button>
-                </CollapsibleTrigger>
+              <div
+                className="agent-turn-process"
+                data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
+              >
+                <div className="agent-turn-summary-row">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      className="agent-turn-summary"
+                      variant="ghost"
+                      aria-label={`${finishedDuration === undefined ? label : `用时 ${formatTurnElapsed(finishedDuration)}`}，${open ? '收起' : '展开'}本轮处理过程`}
+                    >
+                      {statusContent}
+                      <HugeiconsIcon
+                        className="agent-turn-chevron"
+                        icon={ArrowDown01Icon}
+                        aria-hidden="true"
+                        data-icon="inline-end"
+                      />
+                    </Button>
+                  </CollapsibleTrigger>
+                </div>
+                <AnimatedCollapsibleContent className="agent-turn-content">
+                  <section className="agent-turn-process-messages" aria-label="本轮处理过程">
+                    {processGroups.map((group) => renderGroup(group, 'process'))}
+                  </section>
+                </AnimatedCollapsibleContent>
               </div>
-              <AnimatedCollapsibleContent className="agent-turn-content">
-                <section className="agent-turn-process-messages" aria-label="本轮处理过程">
-                  {processGroups.map((group) => renderGroup(group, 'process'))}
-                </section>
-              </AnimatedCollapsibleContent>
-            </div>
-          </Collapsible>
-        )}
-        {!showProcess &&
-          (finalGroup || failureGroups.length === 0) &&
-          (!responding || label !== '处理过程') && (
-            <div className="agent-turn-summary agent-turn-summary-static" role="status">
-              {statusContent}
+            </Collapsible>
+          )}
+          {!showProcess &&
+            (finalGroup || failureGroups.length === 0) &&
+            (!responding || label !== '处理过程') && (
+              <div className="agent-turn-summary agent-turn-summary-static" role="status">
+                {statusContent}
+              </div>
+            )}
+          {finalGroup && (
+            <div className="agent-turn-final">{renderGroup(finalGroup, 'result')}</div>
+          )}
+          {failureGroups.length > 0 && (
+            <div className="agent-turn-failure">
+              {failureGroups.map((group) => renderGroup(group, 'result'))}
             </div>
           )}
-        {finalGroup && <div className="agent-turn-final">{renderGroup(finalGroup, 'result')}</div>}
-        {failureGroups.length > 0 && (
-          <div className="agent-turn-failure">
-            {failureGroups.map((group) => renderGroup(group, 'result'))}
-          </div>
-        )}
-        {responding && (
-          <small className="response-status" role="status">
-            <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
-              {responseLabel}
-            </span>
-          </small>
-        )}
-      </section>
-    );
-  };
-  const busy =
-    isLiveTurn(turnActivity) ||
-    messages.some(
-      (message) =>
-        !message.executionUnconfirmed &&
-        !(message.turnId === turnActivity?.turnId && turnActivity?.executionUnconfirmed) &&
-        message.systemKind !== 'turn_timing' &&
-        (!message.turnId || !terminalByTurn.get(message.turnId)) &&
-        (message.delivery === 'sending' ||
-          ((message.role === 'assistant' ||
-            message.role === 'tool' ||
-            message.role === 'subagent' ||
-            message.role === 'thinking' ||
-            message.role === 'system') &&
-            !message.settled)),
-    );
+          {responding && (
+            <small className="response-status" role="status">
+              <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
+                {responseLabel}
+              </span>
+            </small>
+          )}
+        </section>
+      );
+    };
+    const busy =
+      isLiveTurn(turnActivity) ||
+      messages.some(
+        (message) =>
+          !message.executionUnconfirmed &&
+          !(message.turnId === turnActivity?.turnId && turnActivity?.executionUnconfirmed) &&
+          message.systemKind !== 'turn_timing' &&
+          (!message.turnId || !terminalByTurn.get(message.turnId)) &&
+          (message.delivery === 'sending' ||
+            ((message.role === 'assistant' ||
+              message.role === 'tool' ||
+              message.role === 'subagent' ||
+              message.role === 'thinking' ||
+              message.role === 'system') &&
+              !message.settled)),
+      );
+    return { entryContent: entries.map(renderEntry), empty: entries.length === 0, busy };
+  }, [
+    messages,
+    turnActivity,
+    expanded,
+    diagnostics,
+    renderMessage,
+    renderMessageContent,
+    renderMessageAttachments,
+    renderToolActivity,
+    childSessionIdsByTaskId,
+    onOpenChildSession,
+    openFile,
+    writeClipboardText,
+    onToggle,
+    restoredMarkerSignature,
+    loading,
+  ]);
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
@@ -1223,7 +1259,7 @@ export function Conversation({
         >
           <div ref={content} className="reading-column">
             {!loading &&
-              (!entries.length ? (
+              (empty ? (
                 <div className="welcome">
                   <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
                   <p>
@@ -1236,7 +1272,7 @@ export function Conversation({
                   </p>
                 </div>
               ) : (
-                entries.map(renderEntry)
+                entryContent
               ))}
             {!loading && selected && requiredSubagentWait && (
               <Marker className="mt-4" role="status">

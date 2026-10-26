@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { ModelOutputMessage, type ModelOutputMessageProps } from '../src';
 import { useConversationReadActive } from '../src/conversation-activity';
 import { ConversationCache } from '../src/desktop/ConversationCache';
+import { controlCacheAccounting } from './conversation-cache-accounting.fixture';
 
 function CachedOutput(props: ModelOutputMessageProps) {
   const readActive = useConversationReadActive();
@@ -197,6 +198,7 @@ test('a qualified host can read the restored sealed origin using the current sna
 });
 async function domFixture() {
   const dom = new JSDOM('<div id="root"></div>');
+  const accounting = controlCacheAccounting(dom.window);
   const prior = { window: globalThis.window, document: globalThis.document };
   Object.assign(globalThis, {
     window: dom.window,
@@ -207,13 +209,14 @@ async function domFixture() {
     root = createRoot(host);
   return {
     host,
-    renderCached: (
+    renderCached: async (
       props: ModelOutputMessageProps,
       identity = 'a',
       loading = false,
       readActive = true,
-    ) =>
-      act(async () =>
+    ) => {
+      await act(async () => accounting.flush());
+      await act(async () =>
         root.render(
           <ConversationCache
             identity={identity}
@@ -224,7 +227,9 @@ async function domFixture() {
             <CachedOutput {...props} />
           </ConversationCache>,
         ),
-      ),
+      );
+      await act(async () => accounting.flush());
+    },
     render: (props: ModelOutputMessageProps) =>
       act(async () => root.render(<ModelOutputMessage {...props} />)),
     click: async (label: string) =>
@@ -233,6 +238,7 @@ async function domFixture() {
       ),
     close: async () => {
       await act(async () => root.unmount());
+      accounting.restore();
       dom.window.close();
       Object.assign(globalThis, prior);
     },

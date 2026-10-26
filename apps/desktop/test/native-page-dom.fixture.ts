@@ -1,5 +1,12 @@
 import type { JSDOM } from 'jsdom';
 
+/** Navigation admits Main work in the task following its first rendering opportunity. */
+export function nextDesktopPresentation(dom: JSDOM): Promise<void> {
+  return new Promise((resolve) => {
+    dom.window.requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+}
+
 /** These tests assert Native ownership, not keyboard editing; use the actual editor state. */
 export async function setPromptText(element: Element, value: string) {
   const { setEditorText } = await import('../../../packages/ui/test/prompt-editor.fixture');

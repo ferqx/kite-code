@@ -4,9 +4,11 @@ import {
   useConversationReadActive,
   useConversationResourceRetention,
 } from '@kite-ai/ui/desktop';
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNativeDiagnostics } from './native-diagnostics';
 import { nativePreparedMarkdown } from './native-markdown';
+
+const RetainedModelOutput = memo(ModelOutputMessage);
 
 /** Keep verified copy display with its cached DOM; current activity still gates every action. */
 export function NativeModelOutputMessage({
@@ -44,25 +46,26 @@ export function NativeModelOutputMessage({
     },
     [retention],
   );
+  const renderText = useCallback<NonNullable<ModelOutputMessageProps['renderText']>>(
+    (text, verified) => (
+      <NativeMarkdownBody
+        text={text}
+        verified={verified}
+        message={props.message}
+        storeId={props.storeId}
+        autoRead={autoRead}
+        suspended={props.suspended}
+        openFile={openFile}
+      />
+    ),
+    [props.message, props.storeId, autoRead, props.suspended, openFile],
+  );
   return (
-    <ModelOutputMessage
+    <RetainedModelOutput
       {...props}
       autoRead={autoRead}
       renderText={
-        props.message.contentFormat === 'unsupported'
-          ? undefined
-          : (props.renderText ??
-            ((text, verified) => (
-              <NativeMarkdownBody
-                text={text}
-                verified={verified}
-                message={props.message}
-                storeId={props.storeId}
-                autoRead={autoRead}
-                suspended={props.suspended}
-                openFile={openFile}
-              />
-            )))
+        props.message.contentFormat === 'unsupported' ? undefined : (props.renderText ?? renderText)
       }
       showReasoning={diagnostics && props.showReasoning === true}
       onContent={publishDisplay}

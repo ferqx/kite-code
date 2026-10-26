@@ -1,6 +1,6 @@
 import type { BackgroundExecutionItem } from '@kite-ai/client';
 import { type BackgroundExecutionSummary, BackgroundExecutions } from '@kite-ai/ui/desktop';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NativeBackgroundChild } from './background-bridge';
 import { type NativeAgentActivity, nativeAgentActivities } from './native-agent-activity';
 import { readNativeBackground, readNativeBackgroundChild } from './native-background';
@@ -211,7 +211,7 @@ export function useNativeEnvironment({
   const [directoryTick, setDirectoryTick] = useState(0);
   const lastDirectoryRevision = useRef({ scope, revision, refresh: 0 });
   const [refresh, setRefresh] = useState(0),
-    [view, setView] = useState<{
+    [rawView, setView] = useState<{
       scope: string;
       display?: Display;
       facts?: Facts;
@@ -221,6 +221,17 @@ export function useNativeEnvironment({
     [child, setChild] = useState<Child>(),
     [stopping, setStopping] = useState<string>(),
     [stopNotice, setStopNotice] = useState('');
+  const pausedObservation = useRef<
+    { view: typeof rawView; read: typeof pendingRead.current } | undefined
+  >(undefined);
+  const awaitingFreshRead = !!rawView && pausedObservation.current?.view === rawView;
+  const view = rawView && (paused || awaitingFreshRead) ? { ...rawView, busy: true } : rawView;
+  useLayoutEffect(() => {
+    if (paused) pausedObservation.current = { view: rawView, read: pendingRead.current };
+    // A replacement read/error owns the new raw object. Its preceding effect
+    // cleanup has already aborted the retired read, so release the old Facts.
+    else if (rawView !== pausedObservation.current?.view) pausedObservation.current = undefined;
+  }, [paused, rawView]);
   const childCache = useRef(new Map<string, { facts: NativeBackgroundChild; bytes: number }>());
   type ChildJob = {
     scope: string;
@@ -245,10 +256,13 @@ export function useNativeEnvironment({
   >(undefined);
   const latest = useRef(view);
   latest.current = view;
-  const readable = useRef(!unavailable && !paused);
-  readable.current = !unavailable && !paused;
+  const readable = useRef(!unavailable && !paused && !awaitingFreshRead);
+  readable.current = !unavailable && !paused && !awaitingFreshRead;
   const control = useRef({ unavailable: unavailable || paused, controlUnavailable });
-  control.current = { unavailable: unavailable || paused, controlUnavailable };
+  control.current = {
+    unavailable: unavailable || paused || awaitingFreshRead,
+    controlUnavailable,
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new authority epoch releases retained old data.
   useEffect(() => {
     childCache.current.clear();
@@ -274,16 +288,7 @@ export function useNativeEnvironment({
     if (!bridge || !scope || !storeId || !rootSessionId || !viewSelection || !cacheKey) return;
     const display =
       latest.current?.scope === scope ? latest.current.display : cache.current.get(cacheKey);
-    if (paused) {
-      setView((previous) => ({
-        scope,
-        display,
-        facts: previous?.scope === scope ? previous.facts : undefined,
-        busy: true,
-        error: previous?.scope === scope ? previous.error : undefined,
-      }));
-      return;
-    }
+    if (paused) return;
     if (unavailable) {
       setView({ scope, display, busy: false, error: 'environment_unavailable' });
       return;
@@ -313,7 +318,12 @@ export function useNativeEnvironment({
     void promise
       .then(
         (facts) => {
-          if (abort.signal.aborted || live.current !== scope) return;
+          if (
+            abort.signal.aborted ||
+            live.current !== scope ||
+            pausedObservation.current?.read === reading
+          )
+            return;
           const display = environmentDisplay(facts.items, storeId);
           // Presentation-only cache: no observation IDs, output, stop permission or submitted intent.
           cache.current.delete(cacheKey);
@@ -329,7 +339,11 @@ export function useNativeEnvironment({
           setView(latest.current);
         },
         (cause) => {
-          if (!abort.signal.aborted && live.current === scope)
+          if (
+            !abort.signal.aborted &&
+            live.current === scope &&
+            pausedObservation.current?.read !== reading
+          )
             setView({ scope, display, busy: false, error: safeError(cause) });
         },
       )
@@ -338,6 +352,7 @@ export function useNativeEnvironment({
           pendingRead.current = undefined;
           if (
             !abort.signal.aborted &&
+            pausedObservation.current?.read !== reading &&
             live.current === scope &&
             directoryQueued.current &&
             stopBusy.current?.scope !== scope
@@ -555,7 +570,16 @@ export function useNativeEnvironment({
     }
   }
   function openChild(sessionId: string, executionId?: string) {
-    if (!bridge || !scope || !storeId || !rootSessionId || !viewSelection || unavailable || paused)
+    if (
+      !bridge ||
+      !scope ||
+      !storeId ||
+      !rootSessionId ||
+      !viewSelection ||
+      unavailable ||
+      paused ||
+      awaitingFreshRead
+    )
       return;
     childNavigation.current = { scope, sessionId, executionId };
     childRead.current?.abort();
@@ -788,7 +812,7 @@ export function useNativeEnvironment({
           }) ?? [])
         : [],
     childScope: scope,
-    childReadAvailable: !!bridge && !!scope && !unavailable && !paused,
+    childReadAvailable: !!bridge && !!scope && !unavailable && !paused && !awaitingFreshRead,
     openChild,
     closeChild: () => {
       childNavigation.current = undefined;
@@ -834,7 +858,8 @@ export function useNativeEnvironment({
             error: diagnostics ? current?.error : undefined,
             onOpen: (sessionId, executionId) => {
               if (!onOpenChild) return void openChild(sessionId, executionId);
-              if (!bridge || !scope || unavailable || paused || !executionId) return;
+              if (!bridge || !scope || unavailable || paused || awaitingFreshRead || !executionId)
+                return;
               const title = display?.rows.find(
                 (row) => row.executionId === executionId,
               )?.displayName;

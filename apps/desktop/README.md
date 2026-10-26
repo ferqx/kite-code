@@ -304,7 +304,7 @@ Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Ski
 
 2026-10-19 Windows x64／Bun 1.4.3／Chrome 155.0.8059.82，在 `f734245a` 加当前未提交源码上，用隔离夹具加载实际 SessionPage、Sidebar 与 Native 编译样式，Windows／macOS CSS 标记下亮暗、Mica／Vibrancy／实色、窄侧栏、选中导航与设置分类选择器共14组对照：悬停／按下底色不一致的采样由64处降为0。键盘按下空间标题只绘制一层背景，焦点提示、透明承载层、草稿和主区普通按钮的原按下反馈保持；页面无异常，定向 CSS Biome 与文档检查通过。设置页仅核选择器夹具，未复验真实 Service、Electron 实窗或系统材质最终合成。
 
-[Native 页面](src/native.tsx)向共享 SessionPage 传递选中ID时，有明确导航目标则同时核 `selected.current` 与已读取的 `selection.session.id`。切换中保留的旧会话事实只用于原正文及写入门禁，不重新涂成当前选中项；新事实确认后才显示目标行高亮。没有显式切换目标的初始已选会话、同会话刷新及原晚到响应守卫保持。回归归[新对话与导航 DOM 测试](test/isolated/native-new-conversation-dom.test.tsx)。
+[Native 页面](src/native.tsx)对当前可用目录中未删除的普通根会话，在点击时即用目录的 Store／Session 身份更新 SessionPage 的标题、选中项与 `readingKey`，让页面缓存先恢复原 DOM；后台 `select`、模型控件准备与完整历史校准继续独立完成。尚无目标缓存时只传空消息和 loading，不把旧消息装入新树。真实 `selection` 仍独立控制所有读取与写入；子会话和不可用目录不走提前展示。首条投递占位只在原目标保留，切走后不能覆盖新目标。没有显式切换目标的初始已选会话、同会话刷新及原晚到响应守卫保持。回归归[新对话与导航 DOM 测试](test/isolated/native-new-conversation-dom.test.tsx)与[历史展示 DOM](test/isolated/native-history-presentation-dom.test.tsx)。
 
 2026-10-19 Windows x64／Bun 1.4.3，在 `f734245a` 加当前未提交源码上：选中高亮回归先复现延迟选择响应时旧行仍带 `aria-current="page"`，修后核初始已选会话、会话／全局及项目准备入口、缺选择的 Main 发布、目标确认与晚到响应。新对话、会话导航及共享页面三个整文件44项／981断言，Desktop typecheck、定向 Biome 和文档检查通过。Chrome 155.0.8059.82 隔离实际 Native renderer 沿既有模拟桥，亮暗下三种入口及键盘共8组逐帧核对，修前8组误选旧行，修后为0；两种准备入口的4组旧行背景 alpha 全程为0，同目标刷新保留高亮。未改共享 hover 配色、会话选择请求或写入门禁；未复验真实 Service 或 Electron 实窗。
 
@@ -532,6 +532,35 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
 
 ## 会话消息渲染验证
+
+当前缓存复用官方Activity与原portal，非当前页面上限8项；私有CacheHost作为portal前置的React sibling，在后代layout之前接入原容器，去掉attached状态驱动的第二次可见恢复。共享预算、后台分片成本和未知条目退出策略归[UI owner](../../packages/ui/README.md#原桌面展示层)。[NativeDirectoryProjection](src/native-presentation.ts)属于单个窗口，只保当前目录索引；新目录单次分组并复用未变会话／空间对象，同一目录的选择刷新只核旧、新会话摘要，Store变化清空旧映射。Sidebar按空间／标题／会话行memo并仅在该组sessions改变时排序，选中切换仅更新旧、新两行；[SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)的稳定事件代理读取最新已提交回调，操作存在性变化仍立即更新入口，避免以忽略回调的memo隐藏授权撤销。[目录回归](test/native-directory.test.tsx)与[导航回归](../../packages/ui/test/isolated/desktop-sidebar.test.tsx)分别核投影身份／实际状态变化和回调更新／撤销。普通跨根会话导航先建立展示hold与撤销旧操作资格，再通过[绘制机会](src/native-presentation-frame.ts)的RAF后下一task启动Main选择；同会话刷新、首条投递接管和child不延后。随后仍核原nonce／generation／epoch，隐藏窗口跳过等待，帧暂停由100ms deadline收束；这是一帧调度机会，不作为已绘制证明。[时序回归](test/native-presentation-frame.test.ts)以可控队列核RAF本身不释放、post-frame task释放及deadline清理。
+
+标签页scope重置由SessionPage薄入口持有，原页面内容不再因该render-phase状态接管重算；原`useSessionTabs`及browser／child清理保持。环境动画状态已空时不发空更新；existing-session模型选择器的ready回调只更新仍匹配Session／generation／viewIntent的选择，退出会话的回调不触发旧页面更新，首条准备分支保持。[页面回归](../../packages/ui/test/isolated/desktop-session-page-render.test.tsx)核连续scope切换每次只算一次内容、外壳原节点与准确browser关闭，原标签页回归继续覆盖最后标签关闭和child生命周期。
+
+[环境读取](src/native-environment.tsx)在导航暂停时从已提交raw版本派生busy，不再为同一暂停复制View并触发整页更新；恢复后该暂停版本仍不可操作，直到新read接管。layout记录暂停版本和原read身份，旧read的成功／错误／排队刷新不得接管，新版本提交后释放标记引用。[暂停回归](test/isolated/native-environment-pause.test.tsx)核单父提交、恢复首layout的操作限制、迟到结果、child取消、scope替换与失败恢复；原stop／child读取生命周期继续独立核对。
+
+[Native正文适配](src/native-model-output-message.tsx)在私有memo边界内保留未变的共享全文组件与默认renderText回调；公开ConversationActivityContext及resume语义保持，实际readActive、消息、Store、快照和reader变化仍更新。关闭的诊断工具仅在原入口实际显示时构造JSX；不增加普通dev／prod诊断能力。[正文回归](test/isolated/native-model-output-cache-dom.test.tsx)核resume-only跳过正文以及真实门禁／消息更新，原保留全文、复制与释放边界继续覆盖。
+
+[缓存性能夹具](test/session-cache-performance-browser-runner.fixture.ts)是独立测试制品：`bun apps/desktop/test/session-cache-performance-browser-runner.fixture.ts`运行生产Chrome，`--dev`运行隔离Vite开发renderer，`--electron`使用独立Profile的Electron窗口，`--dev --electron`组合验证开发renderer与Electron合成器。每页20轮／40条含代码表格，20个空间／100会话；先核后台记账完成和原节点，再测100次真实click。PNG compositor帧的原时间戳与可信click对齐，DOM可见时刻单列，色标先按同通道截图校准；私有采样与成本标记只由该夹具构建开启，普通dev／prod入口不装配。目标为热命中绘制P95≤32ms，另核500ms选择延迟、零首帧预算扫描、滚动／草稿、操作禁用与A→B→A迟到隔离。准确运行结果与限制在本节归位，不以首次DOM进入或固定sleep充当实际绘制。
+
+2026-10-26，`820141f49`加本次工作树，macOS arm64／Darwin27／Apple M4 Pro14核、Bun1.4.2、React19.2.7，1440×800、浅色、普通动态效果、diagnostics=false、无Profiler：最终四组各100次普通热切换均通过精确P95≤32ms门槛。Chrome155.0.8059.86为DPR1；Electron44.3.0／Chrome152.0.7977.78按系统实际DPR2运行。Vite夹具在初始导航前等待实际依赖扫描与优化Promise完成，整段强制只有一次初始导航；测试构建的采样不装入普通入口。
+
+| 构建／合成器 | P50 | P95 | 最大值 | 本机产物目录 |
+| --- | --- | --- | --- | --- |
+| dev Chrome | 21.47ms | 31.19ms | 32.58ms | `.cache/session-cache-performance-development-GQZ2Yz` |
+| dev Electron | 21.59ms | 31.80ms | 33.06ms | `.cache/session-cache-performance-development-gMkFC0` |
+| production Chrome | 21.42ms | 22.67ms | 23.02ms | `.cache/session-cache-performance-production-O7UNnD` |
+| production Electron | 17.48ms | 18.43ms | 19.02ms | `.cache/session-cache-performance-production-x6Wzs8` |
+
+每组另有4个边界案例，共105段阅读位置区间；九页各793个全Node（637元素＋156文字），8个inactive＋1个active的原viewport／40条article／table／PRE均保留。四组首paint前预算扫描0、页面错误0、longtask0；500ms选择延迟、240px手动阅读、准确草稿、禁用旧操作与A→B→A迟到隔离全部通过。scroll采样只记录已知viewport的对象身份、时间和scrollTop，核首paint后至离开前无位置偏移，不增加样式／几何扫描。JSON、逐帧PNG和时间戳保留在各目录。当前证据为实际NativeDesktop／CSS与隔离bridge的renderer及合成器热命中，不代表用户真实Main／Service／Profile、冷页、大会话或跨平台资格；P95门槛也不等同每次都≤32ms。
+
+未通过的优化阶段保留原报告：`development-MjZJd0` P95为41.78ms，`development-ccBGiK`为33.87ms，`development-j7rGQG`精确32.0080566ms仍判失败；它们均位于相同`.cache/session-cache-performance-*`前缀。一次Vite优化晚刷新中断的`development-YdKWj9`不计资格。最终通过来自后续具体源码及夹具修正，不四舍五入、放宽门槛或抹去失败。
+
+同日较早的展示接管阶段，`820141f49`加该阶段renderer修改，macOS arm64／Bun1.4.2／Chrome155.0.8059.86：生产 NativeDesktop、原样式和隔离 NativeBridge 的两条短消息对照中，将返回已缓存会话的选择确认挂起24帧。修前约392ms一直显示旧会话；修后首个采样帧约6.2ms已恢复目标原 viewport，后续24帧及确认后保留原节点，旧会话正文消失、操作暂停、页面错误0。无延迟的10次往返约14–41ms；此测量是隔离页面采样，不代表用户开发窗口、真实Main／Service激活耗时或安装版资格。报告、CPU采样与过程截图位于本机`.cache/session-render-investigation`。该阶段只提前页面接管，尚未包含本节上述目录／外壳优化及首帧后激活调度。
+
+最终重跑[首条消息与导航 DOM](test/isolated/native-new-conversation-dom.test.tsx)整文件86项／1886断言通过，覆盖准备期占位、切走尚未保存的首条消息、草稿、目标高亮和零重复提交。[历史展示](test/isolated/native-history-presentation-dom.test.tsx)18通过／3失败、[子导航](test/isolated/native-session-navigation-dom.test.tsx)27通过／3失败、[读取归属](test/isolated/native-read-ownership-dom.test.tsx)14通过／2失败；8个失败分别涉及旧工具数量／展开、既有执行状态和首次提交夹具，均以`HEAD`原 Native 源码复现，未改相关断言，也不计作通过。最终缓存／成本两文件14项／624断言、Native正文2项／25断言、共享全文16项／173断言及页面13项／95断言通过；新增投影、侧栏render、环境暂停、复制纯view、标签页与滚动生命周期回归分别沿其负责文件核对。Desktop／UI typecheck、35个实际变更TypeScript文件Biome、文档结构／影响、测试归属及统一边界检查通过。新增挂起选择与迟到结果回归证明目标原节点先显示、复制及提交受限；上述范围不外推实际开发窗口的完整体验资格。
+
+[外壳浏览器夹具](test/session-shell-browser-runner.fixture.ts)同步即时目标标题与配置控件后续接管的预期，深浅主题×500／800／1440／1920px八组几何检查通过；亮色主循环完成挂起选择、控件禁用、hover及100次快速往返，随后在原“上次状态”文案断言失败，暗色主循环和末尾总写入断言未执行。产物位于本机`.cache/session-shell-browser-CcdYzD`。原[历史逐帧夹具](test/native-history-presentation-browser-runner.fixture.ts)仍在旧工具聚合文案断言失败；这两个浏览器失败均用`HEAD`原renderer和原夹具复现，不能声称整套通过。
 
 2026-10-25同一`852f665b0`工作树、Windows x64／Bun1.4.3／Chrome155：用户指出无工具回复仍可能在文本渲染时换行，隔离页面复现逐字span在英文558px和中英混排244px比连续正文多出一行。改用[绘制层渐显](../../packages/ui/src/desktop/streaming-text-reveal.ts)，文字保持连续Text节点、原字距与字体。实际浏览器同时检查字符绘制颜色由透明逐步增加、全文高度不变、结束后Highlight及动态样式为零；不能只核原生时钟已创建。新增字素与已读选区继续分开，后续追加使用appendData保留旧选区。
 

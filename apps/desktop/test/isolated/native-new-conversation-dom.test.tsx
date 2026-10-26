@@ -22,7 +22,12 @@ import type {
   NativeWorkspaceRemoval,
 } from '../../src/native-bridge';
 import { desktopConversationMessages } from '../../src/native-presentation';
-import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
+import {
+  nextDesktopPresentation,
+  prepareDesktopDom,
+  promptValue,
+  setPromptText,
+} from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<!doctype html><div></div>', { pretendToBeVisual: true });
 const originals = {
@@ -498,6 +503,7 @@ function fixture(
       const button = find(name);
       expect(button).toBeDefined();
       button!.click();
+      if (button!.classList.contains('session-row')) await nextDesktopPresentation(dom);
     });
   const edit = async (value: string, label = '新对话草稿') =>
     act(async () => {
@@ -2340,7 +2346,7 @@ test('switching from a Session to global or project preparation retains the inpu
   }
 });
 
-test('Session switches never revive the retired row highlight while the chosen conversation is loading', async () => {
+test('Session switches highlight the pending target without reviving the retired row while the chosen conversation is loading', async () => {
   const f = fixture(true);
   const activeRows = () =>
     [...f.host.querySelectorAll('.session-row[aria-current="page"]')].map((row) =>
@@ -2358,10 +2364,12 @@ test('Session switches never revive the retired row highlight while the chosen c
       }
       f.holdSelection();
       await f.click('Other B');
-      expect(activeRows()).toEqual([]);
-      expect(f.host.querySelector('.session-row.selected')).toBeNull();
+      expect(activeRows()).toEqual(['Other B']);
+      expect(f.host.querySelector('.session-row.selected')?.getAttribute('aria-label')).toBe(
+        'Other B',
+      );
       await f.refreshWhileSelecting();
-      expect(activeRows()).toEqual([]);
+      expect(activeRows()).toEqual(['Other B']);
       await f.releaseSelection();
       expect(activeRows()).toEqual(['Other B']);
       expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
@@ -2453,7 +2461,7 @@ for (const withHistory of [true, false]) {
   });
 }
 
-test('a held Session switch retains the current draft and controls until Main confirms the target, with writes gated', async () => {
+test('a held Session switch shows the target title while retaining the current draft and controls until Main confirms, with writes gated', async () => {
   const f = fixture(true);
   try {
     await act(async () => f.root.render(<NativeDesktop />));
@@ -2469,7 +2477,7 @@ test('a held Session switch retains the current draft and controls until Main co
     expect(f.input('当前会话私有草稿')).toBe(input);
     expect(promptValue(input)).toBe('A own draft');
     expect(input?.getAttribute('contenteditable')).toBe('false');
-    expect(f.host.querySelector('.breadcrumb strong')?.textContent).toBe('Original A');
+    expect(f.host.querySelector('.breadcrumb strong')?.textContent).toBe('Other B');
     expect(f.host.querySelector('[data-model-trigger]')).toBe(model);
     expect((model as HTMLButtonElement).disabled).toBe(true);
     await f.refreshWhileSelecting();
@@ -3320,6 +3328,7 @@ test('first send clears and renders original text; late failure cannot steal ano
         item.textContent?.includes('新对话'),
       )!;
       item.click();
+      await nextDesktopPresentation(f.dom);
     });
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('first raw\n雪🙂\n\n');
     expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(0);
@@ -3580,6 +3589,7 @@ test('a saved first-created conversation waits for fresh grouping when its inact
       const row = f.host.querySelector<HTMLButtonElement>('.session-row[aria-label="新对话"]');
       expect(row).not.toBeNull();
       row!.click();
+      await nextDesktopPresentation(f.dom);
     });
     expect(f.selected()).toBe(send.creation.sessionId);
     // A saved first input must never return as an optimistic placeholder while
@@ -3956,17 +3966,35 @@ test('leaving a delayed first selection or history read preserves the newer Sess
       if (delay === 'selection') f.holdSelection();
       else f.holdHistory();
       await f.resolve('accepted');
+      const placeholder = f.host.querySelector('.message.user');
+      if (delay === 'history') {
+        expect(placeholder?.textContent).toContain('original delayed first input');
+        f.holdSelection();
+      }
       await f.click('Other B');
+      if (delay === 'history') {
+        expect(f.host.querySelector('.breadcrumb strong')?.textContent).toBe('Other B');
+        expect(f.host.querySelector('.conversation-loading')).not.toBeNull();
+        expect(f.host.querySelector('.message.user')).toBeNull();
+        expect(f.host.body.textContent).not.toContain('original delayed first input');
+        expect(placeholder?.isConnected).toBe(false);
+        expect(
+          f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
+        ).toBe(true);
+        await f.releaseSelection();
+      }
       expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
       if (delay === 'selection') await f.releaseSelection();
       else await f.releaseHistory();
       expect(f.selected()).toBe('b');
+      expect(f.host.querySelector('.breadcrumb strong')?.textContent).toBe('Other B');
       expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
       expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
       expect(f.host.querySelector('.message.user')?.textContent ?? '').not.toContain(
         'original delayed first input',
       );
       expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === 'submit')).toEqual([]);
     } finally {
       await f.close();
     }
@@ -4505,11 +4533,12 @@ test('first accepted input observes a later rejection before Run creation, keeps
     await f.click('Other B');
     expect(f.host.querySelector('[aria-label="回复失败"]')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
-    await act(async () =>
+    await act(async () => {
       [...f.host.querySelectorAll<HTMLButtonElement>('.session-row')]
         .find((row) => row.textContent?.includes('新对话'))!
-        .click(),
-    );
+        .click();
+      await nextDesktopPresentation(f.dom);
+    });
     expect(f.host.querySelector('[aria-label="回复失败"]')).not.toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('你好');
     rejectReady = false;

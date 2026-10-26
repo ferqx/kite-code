@@ -15,7 +15,12 @@ import type {
 } from '../../src/native-bridge';
 import { useNativeEnvironment, waitForNativeDirectory } from '../../src/native-environment';
 import { backgroundItem } from '../background-item.fixture';
-import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
+import {
+  nextDesktopPresentation,
+  prepareDesktopDom,
+  promptValue,
+  setPromptText,
+} from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const initialGlobals = {
@@ -448,6 +453,7 @@ function fixture(
       if (button!.getAttribute('role') === 'tab')
         button!.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
       button!.click();
+      if (button!.classList.contains('session-row')) await nextDesktopPresentation(dom);
     });
   return {
     host,

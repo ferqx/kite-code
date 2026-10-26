@@ -12,6 +12,11 @@ import {
   ConversationActivityContext,
   type RetainedConversationResource,
 } from '../conversation-activity';
+import {
+  CONVERSATION_CACHE_ENTRY_BYTES,
+  CONVERSATION_CACHE_ENTRY_NODES,
+  ConversationCacheCost,
+} from './conversation-cache-cost';
 
 export interface ConversationCacheScope {
   /** Different windows, connections and Stores must not share retained trees. */
@@ -24,31 +29,62 @@ export interface ConversationCacheScope {
   interactive?: boolean;
 }
 
-const MAX_INACTIVE = 3;
+const MAX_INACTIVE = 8;
 const MAX_BYTES = 16 * 1024 * 1024;
 const MAX_NODES = 20_000;
-const MAX_ENTRY_BYTES = 8 * 1024 * 1024;
-const MAX_ENTRY_NODES = 10_000;
 
 type Entry = {
   container: HTMLDivElement;
   resources: Set<RetainedConversationResource>;
   content?: ReactElement;
   used: number;
-  cost?: { bytes: number; nodes: number };
+  cost: ConversationCacheCost;
 };
 
-// Budget DOM payload and registered encoded media, not total heap or decoded pixels.
-function retainedCost({ container, resources }: Entry) {
-  const walker = container.ownerDocument.createTreeWalker(container, 0xffffffff);
-  let nodes = 0,
-    bytes = [...resources].reduce((sum, resource) => sum + resource.bytes, 0);
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    nodes++;
-    bytes += 96 + (node.nodeValue?.length ?? 0) * 2;
-    if (nodes > MAX_ENTRY_NODES || bytes > MAX_ENTRY_BYTES) break;
-  }
-  return { bytes, nodes };
+function createEntry(document: Document): Entry {
+  const container = document.createElement('div');
+  container.className = 'conversation-cache-container';
+  return { container, resources: new Set(), used: 0, cost: new ConversationCacheCost(container) };
+}
+
+function admittedCost(entry: Entry) {
+  const cost = entry.cost.snapshot();
+  return cost &&
+    cost.bytes <= CONVERSATION_CACHE_ENTRY_BYTES &&
+    cost.nodes <= CONVERSATION_CACHE_ENTRY_NODES
+    ? cost
+    : undefined;
+}
+
+/** This sibling commits before portal descendants restore their layout effects. */
+function CacheHost({
+  container,
+  onCommit,
+}: {
+  container?: HTMLDivElement;
+  onCommit: (host: HTMLDivElement) => void;
+}) {
+  const host = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = host.current!;
+    onCommit(element);
+    if (element.firstChild !== (container ?? null))
+      element.replaceChildren(...(container ? [container] : []));
+  });
+  useLayoutEffect(() => {
+    const view = container?.ownerDocument.defaultView;
+    if (!container || !view?.requestAnimationFrame) return;
+    // Resolve retained hover/opacity before descendants restore, then allow new animations.
+    container.setAttribute('data-restoring', 'true');
+    let frame = view.requestAnimationFrame(() => {
+      frame = view.requestAnimationFrame(() => container.removeAttribute('data-restoring'));
+    });
+    return () => {
+      view.cancelAnimationFrame(frame);
+      container.removeAttribute('data-restoring');
+    };
+  }, [container]);
+  return <div className="conversation-cache-host" ref={host} />;
 }
 
 function CacheEntry({
@@ -56,12 +92,16 @@ function CacheEntry({
   readActive,
   interactive,
   resources,
+  cost,
+  onChanged,
   children,
 }: {
   active: boolean;
   readActive: boolean;
   interactive: boolean;
   resources: Set<RetainedConversationResource>;
+  cost: ConversationCacheCost;
+  onChanged: () => void;
   children?: ReactElement;
 }) {
   const [activation, setActivation] = useState({ active, resume: 0 });
@@ -84,20 +124,27 @@ function CacheEntry({
   const retain = useCallback(
     (resource: RetainedConversationResource) => {
       resources.add(resource);
+      const unregister = cost.retain(resource);
       return () => {
         resources.delete(resource);
+        unregister();
       };
     },
-    [resources],
+    [resources, cost],
   );
+  const changed = useRef(onChanged);
+  useLayoutEffect(() => {
+    changed.current = onChanged;
+  });
   // This owner remains mounted while Activity disconnects its descendants' effects.
-  useLayoutEffect(
-    () => () => {
+  useLayoutEffect(() => {
+    cost.start(() => changed.current());
+    return () => {
+      cost.stop();
       for (const resource of resources) resource.release();
       resources.clear();
-    },
-    [resources],
-  );
+    };
+  }, [resources, cost]);
   const activeState = useRef(active);
   activeState.current = active;
   const retention = useMemo(() => ({ retain, isPaused: () => !activeState.current }), [retain]);
@@ -166,8 +213,8 @@ export function ConversationCache({
     revision: cache.revision,
     entries: new Map<string, Entry>(),
   }));
-  const host = useRef<HTMLDivElement>(null);
-  const [attached, setAttached] = useState<HTMLDivElement | null>(null);
+  const activeEntry = useRef<Entry | undefined>(undefined);
+  const ownerDocument = useRef<Document | undefined>(undefined);
   const clock = useRef(0);
   if (state.scope !== cache.scope) {
     setState({ scope: cache.scope, revision: cache.revision, entries: new Map() });
@@ -178,55 +225,49 @@ export function ConversationCache({
       entries: new Map([...state.entries].filter(([key]) => visible && key === identity)),
     });
   } else if (visible && !state.entries.has(identity)) {
-    const container = document.createElement('div');
-    container.className = 'conversation-cache-container';
     setState({
       ...state,
-      entries: new Map(state.entries).set(identity, { container, resources: new Set(), used: 0 }),
+      entries: new Map(state.entries).set(identity, createEntry(document)),
     });
+  } else if (visible) {
+    const candidate = state.entries.get(identity)!;
+    if (candidate.content && activeEntry.current !== candidate && !admittedCost(candidate))
+      setState({
+        ...state,
+        entries: new Map(state.entries).set(identity, createEntry(document)),
+      });
   }
   const active = visible ? state.entries.get(identity) : undefined;
+  const retireChanged = useCallback((key: string, entry: Entry) => {
+    if (activeEntry.current === entry) return;
+    setState((previous) => {
+      if (previous.entries.get(key) !== entry || activeEntry.current === entry) return previous;
+      const entries = new Map(previous.entries);
+      entries.delete(key);
+      return { ...previous, entries };
+    });
+  }, []);
   const entries = useRef(state.entries);
-  entries.current = state.entries;
   useLayoutEffect(() => {
-    const document = host.current!.ownerDocument;
+    const document = ownerDocument.current!;
     const releaseHiddenMedia = () => {
       if (!document.hidden) return;
       for (const entry of entries.current.values()) {
         for (const resource of entry.resources)
-          if (resource.releaseOnWindowHide) resource.release();
-        entry.cost = undefined;
+          if (resource.releaseOnWindowHide) {
+            entry.cost.remove(resource);
+            entry.resources.delete(resource);
+            resource.release();
+          }
       }
     };
     document.addEventListener('visibilitychange', releaseHiddenMedia);
     return () => document.removeEventListener('visibilitychange', releaseHiddenMedia);
   }, []);
-  const container = active?.container;
   useLayoutEffect(() => {
-    const view = container?.ownerDocument.defaultView;
-    if (!container || !view?.requestAnimationFrame) return;
-    // Reattachment must resolve hover/opacity immediately; later interactions still animate.
-    container.setAttribute('data-restoring', 'true');
-    let frame = view.requestAnimationFrame(() => {
-      frame = view.requestAnimationFrame(() => container.removeAttribute('data-restoring'));
-    });
-    return () => {
-      view.cancelAnimationFrame(frame);
-      container.removeAttribute('data-restoring');
-    };
-  }, [container]);
-  useLayoutEffect(() => {
-    const element = host.current;
-    if (!element) return;
-    const container = active?.container ?? null;
-    if (container !== attached) {
-      element.replaceChildren(...(container ? [container] : []));
-      setAttached(container);
-    }
-    if (active && attached === active.container && !loading) {
+    if (active && !loading) {
       active.content = children;
       active.used = ++clock.current;
-      active.cost = undefined;
     }
     const inactive = [...state.entries].filter(([, entry]) => entry !== active);
     const retained = new Map(state.entries);
@@ -234,9 +275,8 @@ export function ConversationCache({
       nodes = 0;
     const candidates = inactive
       .filter(([key, entry]) => {
-        const cost = entry.cost ?? retainedCost(entry);
-        entry.cost = cost;
-        if (!entry.content || cost.bytes > MAX_ENTRY_BYTES || cost.nodes > MAX_ENTRY_NODES) {
+        const cost = admittedCost(entry);
+        if (!entry.content || !cost) {
           retained.delete(key);
           return false;
         }
@@ -248,18 +288,29 @@ export function ConversationCache({
     while (candidates.length > MAX_INACTIVE || bytes > MAX_BYTES || nodes > MAX_NODES) {
       const [key, entry] = candidates.shift()!;
       retained.delete(key);
-      bytes -= entry.cost!.bytes;
-      nodes -= entry.cost!.nodes;
+      const cost = entry.cost.snapshot()!;
+      bytes -= cost.bytes;
+      nodes -= cost.nodes;
     }
     if (retained.size !== state.entries.size) setState({ ...state, entries: retained });
   });
   return (
-    <div className="conversation-cache-host" ref={host}>
+    <>
+      <CacheHost
+        container={active?.container}
+        onCommit={(host) => {
+          activeEntry.current = active;
+          entries.current = state.entries;
+          ownerDocument.current = host.ownerDocument;
+        }}
+      />
       {[...state.entries].map(([key, entry]) =>
         createPortal(
           <CacheEntry
-            active={entry === active && attached === entry.container}
+            active={entry === active}
             resources={entry.resources}
+            cost={entry.cost}
+            onChanged={() => retireChanged(key, entry)}
             readActive={cache.readActive}
             interactive={!loading && (cache.interactive ?? cache.readActive)}
           >
@@ -271,6 +322,6 @@ export function ConversationCache({
           JSON.stringify([state.scope, key]),
         ),
       )}
-    </div>
+    </>
   );
 }

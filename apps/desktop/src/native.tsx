@@ -91,9 +91,10 @@ import {
 } from './native-model-picker';
 import {
   desktopConversationMessages,
-  desktopDirectory,
   desktopMessages,
+  NativeDirectoryProjection,
 } from './native-presentation';
+import { afterNativePresentation } from './native-presentation-frame';
 import { NativeProviderModelSettings } from './native-provider-model-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult } from './native-result';
@@ -278,6 +279,7 @@ function NativeDesktopContent({
   >(undefined);
   const [state, setState] = useState<NativeState>();
   const [directory, setDirectory] = useState<NativeDirectory>();
+  const [directoryProjection] = useState(() => new NativeDirectoryProjection());
   const imageDrafts = useNativeInputImages(bridge, state?.generation, directory?.storeId);
   const newImageScope = imageScope(directory?.storeId, 'new-conversation');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -692,6 +694,17 @@ function NativeDesktopContent({
     };
     selectionRead.current = original;
     try {
+      if (
+        !preparing &&
+        state?.selection?.session.id !== sessionId &&
+        !directory?.unavailable &&
+        directory?.sessions.some(
+          (session) => session.id === sessionId && !session.deletedAt && !session.parentSessionId,
+        )
+      ) {
+        await afterNativePresentation(window);
+        if (!isCurrentRead(current, epoch, nonce)) return;
+      }
       let value = await bridge.request({
         method: 'select',
         generation: current,
@@ -917,6 +930,19 @@ function NativeDesktopContent({
   // Selection counters govern IO, not the identity of an already observed display label.
   const selectionHandoff =
     !!selectionRead.current && selected.current !== state?.selection?.session.id;
+  // Select the retained tree on the click, before Main finishes activating its
+  // fresh readers. This identity is presentation only; selection still owns IO.
+  const pendingSession =
+    selectionHandoff && !preparing && !directory?.unavailable
+      ? directory?.sessions.find(
+          (session) =>
+            session.id === selected.current && !session.deletedAt && !session.parentSessionId,
+        )
+      : undefined;
+  const pendingReading =
+    pendingSession && directory
+      ? { storeId: directory.storeId, sessionId: pendingSession.id }
+      : undefined;
   const sessionLoading =
     selectionHandoff ||
     (!state?.callerUnavailable &&
@@ -959,6 +985,7 @@ function NativeDesktopContent({
     selection?.session.id,
     selection?.viewSelection,
   ]);
+  const choiceViewIntent = viewIntent.current;
   const activeInputRun = selection?.runs.find((run) => run.isActive);
   const directoryActivity =
     directory?.storeId === selection?.storeId
@@ -2054,7 +2081,9 @@ function NativeDesktopContent({
     firstSubmission &&
     directory?.storeId === firstSubmission.creation.expectedStoreId &&
     (preparing ||
-      (selection?.storeId === firstSubmission.creation.expectedStoreId &&
+      ((selected.current === undefined ||
+        selected.current === firstSubmission.creation.sessionId) &&
+        selection?.storeId === firstSubmission.creation.expectedStoreId &&
         selection.session.id === firstSubmission.creation.sessionId));
   const firstSaved =
     firstVisible &&
@@ -2513,7 +2542,7 @@ function NativeDesktopContent({
         }}
       />
     ) : undefined;
-  const sessionTools = (
+  const renderSessionTools = () => (
     <section id="native-session-tools" aria-label="会话与任务">
       <header>
         <h2>会话与任务</h2>
@@ -3170,14 +3199,18 @@ function NativeDesktopContent({
       />
     </section>
   );
-  const workspaceModels = directory ? desktopDirectory(directory, selection) : [];
+  const workspaceModels = directory ? directoryProjection.project(directory, selection) : [];
+  const loadedWorkspaces = useMemo(
+    () => workspaceModels.filter((workspace) => workspace.state === 'loaded'),
+    [workspaceModels],
+  );
   const scheduledTaskProps = useNativeScheduledTasks({
     bridge,
     generation: state?.generation ?? 0,
     storeId: directory?.storeId,
     active: scheduledTasksView,
     revision: settingsRevision,
-    workspaces: workspaceModels.filter((workspace) => workspace.state === 'loaded'),
+    workspaces: loadedWorkspaces,
     onOpen: async (sessionId) => {
       const original = pageIntent.current;
       await select(sessionId, true, true);
@@ -3606,12 +3639,21 @@ function NativeDesktopContent({
       selected={
         !scheduledTasksView &&
         !preparing &&
-        selection?.storeId === directory?.storeId &&
-        (selected.current === undefined || selected.current === selection?.session.id)
-          ? selection?.session.id
+        (pendingSession ||
+          (selection?.storeId === directory?.storeId &&
+            (selected.current === undefined || selected.current === selection?.session.id)))
+          ? (pendingSession?.id ?? selection?.session.id)
           : undefined
       }
-      sessionLabel={preparing ? '新对话' : selection ? selection.session.title || '新对话' : 'Kite'}
+      sessionLabel={
+        preparing
+          ? '新对话'
+          : pendingReading
+            ? pendingSession?.title || '新对话'
+            : selection
+              ? selection.session.title || '新对话'
+              : 'Kite'
+      }
       readingKey={
         firstVisible && !firstSaved
           ? JSON.stringify([
@@ -3620,7 +3662,10 @@ function NativeDesktopContent({
             ])
           : preparing
             ? 'new-conversation'
-            : JSON.stringify([selection?.storeId, selection?.session.id])
+            : JSON.stringify([
+                pendingReading?.storeId ?? selection?.storeId,
+                pendingReading?.sessionId ?? selection?.session.id,
+              ])
       }
       conversationCache={{
         interactive: !!selection && selected.current === selection.session.id,
@@ -3634,7 +3679,7 @@ function NativeDesktopContent({
           historyState.phase === 'complete' &&
           !historyMetadataLoading,
       }}
-      messages={messageModels}
+      messages={pendingReading && !(firstVisible && !firstSaved) ? [] : messageModels}
       initialPresentationPending={
         !(firstVisible && !firstSaved) &&
         !pendingInputModels.length &&
@@ -3718,9 +3763,9 @@ function NativeDesktopContent({
       loading={
         !preparing &&
         !(firstVisible && !firstSaved) &&
-        (!!selection || selectionHandoff) &&
-        historyState.phase === 'loading' &&
-        !messages.length
+        (!!pendingReading ||
+          (selectionHandoff && !messages.length) ||
+          (!!selection && historyState.phase === 'loading' && !messages.length))
       }
       renderBrowser={renderNativeBrowser}
       closeBrowser={closeNativeBrowserTab}
@@ -4137,14 +4182,20 @@ function NativeDesktopContent({
                         modelChoices.current.set(choiceKey, choice);
                         choiceChanged((value) => value + 1);
                       }}
-                      onReady={(ready, choice) =>
+                      onReady={(ready, choice) => {
+                        const isCurrentChoice = () =>
+                          selected.current === selection.session.id &&
+                          generation.current === state.generation &&
+                          viewIntent.current === choiceViewIntent;
+                        if (!isCurrentChoice()) return;
                         setResolvedChoice((previous) => {
+                          if (!isCurrentChoice()) return previous;
                           const value = { identity: choiceIdentity, choice, ready };
                           return JSON.stringify(previous) === JSON.stringify(value)
                             ? previous
                             : value;
-                        })
-                      }
+                        });
+                      }}
                     />
                     <NativeDiagnostic>
                       <label>
@@ -4262,7 +4313,7 @@ function NativeDesktopContent({
               label: '会话与任务',
               content: (
                 <>
-                  {sessionTools}
+                  {renderSessionTools()}
                   {selection && state && (
                     <NativeExtensions
                       key={JSON.stringify([

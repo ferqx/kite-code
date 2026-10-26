@@ -6,6 +6,7 @@ import { Conversation } from '../../src/desktop/Conversation';
 import { ConversationCache } from '../../src/desktop/ConversationCache';
 import { MessageCopyButton } from '../../src/desktop/MessageCopyButton';
 import type { Message } from '../../src/desktop/types';
+import { controlCacheAccounting } from '../conversation-cache-accounting.fixture';
 
 test('select all belongs to one visible conversation and preserves editor shortcuts', async () => {
   const dom = new JSDOM('<div id="root"></div><input /><div contenteditable>Editor text</div>', {
@@ -304,6 +305,7 @@ test('actual Conversation copies only original settled user and host-confirmed f
 
 test('cached copy feedback survives effect reactivation, expires at its original deadline and rejects paused or late copies', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const accounting = controlCacheAccounting(dom.window);
   const keys = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const previous = keys.map(
     (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
@@ -325,8 +327,9 @@ test('cached copy feedback survives effect reactivation, expires at its original
         release = resolve;
       });
   };
-  const render = (id: string, readable = true) =>
-    act(async () =>
+  const render = async (id: string, readable = true) => {
+    await act(async () => accounting.flush());
+    await act(async () =>
       root.render(
         <ConversationCache
           identity={id}
@@ -340,6 +343,8 @@ test('cached copy feedback survives effect reactivation, expires at its original
         </ConversationCache>,
       ),
     );
+    await act(async () => accounting.flush());
+  };
   try {
     await render('a');
     const button = dom.window.document.querySelector<HTMLButtonElement>('button')!;
@@ -370,6 +375,7 @@ test('cached copy feedback survives effect reactivation, expires at its original
     expect(button.getAttribute('data-copy-state')).toBe('idle');
   } finally {
     await act(async () => root.unmount());
+    accounting.restore();
     clock.mockRestore();
     dom.window.close();
     for (const [key, descriptor] of previous) {

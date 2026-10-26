@@ -214,11 +214,14 @@ try {
     });
     await select('b');
     await page.waitForFunction(() => window.sessionShellFixture.pending('selection') > 0);
+    const coldTargetTitle = (await take()).title;
+    assert.equal(coldTargetTitle.text, 'Session B');
+    assert.equal(coldTargetTitle.same, true);
     await page.evaluate(() => window.sessionShellFixture.release('selection'));
     await page.waitForFunction(() => window.sessionShellFixture.pending('models') > 0);
     await page.evaluate(() => window.sessionShellFixture.publish());
     const coldWaiting = await capture();
-    stable(coldWaiting, coldA, [
+    stable(coldWaiting, { ...coldA, title: coldTargetTitle }, [
       'title',
       'editor',
       'model',
@@ -229,6 +232,11 @@ try {
       'environmentStop',
       'sidebar',
     ]);
+    for (const frame of coldWaiting) {
+      assert.equal(frame.editor.readOnly, true);
+      for (const name of ['permission', 'model', 'action', 'attach', 'environmentStop'] as const)
+        assert.equal(frame[name].disabled, true);
+    }
     assert.equal(
       await page.evaluate(() =>
         window.sessionShellFixture.requests.some(
@@ -243,21 +251,17 @@ try {
     const coldB = await take();
     assert.equal(coldB.title.text, 'Session B');
     assert.equal(coldB.model.text, 'Model B Extended Reasoning Route中');
+    let coldModelAdopted = false;
     for (const frame of coldFrames) {
+      assert.equal(frame.title.text, 'Session B');
       assert.equal(frame.model.same, true);
       assert.equal(frame.model.opacity, '1');
-      assert.equal(
-        frame.model.text,
-        frame.title.text === 'Session A' ? coldA.model.text : coldB.model.text,
-      );
-      assert.equal(
-        frame.model.rect[2],
-        frame.title.text === 'Session A' ? coldA.model.rect[2] : coldB.model.rect[2],
-      );
-      assert.equal(
-        frame.permission.rect[0],
-        frame.title.text === 'Session A' ? coldA.permission.rect[0] : coldB.permission.rect[0],
-      );
+      const expected = frame.model.text === coldA.model.text ? coldA : coldB;
+      assert.equal(frame.model.text, expected.model.text);
+      if (expected === coldB) coldModelAdopted = true;
+      else assert.equal(coldModelAdopted, false, `${theme}: adopted model must not revert`);
+      assert.equal(frame.model.rect[2], expected.model.rect[2]);
+      assert.equal(frame.permission.rect[0], expected.permission.rect[0]);
     }
     const coldEdits = await page.evaluate(() => {
       const state = window as unknown as {
@@ -320,7 +324,7 @@ try {
     }
     await page.locator(hoverSelectors.permission).hover();
     await settle();
-    stable(selection, a, [
+    stable(selection, { ...a, title: b.title }, [
       'title',
       'editor',
       'permission',

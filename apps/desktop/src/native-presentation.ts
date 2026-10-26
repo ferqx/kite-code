@@ -2,75 +2,84 @@ import type { Message } from '@kite-ai/client';
 import type { Message as DesktopMessage, WorkspaceSummary } from '@kite-ai/ui/desktop';
 import type { NativeDirectory, NativeSelection } from './native-bridge';
 
+type SessionSummary = WorkspaceSummary['sessions'][number];
+
+function desktopSessionSummary(
+  directory: NativeDirectory,
+  session: NativeDirectory['sessions'][number],
+  selection?: NativeSelection,
+): SessionSummary {
+  if (session.activity) {
+    const { run, queued, pendingInteractions, updatedAt } = session.activity;
+    const unconfirmed =
+      session.activity.executionOwner === 'unheld' || session.activity.executionOwner === 'unknown';
+    const waiting =
+      !unconfirmed && run?.isActive && run.status === 'waiting_execution' && run.waitingForResults;
+    return {
+      sessionId: session.id,
+      displayName: session.title || '新对话',
+      status: directory.unavailable
+        ? '上次确认状态'
+        : unconfirmed
+          ? '执行状态待核实'
+          : run?.isActive
+            ? run.status === 'waiting_interaction' || waiting
+              ? 'waiting'
+              : run.status === 'waiting_execution'
+                ? '等待执行结果'
+                : run.status === 'cancelling'
+                  ? '正在停止'
+                  : run.status
+            : queued
+              ? 'queued'
+              : (run?.status ?? 'idle'),
+      ...(updatedAt !== null ? { updatedAt: new Date(updatedAt).toISOString() } : {}),
+      ...(!directory.unavailable && !unconfirmed ? { pendingInteractions } : {}),
+      ...(!directory.unavailable && waiting
+        ? { waitingReason: 'required_background' as const }
+        : {}),
+    };
+  }
+  const observed = selection?.storeId === directory.storeId && selection.session.id === session.id;
+  const active = observed ? selection.runs.find((run) => run.isActive) : undefined;
+  return {
+    sessionId: session.id,
+    displayName: session.title || '新对话',
+    status: !observed
+      ? '状态待读取'
+      : directory.unavailable || (selection.permissionUnavailable && !selection.viewLoading)
+        ? '上次确认状态'
+        : active?.status === 'waiting_interaction'
+          ? 'waiting'
+          : active?.status === 'waiting_execution'
+            ? '等待执行结果'
+            : active?.status === 'cancelling'
+              ? '正在停止'
+              : (active?.status ?? 'idle'),
+    ...(observed
+      ? {
+          pendingInteractions: selection.interactions.filter((card) => card.state === 'pending')
+            .length,
+        }
+      : {}),
+  };
+}
+
 /** Adapt public facts to the retained desktop view model; missing facts stay missing. */
 export function desktopDirectory(
   directory: NativeDirectory,
   selection?: NativeSelection,
 ): WorkspaceSummary[] {
-  const sessions = directory.sessions.filter((session) => !session.deletedAt);
-  const summary = (session: NativeDirectory['sessions'][number]) => {
-    if (session.activity) {
-      const { run, queued, pendingInteractions, updatedAt } = session.activity;
-      const unconfirmed =
-        session.activity.executionOwner === 'unheld' ||
-        session.activity.executionOwner === 'unknown';
-      const waiting =
-        !unconfirmed &&
-        run?.isActive &&
-        run.status === 'waiting_execution' &&
-        run.waitingForResults;
-      return {
-        sessionId: session.id,
-        displayName: session.title || '新对话',
-        status: directory.unavailable
-          ? '上次确认状态'
-          : unconfirmed
-            ? '执行状态待核实'
-            : run?.isActive
-              ? run.status === 'waiting_interaction' || waiting
-                ? 'waiting'
-                : run.status === 'waiting_execution'
-                  ? '等待执行结果'
-                  : run.status === 'cancelling'
-                    ? '正在停止'
-                    : run.status
-              : queued
-                ? 'queued'
-                : (run?.status ?? 'idle'),
-        ...(updatedAt !== null ? { updatedAt: new Date(updatedAt).toISOString() } : {}),
-        ...(!directory.unavailable && !unconfirmed ? { pendingInteractions } : {}),
-        ...(!directory.unavailable && waiting
-          ? { waitingReason: 'required_background' as const }
-          : {}),
-      };
-    }
-    const observed =
-      selection?.storeId === directory.storeId && selection.session.id === session.id;
-    const active = observed ? selection.runs.find((run) => run.isActive) : undefined;
-    return {
-      sessionId: session.id,
-      displayName: session.title || '新对话',
-      status: !observed
-        ? '状态待读取'
-        : directory.unavailable || (selection.permissionUnavailable && !selection.viewLoading)
-          ? '上次确认状态'
-          : active?.status === 'waiting_interaction'
-            ? 'waiting'
-            : active?.status === 'waiting_execution'
-              ? '等待执行结果'
-              : active?.status === 'cancelling'
-                ? '正在停止'
-                : (active?.status ?? 'idle'),
-      ...(observed
-        ? {
-            pendingInteractions: selection.interactions.filter((card) => card.state === 'pending')
-              .length,
-          }
-        : {}),
-    };
-  };
+  const groups = new Map<string, SessionSummary[]>();
+  for (const session of directory.sessions) {
+    if (session.deletedAt) continue;
+    const items = groups.get(session.workspaceId) ?? [];
+    items.push(desktopSessionSummary(directory, session, selection));
+    groups.set(session.workspaceId, items);
+  }
   const workspaces: WorkspaceSummary[] = directory.workspaces.map((workspace) => {
-    const items = sessions.filter((session) => session.workspaceId === workspace.id).map(summary);
+    const items = groups.get(workspace.id) ?? [];
+    groups.delete(workspace.id);
     return {
       id: workspace.id,
       label: workspace.name,
@@ -80,18 +89,113 @@ export function desktopDirectory(
     };
   });
   // The two complete reads can straddle a newly registered Workspace. Keep its original Session visible.
-  for (const workspaceId of new Set(sessions.map((session) => session.workspaceId))) {
-    if (directory.workspaces.some((workspace) => workspace.id === workspaceId)) continue;
-    const items = sessions.filter((session) => session.workspaceId === workspaceId).map(summary);
+  for (const [id, sessions] of groups)
     workspaces.push({
-      id: workspaceId,
+      id,
       label: '项目待读取的会话',
-      sessions: items,
-      sessionCount: items.length,
+      sessions,
+      sessionCount: sessions.length,
       state: 'unavailable',
     });
-  }
   return workspaces;
+}
+
+function sameSessionSummary(left: SessionSummary | undefined, right: SessionSummary | undefined) {
+  return (
+    left === right ||
+    (!!left &&
+      !!right &&
+      left.sessionId === right.sessionId &&
+      left.displayName === right.displayName &&
+      left.status === right.status &&
+      left.updatedAt === right.updatedAt &&
+      left.pendingInteractions === right.pendingInteractions &&
+      left.waitingReason === right.waitingReason)
+  );
+}
+
+function sameItems<T>(left: readonly T[], right: readonly T[]) {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
+}
+
+/** One window's current immutable directory projection, without retaining old Stores or snapshots. */
+export class NativeDirectoryProjection {
+  private directory?: NativeDirectory;
+  private sources = new Map<string, NativeDirectory['sessions'][number]>();
+  private summaries = new Map<string, SessionSummary>();
+  private workspaces: WorkspaceSummary[] = [];
+  private observed?: SessionSummary;
+
+  private selectionSummary(directory: NativeDirectory, selection?: NativeSelection) {
+    const source =
+      selection?.storeId === directory.storeId ? this.sources.get(selection.session.id) : undefined;
+    return source && !source.activity
+      ? desktopSessionSummary(directory, source, selection)
+      : undefined;
+  }
+
+  project(directory: NativeDirectory, selection?: NativeSelection): WorkspaceSummary[] {
+    if (directory !== this.directory) {
+      if (directory.storeId !== this.directory?.storeId) {
+        this.summaries.clear();
+        this.workspaces = [];
+      }
+      const summaries = new Map<string, SessionSummary>();
+      const previousWorkspaces = new Map(
+        this.workspaces.map((workspace) => [workspace.id, workspace]),
+      );
+      const projected = desktopDirectory(directory, selection).map((workspace) => {
+        const previous = previousWorkspaces.get(workspace.id);
+        const items = workspace.sessions.map((summary) => {
+          const retained = this.summaries.get(summary.sessionId);
+          const value = sameSessionSummary(retained, summary) ? retained! : summary;
+          summaries.set(value.sessionId, value);
+          return value;
+        });
+        const sessions =
+          previous && sameItems(previous.sessions, items) ? previous.sessions : items;
+        return previous &&
+          previous.label === workspace.label &&
+          previous.state === workspace.state &&
+          previous.sessionCount === workspace.sessionCount &&
+          sessions === previous.sessions
+          ? previous
+          : { ...workspace, sessions };
+      });
+      this.sources = new Map(
+        directory.sessions
+          .filter((session) => !session.deletedAt)
+          .map((session) => [session.id, session]),
+      );
+      this.summaries = summaries;
+      this.directory = directory;
+      if (!sameItems(this.workspaces, projected)) this.workspaces = projected;
+      this.observed = this.selectionSummary(directory, selection);
+      return this.workspaces;
+    }
+    const observed = this.selectionSummary(directory, selection);
+    if (sameSessionSummary(this.observed, observed)) return this.workspaces;
+    const changedWorkspaces = new Set<string>();
+    for (const id of new Set([this.observed?.sessionId, observed?.sessionId])) {
+      const source = id ? this.sources.get(id) : undefined;
+      if (!source || source.activity) continue;
+      const summary = desktopSessionSummary(directory, source, selection);
+      if (sameSessionSummary(this.summaries.get(source.id), summary)) continue;
+      this.summaries.set(source.id, summary);
+      changedWorkspaces.add(source.workspaceId);
+    }
+    this.observed = observed;
+    if (changedWorkspaces.size)
+      this.workspaces = this.workspaces.map((workspace) =>
+        changedWorkspaces.has(workspace.id)
+          ? {
+              ...workspace,
+              sessions: workspace.sessions.map((session) => this.summaries.get(session.sessionId)!),
+            }
+          : workspace,
+      );
+    return this.workspaces;
+  }
 }
 
 /** Keep one complete business message at the original input's position in this reading. */

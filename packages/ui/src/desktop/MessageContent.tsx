@@ -15,6 +15,7 @@ import {
   useContext,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
 } from 'react';
 import Markdown, { type ExtraProps } from 'react-markdown';
@@ -208,16 +209,19 @@ export const MessageContent = memo(function MessageContent({
     };
   }, [openFile]);
   const dispatchOpenFile = useCallback((path: string) => currentOpenFile.current?.(path), []);
-  return (
-    <FileLinkContext.Provider value={openFile ? dispatchOpenFile : undefined}>
-      <MarkdownContent
-        text={text}
-        prepared={prepared}
-        streaming={streaming}
-        streamingReveal={streamingReveal}
-        readActive={readActive}
-      />
-    </FileLinkContext.Provider>
+  return useMemo(
+    () => (
+      <FileLinkContext.Provider value={openFile ? dispatchOpenFile : undefined}>
+        <MarkdownContent
+          text={text}
+          prepared={prepared}
+          streaming={streaming}
+          streamingReveal={streamingReveal}
+          readActive={readActive}
+        />
+      </FileLinkContext.Provider>
+    ),
+    [text, prepared, streaming, streamingReveal, readActive, openFile, dispatchOpenFile],
   );
 });
 

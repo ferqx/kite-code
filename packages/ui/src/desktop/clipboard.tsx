@@ -56,7 +56,7 @@ export function useTextCopy(
       copyResetTimer.current = undefined;
     };
   }, [text, disabled, readActive, writer, scheduleReset]);
-  async function copyMessage() {
+  const copyMessage = useCallback(async () => {
     if (
       !mounted.current ||
       !text ||
@@ -85,6 +85,6 @@ export function useTextCopy(
     } catch {
       if (active()) setCopyState('failed');
     }
-  }
+  }, [text, writer, scheduleReset]);
   return { copyState, copyMessage, readActive };
 }

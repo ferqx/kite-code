@@ -6,7 +6,7 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ComponentProps, ReactNode, SyntheticEvent } from 'react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PanelImperativeHandle } from 'react-resizable-panels';
 import { Composer, type ComposerProps } from './Composer';
 import type { ToolActivityState } from './Conversation';
@@ -34,6 +34,7 @@ import {
   type SessionChildTabRequest,
   type SessionChildTarget,
   SessionTabs,
+  type SessionTabsModel,
   useSessionTabs,
 } from './SessionTabs';
 import { type PageActions, Sidebar } from './Sidebar';
@@ -48,6 +49,85 @@ const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
 // Match the centered column and gutters in the docked safe-area CSS. Automatic
 // opening must fit in the right gutter without narrowing or shifting the input.
 const ENVIRONMENT_INFORMATION_MIN_WIDTH = 844 + 2 * 344 + 28;
+const MemoizedSidebar = memo(Sidebar);
+
+/** Stable event delegates use only the latest committed host operations. */
+function useNavigationCallbacks(
+  props: Pick<SessionPageProps, 'actions' | 'onOpen' | 'onExpand'>,
+  focusComposer: () => void,
+) {
+  const committed = useRef({ props, focusComposer });
+  useLayoutEffect(() => {
+    committed.current = { props, focusComposer };
+  });
+  const callbacks = useMemo(
+    () => ({
+      open: (id: string) => committed.current.props.onOpen?.(id),
+      expand: (id: string) => committed.current.props.onExpand?.(id),
+      newSession: () => {
+        committed.current.props.actions.newSession?.();
+        committed.current.focusComposer();
+      },
+      newWorkspaceSession: (id: string) => {
+        committed.current.props.actions.newWorkspaceSession?.(id);
+        committed.current.focusComposer();
+      },
+      addWorkspace: () => committed.current.props.actions.addWorkspace?.(),
+      removeWorkspace: (id: string) => committed.current.props.actions.removeWorkspace?.(id),
+      workbench: () => committed.current.props.actions.workbench?.(),
+      scheduledTasks: () => committed.current.props.actions.scheduledTasks?.(),
+      settings: () => committed.current.props.actions.settings?.(),
+      theme: (value: 'light' | 'dark' | 'system') =>
+        committed.current.props.actions.theme?.onChange(value),
+      connection: () => committed.current.props.actions.connection?.run(),
+      openFile: (path: string) => committed.current.props.actions.openFile?.(path),
+    }),
+    [],
+  );
+  const newSession = !!props.actions.newSession;
+  const newWorkspaceSession = !!props.actions.newWorkspaceSession;
+  const addWorkspace = !!props.actions.addWorkspace;
+  const removeWorkspace = !!props.actions.removeWorkspace;
+  const workbench = !!props.actions.workbench;
+  const scheduledTasks = !!props.actions.scheduledTasks;
+  const settings = !!props.actions.settings;
+  const openFile = !!props.actions.openFile;
+  const theme = props.actions.theme?.value;
+  const connection = props.actions.connection?.label;
+  const actions = useMemo<PageActions>(
+    () => ({
+      newSession: newSession ? callbacks.newSession : undefined,
+      newWorkspaceSession: newWorkspaceSession ? callbacks.newWorkspaceSession : undefined,
+      addWorkspace: addWorkspace ? callbacks.addWorkspace : undefined,
+      removeWorkspace: removeWorkspace ? callbacks.removeWorkspace : undefined,
+      workbench: workbench ? callbacks.workbench : undefined,
+      scheduledTasks: scheduledTasks ? callbacks.scheduledTasks : undefined,
+      settings: settings ? callbacks.settings : undefined,
+      openFile: openFile ? callbacks.openFile : undefined,
+      theme: theme === undefined ? undefined : { value: theme, onChange: callbacks.theme },
+      connection:
+        connection === undefined ? undefined : { label: connection, run: callbacks.connection },
+    }),
+    [
+      newSession,
+      newWorkspaceSession,
+      addWorkspace,
+      removeWorkspace,
+      workbench,
+      scheduledTasks,
+      settings,
+      openFile,
+      theme,
+      connection,
+      callbacks,
+    ],
+  );
+  return {
+    actions,
+    onOpen: props.onOpen ? callbacks.open : undefined,
+    onExpand: props.onExpand ? callbacks.expand : undefined,
+  };
+}
 
 function savedNavigationWidth(): number {
   try {
@@ -133,8 +213,27 @@ export interface SessionPageProps {
   onOpenChildSession?: (childSessionId: string) => void;
 }
 
+/** Keep tab-scope reconciliation outside the retained page's expensive render. */
+export function SessionPage(props: SessionPageProps) {
+  const hasTabs =
+    !props.workbench &&
+    !props.scheduledTasks &&
+    (props.renderBrowser !== undefined ||
+      props.fileChanges !== undefined ||
+      props.fileChangesContent !== undefined ||
+      props.renderChildSession !== undefined);
+  const tabModel = useSessionTabs(hasTabs ? props.readingKey : 'inactive', props.closeBrowser);
+  return <SessionPageContent {...props} hasTabs={hasTabs} tabModel={tabModel} />;
+}
+
 /** The single production conversation page for both hosts. No host/protocol imports. */
-export function SessionPage({ messages, fileChanges, ...props }: SessionPageProps) {
+function SessionPageContent({
+  messages,
+  fileChanges,
+  hasTabs,
+  tabModel,
+  ...props
+}: SessionPageProps & { hasTabs: boolean; tabModel: SessionTabsModel }) {
   // Keep evictable history outside props captured by persistent window listeners.
   const composerInput = useRef<PromptEditorHandle>(null);
   const headerElement = useRef<HTMLElement>(null);
@@ -160,14 +259,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const [tabsKey, setTabsKey] = useState<string>();
   const [detailsCollapsed, setDetailsCollapsed] = useState<boolean>();
   const presentedTabsKey = useRef<string | undefined>(undefined);
-  const hasTabs =
-    !props.workbench &&
-    !props.scheduledTasks &&
-    (props.renderBrowser !== undefined ||
-      fileChanges !== undefined ||
-      props.fileChangesContent !== undefined ||
-      props.renderChildSession !== undefined);
-  const tabModel = useSessionTabs(hasTabs ? props.readingKey : 'inactive', props.closeBrowser);
   const childTabOpener = useRef(tabModel.openChild);
   childTabOpener.current = tabModel.openChild;
   const [tabLimitKey, setTabLimitKey] = useState<string>();
@@ -354,8 +445,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     if (environmentAnimationTimer.current !== undefined)
       clearTimeout(environmentAnimationTimer.current);
     environmentAnimationTimer.current = undefined;
-    setEnvironmentAnimationKey(undefined);
-  }, [props.readingKey]);
+    if (environmentAnimationKey !== undefined) setEnvironmentAnimationKey(undefined);
+  }, [props.readingKey, environmentAnimationKey]);
   useLayoutEffect(() => {
     if (tabsKey !== undefined && tabsKey !== props.readingKey) {
       collapseDetails();
@@ -489,6 +580,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     event.preventDefault();
     props.onHeaderMouseDown?.(event.detail);
   };
+  const navigation = useNavigationCallbacks(props, focusComposerAfterCommit);
   const sidebarPanel = (
     <div className="client-sidebar-panel">
       {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
@@ -496,7 +588,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         <strong className="brand">Kite</strong>
       </header>
       <aside className="sidebar" aria-label="空间与会话">
-        <Sidebar
+        <MemoizedSidebar
           workspaces={props.workspaces}
           selectedWorkspace={
             !props.workbench && !props.scheduledTasks
@@ -512,21 +604,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           }
           busy={props.busy}
           mutationBusy={props.mutationBusy}
-          actions={{
-            ...props.actions,
-            newWorkspaceSession: props.actions.newWorkspaceSession
-              ? (id) => {
-                  props.actions.newWorkspaceSession?.(id);
-                  focusComposerAfterCommit();
-                }
-              : undefined,
-            newSession: props.actions.newSession
-              ? () => {
-                  props.actions.newSession?.();
-                  focusComposerAfterCommit();
-                }
-              : undefined,
-          }}
+          actions={navigation.actions}
           connectionLabel={props.connectionLabel}
           activePage={
             props.scheduledTasks
@@ -537,9 +615,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   ? 'newConversation'
                   : 'conversation'
           }
-          onExpand={props.onExpand}
+          onExpand={navigation.onExpand}
           defaultExpanded={props.defaultExpanded}
-          onOpen={props.onOpen}
+          onOpen={navigation.onOpen}
         />
       </aside>
     </div>

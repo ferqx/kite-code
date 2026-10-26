@@ -3,6 +3,7 @@ import type { Message } from '@kite-ai/client';
 import type { Message as DisplayMessage } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { controlCacheAccounting } from '../../../../packages/ui/test/conversation-cache-accounting.fixture';
 import type {
   NativeBridge,
   NativeEvent,
@@ -13,7 +14,7 @@ import type {
 import { NativeTranscriptDisplay } from '../../src/native-transcript-display';
 import { backgroundItem } from '../background-item.fixture';
 import { installImagePreviewWorker } from '../image-preview-worker.fixture';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { nextDesktopPresentation, prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const globals = {
@@ -46,6 +47,8 @@ function fixture(
     url: 'http://localhost',
     pretendToBeVisual: true,
   });
+  const accounting = controlCacheAccounting(dom.window);
+  const flushCacheCosts = () => act(async () => accounting.flush());
   const restore = prepareDesktopDom(dom);
   const prior = {
     window: globalThis.window,
@@ -360,12 +363,14 @@ function fixture(
     until,
     release,
     async select(title: string) {
+      await flushCacheCosts();
       await act(async () => {
         const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
           (candidate) => candidate.textContent === title,
         );
         expect(button).toBeDefined();
         button!.click();
+        await nextDesktopPresentation(dom);
       });
     },
     pending: (reader: Reader) => pending[reader].length,
@@ -423,6 +428,7 @@ function fixture(
       for (const reader of ['runs', 'tools'] as const)
         for (const resolve of pending[reader].splice(0)) resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
+      accounting.restore();
       dom.window.close();
       restore();
       Object.assign(globalThis, prior);
@@ -967,11 +973,12 @@ test('repeatedly selecting an in-flight target reuses the original selection req
       process = f.host.querySelector('.agent-turn-process')!;
     f.holdNextSelection();
     await f.select('Other session');
-    expect(f.host.querySelector('.conversation-loading') === null).toBe(true);
-    expect(f.host.querySelector('.agent-turn-final') === reply).toBe(true);
-    expect(f.host.querySelector('.agent-turn-process') === process).toBe(true);
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
-    expect(f.host.querySelector('.session-row[aria-current="page"]') === null).toBe(true);
+    expectInitialStructurePending(f.host);
+    expect(reply.isConnected).toBe(false);
+    expect(process.isConnected).toBe(false);
+    expect(f.host.querySelector('.session-row[aria-current="page"]')?.textContent).toBe(
+      'Other session',
+    );
     expect(
       f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
     ).toBe(true);
@@ -982,6 +989,97 @@ test('repeatedly selecting an in-flight target reuses the original selection req
     await f.releaseSelection();
     await f.until(
       () => !!f.host.querySelector('.conversation-viewport')?.textContent?.includes('Other ready'),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('cached history restores its original nodes while the selection request is still pending and gates all operations', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.agent-turn-final'));
+    const viewport = f.host.querySelector('.conversation-viewport')!,
+      reply = f.host.querySelector('.agent-turn-final')!;
+    await f.select('Other session');
+    await f.until(() => !!f.host.textContent?.includes('Other ready'));
+    expect(viewport.isConnected).toBe(false);
+
+    f.holdNextSelection();
+    await f.select('Original');
+    expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
+    expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
+    expect(f.host.querySelector('.conversation-loading')).toBeNull();
+    expect(f.host.textContent).toContain(final);
+    expect(f.host.textContent).not.toContain('Other ready');
+    expect(
+      f.host.querySelector('fieldset.conversation-cache-entry')?.getAttribute('aria-disabled'),
+    ).toBe('true');
+    const copy = reply.querySelector<HTMLButtonElement>('.message-copy')!;
+    expect(copy.getAttribute('aria-disabled')).toBe('true');
+    const submit = f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')!;
+    expect(submit.disabled).toBe(true);
+    const beforeActions = f.requests.length;
+    await act(async () => {
+      copy.click();
+      submit.click();
+      submit.form!.dispatchEvent(
+        new f.host.ownerDocument.defaultView!.Event('submit', {
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(f.requests.slice(beforeActions)).toEqual([]);
+
+    await f.releaseSelection();
+    await f.until(() => f.pending('runs') > 0 && f.pending('tools') > 0);
+    expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
+    expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
+    await f.release('runs');
+    await f.release('tools');
+    expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
+    expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
+    expect(f.host.textContent).not.toContain('Other ready');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a late cached selection cannot replace a newer selected conversation', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.agent-turn-final'));
+    const originalViewport = f.host.querySelector('.conversation-viewport')!;
+    await f.select('Other session');
+    await f.until(() => !!f.host.textContent?.includes('Other ready'));
+    const otherViewport = f.host.querySelector('.conversation-viewport')!,
+      otherReply = f.host.querySelector('.message.assistant')!;
+
+    f.holdNextSelection();
+    await f.select('Original');
+    expect(f.host.querySelector('.conversation-viewport')).toBe(originalViewport);
+    expect(f.host.textContent).not.toContain('Other ready');
+    await f.select('Other session');
+    await f.until(() => !!f.host.textContent?.includes('Other ready'));
+    expect(f.host.querySelector('.conversation-viewport')).toBe(otherViewport);
+    expect(f.host.querySelector('.message.assistant')).toBe(otherReply);
+    expect(originalViewport.isConnected).toBe(false);
+    const beforeLateSelection = f.requests.length;
+    await f.releaseSelection();
+    expect(f.host.querySelector('.conversation-viewport')).toBe(otherViewport);
+    expect(f.host.querySelector('.message.assistant')).toBe(otherReply);
+    expect(f.host.textContent).toContain('Other ready');
+    expect(f.host.textContent).not.toContain(final);
+    expect(f.requests.slice(beforeLateSelection)).toEqual([]);
+    expect(f.host.querySelector('.session-row[aria-current="page"]')?.textContent).toBe(
+      'Other session',
     );
   } finally {
     await f.close();
