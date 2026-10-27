@@ -136,6 +136,8 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)通过 builder 的 `development` 选项构建 Main／preload 和首个独立 Service 版本，由[本地 Vite renderer](scripts/development-renderer.ts)提供页面。[重载协调器](../../scripts/development/desktop-reload.ts)在初次构建和每次重建后，以新 Bun 进程实际加载 Service 及外部 workspace 导入；不执行 `import.meta.main` 分支、不自动安装依赖，最长等待10秒，失败保留最多16K字符诊断并回收探测进程。缺失导出不能只因入口 bundle 生成而放行。加载检查不代替完整类型检查或业务验证。
 
+Browser 配置使用的 guardian locator 在本次开发 Service 的 JS 入口内编译；同一源码快照的 POSIX／Windows guardian 随每次初构及重载生成在该入口的同一私有版本目录。仅 Browser 配置模块的资产定位导入参与这次 bundle，其他 MCP workspace 引用继续读取当前源码，Shell 沿原编译资产选择。原 locator 的 `.ts` 拒绝规则保持；直接源码调用不会获得编译资产资格。guardian 编译失败拒绝新版本，缺少该版本的 `.js` guardian 时能力明确不可用，不能退回旧版本或同名 `.ts`。Service 入口摘要封存编译后的定位代码，所选 guardian 继续进入原运行资产保护。[开发 Browser 回归](../../tests/isolated/unified-agent/development-desktop-browser.test.ts)覆盖当前资产重建、旧版本保持、构建失败、源码拒绝，以及真实配对 Service 的只读可用／缺资产反例；测试不打开浏览器或请求模型，不代表新 Chrome 实机资格。
+
 协调器监听 Service、Agent、AI、Client 的 `src`。启动时从 Vite 公开声明的 `FSWatcher` 类构造器创建本次独立监听器，先注册 ready／error／变化处理，再一次加入 source roots；缺少的根沿最近存在目录及祖先去重监听，忽略其下缓存、node_modules 和 symlink。等待该实例真实首次扫描完成后才开始首个 Service 构建，构建期间变化先记 dirty、原重载队列就绪后接管；不向已经 ready 的 Vite UI watcher 晚加路径并误用其首次 ready。构造器形状不可用或建立监听失败明确拒绝启动；运行期监听错误停止本次准确父控制并非零退出，不能继续报告热更新可用。退出先关闭自有监听器，即使关闭失败仍执行原构建队列、Vite、控制通道及所属进程清理。原 UI watcher 继续负责页面 HMR，没有新增启动配置或依赖。协调器合并连续保存、串行构建并保留旧版本字节；同时核源码内容摘要，避免外部 workspace 变化而入口 SHA 未变时跳过重载，内容相同不重启。检查中源码变化拒绝发布该版本，后续保存仍沿原队列处理；编译／加载检查失败保持旧服务。React 组件及 CSS 沿 Vite Fast Refresh，共享 UI 保存不重启 Service。
 
 Main／preload及其IPC投影变更必须退出并重新启动`desktop:dev`，沿新启动构建加载；只刷新页面或新建会话不会替换旧主进程。重新启动沿原development profile读取已保存会话，不需重新提问或重跑工具；进程内未发送内容须按原草稿边界保留。完整操作边界归[本地开发](../../docs/development/local-development.md)。

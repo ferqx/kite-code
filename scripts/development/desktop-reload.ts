@@ -230,6 +230,25 @@ export async function buildDevelopmentService(
   privateDirectory(outdir);
   privateDirectory(services);
   privateDirectory(directory);
+  const browserConfiguration = join(root, 'apps/service/src/browser-configuration.ts');
+  if (existsSync(browserConfiguration)) {
+    // The locator is compiled into this exact Service entry. Its sibling guardian
+    // must be built from the same current sources, including after a source reload.
+    try {
+      const assets = await Bun.build({
+        entrypoints: [
+          join(root, 'packages/agent/src/mcp/stdio-guardian.ts'),
+          join(root, 'packages/agent/src/mcp/windows-stdio-guardian.ts'),
+        ],
+        target: 'bun',
+        outdir: directory,
+        naming: '[name].js',
+      });
+      if (!assets.success) throw new AggregateError(assets.logs);
+    } catch (error) {
+      throw new AggregateError([error], 'development_browser_assets_build_failed');
+    }
+  }
   let result: Awaited<ReturnType<typeof Bun.build>>;
   try {
     result = await Bun.build({
@@ -239,8 +258,14 @@ export async function buildDevelopmentService(
       external: ['@kite-ai/*'],
       plugins: [
         {
-          name: 'development-shell-assets',
+          name: 'development-process-assets',
           setup(build) {
+            build.onResolve({ filter: /^@kite-ai\/agent\/mcp$/ }, (args) => {
+              if (args.importer !== browserConfiguration) return;
+              // Only Browser's locator is bundled. Other MCP users retain source
+              // imports; no source locator is permitted to impersonate a JS asset.
+              return { path: join(root, 'packages/agent/src/mcp/stdio-port.ts'), external: false };
+            });
             // The packaged locator must keep its original module URL next to built assets.
             // Other workspace imports continue using current sources during development.
             build.onResolve({ filter: /^@kite-ai\/agent\/jobs\/shell$/ }, () => ({
