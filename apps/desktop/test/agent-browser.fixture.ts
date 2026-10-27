@@ -49,7 +49,10 @@ export function browserFixture() {
   let drop = false,
     foreignHead = false,
     inFlight = 0,
-    maxInFlight = 0;
+    maxInFlight = 0,
+    handoffs = 0,
+    resumes = 0;
+  const responseGates = new Map<NativeRequest['method'], () => Promise<void>>();
   const calls: NativeRequest[] = [],
     submitted: ExtensionCommandRequest[] = [],
     records: NativeCallerRecord[] = [];
@@ -133,11 +136,11 @@ export function browserFixture() {
       const input = request.input as Record<string, unknown>;
       if (request.actionId === 'browser.handoff') {
         view.state = 'human';
-        view.generation = 'human-generation';
+        view.generation = `human-generation${++handoffs === 1 ? '' : `-${handoffs}`}`;
       }
       if (request.actionId === 'browser.resume') {
         view.state = 'agent';
-        view.generation = 'resumed-generation';
+        view.generation = `resumed-generation${++resumes === 1 ? '' : `-${resumes}`}`;
         view.selectedAnnotation = null;
       }
       if (request.actionId === 'browser.select')
@@ -192,9 +195,8 @@ export function browserFixture() {
     records: () => records,
     releaseFirst() {},
   });
-  const bridge = {
+  const dispatch = {
     async request(raw: NativeRequest) {
-      calls.push(raw);
       const request = decodeNativeRequest(raw);
       switch (request.method) {
         case 'extensions.open': {
@@ -219,6 +221,16 @@ export function browserFixture() {
           throw Error(`unexpected_bridge_call:${request.method}`);
       }
     },
+  };
+  const bridge = {
+    async request(raw: NativeRequest) {
+      calls.push(raw);
+      const gate = responseGates.get(raw.method);
+      responseGates.delete(raw.method);
+      const result = await dispatch.request(raw);
+      await gate?.();
+      return result;
+    },
   } as NativeBridge;
   return {
     bridge,
@@ -227,6 +239,28 @@ export function browserFixture() {
     submitted,
     records,
     catalogue,
+    // Hold an already-produced Main response, rather than blocking its underlying operation.
+    deferNextResponse(method: NativeRequest['method']) {
+      if (responseGates.has(method)) throw Error('browser_response_already_deferred');
+      let held = false,
+        release!: () => void,
+        drop!: () => void;
+      const wait = new Promise<void>((resolve, reject) => {
+        release = resolve;
+        drop = () => reject(Error('lost_browser_response'));
+      });
+      responseGates.set(method, () => {
+        held = true;
+        return wait;
+      });
+      return {
+        get held() {
+          return held;
+        },
+        release,
+        drop,
+      };
+    },
     get view() {
       return view;
     },

@@ -54,6 +54,8 @@ Chrome 仅设置 32 MiB disk cache／8 MiB media cache 参数，不承诺浏览�
 
 [Controller 回归](../../../test/isolated/browser/controller.test.ts)与[真实 Runtime／SQLite 回归](../../../test/isolated/browser/runtime.test.ts)断言无副作用 Query、原 Job 生命周期、同 key 去重、外部 scope／旧 generation 拒绝、人工接管竞争、未知结果及清理保留。[原生协议回归](../../../test/isolated/browser/native.test.ts)使用替身进程监督和内存 socket，核版本／会话绑定、消息限额、沙箱拒绝、目录采样和未知清理；[资产回归](../../../test/isolated/browser/assets.test.ts)核固定依赖与包内资产。测试存在及断言范围不等于本次执行通过。
 
+[扫描故障注入](../../../test/isolated/browser/native-resources.test.ts)用独立子进程的替身句柄核 ENOENT 竞态、EACCES／打开失败、目录与文件关闭结果未知、扫描停滞后的停止与资源保留。原生协议替身另核不支持平台在创建资源前拒绝、分片 UTF-8、损坏／多余响应、派发前连接失败与派发后写入失败的区别，以及迟到就绪／成功不能复活已取消操作。加速定时器只验证决策与状态，不证明真实 OS 时限、硬配额或平台实现。Desktop 替身回归核多轮接管、换会话后迟到回调、迟到帧和丢失成功响应后仅查询原命令；不将这些测试视为实机资格。 [A→B→A 联动回归](../../../../../apps/desktop/test/isolated/agent-browser-session-runtime.test.ts)连接真实 Runtime／SQLite、NativeExtensions 与 Observer，仅替换模型、浏览器 transport 和桥接端口；A 的导航尚在派发时切到 B，不取消 A 的操作或 Job，A 在后台完成后回到同一 browserId 读取原结果，且无重复启动／派发。
+
 [Service owner](../../../../../apps/service/README.md#受管-browser-默认装配)维护默认目录、禁用硬上限、恢复配置摘要与私有目录保护；[Native owner](../../../../../apps/desktop/README.md#agent-浏览器观察与人工操作)维护同一 Main 观察身份、隐藏与卸载、选择备注和准确命令结果查询。
 
 本轮云环境拒绝实际私有 Unix socket 测试；另一个执行通道也未能启动。因此模拟协议、SQLite／固定模型及 DOM 测试不等于真实 Chrome／Electron 联调通过。Linux 真实进程／Chrome／Electron 操作过程仍未取得资格；macOS／Windows 适配器未实现、功能不可用，不能以本文或编译成功宣称桌面浏览器接入全部完成。未运行真实账号登录、外部表单提交或付费模型。

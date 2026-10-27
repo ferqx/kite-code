@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { AgentBrowserPanel } from '../../src/agent-browser-panel';
-import { browserFixture, browserScope } from '../agent-browser.fixture';
+import { browserFixture, browserScope, browserView } from '../agent-browser.fixture';
 
 async function setup() {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
@@ -35,12 +35,12 @@ async function setup() {
       await flush();
     }
   };
-  const render = (visible = true, canInvoke = true) =>
+  const render = (visible = true, canInvoke = true, scope = browserScope) =>
     flush(() =>
       root.render(
         <AgentBrowserPanel
           bridge={f.bridge}
-          scope={browserScope}
+          scope={scope}
           canRead
           canInvoke={canInvoke}
           visible={visible}
@@ -200,6 +200,123 @@ test('unsupported platform is a clear unavailable state, not a generic read erro
     expect(x.button('暂停并接管')).toBeUndefined();
     expect(x.f.submitted).toHaveLength(0);
   } finally {
+    await x.cleanup();
+  }
+});
+
+test('late frame bodies cannot restore a previous session or action authority across hide and reopen', async () => {
+  const x = await setup();
+  const delayed: ReturnType<typeof x.f.deferNextResponse>[] = [];
+  x.f.view.state = 'human';
+  x.f.view.title = 'Previous session';
+  x.f.view.selectedAnnotation = x.f.view.annotations[0]!;
+  try {
+    await x.render();
+    await x.until(() => !!x.button('引用到对话') && !x.button('引用到对话').disabled);
+    const previous = x.f.deferNextResponse('extensions.read');
+    delayed.push(previous);
+    await x.until(() => previous.held);
+    const scope = { ...browserScope, generation: 2, viewSelection: 2, sessionId: 'next-session' };
+    x.f.scope = scope;
+    x.f.view = {
+      ...browserView(),
+      browserId: 'next-browser',
+      generation: 'next-generation',
+      title: 'Next session',
+      state: 'human',
+      annotations: [],
+    };
+    await x.render(true, true, scope);
+    await x.until(
+      () =>
+        x.host.body.textContent?.includes('Next session') === true &&
+        !x.button('交还 Agent').disabled,
+    );
+    await x.flush(() => previous.release());
+    expect(x.host.body.textContent).not.toContain('Previous session');
+    expect(x.host.body.textContent).not.toContain('@e1');
+    expect(x.button('引用到对话')).toBeUndefined();
+    const hidden = x.f.deferNextResponse('extensions.read');
+    delayed.push(hidden);
+    await x.until(() => hidden.held);
+    await x.render(false, true, scope);
+    x.f.view.title = 'Newest frame';
+    x.f.view.seq = '2';
+    x.f.view.frame!.seq = '2';
+    await x.render(true, true, scope);
+    expect(x.button('交还 Agent').disabled).toBe(true);
+    expect(x.host.body.textContent).toContain('此画面尚未重新核实');
+    await x.flush(() => hidden.release());
+    await x.until(
+      () =>
+        x.host.body.textContent?.includes('Newest frame') === true &&
+        !x.button('交还 Agent').disabled,
+    );
+    expect(x.host.body.textContent).not.toContain('Next session');
+    expect(x.host.body.textContent).not.toContain('Previous session');
+    expect(x.f.submitted).toHaveLength(0);
+    expect(x.quotes).toHaveLength(0);
+  } finally {
+    for (const response of delayed) response.release();
+    await x.cleanup();
+  }
+});
+
+test('an unknown page click stays blocked across panel reopen and repeated queries only recover its original command', async () => {
+  const x = await setup();
+  const lost = x.f.deferNextResponse('extensions.invoke');
+  let recovery: ReturnType<typeof x.f.deferNextResponse> | undefined;
+  x.f.view.state = 'human';
+  x.f.view.selectedAnnotation = x.f.view.annotations[0]!;
+  try {
+    await x.render();
+    await x.until(() => !!x.button('点击所选元素') && !x.button('点击所选元素').disabled);
+    await x.flush(() => {
+      x.button('点击所选元素').click();
+      x.button('点击所选元素')?.click();
+    });
+    await x.until(() => lost.held);
+    // Main completed the page click, but its response never reaches the renderer.
+    x.f.drop = true;
+    await x.flush(() => lost.drop());
+    await x.until(() => !!x.button('查询原操作') && !x.button('引用到对话'));
+    const original = x.f.submitted[0]!.commandId;
+    expect(x.f.submitted[0]).toMatchObject({
+      actionId: 'browser.input',
+      input: { command: { action: 'click', ref: '@e1', seq: '1' } },
+    });
+    expect(x.button('向下滚动').disabled).toBe(true);
+    expect(x.button('交还 Agent').disabled).toBe(true);
+    expect(x.button('结束浏览器').disabled).toBe(true);
+    await x.flush(() => x.root.render(null));
+    await x.render();
+    await x.until(() => !!x.button('查询原操作') && !!x.button('交还 Agent'));
+    expect(x.button('向下滚动').disabled).toBe(true);
+    expect(x.host.body.textContent).toContain('不会重复提交');
+    x.f.drop = false;
+    recovery = x.f.deferNextResponse('extensions.lookup');
+    const lookups = () => x.f.calls.filter((call) => call.method === 'extensions.lookup');
+    const count = lookups().length;
+    await x.flush(() => {
+      x.button('查询原操作').click();
+      x.button('查询原操作').click();
+    });
+    await x.until(() => recovery!.held);
+    await x.flush(() => x.button('查询原操作').click());
+    expect(lookups()).toHaveLength(count + 1);
+    expect(x.button('向下滚动').disabled).toBe(true);
+    await x.flush(() => recovery!.release());
+    await x.until(() => !x.button('查询原操作') && !x.button('向下滚动').disabled);
+    expect(lookups().every((call) => 'commandId' in call && call.commandId === original)).toBe(
+      true,
+    );
+    expect(x.f.calls.filter((call) => call.method === 'extensions.invoke')).toHaveLength(1);
+    expect(x.f.submitted).toHaveLength(1);
+    expect(x.button('引用到对话')).toBeUndefined();
+    expect(x.quotes).toHaveLength(0);
+  } finally {
+    lost.release();
+    recovery?.release();
     await x.cleanup();
   }
 });
