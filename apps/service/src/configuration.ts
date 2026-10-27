@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -288,7 +289,11 @@ export function createDefaultProcessConfiguration(options: {
   const browser = createBrowserConfiguration({
     configuration: options.browser,
     privateDirectory: join(
-      process.platform === 'win32' ? tmpdir() : '/tmp',
+      process.platform === 'win32'
+        ? tmpdir()
+        : process.platform === 'darwin'
+          ? realpathSync('/tmp')
+          : '/tmp',
       `kite-ab-${process.getuid?.() ?? 'user'}-${options.profile.profileAccessKey.slice(0, 16)}`,
     ),
   });

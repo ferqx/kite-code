@@ -8,6 +8,7 @@ import {
   requiresInteractionAttachment,
   type Workspace,
 } from '@kite-ai/client';
+import { browserDraftMatches } from '../src/browser-annotation-content';
 import {
   createDesktopController,
   type DesktopController,
@@ -24,7 +25,6 @@ import type {
   NativeResult,
   NativeState,
 } from '../src/native-bridge';
-import { promptTextForSend } from '../src/prompt-text';
 import { NativeAnswerJournal } from './answer-journal';
 import { NativeBackground } from './background';
 import {
@@ -32,6 +32,7 @@ import {
   callerMetadata,
   callerTextDigest,
   NativeCallerJournal,
+  nativeDraftProof,
 } from './caller-journal';
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
@@ -2351,14 +2352,12 @@ export class NativeCaller {
             rootSessionId: request.sessionId,
           });
           if (
-            saved.content === request.intent.content ||
-            promptTextForSend(saved.content) === request.intent.content
+            saved.browserAnnotations?.length &&
+            !browserDraftMatches(saved, request.intent.content)
           )
-            draftProof = {
-              id: saved.id,
-              revision: String(saved.revision),
-              textDigest: callerTextDigest(saved.content),
-            };
+            throw new ClientError('caller_draft_unavailable');
+          if (browserDraftMatches(saved, request.intent.content))
+            draftProof = nativeDraftProof(saved);
         }
         const prepared = await this.requireCaller().prepare(request.sessionId, intent, draftProof);
         if (intent.kind !== 'input.steer' && intent.modelId)
@@ -2540,7 +2539,13 @@ export class NativeCaller {
         result =
           request.method === 'draft.read'
             ? this.requirePrivateData().read(scope)
-            : this.requirePrivateData().save(scope, request.revision, request.content);
+            : this.requirePrivateData().save(
+                scope,
+                request.revision,
+                request.content,
+                request.browserAnnotations,
+                request.annotationImageOffset,
+              );
         break;
       }
       case 'grants.read':

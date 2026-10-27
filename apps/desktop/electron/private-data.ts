@@ -7,13 +7,20 @@ import {
   canonicalFileRecoveryIntent,
   parseFileRecoveryIntent,
 } from '@kite-ai/client/file-recovery-intent';
+import {
+  annotationReceiptRefs,
+  type BrowserSavedAnnotation,
+  browserDraftMatches,
+  browserDraftProofText,
+  composeBrowserDraft,
+  readBrowserAnnotations,
+} from '../src/browser-annotation-content';
 import type {
   NativeCallerRecord,
   NativeCreation,
   NativeDraft,
   NativeRecoveryIntent,
 } from '../src/native-bridge';
-import { promptTextForSend } from '../src/prompt-text';
 import {
   assertAnswerRecords,
   type NativeAnswerData,
@@ -77,7 +84,13 @@ export type PrivateData = NativeScheduledTaskData &
   NativeFileRecoveryJournal &
   NativeAnswerData & {
     read(scope: DraftScope): NativeDraft;
-    save(scope: DraftScope, revision: number, content: string): NativeDraft;
+    save(
+      scope: DraftScope,
+      revision: number,
+      content: string,
+      browserAnnotations?: readonly BrowserSavedAnnotation[],
+      annotationImageOffset?: number,
+    ): NativeDraft;
     list(after?: string): { drafts: Omit<NativeDraft, 'content'>[]; nextId: string | null };
     readId(id: string): NativeDraft;
     creations(): NativeCreation[];
@@ -102,6 +115,27 @@ const identity = (scope: DraftScope) =>
   createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 function failure(): never {
   throw Error('draft_storage_unavailable');
+}
+function encodeDraft(
+  content: string,
+  notes?: readonly BrowserSavedAnnotation[],
+  imageOffset = 0,
+): string {
+  const annotations = readBrowserAnnotations(notes);
+  if (!annotations.length) return JSON.stringify(content);
+  composeBrowserDraft({
+    content,
+    browserAnnotations: annotations,
+    annotationImageOffset: imageOffset,
+  });
+  const encoded = JSON.stringify({
+    kind: 'browser_annotation_draft',
+    content,
+    browserAnnotations: annotations,
+    annotationImageOffset: imageOffset,
+  });
+  if (Buffer.byteLength(encoded) > 1048576) throw Error('draft_capacity_exceeded');
+  return encoded;
 }
 
 /** Node-only UI user data, never a substitute for Service command authority. */
@@ -578,12 +612,38 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     } catch {
       failure();
     }
+    let browserAnnotations: readonly BrowserSavedAnnotation[] = [],
+      annotationImageOffset = 0;
+    if (content && typeof content === 'object' && !Array.isArray(content)) {
+      const envelope = content as Record<string, unknown>;
+      if (
+        Object.keys(envelope).sort().join(',') !==
+          'annotationImageOffset,browserAnnotations,content,kind' ||
+        envelope.kind !== 'browser_annotation_draft' ||
+        Buffer.byteLength(String(row.content)) > 1048576
+      )
+        failure();
+      try {
+        browserAnnotations = readBrowserAnnotations(envelope.browserAnnotations);
+        if (typeof envelope.annotationImageOffset !== 'number') failure();
+        annotationImageOffset = envelope.annotationImageOffset;
+        composeBrowserDraft({
+          content: envelope.content as string,
+          browserAnnotations,
+          annotationImageOffset,
+        });
+      } catch {
+        failure();
+      }
+      content = envelope.content;
+    }
     if (typeof content !== 'string' || Buffer.byteLength(content) > 1048576) failure();
     return {
       id: String(row.id),
       ...(scope as DraftScope),
       revision: Number(row.revision),
       content,
+      ...(browserAnnotations.length ? { browserAnnotations, annotationImageOffset } : {}),
     };
   };
   const creation = (row: Record<string, unknown>): NativeCreation => {
@@ -636,7 +696,11 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
   function withConsumption(saved: NativeDraft): NativeDraft {
     const consumed = draftConsumptions.get(saved.id);
     if (!consumed) return saved;
-    if (saved.revision !== consumed.revision || saved.content !== '') {
+    if (
+      saved.revision !== consumed.revision ||
+      saved.content !== '' ||
+      saved.browserAnnotations?.length
+    ) {
       draftConsumptions.delete(saved.id);
       return saved;
     }
@@ -654,9 +718,10 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       intent.scope.workspaceId === saved.workspaceId &&
       intent.scope.sessionId === saved.rootSessionId &&
       'content' in intent.request &&
-      (intent.request.content === saved.content ||
-        intent.request.content === promptTextForSend(saved.content)) &&
-      callerTextDigest(saved.content) === proof.textDigest
+      browserDraftMatches(saved, intent.request.content) &&
+      callerTextDigest(browserDraftProofText(saved)) === proof.textDigest &&
+      (!saved.browserAnnotations?.length ||
+        callerCanonical(proof.browserAnnotations) === callerCanonical(annotationReceiptRefs(saved)))
     );
   }
   // Caller receipt and consumption share one transaction. A later edit owns a new revision.
@@ -666,12 +731,40 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     const row = database().prepare('SELECT * FROM drafts WHERE id=?').get(proof.id);
     if (!row) return;
     const saved = draft(row);
-    if (!saved.content || !submittedDraft(record, saved)) return;
+    const exact = submittedDraft(record, saved);
+    const refs = proof.browserAnnotations;
+    const partial =
+      !exact &&
+      refs?.length &&
+      saved.revision > Number(proof.revision) &&
+      record.intent.scope.storeId === saved.storeId &&
+      record.intent.scope.workspaceId === saved.workspaceId &&
+      record.intent.scope.sessionId === saved.rootSessionId;
+    const remaining = partial
+      ? (saved.browserAnnotations ?? []).filter(
+          (note) =>
+            !refs.some(
+              (ref) =>
+                ref.id === note.id &&
+                ref.version === note.version &&
+                ref.imageHash === note.imageHash,
+            ),
+        )
+      : [];
+    if (!exact && (!partial || remaining.length === (saved.browserAnnotations?.length ?? 0)))
+      return;
+    if (!saved.content && !saved.browserAnnotations?.length) return;
     if (!Number.isSafeInteger(saved.revision + 1)) throw Error('draft_revision_conflict');
     const result = database()
       .prepare('UPDATE drafts SET revision=?,content=? WHERE id=? AND revision=?')
-      .run(saved.revision + 1, JSON.stringify(''), saved.id, saved.revision);
+      .run(
+        saved.revision + 1,
+        encodeDraft(exact ? '' : saved.content, remaining, saved.annotationImageOffset),
+        saved.id,
+        saved.revision,
+      );
     if (Number(result.changes) !== 1) throw Error('draft_revision_conflict');
+    if (!exact) return;
     return {
       id: saved.id,
       revision: saved.revision + 1,
@@ -680,7 +773,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
   }
   const read = (scope: DraftScope): NativeDraft => {
     const saved = readDraft(scope);
-    if (!saved.content) return withConsumption(saved);
+    if (!saved.content && !saved.browserAnnotations?.length) return withConsumption(saved);
     // Older clients kept accepted input as a saved draft. Reconcile only its exact proof;
     // opening history performs no command lookup, retry or new submission.
     const accepted = callerRows().find((record) => submittedDraft(record, saved));
@@ -853,10 +946,12 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           .run(record.request.commandId, JSON.stringify(record));
       });
     },
-    save(scope, revision, content) {
+    save(scope, revision, content, browserAnnotations, annotationImageOffset) {
       if (Buffer.byteLength(content) > 1048576) throw Error('draft_capacity_exceeded');
       const result = transaction(() => {
         const previous = readDraft(scope);
+        if (previous.browserAnnotations?.length && browserAnnotations === undefined)
+          throw Error('browser_annotation_draft_required');
         if (previous.revision !== revision) throw Error('draft_revision_conflict');
         if (!Number.isSafeInteger(revision + 1)) throw Error('draft_revision_conflict');
         database()
@@ -869,9 +964,20 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
             scope.workspaceId,
             scope.rootSessionId,
             revision + 1,
-            JSON.stringify(content),
+            encodeDraft(content, browserAnnotations, annotationImageOffset),
           );
-        return { ...previous, content, revision: revision + 1 };
+        const { browserAnnotations: _notes, annotationImageOffset: _offset, ...base } = previous;
+        return {
+          ...base,
+          content,
+          ...(browserAnnotations?.length
+            ? {
+                browserAnnotations: structuredClone(browserAnnotations),
+                annotationImageOffset: annotationImageOffset ?? 0,
+              }
+            : {}),
+          revision: revision + 1,
+        };
       });
       draftConsumptions.delete(result.id);
       return result;
@@ -1286,6 +1392,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     'draft_storage_unavailable',
     'draft_capacity_exceeded',
     'draft_revision_conflict',
+    'browser_annotation_draft_required',
     'draft_not_found',
     'creation_intent_conflict',
     'creation_capacity_exceeded',

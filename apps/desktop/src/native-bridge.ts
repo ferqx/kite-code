@@ -27,6 +27,10 @@ import type {
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
 import type { NativeBackgroundRequest, NativeBackgroundResult } from './background-bridge';
 import type {
+  BrowserAnnotationReceiptRef,
+  BrowserSavedAnnotation,
+} from './browser-annotation-content';
+import type {
   ContextSubmission,
   DesktopPermissionFacts,
   InteractionAnswerSubmission,
@@ -128,7 +132,13 @@ export type NativeCallerIntent = {
   };
   bodyDigest: string;
   requestDigest: string;
-  draft?: { id: string; revision: string; textDigest: string };
+  draft?: {
+    id: string;
+    revision: string;
+    textDigest: string;
+    browserAnnotations?: readonly BrowserAnnotationReceiptRef[];
+    promptTextDigest?: string;
+  };
 };
 export type NativeCallerRecord = {
   intent: NativeCallerIntent;
@@ -185,6 +195,8 @@ export type NativeDraft = {
   rootSessionId: string;
   revision: number;
   content: string;
+  browserAnnotations?: readonly BrowserSavedAnnotation[];
+  annotationImageOffset?: number;
   /** Current-process proof of the committed receipt that cleared this exact revision. */
   consumedFrom?: { commandId: string; revision: number };
   association?: 'current' | 'unavailable';
@@ -541,6 +553,11 @@ export type NativeRequest =
       intent: StartCommandRequest;
       /** Private preparation only; appended to intent.content when retaining the original draft. */
       draftLineEndings?: string;
+      draftDocument?: {
+        content: string;
+        browserAnnotations?: readonly BrowserSavedAnnotation[];
+        annotationImageOffset?: number;
+      };
       permissionMode?: 'accept_edits' | 'auto' | 'full';
       imageIds?: readonly string[];
       fileIds?: readonly string[];
@@ -778,6 +795,8 @@ export type NativeRequest =
       sessionId: string;
       revision: number;
       content: string;
+      browserAnnotations?: readonly BrowserSavedAnnotation[];
+      annotationImageOffset?: number;
     }
   | {
       method: 'permission.mode';

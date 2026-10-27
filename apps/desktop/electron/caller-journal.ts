@@ -9,13 +9,19 @@ import {
   readOrdinaryCommandApplication,
   validateRequest,
 } from '@kite-ai/client';
+import {
+  annotationReceiptRefs,
+  browserDraftImagesMatch,
+  browserDraftMatches,
+  browserDraftProofText,
+} from '../src/browser-annotation-content';
 import type {
   NativeCallerCommandRequest,
   NativeCallerIntent,
   NativeCallerMetadata,
   NativeCallerRecord,
+  NativeDraft,
 } from '../src/native-bridge';
-import { promptTextForSend } from '../src/prompt-text';
 import type { PrivateData } from './private-data';
 export const callerCanonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(callerCanonical).join(',')}]`;
@@ -33,6 +39,17 @@ export const callerCanonical = (value: unknown): string => {
 };
 export const callerTextDigest = (text: string) => createHash('sha256').update(text).digest('hex');
 export const callerDigest = (value: unknown) => callerTextDigest(callerCanonical(value));
+export function nativeDraftProof(draft: NativeDraft): NonNullable<NativeCallerIntent['draft']> {
+  const refs = annotationReceiptRefs(draft);
+  return {
+    id: draft.id,
+    revision: String(draft.revision),
+    textDigest: callerTextDigest(browserDraftProofText(draft)),
+    ...(refs.length
+      ? { browserAnnotations: refs, promptTextDigest: callerTextDigest(draft.content) }
+      : {}),
+  };
+}
 /** Native DB9 adds public extension envelopes without broadening the shared five-command caller. */
 export function canonicalNativeCallerRequest(request: NativeCallerCommandRequest): string {
   if (request.kind !== 'extension.invoke') return canonicalCallerCommandRequest(request);
@@ -121,7 +138,53 @@ export function validateCallerRecord(raw: unknown): NativeCallerRecord {
     throw Error('caller_storage_unavailable');
   if (hasDraft) {
     if (request.kind === 'extension.invoke') throw Error('caller_storage_unavailable');
-    closed(item.draft, ['id', 'revision', 'textDigest']);
+    const annotated =
+      !!item.draft && typeof item.draft === 'object' && 'browserAnnotations' in item.draft;
+    closed(item.draft, [
+      'id',
+      'revision',
+      'textDigest',
+      ...(annotated ? ['browserAnnotations', 'promptTextDigest'] : []),
+    ]);
+    if (annotated) {
+      if (
+        !Array.isArray(item.draft.browserAnnotations) ||
+        !item.draft.browserAnnotations.length ||
+        item.draft.browserAnnotations.length > 4 ||
+        typeof item.draft.promptTextDigest !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(item.draft.promptTextDigest) ||
+        !('content' in request) ||
+        callerTextDigest(request.content) !== item.draft.textDigest
+      )
+        throw Error('caller_storage_unavailable');
+      for (const ref of item.draft.browserAnnotations) {
+        closed(ref, ['id', 'version', 'imageHash']);
+        if (
+          !id(ref.id) ||
+          !Number.isSafeInteger(ref.version) ||
+          Number(ref.version) < 1 ||
+          typeof ref.imageHash !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(ref.imageHash)
+        )
+          throw Error('caller_storage_unavailable');
+      }
+      if (
+        new Set(item.draft.browserAnnotations.map((ref) => ref.id)).size !==
+        item.draft.browserAnnotations.length
+      )
+        throw Error('caller_storage_unavailable');
+      const images = 'images' in request ? request.images : undefined;
+      const refs = item.draft.browserAnnotations;
+      if (
+        !images ||
+        images.length < refs.length ||
+        refs.some(
+          (ref, index) =>
+            images[images.length - refs.length + index]?.reference.hash !== ref.imageHash,
+        )
+      )
+        throw Error('caller_storage_unavailable');
+    }
     if (
       typeof item.draft.id !== 'string' ||
       !/^[a-f0-9]{64}$/.test(item.draft.id) ||
@@ -276,10 +339,10 @@ export class NativeCallerJournal {
         original.workspaceId !== scope.workspaceId ||
         original.rootSessionId !== sessionId ||
         String(original.revision) !== draft.revision ||
-        callerTextDigest(original.content) !== draft.textDigest ||
+        callerCanonical(nativeDraftProof(original)) !== callerCanonical(draft) ||
         !('content' in request) ||
-        (request.content !== original.content &&
-          request.content !== promptTextForSend(original.content))
+        !browserDraftMatches(original, request.content) ||
+        !browserDraftImagesMatch(original, 'images' in request ? request.images : undefined)
       )
         throw Error('caller_draft_unavailable');
     }

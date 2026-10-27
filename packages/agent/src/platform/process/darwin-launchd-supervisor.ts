@@ -25,6 +25,7 @@ export interface LaunchdControl {
   registration: Registration;
 }
 const MAX_FRAME = 1024 * 1024;
+const TERMINAL_EOF_MS = 2000;
 const xml = (text: string) =>
   text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 function startupDiagnostic(rootPath: string) {
@@ -71,10 +72,11 @@ async function launchctl(args: string[]): Promise<{ code: number | null; output:
 /** File and socket are in the trusted host's protected private control base. */
 export async function connectLaunchdControl(
   path: string,
-  kind: 'shell' | 'mcp' = 'shell',
+  kind: 'shell' | 'mcp' | 'browser' = 'shell',
   onConnectionFailure?: (registration: Registration) => Promise<void>,
 ): Promise<LaunchdControl> {
-  if (kind !== 'shell' && kind !== 'mcp') throw Error('launchd_control_invalid');
+  if (kind !== 'shell' && kind !== 'mcp' && kind !== 'browser')
+    throw Error('launchd_control_invalid');
   const registration = JSON.parse(readFileSync(join(path, 'owner.json'), 'utf8')) as Registration;
   if (
     !/^[a-f0-9-]{36}$/.test(registration.secret) ||
@@ -139,7 +141,7 @@ export async function removeLaunchdRegistration(registration: Registration): Pro
 export async function startLaunchdSupervisor(input: {
   frame: Record<string, unknown>;
   controlBase: string;
-  kind?: 'shell' | 'mcp';
+  kind?: 'shell' | 'mcp' | 'browser';
   includeRegistration?: boolean;
   cancelled?: () => boolean;
   onFrame(frame: Record<string, unknown>): Promise<void>;
@@ -151,7 +153,8 @@ export async function startLaunchdSupervisor(input: {
   if (process.platform !== 'darwin' || !input.controlBase.startsWith('/'))
     throw Error('launchd_supervisor_unsupported');
   const kind = input.kind ?? 'shell';
-  if (kind !== 'shell' && kind !== 'mcp') throw Error('launchd_supervisor_unsupported');
+  if (kind !== 'shell' && kind !== 'mcp' && kind !== 'browser')
+    throw Error('launchd_supervisor_unsupported');
   const frameLimit = kind === 'mcp' ? 2 * 1024 * 1024 + 64 * 1024 : MAX_FRAME;
   const rootPath = realpathSync.native(mkdtempSync(join(input.controlBase, `${kind}-`)));
   chmodSync(rootPath, 0o700);
@@ -189,36 +192,67 @@ export async function startLaunchdSupervisor(input: {
       return;
     }
     let authenticated = false;
-    let buffer = '';
+    let buffer = Buffer.alloc(0);
     let chain = Promise.resolve();
-    socket.setEncoding('utf8');
-    socket.on('error', (error) => {
-      if (!authenticated) readyReject(error);
-      else if (!finished) finishReject(error);
-    });
+    let readEnded = false;
+    let readClosed = false;
+    let invalid: Error | undefined;
+    let eofTimer: ReturnType<typeof setTimeout> | undefined;
+    const fail = (error: Error) => {
+      invalid ??= error;
+      finished = true;
+      clearTimeout(eofTimer);
+      readyReject(invalid);
+      finishReject(invalid);
+      socket.destroy();
+    };
+    const complete = () => {
+      void chain
+        .then(() => {
+          if (invalid) return;
+          if (!readEnded || !authenticated || !terminal)
+            return fail(Error('launchd_guardian_disconnected'));
+          if (buffer.length) return fail(Error('launchd_guardian_truncated'));
+          // Guardian exits after writing terminal, independently of the broker.
+          // Close our writable half after its EOF, never in response to terminal
+          // alone; retain incoming bytes/errors until the full channel closes.
+          if (!readClosed) {
+            socket.end();
+            return;
+          }
+          finished = true;
+          clearTimeout(eofTimer);
+          finishResolve();
+        }, fail)
+        .catch(fail);
+    };
+    socket.on('error', fail);
     socket.on('end', () => {
-      if (!finished) finishReject(Error('launchd_guardian_disconnected'));
+      readEnded = true;
+      complete();
     });
     socket.on('close', () => {
-      if (!finished) {
-        const error = Error('launchd_guardian_disconnected');
-        readyReject(error);
-        finishReject(error);
-      }
+      readClosed = true;
+      complete();
     });
-    socket.on('data', (chunk: string) => {
+    socket.on('data', (chunk: Buffer) => {
       socket.pause();
-      buffer += chunk;
-      if (Buffer.byteLength(buffer) > frameLimit) {
-        socket.destroy(Error('launchd_frame_overflow'));
+      if (invalid) return;
+      if (readEnded || readClosed) return fail(Error('launchd_data_after_eof'));
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length > frameLimit) {
+        fail(Error('launchd_frame_overflow'));
         return;
       }
-      while (buffer.includes('\n')) {
-        const boundary = buffer.indexOf('\n');
-        const line = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 1);
+      for (let boundary = buffer.indexOf(10); boundary >= 0; boundary = buffer.indexOf(10)) {
+        const line = buffer.subarray(0, boundary);
+        buffer = buffer.subarray(boundary + 1);
         chain = chain.then(async () => {
-          const frame = JSON.parse(line) as Record<string, unknown>;
+          if (invalid) throw invalid;
+          if (terminal) throw Error('launchd_frame_after_terminal');
+          const frame = JSON.parse(
+            new TextDecoder('utf-8', { fatal: true }).decode(line),
+          ) as Record<string, unknown>;
           if (!authenticated) {
             if (
               frame.type !== 'guardian' ||
@@ -241,11 +275,13 @@ export async function startLaunchdSupervisor(input: {
             if (frame.nonce !== input.frame.nonce) throw Error('launchd_frame_identity_invalid');
             if (frame.type === 'terminal') {
               terminal = frame;
-              finished = true;
-              finishResolve();
+              eofTimer = setTimeout(
+                () => fail(Error('launchd_guardian_eof_timeout')),
+                TERMINAL_EOF_MS,
+              );
             } else
               await input.onFrame(
-                (kind === 'mcp' || input.includeRegistration) && frame.type === 'ready'
+                (kind !== 'shell' || input.includeRegistration) && frame.type === 'ready'
                   ? {
                       ...frame,
                       registration: {
@@ -258,11 +294,7 @@ export async function startLaunchdSupervisor(input: {
               );
           }
         });
-        void chain.catch((error: Error) => {
-          readyReject(error);
-          finishReject(error);
-          socket.destroy();
-        });
+        void chain.catch(fail);
       }
       void chain.then(
         () => socket.resume(),
@@ -281,7 +313,13 @@ export async function startLaunchdSupervisor(input: {
       server.listen('control.sock', resolve);
     });
     const plist = join(rootPath, 'job.plist');
-    const strings = [process.execPath, process.argv[1]!, '--launchd-owned', rootPath];
+    const strings = [
+      process.execPath,
+      process.argv[1]!,
+      '--launchd-owned',
+      rootPath,
+      ...(kind === 'browser' ? ['--browser-owner'] : []),
+    ];
     writeFileSync(
       plist,
       `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
@@ -307,7 +345,7 @@ export async function startLaunchdSupervisor(input: {
         throw Error('launchd_frame_identity_invalid');
       const content = JSON.stringify(frame);
       if (Buffer.byteLength(content) > frameLimit) throw Error('launchd_frame_overflow');
-      if (finished || !channel?.writable) throw Error('launchd_guardian_disconnected');
+      if (finished || terminal || !channel?.writable) throw Error('launchd_guardian_disconnected');
       await new Promise<void>((resolve, reject) =>
         channel!.write(`${content}\n`, (error) => (error ? reject(error) : resolve())),
       );
@@ -339,7 +377,7 @@ export async function startLaunchdSupervisor(input: {
             throw error;
           }
           await input.onFrame(
-            kind === 'mcp' || input.includeRegistration
+            kind !== 'shell' || input.includeRegistration
               ? {
                   ...terminal!,
                   registrationRemoved: true,

@@ -11,8 +11,8 @@ import {
   agentBrowserErrorMessage,
   agentBrowserHit,
   agentBrowserPoint,
-  agentBrowserQuote,
 } from './agent-browser-view';
+import { type BrowserNoteInput, browserNoteInput } from './browser-annotation-drafts';
 import type { NativeExtensionScope } from './extensions-bridge';
 import type { NativeBridge, NativeCallerMetadata } from './native-bridge';
 import './agent-browser-panel.css';
@@ -35,7 +35,7 @@ export function AgentBrowserPanel({
   canInvoke,
   visible = true,
   submissions = [],
-  onQuote,
+  onAnnotate,
 }: {
   bridge: NativeBridge;
   scope: NativeExtensionScope;
@@ -43,10 +43,11 @@ export function AgentBrowserPanel({
   canInvoke: boolean;
   visible?: boolean;
   submissions?: readonly NativeCallerMetadata[];
-  onQuote: (text: string) => void;
+  onAnnotate: (capture: BrowserNoteInput) => void;
 }) {
   const host = useRef<HTMLElement>(null);
   const fillNoticeId = useId();
+  const noteEditor = useRef<HTMLTextAreaElement>(null);
   const observer = useRef<AgentBrowserObserver | undefined>(undefined);
   const [state, setState] = useState<AgentBrowserObservation>({
     fresh: false,
@@ -55,6 +56,12 @@ export function AgentBrowserPanel({
     pending: false,
   });
   const [note, setNote] = useState('');
+  const [frozenState, setFrozenState] = useState<{ identity: string; view: AgentBrowserView }>();
+  const setFrozen = (view: AgentBrowserView | undefined) =>
+    setFrozenState(view ? { identity, view } : undefined);
+  const frozen = frozenState?.identity === JSON.stringify(scope) ? frozenState.view : undefined;
+  const [hoverRef, setHoverRef] = useState('');
+  const [noteRef, setNoteRef] = useState('');
   const [text, setText] = useState('');
   const [address, setAddress] = useState('');
   const [message, setMessage] = useState('');
@@ -65,6 +72,9 @@ export function AgentBrowserPanel({
   current.current = { identity, visible, canInvoke, scope, submissions };
   useEffect(() => {
     setNote('');
+    setFrozenState(undefined);
+    setHoverRef('');
+    setNoteRef('');
     setText('');
     setMessage('');
     setDecoded('');
@@ -114,7 +124,26 @@ export function AgentBrowserPanel({
     updateVisibility.current?.(visible);
   }, [visible, canInvoke]);
   const view = state.view;
-  const frame = view?.frame;
+  const shown = frozen ?? view;
+  const frame = shown?.frame;
+  const noteTarget = frozen?.annotations.find((item) => item.ref === noteRef);
+  const highlighted = shown?.annotations.find((item) => item.ref === (noteRef || hoverRef));
+  useEffect(() => {
+    if (!frozen) return;
+    const exitSelection = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setFrozenState(undefined);
+        setNoteRef('');
+        setHoverRef('');
+        setNote('');
+      }
+    };
+    document.addEventListener('keydown', exitSelection);
+    return () => document.removeEventListener('keydown', exitSelection);
+  }, [frozen]);
+  useEffect(() => {
+    if (noteRef) noteEditor.current?.focus();
+  }, [noteRef]);
   const actionable = !!view && state.fresh && canInvoke && !state.pending;
   const human = actionable && view.state === 'human';
   const selected = state.fresh ? view?.selectedAnnotation : undefined;
@@ -154,6 +183,26 @@ export function AgentBrowserPanel({
       {view && (
         <>
           <div className="agent-browser-toolbar">
+            <Button
+              variant={frozen ? 'outline' : 'ghost'}
+              aria-pressed={!!frozen}
+              disabled={!frozen && (!state.fresh || !frame || decoded !== frame.data)}
+              onClick={() => {
+                if (frozen) {
+                  setFrozen(undefined);
+                  setHoverRef('');
+                  setNoteRef('');
+                  setNote('');
+                } else if (view?.frame && decoded === view.frame.data) {
+                  setFrozen(structuredClone(view));
+                  setNoteRef('');
+                  setHoverRef('');
+                  setNote('');
+                }
+              }}
+            >
+              ⌖ {frozen ? '退出指向 · Esc' : '指向元素'}
+            </Button>
             {view.state === 'agent' && (
               <Button variant="outline" disabled={!actionable} onClick={() => invoke('handoff')}>
                 暂停并接管
@@ -179,51 +228,124 @@ export function AgentBrowserPanel({
             <strong>{view.title || '未命名页面'}</strong>
             <span title={view.url}>{view.url || '尚未打开网页'}</span>
           </div>
-          {frame ? (
-            <button
-              type="button"
-              className="agent-browser-frame"
-              aria-label="在画面中选取元素（不会点击网页）"
-              disabled={!human || decoded !== frame.data}
-              onClick={(event) => {
-                const image = event.currentTarget.querySelector('img');
-                if (!image || !view.frame || decoded !== frame.data) return;
-                const point = agentBrowserPoint(
-                  view.frame,
-                  image.getBoundingClientRect(),
-                  event.clientX,
-                  event.clientY,
-                );
-                const target = point ? agentBrowserHit(view, point) : undefined;
-                if (target) invoke('select', { seq: view.seq, ref: target.ref });
-                else setMessage('这里没有可引用的元素，请选择带编号的区域。');
-              }}
-            >
-              <img
-                src={`data:image/jpeg;base64,${frame.data}`}
-                alt={view.title ? `网页实时画面：${view.title}` : '网页实时画面'}
-                draggable={false}
-                onLoad={(event) => setDecoded(event.currentTarget.src.slice(23))}
-                onError={() => {
-                  setDecoded('');
-                  setMessage('画面解码失败，等待下一帧。');
+          {frame && shown ? (
+            <div className="agent-browser-canvas">
+              <button
+                type="button"
+                className={`agent-browser-frame${frozen ? ' is-pointing' : ''}`}
+                aria-label={
+                  frozen
+                    ? '在冻结快照中选取注释元素（不会点击网页）'
+                    : '浏览器画面；接管后可选择操作元素'
+                }
+                disabled={(!frozen && !human) || decoded !== frame.data}
+                onMouseMove={(event) => {
+                  if (!frozen) return;
+                  const image = event.currentTarget.querySelector('img');
+                  const point = image
+                    ? agentBrowserPoint(
+                        frame,
+                        image.getBoundingClientRect(),
+                        event.clientX,
+                        event.clientY,
+                      )
+                    : undefined;
+                  setHoverRef(point ? (agentBrowserHit(shown, point)?.ref ?? '') : '');
                 }}
-              />
-              {view.annotations.map((item) => (
-                <span
-                  key={item.ref}
-                  className={`agent-browser-region${selected?.ref === item.ref ? ' is-selected' : ''}`}
-                  style={{
-                    left: `${(item.box.x / frame.width) * 100}%`,
-                    top: `${(item.box.y / frame.height) * 100}%`,
-                    width: `${(item.box.width / frame.width) * 100}%`,
-                    height: `${(item.box.height / frame.height) * 100}%`,
+                onMouseLeave={() => setHoverRef('')}
+                onClick={(event) => {
+                  const image = event.currentTarget.querySelector('img');
+                  if (!image || decoded !== frame.data) return;
+                  const point = agentBrowserPoint(
+                    frame,
+                    image.getBoundingClientRect(),
+                    event.clientX,
+                    event.clientY,
+                  );
+                  const target = point ? agentBrowserHit(shown, point) : undefined;
+                  if (!target) {
+                    setMessage('此处没有可引用元素；目前仅支持这份快照提供的元素。');
+                    return;
+                  }
+                  if (frozen) {
+                    setNoteRef(target.ref);
+                    setNote('');
+                  } else invoke('select', { seq: view.seq, ref: target.ref });
+                }}
+              >
+                <img
+                  src={`data:image/jpeg;base64,${frame.data}`}
+                  alt={frozen ? '用于注释的冻结网页快照' : '网页实时画面'}
+                  draggable={false}
+                  onLoad={(event) => setDecoded(event.currentTarget.src.slice(23))}
+                  onError={() => {
+                    setDecoded('');
+                    setMessage('画面解码失败，无法选取。');
+                  }}
+                />
+                {highlighted && frozen && (
+                  <span
+                    className="agent-browser-region is-selected"
+                    style={{
+                      left: `${(highlighted.box.x / frame.width) * 100}%`,
+                      top: `${(highlighted.box.y / frame.height) * 100}%`,
+                      width: `${(highlighted.box.width / frame.width) * 100}%`,
+                      height: `${(highlighted.box.height / frame.height) * 100}%`,
+                    }}
+                  />
+                )}
+              </button>
+              {frozen && (
+                <p className="agent-browser-help">
+                  冻结快照 · Agent 继续运行 · 只选取已有元素 · Esc 退出
+                  {view.seq !== frozen.seq ? ' · 页面已有更新，此处保留当时画面' : ''}
+                </p>
+              )}
+              {frozen && noteTarget && (
+                <form
+                  className="agent-browser-note"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    try {
+                      onAnnotate(browserNoteInput(frozen, noteTarget, note));
+                      setNoteRef('');
+                      setNote('');
+                      setMessage('已加入注释草稿，将随下一次提示词发送。');
+                    } catch {
+                      setMessage('未能加入注释，请检查图片准备状态与数量上限。');
+                    }
                   }}
                 >
-                  <span>{item.number}</span>
-                </span>
-              ))}
-            </button>
+                  <strong>
+                    {noteTarget.role} · {noteTarget.name || noteTarget.ref}
+                  </strong>
+                  <textarea
+                    ref={noteEditor}
+                    aria-label="注释说明"
+                    placeholder="描述你希望 Agent 关注的内容…"
+                    maxLength={2000}
+                    rows={3}
+                    value={note}
+                    onChange={(event) => setNote(event.currentTarget.value)}
+                  />
+                  <div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setNoteRef('');
+                        setNote('');
+                      }}
+                    >
+                      取消
+                    </Button>
+                    <Button type="submit" variant="outline">
+                      加入提示词
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
           ) : (
             <p className="agent-browser-empty">尚无可用画面。</p>
           )}
@@ -257,27 +379,6 @@ export function AgentBrowserPanel({
                   <span>
                     {selected.ref} · {selected.role}
                   </span>
-                  <label>
-                    给 Agent 的说明
-                    <textarea
-                      aria-label="给 Agent 的说明"
-                      value={note}
-                      onChange={(event) => setNote(event.currentTarget.value)}
-                      rows={2}
-                    />
-                  </label>
-                  <Button
-                    variant="outline"
-                    disabled={!human}
-                    onClick={() => {
-                      const quote = agentBrowserQuote(view, note);
-                      if (!quote) return;
-                      onQuote(quote);
-                      setMessage('已添加到输入草稿，尚未发送。');
-                    }}
-                  >
-                    引用到对话
-                  </Button>
                   <Button
                     variant="outline"
                     disabled={!human}

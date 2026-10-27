@@ -140,6 +140,8 @@ QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完
 
 可信 `readStepCapabilities` 在安全 Step 只选择缓存定义，Model 的实际工具版本与非秘密目录事实独立保存。旧未派发调用在目录变化后失效，下一模型请求同时更新 schema；已派发任务保留原 scope 和 lease。新版本 Tool 的自有 namespace 从准确成功 Model 的实际请求/绑定与原工作身份核实，不能靠调用者声明或替换旧 Run manifest 获得；真正执行仍走独立权限和最终派发事务。
 
+Agent Browser 沿原 Tool／browser.session Job／Query／Action 保持所属Session与未知操作合同。原生所有权按平台由Linux PID namespace或macOS独占launchd coalition提供；Native侧栏只观察最新帧，切会话不取消Job。平台、资产、预算、准确停止及本轮真实证据归[Browser owner](../../packages/agent/src/tools/browser/README.md)，不改变公开API或Tool版本，也不把手动网页标签变成Agent执行权。
+
 MCP 的 resources/prompts、live-only `mcp.catalogue.refresh` 均是普通 Tool/Action，绑定准确原 connection Job/key/configDigest/generation，read/get 再核成功目录 Execution 与 descriptor digest。刷新不冷连接、不变更原 connection 记录；新 schema 在下一安全 Step 生效。runless 调用从真实 Session/Workspace 核当前 selected-server 后才委托外部权限，宽权限不能跳过来源范围。独立 `builtin.mcp.management` 的 `mcp.servers` Query 与 `mcp.server.select` Action 只管理 trusted programmatic registry 的选择；真实六字段 read-set/Workspace identity 与 HostMutation 保原未知回执。默认原始来源、项目批准与认证绑定按[来源提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)继续实施，OAuth原认证合同归[认证边界](mcp-authentication.md)，Native完整设置由[Desktop owner](../../apps/desktop/README.md#native-mcp-完整设置)维护；完整浏览器/vault和平台资格仍按实际验收核对。
 
 公开 HTTP DTO 的来源为[Service schema](../../apps/service/src/http/schema/index.ts)，生成到 Client 目录与 OpenAPI；领域/SQL记录通过明确投影连接，不能直接成为 renderer 契约。正式客户端切换完成前，HTTP/Client 的交付只覆盖证据记录的切片。新的连接必须核对启动前选择的目标与必需接口，Store 写身份仍在各自事务内核对。
@@ -163,6 +165,8 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 [`client`](../../packages/client/README.md)只依赖生成 schema 和网络能力；[`ui`](../../packages/ui/README.md)消费公开投影、React 与便携展示控件，不知道参考扩展业务。SSE 的 ready/heartbeat 不推进 cursor；变化应用成功后确认，过滤范围的 checkpoint 只来自一致页。快照页不代表全局事件应用成功，切换 scope 需要相应水位。reset 后先冻结原 Store 的全局集合基线，再完整重读所需事实；SDK `startAfter` 仅设置重开 scan 起点，保留原 ACK，不将单对象 snapshotCursor 冒充全局应用。validated `onReady` 可确认流准入并等待应用准备，仍不 ACK；正常 EOF 且 ACK 尚未到达重读基线时沿原起点重开。原 Store 改变、读取失败或未完成时不解除对应写门禁，也不重发业务意图。
 
 受管 Agent Browser 沿 [Service 默认装配](../../apps/service/README.md#受管-browser-默认装配) → [Agent Browser Extension／Controller](../../packages/agent/src/tools/browser/README.md) → 原 `browser.session` Job 与进程监督，Native 沿既有 Extension Query／Action 和 Main 已核实 scope 观察／操作。它不复用下述手动网页的 WebContentsView，不新增模型 Loop、Core 业务表或专用 IPC／HTTP 控制旁路。`browser.view` 只读且不启动资源；网页、renderer、工具参数不能提供 Session authority、原生路径、CDP 或登录状态文件。宿主禁用是权限硬上限，Full 模式和 JSONC 不能解除。
+
+Native网页注释只在已解码、身份绑定的冻结帧上做本地历史上下文选择，不隐式handoff，不把静态ref当作当前Runtime事实或操作授权。私有草稿保存原prompt与有界annotation metadata，像素归原image owner；公开输入仍使用既有content＋images，由共享纯投影和Main原草稿proof／CAS核对，不新增Core或Tool协议。unknown保留原申请，确认只消费准确版本；临时图片身份冷重开不可复用。具体实现和限制归[Desktop owner](../../apps/desktop/README.md#agent-浏览器观察与人工操作)。
 
 `browser.open` 通过原 operations.ensure 绑定准确 key／URL 和 Job 申请；其余 Tool／人工 Action 先保存准确输入摘要的 pending 意图，再派发。已完成同 key 可重读，遗留 pending、输入冲突、发送后丢回应／取消／超时不能重放或换 key 重试。人工接管先撤销新的模型操作资格并更换 generation，等待原在途操作边界后以新页面观察交接；上游 pause、CLI 退出、侧栏隐藏均不是进程树停止证明。资源和未知 owner 保留到真实整树及本地句柄清理确认；停止不回滚网站效果。普通 fill 值进入原 Tool／Action 的耐久会话历史，不是凭据安全通道，不能用临时 Profile 或仅保存最新画面推导秘密不留存。
 

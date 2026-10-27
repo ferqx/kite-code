@@ -32,6 +32,7 @@ function assets(root: string): NativeBrowserTransportOptions {
     executable,
     browserPath: executable,
     linux: { bubblewrapPath: executable, initExecutable: executable },
+    darwin: { guardianPath: executable, bunExecutable: executable },
     runtimeDirectory: join(root, 'private-browser'),
   };
 }

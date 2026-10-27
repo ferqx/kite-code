@@ -23,7 +23,7 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, initial);
 bootstrap.window.close();
 
-test('Native automatically presents only the selected browser Job, preserves dismissal, and inserts verified context into existing draft', async () => {
+test('Native automatically presents only the selected browser Job, preserves dismissal, and keeps frozen annotation cards separate from existing draft', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -126,19 +126,22 @@ test('Native automatically presents only the selected browser Job, preserves dis
     });
     await until(() => !!panel() && !!button('暂停并接管'));
     expect(promptValue(host.querySelector('.composer [role="textbox"]'))).toBe('Keep my draft');
-    await flush(() => button('暂停并接管').click());
-    await until(() => !!button('交还 Agent') && !button('交还 Agent').disabled);
-    const select = panel()!.querySelector('select')!;
-    await flush(() => {
-      select.value = '@e1';
-      select.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-    });
-    await until(() => !!button('引用到对话') && !button('引用到对话').disabled);
-    await flush(() => button('引用到对话').click());
-    const draft = promptValue(host.querySelector('.composer [role="textbox"]'))!;
-    expect(draft.startsWith('Keep my draft\n\n')).toBe(true);
-    expect(draft).toContain('"ref":"@e1"');
-    expect(draft).toContain('"frameSeq":"1"');
+    const image = panel()!.querySelector('img')!;
+    image.getBoundingClientRect = () => new dom.window.DOMRect(0, 0, 400, 300);
+    await flush(() => image.dispatchEvent(new dom.window.Event('load')));
+    await flush(() => button('⌖ 指向元素').click());
+    await flush(() =>
+      panel()!
+        .querySelector('.agent-browser-frame')!
+        .dispatchEvent(
+          new dom.window.MouseEvent('click', { bubbles: true, clientX: 80, clientY: 70 }),
+        ),
+    );
+    await until(() => !!button('加入提示词'));
+    await flush(() => button('加入提示词').click());
+    expect(promptValue(host.querySelector('.composer [role="textbox"]'))).toBe('Keep my draft');
+    expect(host.querySelector('.browser-note-context')?.textContent).toContain('1 条网页注释');
+    expect(browser.submitted).toHaveLength(0);
     expect(
       control.requests.some((request) =>
         ['input.prepare', 'caller.prepare', 'input.submit'].includes(request.method),

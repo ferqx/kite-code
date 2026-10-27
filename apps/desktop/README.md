@@ -376,15 +376,35 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## Agent 浏览器观察与人工操作
 
-这是独立于上节手动网页标签的受管浏览器观察面板，不接管 WebContentsView，也不添加另一套 Agent Loop。产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#agent-浏览器)，能力装配与真实资源分别由 [Service](../service/README.md#受管-browser-默认装配)和 [Agent Browser](../../packages/agent/src/tools/browser/README.md)负责。当前只有 Linux 原生监督适配已实现，真实 Chrome／Electron 联调尚未取得资格；macOS／Windows 明确不可用，不是仅缺测试。
+2026-10-27，macOS27.0.1／arm64、Electron44.3.0、Chrome156.0.8078.48：独立可见Electron制品使用实际NativeDesktop／preload／IPC／NativeCaller和真实Service／SQLite，renderer保持sandbox=true、contextIsolation=true、nodeIntegration=false。UI私有数据使用测试夹具的Node SQLite内存端口，运行／模型／浏览器结果保存在真实Core；不是正式安装版或普通用户Profile验收。客户端实际目录核所选route enabled／configured，API model=`gpt-6-luna`；沿原createCodexLocalSource只读采用本机ChatGPT登录，没有复制认证文件、重登或新API key。
+
+客户端输入本地页面自然语言任务后，第一成功轮由模型自主执行10个浏览器Tool；最终窗口轮10次真实模型请求、9个浏览器Tool全部成功，实际填写 `Kite Luna real value`、点击一次后显示 `Clicked once`，下滚500再回顶并给出最终回复。A在真实慢导航期间切B，保持B至原Run完成；回A后明确重开只读观察面板，核同一browserId及generation、仅一个Browser Job和一次目标导航，没有重发。实际窗口再核接管、选择元素、备注连同原有草稿保留且未发送、交还及显式关闭；四个人工Action成功，原Job取消且报告完整树清理，Service正常关闭后私有会话目录为空。等待原命令核实的短暂pending提示沿原查询路径处理，不重复提交；最后截图包含关闭后的中间显示，最终Core回执另行核对。截图仅留本机内部检查。
+
+此前真实模型曾把未知generation猜为数字，并对改参数后的读取复用key；安全校验分别拒绝为stale target和intent conflict。仅补清Tool参数说明：首次snapshot省略未知generation，不猜值；不同读取／改变参数用独立意图key，未知网站操作仍不得换key重试。Tool／协议版本与执行校验未变。早期夹具的Bun SQLite／模块格式、缺Artifact store、目录显示名筛选及旧测试标记问题均保留失败记录，未计为真实模型通过。原资产启动及共享MCP间歇失败边界归[Browser owner](../../packages/agent/src/tools/browser/README.md)。
+
+以上真实窗口／模型结果发生在后续Darwin owner控制校验加严和共享broker内层EOF修正之前。截至v1审查包时新启动被自动审批拒绝；随后用户明确允许的单实例最终native闭环通过，当时尚未重新运行真实窗口／模型A-B路径，后续05:53轮另记如下。原未知实例与目录继续保留，不能由此前窗口成功授予最终控制实现完整资格。父死亡测试仅核一次父链快照中的已观察成员，不是独立全coalition终态枚举。
+
+2026-10-27 05:53 UTC另按后续明确授权，以同一v1源码和重新构建guardian进行一个新受限真实Native窗口／gpt-6-luna后台轮。A慢导航在途时05:53:33.830选B，并在61次aria-current采样中一直保持B，至Run于05:53:49.907 completed、05:53:50.031在B观察确认。切换后模型新发fill、click、down/up scroll和最终snapshot共5个Tool，全成功；服务端独立记录填写值、一次点击、scrollY500→0，页面初始及慢导航各一次，一个Browser Job／owner，无后台取消或重启。最终回复含KITE_FINAL_BACKGROUND_DONE。
+
+同轮切换前一次snapshot使用browser_id及generation=??，被invalid_tool_arguments在派发前拒绝，模型正确修正后读取成功。driver把“全轮每个Tool都成功”作为总断言，因该已知失败退出1，未执行回A辅助画面或UI结束按钮；不将整脚本称为通过。只读独立校验确认用户要求的后台新动作／真实页面效果／任务完成主条件。随后Service正常关闭沿准确原Job取得cancel stopped、terminal supervision=ended及dispose；冷Job回执确认owned process-tree cleanup，17个采样身份absent、准确label113、目录为空，旧unknown未动。没有为补辅助步骤重开或重发模型。
+
+这是独立于上节手动网页标签的受管浏览器观察面板，不接管 WebContentsView，也不添加另一套 Agent Loop。产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#agent-浏览器)，能力装配与真实资源分别由 [Service](../service/README.md#受管-browser-默认装配)和 [Agent Browser](../../packages/agent/src/tools/browser/README.md)负责。当前 Linux PID namespace 与 macOS launchd coalition 监督适配已实现；macOS本轮真实Host／Runtime范围见[Browser owner](../../packages/agent/src/tools/browser/README.md)，Linux真实Chrome与正式安装制品仍未取得资格，Windows明确不可用。
 
 [Native 主页面](src/native.tsx)在普通主会话提供“Agent 浏览器”入口，不受测试诊断开关控制。[自动呈现](src/agent-browser-presentation.ts)只接受当前已核实 Store／Session 内 `browser.session@1` 的 dispatching／running Job，排除 child、foreign、取消中和未完成选择的记录。每个准确 Job 在当前 renderer 生命周期内最多自动打开一次；用户关闭面板不因同一记录重读而重新打开。换会话、准备新会话或进入安排任务收起面板，不改变浏览器 Job。
 
 [Observer](src/agent-browser-observer.ts)沿原 Main Extension 读取身份调用 `browser.view`，只持一份最新帧；隐藏、设置覆盖、不可见或卸载时释放观察句柄并撤销旧操作资格。[View decoder](src/agent-browser-view.ts)核 envelope、generation／seq、帧和选取引用；页面内容不能提供新的读取或执行权。人工 handoff／resume／input／select／close 仍走原 Action 和持久 Command，未知只查原 commandId；原提交跨面板重开继续查询，不重发输入。主进程和公开 HTTP 协议未增加浏览器专用旁路。
 
-[Panel](src/agent-browser-panel.tsx)把截图点击转换为实际图片范围内的元素选择，不直接点击网页；明确“点击所选元素”或“填入所选元素”才提交操作。页面变化使旧引用失效；“引用到对话”把页面、元素、帧身份和用户备注加入同一 Session 的已有草稿，尚未发送。普通填写值进入耐久会话记录，面板明确提示不支持密码、验证码或其他凭据；该提示不是自动识别／脱敏功能，也不能把临时 Profile 当作凭据安全通道。
+[Panel](src/agent-browser-panel.tsx)的“指向元素”在已验证且成功解码的画面上冻结一帧，按实际图片矩形换算坐标；重叠区域选择面积最小的既有 annotation。hover／选取只画一个蓝框，不派发 Action、不暂停或接管 Agent，Esc 或退出指向回到最新画面；导航、滚动和缩放不会把冻结引用改绑到新帧。画面更新时明确显示历史状态，换 Session／scope 清掉 picker。只能命中当前 backend 提供的 annotations，不能任意拾取 DOM／div。agent-browser 0.39.4 的编号已烘焙进 JPEG，CSS 不能隐藏；面板不再重复叠加常驻编号。“暂停并接管”后的页面元素选择仍用原 browser.select，实际点击、填写、滚动和导航只走明确按钮及原身份校验，不能把注释引用当作当前操作许可。普通填写值进入耐久会话记录，面板不支持密码、验证码或其他凭据。
 
-[Observer 回归](test/agent-browser-observer.test.ts)、[View 回归](test/agent-browser-view.test.ts)和[呈现回归](test/agent-browser-presentation.test.ts)核读身份、未知结果、换代、引用与自动打开；[面板 DOM](test/isolated/agent-browser-dom.test.tsx)和[主页面 DOM](test/isolated/agent-browser-native-dom.test.tsx)沿[隔离 Main 夹具](test/agent-browser.fixture.ts)核接管→选择→草稿→明确输入→失效→交还、隐藏释放和不可用平台。上述夹具不证明真实 Chrome、Unix socket、Electron IPC 或安装制品。云环境实际私有 Unix socket 执行被拒绝，另一个执行通道未能启动；不从 DOM 或固定模型测试授予平台可用资格。
+[注释 owner](src/browser-annotation-drafts.ts)按 Store／Session 保存冻结来源、元素与用户说明；[卡片](src/browser-annotation-cards.tsx)在 Composer 的 context 插槽中显示数量、原帧缩略图、元素标签和说明，支持编辑／删除，编辑器仍仅显示原 prompt。每 Session 最多4条、窗口最多16条，每份 JPEG最多96 KiB；同帧像素首次准备后由原 NativeInputImages 的 begin／append／finish／publish 保管，编辑说明只更新版本，不重传或重哈希像素。普通图片排在前面，注释截图按卡片顺序随后，总数仍最多10张。删除、确认消费和窗口收束释放原 prepared image；没有伪造磁盘路径或 file attachment。私有草稿只存 metadata，不含 Base64、临时 prepared ID 或无限截图历史。500ms静默后串行 CAS 只保存小元数据；保存结果未知不盲重写。冷重开恢复文字卡片但标“快照未恢复”，不能发送，需删除后重新选取；同窗口换会话保留原像素。
+
+[共享纯合成函数](src/browser-annotation-content.ts)冻结实际出站 content：完整 prompt、注释全文、来源、历史语义和图片序号／hash，像素沿原 images 进入同一消息。普通 files 只自动附引用，不能代替首请求的注释文字。Native 私有 drafts.content兼容旧 JSON string 与闭合 annotation envelope，不新增 Core 表或公开协议字段；旧换行／hash语义保留。Main 的 [CallerJournal](electron/caller-journal.ts)从保存结构重算 proof并校验图片顺序、hash、mediaType／size，[PrivateData](electron/private-data.ts)在原受理事务按相同投影消费。notes-only也可提交；失败保留，unknown按原commandId核实且不重复发送，受理只清准确注释版本，新 prompt／新卡片不被旧回执清掉。草稿文本与图片的信任边界见[输入区 owner](#markdown-与附件输入)。Tool、Extension和HTTP协议版本未变。
+
+[Observer 回归](test/agent-browser-observer.test.ts)、[View 回归](test/agent-browser-view.test.ts)和[呈现回归](test/agent-browser-presentation.test.ts)核读身份、未知结果、换代、引用与自动打开；[面板 DOM](test/isolated/agent-browser-dom.test.tsx)、[自动呈现 DOM](test/isolated/agent-browser-native-dom.test.tsx)和[实际 Native 页面](test/isolated/native-read-ownership-dom.test.tsx)核冻结选择、Agent不中断、原正文、卡片、跨会话、失败／unknown和notes-only发送；[注释 owner](test/isolated/browser-annotation-drafts.test.ts)核数量／字节限制、冷恢复与消费版本，[ModelInput／Provider](test/isolated/browser-annotation-input.test.ts)核首请求文字＋原像素及运行中 steer，无预先 read_file。[Node 私有文件](test/isolated/private-data.test.ts)沿真实SQLite核metadata冷恢复、CAS、notes-only、unknown保留与旧回执保护新编辑。UI验证使用静态帧／本地模拟Provider和独立Electron，不授予新浏览器、真实模型或安装制品资格；上文最终v1真实后台轮是本次UI修改前的独立检查点。
+
+2026-10-27在上述macOS隔离工作树（基准982db30e加本轮未提交UI diff）实跑：16个相关文件按独立进程合计94项／897个Bun断言通过，真实Node私有SQLite／原Caller恢复另7项／162断言通过；Desktop与UI类型、定向Biome、API／边界／测试归属、文档检查通过。同进程直接组合16文件曾88通过／5失败，保留日志，不将该组合称绿。新增ModelInput／SDK测试由本地模拟transport记录实际请求格式，首请求与运行中steer均包含原文、完整说明和原JPEG，无read_file；不代表再次调用真实Luna。隔离Electron44.3.0加载真实Native renderer／样式及原preload，Main为静态无凭据测试端口；逐步核hover、选取、就地备注、卡片编辑、切B隔离、回A保留、820px卡片布局无横向溢出、深浅主题与删除。像素仅留本机；初次夹具executable未找到、会话读取前过早断言及构建原keyframes warning均保留。本轮没有新Browser owner／模型请求，旧unknown和先前v1资格边界不变。
+
+Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密或复制任何浏览器Cookie、密码或Profile。后续需先明确来源、站点范围和目标浏览器，单次明确授权后仅把选中Cookie交给准确owner，原值不进模型、提示词或日志；手动网页标签与Agent浏览器不能互相默认继承。单独方案见[Cookie导入提案](../../.agents/notes/proposed/feature/2026-10-27-browser-cookie-import.md)。
 
 ## 原文件变更面板与编辑器
 

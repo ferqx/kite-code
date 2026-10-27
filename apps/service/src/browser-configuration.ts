@@ -12,17 +12,21 @@ import {
   nativeBrowserUnavailableReason,
 } from '@kite-ai/agent/browser';
 import { linuxShellInitAsset } from '@kite-ai/agent/jobs/shell';
+import { mcpStdioGuardianAsset } from '@kite-ai/agent/mcp';
 import { builtinCapability, type CapabilityDescription } from '@kite-ai/agent/permissions';
 
 /** Programmatic host policy only. Never read these assets, limits or private roots from JSONC. */
 export type BrowserConfigurationOptions = NativeBrowserTransportOptions;
 
-function executable(path: string): string | null {
+function executable(path: string, execute = true): string | null {
   if (!isAbsolute(path) || path.includes('\0')) return null;
   try {
     const resolved = realpathSync.native(path);
     if (!statSync(resolved).isFile()) return null;
-    accessSync(resolved, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
+    accessSync(
+      resolved,
+      !execute || process.platform === 'win32' ? constants.F_OK : constants.X_OK,
+    );
     return resolved;
   } catch {
     return null;
@@ -44,7 +48,7 @@ function installedBrowser(): string | null {
       : process.platform === 'darwin'
         ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
         : [];
-  return candidates.map(executable).find((path) => path !== null) ?? null;
+  return candidates.map((path) => executable(path)).find((path) => path !== null) ?? null;
 }
 
 /** One inert Service-scoped controller; the ordinary browser.session Job owns all live resources. */
@@ -59,24 +63,53 @@ export function createBrowserConfiguration(options: {
   if (!enabled) unavailableReason = 'browser_disabled_by_host';
   else if (options.configuration) {
     const configured = structuredClone(options.configuration);
+    const platformAssets = process.platform === 'darwin' ? configured.darwin : configured.linux;
     const paths = [
       configured.executable,
       configured.browserPath,
-      configured.linux.bubblewrapPath,
-      configured.linux.initExecutable,
+      ...(process.platform === 'darwin' && configured.darwin
+        ? [configured.darwin.guardianPath, configured.darwin.bunExecutable]
+        : configured.linux
+          ? [configured.linux.bubblewrapPath, configured.linux.initExecutable]
+          : []),
     ];
-    const resolved = paths.map(executable);
+    const resolved = paths.map((path, index) =>
+      executable(path, !(process.platform === 'darwin' && index === 2)),
+    );
     runtimeAssets = resolved.filter((path): path is string => path !== null);
-    if (runtimeAssets.length !== paths.length) unavailableReason = 'browser_runtime_unavailable';
+    if (!platformAssets || runtimeAssets.length !== 4)
+      unavailableReason = 'browser_runtime_unavailable';
     else
       transport = {
         ...configured,
-        // Dispatch the captured canonical files, not a mutable host-path alias.
         executable: resolved[0]!,
         browserPath: resolved[1]!,
-        linux: { bubblewrapPath: resolved[2]!, initExecutable: resolved[3]! },
+        ...(process.platform === 'darwin'
+          ? { darwin: { guardianPath: resolved[2]!, bunExecutable: resolved[3]! } }
+          : { linux: { bubblewrapPath: resolved[2]!, initExecutable: resolved[3]! } }),
         runtimeDirectory: configured.runtimeDirectory ?? options.privateDirectory,
       };
+  } else if (process.platform === 'darwin') {
+    try {
+      const native = agentBrowserExecutableAsset(),
+        browserPath = installedBrowser();
+      const guardianPath = executable(mcpStdioGuardianAsset(), false),
+        bunExecutable = executable(process.execPath);
+      if (!browserPath) unavailableReason = 'browser_executable_unavailable';
+      else if (!guardianPath || !bunExecutable)
+        unavailableReason = 'browser_process_boundary_unavailable';
+      else {
+        transport = {
+          executable: native,
+          browserPath,
+          darwin: { guardianPath, bunExecutable },
+          runtimeDirectory: options.privateDirectory,
+        };
+        runtimeAssets = [...agentBrowserRuntimeAssets(), browserPath, guardianPath, bunExecutable];
+      }
+    } catch {
+      unavailableReason = 'browser_runtime_unavailable';
+    }
   } else if (process.platform !== 'linux')
     unavailableReason = nativeBrowserUnavailableReason() ?? 'browser_native_platform_unavailable';
   else {
@@ -87,7 +120,7 @@ export function createBrowserConfiguration(options: {
       if (!browserPath) unavailableReason = 'browser_executable_unavailable';
       else {
         const bubblewrapPath = ['/usr/bin/bwrap', '/bin/bwrap']
-          .map(executable)
+          .map((path) => executable(path))
           .find((path) => path !== null);
         if (!bubblewrapPath) unavailableReason = 'browser_process_boundary_unavailable';
         else {

@@ -119,3 +119,144 @@
   background: var(--muted);
   border-radius: 6px;
 }
+.agent-browser-panel {
+  padding: 10px;
+  gap: 10px;
+}
+.agent-browser-toolbar {
+  align-items: center;
+}
+.agent-browser-toolbar button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.agent-browser-status > strong {
+  font-size: 12px;
+}
+.agent-browser-location {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  gap: 2px;
+}
+.agent-browser-location > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-browser-canvas {
+  position: relative;
+  min-width: 0;
+}
+.agent-browser-frame {
+  cursor: default;
+  border-radius: 8px;
+}
+.agent-browser-frame.is-pointing {
+  cursor: crosshair;
+  border-color: #3b82f6;
+}
+.agent-browser-region.is-selected {
+  border: 2px solid #3b82f6;
+  background: #3b82f61a;
+  box-shadow: 0 0 0 1px #fff8;
+}
+.agent-browser-note {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  background: var(--background);
+}
+.agent-browser-note > strong {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.agent-browser-note > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.browser-note-context {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+.browser-note-context summary {
+  cursor: pointer;
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.browser-note-list {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 8px;
+}
+.browser-note-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+}
+.browser-note-thumb {
+  position: relative;
+  align-self: start;
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.browser-note-thumb img {
+  display: block;
+  width: 100%;
+}
+.browser-note-card strong,
+.browser-note-card small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-note-card small,
+.browser-note-context > p {
+  color: var(--muted-foreground);
+}
+.browser-note-card textarea {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+.browser-note-card p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.browser-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.browser-note-actions button {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+@container (max-width: 280px) {
+  .browser-note-card {
+    grid-template-columns: 1fr;
+  }
+}

@@ -168,6 +168,8 @@ export interface ComposerProps {
   onRemoveImage?: (id: string) => void;
   imageError?: string;
   context?: ReactNode;
+  /** Explicit prepared context is input even when the text editor is empty. */
+  contextHasInput?: boolean;
   options?: ReactNode;
   inputLabel?: string;
   sendLabel?: string;
@@ -415,12 +417,19 @@ export function Composer(props: ComposerProps) {
     !props.sending &&
     !pickingFiles &&
     !props.images?.some((image) => image.loading || image.error) &&
-    (!!props.draft.trim() || !!props.images?.length || !!props.files?.length);
+    (!!props.draft.trim() ||
+      !!props.images?.length ||
+      !!props.files?.length ||
+      !!props.contextHasInput);
   const showStop =
     !props.sending &&
     props.active &&
     !!props.onCancel &&
-    ((!props.draft.trim() && !props.images?.length && !props.files?.length) || props.stopping);
+    ((!props.draft.trim() &&
+      !props.images?.length &&
+      !props.files?.length &&
+      !props.contextHasInput) ||
+      props.stopping);
   // Preserve only previously enabled presentation during a routine read gate. Business
   // disabled states (empty draft, sending, stopping, file preparation) remain visible.
   const presentation = useRef(
@@ -870,7 +879,10 @@ export function Composer(props: ComposerProps) {
                       !props.sending &&
                       !pickingFiles &&
                       !props.images?.some((image) => image.loading || image.error) &&
-                      (!!props.draft.trim() || !!props.images?.length || !!props.files?.length)) ||
+                      (!!props.draft.trim() ||
+                        !!props.images?.length ||
+                        !!props.files?.length ||
+                        !!props.contextHasInput)) ||
                     undefined
                   }
                 >

@@ -24,6 +24,11 @@ import {
   LinuxOwnedProgramStartError,
   startLinuxOwnedProgram,
 } from '../../platform/process/linux-owned-program';
+import {
+  type DarwinBrowserEvidence,
+  type DarwinBrowserOwner,
+  startDarwinBrowserOwner,
+} from './darwin-owner';
 import type { BrowserAnnotation, BrowserFrame } from './types';
 
 /** Pinned internal daemon protocol; never mix this owner with CLI auto-start. */
@@ -31,7 +36,8 @@ export const agentBrowserVersion = '0.39.4';
 export interface NativeBrowserTransportOptions {
   executable: string;
   browserPath: string;
-  linux: { bubblewrapPath: string; initExecutable: string };
+  linux?: { bubblewrapPath: string; initExecutable: string };
+  darwin?: { guardianPath: string; bunExecutable: string };
   runtimeDirectory?: string;
   startupTimeoutMs?: number;
   requestTimeoutMs?: number;
@@ -40,6 +46,8 @@ export interface NativeBrowserTransportOptions {
   maximumResponseBytes?: number;
 }
 export interface NativeBrowserTransport {
+  /** Trusted host diagnostics only; never part of the browser view or Tool result. */
+  readProcessEvidence?(): LinuxOwnedProgramEvidence | DarwinBrowserEvidence;
   readonly ready: Promise<void>;
   readonly completion: Promise<{ confirmed: boolean }>;
   /** Full response envelope, including success/code and confirmation-required data. */
@@ -88,6 +96,7 @@ function requireSandboxEligibleHost(): void {
     }
     throw failure('browser_native_sandbox_unavailable');
   }
+  if (process.platform === 'darwin') return;
   // Inside the owned PID namespace /proc/1 is our init, with our cgroup. Inspect
   // both the current and host init cgroups conservatively, without unbounded reads.
   for (const path of ['/proc/self/cgroup', '/proc/1/cgroup']) {
@@ -115,7 +124,7 @@ function requireSandboxEligibleHost(): void {
 /** Passive host preflight only; undefined is not evidence of successful native qualification. */
 export function nativeBrowserUnavailableReason(): string | undefined {
   if (
-    process.platform !== 'linux' ||
+    !['linux', 'darwin'].includes(process.platform) ||
     !['x64', 'arm64'].includes(process.arch) ||
     !process.versions.bun
   )
@@ -161,7 +170,22 @@ function runtimeBase(path: string | undefined): string {
     throw failure('browser_native_invalid_directory');
   return path;
 }
-function ended(e: LinuxOwnedProgramEvidence, nonce: string): boolean {
+function ended(e: LinuxOwnedProgramEvidence | DarwinBrowserEvidence, nonce: string): boolean {
+  if (!('coverage' in e))
+    return (
+      e.ownerPid === process.pid &&
+      e.nonce === nonce &&
+      e.phase === 'terminal' &&
+      e.treeStopped &&
+      e.fdClosed &&
+      e.registration?.removed === true &&
+      e.coalition?.taskCount === 1 &&
+      e.root?.exit?.reaped === true &&
+      e.guardian?.kernelState === 'absent' &&
+      e.guardian.exit === null &&
+      e.broker?.exit?.code === 0 &&
+      e.broker.exit.reaped === true
+    );
   return !!(
     e.ownerPid === process.pid &&
     e.admission.nonce === nonce &&
@@ -266,8 +290,19 @@ export function createNativeBrowserTransport(
   const grace = limit(options.graceMs, 1000, 5000);
   const executable = executablePath(options.executable),
     browser = executablePath(options.browserPath);
-  const bubblewrapPath = executablePath(options.linux.bubblewrapPath);
-  const initExecutable = executablePath(options.linux.initExecutable);
+  const linux = process.platform === 'linux' ? options.linux : undefined;
+  const darwin = process.platform === 'darwin' ? options.darwin : undefined;
+  if ((process.platform === 'linux' && !linux) || (process.platform === 'darwin' && !darwin))
+    throw failure('browser_native_asset_unavailable');
+  const bubblewrapPath = linux ? executablePath(linux.bubblewrapPath) : '';
+  const initExecutable = linux ? executablePath(linux.initExecutable) : '';
+  const guardianPath = darwin ? realpathSync(darwin.guardianPath) : '';
+  if (
+    darwin &&
+    (!isAbsolute(guardianPath) || !guardianPath.endsWith('.js') || !statSync(guardianPath).isFile())
+  )
+    throw failure('browser_native_invalid_asset');
+  const bunExecutable = darwin ? executablePath(darwin.bunExecutable) : '';
   const base = runtimeBase(options.runtimeDirectory);
   const directory = mkdtempSync(join(base, 'kite-ab-'));
   chmodSync(directory, 0o700);
@@ -276,37 +311,49 @@ export function createNativeBrowserTransport(
   const socketPath = join(directory, `${session}.sock`);
   const nonce = randomUUID();
   admitted.add(directory);
-  let owner: LinuxOwnedProgram;
+  let owner: LinuxOwnedProgram | DarwinBrowserOwner;
   try {
     if (Buffer.byteLength(socketPath) > 103) throw failure('browser_native_socket_path_limit');
     for (const child of ['home', 'tmp', 'downloads', 'profile', 'cache', 'config', 'data'])
       mkdirSync(join(directory, child), { mode: 0o700 });
-    owner = startLinuxOwnedProgram({
-      executable,
-      argv: [],
-      cwd: directory,
-      bubblewrapPath,
-      initExecutable,
-      nonce,
-      graceMs: grace,
-      env: {
-        PATH: '/usr/bin:/bin',
-        HOME: join(directory, 'home'),
-        TMPDIR: join(directory, 'tmp'),
-        XDG_CACHE_HOME: join(directory, 'cache'),
-        XDG_CONFIG_HOME: join(directory, 'config'),
-        XDG_DATA_HOME: join(directory, 'data'),
-        AGENT_BROWSER_DAEMON: '1',
-        AGENT_BROWSER_SESSION: session,
-        AGENT_BROWSER_SOCKET_DIR: directory,
-        AGENT_BROWSER_ENGINE: 'chrome',
-        AGENT_BROWSER_EXECUTABLE_PATH: browser,
-        AGENT_BROWSER_NO_WEBMCP: '1',
-        AGENT_BROWSER_IDLE_TIMEOUT_MS: '300000',
-        AGENT_BROWSER_DEFAULT_TIMEOUT: '25000',
-        AGENT_BROWSER_DOWNLOAD_PATH: join(directory, 'downloads'),
-      },
-    });
+    const env = {
+      PATH: '/usr/bin:/bin',
+      HOME: join(directory, 'home'),
+      TMPDIR: join(directory, 'tmp'),
+      XDG_CACHE_HOME: join(directory, 'cache'),
+      XDG_CONFIG_HOME: join(directory, 'config'),
+      XDG_DATA_HOME: join(directory, 'data'),
+      AGENT_BROWSER_DAEMON: '1',
+      AGENT_BROWSER_SESSION: session,
+      AGENT_BROWSER_SOCKET_DIR: directory,
+      AGENT_BROWSER_ENGINE: 'chrome',
+      AGENT_BROWSER_EXECUTABLE_PATH: browser,
+      AGENT_BROWSER_NO_WEBMCP: '1',
+      AGENT_BROWSER_IDLE_TIMEOUT_MS: '300000',
+      AGENT_BROWSER_DEFAULT_TIMEOUT: '25000',
+      AGENT_BROWSER_DOWNLOAD_PATH: join(directory, 'downloads'),
+    };
+    owner = darwin
+      ? startDarwinBrowserOwner({
+          guardianPath,
+          bunExecutable,
+          executable,
+          cwd: directory,
+          env,
+          nonce,
+          graceMs: grace,
+          startupTimeoutMs: startupTimeout,
+        })
+      : startLinuxOwnedProgram({
+          executable,
+          argv: [],
+          cwd: directory,
+          bubblewrapPath,
+          initExecutable,
+          nonce,
+          graceMs: grace,
+          env,
+        });
   } catch (cause) {
     if (cause instanceof LinuxOwnedProgramStartError) owner = cause.cleanup;
     else {
@@ -421,6 +468,20 @@ export function createNativeBrowserTransport(
   // denied by the released daemon, and growth can overshoot between samples or
   // while stopping. Never follow Chrome-created symlinks outside the owned root.
   async function inspectStorage(): Promise<void> {
+    if (darwin) {
+      const { scanDarwinBrowserDirectory } = await import('./darwin-storage');
+      await scanDarwinBrowserDirectory({
+        directory,
+        identity,
+        closing: () => closing,
+        closeUnknown(resource) {
+          localCleanupUnknown = true;
+          retained.add({ resource, owner, directory });
+          void close();
+        },
+      });
+      return;
+    }
     const started = performance.now();
     let entries = 0,
       bytes = 0;
@@ -609,21 +670,30 @@ export function createNativeBrowserTransport(
   const startup = (async () => {
     await owner.ready;
     const evidence = owner.readProcessEvidence();
-    const root = evidence.namespace?.root;
-    if (
-      evidence.ownerPid !== process.pid ||
-      evidence.admission.nonce !== nonce ||
-      evidence.phase !== 'ready' ||
-      !root ||
-      root.dead ||
-      evidence.namespace?.init.dead ||
-      evidence.namespace?.treeStopped ||
-      evidence.closeUnknown ||
-      evidence.fdClosed ||
-      evidence.wrapper.closed ||
-      evidence.wrapper.exit
-    )
-      throw failure('browser_native_owner_invalid');
+    const root = 'coverage' in evidence ? evidence.namespace?.root : evidence.root;
+    const ownerValid =
+      'coverage' in evidence
+        ? evidence.ownerPid === process.pid &&
+          evidence.admission.nonce === nonce &&
+          evidence.phase === 'ready' &&
+          root &&
+          !evidence.namespace?.root?.dead &&
+          !evidence.namespace?.init.dead &&
+          !evidence.namespace?.treeStopped &&
+          !evidence.closeUnknown &&
+          !evidence.fdClosed &&
+          !evidence.wrapper.closed &&
+          !evidence.wrapper.exit
+        : evidence.ownerPid === process.pid &&
+          evidence.nonce === nonce &&
+          evidence.phase === 'ready' &&
+          root &&
+          !evidence.treeStopped &&
+          !evidence.fdClosed &&
+          !evidence.root?.exit;
+    if (!ownerValid) throw failure('browser_native_owner_invalid');
+    const daemonPid =
+      'coverage' in evidence ? evidence.namespace!.root!.localPid : evidence.root!.pid;
     const until = performance.now() + startupTimeout;
     for (;;) {
       if (closing) throw failure('browser_native_closed');
@@ -647,7 +717,7 @@ export function createNativeBrowserTransport(
       !object(reply.data) ||
       reply.data.session !== session ||
       reply.data.socketDir !== directory ||
-      reply.data.backgroundPid !== root.localPid ||
+      reply.data.backgroundPid !== daemonPid ||
       reply.data.browserLaunched !== false
     )
       throw failure('browser_native_session_mismatch');
@@ -794,6 +864,7 @@ export function createNativeBrowserTransport(
     }
   }
   return {
+    readProcessEvidence: () => owner.readProcessEvidence(),
     ready,
     completion,
     request,

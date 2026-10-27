@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { AgentBrowserPanel } from '../../src/agent-browser-panel';
+import type { BrowserNoteInput } from '../../src/browser-annotation-drafts';
 import { browserFixture, browserScope, browserView } from '../agent-browser.fixture';
 
 async function setup() {
@@ -20,7 +21,7 @@ async function setup() {
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(dom.window.document.getElementById('root')!);
   const f = browserFixture(),
-    quotes: string[] = [];
+    quotes: BrowserNoteInput[] = [];
   const flush = async (action: () => void = () => {}, ms = 30) => {
     await act(async () => {
       action();
@@ -44,7 +45,9 @@ async function setup() {
           canRead
           canInvoke={canInvoke}
           visible={visible}
-          onQuote={(text) => quotes.push(text)}
+          onAnnotate={(capture) => {
+            quotes.push(capture);
+          }}
         />,
       ),
     );
@@ -88,7 +91,7 @@ test('live browser DOM walks handoff, scaled region picker, quoted draft, explic
     });
     await x.flush(() => image.dispatchEvent(new x.dom.window.Event('load')));
     const picker = x.host.querySelector<HTMLButtonElement>(
-      '[aria-label="在画面中选取元素（不会点击网页）"]',
+      '[aria-label="浏览器画面；接管后可选择操作元素"]',
     )!;
     expect(picker.disabled).toBe(false);
     await x.flush(() =>
@@ -96,7 +99,7 @@ test('live browser DOM walks handoff, scaled region picker, quoted draft, explic
         new x.dom.window.MouseEvent('click', { bubbles: true, clientX: 80, clientY: 90 }),
       ),
     );
-    await x.until(() => !!x.button('引用到对话') && !x.button('引用到对话').disabled);
+    await x.until(() => !!x.button('点击所选元素') && !x.button('点击所选元素').disabled);
     const fill = x.host.querySelector<HTMLInputElement>('[aria-label="填入内容"]')!;
     expect(x.host.getElementById(fill.getAttribute('aria-describedby')!)?.textContent).toBe(
       '普通填写内容会进入会话记录；此入口不支持输入密码、验证码或其他凭据。',
@@ -110,7 +113,15 @@ test('live browser DOM walks handoff, scaled region picker, quoted draft, explic
       seq: '1',
       generation: 'human-generation',
     });
-    const note = x.host.querySelector<HTMLTextAreaElement>('textarea')!;
+    // Historical annotation is independent of human browser selection.
+    await x.flush(() => x.button('⌖ 指向元素').click());
+    const frozen = x.host.querySelector<HTMLButtonElement>('.agent-browser-frame')!;
+    await x.flush(() =>
+      frozen.dispatchEvent(
+        new x.dom.window.MouseEvent('click', { bubbles: true, clientX: 80, clientY: 90 }),
+      ),
+    );
+    const note = x.host.querySelector<HTMLTextAreaElement>('[aria-label="注释说明"]')!;
     await x.flush(() => {
       Object.getOwnPropertyDescriptor(
         x.dom.window.HTMLTextAreaElement.prototype,
@@ -118,15 +129,22 @@ test('live browser DOM walks handoff, scaled region picker, quoted draft, explic
       )!.set!.call(note, 'Check this control');
       note.dispatchEvent(new x.dom.window.Event('input', { bubbles: true }));
     });
-    await x.flush(() => x.button('引用到对话').click());
+    await x.flush(() => x.button('加入提示词').click());
     expect(x.quotes).toHaveLength(1);
-    expect(x.quotes[0]).toContain('"ref":"@e1"');
-    expect(x.quotes[0]).toContain('"frameSeq":"1"');
-    expect(x.quotes[0]).toContain('我的说明：Check this control');
-    expect(x.host.body.textContent).toContain('已添加到输入草稿，尚未发送');
+    expect(x.quotes[0]).toMatchObject({
+      element: { ref: '@e1' },
+      source: { frameSeq: '1' },
+      note: 'Check this control',
+    });
+    expect(x.host.body.textContent).toContain('已加入注释草稿');
     expect(x.f.submitted).toHaveLength(2);
+    await x.flush(() =>
+      x.host.dispatchEvent(
+        new x.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
     await x.flush(() => x.button('点击所选元素').click());
-    await x.until(() => x.f.submitted.length === 3 && !x.button('引用到对话'));
+    await x.until(() => x.f.submitted.length === 3 && !x.button('点击所选元素'));
     expect(x.f.submitted[2]).toMatchObject({
       actionId: 'browser.input',
       input: { command: { action: 'click', ref: '@e1', seq: '1' } },
@@ -212,7 +230,7 @@ test('late frame bodies cannot restore a previous session or action authority ac
   x.f.view.selectedAnnotation = x.f.view.annotations[0]!;
   try {
     await x.render();
-    await x.until(() => !!x.button('引用到对话') && !x.button('引用到对话').disabled);
+    await x.until(() => !!x.button('点击所选元素') && !x.button('点击所选元素').disabled);
     const previous = x.f.deferNextResponse('extensions.read');
     delayed.push(previous);
     await x.until(() => previous.held);
@@ -317,6 +335,67 @@ test('an unknown page click stays blocked across panel reopen and repeated queri
   } finally {
     lost.release();
     recovery?.release();
+    await x.cleanup();
+  }
+});
+
+test('Agent-running frozen picker highlights one smallest hit, keeps original frame after updates, and Escape/scope change never hands off', async () => {
+  const x = await setup();
+  x.f.view.annotations.push({
+    ref: '@e2',
+    number: 2,
+    role: 'group',
+    name: 'overlap',
+    box: { x: 0, y: 0, width: 500, height: 400 },
+  });
+  try {
+    await x.render();
+    await x.until(() => !!x.button('暂停并接管'));
+    const image = x.host.querySelector('img')!;
+    image.getBoundingClientRect = () => new x.dom.window.DOMRect(20, 30, 400, 300);
+    await x.flush(() => image.dispatchEvent(new x.dom.window.Event('load')));
+    await x.flush(() => x.button('⌖ 指向元素').click());
+    const frame = x.host.querySelector('.agent-browser-frame')!;
+    await x.flush(() =>
+      frame.dispatchEvent(
+        new x.dom.window.MouseEvent('mousemove', { bubbles: true, clientX: 80, clientY: 90 }),
+      ),
+    );
+    expect(x.host.querySelectorAll('.agent-browser-region')).toHaveLength(1);
+    await x.flush(() =>
+      frame.dispatchEvent(
+        new x.dom.window.MouseEvent('click', { bubbles: true, clientX: 80, clientY: 90 }),
+      ),
+    );
+    expect(x.host.querySelector('.agent-browser-note strong')?.textContent).toContain('Continue');
+    x.f.view = {
+      ...x.f.view,
+      seq: '2',
+      title: 'New live title',
+      frame: { ...x.f.view.frame!, seq: '2', data: '/9j/3Q==' },
+    };
+    await x.until(() => x.host.body.textContent?.includes('New live title') === true);
+    expect(x.host.querySelector('img')?.src).toContain('/9j/2Q==');
+    expect(x.host.body.textContent).toContain('页面已有更新');
+    await x.flush(() => x.button('加入提示词').click());
+    expect(x.quotes[0]).toMatchObject({
+      source: { seq: '1', frameSeq: '1' },
+      element: { ref: '@e1' },
+    });
+    expect(x.f.submitted).toHaveLength(0);
+    await x.flush(() =>
+      x.host.dispatchEvent(
+        new x.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(x.host.querySelector('img')?.src).toContain('/9j/3Q==');
+    expect(x.f.submitted).toHaveLength(0);
+    const scope = { ...browserScope, sessionId: 'other', viewSelection: 2 };
+    x.f.scope = scope;
+    await x.render(true, true, scope);
+    expect(x.host.querySelector('.agent-browser-note')).toBeNull();
+    expect(x.host.querySelectorAll('.agent-browser-region')).toHaveLength(0);
+  } finally {
     await x.cleanup();
   }
 });

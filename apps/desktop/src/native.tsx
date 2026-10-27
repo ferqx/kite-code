@@ -41,12 +41,20 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { AgentBrowserPanel } from './agent-browser-panel';
 import {
   AgentBrowserPresentation,
   agentBrowserPresentationKeys,
 } from './agent-browser-presentation';
+import { BrowserAnnotationCards } from './browser-annotation-cards';
+import {
+  annotationReceiptRefs,
+  type BrowserDraftDocument,
+  composeBrowserDraft,
+} from './browser-annotation-content';
+import { BrowserAnnotationDrafts } from './browser-annotation-drafts';
 import type { DesktopEditor } from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
@@ -298,6 +306,32 @@ function NativeDesktopContent({
   const [directory, setDirectory] = useState<NativeDirectory>();
   const [directoryProjection] = useState(() => new NativeDirectoryProjection());
   const imageDrafts = useNativeInputImages(bridge, state?.generation, directory?.storeId);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Prepared bytes must not cross a Store boundary.
+  const browserNotes = useMemo(
+    () => new BrowserAnnotationDrafts(bridge, state?.generation),
+    [bridge, state?.generation, directory?.storeId],
+  );
+  const browserNotesRef = useRef(browserNotes);
+  browserNotesRef.current = browserNotes;
+  const noteReceipts = useRef<readonly NativeCallerMetadata[]>([]);
+  const noteRevision = useSyncExternalStore(browserNotes.subscribe, browserNotes.snapshot);
+  useEffect(() => () => browserNotes.close(), [browserNotes]);
+  const noteDraftStates = useRef(
+    new Map<
+      string,
+      { revision: number; signature?: string; uncertain?: boolean; managed?: boolean }
+    >(),
+  );
+  const noteSaveQueue = useRef(Promise.resolve());
+  const [noteSaveError, setNoteSaveErrorState] = useState({ key: '', message: '' });
+  function setNoteSaveError(message: string, key = draftOwner.current ?? '') {
+    setNoteSaveErrorState({ key, message });
+  }
+  const noteStateOwner = useRef(browserNotes);
+  if (noteStateOwner.current !== browserNotes) {
+    noteStateOwner.current = browserNotes;
+    noteDraftStates.current.clear();
+  }
   const newImageScope = imageScope(directory?.storeId, 'new-conversation');
   const [messages, setMessages] = useState<Message[]>([]);
   const childTabSequence = useRef(0);
@@ -460,6 +494,18 @@ function NativeDesktopContent({
       // Global failures and directory facts still publish while the current
       // reading stays paused until the target footer can be painted coherently.
       const value: NativeState = hold ? { ...result, selection: undefined } : result;
+      noteReceipts.current = value.callerSubmissions ?? [];
+      for (const caller of value.callerSubmissions ?? []) {
+        const key = imageScope(caller.scope.storeId, caller.scope.sessionId);
+        if (caller.draft?.browserAnnotations)
+          browserNotesRef.current.restoreBinding(
+            caller.request.commandId,
+            key,
+            caller.draft.browserAnnotations,
+            caller.phase,
+          );
+        browserNotesRef.current.settle(caller.request.commandId, caller.phase, key);
+      }
       for (const input of value.inputSubmissions)
         if (['accepted', 'applied', 'terminal'].includes(input.phase))
           consumeInputDraft(input.intent.commandId, input.intent.expectedStoreId, input.sessionId);
@@ -792,6 +838,49 @@ function NativeDesktopContent({
           setDraft(
             draftCache.current.get(imageScope(saved.storeId, sessionId))?.content ?? saved.content,
           );
+          const key = imageScope(saved.storeId, sessionId);
+          browserNotesRef.current.restore(key, saved.browserAnnotations);
+          for (const caller of noteReceipts.current)
+            if (
+              imageScope(caller.scope.storeId, caller.scope.sessionId) === key &&
+              caller.draft?.browserAnnotations
+            )
+              browserNotesRef.current.restoreBinding(
+                caller.request.commandId,
+                key,
+                caller.draft.browserAnnotations,
+                caller.phase,
+              );
+          const known = noteDraftStates.current.get(key);
+          let signature = known?.revision === saved.revision ? known.signature : undefined;
+          for (const caller of noteReceipts.current)
+            if (
+              caller.scope.storeId === saved.storeId &&
+              caller.scope.sessionId === sessionId &&
+              caller.draft?.id === saved.id &&
+              caller.draft.revision === String(saved.revision) &&
+              caller.draft.browserAnnotations &&
+              JSON.stringify(caller.draft.browserAnnotations) ===
+                JSON.stringify(annotationReceiptRefs(saved))
+            ) {
+              const restored = draftCache.current.get(key) ?? { content: saved.content };
+              if (!draftCache.current.has(key)) draftCache.current.set(key, restored);
+              submittedDrafts.current.set(caller.request.commandId, {
+                storeId: saved.storeId,
+                sessionId,
+                draft: restored.content === saved.content ? restored : { content: saved.content },
+              });
+              signature = JSON.stringify({
+                content: saved.content,
+                browserAnnotations: saved.browserAnnotations,
+                annotationImageOffset: saved.annotationImageOffset ?? 0,
+              });
+            }
+          noteDraftStates.current.set(key, {
+            revision: saved.revision,
+            signature,
+            managed: !!saved.browserAnnotations?.length || known?.managed,
+          });
           draftRevision.current = saved.revision;
         }
       }
@@ -1520,6 +1609,12 @@ function NativeDesktopContent({
     if (!submitted || submitted.storeId !== storeId || submitted.sessionId !== sessionId) return;
     submittedDrafts.current.delete(commandId);
     const key = imageScope(storeId, sessionId);
+    browserNotesRef.current.settle(commandId, 'accepted', key);
+    const savedState = noteDraftStates.current.get(key);
+    if (savedState?.signature) {
+      savedState.revision++;
+      savedState.signature = undefined;
+    }
     if (draftCache.current.get(key) !== submitted.draft) return;
     draftCache.current.set(key, { content: '' });
     if (draftOwner.current === key && selected.current === sessionId) setDraft('');
@@ -1908,22 +2003,140 @@ function NativeDesktopContent({
       }
     }, false);
   }
+  function saveBrowserDraft(
+    key: string,
+    sessionId: string,
+    document: BrowserDraftDocument,
+  ): Promise<void> {
+    const serialized = JSON.stringify(document),
+      currentGeneration = generation.current;
+    const task = async () => {
+      if (
+        !bridge ||
+        generation.current !== currentGeneration ||
+        selected.current !== sessionId ||
+        draftOwner.current !== key
+      )
+        throw Error('native_selection_changed');
+      const saved = noteDraftStates.current.get(key);
+      if (!saved || saved.uncertain) throw Error('browser_draft_save_unconfirmed');
+      if (saved.signature === serialized) return;
+      let result: NativeResult;
+      try {
+        result = await bridge.request({
+          method: 'draft.write',
+          generation: currentGeneration,
+          sessionId,
+          revision: saved.revision,
+          ...document,
+          browserAnnotations: document.browserAnnotations ?? [],
+        });
+      } catch (cause) {
+        saved.uncertain = true;
+        throw cause;
+      }
+      if (
+        !result ||
+        !('revision' in result) ||
+        !('content' in result) ||
+        result.revision !== saved.revision + 1
+      ) {
+        saved.uncertain = true;
+        throw Error('browser_draft_save_unconfirmed');
+      }
+      saved.revision = result.revision;
+      saved.managed = true;
+      saved.signature = serialized;
+      if (generation.current === currentGeneration && selected.current === sessionId)
+        draftRevision.current = result.revision;
+    };
+    const pendingSave = noteSaveQueue.current.then(task, task);
+    noteSaveQueue.current = pendingSave.catch(() => {});
+    return pendingSave;
+  }
+  const persistNoteDraft = useRef(() => {});
+  persistNoteDraft.current = () => {
+    if (!selection || !bridge) return;
+    const key = imageScope(selection.storeId, selection.session.id);
+    if (
+      selected.current !== selection.session.id ||
+      browserNotes.blocked(key) ||
+      (!browserNotes.get(key).length && !noteDraftStates.current.get(key)?.managed)
+    )
+      return;
+    try {
+      const document = {
+        content: draftCache.current.get(key)?.content ?? draft,
+        browserAnnotations: browserNotes.document(key),
+        annotationImageOffset: imageDrafts.get(key).length,
+      };
+      void saveBrowserDraft(key, selection.session.id, document).then(
+        () => setNoteSaveError('', key),
+        () => setNoteSaveError('注释草稿尚未确认保存；保留当前内容，请重新打开会话核对。', key),
+      );
+    } catch {
+      /* The next image-owner revision supplies its first verified hash. */
+    }
+  };
+  const noteSaveSignal = selection
+    ? JSON.stringify([
+        imageScope(selection.storeId, selection.session.id),
+        noteRevision,
+        draft,
+        imageDrafts.get(imageScope(selection.storeId, selection.session.id)).length,
+      ])
+    : '';
+  useEffect(() => {
+    if (!noteSaveSignal) return;
+    const timer = setTimeout(() => persistNoteDraft.current(), 500);
+    return () => clearTimeout(timer);
+  }, [noteSaveSignal]);
   function sendInput() {
     if (!bridge || !selection) return;
     const images = imageDrafts.get(imageScope(selection.storeId, selection.session.id));
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
     const draftKey = imageScope(selection.storeId, selection.session.id);
     const submittedDraft = draftCache.current.get(draftKey) ?? { content: draft };
-    const submittedText = promptTextForSend(submittedDraft.content);
+    let noteBatch: ReturnType<BrowserAnnotationDrafts['capture']>,
+      noteDocument: BrowserDraftDocument,
+      submittedText: string;
+    try {
+      noteBatch = browserNotes.capture(draftKey);
+      noteDocument = {
+        content: submittedDraft.content,
+        browserAnnotations: browserNotes.document(draftKey),
+        annotationImageOffset: images.length,
+      };
+      submittedText = composeBrowserDraft(noteDocument);
+    } catch {
+      setNoteSaveError('注释快照尚未就绪或原发送结果待核实。');
+      return;
+    }
     if (!submittedText.trim() && !images.length && !files.length) return;
     if (images.some((image) => image.loading || image.error)) return;
-    const imageIds = images.map((image) => image.id);
+    const imageIds = [
+      ...images.map((image) => image.id),
+      ...noteBatch.entries.map((item) => item.imageId),
+    ];
+    if (imageIds.length > inputImageCount) {
+      setNoteSaveError('图片与注释快照合计不能超过10张。');
+      return;
+    }
     void writeInput(async () => {
       const current = state?.generation ?? 0,
         nonce = viewIntent.current,
         sessionId = selection.session.id,
-        commandId = crypto.randomUUID(),
-        submittedRevision = draftRevision.current;
+        commandId = crypto.randomUUID();
+      if (noteBatch.entries.length || noteDraftStates.current.get(draftKey)?.managed)
+        await saveBrowserDraft(draftKey, sessionId, noteDocument);
+      const submittedRevision = draftRevision.current;
+      if (
+        current !== generation.current ||
+        nonce !== viewIntent.current ||
+        selected.current !== sessionId ||
+        (draftCache.current.get(draftKey) !== submittedDraft && draftCache.current.has(draftKey))
+      )
+        throw Error('native_selection_changed');
       draftCache.current.set(draftKey, submittedDraft);
       const intent = {
         ...nativeTextIntent(
@@ -1956,6 +2169,13 @@ function NativeDesktopContent({
           plan: planMode,
           result: undefined,
         };
+        browserNotes.bind(commandId, noteBatch);
+        if (noteBatch.entries.length)
+          submittedDrafts.current.set(commandId, {
+            storeId: selection.storeId,
+            sessionId,
+            draft: submittedDraft,
+          });
         firstRef.current = original;
         setFirstSubmission(original);
         setDraft('');
@@ -1966,7 +2186,8 @@ function NativeDesktopContent({
             generation: current,
             creation: original.creation,
             intent,
-            ...(submittedDraft.content.length > submittedText.length
+            ...(noteBatch.entries.length ? { draftDocument: noteDocument } : {}),
+            ...(!noteBatch.entries.length && submittedDraft.content.length > submittedText.length
               ? { draftLineEndings: submittedDraft.content.slice(submittedText.length) }
               : {}),
             permissionMode: original.permissionMode,
@@ -1975,9 +2196,21 @@ function NativeDesktopContent({
           });
           if (!value || !('kind' in value) || value.kind !== 'conversation' || !('stage' in value))
             throw Error('conversation_response_unknown');
+          browserNotes.settle(commandId, value.phase, draftKey);
+          if (value.phase === 'accepted')
+            consumeInputDraft(commandId, selection.storeId, sessionId);
           await acceptFirstResult(value, original, current, page);
         } catch (cause) {
           const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+          browserNotes.settle(
+            commandId,
+            ['invalid_native_request', 'native_request_too_large', 'native_sender_denied'].includes(
+              code,
+            )
+              ? 'failed'
+              : 'unknown',
+            draftKey,
+          );
           if (firstRef.current?.commandId === original.commandId) {
             setFirstSubmission({
               ...original,
@@ -2007,6 +2240,7 @@ function NativeDesktopContent({
         }
         return;
       }
+      browserNotes.bind(commandId, noteBatch);
       submittedDrafts.current.set(commandId, {
         storeId: selection.storeId,
         sessionId,
@@ -2044,6 +2278,15 @@ function NativeDesktopContent({
       } catch (cause) {
         const code =
           (cause as { code?: string; message?: string })?.code ?? (cause as Error)?.message;
+        browserNotes.settle(
+          commandId,
+          ['invalid_native_request', 'native_request_too_large', 'native_sender_denied'].includes(
+            code,
+          )
+            ? 'failed'
+            : 'unknown',
+          draftKey,
+        );
         setInputDeliveries((previous) => {
           const next = new Map(previous),
             original = next.get(commandId);
@@ -2077,6 +2320,7 @@ function NativeDesktopContent({
           });
         return next;
       });
+      browserNotes.settle(commandId, value && 'phase' in value ? value.phase : 'unknown', draftKey);
       const accepted =
         value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase);
       if (accepted) imageDrafts.removeIds([...imageIds, ...files.map((file) => file.id)]);
@@ -4247,6 +4491,19 @@ function NativeDesktopContent({
           : canCompose && selection && state
             ? {
                 draft,
+                contextHasInput:
+                  browserNotes.get(imageScope(selection.storeId, selection.session.id)).length > 0,
+                context: (
+                  <BrowserAnnotationCards
+                    owner={browserNotes}
+                    scope={imageScope(selection.storeId, selection.session.id)}
+                    error={
+                      noteSaveError.key === imageScope(selection.storeId, selection.session.id)
+                        ? noteSaveError.message
+                        : undefined
+                    }
+                  />
+                ),
                 queue: inputQueue.queue,
                 queueFocusKey,
                 scopeKey: imageScope(selection.storeId, selection.session.id),
@@ -4299,6 +4556,10 @@ function NativeDesktopContent({
                 ),
                 onPermissionChange: (mode) => void write(() => setPermissionMode(mode, false)),
                 sendDisabled:
+                  browserNotes.blocked(imageScope(selection.storeId, selection.session.id)) ||
+                  browserNotes
+                    .get(imageScope(selection.storeId, selection.session.id))
+                    .some((note) => note.status !== 'ready') ||
                   historyState.phase !== 'complete' ||
                   selection.permissionUnavailable ||
                   (firstSubmission?.creation.sessionId === selection.session.id &&
@@ -4436,6 +4697,21 @@ function NativeDesktopContent({
                               sessionId: original.sessionId,
                               revision,
                               content: draft,
+                              ...(browserNotes.get(
+                                imageScope(selection.storeId, selection.session.id),
+                              ).length ||
+                              noteDraftStates.current.get(
+                                imageScope(selection.storeId, selection.session.id),
+                              )?.signature
+                                ? {
+                                    browserAnnotations: browserNotes.document(
+                                      imageScope(selection.storeId, selection.session.id),
+                                    ),
+                                    annotationImageOffset: imageDrafts.get(
+                                      imageScope(selection.storeId, selection.session.id),
+                                    ).length,
+                                  }
+                                : {}),
                             });
                             if (
                               saved &&
@@ -4486,7 +4762,7 @@ function NativeDesktopContent({
                   canInvoke={selection.canInvokeExtensions === true}
                   visible={!settingsOpen}
                   submissions={state.callerSubmissions}
-                  onQuote={(quote) => {
+                  onAnnotate={(capture) => {
                     if (
                       generation.current !== state.generation ||
                       selected.current !== selection.session.id
@@ -4494,8 +4770,8 @@ function NativeDesktopContent({
                       return;
                     const key = imageScope(selection.storeId, selection.session.id);
                     if (draftOwner.current !== key) return;
-                    const previous = draftCache.current.get(key)?.content ?? draft;
-                    changeDraft(`${previous}${previous ? '\n\n' : ''}${quote}`);
+                    if (!noteDraftStates.current.has(key)) throw Error('browser_draft_not_loaded');
+                    browserNotes.add(key, capture);
                   }}
                 />
               ),

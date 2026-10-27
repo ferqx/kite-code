@@ -15,13 +15,39 @@ import { mock } from 'bun:test';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import * as actualFS from 'node:fs';
+import * as actualPromises from 'node:fs/promises';
 import * as actualNet from 'node:net';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync, existsSync, statSync, symlinkSync, rmSync, truncateSync, readdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync, existsSync, statSync, symlinkSync, rmSync, truncateSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+const hostPlatform = process.platform;
+const temporary = hostPlatform === 'darwin' ? '/private/tmp' : tmpdir();
 Object.defineProperty(process, 'platform', { value: 'linux' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
-const base = mkdtempSync(join(tmpdir(), 'ab-test-'));
+const base = realpathSync(mkdtempSync(join(temporary, 'ab-test-')));
+// This is a Linux transport fixture. On Darwin emulate its proc-fd paths over
+// real fixture directories; this does not qualify native Linux or Darwin I/O.
+if (hostPlatform === 'darwin') {
+  const openDirectory = actualPromises.open;
+  const readDirectory = actualPromises.opendir;
+  const inspectEntry = actualPromises.lstat;
+  const directories = new Map();
+  const anchored = path => {
+    const match = /^\\/proc\\/self\\/fd\\/(\\d+)(\\/.*)?$/.exec(path);
+    return match && directories.has(Number(match[1]))
+      ? directories.get(Number(match[1])) + (match[2] ?? '') : path;
+  };
+  mock.module('node:fs/promises', () => ({ ...actualPromises,
+    async open(path, ...args) {
+      const resolved = anchored(path);
+      const handle = await openDirectory(resolved, ...args);
+      directories.set(handle.fd, resolved);
+      return handle;
+    },
+    opendir: (path, ...args) => readDirectory(anchored(path), ...args),
+    lstat: (path, ...args) => inspectEntry(anchored(path), ...args),
+  }));
+}
 process.env.AGENT_BROWSER_CDP = 'http://untrusted/';
 process.env.AGENT_BROWSER_PLUGINS = 'untrusted';
 process.env.AWS_SECRET_ACCESS_KEY = 'must not inherit';
@@ -171,7 +197,7 @@ mock.module(${JSON.stringify(owned)}, () => ({
 const {createNativeBrowserTransport,BrowserTransportError,nativeBrowserUnavailableReason}=await import(${JSON.stringify(native)});
 assert.equal(starts,0,'cold import must not spawn');
 assert.equal(nativeBrowserUnavailableReason(),undefined,'eligible passive probe');
-for(const platform of ['darwin','win32']){
+for(const platform of ['win32']){
   Object.defineProperty(process,'platform',{value:platform});
   assert.equal(nativeBrowserUnavailableReason(),'browser_native_platform_unavailable');
 }
@@ -181,10 +207,13 @@ const options={executable:process.execPath,browserPath:process.execPath,linux:{b
 const context=()=>({sessionId:'session',executionId:'execution',signal:new AbortController().signal});
 const signal=()=>new AbortController().signal;
 async function start(mode={}){scenario=mode;const transport=createNativeBrowserTransport(options,context());await transport.ready;return transport;}
-for(const platform of ['darwin','win32']){
+for(const platform of ['win32']){
   Object.defineProperty(process,'platform',{value:platform});
   assert.throws(()=>createNativeBrowserTransport(options,context()),/browser_native_platform_unavailable/);
 }
+Object.defineProperty(process,'platform',{value:'darwin'});
+assert.equal(nativeBrowserUnavailableReason(),undefined,'Darwin has a distinct supervised owner');
+assert.throws(()=>createNativeBrowserTransport(options,context()),/browser_native_asset_unavailable/,'Darwin never falls back to Linux assets');
 Object.defineProperty(process,'platform',{value:'linux'});
 Object.defineProperty(process,'arch',{value:'ia32'});
 assert.throws(()=>createNativeBrowserTransport(options,context()),/browser_native_platform_unavailable/);

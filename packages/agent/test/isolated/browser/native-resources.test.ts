@@ -35,11 +35,12 @@ const assert = new Proxy(realAssert, { get(target, key) {
   return typeof value === 'function' ? (...args) => { assertions++; return value(...args); } : value;
 }});
 const fault = ${JSON.stringify(fault)};
+const temporary = process.platform === 'darwin' ? '/private/tmp' : tmpdir();
 Object.defineProperty(process, 'platform', { value: 'linux' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
 Object.defineProperty(process, 'geteuid', { value: () => 1000 });
 delete process.env.CI;
-const base = fs.mkdtempSync(join(tmpdir(), 'ab-res-'));
+const base = fs.realpathSync(fs.mkdtempSync(join(temporary, 'ab-res-')));
 const originalLstat = fs.lstatSync, originalOpen = fs.openSync;
 const originalRead = fs.readSync, originalClose = fs.closeSync;
 let cgroupPosition = 0, starts = 0, current;

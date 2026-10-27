@@ -5,6 +5,7 @@ import {
   validateRequest,
 } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { composeBrowserDraft, readBrowserAnnotations } from '../src/browser-annotation-content';
 import type { DesktopEditor } from '../src/file-changes-bridge';
 import { inputImageCount } from '../src/input-images-bridge';
 import {
@@ -143,6 +144,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
     'creation',
     'intent',
     'draftLineEndings',
+    'draftDocument',
     'permissionMode',
     'targetBranch',
     'imageIds',
@@ -225,7 +227,13 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   lookupPermission: ['commandId'],
   lookupInteraction: ['commandId'],
   'draft.read': ['sessionId'],
-  'draft.write': ['sessionId', 'revision', 'content'],
+  'draft.write': [
+    'sessionId',
+    'revision',
+    'content',
+    'browserAnnotations',
+    'annotationImageOffset',
+  ],
   'permission.mode': ['observationId', 'mode', 'makeDefault'],
   'permission.trust': ['observationId', 'trusted'],
   'permission.refresh': [],
@@ -681,6 +689,26 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     (typeof input.afterId !== 'string' || !/^[0-9a-f]{64}$/.test(input.afterId))
   )
     throw Error('invalid_native_request');
+  if (
+    method === 'draft.write' &&
+    (input.browserAnnotations !== undefined || input.annotationImageOffset !== undefined)
+  ) {
+    readBrowserAnnotations(input.browserAnnotations);
+    composeBrowserDraft(input as unknown as Parameters<typeof composeBrowserDraft>[0]);
+  }
+  if (method === 'conversation.send' && input.draftDocument !== undefined) {
+    const doc = input.draftDocument;
+    if (
+      !doc ||
+      typeof doc !== 'object' ||
+      Array.isArray(doc) ||
+      Object.keys(doc).some(
+        (key) => !['content', 'browserAnnotations', 'annotationImageOffset'].includes(key),
+      )
+    )
+      throw Error('invalid_native_request');
+    composeBrowserDraft(doc as Parameters<typeof composeBrowserDraft>[0]);
+  }
   if (method === 'draft.write' && typeof input.content !== 'string')
     throw Error('invalid_native_request');
   const resourceId = (value: unknown) =>
