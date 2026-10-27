@@ -1,14 +1,22 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { createWriteStream, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  createWriteStream,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { CDPSession } from 'playwright';
 import { _electron } from 'playwright';
 import type { MixedShellLedger } from '../../service/test/isolated/multi-session-shell-load.shared';
 import type { NativeBackgroundPage } from '../src/background-bridge';
 import type { NativeJobOutputPage } from '../src/job-output-bridge';
 import type { NativeState } from '../src/native-bridge';
 import { collectNativeGpuMemory } from './native-gpu-memory.fixture';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 type ProviderStatus = {
   calls: string[];
@@ -44,6 +52,7 @@ const app = await _electron.launch({
 });
 let phase = 'launch',
   servicePid: number | undefined;
+let cpuProfiler: CDPSession | undefined;
 const diagnostics: string[] = [];
 app.process().stderr?.on('data', (value) => diagnostics.push(String(value).slice(0, 400)));
 const percentile = (values: number[], p: number) =>
@@ -52,6 +61,14 @@ try {
   await (async () => {
     const page = await app.firstWindow();
     page.setDefaultTimeout(15000);
+    await app.evaluate(({ app, BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.show();
+      app.focus({ steal: true });
+      window.focus();
+    });
+    await page.bringToFront();
+    await page.waitForFunction(() => document.hasFocus());
     page.on('pageerror', (error) => diagnostics.push(error.message));
     const desktopEnvironment = await app.evaluate(({ app, BrowserWindow, screen }) => {
       const window = BrowserWindow.getAllWindows()[0]!;
@@ -253,7 +270,38 @@ try {
         ? page.locator('.session-tab-child .conversation').innerText()
         : page.locator('.history-panel .conversation').innerText();
     async function close(index: number) {
-      await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+      try {
+        await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+      } catch (cause) {
+        console.error(
+          'multi_close_geometry',
+          JSON.stringify({
+            probe: await page.evaluate(() => {
+              const button = document.querySelector('[aria-label="收起标签栏"]');
+              const box = button?.getBoundingClientRect();
+              return {
+                connected: button?.isConnected,
+                visibility: document.visibilityState,
+                focused: document.hasFocus(),
+                rect: box && [box.x, box.y, box.width, box.height],
+                animated: [...document.querySelectorAll('[data-animate-width]')].map((node) =>
+                  node.getAttribute('data-animate-width'),
+                ),
+              };
+            }),
+            window: await app.evaluate(({ BrowserWindow }) => {
+              const window = BrowserWindow.getAllWindows()[0]!;
+              return {
+                focused: window.isFocused(),
+                visible: window.isVisible(),
+                minimized: window.isMinimized(),
+                bounds: window.getBounds(),
+              };
+            }),
+          }),
+        );
+        throw cause;
+      }
       await until(
         () => page.locator('.session-tab-child').count(),
         (value) => value === 0,
@@ -270,12 +318,14 @@ try {
         .waitFor();
     }
     phase = 'start-four-roots';
+    console.log(JSON.stringify({ phase, time: Date.now() }));
     for (let index = 0; index < 4; index++) {
       await select(index);
       await authorize();
       await page
         .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
         .fill(`MULTI_ROOT_${index}`);
+      await selectNativeFixtureModel(page, 'fixture');
       const send = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
       await until(() => send.isEnabled(), Boolean, 'root send enabled');
       await send.click();
@@ -569,7 +619,7 @@ try {
     const rootBefore = (await provider()).active.find((row) => row.marker === 'ROOT_0')!.tick;
     const rootStarted = Date.now();
     await until(
-      content,
+      () => page.locator('.history-panel .conversation').innerText(),
       (value) => value.includes(`ROOT_0_TICK_${rootBefore + 1}`),
       'main Agent live prefix grows without explicit refresh',
     );
@@ -611,7 +661,27 @@ try {
       'read cancellation leaves every business stream running',
     );
     const cdp = await page.context().newCDPSession(page);
+    const measurementWindows: {
+      stage: string;
+      operation: string;
+      start: number;
+      end: number;
+    }[] = [];
+    const measured = async <T>(stage: string, operation: string, read: () => Promise<T>) => {
+      const start = await page.evaluate(() => performance.now());
+      try {
+        return await read();
+      } finally {
+        measurementWindows.push({
+          stage,
+          operation,
+          start,
+          end: await page.evaluate(() => performance.now()),
+        });
+      }
+    };
     const sample = async (stage: string) => {
+      const sampleStarted = await page.evaluate(() => performance.now());
       const snapshotBarrier = {
         deferredChanges: 0,
         elapsedMs: 0,
@@ -684,7 +754,9 @@ try {
                 requestAnimationFrame(() => requestAnimationFrame(() => queueMicrotask(resolve))),
               ),
           );
-          await cdp.send('HeapProfiler.collectGarbage');
+          await measured(stage, 'collectGarbage-first', () =>
+            cdp.send('HeapProfiler.collectGarbage'),
+          );
           const firstGcDom = await cdp.send('Memory.getDOMCounters');
           // Chromium's weak handle callbacks can finish on the next task. Sample
           // every checkpoint after the same two-pass GC, keeping the original
@@ -698,7 +770,9 @@ try {
                 ),
               ),
           );
-          await cdp.send('HeapProfiler.collectGarbage');
+          await measured(stage, 'collectGarbage-second', () =>
+            cdp.send('HeapProfiler.collectGarbage'),
+          );
           const heap = await cdp.send('Runtime.getHeapUsage'),
             dom = await cdp.send('Memory.getDOMCounters');
           const connectedNodes = await page.evaluate(() => {
@@ -707,6 +781,70 @@ try {
             while (walker.nextNode()) count++;
             return count;
           });
+          const cacheGroup = `native-cache-${stage}`;
+          const cachePrototype = await cdp.send('Runtime.evaluate', {
+            expression: 'HTMLDivElement.prototype',
+            objectGroup: cacheGroup,
+          });
+          const cacheObjects = await measured(stage, 'queryObjects', () =>
+            cdp.send('Runtime.queryObjects', {
+              prototypeObjectId: cachePrototype.result.objectId!,
+              objectGroup: cacheGroup,
+            }),
+          );
+          const cacheSummary = await cdp.send('Runtime.callFunctionOn', {
+            objectId: cacheObjects.objects.objectId!,
+            returnByValue: true,
+            functionDeclaration: `function() {
+              const count = node => { const walker = document.createTreeWalker(node, NodeFilter.SHOW_ALL); let n = 1; while (walker.nextNode()) n++; return n; };
+              return this.filter(node => node.classList.contains('conversation-cache-container')).map(node => {
+                const roots = [...new Set([...node.querySelectorAll('[data-conversation-entry-key]')].flatMap(entry => [...entry.getAttribute('data-conversation-entry-key').matchAll(/"(root-[0-3])"/g)].map(match => match[1])))];
+                const ticks = [...node.querySelectorAll('article.message.assistant .typeset p')].filter(p => /^ROOT_[0-3]_TICK_[0-9]+$/.test(p.textContent) && p.closest('.conversation-cache-container') === node);
+                return { roots, connected: node.isConnected, nodes: count(node), ticks: ticks.map(p => p.textContent), tickNodes: ticks.reduce((total, p) => total + count(p), 0) };
+              });
+            }`,
+          });
+          await cdp.send('Runtime.releaseObjectGroup', { objectGroup: cacheGroup });
+          const cacheRows = cacheSummary.result.value as {
+            roots: string[];
+            connected: boolean;
+            nodes: number;
+            ticks: string[];
+            tickNodes: number;
+          }[];
+          assert.ok(Array.isArray(cacheRows));
+          assert.ok(
+            cacheRows.length <= 9,
+            'retained portal containers stay within eight inactive plus the active tree',
+          );
+          const cacheRoots = cacheRows.flatMap((row) => row.roots);
+          assert.equal(
+            new Set(cacheRoots).size,
+            cacheRoots.length,
+            'one retained body tree per original root',
+          );
+          assert.ok(cacheRoots.length <= 4);
+          for (const row of cacheRows) {
+            assert.ok(row.roots.length <= 1);
+            if (row.roots.length === 1)
+              assert.ok(
+                row.ticks.length > 0,
+                'owned live root body tick measurement must be present',
+              );
+            assert.equal(
+              new Set(row.ticks).size,
+              row.ticks.length,
+              'cached ticks are not duplicated',
+            );
+            for (const tick of row.ticks)
+              assert.ok(
+                tick.startsWith(`ROOT_${row.roots[0]?.slice(-1)}_TICK_`),
+                'cached tick belongs to its original root',
+              );
+          }
+          const ownedDetachedTickNodes = cacheRows
+            .filter((row) => !row.connected && row.roots.length === 1)
+            .reduce((total, row) => total + row.tickNodes, 0);
           const processRow = execFileSync(
             '/bin/ps',
             ['-p', String(servicePid), '-o', '%cpu=,rss='],
@@ -773,6 +911,9 @@ try {
             listeners: dom.jsEventListeners,
             connectedNodes,
             retainedOutsideDocumentNodes: dom.nodes - connectedNodes,
+            cacheRows,
+            ownedDetachedTickNodes,
+            structuralRetainedNodes: dom.nodes - connectedNodes - ownedDetachedTickNodes,
             serviceCpuPercent: processRow[0],
             serviceRssKiB: processRow[1],
             serviceTreeProcesses: serviceProcesses.length,
@@ -823,6 +964,12 @@ try {
         'released snapshot notices finish UI calibration',
       );
       snapshotBarrier.postReleaseSettledMs = Date.now() - releasedAt;
+      measurementWindows.push({
+        stage,
+        operation: 'whole-sample',
+        start: sampleStarted,
+        end: await page.evaluate(() => performance.now()),
+      });
       return {
         ...snapshot,
         ...(memoryDirectory ? { memoryCensus: await collectMemory(stage) } : {}),
@@ -847,14 +994,59 @@ try {
       });
       global.multiLongTaskObserver.observe({ type: 'longtask' });
     });
+    let navigationTrace: Promise<string> | undefined;
+    const startNavigationTrace = async () => {
+      navigationTrace = new Promise((resolve, reject) => {
+        cdp.once('Tracing.tracingComplete', (event) => {
+          if (event.stream) resolve(event.stream);
+          else reject(Error('navigation_trace_stream_missing'));
+        });
+      });
+      await cdp.send('Tracing.start', {
+        transferMode: 'ReturnAsStream',
+        traceConfig: {
+          recordMode: 'recordUntilFull',
+          traceBufferSizeInKb: 4096,
+          includedCategories: ['devtools.timeline', 'blink.user_timing'],
+          excludedCategories: ['*'],
+        },
+      });
+      const start = await page.evaluate(
+        () => performance.mark('kite-native-navigation-trace-start').startTime,
+      );
+      measurementWindows.push({ stage: 'trace', operation: 'trace-start', start, end: start });
+    };
     if (measurement === 'profile') {
+      cpuProfiler = cdp;
       await cdp.send('Profiler.enable');
       await cdp.send('Profiler.setSamplingInterval', { interval: 1000 });
       await cdp.send('Profiler.start');
     }
     const navigation: number[] = [],
       samples: Awaited<ReturnType<typeof sample>>[] = [];
+    const saveNavigationTrace = async () => {
+      if (!navigationTrace) return;
+      await cdp.send('Tracing.end');
+      const traceStream = await navigationTrace;
+      navigationTrace = undefined;
+      const path = join(root!, 'navigation.trace.json');
+      writeFileSync(path, '');
+      let traceBytes = 0;
+      try {
+        for (;;) {
+          const chunk = await cdp.send('IO.read', { handle: traceStream, size: 1024 * 1024 });
+          const bytes = Buffer.from(chunk.data, chunk.base64Encoded ? 'base64' : 'utf8');
+          traceBytes += bytes.length;
+          appendFileSync(path, bytes);
+          if (traceBytes > 64 * 1024 * 1024) throw Error('navigation_trace_byte_limit');
+          if (chunk.eof) break;
+        }
+      } finally {
+        await cdp.send('IO.close', { handle: traceStream });
+      }
+    };
     phase = '120-cross-root-child-navigations';
+    console.log(JSON.stringify({ phase, time: Date.now() }));
     for (let round = 0; round < 120; round++) {
       const index = round % 4,
         child = Math.floor(round / 4) % 3,
@@ -880,10 +1072,14 @@ try {
       if (round % 2 === 0) await close(index);
       // Odd iterations switch directly from a child to another root on the next round.
       navigation.push(Date.now() - started);
+      if (round % 20 === 19)
+        console.log(JSON.stringify({ phase, completed: round + 1, time: Date.now() }));
       if ([19, 59, 119].includes(round)) {
         if (round % 2) await close(index);
         samples.push(await sample(`checkpoint-${round + 1}`));
       }
+      if (measurement === 'profile' && round === 19) await startNavigationTrace();
+      if (round === 39) await saveNavigationTrace();
     }
     if (await page.locator('.session-tab-child').count()) await close(3);
     if (measurement === 'profile') {
@@ -892,6 +1088,7 @@ try {
         join(tmpdir(), 'kite-native-multi-session-navigation.cpuprofile'),
         JSON.stringify(profile),
       );
+      await saveNavigationTrace();
       writeFileSync(
         join(tmpdir(), 'kite-native-multi-session-longtasks.json'),
         JSON.stringify(
@@ -905,14 +1102,15 @@ try {
     const settled = await sample('settled'),
       reading = await metrics(),
       beforeStops = await provider();
-    const longTasks = await page.evaluate(() => {
+    const longTaskEntries = await page.evaluate(() => {
       const global = globalThis as unknown as {
-        multiLongTasks: number[];
+        multiLongTaskEntries: { startTime: number; duration: number }[];
         multiLongTaskObserver: PerformanceObserver;
       };
       global.multiLongTaskObserver.disconnect();
-      return [...global.multiLongTasks];
+      return [...global.multiLongTaskEntries];
     });
+    const longTasks = longTaskEntries.map((entry) => entry.duration);
     assert.equal(beforeStops.active.length, 16);
     assert.deepEqual(
       beforeStops.calls,
@@ -948,7 +1146,7 @@ try {
       ),
     );
     if (
-      settled.retainedOutsideDocumentNodes >= samples[0]!.retainedOutsideDocumentNodes + 400 ||
+      settled.structuralRetainedNodes >= samples[0]!.structuralRetainedNodes + 400 ||
       settled.listeners >= samples[0]!.listeners + 30
     ) {
       const heapFile = createWriteStream(`${evidence}-retained.heapsnapshot`);
@@ -993,9 +1191,11 @@ try {
     );
     // Raw DOM is expected to grow with the deliberately appended live Markdown
     // paragraphs. Keep the original 400-node retention allowance after subtracting
-    // the current connected document, and retain both raw counts in the evidence.
+    // the current document and exact unique TICK paragraphs in the documented
+    // detached root caches. Cache chrome, empty/unknown trees and all other
+    // detached nodes still consume the same 400-node structural allowance.
     assert.ok(
-      settled.retainedOutsideDocumentNodes < samples[0]!.retainedOutsideDocumentNodes + 400,
+      settled.structuralRetainedNodes < samples[0]!.structuralRetainedNodes + 400,
       `retained DOM excess grew: raw ${samples[0]!.nodes}→${settled.nodes}, connected ${samples[0]!.connectedNodes}→${settled.connectedNodes}, excess ${samples[0]!.retainedOutsideDocumentNodes}→${settled.retainedOutsideDocumentNodes}`,
     );
     assert.ok(settled.listeners < samples[0]!.listeners + 30);
@@ -1269,6 +1469,8 @@ try {
         count: longTasks.length,
         p95Ms: percentile(longTasks, 0.95),
         maximumMs: Math.max(0, ...longTasks),
+        entries: longTaskEntries,
+        measurementWindows,
       },
       samples,
       settled,
@@ -1335,6 +1537,37 @@ try {
   console.error('native_multi_stream_failed', phase, cause, diagnostics.slice(-12));
   const page = await app.firstWindow().catch(() => undefined);
   if (page) {
+    if (measurement === 'profile')
+      console.error(
+        'multi_reveal_costs',
+        JSON.stringify(
+          await page.evaluate(
+            () =>
+              (globalThis as typeof globalThis & { multiRevealCosts?: unknown }).multiRevealCosts,
+          ),
+        ),
+      );
+    if (measurement === 'profile') {
+      try {
+        const rendererPid = await app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]!.webContents.getOSProcessId(),
+        );
+        try {
+          execFileSync(
+            '/usr/bin/sample',
+            [String(rendererPid), '1', '1', '-file', join(root!, 'renderer.sample.txt')],
+            { timeout: 5000, stdio: 'pipe' },
+          );
+        } catch (error) {
+          console.error('multi_failure_native_sample_unavailable', error);
+        }
+        if (!cpuProfiler) throw Error('multi_cpu_profile_not_started');
+        const { profile } = await cpuProfiler.send('Profiler.stop');
+        writeFileSync(join(root!, 'failure.cpuprofile'), JSON.stringify(profile));
+      } catch (error) {
+        console.error('multi_failure_profile_unavailable', error);
+      }
+    }
     await page
       .screenshot({ path: join(root!, 'failure.png'), fullPage: true })
       .catch(() => undefined);

@@ -44,6 +44,110 @@ const alive = (pid: number) => {
 const percentile = (values: number[], p: number) =>
   [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * p))] ??
   0;
+type ModelProofRow = {
+  id: string;
+  session_id: string;
+  run_id: string;
+  adapter_id: string;
+  definition_version: string;
+  origin_store_id: string;
+  origin_command_id: string;
+  root_work_command_id: string;
+  state: string;
+  dispatched: number;
+  dispatch_authorization_json: string | null;
+  result_json: string;
+  decision_source_json: string;
+};
+function provePendingInputRecomputation(
+  db: Database,
+  executionId: string,
+  expectedStoreId: string,
+) {
+  const original = db.query('SELECT * FROM execution WHERE id=?').get(executionId) as ModelProofRow;
+  expect(original.origin_store_id).toBe(expectedStoreId);
+  expect(original.state).toBe('failed');
+  expect(original.dispatched).toBe(0);
+  expect(original.dispatch_authorization_json).toBeNull();
+  expect(JSON.parse(original.result_json)).toEqual({
+    code: 'input_pending',
+    incomplete: true,
+    content: '',
+    reasoning: '',
+  });
+  const events = (id: string, type: string) =>
+    db
+      .query('SELECT cursor FROM change_event WHERE object_id=? AND type=? ORDER BY cursor')
+      .all(id, type) as { cursor: number }[];
+  expect(events(executionId, 'execution.dispatching')).toEqual([]);
+  const finished = events(executionId, 'execution.finished');
+  expect(finished).toHaveLength(1);
+  const originalSource = JSON.parse(original.decision_source_json) as {
+    sourceIds: string[];
+    continuation: { contextSelectionId: string };
+  };
+  const successors = db
+    .query(
+      "SELECT * FROM execution WHERE run_id=? AND session_id=? AND origin_store_id=? AND origin_command_id=? AND root_work_command_id=? AND adapter_id=? AND definition_version=? AND kind='model' AND state='succeeded' AND dispatched=1 AND id<>?",
+    )
+    .all(
+      original.run_id,
+      original.session_id,
+      original.origin_store_id,
+      original.origin_command_id,
+      original.root_work_command_id,
+      original.adapter_id,
+      original.definition_version,
+      executionId,
+    ) as ModelProofRow[];
+  for (const successor of successors) {
+    const planned = events(successor.id, 'execution.planned');
+    if (planned.length !== 1 || planned[0]!.cursor <= finished[0]!.cursor) continue;
+    const source = JSON.parse(successor.decision_source_json) as { sourceIds: string[] };
+    const addedReports = source.sourceIds.filter((id) => {
+      if (originalSource.sourceIds.includes(id)) return false;
+      const report = db
+        .query(
+          "SELECT c.id FROM context_snapshot c JOIN execution e ON e.id=c.execution_id WHERE c.id=? AND c.kind='result_ref' AND c.session_id=? AND c.selection_id=? AND c.origin_store_id=? AND c.result_revision=e.result_revision AND e.kind='job' AND e.adapter_id='agent/worker' AND e.session_id=? AND e.root_work_command_id=? AND e.child_session_id IS NOT NULL AND e.state IN('succeeded','cancelled')",
+        )
+        .get(
+          id,
+          original.session_id,
+          originalSource.continuation.contextSelectionId,
+          original.origin_store_id,
+          original.session_id,
+          original.root_work_command_id,
+        );
+      const included = events(id, 'context.result_included');
+      return (
+        report &&
+        included.length === 1 &&
+        included[0]!.cursor > finished[0]!.cursor &&
+        included[0]!.cursor < planned[0]!.cursor
+      );
+    });
+    if (!addedReports.length) continue;
+    const dispatched = events(successor.id, 'execution.dispatching');
+    const completed = events(successor.id, 'execution.finished');
+    expect(dispatched).toHaveLength(1);
+    expect(completed).toHaveLength(1);
+    expect(dispatched[0]!.cursor).toBeGreaterThan(planned[0]!.cursor);
+    expect(completed[0]!.cursor).toBeGreaterThan(dispatched[0]!.cursor);
+    return {
+      executionId,
+      runId: original.run_id,
+      sessionId: original.session_id,
+      reason: 'input_pending',
+      dispatchEvents: 0,
+      finishedCursor: finished[0]!.cursor,
+      successorExecutionId: successor.id,
+      successorPlannedCursor: planned[0]!.cursor,
+      successorCompletedCursor: completed[0]!.cursor,
+      addedReports,
+    };
+  }
+  throw Error(`mixed_shell_unproved_input_deferral:${executionId}`);
+}
 async function descriptors(pid: number) {
   const child = Bun.spawn(['lsof', '-a', '-p', String(pid), '-Ff'], {
     stdout: 'pipe',
@@ -273,6 +377,15 @@ for (const slots of [4, 16])
           id: 'w',
           name: 'Mixed owned load',
           rootUri: pathToFileURL(workspace).href,
+        });
+        const trust = await client.getWorkspaceTrust('w', { storeId });
+        await client.setWorkspaceTrust('w', {
+          expectedStoreId: storeId,
+          commandId: 'fixture-live-trust',
+          trusted: true,
+          ifRevision: trust.revision,
+          canonicalIdentity: trust.canonicalIdentity,
+          externalReadScopeDigest: trust.externalReadScopeDigest,
         });
         await Promise.all(
           Array.from({ length: 4 }, async (_, index) => {
@@ -645,22 +758,27 @@ for (const slots of [4, 16])
         await Promise.all(observers);
         writeFileSync(scripts.finishPath, 'finish');
         await until(() => ledgers().every((row) => row.complete), 'scripts-normal-finish');
+        let terminalViews: Awaited<ReturnType<typeof client.getView>>[] = [];
         await until(async () => {
           source.finish();
           const views = await Promise.all(
             [...labelsBySession.keys()].map((sessionId) => client.getView(sessionId)),
           );
-          return (
+          const settled =
             !source.active.size &&
             views.every((view) => view.runs.every((run) => !run.isActive)) &&
+            views
+              .flatMap((view) => view.executions)
+              .filter((row) => row.kind === 'model')
+              .every((row) =>
+                ['succeeded', 'cancelled', 'failed', 'outcome_unknown'].includes(row.status),
+              ) &&
             (
               await Promise.all([...jobsByLabel.values()].map((id) => client.getExecution(id)))
-            ).every((job) => ['succeeded', 'cancelled'].includes(job.status))
-          );
+            ).every((job) => ['succeeded', 'cancelled'].includes(job.status));
+          if (settled) terminalViews = views;
+          return settled;
         }, 'all-session-runs-drained');
-        const terminalViews = await Promise.all(
-          [...labelsBySession.keys()].map((sessionId) => client.getView(sessionId)),
-        );
         expect(source.active.size).toBe(0);
         expect(
           terminalViews.every((view) =>
@@ -672,8 +790,44 @@ for (const slots of [4, 16])
         const terminalModels = terminalViews
           .flatMap((view) => view.executions)
           .filter((execution) => execution.kind === 'model');
+        const adapterStartsPath = `${metricsPath}.model-starts.jsonl`;
+        const adapterStarts = existsSync(adapterStartsPath)
+          ? readFileSync(adapterStartsPath, 'utf8')
+              .trim()
+              .split('\n')
+              .map((line) => JSON.parse(line) as { executionId: string; sessionId: string })
+          : [];
+        const proofStore = new Database(profile.databasePath, { readonly: true });
+        let preDispatchInputDeferrals: ReturnType<typeof provePendingInputRecomputation>[];
+        try {
+          expect(adapterStarts.length).toBeGreaterThan(0);
+          for (const start of adapterStarts)
+            expect(
+              terminalModels.some(
+                (model) => model.id === start.executionId && model.sessionId === start.sessionId,
+              ),
+            ).toBe(true);
+          preDispatchInputDeferrals = terminalModels
+            .filter((model) => model.status === 'failed')
+            .map((model) => {
+              const proof = provePendingInputRecomputation(proofStore, model.id, storeId);
+              expect(adapterStarts.filter((row) => row.executionId === model.id)).toEqual([]);
+              expect(
+                adapterStarts.filter((row) => row.executionId === proof.successorExecutionId),
+              ).toEqual([{ executionId: proof.successorExecutionId, sessionId: model.sessionId }]);
+              expect(model.runId).toBe(proof.runId);
+              expect(proof.sessionId).toBe(model.sessionId);
+              return proof;
+            });
+        } finally {
+          proofStore.close();
+        }
+        const deferredIds = new Set(preDispatchInputDeferrals.map((proof) => proof.executionId));
         expect(
-          terminalModels.every((model) => ['succeeded', 'cancelled'].includes(model.status)),
+          terminalModels.every(
+            (model) =>
+              ['succeeded', 'cancelled'].includes(model.status) || deferredIds.has(model.id),
+          ),
         ).toBe(true);
         const outputProofs = [];
         for (const [label, id] of jobsByLabel) {
@@ -781,6 +935,9 @@ for (const slots of [4, 16])
               .flatMap((view) => view.runs)
               .map((run) => ({ id: run.id, status: run.status, isActive: run.isActive })),
             allModelsKnownTerminal: true,
+            allDispatchedModelsSucceededOrCancelled: true,
+            preDispatchInputDeferrals,
+            modelAdapterStarts: adapterStarts,
             providerStreams: 0,
           },
           outputProofs,

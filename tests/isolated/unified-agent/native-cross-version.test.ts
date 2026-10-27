@@ -35,8 +35,8 @@ import {
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 import {
-  COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
-  materializeCompatibleTerminalPredecessor,
+  CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
+  materializeCurrentSchemaTerminalPredecessor,
   materializeTerminalPredecessor,
   TERMINAL_PREDECESSOR_COMMIT,
 } from '../../fixtures/unified-agent/terminal-predecessor';
@@ -162,18 +162,18 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           process.platform === 'darwin'
             ? resolve(dirname(dirname(electronPath)), '../..')
             : dirname(electronPath);
-      const predecessor = await materializeCompatibleTerminalPredecessor({
+      const predecessor = await materializeCurrentSchemaTerminalPredecessor({
         root,
         repositoryRoot,
         nativeElectronDist: electronDist,
       });
       const oldNative = predecessor.nativeCandidate!;
-      expect(predecessor.provenance.commit).toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
+      expect(predecessor.provenance.commit).toBe(CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT);
       expect(predecessor.provenance.platform).toBe(process.platform);
       expect(predecessor.provenance.sourceRemoved).toBe(true);
       expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
       expect(oldNative.terminal.manifest.source.commit).toBe(
-        COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
+        CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
       );
       expect(oldNative.terminal.manifest.source.dirty).toBe(false);
       const currentHead = (
@@ -194,7 +194,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         outdir: join(root, 'current-native'),
       });
       expect(current.terminal.manifest.source.commit).toBe(currentHead);
-      expect(currentHead).not.toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
+      expect(currentHead).not.toBe(CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT);
       expect(current.terminal.manifest.productVersion).toBe(
         oldNative.terminal.manifest.productVersion,
       );
@@ -360,51 +360,21 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
                 );
                 expect(proof).toBeDefined();
                 const original = proof!.publicCommand!;
-                const receipt = original.receipt as {
-                  runId: string;
-                  humanInputCommandId: string;
-                  decisionCommandId: string;
-                  businessCommandId: string;
-                };
+                const receipt = original.receipt as { runId: string };
                 expect(original).toMatchObject({
                   status: 'applied',
                   originStoreId: originalStoreId,
                   sessionId,
-                });
-                expect(receipt).toMatchObject({ outcome: 'human_input_applied' });
-                expect(proof!.input).toMatchObject({
-                  id: receipt.humanInputCommandId,
-                  kind: 'human.input',
-                  request: {
-                    publicCommandId: original.id,
-                    content: tasks[1],
-                    originalRequest: original.request,
-                  },
-                  receipt: {
-                    state: 'decided',
-                    decisionCommandId: receipt.decisionCommandId,
-                    businessCommandId: receipt.businessCommandId,
-                  },
-                });
-                expect(proof!.decision).toMatchObject({
-                  id: receipt.decisionCommandId,
-                  kind: 'human.input.decision',
-                  status: 'applied',
-                  request: {
-                    inputCommandId: proof!.input!.id,
-                    inputDigest: proof!.input!.requestDigest,
-                    proposal: { relation: 'independent_work', purpose: 'work' },
-                  },
-                  receipt: { businessCommandId: receipt.businessCommandId },
-                });
-                expect(proof!.business).toMatchObject({
-                  id: receipt.businessCommandId,
-                  status: 'applied',
+                  kind: 'run.start',
                   rootWorkCommandId: original.id,
-                  receipt: { runId: receipt.runId },
+                  request: { kind: 'run.start', content: tasks[1] },
                 });
+                expect(proof!.input).toBeNull();
+                expect(proof!.decision).toBeNull();
+                expect(proof!.business).toBeNull();
                 expect(result.runs.find((run) => run.id === receipt.runId)).toMatchObject({
-                  originCommandId: receipt.businessCommandId,
+                  originCommandId: original.id,
+                  rootWorkCommandId: original.id,
                   status: 'completed',
                 });
                 const models = result.executions.filter(
@@ -415,7 +385,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
                   result.persistedExecutions.find((row) => row.id === models[0]!.id)!.rowJson,
                 );
                 expect(model).toMatchObject({
-                  origin_command_id: receipt.businessCommandId,
+                  origin_command_id: original.id,
                   root_work_command_id: original.id,
                   state: 'succeeded',
                 });
@@ -423,17 +393,17 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
                   (message) =>
                     message.role === 'user' &&
                     message.runId === receipt.runId &&
-                    message.sourceIds?.includes(receipt.businessCommandId),
+                    message.sourceIds?.includes(original.id),
                 );
                 expect(user).toMatchObject({
                   content: tasks[1],
-                  sourceIds: [receipt.businessCommandId],
+                  sourceIds: [original.id],
                 });
                 expect(
                   JSON.parse(
                     result.persistedMessages.find((row) => row.id === user!.id)!.sourceJson,
                   ),
-                ).toMatchObject({ content: tasks[1], sourceIds: [receipt.businessCommandId] });
+                ).toMatchObject({ content: tasks[1], sourceIds: [original.id] });
               }
               expect(
                 result.commands.every(
@@ -969,7 +939,16 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
               .all()
               .map((row) => row.id),
           ).toEqual(
-            boundary === 'schema' ? ['0001-baseline', '0002-recovery-audit'] : ['0001-baseline'],
+            boundary === 'schema'
+              ? [
+                  '0001-baseline',
+                  '0002-recovery-audit',
+                  '0003-session-reconciliation',
+                  '0004-pending-input-order',
+                  '0005-authorization-check',
+                  '0006-input-file-imports',
+                ]
+              : ['0001-baseline'],
           );
         } finally {
           database.close(true);

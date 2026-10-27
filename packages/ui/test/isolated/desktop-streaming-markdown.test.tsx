@@ -4,6 +4,7 @@ import { Activity, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConversationActivityContext } from '../../src/conversation-activity';
 import { MessageContent } from '../../src/desktop/MessageContent';
+import { StreamingTextReveal } from '../../src/desktop/streaming-text-reveal';
 
 type Fiber = {
   type?: { name?: string };
@@ -34,8 +35,8 @@ async function fixture() {
   })) as unknown as typeof window.matchMedia;
   const reveals: { text: string; delay: number }[] = [];
   class TextHighlight {
-    readonly range: Range;
-    constructor(range: Range) {
+    readonly range: AbstractRange;
+    constructor(range: AbstractRange) {
       this.range = range;
     }
   }
@@ -54,7 +55,14 @@ async function fixture() {
       const now = Number(
         highlight.range.startContainer.parentElement?.style.getPropertyValue('--kite-reveal-time'),
       );
-      reveals.push({ text: highlight.range.toString(), delay: at - now });
+      expect(highlight.range.startContainer).toBe(highlight.range.endContainer);
+      reveals.push({
+        text: (highlight.range.startContainer as Text).data.slice(
+          highlight.range.startOffset,
+          highlight.range.endOffset,
+        ),
+        delay: at - now,
+      });
     }
     return originalSet.call(this, name, highlight);
   };
@@ -258,8 +266,18 @@ test('paint reveal keeps a single continuous text node and preserves a selection
     expect(span.firstChild).toBe(node);
     expect(selection.toString()).toBe('office');
     expect(f.highlights.size).toBeGreaterThan(0);
+    const scopes = [...span.classList].filter((name) => name.startsWith('kite-reveal-'));
+    expect(scopes).toHaveLength(1);
+    const rules = [...f.dom.window.document.head.querySelectorAll('style')].flatMap((style) =>
+      style.textContent!.split('\n'),
+    );
+    expect(rules.length).toBe(f.highlights.size);
+    expect(
+      rules.every((rule) => rule.startsWith(`:where(.${scopes[0]})::highlight(${scopes[0]}-`)),
+    ).toBe(true);
     for (const animation of f.animations) animation.onfinish?.();
     expect(f.highlights.size).toBe(0);
+    expect(span.classList.contains(scopes[0]!)).toBe(false);
     expect(f.dom.window.document.head.querySelectorAll('style')).toHaveLength(0);
   } finally {
     await f.close();
@@ -299,7 +317,141 @@ test('a large append reveals whole graphemes individually in bounded source orde
       ),
     ).toEqual([]);
     expect(f.reveals.at(-1)!.delay).toBeLessThanOrEqual(180.000001);
+    expect(
+      [...f.highlights.values()].every(
+        (highlight) => highlight.range instanceof f.dom.window.StaticRange,
+      ),
+    ).toBe(true);
     expect(f.host.textContent).toBe(`历史正文${appended} 结束`);
+  } finally {
+    await f.close();
+  }
+});
+
+test('missing static paint ranges retain complete text without creating live paint ranges', async () => {
+  const f = await fixture();
+  try {
+    Object.defineProperty(f.dom.window, 'StaticRange', { value: undefined });
+    await f.render('原文');
+    await f.render('原文，完整新文字🙂');
+    expect(f.host.textContent).toBe('原文，完整新文字🙂');
+    expect(f.host.querySelector('p > span')?.childNodes).toHaveLength(1);
+    expect(f.animations).toHaveLength(0);
+    expect(f.highlights.size).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('queued appends retain source order and pending paint is revoked by correction, hiding, reduced motion or disposal', async () => {
+  const f = await fixture();
+  const span = f.host.appendChild(f.dom.window.document.createElement('span'));
+  const reveal = new StreamingTextReveal(span);
+  try {
+    reveal.update('old', undefined, 0, 18);
+    reveal.update('oldab', 3, 0, 18);
+    reveal.update('oldabcd', 5, 0, 18);
+    expect(span.textContent).toBe('oldabcd');
+    expect(f.highlights.size).toBe(0);
+    await Promise.resolve();
+    expect(f.reveals.map((item) => item.text)).toEqual(['a', 'b', 'c', 'd']);
+    expect(f.reveals.map((item) => item.delay)).toEqual([0, 18, 36, 54]);
+    f.animations.at(-1)!.onfinish?.();
+    reveal.update('oldabcde', 7, 0, 18);
+    reveal.update('corrected', undefined, 0, 18);
+    await Promise.resolve();
+    expect(span.textContent).toBe('corrected');
+    expect(f.highlights.size).toBe(0);
+    reveal.update('correctedx', 9, 0, 18);
+    span.hidden = true;
+    await Promise.resolve();
+    expect(f.highlights.size).toBe(0);
+    span.hidden = false;
+    reveal.update('correctedxy', 10, 0, 18);
+    f.reduce(true);
+    await Promise.resolve();
+    expect(f.highlights.size).toBe(0);
+    f.reduce(false);
+    reveal.update('correctedxyz', 11, 0, 18);
+    reveal.dispose();
+    await Promise.resolve();
+    expect(span.textContent).toBe('correctedxyz');
+    expect(f.animations).toHaveLength(1);
+    expect(f.highlights.size).toBe(0);
+    expect(f.listeners.size).toBe(0);
+  } finally {
+    reveal.dispose();
+    await f.close();
+  }
+});
+
+test('discarding a hidden queued owner waits until the remaining color reads finish', async () => {
+  const f = await fixture();
+  const spans = [
+    f.host.appendChild(f.dom.window.document.createElement('span')),
+    f.host.appendChild(f.dom.window.document.createElement('span')),
+  ];
+  const owners = spans.map((span) => new StreamingTextReveal(span));
+  try {
+    for (const owner of owners) owner.update('old', undefined, 0, 18);
+    owners[0]!.update('olda', 3, 0, 18);
+    await Promise.resolve();
+    const events: string[] = [];
+    const originalRead = f.dom.window.getComputedStyle.bind(f.dom.window);
+    f.dom.window.getComputedStyle = ((...args: Parameters<typeof originalRead>) => {
+      events.push('read');
+      return originalRead(...args);
+    }) as typeof f.dom.window.getComputedStyle;
+    const originalDelete = f.highlights.delete.bind(f.highlights);
+    f.highlights.delete = (name) => {
+      events.push('delete');
+      return originalDelete(name);
+    };
+    owners[0]!.update('oldab', 4, 0, 18);
+    spans[0]!.hidden = true;
+    owners[1]!.update('oldc', 3, 0, 18);
+    await Promise.resolve();
+    expect(events[0]).toBe('read');
+    expect(events).toContain('delete');
+    expect(
+      [...f.highlights.values()].map((highlight) =>
+        (highlight.range.startContainer as Text).data.slice(
+          highlight.range.startOffset,
+          highlight.range.endOffset,
+        ),
+      ),
+    ).toEqual(['c']);
+  } finally {
+    for (const owner of owners) owner.dispose();
+    await f.close();
+  }
+});
+
+test('a complete large live prefix is static on entry and a later tick reveals only its new graphemes', async () => {
+  const f = await fixture();
+  try {
+    const initial =
+      `${'Child streaming paragraph 中文🙂 '.repeat(120)}\n\n`.repeat(28) + 'INITIAL_TAIL';
+    await f.render(initial);
+    expect(f.reveals).toEqual([]);
+    expect(f.highlights.size).toBe(0);
+    const prefix = f.host.querySelector('p > span')!.firstChild!;
+    const selection = f.dom.window.getSelection()!;
+    const selected = f.dom.window.document.createRange();
+    selected.setStart(prefix, 0);
+    selected.setEnd(prefix, 5);
+    selection.addRange(selected);
+    const tick = 'TICK_1 雪🙂';
+    await f.render(`${initial}\n\n${tick}`);
+    expect(f.host.querySelector('p > span')!.firstChild).toBe(prefix);
+    expect(selection.toString()).toBe('Child');
+    expect(f.reveals.map((item) => item.text)).toEqual(
+      Array.from(
+        new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(tick),
+        (part) => part.segment,
+      ),
+    );
+    expect(f.reveals.map((item) => item.delay)).toEqual([0, 18, 36, 54, 72, 90, 108, 126, 144]);
   } finally {
     await f.close();
   }

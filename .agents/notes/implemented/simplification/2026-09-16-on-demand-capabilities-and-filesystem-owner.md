@@ -22,7 +22,7 @@ required MCP 的全局就绪检查在用户消息已接收、模型尚未调用�
 ## 验证与回退
 Builtin catalog、Service 回归、DesktopClient/stdio Service 与真实 TUI 故障场景覆盖客户端路径。macOS 原生沙箱验证未授权 linked metadata 拒绝、已授权 exact root 只读、父目录和写入拒绝。Host/Store8 故障测试验证原 Run 恢复与不重复模型请求；其他平台与真实用户故障样本不由本机 fixture 代替。
 
-回退应回退代码变更并保留已经写入的真实结算事实，不伪造用户决定或重放未知操作。实际恢复规则与测试入口见 [Service owner](../../../../apps/kite-service/docs/runtime-application.md) 和 [Host mailbox](../../../../packages/runtime-host/docs/commands-mailbox.md)。
+回退应回退代码变更并保留已经写入的真实结算事实，不伪造用户决定或重放未知操作。实际恢复规则与测试入口见 [Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md) 和 [Host mailbox](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/docs/commands-mailbox.md)。
 
 ## Alternatives considered
 

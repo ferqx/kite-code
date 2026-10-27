@@ -12,8 +12,8 @@ import {
   verifyBeforePayloadExecution,
   verifyBootstrapArtifact,
 } from '../../scripts/release/bootstrap-verifier';
-import { buildSyntheticArtifact } from '../../scripts/release/build-artifact';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
+import { writeSyntheticArtifactFixture } from './helpers/synthetic-artifact-fixture';
 
 const roots: string[] = [];
 
@@ -117,7 +117,7 @@ describe('bootstrap release verifier', () => {
 function builtFixture(): string {
   const directory = mkdtempSync(join(tmpdir(), 'kite-bootstrap-verifier-'));
   roots.push(directory);
-  buildSyntheticArtifact({ directory });
+  writeSyntheticArtifactFixture(directory);
   return directory;
 }
 

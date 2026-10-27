@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { mcpCanonical } from '@kite-ai/agent/config';
 import type { Extension, Json, Permissions } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -201,6 +202,7 @@ async function fixture(runlessTools = false, nested = true) {
   const runtime = createRuntime({
     ...host,
     store,
+    artifacts: createArtifactStore({ profile, store }),
     permissions: fixturePermissions(host.permissions!),
     async resolveRunConfiguration(input) {
       const configuration = await host.resolveRunConfiguration!(input);
@@ -315,11 +317,11 @@ test('per-Run root, child and grandchild seal exact inherited IDs despite name c
       },
     });
     const fresh = await f.runtime.waitForCommand('fresh-followup');
-    const freshReceipt = fresh.receipt as { businessCommandId: string; runId: string };
+    const freshReceipt = fresh.receipt as { businessCommandId?: string; runId: string };
     expect(fresh.status).toBe('applied');
     const second = (await f.store.getRun(freshReceipt.runId))!;
     expect(second).toMatchObject({
-      originCommandId: freshReceipt.businessCommandId,
+      originCommandId: freshReceipt.businessCommandId ?? fresh.id,
       rootWorkCommandId: fresh.id,
       status: 'completed',
     });
@@ -328,7 +330,7 @@ test('per-Run root, child and grandchild seal exact inherited IDs despite name c
         (execution) => execution.kind === 'model' && execution.runId === second.id,
       ),
     ).toMatchObject({
-      originCommandId: freshReceipt.businessCommandId,
+      originCommandId: freshReceipt.businessCommandId ?? fresh.id,
       rootWorkCommandId: fresh.id,
     });
     expect(readSkillSelection(second.configuration)).toEqual({
@@ -346,11 +348,11 @@ test('per-Run root, child and grandchild seal exact inherited IDs despite name c
       },
     });
     const omitted = await f.runtime.waitForCommand('omitted-followup');
-    const omittedReceipt = omitted.receipt as { businessCommandId: string; runId: string };
+    const omittedReceipt = omitted.receipt as { businessCommandId?: string; runId: string };
     expect(omitted.status).toBe('applied');
     const third = (await f.store.getRun(omittedReceipt.runId))!;
     expect(third).toMatchObject({
-      originCommandId: omittedReceipt.businessCommandId,
+      originCommandId: omittedReceipt.businessCommandId ?? omitted.id,
       rootWorkCommandId: omitted.id,
       status: 'completed',
     });
@@ -359,7 +361,7 @@ test('per-Run root, child and grandchild seal exact inherited IDs despite name c
         (execution) => execution.kind === 'model' && execution.runId === third.id,
       ),
     ).toMatchObject({
-      originCommandId: omittedReceipt.businessCommandId,
+      originCommandId: omittedReceipt.businessCommandId ?? omitted.id,
       rootWorkCommandId: omitted.id,
     });
     expect(readSkillSelection(third.configuration)).toEqual({
@@ -884,9 +886,9 @@ test('real default Run and descendants keep 301 resolved Skills while unselected
     });
     expect((await f.runtime.waitForCommand('default-many')).status).toBe('applied');
     await until(
-      async () => Promise.all(f.children.map((id) => f.store.getView(id))),
+      async () => Promise.all(['s', ...f.children].map((id) => f.store.getView(id))),
       (views) =>
-        views.length === 1 && views.every((v) => v.runs.some((r) => r.status === 'completed')),
+        views.length === 2 && views.every((v) => v.runs.some((r) => r.status === 'completed')),
     );
     const run = (await f.store.getView('s')).runs.at(-1)!;
     const expected = skills.slice(0, 301).map((s) => s.id);

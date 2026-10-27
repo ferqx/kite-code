@@ -506,6 +506,29 @@ test('presentation retains only a previously complete exact tool through receipt
     await render(accepted);
     expect(host.querySelector('.tool-step-target')?.textContent).toBe(path);
 
+    expect(presentation.project('other-session', [], [], [])).toEqual([]);
+    const returned = presentation.project('scope-a', unverified, [], []);
+    expect(returned).toHaveLength(1);
+    expect(returned[0]!.target).toBe(path);
+    expect(returned[0]!.executionUnconfirmed).toBe(true);
+    await render(returned);
+    expect(host.querySelector('.file-link')).toBeNull();
+
+    const bounded = new NativeToolPresentation();
+    const bridge = {};
+    expect(
+      bounded.project('scope-a', confirmed, [fact], [], { bridge, key: 'generation/store' }),
+    ).toHaveLength(1);
+    expect(
+      bounded.project('scope-a', unverified, [], [], { bridge, key: 'new-generation/store' }),
+    ).toEqual([]);
+    expect(
+      bounded.project('scope-a', confirmed, [fact], [], { bridge, key: 'new-generation/store' }),
+    ).toHaveLength(1);
+    expect(
+      bounded.project('scope-a', unverified, [], [], { bridge: {}, key: 'new-generation/store' }),
+    ).toEqual([]);
+
     expect(
       presentation.project(
         'scope-a',

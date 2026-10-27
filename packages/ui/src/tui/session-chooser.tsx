@@ -194,7 +194,7 @@ export function TuiSessionChooser({
             shortcuts={[
               { keys: '↑↓', label: t('Select') },
               { keys: 'Enter', label: t('Confirm') },
-              { keys: 'Esc', label: t('Back') },
+              { keys: 'Esc/Ctrl+C', label: t('Keep Session') },
             ]}
           />
         }
@@ -210,11 +210,6 @@ export function TuiSessionChooser({
             {t('Original Session')} [{terminalText(deletion.sessionId)}]
           </Text>
         )}
-        <Text>
-          {t(
-            'Delete hides this Session and requests its work to stop. Workspace files stay unchanged.',
-          )}
-        </Text>
         {deletion.phase === 'reading' ? (
           <Text>{t('Reading original Session control…')}</Text>
         ) : deletion.phase === 'ready' ? (
@@ -241,7 +236,6 @@ export function TuiSessionChooser({
                 },
               ]}
             />
-            <Text>{t('Up/Down: choose · Enter: confirm · Esc/Ctrl+C: keep')}</Text>
           </>
         ) : (
           <>

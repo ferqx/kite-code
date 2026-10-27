@@ -62,24 +62,20 @@ export function sessionSwitchBridge(
     id: `run-${selected}`,
     sessionId: selected,
     isActive: options.active ?? true,
-    ...(protocol
-      ? {
-          configuration: {
-            modelId: `model-${options.sameModel ? 'a' : selected}`,
-            snapshot: {
-              version: 1,
-              digest: 'a'.repeat(64),
-              configuration: {
-                models: ['a', 'b'].map((id) => ({
-                  id: `model-${id}`,
-                  provider: 'compatible',
-                  protocol,
-                })),
-              },
-            },
-          },
-        }
-      : {}),
+    configuration: {
+      modelId: `model-${options.sameModel ? 'a' : selected}`,
+      snapshot: {
+        version: 1,
+        digest: 'a'.repeat(64),
+        configuration: {
+          models: ['a', 'b'].map((id) => ({
+            id: `model-${id}`,
+            provider: 'compatible',
+            protocol: protocol ?? 'chat-completions',
+          })),
+        },
+      },
+    },
   });
   const state = (): NativeState => ({
     generation: 1,
@@ -246,7 +242,7 @@ export function sessionSwitchBridge(
                 : {}),
               models: ['a', 'b'].map((model) => ({
                 id: `model-${model}`,
-                provider: protocol ? 'compatible' : 'fixture',
+                provider: 'compatible',
                 ...(protocol ? { protocol } : {}),
                 model: options.modelNames?.[model] ?? `Model ${model.toUpperCase()}`,
                 configured: true,

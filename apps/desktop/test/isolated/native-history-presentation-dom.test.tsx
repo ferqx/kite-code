@@ -40,7 +40,12 @@ function fixture(
   failTools = false,
   failRuns = false,
   withImage = false,
-  options: { permissionUnavailable?: boolean; missingRuns?: boolean; missingTools?: boolean } = {},
+  options: {
+    permissionUnavailable?: boolean;
+    missingRuns?: boolean;
+    missingTools?: boolean;
+    lateChild?: boolean;
+  } = {},
 ) {
   const restoreWorker = withImage ? installImagePreviewWorker() : () => {};
   const dom = new JSDOM('<div id="root"></div>', {
@@ -100,6 +105,7 @@ function fixture(
   }
   const requests: NativeRequest[] = [];
   const pending: Record<Reader, (() => void)[]> = { runs: [], tools: [] };
+  const pendingChildren: (() => void)[] = [];
   const listeners = new Set<(event: NativeEvent) => void>();
   const state = (): NativeState => ({
     generation: 1,
@@ -118,7 +124,7 @@ function fixture(
         ...session,
         id: selected,
         rootSessionId: selected,
-        nextSeq: selected === 'root' ? '6' : '2',
+        nextSeq: selected === 'root' ? (options.lateChild ? '7' : '6') : '2',
       },
       runs: [],
       executions: [],
@@ -153,6 +159,14 @@ function fixture(
     })),
     message('final', 'assistant', '5', final),
   ];
+  if (options.lateChild) {
+    messages[3] = { ...messages[3]!, seq: '5' };
+    messages[4] = { ...messages[4]!, seq: '6' };
+    messages.splice(3, 0, {
+      ...message('spawn-receipt', 'tool', '4', 'CHILD_RECEIPT_MUST_STAY_HIDDEN'),
+      sourceIds: ['spawn-execution'],
+    });
+  }
   if (withImage) messages[0]!.images = [{ name: 'selected.png', reference: imageReference }];
   const bridge: NativeBridge = {
     watch(listener) {
@@ -162,6 +176,36 @@ function fixture(
     async request(request): Promise<NativeResult> {
       requests.push(request);
       switch (request.method) {
+        case 'background.open': {
+          if (!options.lateChild) return null;
+          const item = backgroundItem(1, true);
+          item.sourceTool = {
+            id: 'spawn-execution',
+            definitionId: 'task.spawn',
+            definitionVersion: '1',
+          };
+          item.execution.parentExecutionId = 'spawn-execution';
+          item.run!.id = 'old-run';
+          item.childSession!.title = 'Verified child';
+          return new Promise((resolve) =>
+            pendingChildren.push(() =>
+              resolve({
+                kind: 'background.page',
+                readId: request.readId,
+                viewGeneration: 1,
+                storeId: 'store',
+                rootSessionId: selected,
+                viewSelection,
+                observationId: 1,
+                startIndex: 0,
+                nextIndex: 1,
+                total: 1,
+                complete: true,
+                entries: [item],
+              }),
+            ),
+          );
+        }
         case 'attach':
         case 'state':
           return state();
@@ -322,15 +366,31 @@ function fixture(
                       kind: 'toolMessages.page',
                       readId: request.readId,
                       scope,
-                      entries: (options.missingTools ? [] : [1, 2]).map((number) => ({
-                        messageId: `tool-${number}`,
-                        executionId: `execution-${number}`,
-                        definitionId: 'files.read',
-                        definitionVersion: '4',
-                        status: 'succeeded' as const,
-                        resultRevision: '1',
-                        target: `file-${number}.ts`,
-                      })),
+                      entries: [
+                        ...(options.missingTools ? [] : [1, 2]).map((number) => ({
+                          messageId: `tool-${number}`,
+                          executionId: `execution-${number}`,
+                          definitionId: options.lateChild
+                            ? `custom.reader-${number}`
+                            : 'files.read',
+                          definitionVersion: options.lateChild ? '99' : '4',
+                          status: 'succeeded' as const,
+                          resultRevision: '1',
+                          target: `file-${number}.ts`,
+                        })),
+                        ...(options.lateChild
+                          ? [
+                              {
+                                messageId: 'spawn-receipt',
+                                executionId: 'spawn-execution',
+                                definitionId: 'task.spawn',
+                                definitionVersion: '1',
+                                status: 'succeeded' as const,
+                                resultRevision: '1',
+                              },
+                            ]
+                          : []),
+                      ],
                     },
               );
             }),
@@ -362,6 +422,10 @@ function fixture(
     revoked,
     until,
     release,
+    releaseChildren: () =>
+      act(async () => {
+        for (const release of pendingChildren.splice(0)) release();
+      }),
     async select(title: string) {
       await flushCacheCosts();
       await act(async () => {
@@ -427,6 +491,7 @@ function fixture(
       releaseMessages?.();
       for (const reader of ['runs', 'tools'] as const)
         for (const resolve of pending[reader].splice(0)) resolve();
+      for (const resolve of pendingChildren.splice(0)) resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
       accounting.restore();
       dom.window.close();
@@ -604,9 +669,15 @@ for (const first of ['runs', 'tools'] as const) {
         'false',
       );
       expect(f.host.querySelector('.tool-activity')?.textContent).toContain('读取');
-      expect(f.host.querySelector('.tool-activity')?.textContent).toContain('2');
+      expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件');
       expect(f.host.textContent).not.toContain(summary);
       expect(f.host.textContent).not.toContain(raw);
+      await act(async () =>
+        f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+      );
+      expect(
+        [...f.host.querySelectorAll('.tool-step-target')].map((node) => node.textContent),
+      ).toEqual(['file-1.ts', 'file-2.ts']);
     } finally {
       await f.close();
     }
@@ -673,7 +744,7 @@ test('a history scan failure ends cold structural waiting and preserves the save
   }
 });
 
-test('a failed historical tool check keeps receipts readable and retries without extra session controls', async () => {
+test('a failed cold historical tool check keeps history readable and publishes exact tool cards only after successful retry', async () => {
   const f = fixture(true);
   try {
     await f.render();
@@ -686,10 +757,9 @@ test('a failed historical tool check keeps receipts readable and retries without
     await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
     expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
     expect(f.host.textContent).not.toContain(raw);
-    await act(async () =>
-      f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
-    );
-    expect(f.host.textContent).toContain(raw);
+    // No complete Tool metadata has ever been admitted in this cold scope.
+    // Keep ordinary history readable without inventing a partial Tool card.
+    expect(f.host.querySelector('.tool-activity-summary')).toBeNull();
     f.fail('tools', false);
     await f.until(() => f.pending('tools') > 0);
     const pendingReads = f.requests.filter(
@@ -703,6 +773,16 @@ test('a failed historical tool check keeps receipts readable and retries without
     );
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.tool-activity-summary'));
+    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件');
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+    );
+    expect(
+      [...f.host.querySelectorAll('.tool-step-target')].map((node) => node.textContent),
+    ).toEqual(['file-1.ts', 'file-2.ts']);
+    expect(f.host.textContent).toContain(final);
+    expect(f.host.textContent).not.toContain(raw);
   } finally {
     await f.close();
   }
@@ -748,7 +828,8 @@ test('reentering cached history restores the original DOM before fresh ownership
       'true',
     );
     const originalViewport = f.host.querySelector('.conversation-viewport')!,
-      originalReply = f.host.querySelector('.agent-turn-final')!;
+      originalReply = f.host.querySelector('.agent-turn-final')!,
+      originalTools = f.host.querySelector('.tool-activity')!;
     await f.select('Other session');
     await f.until(
       () => !!f.host.querySelector('.conversation-viewport')?.textContent?.includes('Other ready'),
@@ -759,6 +840,7 @@ test('reentering cached history restores the original DOM before fresh ownership
     expect(f.host.querySelector('.conversation-loading') === null).toBe(true);
     expect(f.host.querySelector('.conversation-viewport') === originalViewport).toBe(true);
     expect(f.host.querySelector('.agent-turn-final') === originalReply).toBe(true);
+    expect(f.host.querySelector('.tool-activity') === originalTools).toBe(true);
     expect(
       f.host.querySelector('.agent-turn-process')?.getAttribute('data-restored-expanded'),
     ).toBe('true');
@@ -1138,6 +1220,60 @@ test('leaving a failed metadata scope cancels its automatic recovery', async () 
       before,
     );
     expect(f.host.textContent).not.toContain('重新核对工具状态');
+  } finally {
+    await f.close();
+  }
+});
+
+test('late verified child directory updates its direct row without replacing expanded ordinary tool readers on either side', async () => {
+  const f = fixture(false, false, false, { lateChild: true });
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
+    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await f.until(() => !!f.host.querySelector('.child-agent-activity'));
+    const child = f.host.querySelector('.child-agent-activity')!;
+    expect(child.textContent).toContain('子 Agent');
+    expect(child.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
+    expect(child.querySelector('[aria-expanded]')).toBeNull();
+    expect(f.host.textContent).not.toContain('CHILD_RECEIPT_MUST_STAY_HIDDEN');
+    const ordinary = () => [...f.host.querySelectorAll<HTMLElement>('.tool-activity-aggregate')];
+    expect(ordinary()).toHaveLength(2);
+    for (const row of ordinary()) {
+      await act(async () =>
+        row.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+      );
+      await act(async () =>
+        row
+          .querySelector<HTMLButtonElement>('.tool-activity-steps .tool-activity-summary')!
+          .click(),
+      );
+    }
+    const rows = ordinary();
+    const bodies = rows.map((row) =>
+      row.querySelector('.tool-activity-steps .tool-activity-content'),
+    );
+    expect(bodies.every(Boolean)).toBe(true);
+    const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!;
+    Object.defineProperties(viewport, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 200 },
+    });
+    await act(async () => {
+      viewport.scrollTop = 71;
+      viewport.dispatchEvent(new viewport.ownerDocument.defaultView!.Event('scroll'));
+    });
+    await f.releaseChildren();
+    await f.until(() => !!child.textContent?.includes('Verified child'));
+    expect(f.host.querySelector('.child-agent-activity')).toBe(child);
+    expect(ordinary()).toEqual(rows);
+    expect(
+      rows.map((row) => row.querySelector('.tool-activity-steps .tool-activity-content')),
+    ).toEqual(bodies);
+    expect(viewport.scrollTop).toBe(71);
+    expect(f.host.textContent).not.toContain('CHILD_RECEIPT_MUST_STAY_HIDDEN');
   } finally {
     await f.close();
   }

@@ -222,6 +222,7 @@ async function fixture(
     sessionId: 's',
     workspaceId: 'w',
     mode: input.mode ?? 'full',
+    trusted: true,
   });
   return {
     root,
@@ -472,11 +473,11 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
           content: 'New task: New explicit work',
         });
         const next = await f.runtime.waitForCommand('next', { timeoutMs: 5000 });
-        const nextReceipt = next.receipt as { runId: string; businessCommandId: string };
+        const nextReceipt = next.receipt as { runId: string };
         expect(next.status).toBe('applied');
         expect(await f.client.getRun(nextReceipt.runId)).toMatchObject({
           status: 'completed',
-          originCommandId: nextReceipt.businessCommandId,
+          originCommandId: next.id,
           rootWorkCommandId: 'next',
         });
         const nextTools = f.requests.at(-1)!.tools as { function: { name: string } }[] | undefined;

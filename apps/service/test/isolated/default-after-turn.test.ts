@@ -670,6 +670,31 @@ async function fixture(
     get reports() {
       return reports;
     },
+    async pendingResultReport(executionId: string) {
+      // Deferred results are accepted mail, but pendingOnly excludes mail that
+      // is not currently runnable. Historical Job-only inventory excludes them too.
+      const page = await store.listAgentMessages({
+        expectedStoreId,
+        sessionId: 's',
+        subjectId: 'user',
+      });
+      const original = page.items.filter(
+        (message) =>
+          message.kind === 'result' &&
+          message.state === 'accepted' &&
+          message.result.executionId === executionId,
+      );
+      expect(original.length).toBeLessThanOrEqual(1);
+      if (!original.length) return undefined;
+      expect(original[0]).toMatchObject({
+        originStoreId: expectedStoreId,
+        targetSessionId: 's',
+        state: 'accepted',
+      });
+      const command = await store.getCommand(original[0]!.id);
+      expect(command?.kind).toBe('job.report');
+      return command ?? undefined;
+    },
     drift(trust = true) {
       currentRevision = 'changed';
       trusted = trust;
@@ -837,17 +862,18 @@ test('default current policy/trust drift after parent completion defers original
         expect(f.reports).toBe(1);
         continue;
       }
+      const carrier = await until(async () =>
+        (await f.store.listExecutions('s')).find(
+          (execution) => execution.childSessionId && execution.status === 'succeeded',
+        ),
+      );
       const deferred = await until(async () => {
-        const page = await f.store.listPendingJobReports({
-          expectedStoreId: f.expectedStoreId,
-          sessionId: 's',
-        });
-        return page.commands.find(
-          (command) => (command.receipt as { outcome?: string }).outcome === 'report_deferred',
-        );
+        const command = await f.pendingResultReport(carrier.id);
+        return (command?.receipt as { outcome?: string })?.outcome === 'report_deferred'
+          ? command
+          : undefined;
       });
       expect(deferred.status).toBe('accepted');
-      const carrier = (await f.store.listExecutions('s')).find((e) => e.childSessionId)!;
       expect(carrier.status).toBe('succeeded');
       expect(carrier.delivery).toBe('pending');
       expect((await f.store.getView('s')).runs).toHaveLength(1);
@@ -940,13 +966,7 @@ async function plannedReport(singleSlot: boolean, driftPlan = false, continued =
       ).toBe(true);
       expect(f.reports).toBe(0);
       expect((await f.store.getExecution(heldModelId))!.status).toBe('planned');
-      const pending = await until(async () => {
-        const reports = await f.store.listPendingJobReports({
-          expectedStoreId: f.expectedStoreId,
-          sessionId: 's',
-        });
-        return reports.commands.length === 1 ? reports.commands[0] : undefined;
-      });
+      const pending = await until(() => f.pendingResultReport(carrier.executionId));
       expect(pending.kind).toBe('job.report');
       expect(pending.status).toBe('accepted');
       expect(

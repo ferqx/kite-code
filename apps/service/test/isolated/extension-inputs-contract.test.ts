@@ -94,11 +94,13 @@ test('actual HTTP forwards independent original start/followup intents and publi
       extensionInputs: [],
     });
     const empty = await runtime.waitForCommand('empty');
-    const emptyReceipt = empty.receipt as { runId: string; businessCommandId: string };
+    const emptyReceipt = empty.receipt as { runId: string };
+    expect(empty).toMatchObject({ id: 'empty', kind: 'input.follow_up', status: 'applied' });
+    expect(emptyReceipt).not.toHaveProperty('businessCommandId');
     const next = emptyReceipt.runId;
     expect(await client.getRun(next)).toMatchObject({
       status: 'completed',
-      originCommandId: emptyReceipt.businessCommandId,
+      originCommandId: empty.id,
       rootWorkCommandId: 'empty',
     });
     await client.followUp('s', {
@@ -110,10 +112,12 @@ test('actual HTTP forwards independent original start/followup intents and publi
       contextSelectionId,
     });
     const omitted = await runtime.waitForCommand('omitted');
-    const omittedReceipt = omitted.receipt as { runId: string; businessCommandId: string };
+    const omittedReceipt = omitted.receipt as { runId: string };
+    expect(omitted).toMatchObject({ id: 'omitted', kind: 'input.follow_up', status: 'applied' });
+    expect(omittedReceipt).not.toHaveProperty('businessCommandId');
     expect(await client.getRun(omittedReceipt.runId)).toMatchObject({
       status: 'completed',
-      originCommandId: omittedReceipt.businessCommandId,
+      originCommandId: omitted.id,
       rootWorkCommandId: 'omitted',
     });
     expect((await store.getCommand('start'))!.request).toMatchObject({
@@ -180,6 +184,8 @@ test('custom Service capability cannot advertise extension input support for uns
       'job_reconcile',
       'run_resume',
       'session_recovery',
+      'session_reconciliation',
+      'pending_input_queue',
     ]);
     expect(service.bootstrap.capabilities).not.toContain('run_extension_inputs');
   } finally {

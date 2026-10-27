@@ -33,4 +33,4 @@ Service 不为主 Run 安装期限 timer，Host 不按原总期限拒绝后续�
 
 验证覆盖 Kernel／Host 新配置与旧活动升级、超过原期限的准入、旧有限资金到期拒绝、真实 SQLite null intent 受理及有限 child 激活、Service 正式入口与进程重启恢复、TUI 超旧等待时限，以及真实 Host `shell_stop` 旧 lease 的红→绿回归。macOS Native Shell 已验证空期限派发与清理；Windows 取得源码协议和受控 adapter 测试证据，当前机器不能重建 Windows binary pin 或验证原生 Job，因此不声称该扩展具有 Windows 平台资格。
 
-当前行为与实现入口见[执行手册](../../../../docs/handbook/features/execution.md)、[Host 生命周期](../../../../packages/runtime-host/docs/execution-lifecycle.md)、[Service owner](../../../../apps/kite-service/docs/runtime-application.md)和[Windows 资格边界](../../../../docs/active/windows-shell-sandbox.md)。
+当前行为与实现入口见[执行手册](../../../../docs/handbook/features/execution.md)、[Host 生命周期](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/docs/execution-lifecycle.md)、[Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)和[Windows 资格边界](../../../../docs/active/windows-shell-sandbox.md)。

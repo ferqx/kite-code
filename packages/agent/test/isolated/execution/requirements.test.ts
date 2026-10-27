@@ -161,35 +161,31 @@ async function fixture(
     async assertBusinessModel(commandId: string) {
       const command = (await store.getCommand(commandId))!;
       const receipt = command.receipt as {
-        businessCommandId: string;
-        humanInputCommandId: string;
         runId: string;
       };
       const content = (command.request as { content: string }).content;
       expect(command.status).toBe('applied');
-      expect(receipt.businessCommandId).toBeString();
-      expect(receipt.businessCommandId).not.toBe(commandId);
-      expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-        request: { publicCommandId: commandId, content, originalRequest: command.request },
-      });
-      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+      expect(receipt.runId).toBeString();
+      expect(receipt).not.toHaveProperty('businessCommandId');
+      expect(receipt).not.toHaveProperty('humanInputCommandId');
+      expect(await store.getCommand(commandId)).toMatchObject({
         status: 'applied',
         request: { content },
         receipt: { runId: receipt.runId },
       });
       expect(await store.getRun(receipt.runId)).toMatchObject({
-        originCommandId: receipt.businessCommandId,
+        originCommandId: commandId,
         rootWorkCommandId: commandId,
       });
       const execution = (await store.listExecutions('s')).find(
         (item) => item.runId === receipt.runId && item.kind === 'model',
       )!;
-      expect(execution.originCommandId).toBe(receipt.businessCommandId);
+      expect(execution.originCommandId).toBe(commandId);
       const input = await runtime.readModelInput({ ...base, executionId: execution.id });
       expect(input.confirmation).toBe('succeeded');
       expect(
         input.request.messages.find((message) => message.content === content)?.sourceIds,
-      ).toEqual([receipt.businessCommandId]);
+      ).toEqual([commandId]);
     },
     async close() {
       await runtime.close();

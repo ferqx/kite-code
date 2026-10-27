@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
   decodeLinuxShellProcessEvidence,
@@ -52,6 +53,144 @@ interface Operation {
   result?: unknown;
 }
 
+type ContinuousModelMessage = {
+  role: string;
+  content: string;
+  tool_call_id?: string;
+  tool_calls?: { id: string; function: { name: string; arguments: string } }[];
+};
+type ContinuousToolCall = { name: string; input: unknown };
+
+/** Follow exact call/result pairs; a pre-dispatch refresh is not a completed effect. */
+export async function selectContinuousParentTool(
+  messages: readonly ContinuousModelMessage[],
+  calls: readonly ContinuousToolCall[],
+  verifyNonDispatch: (
+    callId: string,
+    name: string,
+    input: unknown,
+    code: string,
+  ) => Promise<boolean>,
+): Promise<ContinuousToolCall | undefined> {
+  const originalCalls = new Map<string, { name: string; input: unknown }>();
+  const paired: { id: string; name: string; input: unknown; content: string }[] = [];
+  const received = new Set<string>();
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      for (const call of message.tool_calls ?? []) {
+        if (originalCalls.has(call.id)) throw Error('continuous_tool_call_repeated');
+        originalCalls.set(call.id, {
+          name: call.function.name,
+          input: JSON.parse(call.function.arguments),
+        });
+      }
+    } else if (message.role === 'tool') {
+      const id = message.tool_call_id;
+      const call = id && originalCalls.get(id);
+      if (!id || !call || received.has(id)) throw Error('continuous_tool_result_identity_failed');
+      received.add(id);
+      paired.push({ id, ...call, content: message.content });
+    }
+  }
+  if (received.size !== originalCalls.size) throw Error('continuous_tool_result_missing');
+  let completed = 0;
+  let agentId: string | undefined;
+  let shellId: string | undefined;
+  let shellExecutionId: string | undefined;
+  let childSettled = false,
+    shellSettled = false,
+    afterSeq = '0';
+  for (const result of paired) {
+    if (completed < 3) {
+      const expected = calls[completed]!;
+      if (result.name !== expected.name || !isDeepStrictEqual(result.input, expected.input))
+        throw Error('continuous_original_tool_sequence_changed');
+      if (
+        ['input_pending', 'context_refresh_required', 'capability_refresh_required'].includes(
+          result.content,
+        )
+      ) {
+        if (
+          result.name !== 'shell_launch' ||
+          !(await verifyNonDispatch(result.id, result.name, result.input, result.content))
+        )
+          throw Error('continuous_tool_dispatch_unverified');
+        continue;
+      }
+      const body = JSON.parse(result.content);
+      if (body.error) throw Error('continuous_tool_effect_failed');
+      if (completed === 0 && body.path !== (expected.input as { path: string }).path)
+        throw Error('continuous_original_file_result_changed');
+      if (completed === 1) {
+        if (body.accepted !== true || typeof body.agent_id !== 'string')
+          throw Error('continuous_child_spawn_not_accepted');
+        agentId = body.agent_id;
+      }
+      if (completed === 2) {
+        if (
+          body.accepted !== true ||
+          typeof body.shellId !== 'string' ||
+          body.shellId !== (expected.input as { key: string }).key ||
+          body.ref?.key !== body.shellId ||
+          body.ref?.extensionId !== 'builtin.shell' ||
+          typeof body.ref?.executionId !== 'string'
+        )
+          throw Error('continuous_shell_launch_not_accepted');
+        shellId = body.shellId;
+        shellExecutionId = body.ref.executionId;
+      }
+      completed++;
+      continue;
+    }
+    if (result.name !== 'wait_agent_events' && result.name !== 'shell_wait')
+      throw Error('continuous_original_tool_sequence_changed');
+    if (
+      result.name === 'shell_wait' &&
+      (result.input as { shell_id?: string }).shell_id !== shellId
+    )
+      throw Error('continuous_original_shell_observation_changed');
+    if (
+      ['input_pending', 'context_refresh_required', 'capability_refresh_required'].includes(
+        result.content,
+      )
+    ) {
+      if (!(await verifyNonDispatch(result.id, result.name, result.input, result.content)))
+        throw Error('continuous_tool_dispatch_unverified');
+      continue;
+    }
+    const observed = JSON.parse(result.content);
+    if (observed.error) throw Error('continuous_child_observation_failed');
+    if (result.name === 'wait_agent_events') {
+      if (observed.next_seq !== undefined) afterSeq = observed.next_seq;
+      if (
+        observed.events?.some(
+          (event: { agent_id: string; kind: string; outcome?: string }) =>
+            event.agent_id === agentId &&
+            event.kind === 'completed' &&
+            event.outcome === 'succeeded',
+        )
+      )
+        childSettled = true;
+    } else if (result.name === 'shell_wait') {
+      if (
+        (result.input as { shell_id?: string }).shell_id !== shellId ||
+        observed.ref?.key !== shellId ||
+        observed.execution?.id !== shellExecutionId
+      )
+        throw Error('continuous_original_shell_observation_changed');
+      if (observed.execution.status === 'succeeded') shellSettled = true;
+      else if (['failed', 'cancelled', 'outcome_unknown'].includes(observed.execution.status))
+        throw Error('continuous_original_shell_not_succeeded');
+    } else throw Error('continuous_original_tool_sequence_changed');
+  }
+  if (completed < 3) return calls[completed];
+  if (!childSettled)
+    return { name: 'wait_agent_events', input: { after_seq: afterSeq, wait_ms: 4000 } };
+  if (!shellSettled)
+    return { name: 'shell_wait', input: { shell_id: shellId, wait_timeout_ms: 4000 } };
+  return undefined;
+}
+
 /** Two source-free default Services. No configure hook, custom Tool, Job or permission adapter. */
 export async function openDefaultShellContinuousFixture(root: string, candidateRoot?: string) {
   if (!['darwin', 'linux'].includes(process.platform))
@@ -90,7 +229,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
       port: 0,
       async fetch(request) {
         const body = (await request.json()) as {
-          messages: { role: string; content: string }[];
+          messages: ContinuousModelMessage[];
         };
         providerCalls++;
         const last = body.messages.reduce(
@@ -131,53 +270,70 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
               cancellation: 'detached',
             },
           },
-          {
-            name: 'shell_wait',
-            input: { shell_id: `shell-${nonce}`, wait_timeout_ms: 4000 },
-          },
         ];
-        // Ordinary six-tool spawn does not create a legacy required obligation.
-        // Wait for this exact child's durable completion before concluding the
-        // operation; finite observation timeouts never cancel or complete it.
-        let selected = child ? undefined : calls[results.length];
-        if (!child && results.length >= 3) {
-          const spawned = JSON.parse(results[1]!.content) as {
-            accepted?: boolean;
-            agent_id?: string;
-          };
-          if (spawned.accepted !== true || !spawned.agent_id)
-            throw Error('continuous_child_spawn_not_accepted');
-          let childSettled = false,
-            afterSeq = '0',
-            shellSettled = false;
-          for (const row of results.slice(3)) {
-            const observed = JSON.parse(row.content) as {
-              next_seq?: string;
-              events?: { agent_id: string; kind: string; outcome?: string }[];
-              execution?: { status?: string };
-              error?: unknown;
-            };
-            if (observed.error) throw Error('continuous_child_observation_failed');
-            if (observed.next_seq !== undefined) afterSeq = observed.next_seq;
-            if (
-              observed.events?.some(
-                (event) => event.agent_id === spawned.agent_id && event.kind === 'completed',
-              )
-            )
-              childSettled = true;
-            if (
-              ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
-                observed.execution?.status ?? '',
-              )
-            )
-              shellSettled = true;
-          }
-          selected = !childSettled
-            ? { name: 'wait_agent_events', input: { after_seq: afterSeq, wait_ms: 4000 } }
-            : shellSettled
-              ? undefined
-              : calls[3];
-        }
+        const selected = child
+          ? undefined
+          : await selectContinuousParentTool(
+              body.messages.slice(last + 1),
+              calls,
+              async (callId, name, input, code) => {
+                const definitions: Record<string, string> = {
+                  shell_launch: 'shell.launch',
+                  shell_wait: 'shell.wait',
+                  wait_agent_events: 'task.events',
+                };
+                const definitionId = definitions[name];
+                if (!definitionId) return false;
+                const wireInput = input as Record<string, unknown>;
+                const coreInput =
+                  name === 'shell_wait'
+                    ? { shellId: wireInput.shell_id, timeoutMs: wireInput.wait_timeout_ms }
+                    : name === 'wait_agent_events'
+                      ? { afterSeq: wireInput.after_seq, waitMs: wireInput.wait_ms }
+                      : input;
+                const operation = operations.find((operation) => operation.commandId === nonce);
+                if (!operation) return false;
+                const view = await clients[0]!.getView(operation.sessionId);
+                const run = view.runs.find((run) => run.originCommandId === operation.commandId);
+                const matches = view.executions.filter(
+                  (execution) =>
+                    execution.runId === run?.id &&
+                    execution.kind === 'tool' &&
+                    execution.definitionId === definitionId &&
+                    execution.definitionVersion === '1' &&
+                    execution.toolCallId === callId,
+                );
+                if (
+                  view.storeId !== storeId ||
+                  view.session.id !== operation.sessionId ||
+                  !run ||
+                  matches.length !== 1
+                )
+                  return false;
+                const execution = matches[0]!;
+                const result = execution.result as {
+                  outcome?: string;
+                  content?: string;
+                  details?: {
+                    code?: string;
+                    adapterAttempted?: boolean;
+                    dispatchCommitted?: boolean;
+                  };
+                } | null;
+                return (
+                  execution.originStoreId === storeId &&
+                  execution.rootWorkCommandId === operation.commandId &&
+                  execution.status === 'failed' &&
+                  execution.authorization?.dispatched === false &&
+                  isDeepStrictEqual(execution.toolInput, coreInput) &&
+                  result?.outcome === 'failed' &&
+                  result.content === code &&
+                  result.details?.code === code &&
+                  result.details.adapterAttempted === false &&
+                  result.details.dispatchCommitted === false
+                );
+              },
+            );
         const delta = selected
           ? {
               tool_calls: [

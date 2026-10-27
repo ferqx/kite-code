@@ -13,6 +13,7 @@ import { launchPairedService } from '@kite-ai/service/paired';
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
+import { nativeFileReadBaseline } from '../native-file-result.fixture';
 
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean, limit = 10000) {
@@ -71,13 +72,12 @@ test.skipIf(process.platform !== 'darwin')(
         else if (step === 1) {
           const read = body.messages.filter((message) => message.role === 'tool').at(-1);
           if (!read) throw Error('actual_file_read_baseline_missing');
-          const actual = JSON.parse(read.content) as { path: string; baseline: Json };
-          expect(actual.path).toBe('original.txt');
+          const baseline = nativeFileReadBaseline(read.content, 'original.txt');
           call = {
             name: 'write_file',
             input: {
               path: 'original.txt',
-              base: actual.baseline,
+              base: baseline,
               content: `${key} actual modified UTF8\r\n`,
             },
           };
@@ -129,8 +129,8 @@ test.skipIf(process.platform !== 'darwin')(
           },
         ],
         tools: [
-          { id: 'files.read', definitionVersion: '4' },
-          { id: 'files.write', definitionVersion: '2' },
+          { id: 'files.read', definitionVersion: '5' },
+          { id: 'files.write', definitionVersion: '3' },
         ],
       }),
     );
@@ -215,23 +215,16 @@ test.skipIf(process.platform !== 'darwin')(
           (value) => value.status === 'applied',
         );
         const runId = (command.receipt as { runId: string }).runId;
-        if (commandId === 'second') {
-          const receipt = command.receipt as { businessCommandId: string };
-          const business = await client.getCommand(receipt.businessCommandId);
-          expect(command).toMatchObject({
-            status: 'applied',
-            receipt: { outcome: 'human_input_applied' },
-          });
-          expect(business).toMatchObject({
-            status: 'applied',
-            sessionId: 's',
-            originStoreId: storeId,
-            receipt: { runId },
-          });
-          expect((await client.getRun(runId)).originCommandId).toBe(business.id);
-          expect((await client.getRun(runId)).rootWorkCommandId).toBe(commandId);
-          expect(business.id).not.toBe(commandId);
-        }
+        expect(command).toMatchObject({
+          id: commandId,
+          kind: 'run.start',
+          status: 'applied',
+          sessionId: 's',
+          originStoreId: storeId,
+          receipt: { runId },
+        });
+        expect((await client.getRun(runId)).originCommandId).toBe(commandId);
+        expect((await client.getRun(runId)).rootWorkCommandId).toBe(commandId);
         const run = await until(
           () => client.getRun(runId),
           (value) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(value.status),

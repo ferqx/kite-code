@@ -15,7 +15,7 @@ Status: implemented
 
 原生配套服务测试覆盖初始化尚未返回时重接、取消旧 pending receive、流式任务中更换页面而服务 instanceId 不变、请求计数重置时过滤旧回执、重新订阅与读取历史；仍验证显式 EOF 清理。前端测试覆盖自动恢复选中会话且不创建或发送任务。
 
-这不承诺恢复已退出的原生服务执行，也不增加未发送草稿的持久化。当前职责与操作说明见[桌面新对话与恢复](../../../../apps/kite-desktop/docs/new-conversation.md#页面刷新与连接恢复)。
+这不承诺恢复已退出的原生服务执行，也不增加未发送草稿的持久化。当前职责与操作说明见[桌面新对话与恢复](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/new-conversation.md#页面刷新与连接恢复)。
 
 ## Alternatives considered
 

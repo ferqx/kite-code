@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-发布 compiler 只对准确 jsdom XHR 实现路径做两处已知语法的唯一匹配适配：移除运行时同步 worker 路径解析，并让同步 XHR 发送明确拒绝。源码解析机制、正常 HTTP transport 与 Readability 提取保持原路径。上游实现变化时构建报错，必须重新核对适配。当前边界由 [Builtin Web owner](../../../../packages/builtin-runtime/docs/extensions-and-verification.md#web)维护。
+发布 compiler 只对准确 jsdom XHR 实现路径做两处已知语法的唯一匹配适配：移除运行时同步 worker 路径解析，并让同步 XHR 发送明确拒绝。源码解析机制、正常 HTTP transport 与 Readability 提取保持原路径。上游实现变化时构建报错，必须重新核对适配。当前边界由 [Builtin Web owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/docs/extensions-and-verification.md#web)维护。
 
 ## Alternatives considered
 
@@ -18,4 +18,4 @@ Status: implemented
 
 ## Consequences
 
-原生 HTML 提取不再依赖这个相对 worker 文件；不执行页面脚本或加载子资源，同步 XHR 明确不受支持。适配依赖当前 jsdom 实现形状，升级时构建门禁会要求重新核对。[正式 compiler 回归](../../../../tests/release/web-extraction-compiled.test.ts)删除入口源码后实际运行原生产物，并检查标题、Markdown、绝对链接、脚本及子资源不执行和同步 XHR 拒绝。已在 macOS arm64、Bun 1.4.2 验证；这份证据不代表其他平台资格，也不表示用户正在运行的旧产物已替换。
+原生 HTML 提取不再依赖这个相对 worker 文件；不执行页面脚本或加载子资源，同步 XHR 明确不受支持。适配依赖当前 jsdom 实现形状，升级时构建门禁会要求重新核对。[正式 compiler 回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/release/web-extraction-compiled.test.ts)删除入口源码后实际运行原生产物，并检查标题、Markdown、绝对链接、脚本及子资源不执行和同步 XHR 拒绝。已在 macOS arm64、Bun 1.4.2 验证；这份证据不代表其他平台资格，也不表示用户正在运行的旧产物已替换。

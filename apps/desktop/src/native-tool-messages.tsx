@@ -7,6 +7,7 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import { NativeDisplayCache } from './native-display-cache';
 import type {
   NativeRunFact,
   NativeToolExecution,
@@ -672,6 +673,9 @@ export function nativeLiveToolPresentationReady(
 export class NativeToolPresentation {
   private scope: string | undefined;
   private complete = new Map<string, DesktopMessage>();
+  private readonly cached = new NativeDisplayCache<readonly [string, DesktopMessage][]>();
+  private boundary: string | undefined;
+  private bridge: unknown;
 
   project(
     scope: string,
@@ -681,10 +685,18 @@ export class NativeToolPresentation {
       message: DesktopMessage;
       execution: NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>;
     }[],
+    boundary?: { bridge: unknown; key: string },
   ): DesktopMessage[] {
+    if (boundary && (boundary.bridge !== this.bridge || boundary.key !== this.boundary)) {
+      this.bridge = boundary.bridge;
+      this.boundary = boundary.key;
+      this.cached.clear();
+      this.complete.clear();
+      this.scope = undefined;
+    }
     if (this.scope !== scope) {
       this.scope = scope;
-      this.complete.clear();
+      this.complete = new Map(this.cached.get(scope));
     }
     const completeIds = new Set(
       completeNativeToolMessages(messages, facts).map((message) => message.id),
@@ -731,6 +743,7 @@ export class NativeToolPresentation {
       ];
     });
     for (const key of this.complete.keys()) if (!keep.has(key)) this.complete.delete(key);
+    this.cached.set(scope, [...this.complete]);
     return result;
   }
 }

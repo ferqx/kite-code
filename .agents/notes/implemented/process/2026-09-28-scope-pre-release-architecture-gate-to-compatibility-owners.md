@@ -13,7 +13,7 @@ Status: implemented
 1. 版本或旧写入者身份只在受控 Store 启动维护、格式转换和迁移准入 owner 内成立。SQLite 候选转换必须先核对准确来源 schema 与 epoch，在独占维护下保存备份、转换私有候选并校验连续性；旧进程观测只保护同一数据 home 的迁移，不授予旧进程 Runtime authority。普通 History、Host、客户端和当前 Store writer 不得因此加入旧格式 fallback 或双写。
 2. 架构门禁以源码中明确的 owner 边界约束这些标记，继续拒绝其他生产源码的版本化命名、旧 alias 和第二 composition root。受控 owner 是职责约束，不是允许任意新文件、任意版本或任意兼容分支通过的泛化路径豁免；新增来源仍需现行产品合同、精确格式校验及定向测试。
 3. active 文档可准确写明受支持的来源格式与目标格式；禁止版本标记的生产命名规则不应用于抹除产品和恢复合同中的版本信息。
-4. [现行实体分类规则](../../../../scripts/pre-release-architecture-policy.ts)只对 `packages/ai/src/sdk.ts` 中完整符号 `createCompatibleModelBinding` 识别外部协议身份，并保留版本化实体检查。这项准确分类不给其他路径的同名实体、同路径的其他 `Compat` 或 `Legacy` 名称、旧架构路径、版本分支或 fallback 准入；公开 API 与实际模型行为不变。[模型 owner](../../../../packages/ai/README.md)记录该协议身份。
+4. [现行实体分类规则](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/pre-release-architecture-policy.ts)只对 `packages/ai/src/sdk.ts` 中完整符号 `createCompatibleModelBinding` 识别外部协议身份，并保留版本化实体检查。这项准确分类不给其他路径的同名实体、同路径的其他 `Compat` 或 `Legacy` 名称、旧架构路径、版本分支或 fallback 准入；公开 API 与实际模型行为不变。[模型 owner](../../../../packages/ai/README.md)记录该协议身份。
 
 ## Alternatives considered
 
@@ -24,9 +24,9 @@ Status: implemented
 
 ## Consequences
 
-门禁可以同时验证唯一当前业务入口与受控离线转换。旧格式的存在不代表运行时可按旧格式恢复或写入；未知来源仍 fail closed。门禁规则改变时须以确切的正反例测试证明：已确认的 Store 维护与迁移准入可通过，普通生产源码新增旧版本 façade 仍失败。当前来源集合和发布边界由[本机 App Server 契约](../../../../docs/active/app-server-local-runtime.md#store-与版本)维护，实际 Store 准入与转换由[SQLite owner](../../../../packages/runtime-storage-sqlite/README.md#格式与实际入口)维护。
+门禁可以同时验证唯一当前业务入口与受控离线转换。旧格式的存在不代表运行时可按旧格式恢复或写入；未知来源仍 fail closed。门禁规则改变时须以确切的正反例测试证明：已确认的 Store 维护与迁移准入可通过，普通生产源码新增旧版本 façade 仍失败。当前来源集合和发布边界由[本机 App Server 契约](../../../../docs/active/app-server-local-runtime.md#store-与版本)维护，实际 Store 准入与转换由[SQLite owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md#格式与实际入口)维护。
 
-[分类正反例测试](../../../../tests/isolated/scripts/check-pre-release-architecture-policy.test.ts)核对准确路径与完整工厂符号可通过、其他路径同名与版本化及历史兼容实体仍拒绝；2026-10-05 当前6项、45断言、实际架构检查、normal Root typecheck 和 readonly Biome 均通过。规则直接读取当前源码，没有生成架构快照、可扩展 registry 或第二份例外清单；原 Store owner、版本化路径和 active 文档约束保持。
+[分类正反例测试](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/isolated/scripts/check-pre-release-architecture-policy.test.ts)核对准确路径与完整工厂符号可通过、其他路径同名与版本化及历史兼容实体仍拒绝；2026-10-05 当前6项、45断言、实际架构检查、normal Root typecheck 和 readonly Biome 均通过。规则直接读取当前源码，没有生成架构快照、可扩展 registry 或第二份例外清单；原 Store owner、版本化路径和 active 文档约束保持。
 
 ## Historical relationships
 

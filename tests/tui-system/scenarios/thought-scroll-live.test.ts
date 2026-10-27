@@ -3,6 +3,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { spawnReadyTui } from '../harness/pty-process';
+import { publicAgentResponses } from '../harness/public-agent-responses';
 import { waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -23,72 +24,74 @@ test('live two-turn delegation keeps Thinking after its prompt while scrolled', 
       sandbox: { enabled: false },
     },
   });
-  server.setResponses([
-    {
-      message: {
-        reasoning_chunks: ['Greeting'],
-        content: Array.from({ length: 25 }, (_, i) => `GREETING_${i}`).join('\n\n'),
+  server.setResponses(
+    publicAgentResponses(workspace, [
+      {
+        message: {
+          reasoning_chunks: ['Greeting'],
+          content: Array.from({ length: 25 }, (_, i) => `GREETING_${i}`).join('\n\n'),
+        },
+        chunk_delay: 150,
       },
-      chunk_delay: 150,
-    },
-    {
-      message: {
-        reasoning_chunks: [
-          Array.from(
-            { length: 8 },
-            (_, i) =>
-              `Plan independent tasks. Step ${i}: inspect the repository and return a bounded summary without changing files.`,
-          ).join('\n'),
-          'Keep both tasks bounded.\n',
-        ],
-        content: 'DELEGATION_CAPTION',
-        tool_calls: [
-          {
-            id: 'child-a',
-            name: 'task',
-            args: {
-              name: 'Explore A',
-              subagent_type: 'explore',
-              task: 'Return a short summary of A.',
+      {
+        message: {
+          reasoning_chunks: [
+            Array.from(
+              { length: 8 },
+              (_, i) =>
+                `Plan independent tasks. Step ${i}: inspect the repository and return a bounded summary without changing files.`,
+            ).join('\n'),
+            'Keep both tasks bounded.\n',
+          ],
+          content: 'DELEGATION_CAPTION',
+          tool_calls: [
+            {
+              id: 'child-a',
+              name: 'spawn_agent',
+              args: {
+                task_name: 'Explore A',
+                preset: 'explore',
+                prompt: 'Return a short summary of A.',
+              },
             },
-          },
-          {
-            id: 'child-b',
-            name: 'task',
-            args: {
-              name: 'Explore B',
-              subagent_type: 'explore',
-              task: 'Return a short summary of B.',
+            {
+              id: 'child-b',
+              name: 'spawn_agent',
+              args: {
+                task_name: 'Explore B',
+                preset: 'explore',
+                prompt: 'Return a short summary of B.',
+              },
             },
-          },
-        ],
+          ],
+        },
+        chunk_delay: 650,
       },
-      chunk_delay: 650,
-    },
-    {
-      message: {
-        reasoning_chunks: ['CHILD_A_REASONING\n', 'Checking its independent task.'],
-        content: 'A complete.',
+      {
+        message: {
+          reasoning_chunks: ['CHILD_A_REASONING\n', 'Checking its independent task.'],
+          content: 'A complete.',
+        },
+        chunk_delay: 1200,
       },
-      chunk_delay: 1200,
-    },
-    {
-      message: {
-        reasoning_chunks: ['CHILD_B_REASONING\n', 'Checking its independent task.'],
-        content: 'B complete.',
+      {
+        message: {
+          reasoning_chunks: ['CHILD_B_REASONING\n', 'Checking its independent task.'],
+          content: 'B complete.',
+        },
+        chunk_delay: 1200,
       },
-      chunk_delay: 1200,
-    },
-    {
-      expectedRequest: {
-        toolResults: [
-          { toolCallId: 'child-a', contentIncludes: ['complete'] },
-          { toolCallId: 'child-b', contentIncludes: ['complete'] },
-        ],
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'child-a', contentIncludes: ['complete'] },
+            { toolCallId: 'child-b', contentIncludes: ['complete'] },
+          ],
+        },
+        message: { content: 'PARENT_COMPLETE' },
       },
-      message: { content: 'PARENT_COMPLETE' },
-    },
-  ]);
+    ]),
+  );
   const tui = await spawnReadyTui({ cols: 132, rows: 40, workspace, mockServer: server });
   let sampler: ReturnType<typeof setInterval> | undefined;
   try {

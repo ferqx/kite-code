@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -11,8 +12,10 @@ import {
   createDesktopReloadChannel,
   createDesktopReloadQueue,
   isDevelopmentServiceSource,
+  isDevelopmentServiceSourceEvent,
   startDesktopControl,
   startDesktopRenderer,
+  startDevelopmentServiceWatcher,
 } from '../../../scripts/development/desktop-reload';
 
 test('runtime workspace exports are checked before publishing a development Service version', async () => {
@@ -471,6 +474,174 @@ test('Vite serves a nonce-bearing hot renderer on loopback, rejects development 
     await expect(fetch(renderer.configuration.rendererUrl)).rejects.toThrow();
   } finally {
     await renderer?.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a fresh Service watcher finishes its own scan before immediate writes and follows new source directories', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-source-watch-')));
+  let renderer: Awaited<ReturnType<typeof startDesktopRenderer>> | undefined;
+  let watcher: Awaited<ReturnType<typeof startDevelopmentServiceWatcher>> | undefined;
+  try {
+    mkdirSync(join(root, 'apps/desktop'), { recursive: true });
+    writeFileSync(join(root, 'apps/desktop/index.html'), '<!doctype html><p>watch fixture</p>');
+    const source = join(root, 'apps/service/src');
+    mkdirSync(source, { recursive: true });
+    mkdirSync(join(root, 'packages/agent/src'), { recursive: true });
+    const existing = join(source, 'main.ts');
+    writeFileSync(existing, 'export const value = 1;');
+    renderer = await startDesktopRenderer(root);
+    const template = renderer.server.watcher;
+    const events: { event: string; file: string }[] = [];
+    const failures: Error[] = [];
+    const roots = ['apps/service', 'packages/agent', 'packages/ai', 'packages/client'].map((path) =>
+      join(root, path, 'src'),
+    );
+    watcher = await startDevelopmentServiceWatcher({
+      template,
+      roots,
+      changed(event, file) {
+        if (isDevelopmentServiceSourceEvent(root, event, file)) events.push({ event, file });
+      },
+      failed: (error) => failures.push(error),
+    });
+    // No sleep or task yield between the helper's own ready and this first edit.
+    writeFileSync(existing, 'export const value = 2;');
+    const observed = async (file: string) => {
+      const deadline = Date.now() + 2000;
+      while (!events.some((event) => event.file === file) && Date.now() < deadline)
+        await Bun.sleep(5);
+      expect(events.some((event) => event.file === file)).toBe(true);
+    };
+    await observed(existing);
+    const nested = join(source, 'nested');
+    mkdirSync(nested);
+    writeFileSync(join(nested, 'new.ts'), 'export const fresh = true;');
+    await observed(join(nested, 'new.ts'));
+    const missing = join(root, 'packages/client/src');
+    mkdirSync(missing, { recursive: true });
+    writeFileSync(join(missing, 'observation.ts'), 'export const observation = 2;');
+    await observed(join(missing, 'observation.ts'));
+    expect(isDevelopmentServiceSourceEvent(root, 'unlinkDir', nested)).toBe(true);
+    expect(isDevelopmentServiceSourceEvent(root, 'addDir', join(root, 'packages/ai'))).toBe(true);
+    expect(isDevelopmentServiceSourceEvent(root, 'change', join(source, 'theme.css'))).toBe(false);
+    expect(isDevelopmentServiceSourceEvent(root, 'addDir', join(root, 'packages/ui/src'))).toBe(
+      false,
+    );
+    expect(renderer.server.watcher).toBe(template);
+    await watcher.close();
+    const before = events.length;
+    writeFileSync(existing, 'export const value = 3;');
+    await Bun.sleep(30);
+    expect(events).toHaveLength(before);
+    expect(failures).toEqual([]);
+  } finally {
+    await watcher?.close();
+    await renderer?.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('owned Service watcher waits for its first ready and releases partial startup, abort and runtime errors', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-watch-lifecycle-')));
+  type Template = Parameters<typeof startDevelopmentServiceWatcher>[0]['template'];
+  class Watcher extends EventEmitter {
+    options: Template['options'];
+    roots: readonly string[] = [];
+    closed = 0;
+    static last: Watcher;
+    static addFailure = false;
+    constructor(options: Template['options'] = {}) {
+      super();
+      this.options = options;
+      Watcher.last = this;
+    }
+    add(roots: readonly string[]) {
+      this.roots = roots;
+      if (Watcher.addFailure) throw Error('fixture_add_failed');
+      return this;
+    }
+    getWatched() {
+      return {};
+    }
+    async close() {
+      this.closed++;
+    }
+  }
+  try {
+    mkdirSync(join(root, 'packages'));
+    for (const phase of [
+      'ready',
+      'startup-error',
+      'abort',
+      'add-error',
+      'runtime-error',
+    ] as const) {
+      const template = new Watcher();
+      Watcher.addFailure = phase === 'add-error';
+      const abort = new AbortController();
+      const failures: Error[] = [];
+      let changes = 0;
+      let admitted = false;
+      const pending = startDevelopmentServiceWatcher({
+        template: template as unknown as Template,
+        roots: [join(root, 'packages/agent/src'), join(root, 'packages/client/src')],
+        changed: () => {
+          changes++;
+        },
+        failed: (error) => failures.push(error),
+        signal: abort.signal,
+      });
+      void pending.then(
+        () => {
+          admitted = true;
+        },
+        () => {},
+      );
+      const owned = Watcher.last;
+      expect(owned).not.toBe(template);
+      expect(owned.roots).toEqual([join(root, 'packages')]);
+      await Promise.resolve();
+      expect(admitted).toBe(false);
+      if (phase === 'startup-error') owned.emit('error', Error('fixture_startup_error'));
+      else if (phase === 'abort') abort.abort();
+      else if (phase !== 'add-error') owned.emit('ready');
+      if (phase === 'ready' || phase === 'runtime-error') {
+        const started = await pending;
+        expect(admitted).toBe(true);
+        if (phase === 'runtime-error') owned.emit('error', Error('fixture_runtime_error'));
+        else owned.emit('all', 'change', 'main.ts');
+        await started.close();
+        owned.emit('all', 'change', 'late.ts');
+        expect(changes).toBe(phase === 'ready' ? 1 : 0);
+      } else
+        await expect(pending).rejects.toThrow(
+          phase === 'add-error'
+            ? 'fixture_add_failed'
+            : phase === 'abort'
+              ? 'development_service_watcher_closed'
+              : 'fixture_startup_error',
+        );
+      expect(owned.closed).toBe(1);
+      expect(template.closed).toBe(0);
+      expect(failures.map((error) => error.message)).toEqual(
+        phase === 'startup-error'
+          ? ['fixture_startup_error']
+          : phase === 'runtime-error'
+            ? ['fixture_runtime_error']
+            : [],
+      );
+    }
+    const invalid = { constructor: Object } as unknown as Template;
+    await expect(
+      startDevelopmentServiceWatcher({
+        template: invalid,
+        roots: [root],
+        changed() {},
+        failed() {},
+      }),
+    ).rejects.toThrow('development_service_watcher_unavailable');
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

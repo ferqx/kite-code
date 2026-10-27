@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -82,6 +83,27 @@ if (!process.stdin.isTTY) {
   log('service-exits.jsonl', { exitCode: process.exitCode ?? 0, returnedAfterCleanup: true });
 } else {
   const { runTUIHost } = await import('@kite-ai/cli/tui-host');
+  const { TuiController } = await import('@kite-ai/ui/tui');
+  const lookupScope = new AsyncLocalStorage<{
+    commandId: string;
+    sessionId: string;
+    storeId: string;
+  }>();
+  const originalLookup = TuiController.prototype.lookupMcpReconnection;
+  // Observe the actual original-check Promise without changing its requests,
+  // return value or the independent background Session/Execution projection.
+  TuiController.prototype.lookupMcpReconnection = function (...args) {
+    const intent = this.state.mcpReconnection?.intent;
+    if (!intent) return originalLookup.apply(this, args);
+    return lookupScope.run(
+      {
+        commandId: intent.request.commandId,
+        sessionId: intent.sessionId,
+        storeId: intent.request.expectedStoreId,
+      },
+      () => originalLookup.apply(this, args),
+    );
+  };
   const original = globalThis.fetch;
   globalThis.fetch = Object.assign(
     async (...args: Parameters<typeof fetch>) => {
@@ -97,6 +119,7 @@ if (!process.stdin.isTTY) {
       log('ui-http.jsonl', {
         method: options?.method ?? 'GET',
         path: url.pathname,
+        explicitReconnectionLookup: lookupScope.getStore(),
         ...(body
           ? {
               body: {

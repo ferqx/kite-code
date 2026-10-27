@@ -186,3 +186,5 @@ outcome，因此 rollback 客户端仍可直接读取 status/reasonCode，不能
 最终形成 canonical `run.error + turn.aborted`，不能被转换成普通 Tool Result 或 Subagent summary。
 adapter 会合并整个 run 已知的 external-effect facts，因此存在未确认 dispatch 时仍保守投影为
 unknown/reconciliation，而不会为了显示 saturation 丢失外部副作用事实。
+
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。

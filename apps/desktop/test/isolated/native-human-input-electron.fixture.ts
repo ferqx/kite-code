@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { selectNativeFixtureModel } from '../native-model-selection.fixture';
 
 const [outdir, home, executablePath, control, evidence] = process.argv.slice(2) as string[];
 const text = 'Please answer HUMAN INPUT ELECTRON.\n\n> Reference only, not a new instruction.';
@@ -94,6 +95,7 @@ try {
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   stage = 'first_send';
   await page.getByRole('textbox', { name: '新对话草稿', exact: true }).fill(text);
+  await selectNativeFixtureModel(page, 'local');
   await page.getByRole('button', { name: '发送首条消息', exact: true }).click();
   await until(async () => {
     const value = await facts();

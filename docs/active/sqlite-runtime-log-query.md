@@ -34,7 +34,7 @@ subject 或 Store receipt；未知映射固定为 `other/unknown/unavailable`。
 宣称 Artifact 正文可用，也不会输出 locator。Browser-only Model Context是独立的显式诊断route：它从prepared event取得private ref后交给
 Builtin `ModelArtifactStore`严格readback，只投影有界Public DTO；Runtime Log projector本身仍不取得Artifact reader或通用正文读取能力。
 
-默认 App Server 的物理 Session Store 与逻辑 State/Run 格式见[Storage 入口表](../../packages/runtime-storage-sqlite/README.md#格式与实际入口)。旧 Store 5→6 compatibility import 仅适用于显式 legacy adapter，不在默认 child/daemon 查询路径执行。完整 durable history 固定为 `RuntimeClient.history` 经 App projector 到本 port，
+默认 App Server 的物理 Session Store 与逻辑 State/Run 格式见[Storage 入口表](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md#格式与实际入口)。旧 Store 5→6 compatibility import 仅适用于显式 legacy adapter，不在默认 child/daemon 查询路径执行。完整 durable history 固定为 `RuntimeClient.history` 经 App projector 到本 port，
 再向前分页直到读取完整 Session。`model.reasoning_*`、`model.text_delta` 与 `tool.progress` 是 live ephemeral；
 history mapper 从 durable `model.responded` 的完整 reasoning/text/tool-call facts 合成等价 completed client
 序列，并为 reasoning/text/responded 重建同一 canonical model `requestId`，再与其他 durable event 一起交给
@@ -78,11 +78,13 @@ composition/focused evidence，KLSV1-07的三平台installed process/release qua
 
 旧 adapter 的数据库级 owner 只验证 marker 与结构，用于列出和选择会话；它不扫描所有会话正文。恢复某个会话时必须携带 `sessionId`，该 session-scoped open 才严格校验该会话全部 event、snapshot checksum、revision/position 与 identity。这样一个损坏的旧会话只会让自身不可恢复，不会让同库其他会话全部不可用。
 
-当前 Session Store 的文件打开、结构检查和会话恢复以[Storage 当前 owner](../../packages/runtime-storage-sqlite/README.md#当前数据库与执行所有权)为准；旧 standalone reader 的隔离快照规则不能代替它，也不能给普通 Browser 查询添加第二连接。
+当前 Session Store 的文件打开、结构检查和会话恢复以[Storage 当前 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md#当前数据库与执行所有权)为准；旧 standalone reader 的隔离快照规则不能代替它，也不能给普通 Browser 查询添加第二连接。
 
 Store 9 的 `openHistoryLogs` 在现有连接与只读快照内提供索引 `getSession` 和事件查询；单会话读取不扫描全局会话列表。目录分页使用 updatedAt/sessionId cursor 与持久 membership，并返回已保存的 Session 模型路由供客户端切换时直接展示，不打开项目路径。标题 fallback 只取首条用户正文并由 Service 投影脱敏和限长，不写回命名。
 
-当前 Session Store16 在 `runtime_sessions` 同事务维护 History 内容代次、改写代次、历史追加水位和 Session 实例身份。History adapter 在生产组合的同一 SQLite read snapshot 中核对范围、实例、代次和水位；纯尾部追加不再逐页扫描固定原始前缀，同序号改写、删后重插或 Session 重建必须失效。默认 worker 将首次完整投影存为私有磁盘页，后续按位置读取并校验页字节摘要，不常驻第二份完整 transcript。每页仍重验 root／准确父子范围及当前 metadata，跨页投影 digest 防止混合输出。没有改写代次和实例证明的旧读取端口仍按固定前缀原始摘要核对，没有代次则重扫。缓存和这些内部证明不授予执行权，不证明跨库 Session 相等，也不跨 worker 重启恢复；生命周期见 [Service carrier](../../apps/kite-service/docs/runtime-server-carrier.md)。Store15→16 的私有候选转换、历史高水位及严格 trigger 校验见 [SQLite owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
+当前 Session Store16 在 `runtime_sessions` 同事务维护 History 内容代次、改写代次、历史追加水位和 Session 实例身份。History adapter 在生产组合的同一 SQLite read snapshot 中核对范围、实例、代次和水位；纯尾部追加不再逐页扫描固定原始前缀，同序号改写、删后重插或 Session 重建必须失效。默认 worker 将首次完整投影存为私有磁盘页，后续按位置读取并校验页字节摘要，不常驻第二份完整 transcript。每页仍重验 root／准确父子范围及当前 metadata，跨页投影 digest 防止混合输出。没有改写代次和实例证明的旧读取端口仍按固定前缀原始摘要核对，没有代次则重扫。缓存和这些内部证明不授予执行权，不证明跨库 Session 相等，也不跨 worker 重启恢复；生命周期见 [Service carrier](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-server-carrier.md)。Store15→16 的私有候选转换、历史高水位及严格 trigger 校验见 [SQLite owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
 
 
 默认 Session Store 的普通启动使用精确 schema/marker 检查，不重复执行 SQLite physical/FK 全库扫描或解码全部历史。完整 physical/FK 检查仍供显式 release preflight 使用；Session snapshot 恢复按所选 sessionId 在同一 read snapshot 验证绑定、事件、snapshot、Run/receipt，不因其他会话的内容损坏阻塞目录。Artifact 在 typed read 时校验；目录成功不宣称全库内容健康。性能取舍见 [Agent Note 0183](../../.agents/notes/implemented/testing/2026-09-11-bounded-startup-validation.md)。
+
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。

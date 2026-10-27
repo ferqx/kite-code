@@ -374,16 +374,18 @@ export function formatInkWorkspace(workspace: string, home?: string): string {
 
 /** Pure shared overlay frame; the caller retains focus, choices and original scope. */
 export function TuiOverlayFrame({
+  compact,
   title,
   hint,
   children,
 }: {
+  compact?: boolean;
   title: ReactNode;
   hint?: string;
   children: ReactNode;
 }) {
   return (
-    <OverlayFrame title={title} hint={hint}>
+    <OverlayFrame compact={compact} title={title} hint={hint}>
       {children}
     </OverlayFrame>
   );

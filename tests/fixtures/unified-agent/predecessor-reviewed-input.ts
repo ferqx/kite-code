@@ -77,6 +77,54 @@ const reviewedInputs: Readonly<
     },
   },
 };
+// Additional closed pairs reviewed against 3cf44ed0f. The original approved
+// bytes above remain valid. The new closure adds Markdown/PDF dependencies;
+// existing resolved packages are unchanged except highlight.js moving from the
+// root to cli-highlight/highlight.js with the same original bytes and integrity.
+const currentInputReview: Readonly<
+  Record<string, { sha256: string; commits: readonly string[]; increments: readonly string[] }>
+> = {
+  'bun.lock': {
+    sha256: '072840c44ef3008f49f7f8b3af7955723fdd0b008ae0352d295f46fb60787198',
+    commits: [
+      'a481f3a78df4ff9051eb49be2ef91695f117a183',
+      '60a2d984c554b296609a3fdfb3ed7f483252eaaf',
+      'ed3ac93dc25c5ea744f4b56c07eee69615d8a77c',
+    ],
+    increments: [
+      'markdown_math_diagram_exact_resolved_closure',
+      'pdf_canvas_exact_resolved_closure',
+      'highlight_cli_resolution_preserved',
+      'radix_scroll_cleanup_patch',
+    ],
+  },
+  'package.json': {
+    sha256: '632e8460caf82ff30180de4d6aa7b3fb9e5d9849b7d2b667390567a7acd9b03f',
+    commits: [
+      '60a2d984c554b296609a3fdfb3ed7f483252eaaf',
+      'ed3ac93dc25c5ea744f4b56c07eee69615d8a77c',
+    ],
+    increments: ['pdf_live_script', 'radix_scroll_cleanup_patch'],
+  },
+  'packages/agent/package.json': {
+    sha256: 'f5d5e25020c91aebba8d7459f3b5702c26c1d76aa81d0b5569adb2108c661b68',
+    commits: [
+      '78cbb8a372f4820f03ddcd2294d8fc489438dfba',
+      'ed3ac93dc25c5ea744f4b56c07eee69615d8a77c',
+    ],
+    increments: [
+      'pdf_canvas_dependencies',
+      'documents_assets_build',
+      'agent_dependency_declaration_order',
+    ],
+  },
+  'packages/ui/package.json': {
+    sha256: '06e3fdc419519c670028bf14cc28bec027e10ff64f4eeb666167b98b8b6aa51a',
+    commits: ['a481f3a78df4ff9051eb49be2ef91695f117a183'],
+    increments: ['markdown_math_diagram_dependencies'],
+  },
+};
+
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 export function matchReviewedPredecessorInput(
@@ -90,7 +138,12 @@ export function matchReviewedPredecessorInput(
   const input = reviewedInputs[path]!;
   const previousSha256 = sha256(previous),
     currentSha256 = sha256(current);
-  if (previousSha256 !== input.previousSha256[predecessor] || currentSha256 !== input.currentSha256)
+  const increment = currentInputReview[path];
+  const additional = currentSha256 !== input.currentSha256 && currentSha256 === increment?.sha256;
+  if (
+    previousSha256 !== input.previousSha256[predecessor] ||
+    (currentSha256 !== input.currentSha256 && !additional)
+  )
     return undefined;
   const commits =
     path === 'package.json'
@@ -117,13 +170,18 @@ export function matchReviewedPredecessorInput(
   if (path === 'bun.lock') increments.push('lexical_exact_resolved_closure');
   if (path === 'packages/ui/package.json') increments.push('lexical_editor_dependencies');
   if (path === 'packages/agent/package.json') increments.push('workflow_contract_assets_build');
+  if (additional) {
+    commits.push(...increment!.commits);
+    increments.push(...increment!.increments);
+  }
   return {
     match: 'reviewed_locked_input_increment' as const,
     // These reasons cover this additional review, not the legacy guard's earlier increments.
-    reviewScope:
-      path === 'bun.lock' ||
-      path === 'packages/ui/package.json' ||
-      path === 'packages/agent/package.json'
+    reviewScope: additional
+      ? ('approved_input_increments_2026_10_26' as const)
+      : path === 'bun.lock' ||
+          path === 'packages/ui/package.json' ||
+          path === 'packages/agent/package.json'
         ? ('approved_input_increments_2026_10_21' as const)
         : path === 'package.json'
           ? ('approved_input_increments_2026_10_19' as const)
@@ -139,5 +197,29 @@ export function matchReviewedPredecessorInput(
           collaborationLiveScript: reviewedCollaborationLiveScript,
         }
       : {}),
+  };
+}
+
+/** A current-only patch does not replace any of the eleven original raw proofs. */
+export function matchReviewedCurrentOnlyPredecessorInput(
+  predecessor: ReviewedPredecessorKind,
+  path: string,
+  current: Uint8Array,
+) {
+  if (
+    !Object.hasOwn(REVIEWED_PREDECESSOR_COMMITS, predecessor) ||
+    path !== 'patches/@radix-ui%2Freact-scroll-area@1.2.18.patch' ||
+    sha256(current) !== '1841982547e0f16de48a13db07ad87bf81bd516e1a4c32e1ae3d7a2d3cde54d5'
+  )
+    return undefined;
+  return {
+    path,
+    match: 'reviewed_current_only_patch' as const,
+    predecessorCommit: REVIEWED_PREDECESSOR_COMMITS[predecessor],
+    previousInputDeclared: false as const,
+    currentSha256: sha256(current),
+    reviewScope: 'approved_input_increments_2026_10_26' as const,
+    commits: ['60a2d984c554b296609a3fdfb3ed7f483252eaaf'],
+    increments: ['radix_scroll_listener_cleanup'],
   };
 }

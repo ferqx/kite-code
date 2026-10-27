@@ -1,39 +1,11 @@
-# Web 查询、更新与诊断
+# Web 只读查询
 
-触发：打开页面、切换会话/标签、页面可见时的活动更新或显式刷新。
+显式 daemon/Web 或开发 Web 宿主提供只读 Gateway，浏览器使用同一公开 Client 的只读能力消费 Workspace、Session、消息与诊断。UI 共享展示不扩大 Browser principal 的权限。
 
-```mermaid
-sequenceDiagram
-  participant W as Web page
-  participant A as Browser adapter / typed client
-  participant S as Service Agent API
-  participant D as Store / safe projection
-  W->>A: connect + getServerInfo
-  A->>S: 同源只读访问 /v1
-  W->>A: 目录、Session、History 请求
-  A->>S: schema/cursor/after_sequence
-  S->>D: 有界只读查询
-  D-->>W: 允许字段的 DTO
-  loop running/waiting 且页面可见
-    W->>A: 单飞 History 增量 + Session projection
-    A->>S: after_sequence
-    S-->>W: 更新或明确错误
-  end
-  W->>A: 日志刷新 / 打开 exact invocation context
-  A->>S: 按需诊断读取
-  S-->>W: 安全日志/上下文
-```
+实现与局部验证：[Web](../../../apps/web/README.md)、[Gateway](../../../apps/service/README.md)、[Browser Client](../../../packages/client/src/browser.ts)、[Web controller](../../../apps/web/src/controller.ts)。
 
-| 交接 | owner 与限制 |
-| --- | --- |
-| Browser session | index shell/Service；不是 Native 凭据 |
-| DTO 校验 | agent-api-contract/client；不能直读 Store |
-| 自动更新 | Web App 页面 effect 管理调度；transport adapter 负责一次读取与分页，typed client 不自带 scheduler |
-| logs/context | 按需请求；不继承 History 自动更新策略 |
-| route/document 结束 | route 停对应工作，pagehide 清访问会话；不取消产品任务 |
+目录与分页保原 Store、Workspace、Session、游标和选择代次；旧请求晚到不能覆盖新页面。完整 Model Input、Runtime logs 等敏感内容按实际能力和显式确认读取。Browser 不持有 Runtime、Store、Provider 凭据或普通 mutation 权限；关闭页面不取消后台任务。
 
-旧 generation 或 Session 结果不得覆盖新页面。请求失败保留已读快照和错误，不伪装空历史。API Docs 可读取规范但不提升 capability；只读访问不提供审批或写控制。
+共同约束以[当前八 workspace 边界](../../active/unified-agent-boundary.md)及对应 owner 为准。定向测试、真实客户端过程和平台资格分别说明，不从源码存在或最终截图推定完整行为通过。
 
-底层：[API client](../../../packages/agent-api-client/docs/browser-requests.md)、[Public wire](../../../packages/agent-api-contract/docs/public-wire.md)、[Web 数据](../../../apps/kite-web/docs/data-and-updates.md)、[诊断](../../../apps/kite-web/docs/diagnostics.md)。验证：[transport](../../../apps/kite-web/test/transport.test.ts)、[routing](../../../apps/kite-web/test/routing.test.tsx)、[API client](../../../packages/agent-api-client/test/client.test.ts)。
-
-实际轮询测试覆盖及缺口见[Web 验证](../../../apps/kite-web/docs/testing.md)。
+旧 Host/Kernel/SPI 实现的[历史说明](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/docs/development/flows/web-queries.md)只供删除前设计与证据追溯，不能恢复为当前 owner 或运行入口。

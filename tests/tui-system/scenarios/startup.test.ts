@@ -65,7 +65,10 @@ describe('TUI PTY System — Startup', () => {
         },
         'fresh current session row after the incompatible historical Store is ignored',
         10_000,
-      );
+      ).catch((error) => {
+        console.error('STARTUP_SESSION_VIEWPORT', tui.viewport());
+        throw error;
+      });
       const output = tui.viewport();
       expect(screenContains(output, '历史会话服务不可用')).toBe(false);
       expect(screenContains(output, '请输入 /resume 重试')).toBe(false);

@@ -285,11 +285,10 @@ test('public web_fetch/cancellation retain original worker rights through Store/
     const cancellingCommand = await client.getCommand('cancelled');
     const cancellingReceipt = cancellingCommand.receipt as {
       runId: string;
-      businessCommandId: string;
     };
     expect(cancellingRun).toMatchObject({
       id: cancellingReceipt.runId,
-      originCommandId: cancellingReceipt.businessCommandId,
+      originCommandId: cancellingCommand.id,
       rootWorkCommandId: 'cancelled',
     });
     await client.cancelRun('s', {

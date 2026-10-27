@@ -1,27 +1,12 @@
-type RetiredApplication = 'desktop' | 'terminal' | 'service' | 'release';
+type RetiredApplication = 'terminal';
 
 const currentCommands: Record<RetiredApplication, readonly string[]> = {
-  desktop: [
-    'bun run release:build --product native',
-    'bun run desktop',
-    'bun run test:desktop:native',
-    'bun run release:native --help',
-  ],
   terminal: [
     'bun run release:build',
     'bun run agent --help',
     'bun run tui',
     'bun run cli:dev --help',
     'bun run tui:dev',
-  ],
-  service: ['bun run build', 'bun run release:build', 'bun run server'],
-  release: [
-    'bun run release:build',
-    'bun run release:verify',
-    'bun run release:smoke',
-    'bun run release:install --help',
-    'bun run release:terminal --help',
-    'bun run release:native --help',
   ],
 };
 
@@ -37,13 +22,7 @@ export function rejectRetiredEntrypoint(application: RetiredApplication): void {
 
 if (import.meta.main) {
   const application = process.argv[2];
-  if (
-    application === 'desktop' ||
-    application === 'terminal' ||
-    application === 'service' ||
-    application === 'release'
-  )
-    rejectRetiredEntrypoint(application);
+  if (application === 'terminal') rejectRetiredEntrypoint(application);
   else {
     process.stderr.write('legacy_entrypoint_arguments_invalid\n');
     process.exitCode = 2;

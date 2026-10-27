@@ -5,7 +5,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -15,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 
-test('old ordinary Terminal and Service entrypoints reject before loading legacy dependencies or touching profiles', async () => {
+test('retained old Terminal entrypoints reject before loading legacy dependencies or touching profiles', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-retired-applications-')));
   const home = join(root, 'home');
   const profile = join(home, '.kite-code');
@@ -34,30 +33,9 @@ test('old ordinary Terminal and Service entrypoints reject before loading legacy
       args: [join(repositoryRoot, 'apps/kite-cli/src/tui/executable.tsx'), '--version'],
     },
     {
-      kind: 'service',
-      args: [
-        join(repositoryRoot, 'apps/kite-service/src/executable.ts'),
-        'app-server',
-        'run-stdio',
-      ],
+      kind: 'terminal',
+      args: ['run', '--cwd', join(repositoryRoot, 'apps/kite-cli'), 'build'],
     },
-    {
-      kind: 'service',
-      args: [
-        join(repositoryRoot, 'apps/kite-service/src/executable.ts'),
-        'app-server',
-        'run-stdio',
-        '--kite-internal-unknown',
-        '--kite-internal-mcp-stdio-v1',
-      ],
-    },
-    ...[
-      ['terminal', 'apps/kite-cli', 'build'],
-      ['service', 'apps/kite-service', 'build'],
-    ].map(([kind, workspace, command]) => ({
-      kind,
-      args: ['run', '--cwd', join(repositoryRoot, workspace!), command!],
-    })),
   ];
   try {
     for (const { kind, args } of commands) {
@@ -106,84 +84,13 @@ test('old ordinary Terminal and Service entrypoints reject before loading legacy
   }
 }, 15000);
 
-test('old ordinary OSS release build, verify, install lifecycle and smoke reject before archive or data access', () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-retired-release-')));
-  const home = join(root, 'home');
-  const profile = join(home, '.kite-code');
-  const prefix = join(root, 'prefix');
-  const archive = join(root, 'candidate.tar.gz');
-  const bytes = new Uint8Array([0, 13, 10, 255]);
-  mkdirSync(profile, { recursive: true });
-  mkdirSync(prefix);
-  const preservedFiles = [
-    archive,
-    join(profile, 'original-profile'),
-    join(prefix, 'active'),
-    join(prefix, 'original-install'),
-  ];
-  for (const path of preservedFiles) writeFileSync(path, bytes);
-  const commands = [
-    ['verify-oss-candidate.ts', '--archive', archive],
-    ['build-oss-candidate.ts', '--archive', archive],
-    ...['status', 'install', 'rollback', 'uninstall'].map((action) => [
-      'install-oss-candidate.ts',
-      action,
-      '--prefix',
-      prefix,
-      '--archive',
-      archive,
-    ]),
-    ['smoke-oss-candidate.ts', '--archive', archive],
-  ];
-  try {
-    for (const [entry, ...args] of commands) {
-      const child = spawnSync(
-        process.execPath,
-        [join(repositoryRoot, 'scripts/release', entry!), ...args],
-        {
-          cwd: root,
-          env: {
-            ...process.env,
-            HOME: home,
-            USERPROFILE: home,
-            APPDATA: home,
-            LOCALAPPDATA: home,
-            XDG_CONFIG_HOME: home,
-            XDG_DATA_HOME: home,
-            KITE_CODE_HOME: profile,
-            BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
-          },
-          encoding: 'utf8',
-          timeout: 5000,
-        },
-      );
-      expect(child.error).toBeUndefined();
-      expect(child.status).toBe(2);
-      expect(child.signal).toBeNull();
-      expect(child.stdout).toBe('');
-      expect(child.stderr).toContain('legacy_release_entrypoint_retired');
-      expect(child.stderr).toContain('bun run release:build');
-      expect(child.stderr).toContain('bun run release:terminal --help');
-      for (const path of preservedFiles) expect(new Uint8Array(readFileSync(path))).toEqual(bytes);
-      expect(readdirSync(profile)).toEqual(['original-profile']);
-      expect(readdirSync(prefix).sort()).toEqual(['active', 'original-install']);
-      expect(readdirSync(home)).toEqual(['.kite-code']);
-      expect(readdirSync(root).sort()).toEqual(['candidate.tar.gz', 'home', 'prefix']);
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}, 15000);
-
-test('actual retirement wrappers retain historical function identities, synchronous APIs and private helper dispatch in source and bundles', async () => {
+test('retained Terminal wrappers preserve historical function identities and synchronous APIs in source and bundles', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-retired-imports-')));
   const sourcePaths = [
     'scripts/development/retired-entrypoints.ts',
     'apps/kite-cli/src/index.ts',
     'apps/kite-cli/src/cli/executable.ts',
     'apps/kite-cli/src/tui/executable.tsx',
-    'apps/kite-service/src/executable.ts',
-    'scripts/release/install-oss-candidate.ts',
   ];
   const add = (path: string, content: string) => {
     const file = join(root, path);
@@ -210,28 +117,11 @@ test('actual retirement wrappers retain historical function identities, synchron
       copyFileSync(join(repositoryRoot, path), join(root, path));
     }
     // Harmless historical ports isolate only module loading and binding semantics.
-    // The production historical implementation bytes are audited separately.
     add(
       'apps/kite-cli/src/cli/legacy-executable.ts',
       'export async function runCli() { return 7; }',
     );
     add('apps/kite-cli/src/tui/legacy-executable.tsx', 'export function runTui() { return 11; }');
-    add(
-      'apps/kite-service/src/legacy-executable.ts',
-      `export async function runKiteServiceMain(args = process.argv.slice(2)) {
-        console.log(JSON.stringify({privateArgs: args}));
-      }
-      export function isKiteServiceMcpStdioInvocation(args) { return args.includes('--kite-internal-mcp-stdio-v1'); }`,
-    );
-    add(
-      'scripts/release/historical-install-oss-candidate.ts',
-      `export const ACTIVE_RELEASE_POINTER_FILE = 'active';
-      export function defaultInstallPrefix() { return 'historical-prefix'; }
-      export async function installOssCandidate(input) { return input.prefix; }
-      export function rollbackOssCandidate(prefix) { return prefix; }
-      export function uninstallOssCandidate() {}
-      export function readInstallStatus(prefix) { return prefix; }`,
-    );
     const entry = add(
       'consumer.ts',
       `import assert from 'node:assert/strict';
@@ -240,24 +130,9 @@ test('actual retirement wrappers retain historical function identities, synchron
       import * as tui from './apps/kite-cli/src/tui/executable';
       import * as originalCli from './apps/kite-cli/src/cli/legacy-executable';
       import * as originalTui from './apps/kite-cli/src/tui/legacy-executable';
-      import * as service from './apps/kite-service/src/executable';
-      import * as originalService from './apps/kite-service/src/legacy-executable';
-      import * as installer from './scripts/release/install-oss-candidate';
-      import * as originalInstaller from './scripts/release/historical-install-oss-candidate';
       assert.equal(root.runCli, cli.runCli); assert.equal(cli.runCli, originalCli.runCli);
       assert.equal(root.runTui, tui.runTui); assert.equal(tui.runTui, originalTui.runTui);
       assert.equal(await root.runCli(), 7); assert.equal(root.runTui(), 11);
-      assert.equal(service.runKiteServiceMain, originalService.runKiteServiceMain);
-      assert.equal(service.isKiteServiceMcpStdioInvocation, originalService.isKiteServiceMcpStdioInvocation);
-      assert.equal(service.isKiteServiceMcpStdioInvocation(['--kite-internal-mcp-stdio-v1']), true);
-      assert.deepEqual(Object.keys(installer).sort(), Object.keys(originalInstaller).sort());
-      for (const name of Object.keys(originalInstaller)) assert.equal(installer[name], originalInstaller[name]);
-      assert.equal(installer.ACTIVE_RELEASE_POINTER_FILE, 'active');
-      assert.equal(installer.defaultInstallPrefix(), 'historical-prefix');
-      assert.equal(await installer.installOssCandidate({prefix: 'original'}), 'original');
-      assert.equal(installer.rollbackOssCandidate('original'), 'original');
-      assert.equal(installer.readInstallStatus('original'), 'original');
-      assert.equal(installer.uninstallOssCandidate('original'), undefined);
       console.log('historical_import_contract_verified');`,
     );
     expect(execute(entry)).toBe('historical_import_contract_verified\n');
@@ -265,16 +140,6 @@ test('actual retirement wrappers retain historical function identities, synchron
     const build = await Bun.build({ entrypoints: [entry], target: 'bun', outdir });
     expect(build.success).toBe(true);
     expect(execute(join(outdir, 'consumer.js'))).toBe('historical_import_contract_verified\n');
-    for (const args of [
-      ['--kite-internal-history-page-v1'],
-      ['--kite-internal-process-tree-v1'],
-      ['--kite-internal-posix-supervisor-v1', 'harmless-fixture-argument'],
-      ['--kite-internal-mcp-stdio-v1'],
-    ]) {
-      expect(execute(join(root, 'apps/kite-service/src/executable.ts'), args)).toBe(
-        `${JSON.stringify({ privateArgs: args })}\n`,
-      );
-    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

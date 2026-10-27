@@ -112,10 +112,8 @@ test('paired child waiting accepts steer in the original Run and queues followup
     expect((await input.lookup('guide')).run?.id).toBe(run.id);
     expect((await input.lookup('next')).run?.id).not.toBe(run.id);
     const nextState = await input.lookup('next');
-    expect(nextState.run?.rootWorkCommandId).toBe('work');
-    expect(nextState.run?.originCommandId).toBe(
-      (nextState.command?.receipt as { businessCommandId: string }).businessCommandId,
-    );
+    expect(nextState.run?.rootWorkCommandId).toBe('next');
+    expect(nextState.run?.originCommandId).toBe(nextState.command?.id);
     const requests = readFileSync(join(f.profile.profilePath, 'models'), 'utf8');
     expect(requests).toContain('exact new guide');
     expect(requests).toContain('later task');

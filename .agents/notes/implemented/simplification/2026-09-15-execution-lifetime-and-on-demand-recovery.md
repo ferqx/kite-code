@@ -15,7 +15,7 @@ Electron 持有同一配套 Service。切换空间仅替换逻辑连接、授权
 ## 影响与限制
 多进程争用、generation、effect lease、mailbox、命令回执和 tombstone 各有独立职责，继续保留。旧版本只留 completed 而没有 cleanup 证明的会话不能自动解锁；缺证据的历史操作保持阻断并给出具体原因。权限设置与执行仍按 [Agent Note 0186](2026-09-14-session-policy-without-execution.md) 分离，失权清理期间不可使用正在关闭的 coordinator。
 
-当前实现与测试见 [Host 生命周期](../../../../packages/runtime-host/docs/execution-lifecycle.md)、[Service](../../../../apps/kite-service/docs/runtime-application.md)、[Store 恢复](../../../../packages/runtime-storage-sqlite/docs/authority-and-recovery.md)。回滚必须让配套协议客户端和 Service 一起回滚，不以忽略过期或写库伪造清理作为兼容办法。
+当前实现与测试见 [Host 生命周期](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/docs/execution-lifecycle.md)、[Service](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)、[Store 恢复](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/authority-and-recovery.md)。回滚必须让配套协议客户端和 Service 一起回滚，不以忽略过期或写库伪造清理作为兼容办法。
 
 ## Alternatives considered
 

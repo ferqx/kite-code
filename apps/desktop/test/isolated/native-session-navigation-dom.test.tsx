@@ -13,7 +13,6 @@ import type {
   NativeResult,
   NativeState,
 } from '../../src/native-bridge';
-import { useNativeEnvironment, waitForNativeDirectory } from '../../src/native-environment';
 import { backgroundItem } from '../background-item.fixture';
 import {
   nextDesktopPresentation,
@@ -34,6 +33,9 @@ Object.assign(globalThis, {
   navigator: bootstrap.window.navigator,
 });
 const { createRoot } = await import('react-dom/client');
+const { useNativeEnvironment, waitForNativeDirectory } = await import(
+  '../../src/native-environment'
+);
 const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, initialGlobals);
 bootstrap.window.close();
@@ -58,6 +60,21 @@ function fixture(
     pretendToBeVisual: true,
   });
   const restoreLayout = prepareDesktopDom(dom);
+  const stylePrototype = Object.getPrototypeOf(dom.window.document.createElement('div').style);
+  const clip = Object.getOwnPropertyDescriptor(stylePrototype, 'clip')!;
+  // Keep Radix's zero clipping rectangle while avoiding JSDOM's deprecated
+  // numeric clip parser after the preceding DOM fixtures have run.
+  Object.defineProperty(stylePrototype, 'clip', {
+    ...clip,
+    set(value: string) {
+      clip.set!.call(
+        this,
+        value === 'rect(0, 0, 0, 0)'
+          ? 'var(--native-test-clip-zero, rect(0px, 0px, 0px, 0px))'
+          : value,
+      );
+    },
+  });
   const prior = {
     window: globalThis.window,
     document: globalThis.document,
@@ -630,6 +647,7 @@ function fixture(
       for (const release of metadataReleases) release();
       releaseDirectory?.();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      Object.defineProperty(stylePrototype, 'clip', clip);
       dom.window.close();
       restoreLayout();
       Object.assign(globalThis, prior);
@@ -1633,6 +1651,7 @@ test('Native live tool observation failures stay silent outside explicit diagnos
         definitionId: 'files.write',
         definitionVersion: '2',
         status: 'running',
+        toolInput: { path: '/workspace/live.txt', content: 'Original live write' },
         result: null,
         cancelRequestedAt: null,
       },
@@ -1656,6 +1675,7 @@ test('Native live tool observation failures stay silent outside explicit diagnos
           definitionId: 'files.write',
           definitionVersion: '2',
           status: 'running',
+          toolInput: { path: '/workspace/live.txt', content: 'Original live write' },
           result: null,
           cancelRequestedAt: 1,
         },
@@ -1765,89 +1785,94 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
   }
 });
 
-test('Native reconciles an unowned parent and its child detail without hiding saved child content', async () => {
-  const f = fixture(true, false, '');
-  f.runningParent();
-  const body: Parameters<typeof f.childBody>[0] = {
-    upperSeq: '1',
-    messages: [
-      {
-        id: 'child-message',
-        sessionId: 'child',
-        seq: '1',
-        role: 'assistant',
-        status: 'incomplete',
-        runId: 'original-child-run',
-        content: 'Saved child progress',
-      },
-    ],
-    modelOutputs: [],
-    presentation: {
-      runs: [
+for (const diagnostics of [false, true])
+  test(`Native reconciles an unowned parent and its child detail without hiding saved child content; diagnostics=${diagnostics}`, async () => {
+    const f = fixture(true, false, '');
+    f.runningParent();
+    const body: Parameters<typeof f.childBody>[0] = {
+      upperSeq: '1',
+      messages: [
         {
-          id: 'original-child-run',
+          id: 'child-message',
           sessionId: 'child',
-          originStoreId: 'store',
-          status: 'running',
-          isActive: true,
-          createdAt: 1000,
-          finishedAt: null,
-          reason: null,
-        },
-      ],
-      tools: [],
-      executions: [
-        {
-          id: 'child-wait',
-          kind: 'tool',
-          originStoreId: 'store',
-          sessionId: 'child',
+          seq: '1',
+          role: 'assistant',
+          status: 'incomplete',
           runId: 'original-child-run',
-          definitionId: 'task.events',
-          definitionVersion: '1',
-          status: 'planned',
-          resultRevision: '0',
-          cancelRequestedAt: null,
+          content: 'Saved child progress',
         },
       ],
-    },
-  };
-  f.childBody(body);
-  try {
-    await f.observeExecutionOwner('held');
-    await f.render();
-    await f.click('Original');
-    await f.open();
-    await f.waitForText('Saved child progress');
-    const child = () => f.host.querySelector('.session-tab-child')!;
-    expect(child().querySelectorAll('.response-status')).toHaveLength(1);
-    expect(child().textContent).toContain('等待执行');
-    expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
-    const originalRun = f.observedRun();
-    for (const owner of ['unheld', 'unknown'] as const) {
-      await f.observeExecutionOwner(owner);
-      expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
-      expect(child().querySelectorAll('.tool-activity .shimmer')).toHaveLength(0);
-      expect(child().textContent).toContain('Saved child progress');
-      expect(child().textContent).not.toContain('执行状态待核实');
-      expect(child().textContent).not.toContain('等待执行');
-      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
-        '执行状态待核实',
-      );
-      expect(f.host.querySelectorAll('.background-execution-stop')).toHaveLength(0);
-      expect(f.observedRun()).toEqual(originalRun);
+      modelOutputs: [],
+      presentation: {
+        runs: [
+          {
+            id: 'original-child-run',
+            sessionId: 'child',
+            originStoreId: 'store',
+            status: 'running',
+            isActive: true,
+            createdAt: 1000,
+            finishedAt: null,
+            reason: null,
+          },
+        ],
+        tools: [],
+        executions: [
+          {
+            id: 'child-wait',
+            kind: 'tool',
+            originStoreId: 'store',
+            sessionId: 'child',
+            runId: 'original-child-run',
+            definitionId: 'task.events',
+            definitionVersion: '1',
+            status: 'planned',
+            inputReady: true,
+            resultRevision: '0',
+            cancelRequestedAt: null,
+          },
+        ],
+      },
+    };
+    f.childBody(body);
+    try {
+      await f.observeExecutionOwner('held');
+      await f.render(diagnostics);
+      await f.click('Original');
+      await f.open();
+      await f.waitForText('Saved child progress');
+      const child = () => f.host.querySelector('.session-tab-child')!;
+      const tools = child().querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+      expect(tools.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => tools.click());
+      expect(child().querySelectorAll('.response-status')).toHaveLength(1);
+      expect(child().textContent).toContain('等待执行');
+      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
+      const originalRun = f.observedRun();
+      for (const owner of ['unheld', 'unknown'] as const) {
+        await f.observeExecutionOwner(owner);
+        expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
+        expect(child().querySelectorAll('.tool-activity .shimmer')).toHaveLength(0);
+        expect(child().textContent).toContain('Saved child progress');
+        expect(child().textContent?.includes('执行状态待核实')).toBe(diagnostics);
+        expect(child().textContent).not.toContain('等待执行');
+        expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
+          diagnostics ? '执行状态待核实' : '运行中',
+        );
+        expect(f.host.querySelectorAll('.background-execution-stop')).toHaveLength(0);
+        expect(f.observedRun()).toEqual(originalRun);
+      }
+      await f.observeExecutionOwner('held');
+      expect(child().querySelectorAll('.response-status')).toHaveLength(1);
+      expect(child().textContent).toContain('等待执行');
+      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
+      expect(
+        f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
+      ).toEqual([]);
+    } finally {
+      await f.close();
     }
-    await f.observeExecutionOwner('held');
-    expect(child().querySelectorAll('.response-status')).toHaveLength(1);
-    expect(child().textContent).toContain('等待执行');
-    expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
-    expect(
-      f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
-    ).toEqual([]);
-  } finally {
-    await f.close();
-  }
-});
+  });
 
 test('a child carrier inside a mixed tool activity still opens its exact read-only detail', async () => {
   const f = fixture(true, true);
@@ -1857,17 +1882,23 @@ test('a child carrier inside a mixed tool activity still opens its exact read-on
     await f.render();
     await f.click('Original');
     await f.waitForText('创建子 Agent读取文件');
-    const summary = f.host.querySelector<HTMLButtonElement>(
-      '.conversation button.tool-activity-summary',
-    )!;
-    expect(summary).not.toBeNull();
-    expect(summary.getAttribute('aria-expanded')).toBe('false');
-    await act(async () => summary.click());
     const child = f.host.querySelector<HTMLButtonElement>(
-      '.conversation .tool-activity-steps button[aria-label="查看子 Agent 详情：Live child"]',
+      '.conversation .child-agent-activity button[aria-label="查看子 Agent 详情：Live child"]',
     )!;
     expect(child).not.toBeNull();
-    expect(f.host.querySelector('.conversation .tool-activity-steps')?.children).toHaveLength(2);
+    expect(child.disabled).toBe(false);
+    expect(child.getAttribute('aria-expanded')).toBeNull();
+    expect(child.closest('.tool-activity-steps')).toBeNull();
+    const ordinary = f.host.querySelector<HTMLButtonElement>(
+      '.conversation .tool-activity-aggregate button.tool-activity-summary',
+    )!;
+    expect(ordinary).not.toBeNull();
+    expect(ordinary.textContent).toContain('读取文件');
+    expect(ordinary.getAttribute('aria-expanded')).toBe('false');
+    expect(
+      child.compareDocumentPosition(ordinary) &
+        child.ownerDocument.defaultView!.Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
     await act(async () => child.click());
     await f.waitForText('Child prefix');
     expect(f.host.querySelectorAll('[role="tab"]')).toHaveLength(1);
@@ -1881,9 +1912,15 @@ test('a child carrier inside a mixed tool activity still opens its exact read-on
       messageIcon.getAttribute('data-child-color'),
     );
     expect(f.host.querySelector('.session-tab-child')?.textContent).toContain('Child prefix');
-    expect(f.requests.some((request) => request.method === 'background.child.open')).toBe(true);
+    expect(f.host.querySelector('.session-tab-child [contenteditable]')).toBeNull();
+    expect(ordinary.getAttribute('aria-expanded')).toBe('false');
     expect(
-      f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
+      f.requests.filter((request) => request.method === 'background.child.open'),
+    ).toMatchObject([{ method: 'background.child.open', generation: 1, executionId: 'job-1' }]);
+    expect(
+      f.requests.filter((request) =>
+        /submit|prepare|recover|cancel|background\.stop/.test(request.method),
+      ),
     ).toEqual([]);
   } finally {
     await f.close();
@@ -2157,35 +2194,38 @@ test('child metadata failure keeps its verified transcript readable and restores
   }
 });
 
-test('reconciled terminal facts retire cached owner warnings in the selected conversation and environment', async () => {
-  for (const status of ['interrupted', 'completed'] as const) {
-    const f = fixture(true, false, '');
-    f.runningParent();
-    try {
-      await f.observeExecutionOwner('unheld');
-      await f.render();
-      await f.click('Original');
-      expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
-      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
-        '执行状态待核实',
-      );
-      f.settleParent(status);
-      await f.updateParent('Saved parent content after reconciliation');
-      expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
-      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe(
-        '执行状态待核实',
-      );
-      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('已取消');
-      expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
-      await act(async () =>
-        f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
-      );
-      expect(f.host.textContent).toContain('Saved parent content after reconciliation');
-    } finally {
-      await f.close();
+for (const diagnostics of [false, true])
+  test(`reconciled terminal facts retire cached owner warnings in the selected conversation and environment; diagnostics=${diagnostics}`, async () => {
+    for (const status of ['interrupted', 'completed'] as const) {
+      const f = fixture(true, false, '');
+      f.runningParent();
+      try {
+        await f.observeExecutionOwner('unheld');
+        await f.render(diagnostics);
+        await f.click('Original');
+        expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(
+          diagnostics ? 1 : 0,
+        );
+        expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
+          diagnostics ? '执行状态待核实' : '运行中',
+        );
+        f.settleParent(status);
+        await f.updateParent('Saved parent content after reconciliation');
+        expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
+        expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe(
+          '执行状态待核实',
+        );
+        expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('已取消');
+        expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
+        await act(async () =>
+          f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
+        );
+        expect(f.host.textContent).toContain('Saved parent content after reconciliation');
+      } finally {
+        await f.close();
+      }
     }
-  }
-});
+  });
 
 test('an owner observation for an earlier Run cannot mark a later active Run unconfirmed', async () => {
   const f = fixture(true, false, '');
@@ -2221,6 +2261,29 @@ test('an unconfirmed Native execution queues the new input on its exact Run whil
       await f.edit('continue exact input 雪🙂');
       const label = owner === 'held' ? '引导当前轮次' : '排队后续输入';
       const send = () => f.host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+      if (owner !== 'held') {
+        expect(send()?.disabled).toBe(true);
+        await f.click('选择模型');
+        for (const label of ['选择模型，当前 未选择', '选择模型 model']) {
+          await until(() => !!f.host.ownerDocument.querySelector(`[aria-label="${label}"]`));
+          await act(async () => {
+            const choice = f.host.ownerDocument.querySelector<HTMLElement>(
+              `[aria-label="${label}"]`,
+            );
+            expect(choice).not.toBeNull();
+            choice!.click();
+          });
+        }
+        await act(async () => {
+          const popup = f.host.ownerDocument.querySelector('[aria-label="模型与思考程度"]')!;
+          popup.dispatchEvent(
+            new f.host.ownerDocument.defaultView!.KeyboardEvent('keydown', {
+              key: 'Escape',
+              bubbles: true,
+            }),
+          );
+        });
+      }
       await until(() => !!send() && !send()!.disabled);
       await f.click(label);
       const submissions = f.requests.filter(

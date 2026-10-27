@@ -314,24 +314,10 @@ test('unknown or duplicate host selections reject before any Model; failed admis
       reason: 'invalid_tool_configuration',
     });
     const duplicate = (await f.store.getCommand('duplicate'))!;
-    const receipt = duplicate.receipt as {
-      businessCommandId: string;
-      humanInputCommandId: string;
-      runId: null;
-    };
-    expect(receipt.runId).toBeNull();
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe(duplicate.id);
-    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      request: {
-        publicCommandId: duplicate.id,
-        content: 'New task: duplicate',
-        originalRequest: duplicate.request,
-      },
-    });
-    const business = (await f.store.getCommand(receipt.businessCommandId))!;
-    expect(business.status).toBe('rejected');
-    expect(business.receipt).toEqual({ reason: 'invalid_tool_configuration' });
+    expect(duplicate.receipt).toEqual({ reason: 'invalid_tool_configuration' });
+    expect(duplicate.receipt).not.toHaveProperty('runId');
+    expect(duplicate.receipt).not.toHaveProperty('businessCommandId');
+    expect(duplicate.receipt).not.toHaveProperty('humanInputCommandId');
     expect(model.requests).toHaveLength(0);
     expect(disposed).toBe(2);
   } finally {
@@ -578,30 +564,22 @@ test('ordinary background Job retains dynamic Run binding beyond parent completi
     expect((await f.done('second')).run?.status).toBe('completed');
     const second = (await f.store.getCommand('second'))!;
     const receipt = second.receipt as {
-      businessCommandId: string;
-      humanInputCommandId: string;
       runId: string;
     };
     expect(second).toMatchObject({
       status: 'applied',
       request: { kind: 'run.start', content: 'New task: second' },
     });
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe(second.id);
-    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      request: {
-        publicCommandId: second.id,
-        content: 'New task: second',
-        originalRequest: second.request,
-      },
-    });
-    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
+    expect(receipt.runId).toBeString();
+    expect(receipt).not.toHaveProperty('businessCommandId');
+    expect(receipt).not.toHaveProperty('humanInputCommandId');
+    expect(await f.store.getCommand(second.id)).toMatchObject({
       status: 'applied',
       request: { content: 'New task: second' },
       receipt: { runId: receipt.runId },
     });
     expect(await f.store.getRun(receipt.runId)).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: second.id,
       rootWorkCommandId: second.id,
     });
     const models = (await f.store.listExecutions('s')).filter(
@@ -616,7 +594,7 @@ test('ordinary background Job retains dynamic Run binding beyond parent completi
     });
     expect(input.confirmation).toBe('succeeded');
     expect(input.request.messages.find((m) => m.content === 'New task: second')?.sourceIds).toEqual(
-      [receipt.businessCommandId],
+      [second.id],
     );
     expect(bindingDisposals).toEqual([0, 0]);
     expect(starts).toEqual([1, 1]);

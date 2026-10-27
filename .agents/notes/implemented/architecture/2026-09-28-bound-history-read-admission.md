@@ -29,6 +29,6 @@ App Server 根／子 History 使用固定两个子进程，每个一次执行一
 
 ## Consequences
 
-容量暂满时读取或输出等待，不直接拒绝合法 backlog；实际等待／执行／drain 超时仍明确失败。排队文件带来真实 I/O 成本，不用旧版提前拒绝后的耗时对照完整工作。两个进程的启动和保留有资源代价，旧无分页 transcript 超过单帧仍返回 `history_too_large`，正式分页不按累计大小拒绝。非 App Server 或注入的 History client 可使用直接读取 fallback，不享有进程隔离。永久挂起的 App owner 可占满自身执行位，Runtime 与 History 容量独立。当前行为见 [Service carrier](../../../../apps/kite-service/docs/runtime-server-carrier.md)，回归覆盖跨连接公平、超过旧 pending 数量的排队／取消、慢输出恢复、drain 超时清理和控制请求前进；不据此声明无限并发、固定总内存或 UI 延迟承诺。
+容量暂满时读取或输出等待，不直接拒绝合法 backlog；实际等待／执行／drain 超时仍明确失败。排队文件带来真实 I/O 成本，不用旧版提前拒绝后的耗时对照完整工作。两个进程的启动和保留有资源代价，旧无分页 transcript 超过单帧仍返回 `history_too_large`，正式分页不按累计大小拒绝。非 App Server 或注入的 History client 可使用直接读取 fallback，不享有进程隔离。永久挂起的 App owner 可占满自身执行位，Runtime 与 History 容量独立。当前行为见 [Service carrier](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-server-carrier.md)，回归覆盖跨连接公平、超过旧 pending 数量的排队／取消、慢输出恢复、drain 超时清理和控制请求前进；不据此声明无限并发、固定总内存或 UI 延迟承诺。
 
 The cumulative transcript admission portion of this decision is superseded by [the complete History reading decision](2026-09-30-run-cumulative-limits-removed.md). The process pool, cancellation, active deadlines, per-page frame checks, and cache eviction continue to apply.

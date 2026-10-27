@@ -228,6 +228,31 @@ describe('terminal condition helpers', () => {
     expect(screenHasSessionRow('会话列表\n❯ Message in session B', 'Message in session B')).toBe(
       false,
     );
+    const withoutDates = [
+      '❯ Historical conversation title',
+      '── 会话列表 ───────────── 2 / 2 ──',
+      '搜索: _',
+      '  Saved session',
+      '❯ 新会话                      当前',
+      '↑↓ 导航  Enter 选择  D 删除  Esc 关闭',
+      '❯ Later conversation title',
+    ].join('\n');
+    expect(screenHasSessionRow(withoutDates, '新会话', { selected: true, active: true })).toBe(
+      true,
+    );
+    expect(
+      screenHasSessionRow(withoutDates, 'Saved session', { selected: false, active: false }),
+    ).toBe(true);
+    expect(screenHasSessionRow(withoutDates, 'Saved session', { selected: true })).toBe(false);
+    expect(screenHasSessionRow(withoutDates, '新会话', { active: false })).toBe(false);
+    expect(screenHasSessionRow(withoutDates, 'Historical conversation title')).toBe(false);
+    expect(screenHasSessionRow(withoutDates, 'Later conversation title')).toBe(false);
+    expect(
+      screenHasSessionRow(
+        withoutDates.replace('↑↓ 导航  Enter 选择  D 删除  Esc 关闭', ''),
+        '新会话',
+      ),
+    ).toBe(false);
   });
 
   test('waits for a non-terminal condition', async () => {

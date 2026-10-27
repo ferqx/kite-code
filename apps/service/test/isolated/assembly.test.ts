@@ -57,7 +57,7 @@ test('per-Run host assembly discovers summaries only, binds actual versions and 
     ).toContain('files.write');
     expect(
       assembly.snapshotFacts.tools.find((tool) => tool.id === 'files.write')!.definitionVersion,
-    ).toBe('2');
+    ).toBe('3');
     writeFileSync(
       join(skill, 'SKILL.md'),
       '---\nname: Guide\ndescription: New summary\n---\nnew-body-marker\n',

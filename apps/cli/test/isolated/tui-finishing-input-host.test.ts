@@ -312,39 +312,21 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     expect(saved.intent.request.afterRunId).toBe(originalRun.id);
     const pending = await client.getCommand(saved.intent.request.commandId);
     expect(pending.status).toBe('accepted');
-    const pendingReceipt = pending.receipt as {
-      humanInputCommandId: string;
-      businessCommandId: string;
-      decisionCommandId: string;
-      outcome: string;
-      runId: string | null;
-    };
-    expect(pendingReceipt).toMatchObject({ outcome: 'human_input_queued', runId: null });
-    const raw = await client.getCommand(pendingReceipt.humanInputCommandId);
-    expect(raw.kind).toBe('human.input');
-    expect(raw.receipt).toMatchObject({
-      state: 'decided',
-      applicationState: 'queued',
-      businessCommandId: pendingReceipt.businessCommandId,
-      decisionCommandId: pendingReceipt.decisionCommandId,
-    });
-    expect((await store.getCommand(raw.id))!.request).toMatchObject({
+    expect(pending.receipt).toEqual({ commandId: pending.id });
+    const stored = await store.getCommand(pending.id);
+    expect(stored!.kind).toBe('input.follow_up');
+    expect(stored!.request).toMatchObject({
+      kind: saved.intent.request.kind,
       content: body,
-      publicCommandId: pending.id,
-      originalRequest: {
-        kind: saved.intent.request.kind,
-        content: body,
-        afterRunId: originalRun.id,
-        contextSelectionId: saved.intent.request.contextSelectionId,
-      },
+      afterRunId: originalRun.id,
+      contextSelectionId: saved.intent.request.contextSelectionId,
     });
+    expect((await store.listAcceptedCommands('a')).map((command) => command.id)).toEqual([
+      pending.id,
+    ]);
     const queued = await readTuiPendingInputs(client, storeId, 'a', new AbortController().signal);
     expect(queued.map((input) => input.request.content)).toEqual([body]);
-    expect(queued.map((input) => input.id)).toEqual([pendingReceipt.businessCommandId]);
-    expect((await store.getCommand(pendingReceipt.decisionCommandId))!.request).toMatchObject({
-      inputCommandId: raw.id,
-      proposal: { relation: 'independent_work', purpose: 'work' },
-    });
+    expect(queued.map((input) => input.id)).toEqual([pending.id]);
     await controller.select('b');
     controller.setDraft('B original draft');
     receiptReleased.release();
@@ -363,20 +345,23 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     );
     const applied = await client.getCommand(saved.intent.request.commandId);
     const appliedReceipt = applied.receipt as {
-      businessCommandId: string;
-      decisionCommandId: string;
-      humanInputCommandId: string;
+      outcome: 'input_applied';
       runId: string;
+      contextSelectionId: string;
+      messageId: string;
+      supersededExecutionIds: string[];
     };
     expect(applied.status).toBe('applied');
-    expect(appliedReceipt.humanInputCommandId).toBe(raw.id);
-    expect((await client.getCommand(raw.id)).receipt).toMatchObject({
-      businessCommandId: appliedReceipt.businessCommandId,
-      decisionCommandId: appliedReceipt.decisionCommandId,
+    expect(appliedReceipt).toEqual({
+      outcome: 'input_applied',
+      runId: appliedReceipt.runId,
+      contextSelectionId: saved.intent.request.contextSelectionId,
+      messageId: expect.any(String),
+      supersededExecutionIds: [],
     });
-    const business = await client.getCommand(appliedReceipt.businessCommandId);
-    expect(business.status).toBe('applied');
-    expect((await client.getRun(appliedReceipt.runId)).originCommandId).toBe(business.id);
+    const successor = await client.getRun(appliedReceipt.runId);
+    expect(successor.originCommandId).toBe(applied.id);
+    expect(successor.rootWorkCommandId).toBe(applied.id);
     expect(finalView.runs.find((run) => run.id === originalRun.id)?.status).toBe('cancelled');
     expect(model.requests.length).toBe(2);
     expect(model.requests[1]!.messages.some((message) => message.content === body)).toBe(true);

@@ -22,6 +22,7 @@ import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
+import { managementActionWire } from '../fixtures/tui-activation-wire';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -482,7 +483,9 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
     writeFileSync(join(evidence, 'pty.log'), pythonOut + pythonErr);
     expect(pythonExit).toBe(0);
     expect(pythonOut).toContain('ORIGINAL_TOOLS_WARM_COLD_COMPLETE');
-    expect(http().every((row) => row.method === 'GET')).toBe(true);
+    expect(
+      managementActionWire(http(), { warm: 2, cold: 2 }).every((row) => row.method === 'GET'),
+    ).toBe(true);
     expect(http().some((row) => row.phase === 'cold' && row.path.includes('/artifacts/'))).toBe(
       true,
     );

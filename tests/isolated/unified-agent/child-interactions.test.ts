@@ -449,7 +449,7 @@ test('denying one actual child ends its original round without cancelling a queu
         })
       ).selectedWork?.rootWorkCommandId,
     ).toBe('new-explicit');
-    // Finishing independent B does not select original A; only this new human input does.
+    // Explicit new input owns a new work identity; its text never reselects the old work.
     await f.peer.startRun('root', {
       expectedStoreId: f.expectedStoreId,
       commandId: 'continue-original',
@@ -462,7 +462,9 @@ test('denying one actual child ends its original round without cancelling a queu
     const originalRun = (await f.client.getView('root')).runs.find(
       (run) => run.originCommandId === 'original',
     )!;
-    expect(continuedRun.rootWorkCommandId).toBe('original');
+    expect(continuedRun.rootWorkCommandId).toBe('continue-original');
+    expect(continuedRun.originCommandId).toBe(continued.id);
+    expect(originalRun.rootWorkCommandId).toBe('original');
     expect(continuedRun.id).not.toBe(originalRun.id);
     expect(continuedRun.status).toBe('completed');
     expect((await f.store.getRun(continuedRun.id))?.configuration).toEqual(

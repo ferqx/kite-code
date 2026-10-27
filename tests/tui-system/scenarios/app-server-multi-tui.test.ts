@@ -48,6 +48,7 @@ describe('TUI PTY System — parent-owned App Servers', () => {
         15_000,
       );
 
+      await submitCommand(first, '/session rename History from the first TUI');
       server.setResponses([]);
       second = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
       await submitCommand(second, '/resume');

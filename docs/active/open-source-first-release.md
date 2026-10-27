@@ -10,6 +10,8 @@
 
 当前新发行入口与资格以[release control](release-control.md)、[V1.3](../plans/unified-agent-refactor-v1.md)及实际进度为准。下文旧 State/App Server/standalone 格式与 `release/oss-first-release/` 记录仅保留历史，不能用于新候选构建或放行；仍适用的安全/三平台/发布者认证约束没有撤销。面向使用者的 README 不重复发布门禁。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 保留的安全与平台约束
 
 `G0` 只判断本地正确性和安全：规范测试通过；Workspace 越界、secret、network、MCP write、
@@ -47,7 +49,7 @@ build/verify/install/process/PTY/smoke 资格；证据边界见[完成记录](..
 
 ## 制品与安装
 
-原生 compiler 的 jsdom 适配与被动 Web HTML 提取边界由 [Builtin owner](../../packages/builtin-runtime/docs/extensions-and-verification.md#web)维护。[原生网页回归](../../tests/release/web-extraction-compiled.test.ts)使用正式 compiler 生成独立可执行文件并实际运行，不能只以源码模式通过证明安装产物可解析网页。本次验证环境为 macOS arm64、Bun 1.4.2，不替代其他平台资格。
+原生 compiler 的 jsdom 适配与被动 Web HTML 提取边界由 [Builtin owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/docs/extensions-and-verification.md#web)维护。[原生网页回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/release/web-extraction-compiled.test.ts)使用正式 compiler 生成独立可执行文件并实际运行，不能只以源码模式通过证明安装产物可解析网页。本次验证环境为 macOS arm64、Bun 1.4.2，不替代其他平台资格。
 
 macOS 原生编译完成后，构建 owner 对可执行文件重新执行本地 ad-hoc 签名并严格校验，再读取字节生成候选摘要，避免编译载荷使嵌入签名失效而被系统直接终止。该签名仅满足本机执行校验，不提供开发者身份、notarization 或发布来源证明。
 

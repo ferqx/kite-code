@@ -10,6 +10,7 @@
 
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { startTestHttpServer } from '../../helpers/test-http-server';
+import { originalModelToolName, projectOriginalModelToolCall } from './model-tool-contract';
 import {
   migrateOriginalToolCall,
   type OriginalToolCall,
@@ -355,10 +356,9 @@ export function createMockModelServer(): MockModelServer {
           try {
             toolCalls = await Promise.all(
               (toolCalls ?? []).map(async (original) => {
-                const emitted = await migrateOriginalToolCall(original, workspaceScope!, {
-                  body: bodyRecord,
-                  messages,
-                });
+                const request = { body: bodyRecord, messages };
+                const migrated = await migrateOriginalToolCall(original, workspaceScope!, request);
+                const emitted = projectOriginalModelToolCall(migrated, request);
                 toolMigrations.push({
                   original: structuredClone(original),
                   emitted: structuredClone(emitted),
@@ -368,7 +368,10 @@ export function createMockModelServer(): MockModelServer {
             );
             invalidToolCalls = invalidToolCalls?.map((call) => ({
               ...call,
-              name: originalToolName(call.name),
+              name: originalModelToolName(originalToolName(call.name), {
+                body: bodyRecord,
+                messages,
+              }),
             }));
           } catch (error) {
             const violation = `response ${idx + 1} tool contract migration failed: ${error instanceof Error ? error.message : String(error)}`;

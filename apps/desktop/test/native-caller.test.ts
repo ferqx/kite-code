@@ -81,6 +81,88 @@ async function waitForCallerState(
     await Bun.sleep(1);
   }
 }
+for (const outcome of ['ready', 'read_failure', 'selection_changed'] as const) {
+  test(`Native ready reconciliation joins the pending selection and preserves ${outcome}`, async () => {
+    function gate() {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { promise, release };
+    }
+    const first = gate(),
+      firstEntered = gate(),
+      successor = gate(),
+      successorEntered = gate();
+    const connection = client();
+    connection.serverInfo!.capabilities.push('session_reconciliation');
+    let observe!: Parameters<AgentClient['observe']>[0],
+      reconciliations = 0,
+      settled = false;
+    const failure = new ClientError('ready_read_failed');
+    connection.observe = async (options) => {
+      observe = options;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    };
+    connection.reconcileSessionState = async (sessionId) => {
+      reconciliations++;
+      if (reconciliations === 1) {
+        firstEntered.release();
+        await first.promise;
+      } else if (reconciliations === 2) {
+        successorEntered.release();
+        // Retain a late transport reply even if a new selection cancels its signal.
+        await successor.promise;
+        if (outcome === 'read_failure') throw failure;
+      }
+      return connection.getView(sessionId);
+    };
+    const caller = new NativeCaller(connection, () => {});
+    try {
+      await caller.invoke({ method: 'attach' });
+      const selected = caller.invoke({ method: 'select', generation: 1, sessionId: 's' }).then(
+        (value) => {
+          settled = true;
+          return value;
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
+      );
+      await firstEntered.promise;
+      const ready = observe.onReady!({ storeId: 'store', replayFloor: '0', highWaterCursor: '0' });
+      expect(reconciliations).toBe(1);
+      expect(settled).toBe(false);
+      first.release();
+      await successorEntered.promise;
+      expect(settled).toBe(false);
+      expect(caller.state().environmentReadUnavailable).toBe(true);
+      if (outcome === 'selection_changed')
+        await caller.invoke({ method: 'select', generation: 1, sessionId: 'other' });
+      successor.release();
+      await ready;
+      const result = await selected;
+      if (outcome === 'read_failure') expect(result).toBe(failure);
+      else if (outcome === 'selection_changed') {
+        expect(result).toMatchObject({ code: 'native_selection_changed' });
+        expect(caller.state().selection?.session.id).toBe('other');
+        expect(caller.state().selection?.permissionUnavailable).toBe(false);
+      } else {
+        expect(result).toMatchObject({ selection: { session: { id: 's' } } });
+        expect(caller.state().selection?.permissionUnavailable).toBe(false);
+      }
+      expect(reconciliations).toBe(outcome === 'selection_changed' ? 3 : 2);
+      expect(connection.writes).toBe(0);
+    } finally {
+      first.release();
+      successor.release();
+      await caller.close();
+    }
+  });
+}
 test('Native selected message events wake durable changes directly without View refresh and reconnect revokes the baseline', async () => {
   const connection = client();
   connection.serverInfo!.capabilities.push('message_changes');

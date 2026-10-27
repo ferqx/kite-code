@@ -10,7 +10,7 @@ import type {
   NativeState,
 } from '../../src/native-bridge';
 import { backgroundItem } from '../background-item.fixture';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { nextDesktopPresentation, prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const globals = {
@@ -347,11 +347,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
         revision++;
         for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
       });
-      await until(() =>
-        mode === 'unsupported'
-          ? !!host.querySelector('.tool-activity-summary')
-          : requests.some((request) => request.method === 'toolMessages.list'),
-      );
+      if (mode === 'unsupported') await act(async () => nextDesktopPresentation(dom));
+      else await until(() => requests.some((request) => request.method === 'toolMessages.list'));
     },
     flush: () =>
       act(async () => {
@@ -413,7 +410,26 @@ test('actual NativeDesktop keeps a raw tool receipt hidden while metadata reader
   }
 });
 
-for (const mode of ['empty', 'failed', 'future', 'unsupported'] as const) {
+for (const mode of ['empty', 'failed', 'unsupported'] as const) {
+  test(`actual NativeDesktop ${mode} metadata withholds the complete tool row until its input and receipt identity can be verified`, async () => {
+    const f = fixture(mode);
+    try {
+      await f.render();
+      await f.flush();
+      expect(f.host.querySelector('.tool-activity')).toBeNull();
+      expect(f.host.textContent).not.toContain(sentinel);
+      expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
+      expect(f.host.textContent).not.toContain('状态待核对');
+      expect(f.host.textContent).not.toContain('结果未知');
+      await f.selectOther();
+      expect(f.host.textContent).toContain('Other session');
+      expect(f.host.textContent).not.toContain(sentinel);
+    } finally {
+      await f.close();
+    }
+  });
+}
+for (const mode of ['future'] as const) {
   test(`actual NativeDesktop ${mode} metadata keeps original receipt available only after explicit expansion and scoped to its session`, async () => {
     const f = fixture(mode);
     try {
@@ -461,11 +477,12 @@ test('actual NativeDesktop preserves a verified future tool outcome_unknown inst
   }
 });
 
-test('isolated Native diagnostics may show an unverified metadata hint without claiming a tool outcome', async () => {
+test('isolated Native diagnostics also wait for complete tool metadata without publishing a partial tool row', async () => {
   const f = fixture('known', true);
   try {
     await f.render();
-    expect(f.host.textContent).toContain('状态待核对');
+    expect(f.host.querySelector('.tool-activity')).toBeNull();
+    expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain('结果未知');
     expect(f.host.textContent).not.toContain(sentinel);
     expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
@@ -482,8 +499,11 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
   const f = fixture('mixed');
   try {
     await f.render();
+    expect(f.host.querySelector('.tool-activity')).toBeNull();
+    await f.flush();
     const aggregate = f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
-    expect(aggregate.textContent).toContain('使用工具');
+    expect(aggregate.textContent).toContain('编辑文件');
+    expect(aggregate.textContent).toContain('读取文件');
     await f.toggle();
     await f.flushTargets();
     expect(f.host.querySelector('.tool-activity-summary')).toBe(aggregate);
@@ -518,9 +538,8 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
         '.tool-activity-steps button.tool-activity-summary',
       ),
     ].find((button) => button.textContent?.includes('工具结果'))!;
-    expect(originalReader).toBeDefined();
-    await act(async () => originalReader.click());
-    expect(f.host.textContent).toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
+    expect(originalReader).toBeUndefined();
+    expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
     expect(delivery.querySelector('pre')).toBe(body);
     await act(async () => file.click());
     expect(f.requests.filter((request) => request.method === 'fileChanges.open')).toEqual([

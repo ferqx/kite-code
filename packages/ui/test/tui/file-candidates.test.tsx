@@ -132,6 +132,25 @@ test('exhausts candidate pages and freezes original scope/revision; stale cross 
   expect(f.mutations()).toBe(0);
   c.dispose();
 });
+test('same Session refresh retains the original in-flight candidate read and ready list', async () => {
+  const f = fixture(),
+    c = f.controller;
+  await c.select('a');
+  c.setDraft('@目录');
+  const reading = c.readFileCandidates(fileToken('@目录', 3));
+  await c.select('a', { reconcile: false });
+  expect(f.reads[0]!.signal.aborted).toBe(false);
+  expect(c.state.fileCandidates?.phase).toBe('reading');
+  f.reads[0]!.resolve(page(f.reads[0]!, ['目录/中文 空格.txt']));
+  await reading;
+  await c.select('a', { reconcile: false });
+  expect(c.state.fileCandidates?.paths).toEqual(['目录/中文 空格.txt']);
+  expect(c.state.draft).toBe('@目录');
+  await c.select('b');
+  expect(c.state.fileCandidates).toBeUndefined();
+  expect(f.mutations()).toBe(0);
+  c.dispose();
+});
 test('wrong page scope fails closed, edited revision and late pages cannot resurrect original candidates', async () => {
   const f = fixture(),
     c = f.controller;

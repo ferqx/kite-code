@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -27,6 +28,10 @@ type Physical = {
   };
 };
 type Globals = typeof globalThis & { backgroundPhysical: Physical[] };
+const isObservation = (row: Physical) =>
+  row.method === 'GET' ||
+  (row.method === 'POST' &&
+    /^\/v1\/sessions\/(original-root|newer-root)\/reconcile$/.test(row.path));
 const [candidate, home, originalStoreId, control] = process.argv.slice(2) as string[];
 const { unicode } = JSON.parse(readFileSync(join(home!, 'original-background.json'), 'utf8')) as {
   unicode: string;
@@ -156,6 +161,7 @@ try {
     assert.equal((await state()).selection?.storeId, storeId);
   }
   async function authorize() {
+    await openSessionTools(page);
     const permissions = page.getByRole('region', { name: '权限与工作区信任', exact: true });
     if (!(await permissions.innerText()).includes('信任状态：trusted')) {
       await permissions
@@ -169,6 +175,7 @@ try {
     await permissions.getByText(/^当前模式：full；默认模式：/).waitFor();
   }
   async function send(content: string) {
+    await selectNativeFixtureModel(page, 'fixed');
     await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(content);
     const button = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
     await until(
@@ -189,9 +196,9 @@ try {
       .getByText(/^已完整读取子会话日志。/)
       .waitFor();
     assert.ok((await log(id).innerText()).includes(`原会话 ${completed.childSessionId} 截至序号`));
-    const texts = await log(id).locator('article > pre').allTextContents();
+    const texts = await log(id).locator('article .typeset').allTextContents();
     assert.ok(
-      texts.includes(unicode),
+      texts.includes(unicode.trimEnd()),
       'exact complete original Unicode model output, no preview truncation',
     );
     assert.equal(await log(id).getByRole('alert').count(), 0);
@@ -327,6 +334,7 @@ try {
   const readOnlyStart = await app!.evaluate(
     () => (globalThis as Globals).backgroundPhysical.length,
   );
+  await openSessionTools(page);
   await overview().getByRole('button', { name: '打开后台总览', exact: true }).click();
   await card(completed.id).waitFor();
   assert.match(await card(completed.id).innerText(), /· succeeded/);
@@ -373,8 +381,8 @@ try {
   );
   const readonlyPhysical = await app!.evaluate(() => (globalThis as Globals).backgroundPhysical);
   assert.ok(
-    readonlyPhysical.slice(readOnlyStart).every((row) => row.method === 'GET'),
-    'overview, full log, close and refresh are GET-only',
+    readonlyPhysical.slice(readOnlyStart).every(isObservation),
+    'overview, full log, close and refresh add no business mutations',
   );
   const beforeStop = readonlyPhysical.length;
   await card(stopId)
@@ -468,6 +476,7 @@ try {
   assert.equal(baseline.calls, callsBeforeCold);
   page = await launch();
   await select('Newer Background', 'newer-root');
+  await openSessionTools(page);
   await overview().getByRole('button', { name: '打开后台总览', exact: true }).click();
   await card(completed.id).waitFor();
   for (const id of [...tasks.map((row) => row.id), newerTask.id]) {
@@ -522,14 +531,15 @@ try {
     .getByText(/^已完整读取子会话日志。/)
     .waitFor();
   assert.equal(await log(completed.id).getByRole('alert').count(), 0);
-  assert.ok((await log(completed.id).locator('article > pre').allTextContents()).includes(unicode));
+  assert.ok(
+    (await log(completed.id).locator('article .typeset').allTextContents()).includes(
+      unicode.trimEnd(),
+    ),
+  );
   await overview().getByRole('button', { name: '刷新后台总览', exact: true }).click();
   await card(completed.id).waitFor();
   const coldPhysical = await app!.evaluate(() => (globalThis as Globals).backgroundPhysical);
-  assert.ok(
-    coldPhysical.every((row) => row.method === 'GET'),
-    JSON.stringify(coldPhysical),
-  );
+  assert.ok(coldPhysical.every(isObservation), JSON.stringify(coldPhysical));
   const coldDirectory = coldPhysical.filter(
     (row) => row.path === '/v1/background-executions' && row.responseStoreId !== undefined,
   );
@@ -569,10 +579,13 @@ try {
   assert.ok(targetRoots.length >= 2);
   writeFileSync(join(home!, 'workspace', 'retained-project-file'), 'original project bytes');
   await app!.evaluate(({ dialog }) => {
-    const global = globalThis as typeof globalThis & {
+    const global = globalThis as Globals & {
       removeDialogs: unknown[];
       removeResponse: number;
     };
+    // The completed cold observation is already retained in coldPhysical.
+    // Measure removal controls from their own original operation boundary.
+    global.backgroundPhysical = [];
     global.removeDialogs = [];
     global.removeResponse = 0;
     dialog.showMessageBox = async (...args: unknown[]) => {

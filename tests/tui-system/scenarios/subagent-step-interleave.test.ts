@@ -1,3 +1,4 @@
+import { publicAgentResponses } from '../harness/public-agent-responses';
 /**
  * PTY regression for two concurrent children issuing the same tool name.
  *
@@ -53,164 +54,166 @@ describe('TUI PTY System — concurrent same-name Subagent steps', () => {
     const alphaPath = join(workspace.workspace, ALPHA_FILE);
     const betaPath = join(workspace.workspace, BETA_FILE);
 
-    server.setResponses([
-      {
-        message: {
-          content: 'I will inspect two same-name tool children concurrently.',
-          tool_calls: [
-            {
-              id: 'same-name-alpha-parent',
-              name: 'task',
-              args: {
-                name: 'Same-name tool child',
-                subagent_type: 'explore',
-                task: `${ALPHA_TASK}: read ${alphaPath}`,
-              },
-            },
-            {
-              id: 'same-name-beta-parent',
-              name: 'task',
-              args: {
-                name: 'Same-name tool child',
-                subagent_type: 'explore',
-                task: `${BETA_TASK}: read ${betaPath}`,
-              },
-            },
-          ],
-        },
-      },
-      {
-        response: ({ messages }) => {
-          const text = requestText(messages);
-          const alpha = text.includes(ALPHA_TASK);
-          const beta = text.includes(BETA_TASK);
-          if (alpha === beta) {
-            throw new Error(`expected exactly one child task in first step: ${text}`);
-          }
-          return {
-            // Alpha is intentionally slower, so Beta's matching read_file
-            // step can complete while Alpha is still in the same group.
-            delay: alpha ? 350 : 25,
-            message: {
-              content: `${alpha ? 'Alpha' : 'Beta'} child starts the same-name read_file step.`,
-              tool_calls: [
-                {
-                  id: alpha ? 'same-name-alpha-step-tool' : 'same-name-beta-step-tool',
-                  name: 'read_file',
-                  args: { path: alpha ? alphaPath : betaPath },
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          message: {
+            content: 'I will inspect two same-name tool children concurrently.',
+            tool_calls: [
+              {
+                id: 'same-name-alpha-parent',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Same-name tool child',
+                  preset: 'explore',
+                  prompt: `${ALPHA_TASK}: read ${alphaPath}`,
                 },
-              ],
-            },
-          };
-        },
-      },
-      {
-        response: ({ messages }) => {
-          const text = requestText(messages);
-          const alpha = text.includes(ALPHA_TASK);
-          const beta = text.includes(BETA_TASK);
-          if (alpha === beta) {
-            throw new Error(`expected exactly one child task in second step: ${text}`);
-          }
-          return {
-            delay: alpha ? 350 : 25,
-            message: {
-              content: `${alpha ? 'Alpha' : 'Beta'} child issued the same-name read_file step.`,
-              tool_calls: [
-                {
-                  id: alpha ? 'same-name-alpha-step-tool' : 'same-name-beta-step-tool',
-                  name: 'read_file',
-                  args: { path: alpha ? alphaPath : betaPath },
+              },
+              {
+                id: 'same-name-beta-parent',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Same-name tool child',
+                  preset: 'explore',
+                  prompt: `${BETA_TASK}: read ${betaPath}`,
                 },
-              ],
-            },
-          };
+              },
+            ],
+          },
         },
-      },
-      {
-        response: ({ messages }) => {
-          const text = requestText(messages);
-          if (text.includes('ALPHA_STEP_FILE_CONTENT')) {
+        {
+          response: ({ messages }) => {
+            const text = requestText(messages);
+            const alpha = text.includes(ALPHA_TASK);
+            const beta = text.includes(BETA_TASK);
+            if (alpha === beta) {
+              throw new Error(`expected exactly one child task in first step: ${text}`);
+            }
             return {
-              expectedRequest: {
-                toolResults: [
+              // Alpha is intentionally slower, so Beta's matching read_file
+              // step can complete while Alpha is still in the same group.
+              delay: alpha ? 350 : 25,
+              message: {
+                content: `${alpha ? 'Alpha' : 'Beta'} child starts the same-name read_file step.`,
+                tool_calls: [
                   {
-                    toolCallId: 'same-name-alpha-step-tool',
-                    contentIncludes: ['ALPHA_STEP_FILE_CONTENT'],
+                    id: alpha ? 'same-name-alpha-step-tool' : 'same-name-beta-step-tool',
+                    name: 'read_file',
+                    args: { path: alpha ? alphaPath : betaPath },
                   },
                 ],
               },
-              delay: 250,
-              message: { content: 'ALPHA_STEP_DONE' },
             };
-          }
-          if (text.includes('BETA_STEP_FILE_CONTENT')) {
+          },
+        },
+        {
+          response: ({ messages }) => {
+            const text = requestText(messages);
+            const alpha = text.includes(ALPHA_TASK);
+            const beta = text.includes(BETA_TASK);
+            if (alpha === beta) {
+              throw new Error(`expected exactly one child task in second step: ${text}`);
+            }
             return {
-              expectedRequest: {
-                toolResults: [
+              delay: alpha ? 350 : 25,
+              message: {
+                content: `${alpha ? 'Alpha' : 'Beta'} child issued the same-name read_file step.`,
+                tool_calls: [
                   {
-                    toolCallId: 'same-name-beta-step-tool',
-                    contentIncludes: ['BETA_STEP_FILE_CONTENT'],
+                    id: alpha ? 'same-name-alpha-step-tool' : 'same-name-beta-step-tool',
+                    name: 'read_file',
+                    args: { path: alpha ? alphaPath : betaPath },
                   },
                 ],
               },
-              delay: 25,
-              message: { content: 'BETA_STEP_DONE' },
             };
-          }
-          throw new Error(`expected one same-name child tool result: ${text}`);
+          },
         },
-      },
-      {
-        response: ({ messages }) => {
-          const text = requestText(messages);
-          if (text.includes('ALPHA_STEP_FILE_CONTENT')) {
-            return {
-              expectedRequest: {
-                toolResults: [
-                  {
-                    toolCallId: 'same-name-alpha-step-tool',
-                    contentIncludes: ['ALPHA_STEP_FILE_CONTENT'],
-                  },
-                ],
+        {
+          response: ({ messages }) => {
+            const text = requestText(messages);
+            if (text.includes('ALPHA_STEP_FILE_CONTENT')) {
+              return {
+                expectedRequest: {
+                  toolResults: [
+                    {
+                      toolCallId: 'same-name-alpha-step-tool',
+                      contentIncludes: ['ALPHA_STEP_FILE_CONTENT'],
+                    },
+                  ],
+                },
+                delay: 250,
+                message: { content: 'ALPHA_STEP_DONE' },
+              };
+            }
+            if (text.includes('BETA_STEP_FILE_CONTENT')) {
+              return {
+                expectedRequest: {
+                  toolResults: [
+                    {
+                      toolCallId: 'same-name-beta-step-tool',
+                      contentIncludes: ['BETA_STEP_FILE_CONTENT'],
+                    },
+                  ],
+                },
+                delay: 25,
+                message: { content: 'BETA_STEP_DONE' },
+              };
+            }
+            throw new Error(`expected one same-name child tool result: ${text}`);
+          },
+        },
+        {
+          response: ({ messages }) => {
+            const text = requestText(messages);
+            if (text.includes('ALPHA_STEP_FILE_CONTENT')) {
+              return {
+                expectedRequest: {
+                  toolResults: [
+                    {
+                      toolCallId: 'same-name-alpha-step-tool',
+                      contentIncludes: ['ALPHA_STEP_FILE_CONTENT'],
+                    },
+                  ],
+                },
+                delay: 250,
+                message: { content: 'ALPHA_STEP_DONE' },
+              };
+            }
+            if (text.includes('BETA_STEP_FILE_CONTENT')) {
+              return {
+                expectedRequest: {
+                  toolResults: [
+                    {
+                      toolCallId: 'same-name-beta-step-tool',
+                      contentIncludes: ['BETA_STEP_FILE_CONTENT'],
+                    },
+                  ],
+                },
+                delay: 25,
+                message: { content: 'BETA_STEP_DONE' },
+              };
+            }
+            throw new Error(`expected one same-name child continuation: ${text}`);
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'same-name-alpha-parent',
+                contentIncludes: ['ALPHA_STEP_DONE'],
               },
-              delay: 250,
-              message: { content: 'ALPHA_STEP_DONE' },
-            };
-          }
-          if (text.includes('BETA_STEP_FILE_CONTENT')) {
-            return {
-              expectedRequest: {
-                toolResults: [
-                  {
-                    toolCallId: 'same-name-beta-step-tool',
-                    contentIncludes: ['BETA_STEP_FILE_CONTENT'],
-                  },
-                ],
+              {
+                toolCallId: 'same-name-beta-parent',
+                contentIncludes: ['BETA_STEP_DONE'],
               },
-              delay: 25,
-              message: { content: 'BETA_STEP_DONE' },
-            };
-          }
-          throw new Error(`expected one same-name child continuation: ${text}`);
+            ],
+          },
+          message: { content: 'INTERLEAVED_PARENT_DONE' },
         },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            {
-              toolCallId: 'same-name-alpha-parent',
-              contentIncludes: ['ALPHA_STEP_DONE'],
-            },
-            {
-              toolCallId: 'same-name-beta-parent',
-              contentIncludes: ['BETA_STEP_DONE'],
-            },
-          ],
-        },
-        message: { content: 'INTERLEAVED_PARENT_DONE' },
-      },
-    ]);
+      ]),
+    );
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });

@@ -9,6 +9,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
@@ -41,7 +42,7 @@ test('built Service and actual PTY permission controls preserve exact grants and
       const review = body.messages.some((message) => {
         if (message.role !== 'user') return false;
         try {
-          return JSON.parse(message.content).purpose === 'authorization_review';
+          return JSON.parse(message.content).purpose === 'authorization_check';
         } catch {
           return false;
         }
@@ -56,6 +57,16 @@ test('built Service and actual PTY permission controls preserve exact grants and
         };
         return new Response(
           `data: ${JSON.stringify({ id: 'review', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
+      if (
+        body.messages.some(
+          (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+        )
+      ) {
+        return new Response(
+          `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta: { content: 'Owned permission checks' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
           { headers: { 'content-type': 'text/event-stream' } },
         );
       }
@@ -225,31 +236,13 @@ test('built Service and actual PTY permission controls preserve exact grants and
           .all(expected.content) as { id: string }[];
         expect(originals).toHaveLength(1);
         const original = (await proofStore.getCommand(originals[0]!.id))!;
-        const receipt = original.receipt as {
-          businessCommandId?: string;
-          humanInputCommandId?: string;
-          runId: string;
-        };
-        const businessId = receipt.businessCommandId ?? original.id;
+        const receipt = original.receipt as { runId: string };
+        const businessId = original.id;
         expect(original.status).toBe('applied');
         const run = (await proofStore.getRun(receipt.runId))!;
-        expect(run).toMatchObject({ originCommandId: businessId, rootWorkCommandId: original.id });
-        if (expected.content.startsWith('New task:')) {
-          expect(receipt.businessCommandId).toBeString();
-          expect(businessId).not.toBe(original.id);
-          expect(await proofStore.getCommand(receipt.humanInputCommandId!)).toMatchObject({
-            request: {
-              publicCommandId: original.id,
-              content: expected.content,
-              originalRequest: original.request,
-            },
-            receipt: { businessCommandId: businessId, state: 'decided' },
-          });
-          expect(await proofStore.getCommand(businessId)).toMatchObject({
-            status: 'applied',
-            receipt: { runId: run.id },
-          });
-        }
+        expect(receipt).toEqual({ runId: run.id });
+        expect(run).toMatchObject({ originCommandId: original.id, rootWorkCommandId: original.id });
+        expect(original.request).toMatchObject({ kind: 'run.start', content: expected.content });
         const models = (await proofStore.listExecutions(original.sessionId)).filter(
           (execution) => execution.kind === 'model' && execution.runId === run.id,
         );

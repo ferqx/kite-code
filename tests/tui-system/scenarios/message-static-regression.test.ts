@@ -4,6 +4,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { publicAgentResponses } from '../harness/public-agent-responses';
 import { stripAnsi, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -119,50 +120,52 @@ describe('TUI PTY System — terminal concurrent Subagent Static ownership', () 
     server = createMockModelServer();
     workspace = createTestWorkspace();
     const answer = longAnswer('SUBAGENT_STATIC_LINE');
-    server.setResponses([
-      {
-        message: {
-          content: 'I will inspect two independent areas concurrently.',
-          tool_calls: [
-            {
-              id: 'subagent-static-runtime',
-              name: 'task',
-              args: {
-                name: 'Inspect runtime packages',
-                subagent_type: 'explore',
-                task: 'Inspect the runtime package layout and report a short summary.',
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          message: {
+            content: 'I will inspect two independent areas concurrently.',
+            tool_calls: [
+              {
+                id: 'subagent-static-runtime',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Inspect runtime packages',
+                  preset: 'explore',
+                  prompt: 'Inspect the runtime package layout and report a short summary.',
+                },
               },
-            },
-            {
-              id: 'subagent-static-tests',
-              name: 'task',
-              args: {
-                name: 'Inspect test layout',
-                subagent_type: 'explore',
-                task: 'Inspect the test layout and report a short summary.',
+              {
+                id: 'subagent-static-tests',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Inspect test layout',
+                  preset: 'explore',
+                  prompt: 'Inspect the test layout and report a short summary.',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      { delay: 500, message: { content: 'Runtime package inspection complete.' } },
-      { delay: 500, message: { content: 'Test layout inspection complete.' } },
-      {
-        expectedRequest: {
-          toolResults: [
-            { toolCallId: 'subagent-static-runtime', contentIncludes: ['inspection complete'] },
-            { toolCallId: 'subagent-static-tests', contentIncludes: ['inspection complete'] },
-          ],
+        { delay: 500, message: { content: 'Runtime package inspection complete.' } },
+        { delay: 500, message: { content: 'Test layout inspection complete.' } },
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'subagent-static-runtime', contentIncludes: ['inspection complete'] },
+              { toolCallId: 'subagent-static-tests', contentIncludes: ['inspection complete'] },
+            ],
+          },
+          message: {
+            content_chunks: [
+              'SUBAGENT_STATIC_FIRST: first complete component.\n\n',
+              `${answer}\n\nSUBAGENT_STATIC_LAST: terminal component.`,
+            ],
+          },
+          chunk_delay: 250,
         },
-        message: {
-          content_chunks: [
-            'SUBAGENT_STATIC_FIRST: first complete component.\n\n',
-            `${answer}\n\nSUBAGENT_STATIC_LAST: terminal component.`,
-          ],
-        },
-        chunk_delay: 250,
-      },
-    ]);
+      ]),
+    );
     tui = await spawnReadyTui({ cols: 120, rows: 30, mockServer: server, workspace });
   });
 

@@ -55,7 +55,7 @@ async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 
             .reverse()
             .find((message) => message.role === 'user')?.content ?? '',
         );
-        if (parsed.purpose === 'authorization_review') payload = parsed;
+        if (parsed.purpose === 'authorization_check') payload = parsed;
       } catch {}
       let delta: unknown, finish: string;
       if (payload) {
@@ -269,8 +269,12 @@ test('Auto web_fetch actual reviewer approves or rejects with the original reaso
         expect(f.counts().sockets).toBeGreaterThan(0);
         expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
       } else {
-        expect(f.counts()).toEqual({ dns: 0, sockets: 0, normal: 1 });
-        expect((await f.runtime.getView('s')).runs[0]!.status).toBe('cancelled');
+        expect(f.counts()).toEqual({ dns: 0, sockets: 0, normal: 2 });
+        expect(await f.tool()).toMatchObject({
+          status: 'failed',
+          result: { outcome: 'failed', details: { code: 'permission_denied' } },
+        });
+        expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
         const executions = await f.store.listExecutions('s', 200);
         expect(JSON.stringify(executions)).toContain(reviewReason);
       }

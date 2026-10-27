@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import {
+  activateSessionSearch,
+  submitCommand,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
 import {
   awaitPreInkTuiReady,
   type PtyProcess,
@@ -33,6 +38,7 @@ async function existingHistory() {
     tuis.push(first);
     await submitUserMessage(first, server, question);
     await waitForText(() => first.viewport(), answer, 15_000);
+    await submitCommand(first, `/session rename ${question}`);
     let sessionId: string | undefined;
     await waitForCondition(
       () => {
@@ -115,6 +121,8 @@ describe('TUI startup Store maintenance wait', () => {
         'original Session listed after automatic maintenance retry',
         15_000,
       );
+      await activateSessionSearch(waiting);
+      await typeText(waiting, question);
       waiting.write('\x1b[B');
       await waitForCondition(
         () => screenHasSessionRow(waiting.viewport(), question, { selected: true, active: false }),

@@ -40,6 +40,7 @@ function fixture() {
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   return {
+    dom,
     host,
     root,
     async close() {
@@ -49,6 +50,42 @@ function fixture() {
       Object.assign(globalThis, previous);
     },
   };
+}
+/** Observe paint ranges while keeping each paragraph one continuous text node. */
+function streamingReveals(dom: JSDOM) {
+  const reveals: string[] = [];
+  class TextHighlight {
+    readonly range: AbstractRange;
+    constructor(range: AbstractRange) {
+      this.range = range;
+    }
+  }
+  const highlights = new Map<string, TextHighlight>();
+  const set = highlights.set;
+  highlights.set = function (name, highlight) {
+    if (!this.has(name)) {
+      expect(highlight.range.startContainer).toBe(highlight.range.endContainer);
+      reveals.push(
+        (highlight.range.startContainer as Text).data.slice(
+          highlight.range.startOffset,
+          highlight.range.endOffset,
+        ),
+      );
+    }
+    return set.call(this, name, highlight);
+  };
+  Object.defineProperty(dom.window, 'Highlight', { value: TextHighlight, configurable: true });
+  Object.defineProperty(dom.window, 'CSS', {
+    value: { highlights, registerProperty() {} },
+    configurable: true,
+  });
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'animate', {
+    configurable: true,
+    value() {
+      return { cancel() {}, onfinish: null, oncancel: null };
+    },
+  });
+  return reveals;
 }
 const run = (id = 'r', sessionId = 's'): NativeRunFact => ({
   id,
@@ -944,14 +981,7 @@ test('an empty tool-first preview with nonzero body bytes retains its actual Nat
 
 test('Native reveals live preview appends but an explicit incomplete full-body read stays static', async () => {
   const f = fixture();
-  const animations: string[] = [];
-  Object.defineProperty(HTMLElement.prototype, 'animate', {
-    configurable: true,
-    value(this: HTMLElement) {
-      animations.push(this.textContent!);
-      return { cancel() {}, onfinish: null, oncancel: null };
-    },
-  });
+  const reveals = streamingReveals(f.dom);
   const content = '原预览，流式新增，显式读取的完整已保存前缀';
   const contentBytes = String(new TextEncoder().encode(content).length);
   let preview: Message = {
@@ -997,22 +1027,22 @@ test('Native reveals live preview appends but an explicit incomplete full-body r
     );
   try {
     await render();
-    expect(animations).toEqual([]);
+    expect(reveals).toEqual([]);
     preview = { ...preview, content: '原预览，流式新增' };
     await render();
-    expect(animations).toEqual([...'，流式新增']);
+    expect(reveals).toEqual([...'，流式新增']);
     const read = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === '查看完整回复',
     )!;
     await act(async () => read.click());
     expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(content);
-    expect(animations).toEqual([...'，流式新增']);
+    expect(reveals).toEqual([...'，流式新增']);
     const close = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === '收起完整回复',
     )!;
     await act(async () => close.click());
     expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(preview.content);
-    expect(animations).toEqual([...'，流式新增']);
+    expect(reveals).toEqual([...'，流式新增']);
   } finally {
     await f.close();
   }
@@ -1020,15 +1050,8 @@ test('Native reveals live preview appends but an explicit incomplete full-body r
 
 test('Native automatic body fills stay static initially, retain verified text during the next read and reveal only new graphemes', async () => {
   const f = fixture(),
-    animations: string[] = [],
+    reveals = streamingReveals(f.dom),
     copied: (string | undefined)[] = [];
-  Object.defineProperty(HTMLElement.prototype, 'animate', {
-    configurable: true,
-    value(this: HTMLElement) {
-      animations.push(this.textContent!);
-      return { cancel() {}, onfinish: null, oncancel: null };
-    },
-  });
   const first = '原预览，已经保存的完整前缀';
   const bytes = (text: string) => String(new TextEncoder().encode(text).length);
   let preview: Message = {
@@ -1078,7 +1101,7 @@ test('Native automatic body fills stay static initially, retain verified text du
     verified = snapshot(first, '1');
     await render();
     expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(first);
-    expect(animations).toEqual([]);
+    expect(reveals).toEqual([]);
     const paragraph = f.host.querySelector('.typeset-chat p');
     const second = `${first}，又新增🙂`;
     preview = { ...preview, outputBody: { ...preview.outputBody!, contentBytes: bytes(second) } };
@@ -1087,11 +1110,11 @@ test('Native automatic body fills stay static initially, retain verified text du
     expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(first);
     expect(f.host.querySelector('.typeset-chat p')).toBe(paragraph);
     expect(copied.at(-1)).toBeUndefined();
-    expect(animations).toEqual([]);
+    expect(reveals).toEqual([]);
     verified = snapshot(second, '2');
     await render();
     expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(second);
-    expect(animations).toEqual([...'，又新增🙂']);
+    expect(reveals).toEqual([...'，又新增🙂']);
     expect(copied.at(-1)).toBe(second);
     const third = `${second}末批`;
     preview = {
@@ -1101,14 +1124,14 @@ test('Native automatic body fills stay static initially, retain verified text du
     };
     verified = undefined;
     await render();
-    expect(animations).toEqual([...'，又新增🙂末批']);
+    expect(reveals).toEqual([...'，又新增🙂末批']);
     verified = snapshot(third, '3');
     await render();
-    expect(animations).toEqual([...'，又新增🙂末批']);
+    expect(reveals).toEqual([...'，又新增🙂末批']);
     preview = { ...preview, id: 'different-message', outputBody: undefined };
     verified = undefined;
     await render();
-    expect(animations).toEqual([...'，又新增🙂末批']);
+    expect(reveals).toEqual([...'，又新增🙂末批']);
   } finally {
     await f.close();
   }
@@ -2146,7 +2169,7 @@ test('search v2/v3 keep exact exploration presentation while unknown versions re
     });
     expect(projection.messages[0]).toMatchObject(
       definitionVersion === '99'
-        ? { title: 'files.search · 99', toolName: undefined }
+        ? { title: '搜索内容', toolName: undefined }
         : { title: '搜索内容', toolName: 'search_content', presentation: 'exploration' },
     );
     if (definitionVersion === '99')

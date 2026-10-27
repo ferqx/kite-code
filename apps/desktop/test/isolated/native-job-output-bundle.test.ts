@@ -20,7 +20,6 @@ import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
-import { initializeLivePermissionFixture } from '../../../service/test/fixtures/live-permission-fixture';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -163,15 +162,31 @@ test.skipIf(process.platform !== 'darwin')(
       }
       const report = JSON.parse(readFileSync(join(home, 'job-output-report.json'), 'utf8')) as {
         pids: number[];
-        physical: { method: string }[];
-        coldPhysical: { method: string }[];
+        physical: { method: string; path: string }[];
+        coldPhysical: { method: string; path: string }[];
         bytePages: { highWaterSeq: string; items: number; bytes: number }[];
       };
       expect(report.pids).toHaveLength(2);
       for (const pid of report.pids) expect(() => process.kill(pid, 0)).toThrow();
       expect(producerCalls).toBe(0);
-      expect(report.physical.every((row) => row.method === 'GET')).toBe(true);
-      expect(report.coldPhysical.every((row) => row.method === 'GET')).toBe(true);
+      expect(
+        report.physical.every(
+          (row) =>
+            row.method === 'GET' ||
+            (row.method === 'POST' &&
+              [
+                '/v1/sessions/job-output-window/reconcile',
+                '/v1/sessions/second-output-window/reconcile',
+              ].includes(row.path)),
+        ),
+      ).toBe(true);
+      expect(
+        report.coldPhysical.every(
+          (row) =>
+            row.method === 'GET' ||
+            (row.method === 'POST' && row.path === '/v1/sessions/job-output-window/reconcile'),
+        ),
+      ).toBe(true);
       expect(report.bytePages.length).toBeGreaterThan(1);
       expect(report.bytePages.every((row) => row.bytes <= 524288)).toBe(true);
       expect(new Set(report.bytePages.map((row) => row.highWaterSeq)).size).toBe(1);
@@ -445,22 +460,6 @@ async function seedJob({
       graceMs: 20,
       maxQueuedBytes: 16 * 1024 * 1024,
     },
-    permissionPolicy: {
-      readPolicy: () => ({
-        mode: 'full',
-        workspaceTrust: true,
-        revision: 'explicit-output-producer-full',
-        allowed: [
-          { kind: 'model', definitionId: 'fixed', definitionVersion: '1' },
-          ...['shell.launch', 'shell.wait'].map((definitionId) => ({
-            kind: 'tool' as const,
-            definitionId,
-            definitionVersion: '1',
-          })),
-          { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
-        ],
-      }),
-    },
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const runtime = createRuntime({
@@ -470,7 +469,7 @@ async function seedJob({
     modelConcurrency: 1,
     processConcurrency: 1,
   });
-  host.permissionManagement?.(runtime);
+  const permission = host.permissionManagement!(runtime);
   try {
     const storeId = (await store.getMetadata()).storeId;
     await runtime.createWorkspace({
@@ -491,17 +490,40 @@ async function seedJob({
         workspaceId: 'w',
         title: title!,
       });
-    for (const sessionId of ['job-output-window', 'second-output-window'])
-      await initializeLivePermissionFixture({
-        runtime,
-        profile,
+    for (const sessionId of ['job-output-window', 'second-output-window']) {
+      const identity = {
         expectedStoreId: storeId,
         subjectId: 'local-user',
-        sessionId,
-        workspaceId: 'w',
-        mode: 'full',
-        trusted: true,
-      });
+      };
+      const mode = await permission.readMode({ ...identity, sessionId });
+      expect(
+        (
+          await permission.setMode({
+            ...identity,
+            sessionId,
+            commandId: `fixture-mode-${sessionId}`,
+            mode: 'full',
+            makeDefault: false,
+            ifRevision: mode.revision,
+            ifDefaultRevision: mode.defaultRevision,
+          })
+        ).state,
+      ).toBe('applied');
+      const trust = await permission.readTrust({ ...identity, workspaceId: 'w' });
+      expect(
+        (
+          await permission.setTrust({
+            ...identity,
+            workspaceId: 'w',
+            commandId: `fixture-trust-${sessionId}`,
+            trusted: true,
+            ifRevision: trust.revision,
+            canonicalIdentity: trust.canonicalIdentity,
+            externalReadScopeDigest: trust.externalReadScopeDigest,
+          })
+        ).state,
+      ).toBe('applied');
+    }
     await runtime.submitCommand({
       expectedStoreId: storeId,
       subjectId: 'local-user',

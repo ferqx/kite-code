@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Execution, Message } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 const [launcher, home, control, originalStoreId] = process.argv.slice(2) as [
     string,
@@ -86,12 +87,25 @@ async function select(page: import('playwright').Page, title: string) {
     .and(page.locator('button.session-row'))
     .click();
   await page.locator('.session-header').getByTitle(title, { exact: true }).waitFor();
+  if (title === 'Sealed questions' || (title === 'Source questions' && forkId)) {
+    await page.getByText('问答后的原任务已完成', { exact: true }).waitFor();
+    await selectedState(page, title);
+  }
 }
 async function state(page: import('playwright').Page) {
   return page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
   );
+}
+async function selectedState(page: import('playwright').Page, title: string) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const value = await state(page);
+    if (value.selection?.session.title === title && !value.selection.viewLoading) return value;
+    assert.ok(Date.now() < deadline, `selected current history: ${title}`);
+    await page.waitForTimeout(20);
+  }
 }
 async function history(page: import('playwright').Page, sessionId: string) {
   return page.evaluate(async (sessionId) => {
@@ -112,6 +126,8 @@ async function openTools(page: import('playwright').Page) {
 async function receipt(page: import('playwright').Page, original: Message) {
   const process = page.getByRole('button', { name: /展开本轮处理过程/ });
   if (await process.count()) await process.click();
+  for (const group of await page.locator('.tool-activity-aggregate > .tool-activity-summary').all())
+    if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
   const row = page.getByRole('article', { name: /^询问用户 · 已回答 2 项/ });
   await row.waitFor();
   const summary = row.locator('.tool-activity-summary');
@@ -188,8 +204,14 @@ async function records(
 }
 async function noWrites(sealed = false) {
   const requests = (await app!.evaluate('globalThis.__questionAudit.requests')) as string[];
+  // Current activation reconciles only each explicitly selected Session; it creates no business work.
+  const reconciliation = new Set(
+    ['s', 'other', forkId]
+      .filter(Boolean)
+      .map((id) => `POST /v1/sessions/${encodeURIComponent(id)}/reconcile`),
+  );
   assert.deepEqual(
-    requests.filter((entry) => !entry.startsWith('GET ')),
+    requests.filter((entry) => !entry.startsWith('GET ') && !reconciliation.has(entry)),
     [],
   );
   if (sealed)
@@ -284,6 +306,7 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('沿原 PC 问卷填写并保存回答');
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   await page.getByRole('form', { name: 'Questionnaire' }).waitFor();
   await page.getByRole('radio', { name: `${facts.answers.q1} (Recommended)`, exact: true }).check();
@@ -323,7 +346,9 @@ try {
   await app!.evaluate('globalThis.__questionAudit.requests=[]');
   await openFork.click();
   await page.locator('.session-header').getByTitle('Sealed questions', { exact: true }).waitFor();
-  forkId = (await state(page)).selection!.session.id;
+  await page.getByText('问答后的原任务已完成', { exact: true }).waitFor();
+  const fork = await selectedState(page, 'Sealed questions');
+  forkId = fork.selection!.session.id;
   assert.notEqual(forkId, 's');
   const copies = await history(page, forkId);
   assert.equal(copies.length, source.length);

@@ -1431,12 +1431,23 @@ test('actual after-turn report admission and its active Run block scheduling unt
     applyGate = gate(),
     reportStarted = gate(),
     reportStartGate = gate();
-  const originalApply = store.applyJobReport.bind(store);
-  store.applyJobReport = async (input) => {
-    const result = await originalApply(input);
-    if (result.started) {
-      reportStarted.release();
-      await reportStartGate.promise;
+  const originalReceive = store.receiveAgentMessages.bind(store);
+  store.receiveAgentMessages = async (input) => {
+    const result = await originalReceive(input);
+    for (const commandId of input.messageIds) {
+      const command = await store.getCommand(commandId);
+      const receipt = command?.receipt as { mode?: string; runId?: string } | undefined;
+      const run = receipt?.runId ? await store.getRun(receipt.runId) : null;
+      if (
+        command?.kind === 'job.report' &&
+        command.status === 'applied' &&
+        receipt?.mode === 'idle_new_turn' &&
+        run?.isActive &&
+        run.originCommandId === command.id
+      ) {
+        reportStarted.release();
+        await reportStartGate.promise;
+      }
     }
     return result;
   };
@@ -1719,15 +1730,48 @@ test('an identical create retry across its due time preserves persisted scheduli
   }
 });
 
-test('a real human handoff does not settle unfinished scheduled work or admit another occurrence', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-scheduled-human-handoff-')));
+test('a retained human_work_deferred Run does not prove scheduled work settled or admit another occurrence', async () => {
+  const f = fixture(),
+    c = fakeClient(f),
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  try {
+    runner.start();
+    await runner.tick();
+    await runner.runNow('task');
+    const first = f.data.scheduledTaskRuns()[0]!;
+    Object.assign(c.runs.get(first.serviceRunId!)!, {
+      status: 'completed',
+      isActive: false,
+      reason: 'human_work_deferred',
+    });
+    await runner.tick();
+    f.advance(60000);
+    await runner.tick();
+    await runner.runNow('task');
+    expect(f.data.scheduledTaskRuns()).toHaveLength(1);
+    expect(f.data.scheduledTaskRuns()[0]).toMatchObject({
+      id: first.id,
+      status: 'unknown',
+      error: 'human_work_deferred',
+    });
+    expect(f.data.scheduledTaskRuns()[0]!.settlementVersion).toBeUndefined();
+    expect(c.posts).toEqual(['create', 'start']);
+  } finally {
+    await runner.stop();
+    f.db.close();
+  }
+});
+
+test('a queued human turn cannot settle unfinished scheduled Tool work or admit another occurrence', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-scheduled-queued-human-')));
   const dataRoot = join(root, 'data');
   const store = await openSqliteStore({ dataRoot, profile: 'test' });
   let release!: () => void;
   const originalGate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  let calls = 0;
+  let calls = 0,
+    effects = 0;
   const finish = {
     type: 'finish' as const,
     reason: 'stop' as const,
@@ -1744,11 +1788,40 @@ test('a real human handoff does not settle unfinished scheduled work or admit an
     },
     model: {
       async *stream() {
-        if (calls++ === 0) await originalGate;
-        yield { type: 'text_delta' as const, text: 'Partial response before handoff' };
+        if (calls++ === 0) {
+          yield {
+            type: 'tool_call' as const,
+            id: 'effect',
+            name: 'fixture.effect',
+            arguments: '{}',
+          };
+          yield { ...finish, reason: 'tool_calls' as const };
+          return;
+        }
+        yield { type: 'text_delta' as const, text: 'Actual completed response' };
         yield finish;
       },
     },
+    extensions: [
+      {
+        id: 'fixture',
+        version: '1',
+        apiMajor: 1,
+        tools: [
+          {
+            id: 'fixture.effect',
+            version: '1',
+            description: 'Harmless controlled scheduled work',
+            inputSchema: { type: 'object' },
+            async execute() {
+              effects++;
+              await originalGate;
+              return { outcome: 'succeeded' as const, content: 'Actual scheduled work settled' };
+            },
+          },
+        ],
+      },
+    ],
   });
   const profile = {
     dataRoot: realpathSync(dataRoot),
@@ -1758,7 +1831,7 @@ test('a real human handoff does not settle unfinished scheduled work or admit an
   const service = await startService({
     runtime,
     profile,
-    buildId: 'scheduled-human-handoff',
+    buildId: 'scheduled-queued-human',
     subjectId: 'owner',
   });
   const client = createClient({
@@ -1773,7 +1846,7 @@ test('a real human handoff does not settle unfinished scheduled work or admit an
   const until = async (read: () => Promise<boolean>) => {
     const end = Date.now() + 6000;
     while (!(await read())) {
-      if (Date.now() > end) throw Error('scheduled_handoff_timeout');
+      if (Date.now() > end) throw Error('scheduled_tool_timeout');
       await Bun.sleep(5);
     }
   };
@@ -1788,7 +1861,7 @@ test('a real human handoff does not settle unfinished scheduled work or admit an
     await runner.tick();
     await runner.runNow('task');
     const first = f.data.scheduledTaskRuns()[0]!;
-    await until(async () => calls === 1);
+    await until(async () => effects === 1);
     await runtime.submitCommand({
       expectedStoreId: storeId,
       sessionId: first.sessionId,
@@ -1796,27 +1869,53 @@ test('a real human handoff does not settle unfinished scheduled work or admit an
       commandId: 'independent-B',
       request: { kind: 'run.start', content: 'New task: independent B' },
     });
-    release();
-    await runtime.waitForCommand(first.startCommandId, { timeoutMs: 6000 });
-    await runtime.waitForCommand('independent-B', { timeoutMs: 6000 });
-    const original = (await store.getView(first.sessionId)).runs.find(
-      (run) => run.rootWorkCommandId === first.startCommandId,
-    )!;
+    const active = await store.getView(first.sessionId);
+    const original = active.runs.find((run) => run.rootWorkCommandId === first.startCommandId)!;
     expect(original).toMatchObject({
-      status: 'completed',
-      reason: 'human_work_deferred',
-      isActive: false,
+      status: 'running',
+      isActive: true,
     });
+    expect(active.executions.filter((execution) => execution.kind === 'tool')).toMatchObject([
+      {
+        definitionId: 'fixture.effect',
+        status: 'dispatching',
+        authorization: { dispatched: true },
+      },
+    ]);
+    expect((await store.getCommand('independent-B'))?.status).toBe('accepted');
+    expect(calls).toBe(1);
     await runner.tick();
-    const observed = f.data.scheduledTaskRuns()[0]!;
+    expect(f.data.scheduledTaskRuns()[0]!.status).toBe('running');
+    expect(f.data.scheduledTaskRuns()[0]!.settlementVersion).toBeUndefined();
     f.advance(60000);
     await runner.tick();
     expect(f.data.scheduledTaskRuns()).toHaveLength(1);
     await runner.runNow('task');
-    expect(observed.status).toBe('unknown');
-    expect(observed.error).toBe('human_work_deferred');
-    expect(observed.settlementVersion).toBeUndefined();
+    expect(f.data.scheduledTaskRuns()[0]!.status).toBe('running');
+    expect(f.data.scheduledTaskRuns()[0]!.settlementVersion).toBeUndefined();
     expect(f.data.scheduledTaskRuns()).toHaveLength(1);
+    expect((await store.getCommand('independent-B'))?.status).toBe('accepted');
+    expect(calls).toBe(1);
+    expect(effects).toBe(1);
+    await runner.toggle('task', false);
+    release();
+    await runtime.waitForCommand(first.startCommandId, { timeoutMs: 6000 });
+    await runtime.waitForCommand('independent-B', { timeoutMs: 6000 });
+    const settled = await store.getView(first.sessionId);
+    expect(settled.runs.map((run) => run.originCommandId)).toEqual([
+      first.startCommandId,
+      'independent-B',
+    ]);
+    expect(settled.runs.every((run) => run.status === 'completed' && !run.isActive)).toBe(true);
+    expect(calls).toBe(3);
+    expect(effects).toBe(1);
+    await runner.tick();
+    expect(f.data.scheduledTaskRuns()).toHaveLength(1);
+    expect(f.data.scheduledTaskRuns()[0]).toMatchObject({
+      id: first.id,
+      status: 'completed',
+      settlementVersion: 1,
+    });
   } finally {
     release();
     await runner.stop();

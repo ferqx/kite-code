@@ -74,6 +74,13 @@ try {
   await openSessionTools(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(() => {
+    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    return (
+      input?.getAttribute('contenteditable') === 'true' &&
+      !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
+    );
+  });
   await openSessionTools(page);
   await page.evaluate(async () => {
     const first = (await window.kiteNative!.request({ method: 'attach' })) as NativeState;
@@ -90,6 +97,13 @@ try {
   await openSessionTools(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(() => {
+    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    return (
+      input?.getAttribute('contenteditable') === 'true' &&
+      !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
+    );
+  });
   await openSessionTools(page);
   phase('initial_reload_ready');
   const generation = await page.evaluate(
@@ -126,7 +140,19 @@ try {
             generation,
           })) as NativeState;
           identity(fresh);
-          const observationId = fresh.selection!.permissions!.observationId;
+          const facts = fresh.selection!.permissions!;
+          if (
+            fresh.permissionSubmissions.some((entry) =>
+              ['saved', 'submitting', 'unknown'].includes(entry.phase),
+            )
+          )
+            throw Error('permission_fixture_original_intent_pending');
+          if (
+            (kind === 'permission.mode' && facts.mode.mode === 'full') ||
+            (kind === 'permission.trust' && facts.trust.trusted)
+          )
+            break;
+          const observationId = facts.observationId;
           const before = intentIds(fresh);
           console.error(
             'native_permission_attempt ' +
@@ -160,6 +186,16 @@ try {
           }
         }
       }
+      const verified = (await window.kiteNative!.request({
+        method: 'permission.refresh',
+        generation,
+      })) as NativeState;
+      identity(verified);
+      if (
+        verified.selection!.permissions!.mode.mode !== 'full' ||
+        !verified.selection!.permissions!.trust.trusted
+      )
+        throw Error('permission_fixture_controls_unverified');
     },
     { generation, storeId },
   );
@@ -229,6 +265,13 @@ try {
   process.kill(servicePid, 0);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(() => {
+    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    return (
+      input?.getAttribute('contenteditable') === 'true' &&
+      !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
+    );
+  });
   await openSessionTools(page);
   phase('live_reload_ready');
   expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText()).toBe(
@@ -368,6 +411,13 @@ try {
   await openSessionTools(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(() => {
+    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    return (
+      input?.getAttribute('contenteditable') === 'true' &&
+      !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
+    );
+  });
   await openSessionTools(page);
   await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
   expect(await page.getByRole('button', { name: '查看完整回复', exact: true }).count()).toBe(0);

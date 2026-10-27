@@ -1,10 +1,27 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 import { promptText } from './prompt-editor-text.fixture';
+
+async function observedState(
+  page: import('playwright').Page,
+  accepts: (value: NativeState) => boolean,
+  deadline: number,
+): Promise<NativeState> {
+  for (;;) {
+    const value = (await page.evaluate(async () =>
+      window.kiteNative!.request({ method: 'state', generation: 1 }),
+    )) as NativeState;
+    if (accepts(value)) return value;
+    if (Date.now() >= deadline) throw Error('native_bundle_observation_timeout');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -35,9 +52,11 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   await final.waitFor();
   assert.equal(await process.getAttribute('aria-expanded'), 'false');
   await process.click();
+  for (const group of await page.locator('.tool-activity-aggregate > .tool-activity-summary').all())
+    if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
   assert.equal(await final.count(), 1);
-  await page.locator('.tool-edit-heading').filter({ hasText: '已人工批准' }).waitFor();
+  await page.locator('.tool-edit-heading [role="img"][aria-label^="已人工批准"]').waitFor();
   await openSessionTools(page);
   const history = page.locator('[data-interaction-history]');
   await history.locator(':scope > summary').click();
@@ -90,14 +109,42 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
     'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
   );
   await page.getByRole('button', { name: 'bundled.txt', exact: true }).waitFor();
-  const failed = page
-    .locator('.tool-activity-step.failed')
-    .filter({ hasText: 'missing-tool-target.txt' });
-  await failed.waitFor();
-  assert.ok((await failed.textContent())!.includes('读取'));
-  assert.ok((await failed.textContent())!.includes('失败'));
-  assert.equal(await failed.locator('button').count(), 0);
+  const failed = page.locator('.tool-activity:not(.tool-activity-aggregate)').filter({
+    has: page.locator('.tool-activity-summary').filter({ hasText: 'missing-tool-target.txt' }),
+  });
+  try {
+    await failed.waitFor();
+  } catch (error) {
+    console.error(
+      'native_failed_read_observation',
+      JSON.stringify({
+        text: (await page.locator('body').innerText()).slice(0, 16000),
+        tools: await page.locator('.tool-activity-summary').evaluateAll((rows) =>
+          rows.map((row) => ({
+            text: row.textContent,
+            html: row.outerHTML.slice(0, 4000),
+          })),
+        ),
+        state: await page.evaluate(async () =>
+          window.kiteNative!.request({ method: 'state', generation: 1 }),
+        ),
+      }),
+    );
+    throw error;
+  }
+  const failedHeading = failed.locator(':scope > .tool-activity-summary');
+  assert.ok((await failedHeading.textContent())!.includes('读取'));
+  assert.ok((await failedHeading.textContent())!.includes('失败'));
+  assert.equal(await failedHeading.getAttribute('data-status'), 'error');
+  assert.equal(await failed.locator('button.file-link').count(), 0);
+  assert.equal(
+    await failed.getByRole('button', { name: 'missing-tool-target.txt', exact: true }).count(),
+    0,
+  );
   assert.equal(await failed.locator('.tool-step-preview').count(), 0);
+  if ((await failedHeading.getAttribute('aria-expanded')) !== 'true') await failedHeading.click();
+  await failed.getByRole('region', { name: '工具异常详情', exact: true }).waitFor();
+  assert.ok((await failed.locator('.tool-detail').textContent())!.includes('ENOENT'));
   console.log(
     'native_driver_stage: original tool rows, accurate Files read failure and no file action',
   );
@@ -133,10 +180,49 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   await pane.getByText('1 次文件操作', { exact: true }).waitFor();
   assert.equal(await pane.locator('details.file-change').count(), 1);
   await pane.locator('details.file-change > summary').click();
-  const diff = pane.getByRole('region', { name: '文件差异', exact: true });
-  await diff.waitFor();
-  assert.ok((await diff.textContent())!.includes('actual bundled bytes'));
-  assert.equal(await pane.getByRole('button', { name: 'bundled.txt', exact: true }).count(), 1);
+  const delivery = pane.getByRole('region', { name: '交付文件历史内容', exact: true });
+  await delivery.waitFor();
+  const deliveredText = await delivery.locator('pre.tool-file-snapshot').textContent();
+  assert.equal(deliveredText, 'actual bundled bytes\r\n');
+  assert.equal(await pane.getByRole('button', { name: '读取下一段', exact: true }).count(), 0);
+  const originalFile = await page.evaluate(async () => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    const execution = state.selection?.executions.find(
+      (row) =>
+        row.definitionId === 'files.write' &&
+        row.definitionVersion === '3' &&
+        row.status === 'succeeded',
+    );
+    const result = execution?.result;
+    if (
+      !execution ||
+      !result ||
+      typeof result !== 'object' ||
+      Array.isArray(result) ||
+      typeof result.content !== 'string'
+    )
+      throw Error('original_file_delivery_missing');
+    const snapshot = JSON.parse(result.content) as {
+      path: string;
+      baseline: { hash: string; size: number };
+    };
+    return { storeId: state.selection!.storeId, sessionId: execution.sessionId, ...snapshot };
+  });
+  assert.equal(originalFile.storeId, storeId);
+  assert.equal(originalFile.sessionId, conversationId);
+  assert.equal(originalFile.path, 'bundled.txt');
+  assert.equal(originalFile.baseline.size, Buffer.byteLength(deliveredText!, 'utf8'));
+  assert.equal(
+    originalFile.baseline.hash,
+    createHash('sha256').update(deliveredText!).digest('hex'),
+  );
+  assert.equal(
+    await pane.getByRole('button', { name: '打开当前文件：bundled.txt', exact: true }).count(),
+    1,
+  );
   const denied = await page.evaluate(async () => {
     try {
       await window.kiteNative!.request({
@@ -151,7 +237,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
     }
   });
   assert.equal(denied, 'file_change_observation_unavailable');
-  await diff.focus();
+  await delivery.focus();
   await page.keyboard.press('Escape');
   assert.equal(await pane.count(), 0);
   await page.getByRole('button', { name: '设置', exact: true }).click();
@@ -376,6 +462,7 @@ async function launch() {
     .click();
   await page.locator('.session-header').getByTitle(conversationTitle, { exact: true }).waitFor();
   await openSessionTools(page);
+  await page.locator('.composer').waitFor();
   const layout = await page.evaluate(async () => {
     await document.fonts.ready;
     const shell = document.querySelector('.kite-client.shell')!;
@@ -620,6 +707,7 @@ try {
     await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
     'write one real bundled file',
   );
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('button', { name: '发送首条消息' }).click();
   assert.equal(
     await page.evaluate(() => (Reflect.get(window, '__bundleInputEvents') as unknown[]).length),
@@ -654,10 +742,44 @@ try {
       if (!approvals.includes(card.id)) {
         // The original card may remain visible after submitting its answer;
         // only an unanswered card requires its tool's pending approval label.
-        const write = page.locator('.tool-edit-heading').filter({ hasText: '写入' });
-        await write
-          .filter({ hasText: '等待人工审批' })
-          .waitFor({ timeout: Math.max(1, deadline - Date.now()) });
+        const process = page.locator('.agent-turn-summary[aria-expanded="false"]').first();
+        if (await process.count()) await process.click();
+        const write = page
+          .locator('.tool-activity-summary')
+          .filter({ hasText: 'bundled.txt' })
+          .filter({ hasText: '等待人工审批' });
+        while (!(await write.isVisible())) {
+          // The interaction card can precede the saved process metadata. Expand
+          // the real process when it arrives, within the same original deadline.
+          const pendingProcess = page.locator('.agent-turn-summary[aria-expanded="false"]').first();
+          if (await pendingProcess.count()) await pendingProcess.click();
+          for (const group of await page
+            .locator('.tool-activity-aggregate > .tool-activity-summary')
+            .all())
+            if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
+          if (Date.now() >= deadline) {
+            console.error(
+              'native_pending_write_failure',
+              JSON.stringify({
+                text: (await page.locator('body').innerText()).slice(0, 12000),
+                toolRows: await page.locator('.tool-activity-summary').evaluateAll((rows) =>
+                  rows.map((row) => ({
+                    text: row.textContent,
+                    html: row.outerHTML.slice(0, 5000),
+                  })),
+                ),
+                state: await page.evaluate(async () =>
+                  window.kiteNative!.request({ method: 'state', generation: 1 }),
+                ),
+              }),
+            );
+          }
+          assert.ok(
+            Date.now() < deadline,
+            'original pending write metadata and group became visible',
+          );
+          await page.waitForTimeout(20);
+        }
         assert.ok((await write.textContent())!.includes('等待人工审批'));
         if (approvals.length === 0) {
           const pendingRow = page
@@ -674,9 +796,10 @@ try {
             .getByTitle('Native bundled', { exact: true })
             .waitFor();
           assert.equal(await pendingRow.getByText('待用户输入', { exact: true }).isVisible(), true);
-          const reading = await page.evaluate(
-            async () =>
-              (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+          const reading = await observedState(
+            page,
+            (value) => value.selection?.session.id === 's' && !value.selection.viewLoading,
+            deadline,
           );
           assert.equal(reading.selection?.session.id, 's');
           const activity = reading.directory!.sessions.find(
@@ -692,9 +815,13 @@ try {
           assert.equal(await (await fetch(`${control}/count`)).text(), '1');
           await pendingRow.click();
           await approve.waitFor();
-          const original = await page.evaluate(
-            async () =>
-              (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+          const original = await observedState(
+            page,
+            (value) =>
+              value.selection?.session.id === actualSession &&
+              !value.selection.viewLoading &&
+              value.selection.interactions.some((interaction) => interaction.id === card.id),
+            deadline,
           );
           assert.equal(original.selection?.session.id, actualSession);
           assert.ok(

@@ -652,7 +652,16 @@ test('default Runtime freshly reads durable Accept Edits and actual trusted scop
       (item) => item.kind === 'tool',
     )!;
     expect(execution.status).toBe('succeeded');
-    expect(execution.definitionVersion).toBe('2');
+    const originalRun = (await f.store.getRun(execution.runId!))!;
+    expect(originalRun.originCommandId).toBe('work');
+    const originalWrite = (
+      originalRun.configuration as {
+        tools: { extensionId: string; id: string; version: string }[];
+      }
+    ).tools.find((tool) => tool.id === 'files.write');
+    expect(originalWrite).toMatchObject({ extensionId: 'builtin.files', id: 'files.write' });
+    expect(execution.definitionId).toBe('files.write');
+    expect(execution.definitionVersion).toBe(originalWrite!.version);
   } finally {
     await f.close();
   }

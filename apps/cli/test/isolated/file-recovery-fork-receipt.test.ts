@@ -85,7 +85,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
       ],
       tools: [
         { id: 'files.read', definitionVersion: '5' },
-        { id: 'files.write', definitionVersion: '2' },
+        { id: 'files.write', definitionVersion: '3' },
       ],
     }),
   );

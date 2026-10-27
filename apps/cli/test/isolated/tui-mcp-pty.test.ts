@@ -168,7 +168,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
       projectPath = join(workspace, 'kite-agent.jsonc');
     writeFileSync(
       configPath,
-      `// USER COMMENT\n${JSON.stringify({ unknown: { keep: true }, modelId: 'fixed', tools: [{ id: 'files.write', definitionVersion: '2' }], models: [{ id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` }], mcp: [{ id: 'owned-server', enabled: false }] })}\n`,
+      `// USER COMMENT\n${JSON.stringify({ unknown: { keep: true }, modelId: 'fixed', tools: [{ id: 'files.write', definitionVersion: '3' }], models: [{ id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` }], mcp: [{ id: 'owned-server', enabled: false }] })}\n`,
       { mode: 0o600 },
     );
     writeFileSync(projectPath, '// PROJECT COMMENT\n{"unknown":42}\n', { mode: 0o600 });

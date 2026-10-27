@@ -45,22 +45,21 @@ test('actual library run requires durable host port; original new Work request s
     expect(original.request).toEqual(request);
     expect(original.draft).toBeUndefined();
     const applied = await warm.client.getCommand('library-work');
-    const originalRun = applied.receipt as {
-      runId: string;
-      businessCommandId: string;
-      humanInputCommandId: string;
-      decisionCommandId: string;
-    };
+    const originalRun = applied.receipt as { runId: string };
     expect(applied.status).toBe('applied');
-    const raw = await warm.client.getCommand(originalRun.humanInputCommandId);
-    expect(raw.kind).toBe('human.input');
-    expect(raw.receipt).toMatchObject({
-      businessCommandId: originalRun.businessCommandId,
-      decisionCommandId: originalRun.decisionCommandId,
+    expect(applied.kind).toBe('run.start');
+    expect(applied.receipt).toEqual({ runId: originalRun.runId });
+    expect(await warm.client.getRun(originalRun.runId)).toMatchObject({
+      originCommandId: applied.id,
+      rootWorkCommandId: applied.id,
+      sessionId: 's',
+      originStoreId: f.storeId,
     });
-    const business = await warm.client.getCommand(originalRun.businessCommandId);
-    expect(business.status).toBe('applied');
-    expect((await warm.client.getRun(originalRun.runId)).originCommandId).toBe(business.id);
+    expect(
+      f.rows(
+        "SELECT count(*) AS n FROM command WHERE kind IN ('human.input','human.input.decision')",
+      ),
+    ).toEqual([{ n: 0 }]);
     const calls = f.calls();
     expect(await runNonInteractive(['work', 's', JSON.stringify(request)], options)).toBe(3);
     expect(f.calls()).toBe(calls);

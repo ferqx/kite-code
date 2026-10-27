@@ -159,7 +159,9 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await submitCommand(tui, '/effort');
       await waitForText(() => tui.viewport(), '选择推理深度', 10_000);
-      await waitForText(() => tui.viewport(), '❯ 最大', 10_000);
+      await waitForText(() => tui.viewport(), '❯ Max', 10_000);
+      tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '❯ 极高', 10_000);
       tui.write('\x1b[A');
       await waitForText(() => tui.viewport(), '❯ 高', 10_000);
       tui.write('\r');

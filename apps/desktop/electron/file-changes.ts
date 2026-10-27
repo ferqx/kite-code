@@ -60,6 +60,7 @@ function resultFacts(execution: Execution) {
   }
   const path =
     (execution.definitionVersion === '2' ||
+      (execution.definitionId === 'files.write' && execution.definitionVersion === '3') ||
       (['files.write_path', 'files.edit_path'].includes(execution.definitionId) &&
         execution.definitionVersion === '1') ||
       (execution.definitionId === 'files.read' &&

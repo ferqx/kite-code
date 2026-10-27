@@ -363,11 +363,7 @@ finally:
             sessionId: 's',
             status: 'completed',
           });
-          if (index === 0) expect(run.originCommandId).toBe(commandIds[index]!);
-          else {
-            expect(value.commands[index]!.receipt.businessCommandId).toBeString();
-            expect(run.originCommandId).not.toBe(commandIds[index]!);
-          }
+          expect(run.originCommandId).toBe(commandIds[index]!);
         });
       };
       assertRuns(original);

@@ -10,6 +10,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { publicAgentResponses } from '../harness/public-agent-responses';
 import { screenContains, waitForCondition } from '../harness/terminal-screen';
 import { createTestWorkspace, observePersistedTurnEvents } from '../harness/test-workspace';
 
@@ -64,37 +65,39 @@ writeFileSync('late-side-effect.txt', 'unexpected completion');
   const command = argv
     .map((value) => quote(process.platform === 'win32' ? value.replaceAll('\\', '/') : value))
     .join(' ');
-  server.setResponses([
-    {
-      toolContinuation: 'aborted',
-      message: {
-        tool_calls: [
-          {
-            id: 'parent-child',
-            name: 'task',
-            args: {
-              name: 'Cancellable shell child',
-              subagent_type: 'code',
-              task: 'Run the heartbeat command.',
+  server.setResponses(
+    publicAgentResponses(workspace, [
+      {
+        toolContinuation: 'aborted',
+        message: {
+          tool_calls: [
+            {
+              id: 'parent-child',
+              name: 'spawn_agent',
+              args: {
+                task_name: 'Cancellable shell child',
+                preset: 'code',
+                prompt: 'Run the heartbeat command.',
+              },
             },
-          },
-        ],
+          ],
+        },
       },
-    },
-    {
-      toolContinuation: 'aborted',
-      message: {
-        tool_calls: [
-          {
-            id: 'child-shell',
-            name: 'shell.execute',
-            args: { key: 'original-child-shell', command, timeoutMs: 60_000 },
-          },
-        ],
+      {
+        toolContinuation: 'aborted',
+        message: {
+          tool_calls: [
+            {
+              id: 'child-shell',
+              name: 'shell.execute',
+              args: { key: 'original-child-shell', command, timeoutMs: 60_000 },
+            },
+          ],
+        },
       },
-    },
-    { message: { content: 'SUCCESSOR_AFTER_PROCESS_CLEANUP' } },
-  ]);
+      { message: { content: 'SUCCESSOR_AFTER_PROCESS_CLEANUP' } },
+    ]),
+  );
   function observe() {
     const original = observePersistedTurnEvents(workspace, prompt);
     if (original.status !== 'ready' || !original.value) return undefined;
@@ -231,7 +234,11 @@ writeFileSync('late-side-effect.txt', 'unexpected completion');
     const stopped = observe()!;
     expect(stopped.root.is_active).toBe(0);
     expect(stopped.childRun?.is_active).toBe(0);
-    expect(stopped.task?.state).toBe('cancelled');
+    expect(stopped.task?.state).toBe('succeeded');
+    expect(JSON.parse(stopped.task!.result_json!)).toMatchObject({
+      outcome: 'succeeded',
+      details: { accepted: true, agent_id: stopped.child!.child_session_id, state: 'queued' },
+    });
     expect(JSON.parse(stopped.shell!.result_json!)).toMatchObject({
       outcome: 'cancelled',
       details: { groupStopped: true },
@@ -261,10 +268,10 @@ writeFileSync('late-side-effect.txt', 'unexpected completion');
     expect(final.shell!.completed_cursor).toBeLessThan(final.child!.completed_cursor!);
     expect(final.child!.completed_cursor).toBeLessThan(final.successor!.started_cursor);
     expect(final.rootFinished).toBeLessThan(final.successor!.started_cursor);
-    expect(final.task?.state).toBe('cancelled');
+    expect(final.task?.state).toBe('succeeded');
     expect(final.successor!.status).toBe('completed');
     expect(final.afterCancelDispatches).toEqual([]);
-    expect(server.getWorkRequestCount()).toBe(3);
+    expect(server.getWorkRequestCount()).toBe(4);
     console.log(
       JSON.stringify({
         pid,
@@ -310,6 +317,20 @@ writeFileSync('late-side-effect.txt', 'unexpected completion');
       }),
     );
     console.error('Child cancellation viewport:', tui?.viewport());
+    console.error(
+      'Child cancellation model requests:',
+      server.getWorkRequests().map((request) => ({
+        users: request.messages
+          .filter((message) => message.role === 'user')
+          .map((message) => message.content),
+        tools: request.messages
+          .filter((message) => message.role === 'tool')
+          .map((message) => ({
+            id: message.tool_call_id,
+            content: String(message.content).slice(0, 160),
+          })),
+      })),
+    );
     throw error;
   } finally {
     await cleanupTuiSystemFixtures({

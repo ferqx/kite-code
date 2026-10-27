@@ -15,25 +15,18 @@ async function assertBusinessInput(
   content: string,
 ) {
   const command = (await runtime.getCommand(commandId))!;
-  const receipt = command.receipt as {
-    businessCommandId: string;
-    humanInputCommandId: string;
-    runId: string;
-  };
-  expect(command).toMatchObject({ status: 'applied', request: { kind: 'run.start', content } });
-  expect(receipt.businessCommandId).toBeString();
-  expect(receipt.businessCommandId).not.toBe(commandId);
-  expect(await runtime.getCommand(receipt.humanInputCommandId)).toMatchObject({
-    request: { publicCommandId: commandId, content, originalRequest: command.request },
-  });
-  expect(await runtime.getCommand(receipt.businessCommandId)).toMatchObject({
+  const receipt = command.receipt as { runId: string };
+  expect(command).toMatchObject({
+    id: commandId,
     status: 'applied',
-    request: { content },
-    receipt: { runId: receipt.runId },
+    request: { kind: 'run.start', content },
   });
+  expect(receipt.runId).toBeString();
+  expect(receipt).not.toHaveProperty('businessCommandId');
+  expect(receipt).not.toHaveProperty('humanInputCommandId');
   const run = (await runtime.getRun(receipt.runId))!;
   expect(run).toMatchObject({
-    originCommandId: receipt.businessCommandId,
+    originCommandId: commandId,
     rootWorkCommandId: commandId,
   });
   const view = await runtime.getView('session');
@@ -46,10 +39,8 @@ async function assertBusinessInput(
     executionId: model.id,
   });
   expect(input.confirmation).toBe('succeeded');
-  const source = input.request.messages.find((message) =>
-    message.sourceIds?.includes(receipt.businessCommandId),
-  );
-  expect(source).toMatchObject({ content, sourceIds: [receipt.businessCommandId] });
+  const source = input.request.messages.find((message) => message.sourceIds?.includes(commandId));
+  expect(source).toMatchObject({ content, sourceIds: [commandId] });
   return run;
 }
 

@@ -1608,7 +1608,20 @@ nativeTest(
               check: { decision: 'reject', reason: 'scope rejected by reviewer' },
             },
           });
-          expect((await f.store.getView('s')).runs.at(-1)?.status).toBe('cancelled');
+          const view = await f.store.getView('s');
+          expect(view.runs).toHaveLength(1);
+          expect(view.runs[0]).toMatchObject({ originCommandId: 'work', status: 'completed' });
+          expect(
+            f.a.requests.some((request) =>
+              (request.messages as { role: string; content: string }[]).some(
+                (message) =>
+                  message.role === 'tool' && message.content.includes('scope rejected by reviewer'),
+              ),
+            ),
+          ).toBe(true);
+          expect(await f.store.listMessages('s', { afterSeq: '0', limit: 100 })).toContainEqual(
+            expect.objectContaining({ role: 'assistant', content: 'supervised Shell facts' }),
+          );
           expect(
             (await f.store.listExecutions('s')).filter(
               (row) => row.definitionId === 'shell.command',

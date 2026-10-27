@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  matchReviewedCurrentOnlyPredecessorInput,
   matchReviewedPredecessorInput,
   type ReviewedPredecessorKind,
 } from '../../fixtures/unified-agent/predecessor-reviewed-input';
@@ -49,13 +50,14 @@ test('six reviewed raw pairs retain actual predecessor/current hashes and explic
       expect(result.match).toBe('reviewed_locked_input_increment');
       expect(String(result.predecessorCommit)).toBe(commit);
       expect(result.reviewScope).toBe(
-        path === 'bun.lock' ||
-          path === 'packages/ui/package.json' ||
-          path === 'packages/agent/package.json'
-          ? 'approved_input_increments_2026_10_21'
-          : path === 'package.json'
-            ? 'approved_input_increments_2026_10_19'
-            : 'approved_input_increments_2026_10_18',
+        [
+          'bun.lock',
+          'package.json',
+          'packages/ui/package.json',
+          'packages/agent/package.json',
+        ].includes(path)
+          ? 'approved_input_increments_2026_10_26'
+          : 'approved_input_increments_2026_10_18',
       );
       expect(result.previousSha256).toBe(sha(previous));
       expect(result.currentSha256).toBe(sha(actual));
@@ -229,5 +231,85 @@ test('five unchanged inputs, SQL and unknown paths never receive a reviewed exce
   }
   expect(
     matchReviewedPredecessorInput('compatible', '__proto__', Buffer.from('x'), Buffer.from('x')),
+  ).toBeUndefined();
+});
+
+test('the original October 21 approved pairs remain closed and accepted', () => {
+  for (const [kind, commit] of Object.entries(predecessors)) {
+    for (const path of paths) {
+      const approved = show('3cf44ed0f', path);
+      const result = matchReviewedPredecessorInput(
+        kind as ReviewedPredecessorKind,
+        path,
+        show(commit, path),
+        approved,
+      )!;
+      expect(result).toBeDefined();
+      expect(result.currentSha256).toBe(sha(approved));
+      expect(result.reviewScope).not.toBe('approved_input_increments_2026_10_26');
+      expect(
+        matchReviewedPredecessorInput(
+          kind as ReviewedPredecessorKind,
+          path,
+          show(commit, path),
+          mutate(approved),
+        ),
+      ).toBeUndefined();
+    }
+  }
+});
+
+test('the current dependency review preserves every original resolved package, including the relocated CLI highlighter', () => {
+  const previous = Bun.JSONC.parse(show('3cf44ed0f', 'bun.lock').toString()) as {
+    packages: Record<string, unknown>;
+  };
+  const actual = Bun.JSONC.parse(current('bun.lock').toString()) as {
+    packages: Record<string, unknown>;
+  };
+  for (const [name, resolved] of Object.entries(previous.packages))
+    expect(actual.packages[name === 'highlight.js' ? 'cli-highlight/highlight.js' : name]).toEqual(
+      resolved,
+    );
+  expect(Object.keys(actual.packages).filter((name) => !(name in previous.packages))).toHaveLength(
+    163,
+  );
+  for (const name of ['mermaid', 'pdfjs-dist', '@napi-rs/canvas', 'rehype-katex'])
+    expect(actual.packages[name]).toBeDefined();
+});
+
+test('the current-only Radix cleanup patch is independently pinned without inventing an old input', () => {
+  const path = 'patches/@radix-ui%2Freact-scroll-area@1.2.18.patch';
+  const bytes = current(path);
+  for (const [kind, commit] of Object.entries(predecessors)) {
+    const manifest = JSON.parse(show(commit, 'package.json').toString()) as {
+      patchedDependencies: Record<string, string>;
+    };
+    expect(Object.values(manifest.patchedDependencies)).not.toContain(path);
+    const proof = matchReviewedCurrentOnlyPredecessorInput(
+      kind as ReviewedPredecessorKind,
+      path,
+      bytes,
+    )!;
+    expect(proof).toMatchObject({
+      path,
+      predecessorCommit: commit,
+      previousInputDeclared: false,
+      currentSha256: sha(bytes),
+      match: 'reviewed_current_only_patch',
+    });
+    expect(
+      matchReviewedPredecessorInput(kind as ReviewedPredecessorKind, path, bytes, bytes),
+    ).toBeUndefined();
+    for (const wrong of [mutate(bytes), Buffer.concat([bytes, Buffer.from('\n')])])
+      expect(
+        matchReviewedCurrentOnlyPredecessorInput(kind as ReviewedPredecessorKind, path, wrong),
+      ).toBeUndefined();
+    for (const wrong of ['patches/other.patch', '../' + path, path.replace('%2F', '%2f')])
+      expect(
+        matchReviewedCurrentOnlyPredecessorInput(kind as ReviewedPredecessorKind, wrong, bytes),
+      ).toBeUndefined();
+  }
+  expect(
+    matchReviewedCurrentOnlyPredecessorInput('unreviewed' as ReviewedPredecessorKind, path, bytes),
   ).toBeUndefined();
 });

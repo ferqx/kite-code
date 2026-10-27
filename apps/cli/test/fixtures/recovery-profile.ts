@@ -35,7 +35,11 @@ export async function untilRecovery(check: () => Promise<boolean>) {
 
 /** Default compatible SDK, actual original Auto ask_user card, real SIGKILL and owned SQLite. */
 export async function recoveryProfile(
-  options: { holdModelSessionId?: string; completeModelSessionId?: string } = {},
+  options: {
+    holdModelSessionId?: string;
+    holdModelCommandId?: string;
+    completeModelSessionId?: string;
+  } = {},
 ) {
   const root = temporaryDirectory('kite-client-recovery-'),
     workspace = join(root, 'workspace'),
@@ -84,9 +88,9 @@ export async function recoveryProfile(
           if (!input) {
             const row = database()
               .query(
-                'SELECT command.request_json,run.session_id FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1 ORDER BY command.seq DESC LIMIT 1',
+                'SELECT command.id AS command_id,command.request_json,run.session_id FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1 ORDER BY command.seq DESC LIMIT 1',
               )
-              .get() as { request_json: string; session_id: string } | null;
+              .get() as { command_id: string; request_json: string; session_id: string } | null;
             const human = row && JSON.parse(row.request_json).content;
             if (typeof human !== 'string') throw Error('original_recovery_work_missing');
             if (row?.session_id === options.completeModelSessionId) {
@@ -98,7 +102,11 @@ export async function recoveryProfile(
                 { headers: { 'content-type': 'text/event-stream' } },
               );
             }
-            if (row?.session_id === options.holdModelSessionId) {
+            if (
+              row &&
+              (row.session_id === options.holdModelSessionId ||
+                row.command_id === options.holdModelCommandId)
+            ) {
               // A caller-journal fixture can hold its own real Model request active.
               // The original recovery work still follows the strict Files identity below.
               heldModelRequests++;
@@ -169,7 +177,7 @@ export async function recoveryProfile(
         tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
           id,
           enabled: id === 'ask_user' || id === 'files.write',
-          ...(id === 'files.write' ? { definitionVersion: '2' } : {}),
+          ...(id === 'files.write' ? { definitionVersion: '3' } : {}),
         })),
         models: [
           {

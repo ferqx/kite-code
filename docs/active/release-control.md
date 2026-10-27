@@ -6,6 +6,8 @@
 
 验证：`bun run check:runtime-packages`、`bun run check:unified-agent-boundary`、`bun test tests/integration/scripts/unified-ci.test.ts tests/isolated/unified-agent/release-tools.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`、`bun run check:docs-impact`。具体平台范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前发行与源身份
 
 Windows CI 固定 Bun 1.4.3；Linux/macOS CI 与 formal 资格基线保留 1.4.2。Windows 采用上游对 `--tsconfig-override` directory-mismatch 的修复；固定配置、零意外 stderr、PE/System32/no-delay 与 SQLite 精确来源门禁保留，未过滤原 1.4.2 警告。Windows 隔离输入的官方 ZIP SHA 为 `0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d`，实际内嵌 SQLite 3.53.4/sourceId 仍在原已审查集合内。旧 1.4.2 的构建/测试事实保历史范围；固定 1.4.2 的实验 resource-census 补丁未移植，也未替换正式运行时，不授 1.4.3 资源或跨平台资格。
@@ -16,9 +18,9 @@ Windows发布合同现以真实私有ACL、平台锁位置与链接拒绝夹具�
 
 Windows原对象pin现以实际读取/遍历权限建立共享保护，区域锁保持只读SH/EX；Native配套的固定argv、同Main原生owner借用和Node/libuv退出Job接线已修正。子Service仍独立完整准入，退出未知保原使用权；真实反例、可信装配边界和未取得资格归[原对象决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)及上述owners，不把Node探针或有限控制测试计为installed完成。
 
-旧 Desktop 的普通开发、服务准备、Electron构建和打包调用者已明确退役：六个package命令及四个直接脚本在任何旧producer或制品写入前以 `legacy_desktop_entrypoint_retired`／2退出，并指向当前Native命令。完整行为和历史追溯归[开发入口](../development/local-development.md)与[旧Desktop owner](../../apps/kite-desktop/README.md)，实际拒绝及原数据保全由[完整调用者测试](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)核验。此项可独立于RSS／完整观测推进；当前完整Native仍使用新Service／Terminal闭包。旧历史测试／已保存制品及全部旧源码最终退役不因这些命令闭合而自动完成，三平台和§35门禁保持。
+2026-10-26 已按用户明确要求删除旧 Desktop、Service、Web 与其余旧 Runtime/contract workspace，以及仅服务旧实现的脚本和测试；旧架构只保留 `apps/kite-cli` 的历史源码，其运行依赖闭包已移除。此前仅拒绝普通入口、保留历史 import API 和旧 Web 的范围已被本次删除决定取代，准确取舍见[删除决定](../../.agents/notes/implemented/architecture/2026-10-26-remove-legacy-modules-retain-kite-cli.md)。旧制品与原数据保全证据可按固定 revision 追溯；当前 Terminal/Native 继续只消费新架构，删除旧源码不证明 RSS、完整观测、三平台或 §35 门禁通过。
 
-普通旧CLI/TUI／Service入口随后也已收束：真实源码启动和两个package构建命令在旧依赖／Profile前拒绝，公共leaf只输出当前入口与2，不执行迁移或自动fallback。历史import API保原函数对象和同步语义，Service四个private helper仍沿原router；当前formal CI、候选和安装继续拒旧闭包。这些具体消费者的源码／bundle及原数据保全证据归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。用户要求Web端保持现状，旧Web已还原；其他历史producer／整树和阶段门禁不由本片关闭。
+[通用 canonical JSON](../../scripts/release/canonical-json.ts)与[artifact layout](../../scripts/release/artifact-layout.ts)由脚本目录直接负责，不再 re-export 旧 Service。通用 evidence、Gate、SBOM、provenance、rollback、admission 及独立 verifier 继续保留，原身份校验与拒绝条件不变；这些工具可读取其明确支持的 retained metadata，不能据此登记当前 Terminal/Native 或三平台资格。旧 OSS producer、installer、App Server 调用方仍删除。
 
 根 workspaces 精确为 AI、Agent、Client、UI、Service、CLI、Desktop、Web。正式 CLI/TUI 固定完整 Terminal，Desktop 固定完整 Native；独立 source/development 显式入口不发现旧发布包或旧用户数据。业务通过唯一 HTTP/SSE Client；私有 bootstrap/发现只负责配套进程，不是第二业务 carrier。
 
@@ -80,13 +82,15 @@ Windows Native 构建与 transport 原生后端测试在消费编译器前调用
 
 ## 历史 OSS 工具与明确验收
 
-旧OSS普通构建／核验／smoke三个脚本和旧installer的status／install／rollback／uninstall已统一经[退役leaf](../../scripts/development/retired-entrypoints.ts)在旧依赖和任何archive／prefix／Profile前返回 `legacy_release_entrypoint_retired`／2，只显示当前命令，不自动转发旧参数或选择新数据。正式build／verify／smoke／install和版本操作继续由上方新Terminal／Native负责；此普通入口收束不以RSS／观测或整体阶段退出为前置，也不证明三平台资格。
+本节只记录删除前的旧工具及原验收约束，链接固定到当时版本。当前 checkout 不再提供这些脚本或 library；当前发行仍使用根 `release:*` 与 Terminal/Native owner，历史资格不自动转授。
 
-[旧installer导入入口](../../scripts/release/install-oss-candidate.ts)在非main导入时保原五个函数、常量和类型；原方法及prefix安全／锁／Windows发布／卸载检查在[同目录历史实现](../../scripts/release/historical-install-oss-candidate.ts)，`import.meta.dir`根与OS默认home语义不变，同步方法不包装Promise。原[OSS manifest／producer库](../../scripts/release/oss-candidate.ts)未改，旧已保存制品／跨版本样本仍有明确library消费者；保留不等于现行发行资格，不供新基线writer。
+删除前，旧OSS普通构建／核验／smoke三个脚本和旧installer的status／install／rollback／uninstall曾统一经[历史退役leaf](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/development/retired-entrypoints.ts)在旧依赖和任何archive／prefix／Profile前返回 `legacy_release_entrypoint_retired`／2，只显示当前命令，不自动转发旧参数或选择新数据。正式build／verify／smoke／install和版本操作继续由上方新Terminal／Native负责；此普通入口收束不以RSS／观测或整体阶段退出为前置，也不证明三平台资格。
 
-原smoke的完整verify／install／CLI／TUI／daemon／MCP／切换／回退／卸载与失败清理，按原字节保于[明确历史qualification脚本](../../scripts/release/historical-smoke-oss-candidate.ts)。它只供原旧制品的显式历史验收，不被根命令、当前CI或默认测试自动选择；普通旧smoke不加载它。原[历史source检查](../../tests/release/supply-chain-workflow.test.ts)只更新读取真正installer实现的路径，全部原Windows发布断言／次数保持。synthetic测试制品和非生产信任标记不属于旧产品authority，不因文件名删除。
+[旧installer导入入口](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/release/install-oss-candidate.ts)在删除前的非main导入中保留原五个函数、常量和类型；原方法及prefix安全／锁／Windows发布／卸载检查在[同目录历史实现](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/release/historical-install-oss-candidate.ts)，`import.meta.dir`根与OS默认home语义不变，同步方法不包装Promise。删除前的[OSS manifest／producer库](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/release/oss-candidate.ts)仅供历史追溯；对应旧脚本与旧library消费者现已删除；保留不等于现行发行资格，不供新基线writer。
 
-实际七条普通调用保archive、旧prefix和Profile，历史API的source／实际bundle胶水及字节证明归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-oss-发布普通调用者完整退役)。这些证据不代完整旧OS资格或§35整体完成，Web按用户要求保持现状。
+原smoke的完整verify／install／CLI／TUI／daemon／MCP／切换／回退／卸载与失败清理，按原字节保于[明确历史qualification脚本](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/release/historical-smoke-oss-candidate.ts)。它记录删除前针对原旧制品的显式验收，不在当前 checkout 提供可运行入口，也不被根命令、当前CI或默认测试选择。原[历史source检查](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/release/supply-chain-workflow.test.ts)只更新读取真正installer实现的路径，全部原Windows发布断言／次数保持。synthetic测试制品和非生产信任标记不属于旧产品authority，不因文件名删除。
+
+实际七条普通调用保archive、旧prefix和Profile，历史API的source／实际bundle胶水及字节证明归[本轮进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-oss-发布普通调用者完整退役)。这些历史证据不代完整旧OS资格或§35整体完成；当时保留旧Web的范围已被2026-10-26删除决定取代。
 
 ## 安装、登记与使用权
 

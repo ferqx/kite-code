@@ -3,13 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import {
-  getTrustedWorkspaceExternalReadRoots,
-  getWorkspaceTrustSnapshot,
-  getWorkspaceTrustStatus,
-  trustWorkspace,
-} from '../../../apps/kite-service/src/config/workspace-trust';
-import { resolveWorkspaceGitMetadataReadOnlyRoots } from '../../../packages/builtin-runtime/src/git/metadata-scope';
+import { pathToFileURL } from 'node:url';
+import { createRuntime } from '@kite-ai/agent';
+import { selectProfile } from '@kite-ai/agent/profile';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { createPermissionManagement } from '../../../apps/service/src/permission-management';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitUserMessage, typeText } from '../harness/input-helpers';
@@ -87,32 +85,92 @@ test(
     const server = createMockModelServer();
     const workspace = createTestWorkspace();
     const externalGit = mkdtempSync(join(tmpdir(), 'kite-tui-external-git-'));
-    const trustStore = join(workspace.home, '.kite-code', 'workspace-trust.jsonc');
+    const profile = selectProfile(workspace);
+    const openTrust = async () => {
+      const store = await openSqliteStore(profile);
+      const runtime = createRuntime({ store });
+      const expectedStoreId = (await runtime.getMetadata()).storeId;
+      const identity = { expectedStoreId, subjectId: 'local-user', workspaceId: 'git-drift' };
+      const management = createPermissionManagement({
+        runtime,
+        profile,
+        nativeShellRead: process.platform === 'darwin',
+      });
+      return { runtime, management, identity };
+    };
     let tui: PtyProcess | undefined;
     try {
       execFileSync('git', ['init', '--bare', '--quiet', externalGit]);
-      expect(trustWorkspace({ workspace: workspace.workspace, storePath: trustStore }).status).toBe(
-        'recorded',
-      );
-      const before = getWorkspaceTrustSnapshot(workspace.workspace, trustStore);
-      expect(before?.status).toBe('trusted');
-      // Simulate a workspace that acquires a linked Git directory after it was trusted.
-      writeFileSync(join(workspace.workspace, '.git'), `gitdir: ${externalGit}\n`);
-      expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace.workspace)).toEqual([
-        realpathSync.native(externalGit),
-      ]);
-      const after = getWorkspaceTrustSnapshot(workspace.workspace, trustStore);
-      expect(after?.revision).toBe(before?.revision);
-      expect(after?.externalReadScope.roots).toEqual([]);
-      expect(getWorkspaceTrustStatus(workspace.workspace, trustStore)).toBe('trusted');
-      expect(getTrustedWorkspaceExternalReadRoots(workspace.workspace, trustStore)).toEqual([]);
+      const control = await openTrust();
+      let before: Awaited<ReturnType<typeof control.management.readTrust>>;
+      try {
+        await control.runtime.createWorkspace({
+          expectedStoreId: control.identity.expectedStoreId,
+          id: control.identity.workspaceId,
+          name: 'External Git drift',
+          rootUri: pathToFileURL(realpathSync(workspace.workspace)).href,
+        });
+        const initial = await control.management.readTrust(control.identity);
+        expect(
+          (
+            await control.management.setTrust({
+              ...control.identity,
+              commandId: 'trust-before-git-drift',
+              trusted: true,
+              ifRevision: initial.revision,
+              canonicalIdentity: initial.canonicalIdentity,
+              externalReadScopeDigest: initial.externalReadScopeDigest,
+            })
+          ).state,
+        ).toBe('applied');
+        before = await control.management.readTrust(control.identity);
+        expect(before.status).toBe('trusted');
+        // A linked Git directory cannot change the host-selected trust read scopes.
+        writeFileSync(join(workspace.workspace, '.git'), `gitdir: ${externalGit}\n`);
+        expect(
+          realpathSync.native(
+            execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+              cwd: workspace.workspace,
+              encoding: 'utf8',
+            }).trim(),
+          ),
+        ).toBe(realpathSync.native(externalGit));
+        const after = await control.management.readTrust(control.identity);
+        expect(after.revision).toBe(before.revision);
+        expect(after.canonicalIdentity).toBe(before.canonicalIdentity);
+        expect(after.externalReadScopeDigest).toBe(before.externalReadScopeDigest);
+        expect(after.status).toBe('trusted');
+        expect(after.trusted).toBe(true);
+        expect(after.readScopes.some((scope) => /git/i.test(scope.kind))).toBe(false);
+        expect(JSON.stringify(after)).not.toContain(externalGit);
+      } finally {
+        await control.runtime.close();
+      }
       server.setResponses([{ message: { content: 'ordinary turn completed' } }]);
       tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
       await submitUserMessage(tui, server, 'answer without Git', { timeout: 15_000 });
       await waitForText(() => tui!.viewport(), 'ordinary turn completed', 15_000);
       expect(server.getWorkRequestCount()).toBe(1);
-      expect(server.hasRequestMessage('answer without Git', 0)).toBe(true);
-      expect(getTrustedWorkspaceExternalReadRoots(workspace.workspace, trustStore)).toEqual([]);
+      // Core appends its session_files and runtime-state observations after the user input.
+      // Verify the exact original input on the sole actual work request.
+      expect(
+        server.getWorkRequests()[0]?.messages.find((message) => message.role === 'user'),
+      ).toEqual({ role: 'user', content: 'answer without Git' });
+      await tui.killAndWait();
+      tui = undefined;
+      const reopened = await openTrust();
+      try {
+        const afterTurn = await reopened.management.readTrust(reopened.identity);
+        expect(afterTurn.status).toBe('trusted');
+        expect(afterTurn.trusted).toBe(true);
+        expect(afterTurn.revision).toBe(before.revision);
+        expect(afterTurn.canonicalIdentity).toBe(before.canonicalIdentity);
+        expect(afterTurn.externalReadScopeDigest).toBe(before.externalReadScopeDigest);
+        expect(afterTurn.readScopes).toEqual(before.readScopes);
+        expect(JSON.stringify(afterTurn)).not.toContain(externalGit);
+      } finally {
+        await reopened.runtime.close();
+      }
     } finally {
       await cleanupTuiSystemFixtures({
         tuis: [tui],

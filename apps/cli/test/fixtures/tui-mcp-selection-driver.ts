@@ -200,14 +200,16 @@ try {
   await wait('Reading does not connect or authorize tools.');
   await key('\x03');
   await wait('Approve this execution only');
-  await wait('pending · revision 1');
+  // The subsequent control read proves the exact original pending ID and revision.
+  await wait('approval [');
   await check('ctrl-c');
   assert.ok(Buffer.concat(output).includes(Buffer.from('ORIGINAL_COMPLETE_HISTORY_TAIL')));
   await key('/clear');
   await wait('/clear');
   await key('\r');
   await wait('Approve this execution only');
-  await wait('pending · revision 1');
+  // The subsequent control read proves the exact original pending ID and revision.
+  await wait('approval [');
   await check('clear');
   assert.equal(
     owned.sinceAction().replace(ansi, '').includes('ORIGINAL_COMPLETE_HISTORY_TAIL'),
@@ -215,7 +217,8 @@ try {
   );
   await key('PRIVATE_CARD_DRAFT');
   await wait('Approve this execution only');
-  await wait('pending · revision 1');
+  // The subsequent control read proves the exact original pending ID and revision.
+  await wait('approval [');
   await wait('PRIVATE_CARD_DRAFT');
   await check('draft-clear');
   await key('\x11');

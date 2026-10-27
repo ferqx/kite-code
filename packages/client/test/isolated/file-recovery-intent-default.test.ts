@@ -21,6 +21,7 @@ import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security
 import { launchPairedService } from '@kite-ai/service/paired';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { presentedFileRead } from '../../../agent/test/fixtures/presented-file-read';
 import { createClient, type ExtensionCommandRequest, type ForkSessionRequest } from '../../src';
 import {
   canonicalFileRecoveryIntent,
@@ -93,14 +94,15 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
       if (step === 0)
         call = { name: 'read_file', input: { path: `${session}/original.txt`, max_lines: 10000 } };
       if (step === 1) {
-        const read = JSON.parse(body.messages.filter((m) => m.role === 'tool').at(-1)!.content) as {
-          baseline: unknown;
-        };
+        const read = presentedFileRead(
+          body.messages.filter((m) => m.role === 'tool').at(-1)!.content,
+        );
+        expect(read).toBeDefined();
         call = {
           name: 'write_file',
           input: {
             path: `${session}/original.txt`,
-            base: read.baseline,
+            base: read!.baseline,
             content: `${session} ${round} modified\r\n`,
           },
         };
@@ -155,8 +157,8 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
         },
       ],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
-        { id: 'files.write', definitionVersion: '2' },
+        { id: 'files.read', definitionVersion: '5' },
+        { id: 'files.write', definitionVersion: '3' },
       ],
     }),
   );

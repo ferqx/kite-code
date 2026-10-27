@@ -1,5 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import { AgentError } from '@kite-ai/agent';
+import { createConfigurationSnapshot } from '@kite-ai/agent/config';
+import type { Json } from '@kite-ai/agent/extensions';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { runServiceProcess } from '@kite-ai/service/main';
 
@@ -35,6 +37,13 @@ await runServiceProcess({
   configure: async () => ({
     model,
     modelId: 'fixed',
+    resolveRunConfiguration: async () => ({
+      model,
+      modelId: 'fixed',
+      snapshot: createConfigurationSnapshot({
+        models: [{ id: 'fixed', provider: 'compatible', model: 'fixed' }],
+      }) as unknown as Json,
+    }),
     configurationManagement(runtime) {
       const readonly = async (): Promise<never> => {
         throw new AgentError('fixture_configuration_readonly');
@@ -60,7 +69,7 @@ await runServiceProcess({
                 id: 'fixed',
                 enabled: true,
                 configured: true,
-                provider: 'fixture',
+                provider: 'compatible',
                 model: 'fixed',
                 diagnostics: [],
               },

@@ -43,7 +43,7 @@ jobs:
           bun test --parallel=1 --max-concurrency=1
           packages/agent/test/isolated/jobs/confined-shell.test.ts
           packages/agent/test/isolated/files/runtime.test.ts
-          packages/agent/test/isolated/execution/authorization-review.test.ts
+          packages/agent/test/isolated/execution/authorization-check.test.ts
           apps/service/test/isolated/runtime-assets.test.ts
           tests/isolated/unified-agent/formal-optional-capabilities.test.ts
           tests/isolated/unified-agent/native-runtime-protection.test.ts

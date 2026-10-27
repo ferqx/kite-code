@@ -133,29 +133,27 @@ test('authenticated original Command proofs match the complete caller request fo
     await client.followUp('s', follow);
     for (const input of [steer, follow]) {
       const command = (await store.getCommand(input.commandId))!;
-      const receipt = command.receipt as {
-        businessCommandId: string;
-        humanInputCommandId: string;
-      };
-      expect(receipt.businessCommandId).toBeString();
-      expect(receipt.businessCommandId).not.toBe(input.commandId);
-      expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-        kind: 'human.input',
-        request: {
-          publicCommandId: input.commandId,
-          content: input.content,
-          originalRequest: command.request,
-        },
+      expect(command).toMatchObject({
+        id: input.commandId,
+        kind: input.kind,
+        status: 'accepted',
+        request:
+          input.kind === 'input.steer'
+            ? {
+                kind: input.kind,
+                targetRunId: run.id,
+                contextSelectionId: view.session.contextSelectionId,
+                content: input.content,
+              }
+            : {
+                kind: input.kind,
+                afterRunId: run.id,
+                contextSelectionId: view.session.contextSelectionId,
+                content: input.content,
+              },
       });
-      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
-        kind: 'input.steer',
-        request: {
-          kind: 'input.steer',
-          targetRunId: run.id,
-          contextSelectionId: view.session.contextSelectionId,
-          content: input.content,
-        },
-      });
+      expect(command.receipt).not.toHaveProperty('businessCommandId');
+      expect(command.receipt).not.toHaveProperty('humanInputCommandId');
     }
     const cancel: CallerCommandRequest = {
       expectedStoreId: storeId,

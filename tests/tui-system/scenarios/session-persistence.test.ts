@@ -21,7 +21,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import {
+  activateSessionSearch,
+  submitCommand,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -77,6 +82,7 @@ describe.each([
 
       // Wait for the mock model response to appear in the TUI
       await waitForText(() => tui1.outputSinceLastAction(), 'Hello from session!', 15000);
+      await submitCommand(tui1, '/session rename Message before restart');
 
       const output = tui1.viewport();
       expect(screenContains(output, 'Message before restart')).toBe(true);
@@ -172,8 +178,7 @@ describe.each([
       expect(screenContains(output, '导航')).toBe(true);
 
       // The session from tui1 should appear in the list.
-      // Session name defaults to threadId; after smart naming, it becomes
-      // the first user message text (truncated to 30 chars).
+      // This journey explicitly named the original Session before restarting.
       expect(screenHasSessionRow(output, 'Message before restart', { active: false })).toBe(true);
       const persisted = observePersistedUserMessageSession(workspace, 'Message before restart');
       expect(persisted.status).toBe('ready');
@@ -187,9 +192,10 @@ describe.each([
   step(
     'load historical session → message content restored from checkpoint DB',
     async () => {
-      // Runtime Server V1 creates a fresh current row before listing history.
-      // Move from that row to the persisted historical row before loading it.
+      // Filter by the original explicit title without assuming recency order.
       console.log('  pressing Enter to load historical session...');
+      await activateSessionSearch(tui2);
+      await typeText(tui2, 'Message before restart');
       tui2.write('\x1b[B');
       await waitForCondition(
         () =>

@@ -158,7 +158,8 @@ test('Native original compression lookup reads its complete terminal Run beyond 
       await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }
     const boundedView = await current.getView('session');
-    expect(boundedView.runs).toHaveLength(200);
+    expect(boundedView.runs).toHaveLength(201);
+    expect(boundedView.runs.some((run) => run.originCommandId === 'original')).toBe(true);
     expect(boundedView.runs.every((run) => run.status === 'completed')).toBe(true);
     expect(boundedView.runs.some((run) => run.id === originalRun.id)).toBe(false);
     expect(await current.getRun(originalRun.id)).toEqual(originalRun);

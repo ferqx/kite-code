@@ -1,7 +1,8 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   buildOriginalDaemonCandidate,
   createOriginalDaemonHost,
+  releaseOriginalDaemonFixture,
 } from '../fixtures/original-daemon-host';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -10,6 +11,7 @@ import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
+  stripAnsi,
   waitForCondition,
   waitForText,
 } from '../harness/terminal-screen';
@@ -22,19 +24,8 @@ describe('TUI PTY System — explicit App Server daemon', () => {
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let daemon: ReturnType<typeof createOriginalDaemonHost>;
-  const ownedDaemons: ReturnType<typeof createOriginalDaemonHost>[] = [];
-
-  beforeAll(async () => {
-    candidate = await buildOriginalDaemonCandidate();
-  }, 70_000);
-  afterAll(() => {
-    if (!candidate) return;
-    if (ownedDaemons.some((owned) => !owned.exitConfirmed))
-      throw Error('original_daemon_fixture_cleanup_unconfirmed');
-    candidate.cleanup();
-  });
-
   beforeEach(async () => {
+    candidate = await buildOriginalDaemonCandidate();
     server = createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
@@ -50,13 +41,12 @@ describe('TUI PTY System — explicit App Server daemon', () => {
       home: workspace.home,
       workspace: workspace.workspace,
     });
-    ownedDaemons.push(daemon);
     await daemon.start();
     const authenticated = await daemon.verifyAuthentication();
     expect(authenticated.profile).toEqual(daemon.profile);
     expect(authenticated.buildId).toBe(candidate.selected.buildId);
     expect(authenticated.apiMajor).toBe(1);
-  });
+  }, 70_000);
 
   afterEach(async () => {
     await cleanupTuiSystemFixtures({
@@ -65,7 +55,7 @@ describe('TUI PTY System — explicit App Server daemon', () => {
       mockServers: [server],
     });
     // Only remove the isolated Profile after the public stop proved all own births dead.
-    workspace.cleanup();
+    releaseOriginalDaemonFixture({ candidate, daemon, workspace });
   });
 
   test('connects only when selected and disconnect does not stop the daemon', async () => {
@@ -82,6 +72,7 @@ describe('TUI PTY System — explicit App Server daemon', () => {
     await waitForText(() => tui!.viewport(), 'DAEMON_TUI_DONE', 20_000);
     const observer = await daemon.connect();
     let sessionId: string | undefined;
+    let sessionTitle: string | undefined;
     try {
       for (const session of await observer.client.listAllSessions()) {
         const view = await observer.client.getView(session.id);
@@ -89,8 +80,10 @@ describe('TUI PTY System — explicit App Server daemon', () => {
           view.messages.some(
             (message) => message.role === 'user' && message.content === 'Use the explicit daemon',
           )
-        )
+        ) {
           sessionId = session.id;
+          sessionTitle = session.title;
+        }
       }
       expect(sessionId).toBeDefined();
       expect(observer.info.profile).toEqual(daemon.profile);
@@ -113,14 +106,23 @@ describe('TUI PTY System — explicit App Server daemon', () => {
     });
     await submitCommand(second, '/resume');
     await waitForCondition(
-      () => screenHasSessionRow(second!.viewport(), 'Use the explicit daemon', { active: false }),
+      () => screenHasSessionRow(second!.viewport(), sessionTitle!, { active: false }),
       'second shared TUI to find the exact daemon Session',
       5_000,
     );
-    second.write('\x1b[B');
+    if (!screenHasSessionRow(second.viewport(), sessionTitle!, { selected: true, active: false })) {
+      const rows = stripAnsi(second.viewport()).split('\n');
+      const target = rows.findIndex((row) =>
+        screenHasSessionRow(`会话列表\n${row}`, sessionTitle!, { active: false }),
+      );
+      const selected = rows.findIndex((row) => /^\s*[>❯◌⏳]\s/u.test(row));
+      expect(target).toBeGreaterThanOrEqual(0);
+      expect(selected).toBeGreaterThanOrEqual(0);
+      second.write(target < selected ? '\x1b[A' : '\x1b[B');
+    }
     await waitForCondition(
       () =>
-        screenHasSessionRow(second!.viewport(), 'Use the explicit daemon', {
+        screenHasSessionRow(second!.viewport(), sessionTitle!, {
           selected: true,
           active: false,
         }),

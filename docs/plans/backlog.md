@@ -40,9 +40,9 @@
 
 ## Web 更新验证
 
-[页面更新的直接测试缺口](../../apps/kite-web/docs/testing.md)：补充可见性、轮询调度与增量合并场景；当前源码行为不等于测试已覆盖。本次文档验收只纠正覆盖说明，未修改实现或补充运行测试。
+[页面更新的直接测试缺口](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/docs/testing.md)：补充可见性、轮询调度与增量合并场景；当前源码行为不等于测试已覆盖。本次文档验收只纠正覆盖说明，未修改实现或补充运行测试。
 
-Web 已显示 idle 会话后，其他客户端开始执行：当前 [App 轮询](../../apps/kite-web/src/app/app.tsx) 由本页已读取的 running/waiting 状态启动，不主动探测 idle→running。手册的活动条件尚未明确是否承诺发现这种外部变化，需单独确认预期；不能以当前实现自动缩减承诺，也不能把这一差异视为本轮文档规则修改引入的缺陷。
+Web 已显示 idle 会话后，其他客户端开始执行：当前 [App 轮询](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/src/app/app.tsx) 由本页已读取的 running/waiting 状态启动，不主动探测 idle→running。手册的活动条件尚未明确是否承诺发现这种外部变化，需单独确认预期；不能以当前实现自动缩减承诺，也不能把这一差异视为本轮文档规则修改引入的缺陷。
 
 ## 高级配置参考完整性
 
@@ -55,9 +55,9 @@ Web 已显示 idle 会话后，其他客户端开始执行：当前 [App 轮询]
 - TUI 排队提交的迟到失败须按原 Session 投影，见[输入失败归属](../../apps/kite-cli/docs/input-and-commands.md#当前差异排队失败的会话归属)。
 - TUI 自有文案统一 catalog，以及语言写盘失败时的内存状态/提示，见[本地化差异](../../apps/kite-cli/docs/tui-localization.md#当前覆盖与失败行为差异)。
 - 审批 Esc 与 Enter 的在途提交反馈应一致，见[交互差异](../../apps/kite-cli/docs/approvals-and-interactions.md#当前差异esc-提交态)。
-- Web 保留取消与未知终态，见[状态投影差异](../../apps/kite-web/docs/session-presentation.md#当前差异取消与未知状态丢失)。
-- Web 日志失败仍可读、API Docs 参数/schema详情，见[诊断专题](../../apps/kite-web/docs/diagnostics.md)。
-- Web 深链接已取得的新 Session 快照不应被旧目录覆盖，见[快照优先级](../../apps/kite-web/docs/routing-and-lifecycle.md#当前差异深链接快照优先级)。
+- Web 保留取消与未知终态，见[状态投影差异](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/docs/session-presentation.md#当前差异取消与未知状态丢失)。
+- Web 日志失败仍可读、API Docs 参数/schema详情，见[诊断专题](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/docs/diagnostics.md)。
+- Web 深链接已取得的新 Session 快照不应被旧目录覆盖，见[快照优先级](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/docs/routing-and-lifecycle.md#当前差异深链接快照优先级)。
 - CLI recovery_required 退出条件与 --ask 旧帮助文案，见[终态退出](../../apps/kite-cli/docs/service-mode.md#当前-cli-终态退出差异)和[命令参考](../handbook/cli/commands.md)。
 - Web 开发启动脚本应在失败后停止后续调用，见[失败链](../development/local-development.md#web-启动失败链的已知差异)。
 

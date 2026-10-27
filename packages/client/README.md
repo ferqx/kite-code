@@ -1,5 +1,7 @@
 # Client
 
+2026-10-26，[默认 Files 恢复联验](test/isolated/file-recovery-intent-default.test.ts)完整文件1项／174断言通过。夹具固定当前 Service 封存的 read／write 绑定，从实际模型可见的文本回执读取完整 baseline；恢复意图、两个独立申请的原身份、丢失响应后的只读查询及冷态不隐式重发断言保留。Client 生产协议和恢复实现未改，这项定向结果不代替全量测试或其他平台资格。
+
 ## 消息历史增量
 
 [AgentClient.listMessageChanges](src/index.ts)要求`message_changes`能力，GET `/v1/sessions/:id/message-changes`，查询`storeId/afterCursor/upperCursor/upperSeq?/afterSeq?/limit?`。首个候选页省略`upperSeq`时由Store只读事务取得当前序号上界，后页传回该`highWaterSeq`；`nextAfterSeq`按候选行推进，可能含已移除的ID，不能假定总等于最后一条可见消息。穷尽候选页面后才沿`nextCursor`读取下一批事件，达到`upperCursor`表示覆盖该持久事件范围，不表示SSE ACK或执行准入。

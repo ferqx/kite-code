@@ -1,3 +1,4 @@
+import { publicAgentResponses } from '../harness/public-agent-responses';
 /**
  * PTY System Test — Sub-agent External Write Approval
  *
@@ -9,7 +10,7 @@
  *   4. User approves → tool executes → sub-agent continues → completes
  *
  * Original Model fixtures are translated to the current public Tool contracts.
- * The production Service owns task.execute, the child Run and its scoped
+ * The production Service owns task.spawn, the child Run and its scoped
  * permission intersection; the PTY and actual durable receipts prove the journey.
  */
 
@@ -43,6 +44,14 @@ import {
 const EXPLORATION_FIXTURE_READS = 12;
 const TIMEOUT = 30000;
 
+async function focusChildApproval(tui: PtyProcess) {
+  await waitForText(() => tui.viewport(), '等待你的批准', 15_000);
+  tui.write('\x02');
+  await waitForText(() => tui.viewport(), '待决卡片 · 1', 5_000);
+  tui.write('\r');
+  await waitForText(() => tui.viewport(), '工具授权', 5_000);
+}
+
 describe('TUI PTY System — Sub-agent External Write Approval', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
@@ -65,63 +74,68 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     // #2: Sub-agent → attempts write_file with absolute path (triggers approval)
     // #3: Sub-agent after approval → summary
     // #4: Main agent after sub-agent completes → final response
-    server.setResponses([
-      {
-        message: {
-          content: 'I will dispatch a sub-agent to test external file write authorization.',
-          tool_calls: [
-            {
-              id: 'call_spawn_subagent',
-              name: 'task',
-              args: {
-                name: 'Write external test file',
-                subagent_type: 'code',
-                task: `Write a test file at ${externalFile} with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.`,
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          message: {
+            content: 'I will dispatch a sub-agent to test external file write authorization.',
+            tool_calls: [
+              {
+                id: 'call_spawn_subagent',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Write external test file',
+                  preset: 'code',
+                  prompt: `Write a test file at ${externalFile} with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.`,
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      {
-        message: {
-          content: 'I will write the test file.',
-          tool_calls: [
-            {
-              id: 'call_subagent_write',
-              name: 'write_file',
-              args: {
-                path: externalFile,
-                content: 'Test: sub-agent external write',
+        {
+          message: {
+            content: 'I will write the test file.',
+            tool_calls: [
+              {
+                id: 'call_subagent_write',
+                name: 'write_file',
+                args: {
+                  path: externalFile,
+                  content: 'Test: sub-agent external write',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      {
-        // Keep the resumed child alive long enough to assert that the local
-        // approval acknowledgement updates its card before the next model
-        // response or durable child progress can do so incidentally.
-        delay: 750,
-        expectedRequest: {
-          toolResults: [
-            { toolCallId: 'call_subagent_write', contentIncludes: ['external-subagent-write.txt'] },
-          ],
+        {
+          // Keep the resumed child alive long enough to assert that the local
+          // approval acknowledgement updates its card before the next model
+          // response or durable child progress can do so incidentally.
+          delay: 750,
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'call_subagent_write',
+                contentIncludes: ['external-subagent-write.txt'],
+              },
+            ],
+          },
+          message: {
+            content: 'The write succeeded after approval.',
+          },
         },
-        message: {
-          content: 'The write succeeded after approval.',
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'call_spawn_subagent', contentIncludes: ['write succeeded'] },
+            ],
+          },
+          message: {
+            content: 'Sub-agent completed successfully.',
+          },
         },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            { toolCallId: 'call_spawn_subagent', contentIncludes: ['write succeeded'] },
-          ],
-        },
-        message: {
-          content: 'Sub-agent completed successfully.',
-        },
-      },
-    ]);
+      ]),
+    );
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
@@ -139,6 +153,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       });
 
       // Wait for the sub-agent to start and the external write to trigger approval
+      await focusChildApproval(tui);
       await waitForText(() => tui.viewport(), '工具授权', TIMEOUT);
       await waitForText(() => tui.viewport(), 'files.write_path', TIMEOUT);
       await waitForText(() => tui.viewport(), externalFile, TIMEOUT);
@@ -287,6 +302,7 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let externalFile: string;
+  let cancelledResponses: MockResponse[];
 
   beforeEach(async () => {
     server = createMockModelServer();
@@ -297,12 +313,9 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
     });
     externalFile = join(workspace.home, 'cancelled-subagent-write.txt');
 
-    // Keep both model responses explicitly aborted.  The first response still
-    // creates a real child; the second response reaches the child approval
-    // boundary.  No continuation response is allowed after any cancellation
-    // key, which makes an accidental parent-model continuation observable as
-    // an exhausted/invalid fixture request.
-    server.setResponses([
+    // The child reaches the real approval boundary. A denied child must not
+    // continue its Model; the waiting parent may observe its exact terminal result.
+    cancelledResponses = [
       {
         toolContinuation: 'aborted',
         message: {
@@ -310,11 +323,11 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
           tool_calls: [
             {
               id: 'call_cancelled_child',
-              name: 'task',
+              name: 'spawn_agent',
               args: {
-                name: 'Cancel child write',
-                subagent_type: 'code',
-                task: `Write a file at ${externalFile}. This operation will be cancelled by the user.`,
+                task_name: 'Cancel child write',
+                preset: 'code',
+                prompt: `Write a file at ${externalFile}. This operation will be cancelled by the user.`,
               },
             },
           ],
@@ -336,7 +349,7 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
           ],
         },
       },
-    ]);
+    ];
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
@@ -348,8 +361,32 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
   test.each(['reject', 'escape', 'ctrl-c'] as const)(
     'child approval %s leaves no manual approval or Working surface and never executes the tool',
     async (action) => {
+      server.setResponses(
+        publicAgentResponses(
+          workspace,
+          [
+            ...cancelledResponses,
+            ...(action === 'ctrl-c'
+              ? []
+              : [
+                  {
+                    expectedRequest: {
+                      toolResults: [
+                        { toolCallId: 'call_cancelled_child', contentIncludes: ['cancelled'] },
+                      ],
+                    },
+                    message: {
+                      content: 'The child write was cancelled; no external file was written.',
+                    },
+                  },
+                ]),
+          ],
+          action === 'ctrl-c' ? 'succeeded' : 'cancelled',
+        ),
+      );
       const prompt = `Cancel child approval with ${action}`;
       await submitUserMessage(tui, server, prompt, { timeout: 15_000 });
+      await focusChildApproval(tui);
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
@@ -398,24 +435,11 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
       expect(output).not.toContain('Working');
       expect(output).toContain('❯');
       expect(existsSync(externalFile)).toBe(false);
-      // Cancellation/rejection is terminal for this fixture; a parent model
-      // continuation would consume a third response and fail cleanup.
-      if (server.getWorkRequestCount() !== requestCountBeforeAction) {
-        console.log(
-          'unexpected child cancellation continuation',
-          server.getWorkRequests().map((request) => request.messages.at(-1)),
-        );
-        const observation = new Database(workspace.databasePath, { readonly: true });
-        try {
-          console.log(
-            'actual cancelled child facts',
-            observation.query('SELECT id,kind,adapter_id,state,result_json FROM execution').all(),
-          );
-        } finally {
-          observation.close();
-        }
-      }
-      expect(server.getWorkRequestCount()).toBe(requestCountBeforeAction);
+      // Deny/Esc ends only this child; the parent reads the actual result once.
+      // Ctrl+C cancels the whole root, so no parent continuation is permitted.
+      expect(server.getWorkRequestCount()).toBe(
+        requestCountBeforeAction + (action === 'ctrl-c' ? 0 : 2),
+      );
 
       const persisted = requirePersistedRuntimeReady(observePersistedTurnEvents(workspace, prompt));
       expect(persisted).toBeDefined();
@@ -424,7 +448,16 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
         const run = database
           .query<{ status: string }, [string]>('SELECT status FROM run WHERE id=?')
           .get(persisted!.turnId);
-        expect(['cancelled', 'failed', 'completed']).toContain(run?.status);
+        expect(run).toBeDefined();
+        expect(run!.status).toBe(action === 'ctrl-c' ? 'cancelled' : 'completed');
+        const child = database
+          .query<{ state: string; result_json: string }, [string]>(
+            `SELECT c.state,c.result_json FROM execution c JOIN execution p ON p.id=c.parent_execution_id
+           WHERE p.call_id=? AND c.child_session_id IS NOT NULL`,
+          )
+          .get('call_cancelled_child');
+        expect(child?.state).toBe('cancelled');
+        expect(JSON.parse(child!.result_json)).toMatchObject({ outcome: 'cancelled' });
         const writes = database
           .query<{ dispatched: number; state: string }, [string]>(
             'SELECT dispatched,state FROM execution WHERE call_id=?',
@@ -457,111 +490,113 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
     });
     externalFile = join(workspace.home, 'auto-reviewed-subagent-write.txt');
 
-    server.setResponses([
-      {
-        message: {
-          content: 'I will delegate this external write.',
-          tool_calls: [
-            {
-              id: 'call_spawn_auto_reviewed_subagent',
-              name: 'task',
-              args: {
-                name: 'Write auto-reviewed file',
-                subagent_type: 'code',
-                task: `Write "auto review succeeded" to ${externalFile}.`,
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          message: {
+            content: 'I will delegate this external write.',
+            tool_calls: [
+              {
+                id: 'call_spawn_auto_reviewed_subagent',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Write auto-reviewed file',
+                  preset: 'code',
+                  prompt: `Write "auto review succeeded" to ${externalFile}.`,
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      {
-        message: {
-          content: 'I will write the requested file.',
-          tool_calls: [
-            {
-              id: 'call_auto_reviewed_write',
-              name: 'write_file',
-              args: {
-                path: externalFile,
-                content: 'auto review succeeded',
+        {
+          message: {
+            content: 'I will write the requested file.',
+            tool_calls: [
+              {
+                id: 'call_auto_reviewed_write',
+                name: 'write_file',
+                args: {
+                  path: externalFile,
+                  content: 'auto review succeeded',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      {
-        response: ({ messages }) => {
-          const reviewRequest = String(messages.at(-1)?.content ?? '');
-          const actual = JSON.parse(reviewRequest) as {
-            request: {
-              kind: string;
-              policies: {
-                scope: string;
-                request: {
-                  context: {
-                    task: {
-                      availability: string;
-                      workspaceRoot: string;
-                      isChild: boolean;
-                      role: { id: string; version: string };
-                      rootUserTask: string;
-                      parentUserTask: string;
+        {
+          response: ({ messages }) => {
+            const reviewRequest = String(messages.at(-1)?.content ?? '');
+            const actual = JSON.parse(reviewRequest) as {
+              request: {
+                kind: string;
+                policies: {
+                  scope: string;
+                  request: {
+                    context: {
+                      task: {
+                        availability: string;
+                        workspaceRoot: string;
+                        isChild: boolean;
+                        role: { id: string; version: string };
+                        rootUserTask: string;
+                        parentUserTask: string;
+                      };
                     };
                   };
-                };
-              }[];
+                }[];
+              };
             };
-          };
-          expect(actual.request.kind).toBe('parent_child_permission_intersection');
-          expect(actual.request.policies.map((policy) => policy.scope)).toEqual([
-            'parent',
-            'child',
-          ]);
-          for (const policy of actual.request.policies) {
-            expect(policy.request.context.task).toMatchObject({
-              availability: 'available',
-              workspaceRoot: workspace.workspace,
-              isChild: true,
-              role: { id: 'code', version: '1' },
-              rootUserTask: 'Use a subagent to perform the external fixture write',
-              parentUserTask: 'Use a subagent to perform the external fixture write',
-            });
-          }
-          return {
-            // Keep the reviewer request in flight long enough to assert the transient TUI state.
-            delay: 750,
-            message: {
-              content: JSON.stringify({
-                decision: 'approve_once',
-                reason: 'The requested fixture write is scoped and reversible.',
-              }),
-            },
-          };
+            expect(actual.request.kind).toBe('parent_child_permission_intersection');
+            expect(actual.request.policies.map((policy) => policy.scope)).toEqual([
+              'parent',
+              'child',
+            ]);
+            for (const policy of actual.request.policies) {
+              expect(policy.request.context.task).toMatchObject({
+                availability: 'available',
+                workspaceRoot: workspace.workspace,
+                isChild: true,
+                role: { id: 'code', version: '1' },
+                rootUserTask: 'Use a subagent to perform the external fixture write',
+                parentUserTask: 'Use a subagent to perform the external fixture write',
+              });
+            }
+            return {
+              // Keep the reviewer request in flight long enough to assert the transient TUI state.
+              delay: 750,
+              message: {
+                content: JSON.stringify({
+                  decision: 'approve_once',
+                  reason: 'The requested fixture write is scoped and reversible.',
+                }),
+              },
+            };
+          },
         },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            {
-              toolCallId: 'call_auto_reviewed_write',
-              contentIncludes: ['auto-reviewed-subagent-write.txt'],
-            },
-          ],
+        {
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'call_auto_reviewed_write',
+                contentIncludes: ['auto-reviewed-subagent-write.txt'],
+              },
+            ],
+          },
+          message: { content: 'The automatically reviewed write succeeded.' },
         },
-        message: { content: 'The automatically reviewed write succeeded.' },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            {
-              toolCallId: 'call_spawn_auto_reviewed_subagent',
-              contentIncludes: ['automatically reviewed write succeeded'],
-            },
-          ],
+        {
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'call_spawn_auto_reviewed_subagent',
+                contentIncludes: ['automatically reviewed write succeeded'],
+              },
+            ],
+          },
+          message: { content: 'Automatic sub-agent review completed successfully.' },
         },
-        message: { content: 'Automatic sub-agent review completed successfully.' },
-      },
-    ]);
+      ]),
+    );
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
@@ -573,6 +608,7 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
   test(
     'auto review completes durably without relying on a transient client state',
     async () => {
+      const startedAt = Date.now();
       const reviewFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Use a subagent to perform the external fixture write', {
         timeout: 15000,
@@ -585,27 +621,66 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
         () => {
           const frames = tui.screenFramesSince(reviewFrames).map(stripAnsi);
           return frames.some(
-            (frame) => frame.includes('等待自动审查') || frame.includes('自动审查中'),
+            (frame) => frame.includes('等待自动审核') || frame.includes('自动审核中'),
           );
         },
         'auto-review child phase to become visible',
         15_000,
-      );
+      ).catch((error) => {
+        console.log('auto-review viewport', tui.viewport());
+        console.log(
+          'auto-review requests',
+          server.getWorkRequests().map((r) => r.messages.at(-1)),
+        );
+        using database = new Database(workspace.databasePath, { readonly: true });
+        console.log(
+          'auto-review executions',
+          database.query('SELECT id,kind,adapter_id,state,result_json FROM execution').all(),
+        );
+        throw error;
+      });
       const phaseFrame = tui
         .screenFramesSince(reviewFrames)
         .map(stripAnsi)
-        .find((frame) => frame.includes('等待自动审查') || frame.includes('自动审查中'));
+        .find((frame) => frame.includes('等待自动审核') || frame.includes('自动审核中'));
       expect(phaseFrame).toBeDefined();
       expect(phaseFrame).not.toContain('工具授权');
       expect(phaseFrame).not.toContain('人工审批');
       expect(phaseFrame).not.toContain('人工审批队列');
-      expect(phaseFrame).not.toContain('Working');
+      expect(phaseFrame).toContain('Write auto-reviewed file');
 
       await waitForText(
         () => tui.outputSinceLastAction(),
         'Automatic sub-agent review completed successfully.',
-        TIMEOUT,
+        Math.max(1, TIMEOUT - (Date.now() - startedAt)),
       );
+      // Raw PTY receipt precedes xterm's asynchronous parse. Require the same
+      // parent text in the authoritative screen within the original test budget.
+      await waitForText(
+        () => tui.viewport(),
+        'Automatic sub-agent review completed successfully.',
+        Math.max(1, TIMEOUT - (Date.now() - startedAt)),
+      ).catch((error) => {
+        console.log('auto-review final screen', tui.viewport());
+        const original = observePersistedTurnEvents(
+          workspace,
+          'Use a subagent to perform the external fixture write',
+        );
+        if (original.status === 'ready' && original.value) {
+          using database = new Database(workspace.databasePath, { readonly: true });
+          console.log('auto-review original parent', {
+            identity: { threadId: original.value.threadId, turnId: original.value.turnId },
+            run: database
+              .query('SELECT id,status,is_active FROM run WHERE id=?')
+              .get(original.value.turnId),
+            models: database
+              .query("SELECT id,state,result_json FROM execution WHERE run_id=? AND kind='model'")
+              .all(original.value.turnId),
+          });
+        }
+        throw error;
+      });
+      await tui.settleScreen();
 
       const completed = tui.viewport();
       expect(screenContains(completed, 'Automatic sub-agent review completed successfully.')).toBe(
@@ -640,52 +715,54 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
     // Response #2: Sub-agent reads data.txt with absolute path (should succeed, no approval)
     // Response #3: Sub-agent reports result
     // Response #4: Main agent final response
-    server.setResponses([
-      {
-        message: {
-          content: 'I will dispatch a sub-agent to read a file.',
-          tool_calls: [
-            {
-              id: 'call_spawn_reader',
-              name: 'task',
-              args: {
-                name: 'Read workspace data file',
-                subagent_type: 'explore',
-                task: `Read the file at ${join(workspace.workspace, 'data.txt')} using its absolute path. Report the content.`,
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          message: {
+            content: 'I will dispatch a sub-agent to read a file.',
+            tool_calls: [
+              {
+                id: 'call_spawn_reader',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Read workspace data file',
+                  preset: 'explore',
+                  prompt: `Read the file at ${join(workspace.workspace, 'data.txt')} using its absolute path. Report the content.`,
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      {
-        message: {
-          content: 'I will read the file.',
-          tool_calls: [
-            {
-              id: 'call_subagent_read',
-              name: 'read_file',
-              args: { path: join(workspace.workspace, 'data.txt') },
-            },
-          ],
+        {
+          message: {
+            content: 'I will read the file.',
+            tool_calls: [
+              {
+                id: 'call_subagent_read',
+                name: 'read_file',
+                args: { path: join(workspace.workspace, 'data.txt') },
+              },
+            ],
+          },
         },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            { toolCallId: 'call_subagent_read', contentIncludes: ['hello from workspace'] },
-          ],
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'call_subagent_read', contentIncludes: ['hello from workspace'] },
+            ],
+          },
+          message: { content: 'File content: hello from workspace.' },
         },
-        message: { content: 'File content: hello from workspace.' },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            { toolCallId: 'call_spawn_reader', contentIncludes: ['hello from workspace'] },
-          ],
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'call_spawn_reader', contentIncludes: ['hello from workspace'] },
+            ],
+          },
+          message: { content: 'Sub-agent read completed successfully.' },
         },
-        message: { content: 'Sub-agent read completed successfully.' },
-      },
-    ]);
+      ]),
+    );
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
@@ -746,74 +823,76 @@ describe('TUI PTY System — Sub-agent Multi-round Natural Summary', () => {
       writeFileSync(join(workspace.workspace, filename), `evidence ${index + 1}\n`);
       return filename;
     });
-    server.setResponses([
-      {
-        message: {
-          content: 'I will delegate a bounded exploration.',
-          tool_calls: [
-            {
-              id: 'call_bounded_explore',
-              name: 'task',
-              args: {
-                name: 'Bounded exploration',
-                subagent_type: 'explore',
-                task: 'Read the available evidence and report a concise result.',
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          message: {
+            content: 'I will delegate a bounded exploration.',
+            tool_calls: [
+              {
+                id: 'call_bounded_explore',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Bounded exploration',
+                  preset: 'explore',
+                  prompt: 'Read the available evidence and report a concise result.',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      ...evidenceFiles.map((filename, index) => ({
-        ...(index === 0
-          ? {}
-          : {
+        ...evidenceFiles.map((filename, index) => ({
+          ...(index === 0
+            ? {}
+            : {
+                expectedRequest: {
+                  toolResults: [{ toolCallId: `call_bounded_read_${index}` }],
+                },
+              }),
+          message: {
+            tool_calls: [
+              {
+                id: `call_bounded_read_${index + 1}`,
+                name: 'read_file',
+                args: { path: filename },
+              },
+            ],
+          },
+        })),
+        {
+          response: (request) => {
+            const tools = request.body.tools;
+            summaryRetainedReadCapability =
+              Array.isArray(tools) &&
+              tools.some(
+                (tool) =>
+                  tool &&
+                  typeof tool === 'object' &&
+                  tool.function &&
+                  typeof tool.function === 'object' &&
+                  tool.function.name === 'read_file',
+              );
+            return {
               expectedRequest: {
-                toolResults: [{ toolCallId: `call_bounded_read_${index}` }],
+                toolResults: [{ toolCallId: `call_bounded_read_${EXPLORATION_FIXTURE_READS}` }],
               },
-            }),
-        message: {
-          tool_calls: [
-            {
-              id: `call_bounded_read_${index + 1}`,
-              name: 'read_file',
-              args: { path: filename },
-            },
-          ],
+              message: { content: 'BOUNDED_CHILD_FINAL\n第二项发现\n- multiline child result' },
+            };
+          },
         },
-      })),
-      {
-        response: (request) => {
-          const tools = request.body.tools;
-          summaryRetainedReadCapability =
-            Array.isArray(tools) &&
-            tools.some(
-              (tool) =>
-                tool &&
-                typeof tool === 'object' &&
-                tool.function &&
-                typeof tool.function === 'object' &&
-                tool.function.name === 'files.read',
-            );
-          return {
-            expectedRequest: {
-              toolResults: [{ toolCallId: `call_bounded_read_${EXPLORATION_FIXTURE_READS}` }],
-            },
-            message: { content: 'BOUNDED_CHILD_FINAL\n第二项发现\n- multiline child result' },
-          };
+        {
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'call_bounded_explore',
+                contentIncludes: ['BOUNDED_CHILD_FINAL', '第二项发现', 'multiline child result'],
+              },
+            ],
+          },
+          message: { content: 'BOUNDED_PARENT_FINAL' },
         },
-      },
-      {
-        expectedRequest: {
-          toolResults: [
-            {
-              toolCallId: 'call_bounded_explore',
-              contentIncludes: ['BOUNDED_CHILD_FINAL', '第二项发现', 'multiline child result'],
-            },
-          ],
-        },
-        message: { content: 'BOUNDED_PARENT_FINAL' },
-      },
-    ]);
+      ]),
+    );
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
@@ -830,7 +909,7 @@ describe('TUI PTY System — Sub-agent Multi-round Natural Summary', () => {
 
       const output = stripAnsi(tui.scrollback());
       expect(summaryRetainedReadCapability).toBe(true);
-      expect(server.getWorkRequestCount()).toBe(EXPLORATION_FIXTURE_READS + 3);
+      expect(server.getWorkRequestCount()).toBe(EXPLORATION_FIXTURE_READS + 5);
       expect(output).toContain('BOUNDED_PARENT_FINAL');
       expect(output).not.toContain('Working');
       expect(output).not.toContain('Cancellation was not accepted');
@@ -847,50 +926,52 @@ describe('TUI PTY System — Concurrent Sub-agent Aggregation', () => {
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
-    server.setResponses([
-      {
-        message: {
-          content: 'I will inspect two independent areas concurrently.',
-          tool_calls: [
-            {
-              id: 'call_parallel_runtime',
-              name: 'task',
-              args: {
-                name: 'Inspect runtime packages',
-                subagent_type: 'explore',
-                task: 'Inspect the runtime package layout and report a short summary.',
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          message: {
+            content: 'I will inspect two independent areas concurrently.',
+            tool_calls: [
+              {
+                id: 'call_parallel_runtime',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Inspect runtime packages',
+                  preset: 'explore',
+                  prompt: 'Inspect the runtime package layout and report a short summary.',
+                },
               },
-            },
-            {
-              id: 'call_parallel_tests',
-              name: 'task',
-              args: {
-                name: 'Inspect test layout',
-                subagent_type: 'explore',
-                task: 'Inspect the test layout and report a short summary.',
+              {
+                id: 'call_parallel_tests',
+                name: 'spawn_agent',
+                args: {
+                  task_name: 'Inspect test layout',
+                  preset: 'explore',
+                  prompt: 'Inspect the test layout and report a short summary.',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-      { delay: 1_000, message: { content: 'Runtime package inspection complete.' } },
-      { delay: 1_000, message: { content: 'Test layout inspection complete.' } },
-      {
-        expectedRequest: {
-          toolResults: [
-            {
-              toolCallId: 'call_parallel_runtime',
-              contentIncludes: ['inspection complete'],
-            },
-            {
-              toolCallId: 'call_parallel_tests',
-              contentIncludes: ['inspection complete'],
-            },
-          ],
+        { delay: 1_000, message: { content: 'Runtime package inspection complete.' } },
+        { delay: 1_000, message: { content: 'Test layout inspection complete.' } },
+        {
+          expectedRequest: {
+            toolResults: [
+              {
+                toolCallId: 'call_parallel_runtime',
+                contentIncludes: ['inspection complete'],
+              },
+              {
+                toolCallId: 'call_parallel_tests',
+                contentIncludes: ['inspection complete'],
+              },
+            ],
+          },
+          message: { content: 'Concurrent delegation completed.' },
         },
-        message: { content: 'Concurrent delegation completed.' },
-      },
-    ]);
+      ]),
+    );
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
@@ -978,25 +1059,27 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
           }
         : { delay: 5_000, message: { content: `Cancellation area ${area} inspection complete.` } };
     };
-    server.setResponses([
-      {
-        toolContinuation: 'aborted',
-        message: {
-          content: 'I will inspect four areas concurrently.',
-          tool_calls: Array.from({ length: 4 }, (_, index) => ({
-            id: `call_cancel_child_${index + 1}`,
-            name: 'task',
-            args: {
-              name: `Inspect cancellation area ${index + 1}`,
-              subagent_type: 'explore',
-              task: `Inspect cancellation area ${index + 1} and report a short summary.`,
-            },
-          })),
+    server.setResponses(
+      publicAgentResponses(workspace, [
+        {
+          toolContinuation: 'aborted',
+          message: {
+            content: 'I will inspect four areas concurrently.',
+            tool_calls: Array.from({ length: 4 }, (_, index) => ({
+              id: `call_cancel_child_${index + 1}`,
+              name: 'spawn_agent',
+              args: {
+                task_name: `Inspect cancellation area ${index + 1}`,
+                preset: 'explore',
+                prompt: `Inspect cancellation area ${index + 1} and report a short summary.`,
+              },
+            })),
+          },
         },
-      },
-      ...Array.from({ length: 5 }, () => ({ response: childResponse })),
-      { message: { content: 'Queued successor completed after child cleanup.' } },
-    ]);
+        ...Array.from({ length: 5 }, () => ({ response: childResponse })),
+        { message: { content: 'Queued successor completed after child cleanup.' } },
+      ]),
+    );
     tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
@@ -1011,14 +1094,14 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
   });
 
   test(
-    'keeps child identities visible and admits a queued successor only after cancellation cleanup',
+    'keeps child identities visible and dispatches a queued successor only after cancellation cleanup',
     async () => {
       await submitUserMessage(tui, server, 'Start four cancellable subagents', {
         timeout: 15_000,
       });
       await waitForText(() => tui.outputSinceLastAction(), 'Delegating · 4 agents', TIMEOUT);
       await waitForCondition(
-        () => server.getWorkRequestCount() === 6,
+        () => server.getWorkRequestCount() === 7,
         'an empty child search result to reach the next model request',
         TIMEOUT,
       );
@@ -1152,15 +1235,44 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
         const successor = database
           .query<{ cursor: number }, [string, string]>(`
         SELECT e.cursor FROM message m JOIN message_part p ON p.message_id=m.id
-        JOIN change_event e ON e.object_id=m.id AND e.scope_session_id=m.session_id
+        JOIN run r ON r.id=m.run_id AND r.session_id=m.session_id
+        JOIN execution x ON x.run_id=r.id AND x.session_id=r.session_id AND x.kind='model'
+        JOIN change_event e ON e.object_id=x.id AND e.scope_session_id=x.session_id
         WHERE m.role='user' AND m.session_id=? AND p.ordinal=0
-          AND json_extract(p.json,'$.content')=? AND e.type='message.updated'
+          AND json_extract(p.json,'$.content')=? AND e.type='execution.dispatching'
         ORDER BY e.cursor LIMIT 1
       `)
           .get(persisted.threadId, 'Run after cancellation cleanup');
+        // A queued input and its waiting Run may be recorded before cleanup;
+        // actual successor Model dispatch must follow all four terminal carriers.
         expect(successor?.cursor).toBeGreaterThan(
           Math.max(...carriers.map((carrier) => carrier.completed_cursor)),
         );
+        const successorRuns = database
+          .query<{ id: string; status: string }, [string, string]>(`
+          SELECT DISTINCT r.id,r.status FROM run r JOIN message m ON m.run_id=r.id AND m.session_id=r.session_id
+          JOIN message_part p ON p.message_id=m.id AND p.ordinal=0
+          WHERE m.session_id=? AND m.role='user' AND json_extract(p.json,'$.content')=?
+        `)
+          .all(persisted.threadId, 'Run after cancellation cleanup');
+        expect(successorRuns).toHaveLength(1);
+        expect(successorRuns[0]!.status).toBe('completed');
+        const dispatches = database
+          .query<{ cursor: number; kind: string }, [string]>(`
+          SELECT e.cursor,x.kind FROM change_event e JOIN execution x ON x.id=e.object_id
+          JOIN run r ON r.id=? AND r.origin_store_id=x.origin_store_id
+            AND r.root_work_command_id=x.root_work_command_id AND r.root_work_seq=x.root_work_seq
+          WHERE e.type='execution.dispatching' ORDER BY e.cursor
+        `)
+          .all(successorRuns[0]!.id);
+        expect(dispatches.length).toBeGreaterThan(0);
+        expect(
+          dispatches.every(
+            (event) =>
+              event.cursor > Math.max(...carriers.map((carrier) => carrier.completed_cursor)),
+          ),
+        ).toBe(true);
+        expect(dispatches.filter((event) => event.kind === 'model')).toHaveLength(1);
         const unknown = database
           .query<{ total: number }, [string]>(
             "SELECT count(*) AS total FROM execution WHERE root_work_command_id=(SELECT root_work_command_id FROM run WHERE id=?) AND state='outcome_unknown'",

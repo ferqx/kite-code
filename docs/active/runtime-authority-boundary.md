@@ -8,6 +8,8 @@
 
 相关：[Agent Note 0053](../../.agents/notes/implemented/architecture/2026-07-30-local-single-user-first-topology.md)、[Agent Note 0123](../../.agents/notes/implemented/simplification/2026-08-22-runtime-modularization-authority-cutover.md)、[Agent Note 0127](../../.agents/notes/implemented/simplification/2026-08-23-remove-rav1-speculative-authority.md)、[Agent Note 0142](../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md)、[Agent Note 0143](../../.agents/notes/implemented/bug-fix/2026-08-26-local-runtime-presentation-fidelity.md)、[Agent Note 0166](../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## KASD-01 authority substrate
 
 新的`kite-session.sqlite`具有独立exact epoch与Host-owned Session execution authority，并已由默认TUI/CLI App Server消费。
@@ -63,7 +65,7 @@ daemon build ID不参与compatibility，Store generation/revision仍是唯一wri
 
 ## 当前可信域
 
-冷会话的 `set_interaction_mode` 不申请 execution generation，也不恢复 Runtime。Service 只允许权限决定进入现有 Store 的无执行者事务：在 BEGIN IMMEDIATE 内检查 idle／recovery_required 与 expected Session revision，原子持久化事件、State、回执；不写 Run、Effect、cleanup 或 authority。active／detached 仍拒绝，本进程活动 coordinator 则沿已有 generation fence 更新同一 State。该例外不扩展通用 mutation、read 或 effect dispatch 的权限，详见[Store 事务](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
+冷会话的 `set_interaction_mode` 不申请 execution generation，也不恢复 Runtime。Service 只允许权限决定进入现有 Store 的无执行者事务：在 BEGIN IMMEDIATE 内检查 idle／recovery_required 与 expected Session revision，原子持久化事件、State、回执；不写 Run、Effect、cleanup 或 authority。active／detached 仍拒绝，本进程活动 coordinator 则沿已有 generation fence 更新同一 State。该例外不扩展通用 mutation、read 或 effect dispatch 的权限，详见[Store 事务](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
 
 Agent Kernel、Runtime Host、Builtin Runtime、Protocol/Server/Client 与 App composition 可以位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、Protocol message、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。
 
@@ -84,7 +86,7 @@ case-folded path 再次哈希成第二个 Project identity。二者仍指向同�
 
 内部子 Session 的详情订阅须携带已授权父 Session 与子 Session 的准确 ID。Service 以持久父子血缘及连接 Workspace 核验后，Server 才将其映射为子 Session 通知流；普通子 ID 的 query、History 和 Session 订阅仍拒绝。独立子 coordinator 提交后的通知可进入 Host 的观察 projector 供此流读取，观察发布不取得或更换子 Session writer generation，也不让父客户端取得子命令权限。
 
-续轮 Task 的私有读取使用来源 Session 当前 execution scope 与持久的直接父子、grant、accepted policy 和准确 Run／submission 证明；它不取得或续租目标 authority。历史终态与正文按准确 Run 范围读取，取消只操作仍匹配该任务的本地控制器；无法确认清理保持 unknown。完整读取边界见 [Store 查询 owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)，集成验证见 [独立续轮 Task](../../apps/kite-service/test/isolated/cross-session-followup-new-turn.test.ts)。
+续轮 Task 的私有读取使用来源 Session 当前 execution scope 与持久的直接父子、grant、accepted policy 和准确 Run／submission 证明；它不取得或续租目标 authority。历史终态与正文按准确 Run 范围读取，取消只操作仍匹配该任务的本地控制器；无法确认清理保持 unknown。完整读取边界见 [Store 查询 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)，集成验证见 [独立续轮 Task](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/test/isolated/cross-session-followup-new-turn.test.ts)。
 
 Effect lease在Model dispatch前仍绑定exact global revision：旧Surface的prepare/attempt-start不得跨revision执行。Provider已经取得durable attempt acknowledgement后，同一active Turn内的`interaction_mode.changed`等无关user control事实不撤销该exact invocation；Host只允许仍为prepared/dispatching的同一invocation继续投影stream，并提交封闭的retry或terminal批次，逐项限制为Model response、由该response排队的Tool及该invocation reservation终结。Turn aborted/completed、invocation已terminal、identity不匹配或批次混入其他事件时继续fail closed。该窄并发准入不移动lease、不建立第二套revision authority，也不允许stale attempt-start。
 

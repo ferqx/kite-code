@@ -8,7 +8,10 @@ import { pathToFileURL } from 'node:url';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { DevelopmentServiceReload } from '../../apps/desktop/electron/development';
 
-export { startDesktopRenderer } from '../../apps/desktop/scripts/development-renderer';
+export {
+  startDesktopRenderer,
+  startDevelopmentServiceWatcher,
+} from '../../apps/desktop/scripts/development-renderer';
 
 /** Private, per-launch parent control. Windows Electron GUI stdin is not a reliable pipe. */
 export async function startDesktopControl() {
@@ -272,6 +275,20 @@ export function isDevelopmentServiceSource(root: string, file: string): boolean 
     serviceWorkspaces.some((workspace) => path.startsWith(`${workspace}/src/`)) &&
     sourceFile.test(path)
   );
+}
+
+export function isDevelopmentServiceSourceEvent(
+  root: string,
+  event: string,
+  file: string,
+): boolean {
+  if (isDevelopmentServiceSource(root, file)) return true;
+  if (event !== 'addDir' && event !== 'unlinkDir') return false;
+  const path = relative(root, file).replaceAll('\\', '/');
+  return serviceWorkspaces.some((workspace) => {
+    const source = `${workspace}/src`;
+    return path === source || path.startsWith(`${source}/`) || source.startsWith(`${path}/`);
+  });
 }
 
 /** Coalesce saves and serialize builds/reloads; a failed build can be retried by the next save. */

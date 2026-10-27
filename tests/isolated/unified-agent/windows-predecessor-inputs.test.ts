@@ -49,7 +49,11 @@ const previousInputs = {
 test('real Windows predecessor retains exactly its original eleven locked input bytes', () => {
   expect(WINDOWS_PREDECESSOR_COMMIT).toBe('837a2b8cde946d70d00920941a1a3e5e7c684f5d');
   const paths = windowsPredecessorLockedInputPaths(
-    JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
+    JSON.parse(
+      Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:package.json`], {
+        cwd: root,
+      }).stdout.toString(),
+    ),
   );
   expect(paths).toEqual(Object.keys(previousInputs));
   expect(paths).toHaveLength(11);
@@ -229,7 +233,11 @@ test.skipIf(process.platform === 'win32' && process.arch === 'x64')(
 test('Windows compatible predecessor retains original identical raw inputs and pinned schema bytes', () => {
   expect(COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT).toBe('4a4c0e440b2098e5b4ec58c5831452773b39228f');
   const paths = windowsPredecessorLockedInputPaths(
-    JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
+    JSON.parse(
+      Bun.spawnSync(['git', 'show', `${COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT}:package.json`], {
+        cwd: root,
+      }).stdout.toString(),
+    ),
   );
   expect(paths).toEqual([...COMPATIBLE_PREDECESSOR_INPUT_PATHS]);
   for (const path of [...paths, ...COMPATIBLE_PREDECESSOR_MIGRATIONS.map((item) => item.path)]) {
@@ -325,4 +333,22 @@ test('actual Windows inputs preserve raw proofs and use context-bound reviewed p
       historicalInput('packages/agent/package.json'),
     ),
   ).toThrow('windows_predecessor_dependency_input_changed:packages/agent/package.json');
+});
+
+test('current Bun namespace patch names are accepted as literal file names, never decoded paths', () => {
+  const current = windowsPredecessorLockedInputPaths(
+    JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
+  );
+  expect(current).toEqual([
+    ...COMPATIBLE_PREDECESSOR_INPUT_PATHS,
+    'patches/@radix-ui%2Freact-scroll-area@1.2.18.patch',
+  ]);
+  for (const path of [
+    'patches/../escape.patch',
+    'patches/%2e%2e%2fescape.patch',
+    'patches/x%5Cescape.patch',
+  ])
+    expect(() =>
+      windowsPredecessorLockedInputPaths({ patchedDependencies: { bad: path } }),
+    ).toThrow('windows_predecessor_patch_path_invalid');
 });

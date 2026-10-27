@@ -125,12 +125,12 @@ test('workspace-bound mock emits migrated input while retaining original queue a
     const body = await first.json();
     expect(body.choices[0].message.tool_calls[0]).toMatchObject({
       id: 'same-id',
-      function: { name: 'files.read', arguments: JSON.stringify({ path: 'sample.txt' }) },
+      function: { name: 'read_file', arguments: JSON.stringify({ path: 'sample.txt' }) },
     });
     expect(server.getToolContractMigrations()).toEqual([
       {
         original: { id: 'same-id', name: 'read_file', args: { path: 'sample.txt' } },
-        emitted: { id: 'same-id', name: 'files.read', args: { path: 'sample.txt' } },
+        emitted: { id: 'same-id', name: 'read_file', args: { path: 'sample.txt' } },
       },
     ]);
     const second = await fetch(`${server.baseURL}/chat/completions`, {

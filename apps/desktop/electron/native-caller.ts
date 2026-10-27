@@ -822,10 +822,12 @@ export class NativeCaller {
         }, 100);
     });
   }
-  private async drainRefresh() {
-    const pending = this.refreshing;
-    await pending;
-    if (this.refreshing === pending) this.refreshing = undefined;
+  private async drainRefresh(followSuccessors = false) {
+    do {
+      const pending = this.refreshing;
+      await pending;
+      if (this.refreshing === pending) this.refreshing = undefined;
+    } while (followSuccessors && this.refreshing);
   }
   private async startObservation() {
     if (this.stream) return;
@@ -921,13 +923,31 @@ export class NativeCaller {
               ) {
                 const sessionId = this.selected,
                   selection = this.selection;
+                // Ready may arrive during an explicit activation. Keep its read alive,
+                // then reconcile the same selection as a tracked successor so callers
+                // wait for its verified facts and receive its actual read failure.
+                const pending = this.refreshing;
+                const reading = (async () => {
+                  await pending?.catch(() => {});
+                  if (
+                    signal.signal.aborted ||
+                    this.closed ||
+                    this.selected !== sessionId ||
+                    this.selection !== selection
+                  )
+                    return;
+                  return this.controller.selectSession(sessionId);
+                })();
+                this.refreshing = reading;
                 try {
-                  await this.controller.selectSession(sessionId);
+                  await reading;
                 } catch {
                   if (this.selected === sessionId && this.selection === selection) {
                     this.permissionUnavailable = true;
                     this.changed();
                   }
+                } finally {
+                  if (this.refreshing === reading) this.refreshing = undefined;
                 }
               }
               // A ready-only stream at the reloaded baseline adds no new facts.
@@ -1923,7 +1943,7 @@ export class NativeCaller {
           if (this.refreshing === reading) this.refreshing = undefined;
           if (this.refreshRequested && this.observer) this.scheduleRefresh(this.observer.signal);
         }
-        await this.drainRefresh();
+        await this.drainRefresh(true);
         if (this.selected !== request.sessionId || view !== this.selection)
           throw new ClientError('native_selection_changed');
         const snapshot = this.selectScope(request.sessionId);

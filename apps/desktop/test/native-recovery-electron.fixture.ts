@@ -3,6 +3,22 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import type { NativeState } from '../src/native-bridge';
+
+async function observedState(
+  page: import('playwright').Page,
+  accepts: (state: NativeState) => boolean,
+): Promise<NativeState> {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    const value = (await page.evaluate(async () =>
+      window.kiteNative!.request({ method: 'state', generation: 1 }),
+    )) as NativeState;
+    if (accepts(value)) return value;
+    if (Date.now() >= deadline) throw Error('native_recovery_observation_timeout');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -117,6 +133,19 @@ try {
       }
     }, original);
   }
+  if (kind === 'report') {
+    // Crash at the completed original report boundary. A cold GET observes that
+    // exact effect; it cannot resume a report Model interrupted by a second crash.
+    await page.getByText('REPORT_ORIGINAL_CHILD_DONE', { exact: true }).waitFor();
+    await observedState(
+      page,
+      (state) =>
+        state.selection?.session.id === 's' &&
+        state.selection.runs.some(
+          (run) => run.originCommandId === runId && run.status === 'completed' && !run.isActive,
+        ),
+    );
+  }
   const children = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' })
     .trim()
     .split('\n')
@@ -181,6 +210,16 @@ try {
     )) as unknown as { recoverySubmissions: { commandId: string }[] };
     assert.equal(fresh.recoverySubmissions.length, 2);
     assert.notEqual(fresh.recoverySubmissions[1]!.commandId, original);
+    // A resumed receipt precedes the refreshed interaction observation. Keep the
+    // original card identity and revision; answer only after Main has observed it.
+    await observedState(
+      page,
+      (state) =>
+        state.selection?.session.id === 's' &&
+        state.selection.interactions.some(
+          (card) => card.id === cardId && card.revision === revision && card.state === 'pending',
+        ),
+    );
     await page.evaluate(
       async ({ cardId, revision }) => {
         const bridge = window.kiteNative!,

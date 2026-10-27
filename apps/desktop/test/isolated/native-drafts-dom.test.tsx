@@ -9,7 +9,12 @@ import type {
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
+import {
+  nextDesktopPresentation,
+  prepareDesktopDom,
+  promptValue,
+  setPromptText,
+} from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const previous = {
@@ -141,7 +146,31 @@ test('actual React DOM keeps the new selected view when an original creation rec
       )!;
       expect(button).toBeDefined();
       button.click();
+      if (button.classList.contains('session-row')) await nextDesktopPresentation(dom);
     });
+  const chooseModel = async () => {
+    await act(async () => {
+      const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
+      expect(trigger.disabled).toBe(false);
+      trigger.click();
+    });
+    await act(async () => {
+      dom.window.document
+        .querySelector<HTMLButtonElement>('[aria-label^="选择模型，当前 "]')!
+        .click();
+    });
+    await act(async () => {
+      const model = dom.window.document.querySelector<HTMLElement>('[aria-label="选择模型 model"]');
+      expect(model).not.toBeNull();
+      model!.click();
+    });
+    await act(async () =>
+      dom.window.document
+        .querySelector('[aria-label="模型与思考程度"]')!
+        .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    );
+    expect(dom.window.document.querySelector('[aria-label="模型与思考程度"]')).toBeNull();
+  };
   try {
     await act(async () => root.render(<NativeDesktop testDiagnostics />));
     await click('Original A');
@@ -156,6 +185,12 @@ test('actual React DOM keeps the new selected view when an original creation rec
         'first prepared message',
       );
     });
+    expect(
+      [...dom.window.document.querySelectorAll('button')].find(
+        (button) => button.getAttribute('aria-label') === '发送首条消息',
+      )!.disabled,
+    ).toBe(true);
+    await chooseModel();
     await click('发送首条消息');
     expect(posts).toBe(1);
     await click('Other B');

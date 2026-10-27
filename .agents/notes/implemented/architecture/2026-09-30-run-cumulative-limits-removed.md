@@ -39,6 +39,6 @@ MCP 资源与动态结果、声明的 Skill reference 不再受旧的 128 KiB �
 
 新主 Run 不再因累计额度耗尽而进入 `artifact_capacity` 等待或拒绝后续模型／工具调用。无文件变更证据的 Shell 不再把旧 256 MiB 预留记为已知实际产物；有证据时记录观测字节。长期执行继续受子 Agent 并发与安全准入约束；有限子 Run 的截止时间仍生效，主 Run 总期限由上述后续决定移除。旧有限记录和新模式并存，恢复必须按持久标记分流，不能凭当前配置推断历史授权。
 
-验证覆盖 Kernel／Host 的额度升级、在途预留结算、截止时间及并发拒绝，Builtin 模型重试和恢复，Service 的 Shell 后停止／写入、旧容量等待者转换，以及正式 Runtime Server 的父子和 Shell 组合执行。对应入口见[执行手册](../../../../docs/handbook/features/execution.md)、[Host owner](../../../../packages/runtime-host/README.md)和[Service owner](../../../../apps/kite-service/docs/runtime-application.md)。
+验证覆盖 Kernel／Host 的额度升级、在途预留结算、截止时间及并发拒绝，Builtin 模型重试和恢复，Service 的 Shell 后停止／写入、旧容量等待者转换，以及正式 Runtime Server 的父子和 Shell 组合执行。对应入口见[执行手册](../../../../docs/handbook/features/execution.md)、[Host owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/README.md)和[Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)。
 
 本次扩展回归覆盖超出旧阈值的指令、文件、Skill、schema、计划、Artifact 与完整审查内容，四次验证修复后通过、旧修复额度耗尽后的持久升级、压缩失败的同源去重与新增上下文重试、完整 Shell 游标续读及超过 256 个串行句柄；11,000 条后台目录分页、跨页版本变化和准确 Session 拒绝、背景目录整体读取期限、超过 128 KiB 的 MCP／reference 与完整网页提取另有聚焦回归。真实 SQLite 的 50,001 条、超过 40 MiB 源历史通过生产子进程 owner 完整读取 98 页；客户端另验证超旧大小门槛、1,041 个请求排队推进、拥塞重试、取消与总耗时超过单页期限的成功读取。未将受控测试结论外推为任意 Provider 容量或跨宿主崩溃后的临时输出恢复承诺。

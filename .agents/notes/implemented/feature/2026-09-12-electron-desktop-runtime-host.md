@@ -13,7 +13,7 @@ Runtime Host 继续作为经过制品与身份校验的 `kite-service` 独立子
 共享 React/shadcn UI 继续服务桌面与只读 Web。宿主迁移不扩大 Web 权限，不改变会话和执行语义。开发版使用既有 source profile，打包版使用 canonical profile；应用 ID 和已打开项目文件沿用。
 
 ## 影响与证据
-Tauri 与 Rust 不再是桌面开发依赖。Bun/Vite 构建和 Electron Packager 生成 macOS 应用。此前 Tauri 原生验收仅保留历史含义，Electron 的制品、窗口、生命周期和发布资格分别验证。当前实现与验证边界由[桌面 owner](../../../../apps/kite-desktop/README.md)维护。
+Tauri 与 Rust 不再是桌面开发依赖。Bun/Vite 构建和 Electron Packager 生成 macOS 应用。此前 Tauri 原生验收仅保留历史含义，Electron 的制品、窗口、生命周期和发布资格分别验证。当前实现与验证边界由[桌面 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/README.md)维护。
 
 ## Alternatives considered
 

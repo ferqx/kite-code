@@ -51,11 +51,11 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
             { id: 'call_plan_shell_denied', name: 'shell_execute', args: { command: 'pwd' } },
             {
               id: 'call_plan_child_denied',
-              name: 'task',
+              name: 'spawn_agent',
               args: {
-                name: 'Forbidden planning child',
-                subagent_type: 'code',
-                task: 'Do not start before approval.',
+                task_name: 'Forbidden planning child',
+                preset: 'code',
+                prompt: 'Do not start before approval.',
               },
             },
           ],
@@ -179,7 +179,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       for (const [callId, adapterId] of [
         ['call_plan_write_denied', 'files.write'],
         ['call_plan_shell_denied', 'shell.execute'],
-        ['call_plan_child_denied', 'task.execute'],
+        ['call_plan_child_denied', 'task.spawn'],
       ]) {
         const actual = db
           .query<
@@ -257,6 +257,12 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       expect(actual!.state).toBe('succeeded');
       expect(actual!.dispatched).toBe(1);
       expect(actual!.result_json).toContain('planning-baseline.txt');
+      const result = JSON.parse(actual!.result_json);
+      expect(result.outcome).toBe('succeeded');
+      expect(JSON.parse(result.content).entries).toContainEqual({
+        name: 'planning-baseline.txt',
+        kind: 'file',
+      });
       const modelRequestsAtResult = server.getWorkRequestCount();
       tui.write('\x03');
       await observedRun(readonlyTask, 'cancelled');
@@ -265,7 +271,19 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       const output = tui.screenFramesSince(frames).join('\n');
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
       expect(screenContains(output, '工具授权')).toBe(false);
-      expect(screenContains(output, 'planning-baseline.txt')).toBe(true);
+      // Readonly exploration is an aggregate on the main screen. Its original
+      // directory entries remain readable through the ordinary execution panel.
+      await waitForTuiReady(tui);
+      tui.write('\x05');
+      await waitForText(() => tui.viewport(), 'files.list', 5000);
+      await waitForText(
+        () => tui.viewport().replace(/\s*\n\s*/g, ''),
+        'planning-baseline.txt',
+        5000,
+      );
+      expect(server.getWorkRequestCount()).toBe(modelRequestsAtResult);
+      tui.write('\x1b');
+      await waitForTuiReady(tui);
       assertNoEffectDispatch(identity.turnId);
     },
     TIMEOUT,

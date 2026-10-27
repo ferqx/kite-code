@@ -616,6 +616,112 @@ test('interactive Ink emits completed bodies once across status/edit/append and 
   }
 });
 
+test('runless lifecycle Job retains its exact original position on append and a real result revision still rebuilds history', async () => {
+  const original = Array.from({ length: 45 }, (_, i) => `SEQUENCE_HISTORY_${i}`).join('\n\n');
+  let current = snapshot('a', [original]);
+  const job: SessionView['executions'][number] = {
+    id: 'lifecycle',
+    originStoreId: 'store',
+    sessionId: 'a',
+    runId: null,
+    kind: 'job',
+    definitionId: 'builtin.session-title/generate',
+    definitionVersion: '1',
+    rootWorkCommandId: 'lifecycle-command',
+    rootWorkSeq: '2',
+    parentExecutionId: null,
+    childSessionId: null,
+    status: 'succeeded',
+    result: { content: 'ORIGINAL_LIFECYCLE_RESULT' },
+    resultRevision: '1',
+    cancelRequestedAt: null,
+  };
+  current.view.executions = [job];
+  const forbidden = async () => {
+    throw Error('history observation never submits');
+  };
+  const controller = new TuiController({
+    storeId: 'store',
+    nextCommandId: () => 'unused',
+    listSessions: async () => [],
+    readSession: async () => current,
+    submit: forbidden,
+    answer: forbidden,
+    cancel: forbidden,
+    getCommand: forbidden,
+  });
+  await controller.select('a');
+  const stdout = Object.assign(new PassThrough(), { isTTY: true, columns: 80, rows: 24 });
+  const stdin = Object.assign(new PassThrough(), {
+    isTTY: true,
+    setRawMode: () => stdin,
+    ref: () => stdin,
+    unref: () => stdin,
+  });
+  let bytes = '';
+  stdout.on('data', (data) => {
+    bytes += data.toString();
+  });
+  const app = render(<TuiSession testDiagnostics controller={controller} />, {
+    stdout: stdout as unknown as WriteStream,
+    stdin: stdin as unknown as ReadStream,
+    stderr: new PassThrough() as unknown as WriteStream,
+    interactive: true,
+    patchConsole: false,
+    exitOnCtrlC: false,
+  });
+  try {
+    await pause();
+    expect(bytes).toContain('ORIGINAL_LIFECYCLE_RESULT');
+    bytes = '';
+    current = {
+      ...current,
+      messages: [
+        ...current.messages,
+        {
+          id: 'later',
+          sessionId: 'a',
+          runId: null,
+          seq: '3',
+          status: 'complete',
+          role: 'assistant',
+          content: 'AFTER_LIFECYCLE',
+        },
+      ],
+    };
+    await controller.select('a');
+    await pause();
+    expect(bytes).toContain('AFTER_LIFECYCLE');
+    expect(bytes).not.toContain('SEQUENCE_HISTORY_');
+    expect(bytes).not.toContain('ORIGINAL_LIFECYCLE_RESULT');
+    expect(bytes).not.toContain('\u001b[3J');
+    bytes = '';
+    current = {
+      ...current,
+      view: {
+        ...current.view,
+        executions: [
+          {
+            ...job,
+            resultRevision: '2',
+            result: { content: 'REVISED_LIFECYCLE_RESULT' },
+          },
+        ],
+      },
+    };
+    await controller.select('a');
+    await pause();
+    expect(bytes).toContain('\u001b[3J');
+    expect(bytes).toContain('REVISED_LIFECYCLE_RESULT');
+  } finally {
+    app.unmount();
+    app.cleanup();
+    controller.dispose();
+    stdin.destroy();
+    stdout.destroy();
+  }
+});
+
 test('late verified giant body replaces its preview in original Static order before the composer', async () => {
   const body = `${'正文'.repeat(1500000)}ACTUAL_HOST_VERIFIED_TAIL`;
   const reasoning = 'ACTUAL_LOADED_REASON_TAIL\n';

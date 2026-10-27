@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 const [outdir, root, executablePath, control] = process.argv.slice(2) as string[];
 const app = await _electron.launch({
@@ -16,6 +17,7 @@ let phase = 'launch';
 const diagnostics: string[] = [];
 try {
   const page = await app.firstWindow();
+  await page.bringToFront();
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => diagnostics.push(error.message));
   const state = () =>
@@ -41,6 +43,19 @@ try {
     );
   };
   await select('Reasoning Stream', 'parent');
+  await app.evaluate(({ app, BrowserWindow }) => {
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length !== 1) throw Error('reasoning_window_identity_changed');
+    windows[0]!.show();
+    windows[0]!.focus();
+    app.focus({ steal: true });
+  });
+  await page.bringToFront();
+  await until(
+    () => page.evaluate(() => document.hasFocus()),
+    Boolean,
+    'ordinary reasoning window focused',
+  );
   assert.equal(await page.getByRole('button', { name: '会话工具', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '保留草稿', exact: true }).count(), 0);
   for (const kind of ['permission.trust', 'permission.mode'] as const) {
@@ -94,12 +109,14 @@ try {
         }
         if (
           response.ok &&
-          new URL(args[0] instanceof Request ? args[0].url : String(args[0])).pathname.endsWith(
-            '/messages',
+          /\/(?:messages|message-changes)$/.test(
+            new URL(args[0] instanceof Request ? args[0].url : String(args[0])).pathname,
           )
         ) {
-          const result = (await response.clone().json()) as import('@kite-ai/client').Message[];
-          for (const message of Array.isArray(result) ? result : []) {
+          const result = (await response.clone().json()) as
+            | import('@kite-ai/client').Message[]
+            | { messages: import('@kite-ai/client').Message[] };
+          for (const message of Array.isArray(result) ? result : result.messages) {
             const index = global.reasoningMessages.findIndex((old) => old.id === message.id);
             if (index < 0) global.reasoningMessages.push(message);
             else global.reasoningMessages[index] = message;
@@ -233,6 +250,7 @@ try {
   await page.evaluate(installProbe);
   const setPhase = async (value: string) => {
     phase = value;
+    console.log('native_reasoning_phase', value);
     await page.evaluate((value) => {
       (
         globalThis as unknown as { reasoningRenderProbe: { phase: string } }
@@ -286,7 +304,7 @@ try {
       `${label}: only actual prose rendered`,
     );
     assert.equal(
-      await page.locator('.conversation .response-status').count(),
+      await page.locator('.conversation .response-status').filter({ hasText: '正在回复' }).count(),
       0,
       `${label}: no replying before actual body`,
     );
@@ -297,6 +315,7 @@ try {
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('REASONING_RENDER');
   const send = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
+  await selectNativeFixtureModel(page, 'fixture');
   await until(() => send.isEnabled(), Boolean, 'send enabled');
   await send.click();
   await until(
@@ -381,7 +400,7 @@ try {
   await until(content, (value) => value.includes('正在思考'), 'third Model thinking indicator');
   await page.waitForTimeout(300);
   await checkReasoning('second-reasoning', 1);
-  await until(content, (value) => value.includes('读取 3 次'), 'actual reads aggregated');
+  await until(content, (value) => value.includes('读取文件'), 'actual reads aggregated');
   assert.equal(
     await page.locator('.conversation .tool-activity-summary').getAttribute('aria-expanded'),
     'false',
@@ -456,7 +475,7 @@ try {
   await page.locator('.agent-turn-summary[aria-expanded="false"]').click();
   await until(
     content,
-    (value) => value.includes('PUBLIC_STAGE_PROSE') && value.includes('读取 3 次'),
+    (value) => value.includes('PUBLIC_STAGE_PROSE') && value.includes('读取文件'),
     'user opens original phase prose and read group',
   );
   await page.locator('.tool-activity-summary[aria-expanded="false"]').click();
@@ -465,12 +484,38 @@ try {
     (value) => value.includes('PUBLIC_STAGE_PROSE') && value.includes('read-only.txt'),
     'user opens original phase prose and actual read record',
   );
+  assert.equal(
+    await page.locator('.tool-activity-steps > .tool-activity-step').count(),
+    3,
+    'the actual aggregate retains all three original read receipts',
+  );
   assert.deepEqual((await probe()).violations, []);
+  console.log(
+    'native_reasoning_animation_state',
+    JSON.stringify(
+      await page.locator('.agent-turn-content').evaluate((element) =>
+        element.getAnimations({ subtree: true }).map((animation) => ({
+          playState: animation.playState,
+          currentTime: animation.currentTime,
+          timing: animation.effect?.getTiming(),
+          documentTimeline: animation.timeline === element.ownerDocument.timeline,
+          timeline: animation.timeline?.constructor.name,
+        })),
+      ),
+    ),
+  );
   await page.locator('.agent-turn-content').evaluate(async (element) => {
+    // Scroll-linked edge fades do not finish while stationary; wait only real time-based disclosure transitions.
     await Promise.all(
       element
         .getAnimations({ subtree: true })
-        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .filter(
+          (animation) =>
+            animation.timeline === element.ownerDocument.timeline &&
+            Number.isFinite(animation.effect?.getComputedTiming().endTime) &&
+            animation.playState !== 'finished' &&
+            animation.playState !== 'idle',
+        )
         .map((animation) => animation.finished.catch(() => {})),
     );
   });
@@ -547,6 +592,8 @@ try {
   await app.evaluate(({ dialog }) => {
     dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
   });
+  console.log('native_reasoning_phase', 'owned_quit');
   await app.evaluate(({ app }) => app.quit());
   await exited;
+  console.log('native_reasoning_phase', 'owned_exited');
 }

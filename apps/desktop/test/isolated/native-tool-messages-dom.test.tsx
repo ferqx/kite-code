@@ -2,14 +2,32 @@ import { expect, test } from 'bun:test';
 import type { JobDefinition, ToolContext } from '@kite-ai/agent/extensions';
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AgentClient, Execution, Message } from '@kite-ai/client';
-import { DesktopDiagnosticsProvider, SessionPage, ToolActivity } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
 import { createModelToolSurface } from '../../../../packages/agent/src/model-tools';
 import { NativeToolMessages } from '../../electron/tool-messages';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
-import {
+import type { NativeToolMessageFact, NativeToolMessagePage } from '../../src/tool-messages-bridge';
+import { nextDesktopPresentation, prepareDesktopDom } from '../native-page-dom.fixture';
+
+// Radix chooses its browser layout hooks at module initialization. Load the
+// actual UI with a DOM present, as in Native, rather than the server no-op path.
+const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
+const originalGlobals = {
+  window: globalThis.window,
+  document: globalThis.document,
+  navigator: globalThis.navigator,
+};
+Object.assign(globalThis, {
+  window: bootstrap.window,
+  document: bootstrap.window.document,
+  navigator: bootstrap.window.navigator,
+});
+const { createRoot } = await import('react-dom/client');
+const { DesktopDiagnosticsProvider, SessionPage, ToolActivity } = await import(
+  '@kite-ai/ui/desktop'
+);
+const {
   desktopToolMessage,
   desktopToolPresentation,
   groupNativeToolMessages,
@@ -17,10 +35,10 @@ import {
   NativeLiveToolMessage,
   NativeToolMessage,
   useNativeToolMessages,
-} from '../../src/native-tool-messages';
-import { desktopTranscript } from '../../src/native-transcript';
-import type { NativeToolMessageFact, NativeToolMessagePage } from '../../src/tool-messages-bridge';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+} = await import('../../src/native-tool-messages');
+const { desktopTranscript } = await import('../../src/native-transcript');
+Object.assign(globalThis, originalGlobals);
+bootstrap.window.close();
 
 test('collaboration tool labels use exact new definitions and versions without inferring an Agent outcome', () => {
   expect(
@@ -1518,7 +1536,10 @@ test('the retained tool UI shows exact failures and unverified Shell original re
     expect(failedToggle.getAttribute('aria-expanded')).toBe('false');
     await act(async () => failedToggle.click());
     expect(failed.textContent).toContain('file_not_found');
+    await act(async () => nextDesktopPresentation(f.dom));
     await act(async () => failedToggle.click());
+    await act(async () => nextDesktopPresentation(f.dom));
+    expect(failedToggle.getAttribute('aria-expanded')).toBe('false');
     expect(f.host.textContent).not.toContain('file_not_found');
     const shell = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
       button.textContent?.includes('启动命令'),

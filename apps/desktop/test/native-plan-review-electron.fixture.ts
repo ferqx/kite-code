@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Interaction, InteractionAttachment, Json } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type { NativeDraft, NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 // Read editor text without CSS paragraph margins adding visual blank lines.
 // Keep every actual line break and leading/trailing space in the original draft.
@@ -455,6 +456,7 @@ try {
     if (id !== 'a') {
       await establishAutoMode(id);
     }
+    await selectNativeFixtureModel(page, 'fixed');
     if (id === 'b') {
       const parentCount = Number(await (await fetch(`${control}/count`)).text());
       await page
@@ -587,7 +589,7 @@ try {
     assert.equal(await input.count(), 0);
     assert.equal(await page.getByRole('button', { name: '保留草稿', exact: true }).count(), 0);
     assert.ok(
-      (await page.getByRole('button', { name: /^取消原申请/ }).count()) > 0,
+      (await page.getByRole('button', { name: '停止任务', exact: true }).count()) > 0,
       'pending Plan must preserve its original task stop',
     );
     assert.equal(existsSync(join(home, 'workspace', `blocked-${id}-1.txt`)), false);
@@ -706,11 +708,13 @@ try {
     assert.equal(approval.runId, runId);
     assert.equal((approval.request as Record<string, unknown>).definitionId, 'files.write');
     assert.equal(existsSync(join(home, 'workspace', `effect-${id}.txt`)), false);
-    // The exact Files approval is independent of the already saved Plan approval.
+    // Ordinary Tool approval retains the main composer and permission selector;
+    // the exact Files approval is independent of the already saved Plan approval.
     assert.equal(
       await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
-      0,
+      1,
     );
+    await page.locator('[data-permission-trigger]').waitFor();
     await page.getByRole('button', { name: '批准一次', exact: true }).click();
     const accepted = await until(
       state,
@@ -893,6 +897,15 @@ try {
   )!.request.commandId;
   await page.getByRole('button', { name: `取消原申请 · ${dCommand}`, exact: true }).click();
   await done('d', d.runId!, 'cancelled', dDraft);
+  assert.ok(
+    (await state()).callerSubmissions?.some(
+      (row) =>
+        row.request.kind === 'command.cancel' &&
+        row.target.kind === 'command' &&
+        row.target.id === dCommand &&
+        ['accepted', 'applied'].includes(row.phase),
+    ),
+  );
   assert.equal(existsSync(join(home, 'workspace', 'denied-effect.txt')), false);
   const cDraft = '取消原 Main 草稿';
   const c = await start('c', cDraft);
@@ -900,7 +913,7 @@ try {
   const cCommand = (await state()).callerSubmissions!.find(
     (row) => row.scope.sessionId === 'c' && row.request.kind === 'run.start',
   )!.request.commandId;
-  const cancelButton = page.getByRole('button', { name: `取消原申请 · ${cCommand}`, exact: true });
+  const cancelButton = page.getByRole('button', { name: '停止任务', exact: true });
   const providerRequestsBeforeCancel = Number(await (await fetch(`${control}/count`)).text());
   stage('original_cancel_before_click', {
     sessionId: 'c',

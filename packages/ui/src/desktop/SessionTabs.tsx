@@ -29,6 +29,7 @@ export interface SessionChildTarget {
 }
 
 export interface SessionChildTabRequest extends SessionChildTarget {
+  /** Increases for each explicit navigation within the mounted page's lifetime. */
   readonly requestId: number;
   readonly title: string;
   readonly childAgentIdentity?: string;

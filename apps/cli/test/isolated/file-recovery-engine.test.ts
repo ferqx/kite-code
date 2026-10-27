@@ -85,7 +85,7 @@ test('actual default file recovery engine seals both legs before POST and cold l
       ],
       tools: [
         { id: 'files.read', definitionVersion: '5' },
-        { id: 'files.write', definitionVersion: '2' },
+        { id: 'files.write', definitionVersion: '3' },
       ],
     }),
   );

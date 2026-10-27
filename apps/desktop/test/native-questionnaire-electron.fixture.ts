@@ -4,6 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeDraft, NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 import { promptText } from './prompt-editor-text.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
@@ -215,6 +216,7 @@ try {
     const input = page.getByRole('textbox', { name: '当前会话私有草稿' });
     await input.fill(content);
     assert.equal(await promptText(input), content);
+    await selectNativeFixtureModel(page, 'fixed');
     await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
     assert.equal(
       await page.evaluate(

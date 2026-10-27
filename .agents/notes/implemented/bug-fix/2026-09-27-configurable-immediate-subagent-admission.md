@@ -26,6 +26,6 @@ Status: implemented
 
 决策者：用户确认子 Agent 上限默认 3、超限立即拒绝，并保留 `code` 写者安全限制
 
-现行依据：[执行手册](../../../../docs/handbook/features/execution.md)、[配置手册](../../../../docs/handbook/features/models-and-configuration.md)、[Service owner](../../../../apps/kite-service/docs/runtime-application.md)、[Host owner](../../../../packages/runtime-host/docs/execution-lifecycle.md)、[Kernel owner](../../../../packages/agent-kernel/docs/scheduling-authorization.md)。本决策替代 [Agent Note 0104](../feature/2026-08-13-bounded-concurrent-subagent-dispatch.md) 的固定批次上限和新建子任务等待并发位的范围；保留其兼容任务并发、身份隔离、审批交互与写者安全边界。
+现行依据：[执行手册](../../../../docs/handbook/features/execution.md)、[配置手册](../../../../docs/handbook/features/models-and-configuration.md)、[Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)、[Host owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/docs/execution-lifecycle.md)、[Kernel owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/agent-kernel/docs/scheduling-authorization.md)。本决策替代 [Agent Note 0104](../feature/2026-08-13-bounded-concurrent-subagent-dispatch.md) 的固定批次上限和新建子任务等待并发位的范围；保留其兼容任务并发、身份隔离、审批交互与写者安全边界。
 
 现行适用范围修正（2026-09-27）：下文第 1 条的正整数配置在当前固定 30 次父级 turn 预算下限定为 1–28；上限加两份父级余量作为分母时，每个子 Agent 必须获得至少一次 turn。默认值仍为 3。Service 在成功受理前也检查当前预算能否提供正的子份额。这个约束修复了更大数值先受理、随后因零额度结算失败的窗口，不改变即时拒绝与写者安全决定。

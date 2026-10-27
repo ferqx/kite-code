@@ -5,7 +5,9 @@ import { TuiChildSessionPanel } from '../../src/tui/child-session-panel';
 import type { TuiSnapshot } from '../../src/tui/controller';
 import {
   InkExecution,
+  inkExecutionHistoryMutable,
   inkShellCarrier,
+  inkStandaloneJobAnchor,
   inkToolArguments,
   inkToolName,
   projectInkChild,
@@ -79,6 +81,76 @@ const snapshot = (executions: Execution[], messages: Message[] = []): TuiSnapsho
   view: view('parent', { executions }),
   messages,
   interactions: [],
+});
+test('runless root Jobs use the same Session sequence without anchoring foreign, child or malformed scopes', () => {
+  const job = execution('lifecycle', {
+    kind: 'job',
+    runId: null,
+    rootWorkSeq: '9007199254740993',
+    definitionId: 'builtin.session-title/generate',
+  });
+  const earlier = message('earlier', '9007199254740992');
+  const later = message('later', '9007199254740994');
+  const current = snapshot([job], [earlier, later]);
+  expect(inkStandaloneJobAnchor(job, current, [earlier])).toBeUndefined();
+  expect(inkStandaloneJobAnchor(job, current, [earlier, later])).toBe('later');
+  for (const invalid of [
+    { originStoreId: 'foreign' },
+    { sessionId: 'foreign' },
+    { rootWorkSeq: '9223372036854775808' },
+    { rootWorkSeq: '01' },
+    { parentExecutionId: 'real-parent' },
+    { childSessionId: 'child' },
+  ])
+    expect(inkStandaloneJobAnchor({ ...job, ...invalid }, current, [later])).toBeUndefined();
+  const descendant = {
+    ...current,
+    view: { ...current.view, session: { ...current.view.session, parentSessionId: 'root' } },
+  };
+  expect(inkStandaloneJobAnchor(job, descendant, [later])).toBeUndefined();
+});
+
+test('accepted spawn stays in live history until the exact carrier settles without changing either execution status', () => {
+  const spawn = execution('spawn', {
+    definitionId: 'builtin.task/task.spawn',
+    result: {
+      outcome: 'succeeded',
+      details: { accepted: true, agent_id: 'child', state: 'queued' },
+    },
+  });
+  const carrier = execution('carrier', {
+    kind: 'job',
+    runId: null,
+    parentExecutionId: 'spawn',
+    childSessionId: 'child',
+    definitionId: 'agent/worker',
+    status: 'running',
+  });
+  expect(inkExecutionHistoryMutable(spawn, snapshot([spawn]))).toBe(true);
+  expect(inkExecutionHistoryMutable(spawn, snapshot([spawn, carrier]))).toBe(true);
+  expect(spawn.status).toBe('succeeded');
+  expect(carrier.status).toBe('running');
+  expect(
+    inkExecutionHistoryMutable(spawn, snapshot([spawn, { ...carrier, status: 'succeeded' }])),
+  ).toBe(false);
+  expect(
+    inkExecutionHistoryMutable(spawn, snapshot([spawn, { ...carrier, rootWorkSeq: '2' }])),
+  ).toBe(true);
+  expect(
+    inkExecutionHistoryMutable({ ...spawn, originStoreId: 'foreign' }, snapshot([spawn])),
+  ).toBe(false);
+  const completed = snapshot([spawn]);
+  completed.view.runs = completed.view.runs.map((run) => ({
+    ...run,
+    isActive: false,
+    status: 'completed',
+  }));
+  expect(inkExecutionHistoryMutable(spawn, completed)).toBe(false);
+  for (const status of ['failed', 'cancelled', 'outcome_unknown'] as const)
+    expect(inkExecutionHistoryMutable({ ...spawn, status }, snapshot([spawn]))).toBe(false);
+  expect(inkExecutionHistoryMutable({ ...spawn, definitionVersion: '2' }, snapshot([spawn]))).toBe(
+    false,
+  );
 });
 test('only actual same-scope failed pre-dispatch approval denial receives the user rejection message', () => {
   const denied = execution('denied', {
@@ -1107,6 +1179,17 @@ test('file changed display requires a successful scoped builtin receipt and both
     },
   });
   expect(projectInkTool(source, snapshot([source])).fileNotice).toBe('Workspace file changed.');
+  const currentWrite = { ...source, definitionVersion: '3' };
+  expect(projectInkTool(currentWrite, snapshot([currentWrite]))).toMatchObject({
+    fileNotice: 'Workspace file changed.',
+    fileAction: 'Create',
+    summary: 'original text',
+  });
+  for (const unsupported of [
+    { ...source, definitionVersion: '4' },
+    { ...source, definitionId: 'builtin.files/files.edit', definitionVersion: '3' },
+  ])
+    expect(projectInkTool(unsupported, snapshot([unsupported])).fileNotice).toBeUndefined();
   expect(
     projectInkTool(source, {
       ...snapshot([source]),

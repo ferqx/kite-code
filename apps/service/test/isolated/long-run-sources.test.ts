@@ -254,7 +254,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
       expect(execution.sessionId).toBe('s');
       expect(execution.runId).toBe(runId);
       expect(execution.definitionId).toBe('files.read');
-      expect(execution.definitionVersion).toBe('4');
+      expect(execution.definitionVersion).toBe('5');
       const result = execution.result as { outcome: string; content: string };
       expect(result.outcome).toBe('succeeded');
       const saved = JSON.parse(result.content) as {

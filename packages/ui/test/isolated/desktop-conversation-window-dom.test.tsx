@@ -43,10 +43,19 @@ async function fixture(count = 220) {
     if (id !== undefined && tasks.delete(id)) return;
     originalCancel(id);
   };
+  const resizeObservers = new Set<ResizeObserverStub>();
   class ResizeObserverStub {
-    observe() {}
+    readonly callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe() {
+      resizeObservers.add(this);
+    }
     unobserve() {}
-    disconnect() {}
+    disconnect() {
+      resizeObservers.delete(this);
+    }
   }
   Object.assign(dom.window, {
     requestAnimationFrame: requestFrame,
@@ -162,6 +171,10 @@ async function fixture(count = 220) {
     viewport,
     frames,
     tasks,
+    resize() {
+      for (const observer of resizeObservers)
+        observer.callback([], observer as unknown as ResizeObserver);
+    },
     get saved() {
       return saved;
     },
@@ -285,6 +298,7 @@ test('tail updates follow only the latest reading, retain loaded prefix and rest
     await f.render();
     const first = f.row('u-180');
     await f.render({ messages: messages(221) });
+    f.resize();
     expect(f.rows()).toHaveLength(41);
     expect(f.row('u-180') === first).toBe(true);
     expect(f.viewport().scrollHeight - f.viewport().clientHeight - f.viewport().scrollTop).toBe(0);

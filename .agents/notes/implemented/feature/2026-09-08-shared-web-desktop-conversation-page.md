@@ -17,7 +17,7 @@ Browser 保持既有只读 principal，桌面保留当前任务与原生操作�
 - 建立平台插件框架或第二套页面状态仓库：目前两个明确消费者用展示数据与回调即可表达。
 
 ## Consequences
-共享界面变更需要同时验证两端，Web preflight 与原生浏览器默认样式的差异必须在共享 CSS 中处理。共享展示类型不会扩大 Public API 返回字段；原有数据语义差异仍由各自投影 owner 记录和修复。当前职责与验证入口见[共享包](../../../../packages/kite-client-ui/README.md)，产品能力见各端手册。
+共享界面变更需要同时验证两端，Web preflight 与原生浏览器默认样式的差异必须在共享 CSS 中处理。共享展示类型不会扩大 Public API 返回字段；原有数据语义差异仍由各自投影 owner 记录和修复。当前职责与验证入口见[共享包](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/README.md)，产品能力见各端手册。
 
 ## Rollback
 若共享页面引入回归，按受影响变更回退共同组件并复验两个入口；不通过复制一份端侧主页面形成长期分叉。协议、凭据与持久数据格式未因本决策改变。

@@ -1,8 +1,8 @@
 /**
  * PTY System Test — Error Recovery
  *
- * Verifies that the TUI exhausts the bounded retry budget for transient
- * model errors (HTTP 500) and remains functional afterwards. After an error,
+ * Verifies that the TUI retries transient
+ * model errors (HTTP 500), completes the original Run, and remains functional afterwards. After an error,
  * the TUI should:
  * 1. Stay alive with prompt visible
  * 2. Accept and process a new message normally
@@ -21,7 +21,11 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -42,7 +46,8 @@ describe('TUI PTY System — Error Recovery', () => {
       { error: 'Internal server error', delay: 50 },
       { error: 'Internal server error', delay: 50 },
       { error: 'Internal server error', delay: 50 },
-      { message: { content: 'Recovered after bounded model error.' }, delay: 50 },
+      { message: { content: 'Recovered after transient model error.' }, delay: 50 },
+      { message: { content: 'Accepted the next task after recovery.' }, delay: 50 },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -59,7 +64,7 @@ describe('TUI PTY System — Error Recovery', () => {
   // ── Model Error Does Not Crash TUI ────────────────────────
 
   step(
-    'bounded HTTP 500 retries exhaust without crashing TUI',
+    'transient HTTP 500 retries reach success without crashing TUI',
     async () => {
       await submitUserMessage(tui, server, 'Trigger error', { timeout: 15000 });
 
@@ -92,7 +97,35 @@ describe('TUI PTY System — Error Recovery', () => {
       expect(screenContains(output, 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable')).toBe(
         true,
       );
-      expect(server.getWorkRequestCount()).toBe(5);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Recovered after transient model error.',
+        15000,
+      );
+      expect(server.getWorkRequestCount()).toBe(6);
+      await waitForCondition(
+        () => {
+          const observed = observePersistedTurnEvents(workspace, 'Trigger error');
+          return (
+            observed.status === 'ready' &&
+            observed.value?.events.some(
+              (event) => event.type === 'run.finished' && event.status === 'completed',
+            ) === true
+          );
+        },
+        'the original Run to finish after its successful sixth Model attempt',
+        5000,
+      );
+      const original = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, 'Trigger error'),
+      )!;
+      const attempts = original.events.filter(
+        (event) => event.type === 'execution.finished' && event.kind === 'model',
+      );
+      expect(attempts).toHaveLength(6);
+      expect(attempts.filter((event) => event.status === 'failed')).toHaveLength(5);
+      expect(attempts.filter((event) => event.status === 'succeeded')).toHaveLength(1);
+      expect(new Set(attempts.map((event) => event.turnId))).toEqual(new Set([original.turnId]));
     },
     TIMEOUT,
   );
@@ -107,14 +140,15 @@ describe('TUI PTY System — Error Recovery', () => {
       // Wait for the next user turn's successful model response.
       await waitForText(
         () => tui.outputSinceLastAction(),
-        'Recovered after bounded model error.',
+        'Accepted the next task after recovery.',
         15000,
       );
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       expect(screenContains(output, 'Hello after error')).toBe(true);
-      expect(screenContains(output, 'Recovered after bounded model error.')).toBe(true);
+      expect(screenContains(output, 'Accepted the next task after recovery.')).toBe(true);
+      expect(server.getWorkRequestCount()).toBe(7);
       // Prompt should still be visible
       expect(screenContains(output, '❯')).toBe(true);
     },

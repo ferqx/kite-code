@@ -210,13 +210,13 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(button('设置')).toBeDefined();
     expect(button('重新读取目录')).toBeDefined();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).not.toBeNull();
-    expect(f.host.textContent).toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    expect(f.host.textContent).toContain('请选择模型。');
     expect(button('发送首条消息')?.disabled).toBe(true);
     expect(f.calls).toEqual(ordinaryCalls);
     await f.render(false, true);
     expect(f.host.querySelector('.connection')).toBeNull();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
-    expect(f.host.textContent).not.toContain('没有已启用且配置可用的默认模型，请选择模型。');
+    expect(f.host.textContent).not.toContain('请选择模型。');
     expect(f.calls).toEqual(ordinaryCalls);
     expect(
       f.calls.every((request) =>

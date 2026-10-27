@@ -7,6 +7,29 @@
       "authorities": ["apps/service/README.md", "docs/active/unified-agent-boundary.md"]
     },
     {
+      "id": "unified-desktop",
+      "sources": [
+        "apps/desktop/src/**",
+        "apps/desktop/electron/**",
+        "apps/desktop/scripts/**",
+        "apps/desktop/package.json"
+      ],
+      "authorities": [
+        "apps/desktop/README.md",
+        "apps/desktop/docs/native-release.md",
+        "docs/active/unified-agent-boundary.md"
+      ]
+    },
+    {
+      "id": "unified-cli",
+      "sources": ["apps/cli/src/**", "apps/cli/host/**", "apps/cli/package.json"],
+      "authorities": [
+        "apps/cli/README.md",
+        "apps/cli/docs/terminal-release.md",
+        "docs/active/unified-agent-boundary.md"
+      ]
+    },
+    {
       "id": "unified-client",
       "sources": ["packages/client/src/**", "packages/client/package.json"],
       "authorities": ["packages/client/README.md", "docs/active/unified-agent-boundary.md"]
@@ -65,370 +88,8 @@
       "authorities": [
         "tests/README.md",
         "docs/active/execution-platform-support.md",
-        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/unified-agent-boundary.md",
         "docs/development/local-development.md"
-      ]
-    },
-    {
-      "id": "agent-api-contract",
-      "sources": [
-        "packages/agent-api-contract/src/**",
-        "packages/agent-api-contract/package.json",
-        "packages/agent-api-contract/scripts/**",
-        "packages/agent-api-contract/generated/**",
-        "scripts/check-agent-api-packages.ts"
-      ],
-      "authorities": [
-        "packages/agent-api-contract/docs/public-wire.md",
-        "docs/active/agent-api-contract.md"
-      ]
-    },
-    {
-      "id": "agent-api-client",
-      "sources": ["packages/agent-api-client/src/**", "packages/agent-api-client/package.json"],
-      "authorities": [
-        "packages/agent-api-client/docs/browser-requests.md",
-        "docs/active/agent-api-contract.md"
-      ]
-    },
-    {
-      "id": "runtime-contract",
-      "sources": ["packages/runtime-contract/src/**", "packages/runtime-contract/package.json"],
-      "authorities": [
-        "packages/runtime-contract/docs/access-and-projections.md",
-        "docs/active/six-concept-runtime-architecture.md"
-      ]
-    },
-    {
-      "id": "runtime-protocol",
-      "sources": ["packages/runtime-protocol/src/**", "packages/runtime-protocol/package.json"],
-      "authorities": [
-        "packages/runtime-protocol/docs/wire-format.md",
-        "docs/active/six-concept-runtime-architecture.md"
-      ]
-    },
-    {
-      "id": "runtime-server",
-      "sources": ["packages/runtime-server/src/**", "packages/runtime-server/package.json"],
-      "authorities": [
-        "packages/runtime-server/docs/admission-and-subscriptions.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-authority-boundary.md"
-      ]
-    },
-    {
-      "id": "runtime-client",
-      "sources": ["packages/runtime-client/src/**", "packages/runtime-client/package.json"],
-      "authorities": [
-        "packages/runtime-client/docs/requests-and-history.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-resilience-qualification.md"
-      ]
-    },
-    {
-      "id": "kite-app-contract",
-      "sources": ["packages/kite-app-contract/src/**", "packages/kite-app-contract/package.json"],
-      "authorities": [
-        "packages/kite-app-contract/docs/control-surface.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/coordinator-workspace-worker-web.md"
-      ]
-    },
-    {
-      "id": "kite-client-ui",
-      "sources": ["packages/kite-client-ui/src/**", "packages/kite-client-ui/package.json"],
-      "authorities": [
-        "packages/kite-client-ui/README.md",
-        "apps/kite-desktop/docs/conversation-ui.md",
-        "apps/kite-web/docs/session-presentation.md",
-        "docs/handbook/clients/web/interface.md"
-      ]
-    },
-    {
-      "id": "kite-web",
-      "sources": ["apps/kite-web/src/**", "apps/kite-web/package.json"],
-      "authorities": [
-        "apps/kite-web/docs/routing-and-lifecycle.md",
-        "apps/kite-web/docs/data-and-updates.md",
-        "docs/handbook/clients/web/interface.md"
-      ],
-      "excludeSources": [
-        "apps/kite-web/src/main.tsx",
-        "apps/kite-web/src/routing.tsx",
-        "apps/kite-web/src/components/session/model-context-inspector.tsx",
-        "apps/kite-web/src/components/session/session-log-list.tsx",
-        "apps/kite-web/package.json",
-        "apps/kite-web/src/styles/**",
-        "apps/kite-web/src/components/ui/**",
-        "apps/kite-web/src/lib/**",
-        "apps/kite-web/src/transport/**",
-        "apps/kite-web/src/api-docs/**",
-        "apps/kite-web/src/presentation/**"
-      ]
-    },
-    {
-      "id": "kite-local-runtime-client",
-      "sources": ["packages/kite-local-runtime/src/**", "packages/kite-local-runtime/package.json"],
-      "excludeSources": [
-        "packages/kite-local-runtime/src/config/**",
-        "packages/kite-local-runtime/src/service/**"
-      ],
-      "authorities": [
-        "packages/kite-local-runtime/docs/native-client-and-control.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/coordinator-workspace-worker-web.md",
-        "docs/active/app-server-local-runtime.md"
-      ]
-    },
-    {
-      "id": "kite-local-runtime-config",
-      "sources": ["packages/kite-local-runtime/src/config/**"],
-      "authorities": [
-        "packages/kite-local-runtime/README.md",
-        "apps/kite-cli/README.md",
-        "apps/kite-service/README.md",
-        "docs/active/app-server-local-runtime.md"
-      ]
-    },
-    {
-      "id": "kite-local-runtime-service-state",
-      "sources": ["packages/kite-local-runtime/src/service/**"],
-      "authorities": [
-        "packages/kite-local-runtime/README.md",
-        "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/app-server-local-runtime.md"
-      ]
-    },
-    {
-      "id": "kite-service-agent-api",
-      "sources": ["apps/kite-service/src/agent-api/**"],
-      "authorities": [
-        "apps/kite-service/README.md",
-        "apps/kite-service/docs/agent-api.md",
-        "docs/active/agent-api-contract.md",
-        "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/workspace-trust.md",
-        "docs/active/coordinator-workspace-worker-web.md",
-        "docs/handbook/clients/web/reference/capabilities-and-limits.md",
-        "docs/handbook/clients/web/guides/model-context.md"
-      ]
-    },
-    {
-      "id": "kite-service-application",
-      "sources": [
-        "apps/kite-service/package.json",
-        "apps/kite-service/src/app-server.ts",
-        "apps/kite-service/src/app-server-daemon.ts",
-        "apps/kite-service/src/index.ts",
-        "apps/kite-service/src/executable.ts",
-        "apps/kite-service/src/composition.ts",
-        "apps/kite-service/src/native-endpoint.ts"
-      ],
-      "authorities": [
-        "apps/kite-service/docs/composition-and-execution.md",
-        "apps/kite-service/docs/service-state.md",
-        "apps/kite-service/docs/service-resilience.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/app-server-local-runtime.md",
-        "docs/handbook/server/lifecycle.md"
-      ]
-    },
-    {
-      "id": "kite-service-runtime-owner",
-      "sources": [
-        "apps/kite-service/src/bootstrap.ts",
-        "apps/kite-service/src/bootstrap/**",
-        "apps/kite-service/src/app-control/**",
-        "apps/kite-service/src/config/**",
-        "apps/kite-service/src/coordinator/**",
-        "apps/kite-service/src/logs/**",
-        "apps/kite-service/src/observability/**",
-        "apps/kite-service/src/release/**",
-        "apps/kite-service/src/runtime/**",
-        "apps/kite-service/src/runtime-application/**",
-        "apps/kite-service/src/runtime-client/**",
-        "apps/kite-service/src/sandbox/**",
-        "apps/kite-service/src/session-logger/**",
-        "apps/kite-service/src/workspace/**",
-        "apps/kite-service/src/web-gateway/**",
-        "apps/kite-service/src/workspace-worker/**"
-      ],
-      "excludeSources": [
-        "apps/kite-service/src/runtime-client/**",
-        "apps/kite-service/src/sandbox/**",
-        "apps/kite-service/src/observability/**",
-        "apps/kite-service/src/session-logger/**",
-        "apps/kite-service/src/config/session-logging-policy.ts",
-        "apps/kite-service/src/config/mcp-config.ts",
-        "apps/kite-service/src/config/mcp-config-repository.ts",
-        "apps/kite-service/src/config/mcp-project-approvals.ts",
-        "apps/kite-service/src/config/mcp-server-config.ts"
-      ],
-      "authorities": [
-        "apps/kite-service/README.md",
-        "apps/kite-service/docs/runtime-application.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/workspace-trust.md",
-        "docs/active/mcp-control-plane.md",
-        "docs/active/sqlite-runtime-log-query.md",
-        "docs/active/coordinator-workspace-worker-web.md",
-        "docs/active/app-server-local-runtime.md",
-        "docs/active/private-artifact-storage.md"
-      ]
-    },
-    {
-      "id": "kite-service-carrier",
-      "sources": ["apps/kite-service/src/carrier/**"],
-      "authorities": [
-        "apps/kite-service/README.md",
-        "apps/kite-service/docs/runtime-server-carrier.md",
-        "apps/kite-service/docs/service-auth.md",
-        "docs/active/six-concept-runtime-architecture.md",
-        "docs/active/runtime-authority-boundary.md",
-        "docs/active/runtime-resilience-qualification.md",
-        "docs/active/workspace-trust.md",
-        "docs/active/sqlite-runtime-log-query.md",
-        "docs/active/app-server-local-runtime.md"
-      ]
-    },
-    {
-      "id": "agent-kernel",
-      "sources": ["packages/agent-kernel/src/**", "packages/agent-kernel/package.json"],
-      "excludeSources": [
-        "packages/agent-kernel/src/core/authorization/**",
-        "packages/agent-kernel/src/tool-governance.ts"
-      ],
-      "authorities": [
-        "packages/agent-kernel/docs/state-transitions.md",
-        "docs/active/six-concept-runtime-architecture.md"
-      ]
-    },
-    {
-      "id": "agent-kernel-authorization",
-      "sources": [
-        "packages/agent-kernel/src/core/authorization/**",
-        "packages/agent-kernel/src/tool-governance.ts"
-      ],
-      "authorities": [
-        "packages/agent-kernel/docs/scheduling-authorization.md",
-        "docs/active/authorization.md",
-        "docs/handbook/features/tools-and-approvals.md"
-      ]
-    },
-    {
-      "id": "runtime-spi",
-      "sources": ["packages/runtime-spi/src/**", "packages/runtime-spi/package.json"],
-      "authorities": [
-        "packages/runtime-spi/docs/modules-and-ports.md",
-        "docs/active/six-concept-runtime-architecture.md"
-      ]
-    },
-    {
-      "id": "runtime-host",
-      "sources": ["packages/runtime-host/src/**", "packages/runtime-host/package.json"],
-      "excludeSources": [
-        "packages/runtime-host/src/process/**",
-        "packages/runtime-host/src/host/command-receipt.ts",
-        "packages/runtime-host/src/host/runtime-host.ts",
-        "packages/runtime-host/src/storage/index.ts",
-        "packages/runtime-host/src/host/notification-projector.ts",
-        "packages/runtime-host/src/session-mailbox.ts",
-        "packages/runtime-host/src/execution/**",
-        "packages/runtime-host/src/lifecycle/**"
-      ],
-      "authorities": [
-        "packages/runtime-host/docs/commands-mailbox.md",
-        "packages/runtime-host/docs/execution-lifecycle.md"
-      ]
-    },
-    {
-      "id": "runtime-host-command-receipts",
-      "sources": [
-        "packages/runtime-host/src/host/command-receipt.ts",
-        "packages/runtime-host/src/host/runtime-host.ts",
-        "packages/runtime-host/src/storage/index.ts"
-      ],
-      "authorities": [
-        "packages/runtime-host/docs/commands-mailbox.md",
-        "packages/runtime-storage-sqlite/docs/transactions-and-state.md"
-      ]
-    },
-    {
-      "id": "runtime-storage-sqlite",
-      "sources": [
-        "packages/runtime-storage-sqlite/src/**",
-        "packages/runtime-storage-sqlite/package.json"
-      ],
-      "authorities": [
-        "packages/runtime-storage-sqlite/docs/transactions-and-state.md",
-        "packages/runtime-storage-sqlite/README.md"
-      ],
-      "excludeSources": [
-        "packages/runtime-storage-sqlite/src/directory-outbox.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-directory.ts",
-        "packages/runtime-storage-sqlite/src/log-query.ts",
-        "packages/runtime-storage-sqlite/src/workspace-checkpoint-query.ts",
-        "packages/runtime-storage-sqlite/src/artifact-store.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-artifacts.ts",
-        "packages/runtime-storage-sqlite/src/authority-ledger.ts",
-        "packages/runtime-storage-sqlite/src/authority.ts",
-        "packages/runtime-storage-sqlite/src/effect-leases.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-authority.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-recovery-identities.ts",
-        "packages/runtime-storage-sqlite/src/kite-session-effects.ts",
-        "packages/runtime-storage-sqlite/src/kite-session-execution-authority.ts",
-        "packages/runtime-storage-sqlite/src/compatibility.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-runtime-file.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-runtime-journal.ts",
-        "packages/runtime-storage-sqlite/src/kite-session-runtime-file.ts",
-        "packages/runtime-storage-sqlite/src/layout.ts",
-        "packages/runtime-storage-sqlite/src/migration.ts",
-        "packages/runtime-storage-sqlite/src/preflight.ts",
-        "packages/runtime-storage-sqlite/src/run-migration.ts"
-      ]
-    },
-    {
-      "id": "builtin-runtime",
-      "sources": ["packages/builtin-runtime/src/**", "packages/builtin-runtime/package.json"],
-      "excludeSources": [
-        "packages/builtin-runtime/src/model/**",
-        "packages/builtin-runtime/src/model-context.ts",
-        "packages/builtin-runtime/src/mcp/**",
-        "packages/builtin-runtime/src/sandbox/**"
-      ],
-      "authorities": [
-        "packages/builtin-runtime/docs/tool-pipeline.md",
-        "docs/active/tool-gated-autonomy.md",
-        "docs/active/private-artifact-storage.md"
-      ]
-    },
-    {
-      "id": "builtin-model",
-      "sources": [
-        "packages/builtin-runtime/src/model/**",
-        "packages/builtin-runtime/src/model-context.ts"
-      ],
-      "authorities": [
-        "packages/builtin-runtime/docs/model-and-context.md",
-        "docs/active/model-provider-boundary.md",
-        "docs/active/private-artifact-storage.md",
-        "docs/handbook/features/models-and-configuration.md"
-      ]
-    },
-    {
-      "id": "builtin-mcp",
-      "sources": ["packages/builtin-runtime/src/mcp/**"],
-      "authorities": [
-        "packages/builtin-runtime/docs/extensions-and-verification.md",
-        "docs/active/mcp-runtime-governance.md",
-        "docs/handbook/features/extensions.md"
       ]
     },
     {
@@ -474,13 +135,8 @@
     },
     {
       "id": "kite-runtime-history",
-      "sources": [
-        "apps/kite-service/src/runtime-client/**",
-        "apps/kite-cli/src/runtime-client/tui-history-facade.ts"
-      ],
+      "sources": ["apps/kite-cli/src/runtime-client/tui-history-facade.ts"],
       "authorities": [
-        "apps/kite-service/README.md",
-        "apps/kite-service/docs/runtime-application.md",
         "apps/kite-cli/docs/input-and-commands.md",
         "docs/active/sqlite-runtime-log-query.md",
         "docs/active/runtime-authority-boundary.md",
@@ -592,16 +248,8 @@
     },
     {
       "id": "runtime-workspace-boundaries",
-      "sources": [
-        "bun.lock",
-        "tsconfig.json",
-        "scripts/check-core-boundary.ts",
-        "scripts/check-pre-release-architecture.ts",
-        "scripts/check-runtime-packages.ts",
-        "scripts/runtime-packages/**",
-        "scripts/run-runtime-workspace-script.ts"
-      ],
-      "authorities": ["docs/active/six-concept-runtime-architecture.md", "tests/README.md"]
+      "sources": ["bun.lock", "tsconfig.json", "scripts/run-runtime-workspace-script.ts"],
+      "authorities": ["docs/active/unified-agent-boundary.md", "tests/README.md"]
     },
     {
       "id": "test-system",
@@ -614,7 +262,6 @@
         "lefthook.yml",
         ".github/workflows/required.yml",
         "tests/integration/scripts/check-test-ownership.test.ts",
-        "tests/integration/scripts/ci-bun-baseline.test.ts",
         "tests/integration/scripts/test-discovery.test.ts",
         "tests/isolated/scripts/test-suite-runner.test.ts"
       ],
@@ -638,19 +285,9 @@
       "id": "runtime-transport-qualification",
       "sources": [
         ".github/workflows/runtime-stdio-smoke.yml",
-        ".github/workflows/runtime-transport-qualification.yml",
-        "packages/kite-local-runtime/test/bun-stdio-child-transport.test.ts",
-        "packages/kite-local-runtime/test/bun-websocket-transport.test.ts",
-        "apps/kite-service/test/isolated/development-loopback-carrier.test.ts",
-        "apps/kite-service/test/isolated/development-runtime-reference.test.ts",
-        "apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts",
-        "apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts",
-        "apps/kite-service/test/isolated/exclusive/runtime-stdio-child.test.ts",
-        "apps/kite-service/test/isolated/exclusive/runtime-transport-conformance.test.ts"
+        ".github/workflows/runtime-transport-qualification.yml"
       ],
       "authorities": [
-        "apps/kite-service/docs/runtime-server-carrier.md",
-        "packages/kite-local-runtime/README.md",
         "docs/active/runtime-resilience-qualification.md",
         "docs/active/execution-platform-support.md",
         "tests/README.md"
@@ -666,15 +303,7 @@
         ".agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md",
         ".github/workflows/release-candidate.yml"
       ],
-      "excludeSources": [
-        "scripts/release/build-windows-runner.ts",
-        "scripts/release/execution-boundary-smoke.ts",
-        "scripts/release/platform-capability-probe.ts",
-        "scripts/release/platform-smoke.ts",
-        "scripts/release/session-log-acl-smoke.ts",
-        "scripts/release/verify-platform-capability-evidence.ts",
-        "scripts/release/windows-runner-evidence.ts"
-      ],
+      "excludeSources": ["scripts/release/build-windows-runner.ts"],
       "authorities": [
         "docs/active/release-control.md",
         "docs/active/open-source-first-release.md",
@@ -684,15 +313,10 @@
     {
       "id": "platform-qualification",
       "sources": [
-        "scripts/release/build-windows-runner.ts",
-        "scripts/release/execution-boundary-smoke.ts",
-        "scripts/release/platform-capability-probe.ts",
-        "scripts/release/platform-smoke.ts",
-        "scripts/release/verify-platform-capability-evidence.ts",
-        "scripts/release/windows-runner-evidence.ts",
-        "tests/qualification/sandbox/**",
         ".github/workflows/platform-capability-probe.yml",
-        ".github/workflows/execution-boundary-conformance.yml"
+        ".github/workflows/execution-boundary-conformance.yml",
+        "native/windows-sandbox-runner/**",
+        "scripts/release/build-windows-runner.ts"
       ],
       "authorities": [
         "docs/active/execution-platform-support.md",
@@ -703,10 +327,6 @@
     {
       "id": "mcp-control-plane",
       "sources": [
-        "apps/kite-service/src/config/mcp-config.ts",
-        "apps/kite-service/src/config/mcp-config-repository.ts",
-        "apps/kite-service/src/config/mcp-project-approvals.ts",
-        "apps/kite-service/src/config/mcp-server-config.ts",
         ".github/workflows/mcp-native-keyring-smoke.yml",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
@@ -718,92 +338,12 @@
       ]
     },
     {
-      "id": "execution-governance",
-      "sources": [
-        "packages/builtin-runtime/src/sandbox/**",
-        "packages/runtime-host/src/process/**",
-        "apps/kite-service/src/sandbox/**"
-      ],
-      "authorities": [
-        "docs/active/execution-boundary.md",
-        "docs/active/runtime-authority-boundary.md",
-        "docs/active/windows-shell-sandbox.md",
-        "docs/active/private-artifact-storage.md"
-      ]
-    },
-    {
       "id": "observability-and-session-logging",
-      "sources": [
-        "apps/kite-service/src/observability/**",
-        "apps/kite-service/src/session-logger/**",
-        "apps/kite-service/src/config/session-logging-policy.ts",
-        "scripts/release/session-log-acl-smoke.ts",
-        ".github/workflows/session-log-acl-smoke.yml"
-      ],
+      "sources": [".github/workflows/session-log-acl-smoke.yml", "scripts/operations/**"],
       "authorities": [
         "docs/active/observability-privacy-operations.md",
         "docs/active/session-logging-policy.md"
       ]
-    },
-    {
-      "id": "web-visual",
-      "sources": [
-        "apps/kite-web/src/styles/**",
-        "apps/kite-web/src/components/ui/**",
-        "apps/kite-web/src/lib/**"
-      ],
-      "authorities": [
-        "apps/kite-web/docs/ui-design-system.md",
-        "docs/handbook/clients/web/interface.md"
-      ]
-    },
-    {
-      "id": "web-routing",
-      "sources": ["apps/kite-web/src/main.tsx", "apps/kite-web/src/routing.tsx"],
-      "authorities": [
-        "apps/kite-web/docs/routing-and-lifecycle.md",
-        "docs/handbook/clients/web/guides/workspaces-and-sessions.md"
-      ]
-    },
-    {
-      "id": "web-data",
-      "sources": ["apps/kite-web/src/transport/**"],
-      "authorities": [
-        "apps/kite-web/docs/data-and-updates.md",
-        "docs/handbook/clients/web/guides/updates-and-connection.md",
-        "docs/active/agent-api-contract.md"
-      ]
-    },
-    {
-      "id": "web-diagnostics",
-      "sources": [
-        "apps/kite-web/src/components/session/model-context-inspector.tsx",
-        "apps/kite-web/src/components/session/session-log-list.tsx",
-        "apps/kite-web/src/api-docs/**"
-      ],
-      "authorities": [
-        "apps/kite-web/docs/diagnostics.md",
-        "docs/handbook/clients/web/guides/logs.md",
-        "docs/handbook/clients/web/guides/model-context.md",
-        "docs/handbook/clients/web/guides/api-docs.md"
-      ]
-    },
-    {
-      "id": "web-history",
-      "sources": ["apps/kite-web/src/presentation/**"],
-      "authorities": [
-        "apps/kite-web/docs/session-presentation.md",
-        "docs/handbook/clients/web/guides/conversation.md"
-      ]
-    },
-    {
-      "id": "web-build",
-      "sources": [
-        "apps/kite-web/index.html",
-        "apps/kite-web/package.json",
-        "apps/kite-web/vite.config.ts"
-      ],
-      "authorities": ["apps/kite-web/docs/testing.md", "docs/development/local-development.md"]
     },
     {
       "id": "tui-input",
@@ -897,95 +437,6 @@
         "apps/kite-cli/docs/streaming-presentation.md",
         "docs/handbook/clients/tui/guides/conversation.md"
       ]
-    },
-    {
-      "id": "host-execution",
-      "sources": [
-        "packages/runtime-host/src/execution/**",
-        "packages/runtime-host/src/lifecycle/**"
-      ],
-      "authorities": [
-        "packages/runtime-host/docs/execution-lifecycle.md",
-        "docs/active/cancel-resume-cleanup.md"
-      ]
-    },
-    {
-      "id": "host-mailbox",
-      "sources": [
-        "packages/runtime-host/src/host/notification-projector.ts",
-        "packages/runtime-host/src/session-mailbox.ts"
-      ],
-      "authorities": ["packages/runtime-host/docs/commands-mailbox.md"]
-    },
-    {
-      "id": "storage-queries",
-      "sources": [
-        "packages/runtime-storage-sqlite/src/directory-outbox.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-directory.ts",
-        "packages/runtime-storage-sqlite/src/log-query.ts",
-        "packages/runtime-storage-sqlite/src/workspace-checkpoint-query.ts"
-      ],
-      "authorities": [
-        "packages/runtime-storage-sqlite/docs/queries-and-artifacts.md",
-        "docs/active/sqlite-runtime-log-query.md"
-      ]
-    },
-    {
-      "id": "storage-artifacts",
-      "sources": [
-        "packages/runtime-storage-sqlite/src/artifact-store.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-artifacts.ts"
-      ],
-      "authorities": [
-        "packages/runtime-storage-sqlite/docs/queries-and-artifacts.md",
-        "docs/active/private-artifact-storage.md"
-      ]
-    },
-    {
-      "id": "storage-authority",
-      "sources": [
-        "packages/runtime-storage-sqlite/src/authority-ledger.ts",
-        "packages/runtime-storage-sqlite/src/authority.ts",
-        "packages/runtime-storage-sqlite/src/effect-leases.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-authority.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-recovery-identities.ts",
-        "packages/runtime-storage-sqlite/src/kite-session-effects.ts",
-        "packages/runtime-storage-sqlite/src/kite-session-execution-authority.ts"
-      ],
-      "authorities": [
-        "packages/runtime-storage-sqlite/docs/authority-and-recovery.md",
-        "docs/active/app-server-local-runtime.md"
-      ]
-    },
-    {
-      "id": "storage-format",
-      "sources": [
-        "packages/runtime-storage-sqlite/src/compatibility.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-runtime-file.ts",
-        "packages/runtime-storage-sqlite/src/kite-home-runtime-journal.ts",
-        "packages/runtime-storage-sqlite/src/kite-session-runtime-file.ts",
-        "packages/runtime-storage-sqlite/src/layout.ts",
-        "packages/runtime-storage-sqlite/src/migration.ts",
-        "packages/runtime-storage-sqlite/src/preflight.ts",
-        "packages/runtime-storage-sqlite/src/run-migration.ts"
-      ],
-      "authorities": [
-        "packages/runtime-storage-sqlite/docs/authority-and-recovery.md",
-        "docs/handbook/features/recovery.md"
-      ]
-    },
-    {
-      "id": "desktop-client",
-      "sources": [
-        "apps/kite-desktop/src/**",
-        "apps/kite-desktop/electron/**",
-        "apps/kite-desktop/scripts/**",
-        "apps/kite-desktop/package.json",
-        "apps/kite-desktop/vite.config.ts",
-        "apps/kite-desktop/tsconfig.json",
-        "apps/kite-desktop/index.html"
-      ],
-      "authorities": ["apps/kite-desktop/README.md", "docs/active/app-server-local-runtime.md"]
     }
   ]
 }

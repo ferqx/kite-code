@@ -93,8 +93,24 @@ test('tab scope reconciliation does not repeat the retained page render or repla
       ),
     );
   let unmounted = false;
+  const openBrowser = () =>
+    act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click();
+    });
   try {
     await show('a');
+    expect(browsers.size).toBe(0);
+    await openBrowser();
+    await act(async () => {
+      const escapeKey = new dom.window.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      escapeKey.preventDefault();
+      dom.window.dispatchEvent(escapeKey);
+    });
+    expect(host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded')).toBe('true');
     const header = host.querySelector('.session-header');
     const sidebar = host.querySelector('.sidebar');
     const originalBrowser = [...browsers][0]!;
@@ -104,6 +120,7 @@ test('tab scope reconciliation does not repeat the retained page render or repla
     expect(host.querySelector('.session-header')).toBe(header);
     expect(host.querySelector('.sidebar')).toBe(sidebar);
     expect(closed).toEqual([originalBrowser]);
+    await openBrowser();
     expect(browsers.size).toBe(2);
     const secondBrowser = [...browsers][1]!;
     directoryEvaluations = 0;
@@ -112,11 +129,65 @@ test('tab scope reconciliation does not repeat the retained page render or repla
     expect(host.querySelector('.session-header')).toBe(header);
     expect(host.querySelector('.sidebar')).toBe(sidebar);
     expect(closed).toEqual([originalBrowser, secondBrowser]);
+    await openBrowser();
     expect(browsers.size).toBe(3);
     await act(async () => root.unmount());
     unmounted = true;
     expect(closed).toEqual([...browsers]);
   } finally {
     if (!unmounted) await act(async () => root.unmount());
+  }
+});
+
+test('a consumed child navigation never reopens on selection handoff, while a fresh request waits for the actual scope', async () => {
+  const root = createRoot(document.getElementById('root')!);
+  let closes = 0;
+  const show = (readingKey: string, requestId?: number, loading = false, details = false) =>
+    act(async () =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="Session"
+          readingKey={readingKey}
+          messages={[]}
+          connected
+          connectionLabel=""
+          loading={loading}
+          actions={{}}
+          renderBrowser={() => <div>Browser</div>}
+          renderChildSession={() => <div>Original child</div>}
+          childTabRequest={
+            requestId === undefined ? undefined : { requestId, sessionId: 'child', title: 'Child' }
+          }
+          detailPanel={
+            details
+              ? {
+                  label: 'Tasks',
+                  content: <div>Original task reader</div>,
+                  onClose: () => {
+                    closes++;
+                  },
+                }
+              : undefined
+          }
+        />,
+      ),
+    );
+  try {
+    await show('a', 1, false, true);
+    expect(closes).toBe(1);
+    await show('pending', undefined, true, true);
+    await show('b', undefined, false, true);
+    await show('a', 1, false, true);
+    expect(closes).toBe(1);
+    expect(document.querySelector('[aria-label="Tasks"]')).not.toBeNull();
+    await show('a', 2, true, true);
+    expect(closes).toBe(1);
+    await show('a', 2, false, true);
+    expect(closes).toBe(2);
+    await show('b', 1, false, true);
+    expect(closes).toBe(2);
+  } finally {
+    await act(async () => root.unmount());
   }
 });

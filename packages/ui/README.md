@@ -46,7 +46,7 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 消息过滤使用宿主确认的 `Message.hasAttachments` 保留已保存的仅附件用户消息；标记只影响展示，不授予读取权限。Desktop 的持久消息及发送占位均从附件元数据提供此标记。发送接管、失败、重开与真实浏览器布局证据归 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
 
-[Conversation](src/desktop/Conversation.tsx)按浏览器实际夹紧后的 `scrollTop` 记录自己的滚动写入；来自该位置的迟到 scroll 事件不改变跟随状态，用户改变位置时只有实际到底（容许1px的分数滚动精度差）才恢复跟随，取消原48px近底吸附区，避免状态提交或流式追加把手动阅读拉到底部，恢复与“回到最新消息”共用同一写入。避免新一段内容增长先于旧 scroll 通知抵达时误判为用户上翻；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)覆盖这一顺序、手动阅读、恢复及重复卸载的观察器／监听清理。Native 图片挂载与资源生命周期见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
+[Conversation](src/desktop/Conversation.tsx)按浏览器实际夹紧后的 `scrollTop` 记录自己的滚动写入；来自该位置的迟到 scroll 事件不改变跟随状态，用户改变位置时只有实际到底（容许1px的分数滚动精度差）才恢复跟随，取消原48px近底吸附区，避免状态提交或流式追加把手动阅读拉到底部，恢复与“回到最新消息”共用同一写入。首次／缓存恢复及历史窗口补入仍同步定位；普通跟随由原ResizeObserver在viewport或正文几何改变后、绘制前更新，不在每次metadata提交重复读取scrollHeight触发布局，缺少ResizeObserver时保留同步回退。避免新一段内容增长先于旧 scroll 通知抵达时误判为用户上翻；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)覆盖这一顺序、手动阅读、恢复及重复卸载的观察器／监听清理。Native 图片挂载与资源生命周期见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
 
 2026-10-23，同一 Windows 工作树的近底吸附修复：上述滚动回归先复现距底47px时从1853跳到2000，修复后1项／742断言通过，覆盖47／16／2px手动位置、后续重绘与内容增长、0.5px精度差下的真实到底及原观察器清理；UI typecheck、Biome和文档检查通过。隔离实际组件页面用相同上翻／下滚操作复现旧版提前置底，新版停在距底约36px；运行中追加正文保留原scrollTop，手动到底后追加继续跟随，静态会话与显式置底同样核实，无页面错误。验证范围为当前桌面共享组件，未重验安装版 Electron。
 
@@ -78,11 +78,13 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 普通IPC历史读取会先撤销读取资格、完成后再交付同一消息的新正文。渐显只要求当前读取已准入，连续追加的依据是上一次已显示的同挂载正文，不要求上一次`readActive`也为true；否则实际跨任务读取会把所有追加动画关闭。首次历史、非追加纠正和Activity隐藏／重连仍清除连续性；当前不可读时不播放，不恢复任何读取或操作资格。
 
-宿主以`streaming:true`标记实际Agent流式预览，以`false`交接其完成预览；静态正文及显式完整读取不传此标记。[绘制层渐显](src/desktop/streaming-text-reveal.ts)为每个Markdown文字节点保留一个连续Text节点，使用`appendData`追加以保留旧选区，React保留固定种子内容、由layout effect同步本次完整正文。普通格式空白保持原文本，避免向table／list等结构容器插入非法span。新增完整字素通过CSS Custom Highlight的Range绘制颜色渐变，不建立逐字DOM、不改变字距／连字，也不建立React逐帧状态。每个文字节点只保有一个原生动画时钟；各字240ms、普通间隔18ms，跨行内Markdown节点保序，较大批次最多等待180ms、整批最多420ms。新的追加沿同一绝对时钟接续，旧字不重新变透明；Range按当前Text节点重核，完成、减少动态效果或卸载释放原highlight、动态样式和媒体监听。颜色从文字来源元素取得，避免`currentColor`沿highlight继承链读到透明值。缺少Highlight、注册属性或原生动画接口时直接显示正文。
+宿主以`streaming:true`标记实际Agent流式预览，以`false`交接其完成预览；静态正文及显式完整读取不传此标记。[绘制层渐显](src/desktop/streaming-text-reveal.ts)为每个Markdown文字节点保留一个连续Text节点，使用`appendData`追加以保留旧选区，React保留固定种子内容、由layout effect同步本次完整正文。普通格式空白保持原文本，避免向table／list等结构容器插入非法span。新增完整字素通过CSS Custom Highlight的`StaticRange`快照绘制颜色渐变，不建立逐字DOM、不改变字距／连字，也不建立React逐帧状态。每个文字节点只保有一个原生动画时钟；各字240ms、普通间隔18ms，跨行内Markdown节点保序，较大批次最多等待180ms、整批最多420ms。新的追加沿同一绝对时钟接续，旧字不重新变透明；每次追加按当前Text节点重建静态绘制范围，避免大量live Range随每次注册和边界设置反复更新；读者选区仍是原连续Text节点上的独立live Range。各字素的独立颜色规则和严格递增时序保持。每条规则用`:where(.原文字元素唯一class)::highlight(name)`限定实际文字来源，保持原伪元素规则的specificity，避免其他UI元素参与每个字素的样式重算；清理同时移除该绘制class。完成、减少动态效果或卸载释放原highlight、动态样式和媒体监听。同一Document的待绘制实例在一个microtask中先全部读取来源文字颜色，再统一发布Highlight、样式与动画时钟，避免逐节点读写交错触发反复样式计算；正文仍同步进入原Text节点。同一实例在发布前连续追加按最终源码顺序接续独立字素时序，发布时重新核连接、隐藏与减少动态效果；纠正、释放或新更新使旧待发布绘制失效。颜色从文字来源元素取得，避免`currentColor`沿highlight继承链读到透明值。缺少StaticRange、Highlight、注册属性或原生动画接口时直接显示正文。
 
 长文字仍只在原文与解码位置一一对应时，以2048个UTF-16单位为目标在完整字素边界分段；含实体或转义的位置转换保留原节点与准确源码范围。后补组合字符或emoji直接采用完整字素，不保留半字绘制范围。代码、公式及图表沿原组件更新；隐藏、暂停读取、首次历史、非追加纠正与Activity重连不重播旧字，末次流式追加仍可渐显。DOM缓存沿原文字／节点预算保留，不积累字素包装节点；绘制记录仅保留未完成的短时动画。原整文解析、当前读取准入和完整正文复制资格保持。取舍与被替代的逐字span方案见[绘制层决定](../../.agents/notes/implemented/bug-fix/2026-10-25-streaming-text-paint.md)。
 
 [流式回归](test/isolated/desktop-streaming-markdown.test.tsx)核实际React跳过渲染、旧DOM／选区保留、后补语法、末次追加、减少动态效果、缓存Activity重连和Unicode；[代码复制](test/isolated/desktop-code-block.test.tsx)、[正文复制](test/isolated/desktop-message-copy.test.tsx)与[阅读滚动](test/isolated/desktop-conversation-scroll.test.tsx)继续核原边界。生产Native组件的连续帧与交付范围归[Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。取舍见[增量渲染Note](../../.agents/notes/implemented/architecture/2026-10-24-desktop-incremental-markdown.md)。
+
+2026-10-27，macOS arm64／Bun1.4.2，本轮绘制回归13项／797断言、滚动1项／772断言及历史窗口7项／81断言通过；包括原300字素独立严格递增时序、完整正文和原选区、发布前失效、所有颜色先读后写、准确来源规则及释放。实际Native原16流／120切换的样式成本对照与内存边界归[Desktop owner](../../apps/desktop/README.md#本次全量失败修复)。缓存10项／572断言核原预算、暂停与释放；不从这些隔离结果推导真实外网模型或其他平台资格。
 
 | 内容 | 语法与行为 |
 | --- | --- |
@@ -144,7 +146,7 @@ Native 的 SessionPage 在有页面缓存时开启 `lazyHistory`，共享默认�
 
 [DeferredProcessContent](src/desktop/DeferredProcessContent.tsx)使默认折叠的turn过程和[ToolActivity](src/desktop/ToolActivity.tsx)聚合明细在首次展开时才调用内部投影工厂。冷关闭不创建Content，展开后继续使用原Radix退出动画及卸载；关闭动画期间采用当前事实，不冻结旧身份或factory。原来关闭的Radix内容本就不挂载reader，本次减少的是提前构造明细和空Content的工作；不改变读取、审批、复制与恢复资格。
 
-主消息区使用上述原生viewport，嵌套详情保留各自ScrollArea。CodeBlock的header／footer间距选择器限定在同一个块内，避免外层`group:has()`使追加消息反复失效整棵turn样式树；默认及small尺寸的间距和现有Shell／Markdown覆盖规则保持。成本登记以不可变token区分同resource的新旧登记，迟到注销不能删除新登记或owner释放责任；DOM缓存预算和完整成本测量准入不变。
+主消息区使用上述原生viewport，嵌套详情保留各自ScrollArea。CodeBlock的header／footer间距选择器限定在同一个块内，避免外层`group:has()`使追加消息反复失效整棵turn样式树；默认及small尺寸的间距和现有Shell／Markdown覆盖规则保持。成本登记以不可变token区分同resource的新旧登记，迟到注销不能删除新登记或owner释放责任；DOM缓存预算和完整成本测量准入不变。缓存entry变更回调在渲染闭包外构造，只捕获原retire函数、准确key和entry，避免仍在缓存的entry经共享闭包保留旧entries Map及已退役的空portal；保留原成本扫描、暂停、释放与所属scope核验。
 
 [窗口策略](test/isolated/desktop-conversation-window.test.ts)、[真实Conversation DOM](test/isolated/desktop-conversation-window-dom.test.tsx)、[滚动](test/isolated/desktop-conversation-scroll.test.tsx)与[原展示](test/isolated/desktop-conversation-presentation.test.tsx)核阈值、尾部、双向补入、锚点、已加载全选、取消及展开恢复；[折叠工厂](test/isolated/desktop-deferred-process.test.tsx)、[工具聚合](test/isolated/desktop-tool-aggregation.test.tsx)、[成本](test/isolated/conversation-cache-cost.test.ts)和[缓存](test/isolated/desktop-conversation-cache.test.tsx)保留各自生命周期与身份断言。取舍归[按消息加载Note](../../.agents/notes/implemented/architecture/2026-10-26-desktop-progressive-history.md)，实际性能与限制归[Desktop owner](../../apps/desktop/README.md#大会话首次构建)。
 

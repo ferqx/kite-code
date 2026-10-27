@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitCurrentInput, typeMaskedText, typeText } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui, waitForTuiReady } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -63,20 +63,14 @@ describe('first-run — connection boundaries', () => {
   });
 
   async function openCustomEndpointForm(): Promise<void> {
-    tui = spawnTui({
+    tui = await spawnReadyTui({
       cols: 100,
       rows: 40,
       mockServer: server,
       workspace,
       noPreConfig: true,
+      readiness: 'first-run-provider',
     });
-    tui.setRawMode(true);
-    try {
-      await waitForTuiReady(tui, 'first-run-provider', workspace);
-    } catch (error) {
-      console.error('Failed first-run actual viewport:', tui.viewport());
-      throw error;
-    }
     await waitForText(() => output(), '› DeepSeek', 5_000);
     tui.write('\x1b[B');
     await waitForText(() => output(), '› OpenAI', 5_000);

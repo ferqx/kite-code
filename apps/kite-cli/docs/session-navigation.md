@@ -20,4 +20,4 @@ TUI 子 Agent 卡片区分创建、运行、审批等待、自动审查、完成
 
 验证：[导航竞态](../test/session-navigation.test.ts)、[PTY 切换](../../../tests/tui-system/scenarios/session-switch.test.ts)、[会话持久化](../../../tests/tui-system/scenarios/session-persistence.test.ts)。
 
-发布构建通过锁文件应用 `ink-virtual-list@0.2.3` 的[JSX 入口补丁](../../../patches/ink-virtual-list@0.2.3.patch)。该版本发布的 dist 使用开发 JSX API，在 production React 下会使会话选择器崩溃；补丁使用生产 JSX 入口，保留原组件行为。验证见[编译版列表回归](../../../tests/release/oss-candidate.test.ts)。
+发布构建通过锁文件应用 `ink-virtual-list@0.2.3` 的[JSX 入口补丁](../../../patches/ink-virtual-list@0.2.3.patch)。该版本发布的 dist 使用开发 JSX API，在 production React 下会使会话选择器崩溃；补丁使用生产 JSX 入口，保留原组件行为。验证见[编译版列表回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/release/oss-candidate.test.ts)。

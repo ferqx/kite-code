@@ -311,14 +311,12 @@ test('replaying a committed session.cancel command while a writer is held cannot
       status: 'applied',
       request: { kind: 'run.start', content: 'New task: wait for cancellation' },
     });
-    const receipt = second.receipt as { businessCommandId: string; humanInputCommandId: string };
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe(second.id);
-    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      request: { publicCommandId: second.id, content: 'New task: wait for cancellation' },
-    });
+    const receipt = second.receipt as { runId: string };
+    expect(receipt.runId).toBeString();
+    expect(receipt).not.toHaveProperty('businessCommandId');
+    expect(receipt).not.toHaveProperty('humanInputCommandId');
     expect(await f.store.getRun(f.runId)).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: second.id,
       rootWorkCommandId: second.id,
     });
     const input = await f.runtime.readModelInput({
@@ -331,7 +329,7 @@ test('replaying a committed session.cancel command while a writer is held cannot
       input.request.messages.find(
         (message) => message.content === 'New task: wait for cancellation',
       )?.sourceIds,
-    ).toEqual([receipt.businessCommandId]);
+    ).toEqual([second.id]);
     f.lock();
     replay = f.cancel('session', 'old-session-cancel');
     expect(await f.waitAbort(250)).toBe(false);

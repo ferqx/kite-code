@@ -1,6 +1,6 @@
 import type { ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
 import { Box, useInput, useStdout } from 'ink';
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
 import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
 import {
@@ -31,6 +31,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
     facts = state.models;
   const effortPanel = state.panel === 'effort';
   const { stdout } = useStdout();
+  const compact = (stdout.rows ?? 24) < 32;
   const page = Math.max(2, Math.min(8, (stdout.rows ?? 24) - 13));
   const rows = [...(facts?.models ?? [])].sort(
     (a, b) => (a.provider ?? '').localeCompare(b.provider ?? '') || a.id.localeCompare(b.id),
@@ -40,8 +41,9 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
       operation: ModelSettingsRequest['operation'];
       observed: ModelSettingsView;
     }>();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: A new public observation invalidates the selected index and pending confirmation.
-  useEffect(() => {
+  const factsKey = JSON.stringify(facts);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Changed public facts invalidate selection; an identical polling response keeps the user's cursor.
+  useLayoutEffect(() => {
     const selected = facts?.models.find((model) => model.id === facts.defaultModelId);
     setIndex(
       effortPanel
@@ -57,7 +59,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
           ),
     );
     setPending(undefined);
-  }, [facts, effortPanel]);
+  }, [factsKey, effortPanel]);
   const apply = (operation: ModelSettingsRequest['operation'], observed: ModelSettingsView) => {
     const originalSessionId = state.sessionId,
       panel = state.panel,
@@ -149,6 +151,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
   const displayModel = (id: string) => facts?.models.find((model) => model.id === id)?.model ?? id;
   return (
     <TuiOverlayFrame
+      compact={compact}
       title={
         effortPanel
           ? testDiagnostics
@@ -246,11 +249,14 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
                 );
                 return (
                   <Box key={model.id} flexDirection="column">
-                    {(i === 0 || rows[rowIndex - 1]?.provider !== model.provider) && (
-                      <OverlaySection first={i === 0}>
-                        {terminalText(model.provider ?? t('Unavailable'))}
-                      </OverlaySection>
-                    )}
+                    {(i === 0 || rows[rowIndex - 1]?.provider !== model.provider) &&
+                      (compact ? (
+                        <Text dimColor>{terminalText(model.provider ?? t('Unavailable'))}</Text>
+                      ) : (
+                        <OverlaySection first={i === 0}>
+                          {terminalText(model.provider ?? t('Unavailable'))}
+                        </OverlaySection>
+                      ))}
                     <OverlayListRow
                       selected={index === rowIndex}
                       primary={terminalText(model.model ?? model.id)}
@@ -270,7 +276,7 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
                         />
                       }
                     />
-                    {testDiagnostics && (
+                    {testDiagnostics && !compact && (
                       <Text>
                         {terminalText(model.id)} · {t(model.enabled ? 'enabled' : 'disabled')} ·{' '}
                         {t(model.configured ? 'configured' : 'incomplete')} ·{' '}
@@ -298,8 +304,16 @@ export function TuiModelPanel({ controller }: { controller: TuiController }) {
                   ? '↑↓ choose effort · Enter review effort'
                   : '↑↓ select exact ID · Enter review default · E review enabled',
               )}{' '}
-              · {t('Desired default:')} {terminalText(facts.defaultModelId ?? t('none'))} ·{' '}
-              {t('Adapter wire vocabulary only; actual provider may reject unsupported effort.')}
+              · {t('Desired default:')} {terminalText(facts.defaultModelId ?? t('none'))}
+              {!compact && (
+                <>
+                  {' '}
+                  ·{' '}
+                  {t(
+                    'Adapter wire vocabulary only; actual provider may reject unsupported effort.',
+                  )}
+                </>
+              )}
             </Text>
           )}
         </>

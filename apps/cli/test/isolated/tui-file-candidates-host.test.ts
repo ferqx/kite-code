@@ -198,7 +198,7 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
     const runner = join(f.root, 'file-runner.ts');
     writeFileSync(
       runner,
-      `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(wire)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'files',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'file-service.pid'))},String(pid),{mode:0o600})});`,
+      `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(wire)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,...(typeof args[1]?.body==='string'?{body:JSON.parse(args[1].body)}:{})})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'files',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'file-service.pid'))},String(pid),{mode:0o600})});`,
     );
     driver = Bun.spawn(
       [
@@ -212,6 +212,7 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
         transcript,
         quoteName,
         join(f.root, 'file-service.pid'),
+        f.storeId,
       ],
       {
         stdout: 'pipe',
@@ -233,7 +234,20 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));
-    expect(rows.filter((r) => r.method === 'POST')).toEqual([]);
+    const activation = rows.filter((r) => r.method === 'POST');
+    expect(activation.length).toBeGreaterThanOrEqual(1);
+    expect(activation.length).toBeLessThanOrEqual(2);
+    expect(new Set(activation.map((row) => JSON.stringify(row.body))).size).toBe(1);
+    for (const row of activation)
+      expect(row).toEqual({
+        method: 'POST',
+        path: '/v1/sessions/files/reconcile',
+        body: {
+          expectedStoreId: f.storeId,
+          expectedOwnerGeneration: '0',
+          commandId: expect.stringMatching(/^session-reconcile-[a-f0-9]{64}$/),
+        },
+      });
     expect(f.rows("SELECT count(*) AS n FROM run WHERE session_id='files'")).toEqual([{ n: 0 }]);
     expect(f.calls()).toBe(1);
     writeFileSync(

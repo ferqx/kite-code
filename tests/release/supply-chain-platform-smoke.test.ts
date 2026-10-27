@@ -3,13 +3,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RELEASE_MANIFEST_FILE, RELEASE_PAYLOAD_FILE } from '../../scripts/release/artifact-layout';
-import { buildSyntheticArtifact } from '../../scripts/release/build-artifact';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
 import {
   createSyntheticPlatformLauncherIdentity,
   PlatformArtifactSmokeError,
   runPlatformArtifactSmoke,
 } from '../../scripts/release/platform-smoke';
+import { writeSyntheticArtifactFixture } from './helpers/synthetic-artifact-fixture';
 
 const roots: string[] = [];
 const launcherBytes = new TextEncoder().encode('synthetic pre-exec launcher fixture\n');
@@ -99,7 +99,7 @@ describe('platform artifact supply-chain smoke', () => {
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'kite-platform-smoke-'));
   roots.push(directory);
-  const artifact = buildSyntheticArtifact({ directory });
+  const artifact = writeSyntheticArtifactFixture(directory);
   const identity = createSyntheticPlatformLauncherIdentity({
     platform: 'ubuntu-24.04-bubblewrap',
     launcherBytes,

@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConversationCache } from '../../../../packages/ui/src/desktop/ConversationCache';
+import { ConversationCacheCost } from '../../../../packages/ui/src/desktop/conversation-cache-cost';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 import { NativeImagePreviews } from '../../src/native-image-previews';
 import { NativeUserImages } from '../../src/native-user-images';
@@ -15,6 +16,17 @@ const bytes = Buffer.from(data, 'base64');
 const hash = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
 
 function fixture() {
+  const costs = new Set<ConversationCacheCost>();
+  const startCost = ConversationCacheCost.prototype.start;
+  const stopCost = ConversationCacheCost.prototype.stop;
+  ConversationCacheCost.prototype.start = function (...args) {
+    costs.add(this);
+    return startCost.apply(this, args);
+  };
+  ConversationCacheCost.prototype.stop = function (...args) {
+    costs.delete(this);
+    return stopCost.apply(this, args);
+  };
   const restoreWorker = installImagePreviewWorker();
   const previews = new NativeImagePreviews();
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
@@ -108,6 +120,7 @@ function fixture() {
     urls,
     revoked,
     until,
+    measured: () => until(() => costs.size > 0 && [...costs].every((cost) => !!cost.snapshot())),
     peak: () => peak,
     corrupt: (value: boolean) => {
       corrupt = value;
@@ -198,6 +211,8 @@ function fixture() {
       URL.revokeObjectURL = revoke;
       dom.window.close();
       restoreWorker();
+      ConversationCacheCost.prototype.start = startCost;
+      ConversationCacheCost.prototype.stop = stopCost;
       for (const [key, descriptor] of old)
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
         else Reflect.deleteProperty(globalThis, key);
@@ -299,6 +314,7 @@ test('cached image identity survives a new read selection without reopening and 
     await f.until(() => f.host.querySelectorAll('img').length === 1);
     const image = f.host.querySelector('img')!;
     const url = image.getAttribute('src');
+    await f.measured();
     await f.render(1, false, 2, 'b');
     expect(image.isConnected).toBe(false);
     expect(f.revoked).toHaveLength(0);
@@ -309,8 +325,10 @@ test('cached image identity survives a new read selection without reopening and 
     await f.render(1, true, 3, 'a');
     expect(f.host.querySelector('img') === image).toBe(true);
     expect(f.urls).toHaveLength(1);
-    for (const [index, id] of ['b', 'c', 'd', 'e'].entries())
+    for (const [index, id] of ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'].entries()) {
       await f.render(1, true, index + 4, id);
+      await f.measured();
+    }
     expect(f.revoked).toEqual([url!]);
   } finally {
     await f.close();

@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { verifyInteractionAnswerReceipt } from '../src/controller';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../src/native-bridge';
-import { prepareDesktopDom, promptValue } from './native-page-dom.fixture';
+import { nextDesktopPresentation, prepareDesktopDom, promptValue } from './native-page-dom.fixture';
 
 test('Native page keeps original question drafts across sessions, missing pages and read failure; only the exact accepted answer clears its draft', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -187,6 +187,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
       )!;
       expect(button).toBeDefined();
       button.click();
+      if (button.classList.contains('session-row')) await nextDesktopPresentation(dom);
     });
   const text = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自由回答"]')!;
   const mainInput = () =>

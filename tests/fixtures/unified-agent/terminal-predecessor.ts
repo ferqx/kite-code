@@ -13,7 +13,10 @@ import {
   COMPATIBLE_PREDECESSOR_INPUT_PATHS,
   COMPATIBLE_PREDECESSOR_MIGRATIONS,
 } from './compatible-predecessor-input';
-import { matchReviewedPredecessorInput } from './predecessor-reviewed-input';
+import {
+  matchReviewedCurrentOnlyPredecessorInput,
+  matchReviewedPredecessorInput,
+} from './predecessor-reviewed-input';
 import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-declarations';
@@ -22,6 +25,29 @@ import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-
 // used 3140 (macOS) / 1b796 (Linux); their locks predate the PC presentation migration.
 // Keep all original-source, dependency, engine and actual-code-change guards below.
 export const COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT = COMPATIBLE_PREDECESSOR_COMMIT;
+// Real code before the current public Model-output projection fix; all six SQL migrations are identical.
+// Keep the original DB7/DB8 builders below for incompatible-schema rejection coverage.
+export const CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT =
+  '12628a616e7614cbd60666d71896b1db9f74b0f5';
+export const CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS = [
+  ...COMPATIBLE_PREDECESSOR_MIGRATIONS,
+  {
+    path: 'packages/agent/src/storage/migrations/0003-session-reconciliation.sql',
+    sha256: '30009dcece4f09ff83c960af333c34e173f9173d728449b72573c2ebd2bac97d',
+  },
+  {
+    path: 'packages/agent/src/storage/migrations/0004-pending-input-order.sql',
+    sha256: '8e70509f93e990c6a7b556d8d4fe9d6d6dc358dc165b1a40ddac09f056bee7ce',
+  },
+  {
+    path: 'packages/agent/src/storage/migrations/0005-authorization-check.sql',
+    sha256: 'c419d4105a8aa62df8ea05ec78aea48575f66a8bfef14d977f6fabed9f0c12ab',
+  },
+  {
+    path: 'packages/agent/src/storage/migrations/0006-input-file-imports.sql',
+    sha256: 'af8e55877fe1000569c35d6828b3f659baf04ad4844f67a451125f6f862fde4c',
+  },
+] as const;
 export const TERMINAL_PREDECESSOR_COMMIT = 'a2b6441fde28d9c0f895a26e6a9d2471d2b1b242';
 const baseline = 'packages/agent/src/storage/migrations/0001-baseline.sql';
 const baselineSha256 = '92773869c4d4e68947e9721d5bb6d28e10567c6dc3a82b56726b1a0fb7adee42';
@@ -251,13 +277,19 @@ export function materializeTerminalPredecessor(input: TerminalPredecessorInput) 
 export function materializeCompatibleTerminalPredecessor(input: TerminalPredecessorInput) {
   return materializeTerminalPredecessorVersion(input, true);
 }
+export function materializeCurrentSchemaTerminalPredecessor(input: TerminalPredecessorInput) {
+  return materializeTerminalPredecessorVersion(input, true, true);
+}
 async function materializeTerminalPredecessorVersion(
   input: TerminalPredecessorInput,
   compatible: boolean,
+  currentSchema = false,
 ) {
-  const predecessorCommit = compatible
-    ? COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT
-    : TERMINAL_PREDECESSOR_COMMIT;
+  const predecessorCommit = currentSchema
+    ? CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT
+    : compatible
+      ? COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT
+      : TERMINAL_PREDECESSOR_COMMIT;
   const root = realpathSync(input.root),
     repository = realpathSync(input.repositoryRoot);
   if (inside(repository, root) || inside(root, repository) || !lstatSync(root).isDirectory())
@@ -275,13 +307,27 @@ async function materializeTerminalPredecessorVersion(
   const manifest = JSON.parse(readFileSync(join(repository, 'package.json'), 'utf8')) as {
     patchedDependencies?: Record<string, string>;
   };
+  const previousManifest = JSON.parse(
+    (
+      await command(['git', 'show', `${predecessorCommit}:package.json`], repository, 10_000)
+    ).toString(),
+  ) as { patchedDependencies?: Record<string, string> };
+  // The predecessor's original eleven inputs are immutable. Current-only patches
+  // are independently closed and recorded; they are not invented old blobs.
   const inputs = [
     'bun.lock',
     'package.json',
     ...workspaces.map((path) => `${path}/package.json`),
-    ...Object.values(manifest.patchedDependencies ?? {}),
+    ...Object.values(previousManifest.patchedDependencies ?? {}),
   ];
-  if (compatible) assertCompatiblePredecessorInputPaths(inputs);
+  if (currentSchema) {
+    const expected = [
+      ...COMPATIBLE_PREDECESSOR_INPUT_PATHS,
+      'patches/@radix-ui%2Freact-scroll-area@1.2.18.patch',
+    ];
+    if (JSON.stringify(inputs) !== JSON.stringify(expected))
+      throw Error('current_schema_predecessor_input_inventory_changed');
+  } else if (compatible) assertCompatiblePredecessorInputPaths(inputs);
   const lockedInputs: {
     path: string;
     sha256: string;
@@ -303,9 +349,13 @@ async function materializeTerminalPredecessorVersion(
       throw Error('terminal_predecessor_input_escape');
     const old = await command(['git', 'show', `${predecessorCommit}:${path}`], repository, 10_000);
     const current = readFileSync(join(repository, path)),
-      match = compatible
-        ? assertCompatiblePredecessorLockedInput(path, old, current).match
-        : matchTerminalPredecessorInput(path, old, current);
+      match = currentSchema
+        ? old.equals(current)
+          ? ('identical' as const)
+          : undefined
+        : compatible
+          ? assertCompatiblePredecessorLockedInput(path, old, current).match
+          : matchTerminalPredecessorInput(path, old, current);
     if (!match) throw Error(`terminal_predecessor_dependency_input_changed:${path}`);
     lockedInputs.push({ path, sha256: sha256(old), currentSha256: sha256(current), match });
     const reviewedInput = matchReviewedPredecessorInput(
@@ -327,9 +377,24 @@ async function materializeTerminalPredecessorVersion(
         projectedSha256: sha256(refinement.bytes),
       });
   }
-  const migrations = compatible
-    ? COMPATIBLE_PREDECESSOR_MIGRATIONS
-    : [{ path: baseline, sha256: baselineSha256 }];
+  const additionalCurrentInputs = Object.values(manifest.patchedDependencies ?? {})
+    .filter((path) => !inputs.includes(path))
+    .map((path) => {
+      if (!inside(repository, resolve(repository, path)))
+        throw Error('terminal_predecessor_input_escape');
+      const proof = matchReviewedCurrentOnlyPredecessorInput(
+        compatible ? 'compatible' : 'terminal_legacy',
+        path,
+        readFileSync(join(repository, path)),
+      );
+      if (!proof) throw Error(`terminal_predecessor_additional_input_changed:${path}`);
+      return proof;
+    });
+  const migrations = currentSchema
+    ? CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS
+    : compatible
+      ? COMPATIBLE_PREDECESSOR_MIGRATIONS
+      : [{ path: baseline, sha256: baselineSha256 }];
   for (const migration of migrations) {
     const previous = await command(
       ['git', 'show', `${predecessorCommit}:${migration.path}`],
@@ -337,7 +402,8 @@ async function materializeTerminalPredecessorVersion(
       10_000,
     );
     const current = readFileSync(join(repository, migration.path));
-    if (compatible) assertCompatiblePredecessorLockedInput(migration.path, previous, current);
+    if (compatible && !currentSchema)
+      assertCompatiblePredecessorLockedInput(migration.path, previous, current);
     else if (sha256(previous) !== migration.sha256 || sha256(current) !== migration.sha256)
       throw Error('terminal_predecessor_baseline_changed');
   }
@@ -401,7 +467,7 @@ function mirrorLocal(installedFolder, oldFolder) {
     const path = join(installedFolder, name), oldPath = join(oldFolder, name);
     const stat = lstatSync(path);
     // The renderer's owned Vite cache is generated output, not an installed dependency.
-    if (path === join(repository, 'apps/desktop/node_modules/.vite-desktop-dev') && stat.isDirectory()) continue;
+    if (['.vite', '.vite-desktop-dev'].some(cache => path === join(repository, 'apps/desktop/node_modules', cache)) && stat.isDirectory()) continue;
     if (stat.isSymbolicLink()) {
       const declared = resolve(dirname(path), readlinkSync(path));
       const resolved = existsSync(path) ? realpathSync(path) : declared;
@@ -494,10 +560,15 @@ for (const path of JSON.parse(workspaceJSON)) {
       builder: 'scripts/release/terminal-bundle.ts',
       productVersion: oldProductVersion as string,
       lockedInputs,
+      additionalCurrentInputs,
       reviewedDeclarations,
       reviewedInputIncrements,
       baseline: { path: baseline, sha256: baselineSha256, format: 1 as const },
-      schemaCapability: compatible ? ('recovery-audit-v1' as const) : ('baseline-v1' as const),
+      schemaCapability: currentSchema
+        ? ('session-files-v1' as const)
+        : compatible
+          ? ('recovery-audit-v1' as const)
+          : ('baseline-v1' as const),
       migrations,
       sourceRoot: source,
       sourceRemoved: true as const,

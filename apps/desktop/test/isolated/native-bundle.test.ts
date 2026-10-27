@@ -129,11 +129,8 @@ test.skipIf(process.platform !== 'darwin')(
             expect(titleCalls).toBe(1);
             expect(body.tools ?? []).toEqual([]);
             const users = body.messages.filter((message) => message.role === 'user');
-            expect(users).toHaveLength(2);
-            expect(users[0]!.content).toBe('write one real bundled file');
-            expect(users[1]!.content).toMatch(
-              /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
-            );
+            console.log('native_title_request', JSON.stringify(users));
+            expect(users).toEqual([{ role: 'user', content: 'write one real bundled file' }]);
             const frame = (delta: unknown, finish_reason: string | null) =>
               `data: ${JSON.stringify({ id: 'native-title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
             return new Response(
@@ -146,7 +143,7 @@ test.skipIf(process.platform !== 'darwin')(
             if (message.role !== 'user' || typeof message.content !== 'string') return [];
             try {
               const value = JSON.parse(message.content);
-              return value?.purpose === 'authorization_review' ? [value] : [];
+              return value?.purpose === 'authorization_check' ? [value] : [];
             } catch {
               return [];
             }
@@ -157,7 +154,7 @@ test.skipIf(process.platform !== 'darwin')(
             expect(reviews[0].target).toMatchObject({
               originStoreId: storeId,
               definitionId: 'files.write',
-              definitionVersion: '2',
+              definitionVersion: '3',
               input: { path: 'bundled.txt', base: null, content: 'actual bundled bytes\r\n' },
             });
             expect(reviews[0].target.executionId).toBeString();
@@ -219,7 +216,9 @@ test.skipIf(process.platform !== 'darwin')(
                           type: 'function',
                           function: {
                             name: 'read_file',
-                            arguments: JSON.stringify({ path: 'missing-tool-target.txt' }),
+                            arguments: JSON.stringify({
+                              path: 'missing-tool-target.txt',
+                            }),
                           },
                         },
                       ],
@@ -249,8 +248,8 @@ test.skipIf(process.platform !== 'darwin')(
             },
           ],
           tools: [
-            { id: 'files.write', definitionVersion: '2' },
-            { id: 'files.read', definitionVersion: '4' },
+            { id: 'files.write', definitionVersion: '3' },
+            { id: 'files.read', definitionVersion: '5' },
           ],
         }),
       );
@@ -263,13 +262,15 @@ test.skipIf(process.platform !== 'darwin')(
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
-        readFileSync(
-          resolve(import.meta.dir, '../native-bundle-electron.fixture.ts'),
-          'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        readFileSync(resolve(import.meta.dir, '../native-bundle-electron.fixture.ts'), 'utf8')
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       observe('primary_driver_build_begin');
       const result = await Bun.build({
@@ -341,29 +342,40 @@ test.skipIf(process.platform !== 'darwin')(
         )!;
         expect(titleSession.title).toBe('File write');
         const titleExecutions = await cold.listExecutions(titleSession.id);
-        const titleIds = [
-          'agent/session-title',
-          'builtin.session-title/fallback',
-          'builtin.session-title/generate',
-        ];
+        const titleIds = ['builtin.session-title/fallback', 'builtin.session-title/generate'];
         const titleJobs = titleExecutions.filter((row) => titleIds.includes(row.definitionId));
         expect(titleJobs.map((row) => row.definitionId).sort()).toEqual(titleIds);
         for (const row of titleJobs)
-          expect(row).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
-        const carrier = titleJobs.find((row) => row.definitionId === 'agent/session-title')!;
+          expect(row).toMatchObject({
+            kind: 'job',
+            runId: null,
+            childSessionId: null,
+            status: 'succeeded',
+          });
         const generation = titleJobs.find(
           (row) => row.definitionId === 'builtin.session-title/generate',
         )!;
-        const titleChildId = carrier.childSessionId;
-        expect(titleChildId).toBeString();
-        expect(carrier.parentExecutionId).toBe(generation.id);
-        const titleChild = await cold.getView(titleChildId!);
-        expect(titleChild.session.parentSessionId).toBe(titleSession.id);
-        expect(titleChild.runs).toHaveLength(1);
-        expect(titleChild.runs[0]!.status).toBe('completed');
-        const titleChildExecutions = await cold.listExecutions(titleChildId!);
-        expect(titleChildExecutions).toHaveLength(1);
-        expect(titleChildExecutions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
+        const titleModels = titleExecutions.filter(
+          (row) => row.kind === 'model' && row.parentExecutionId === generation.id,
+        );
+        expect(titleModels).toHaveLength(1);
+        expect(titleModels[0]).toMatchObject({
+          kind: 'model',
+          definitionId: 'fixed',
+          definitionVersion: '1',
+          sessionId: titleSession.id,
+          runId: null,
+          childSessionId: null,
+          parentExecutionId: generation.id,
+          status: 'succeeded',
+        });
+        expect((await cold.getView(titleSession.id)).runs).toHaveLength(1);
+        expect(
+          (await cold.listSessions()).filter((row) => row.parentSessionId === titleSession.id),
+        ).toEqual([]);
+        expect(titleExecutions.filter((row) => row.definitionId === 'agent/session-title')).toEqual(
+          [],
+        );
       } finally {
         await cold.close();
       }

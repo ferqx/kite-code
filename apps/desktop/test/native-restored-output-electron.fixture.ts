@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 const [launcher, home, control, originalStoreId] = process.argv.slice(2) as [
     string,
@@ -85,12 +86,24 @@ async function select(page: import('playwright').Page, title: string) {
     .and(page.locator('button.session-row'))
     .click();
   await page.locator('.session-header').getByTitle(title, { exact: true }).waitFor();
+  if (title === 'Sealed Fork')
+    await page.getByText('RESTORED ORIGINAL COMPLETE TAIL', { exact: false }).waitFor();
+  await selectedState(page, title);
 }
 async function state(page: import('playwright').Page) {
   return page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
   );
+}
+async function selectedState(page: import('playwright').Page, title: string) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const value = await state(page);
+    if (value.selection?.session.title === title && !value.selection.viewLoading) return value;
+    assert.ok(Date.now() < deadline, `selected current history: ${title}`);
+    await page.waitForTimeout(20);
+  }
 }
 async function history(page: import('playwright').Page, sessionId: string) {
   return page.evaluate(async (sessionId) => {
@@ -141,8 +154,14 @@ async function readFull(page: import('playwright').Page, storeId: string, sealed
 }
 async function noWrites() {
   const requests = (await app!.evaluate('globalThis.__outputAudit.requests')) as string[];
+  // Current activation reconciles only each explicitly selected Session; it creates no business work.
+  const reconciliation = new Set(
+    ['s', 'other', forkId]
+      .filter(Boolean)
+      .map((id) => `POST /v1/sessions/${encodeURIComponent(id)}/reconcile`),
+  );
   assert.deepEqual(
-    requests.filter((entry) => !entry.startsWith('GET ')),
+    requests.filter((entry) => !entry.startsWith('GET ') && !reconciliation.has(entry)),
     [],
   );
 }
@@ -161,6 +180,7 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('one explicit harmless original Model');
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   await page.locator('.agent-turn-final').waitFor();
   await readFull(page, originalStoreId, false);
@@ -172,7 +192,8 @@ try {
   await panel.getByRole('button', { name: '从当前所选上下文分叉', exact: true }).click();
   await panel.getByRole('button', { name: '打开已确认分叉', exact: true }).click();
   await page.locator('.session-header').getByTitle('Sealed Fork', { exact: true }).waitFor();
-  const fork = await state(page);
+  await page.getByText('RESTORED ORIGINAL COMPLETE TAIL', { exact: false }).waitFor();
+  const fork = await selectedState(page, 'Sealed Fork');
   forkId = fork.selection!.session.id;
   assert.notEqual(forkId, 's');
   const message = (await history(page, forkId)).find((message) => message.outputBody)!;

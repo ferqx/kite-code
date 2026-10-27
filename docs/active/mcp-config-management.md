@@ -5,6 +5,8 @@
 验证：`bun test packages/ui/test/tui/mcp.test.tsx packages/ui/test/tui/mcp-connection.test.tsx apps/cli/test/isolated/tui-mcp-host.test.ts apps/cli/test/isolated/tui-mcp-connection-host.test.ts apps/cli/test/isolated/tui-mcp-connection-restore.test.ts`、`bun run typecheck`、`bun run check:unified-agent-boundary`；默认来源、认证与实际平台资格分别按[Service owner](../../apps/service/README.md)、[MCP owner](../../packages/agent/src/mcp/README.md)与[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。下面旧owner测试只属于历史范围，不参与当前正式/default/CI调度。
 相关：[Agent Note 0019](../../.agents/notes/implemented/feature/2026-07-19-mcp-two-config-locations.md)、[Agent Note 0013](../../.agents/notes/implemented/feature/2026-07-16-mcp-credential-store-and-oauth-session.md)、[Agent Note 0014](../../.agents/notes/implemented/feature/2026-07-17-mcp-tool-visibility-and-policy.md)、[Agent Note 0018](../../.agents/notes/implemented/feature/2026-07-19-mcp-tui-select-management-center.md)、`apps/kite-service/src/config/mcp-config-repository.ts`、`apps/kite-service/src/config/mcp-config.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`apps/kite-cli/src/tui/mcp/`。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 来源与优先级
 
 可见 Source Review、有限原决定读取、跨 Session 未确认冲突与离线 v10 资产已接入，当前合同见[项目来源决定与历史读取](#项目来源决定与历史读取)；本片源码外键盘和当前完整默认已验收，取舍与有限资格见[Source 决定](../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。

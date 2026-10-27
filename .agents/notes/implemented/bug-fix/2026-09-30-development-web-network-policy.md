@@ -10,7 +10,7 @@ Status: implemented
 
 Service 仅为无封存边界、无 production 标记的普通配置，在工具授权之后显式构造开发期 `public` 网络机制策略。它允许公开 DNS 主机和跨主机跳转，复用 Builtin 对实际地址、连接 pinning、逐跳准入和 socket 前持久决定的检查。封存配置仍优先使用原 `off`／`allowlist`；缺配置、production 缺边界和缺持久记录端口继续拒绝。
 
-`public` 只扩展机制策略，不进入封存 `ExecutionBoundary`，不改 Shell 或 MCP 的封存权限。当前完整规则由[执行边界](../../../../docs/active/execution-boundary.md#network-projection-and-durable-admission)与[Service composition](../../../../apps/kite-service/docs/composition-and-execution.md)负责。
+`public` 只扩展机制策略，不进入封存 `ExecutionBoundary`，不改 Shell 或 MCP 的封存权限。当前完整规则由[执行边界](../../../../docs/active/execution-boundary.md#network-projection-and-durable-admission)与[Service composition](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/composition-and-execution.md)负责。
 
 ## Alternatives considered
 
@@ -20,4 +20,4 @@ Service 仅为无封存边界、无 production 标记的普通配置，在工具
 
 ## Consequences
 
-主、子会话共用 Service 工具路由，均能取得准确的开发期策略。新增[回归测试](../../../../apps/kite-service/test/runtime/web-development-boundary.test.ts)核对公开跨主机跳转、持久决定先于请求、私有地址拒绝、记录失败不派发，以及封存策略优先和缺 authority 拒绝。公开网络实际可达性仍取决于 DNS、远端服务器和宿主网络；测试中的模拟 transport 不证明这些外部条件。
+主、子会话共用 Service 工具路由，均能取得准确的开发期策略。新增[回归测试](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/test/runtime/web-development-boundary.test.ts)核对公开跨主机跳转、持久决定先于请求、私有地址拒绝、记录失败不派发，以及封存策略优先和缺 authority 拒绝。公开网络实际可达性仍取决于 DNS、远端服务器和宿主网络；测试中的模拟 transport 不证明这些外部条件。

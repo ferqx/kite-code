@@ -16,6 +16,7 @@ for (const kind of [
   test.skipIf(process.platform !== 'darwin')(
     `actual Electron ${kind} original complete caller survives physical POST/first GET loss and main/owned Service SIGKILL`,
     async () => {
+      const content = '真实 Native 中文🙂é\r\n完整原正文';
       const module = await import(
           resolve(
             import.meta.dir,
@@ -26,28 +27,37 @@ for (const kind of [
         ),
         f = await (kind === 'execution.cancel'
           ? module.nativeCallerJobsProfile()
-          : module.recoveryProfile());
+          : module.recoveryProfile(
+              kind === 'input.follow_up' ? { holdModelCommandId: 'native-window-original' } : {},
+            ));
       let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
       try {
-        const warm = await f.launch();
         let contextSelectionId: string;
-        try {
-          if (kind === 'run.start')
-            await warm.client.recoverSession('s', {
-              kind: 'session.recover',
-              expectedStoreId: f.storeId,
-              commandId: 'before-native-start',
-              decision: 'interrupt',
-            });
-          const view = await warm.client.getView('s');
-          if (typeof view.session.contextSelectionId !== 'string')
-            throw Error('context_fixture_unavailable');
-          contextSelectionId = view.session.contextSelectionId;
-        } finally {
-          await warm.close();
+        if (kind === 'input.steer') {
+          // A read-only warm Service followed by graceful close would cancel the
+          // seeded orphan before Native can explicitly recover its original Run.
+          const original = f.rows("SELECT context_selection_id AS id FROM session WHERE id='s'");
+          if (typeof original[0]?.id !== 'string') throw Error('context_fixture_unavailable');
+          contextSelectionId = original[0].id;
+        } else {
+          const warm = await f.launch();
+          try {
+            if (kind === 'run.start')
+              await warm.client.recoverSession('s', {
+                kind: 'session.recover',
+                expectedStoreId: f.storeId,
+                commandId: 'before-native-start',
+                decision: 'interrupt',
+              });
+            const view = await warm.client.getView('s');
+            if (typeof view.session.contextSelectionId !== 'string')
+              throw Error('context_fixture_unavailable');
+            contextSelectionId = view.session.contextSelectionId;
+          } finally {
+            await warm.close();
+          }
         }
-        const common = { expectedStoreId: f.storeId, commandId: 'native-window-original' },
-          content = '真实 Native 中文🙂é\r\n完整原正文';
+        const common = { expectedStoreId: f.storeId, commandId: 'native-window-original' };
         const input =
           kind === 'execution.cancel'
             ? { ...common, kind, executionId: 'choose-original-first' }
@@ -135,7 +145,11 @@ for (const kind of [
             stdin: 'ignore',
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+            env: {
+              ...(f.userConfiguration?.homeEnvironment ?? { HOME: f.root }),
+              PATH: '/usr/bin:/bin',
+              LANG: 'C.UTF-8',
+            },
           },
         );
         const out = new Response(driver.stdout).text(),
@@ -147,6 +161,7 @@ for (const kind of [
           if (code) console.error(error);
           expect(code).toBe(0);
           expect(await out).toContain('native-caller-window-qualified');
+          if (kind === 'input.follow_up') expect(f.heldModelRequests()).toBe(1);
           expect(
             f.rows("SELECT count(*) AS n FROM command WHERE id='native-window-original'"),
           ).toEqual([{ n: 1 }]);

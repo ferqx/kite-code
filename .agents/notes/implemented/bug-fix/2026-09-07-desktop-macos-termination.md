@@ -17,7 +17,7 @@ Status: implemented
 - 另建后台管理进程：超出当前自有 Service 生命周期要求。
 
 ## Consequences
-该平台适配包含有明确布局/ABI 前提的 Objective-C interop；Tauri/tao 升级需重复原生退出验收。崩溃或强制终止继续依靠已有 EOF 与服务清理，不虚构可拦截所有 OS 强杀。当前实现、验证与限制完整维护在[桌面 owner](../../../../apps/kite-desktop/README.md)及[原生验收](../../../../apps/kite-desktop/docs/native-validation.md)。
+该平台适配包含有明确布局/ABI 前提的 Objective-C interop；Tauri/tao 升级需重复原生退出验收。崩溃或强制终止继续依靠已有 EOF 与服务清理，不虚构可拦截所有 OS 强杀。当前实现、验证与限制完整维护在[桌面 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/README.md)及[原生验收](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md)。
 
 ## Historical relationships
 

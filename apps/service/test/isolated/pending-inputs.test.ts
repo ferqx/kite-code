@@ -17,7 +17,7 @@ function gate() {
   return { promise, release };
 }
 
-test('HTTP pending inputs preserve mixed original result inclusion and follow-up without replaying the Tool', async () => {
+test('HTTP pending inputs preserve mixed original result inclusion and explicit same-Run steering without replaying the Tool', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-http-pending-inputs-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -140,25 +140,25 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
     });
     await ready.promise;
     const started = (await store.getCommand('active-work'))!;
-    const startReceipt = started.receipt as { businessCommandId: string; runId: string };
+    const startReceipt = started.receipt as { runId: string };
     expect(started.status).toBe('applied');
-    expect(startReceipt.businessCommandId).toBeString();
-    expect(startReceipt.businessCommandId).not.toBe(started.id);
+    expect(startReceipt.runId).toBeString();
+    expect(startReceipt).not.toHaveProperty('businessCommandId');
     const run = (await store.getRun(startReceipt.runId))!;
     expect(run).toMatchObject({
       isActive: true,
       rootWorkCommandId: 'active-work',
-      originCommandId: startReceipt.businessCommandId,
+      originCommandId: started.id,
     });
     expect(await store.getExecution(requests[2]!.requestId)).toMatchObject({
       kind: 'model',
       runId: run.id,
-      originCommandId: startReceipt.businessCommandId,
+      originCommandId: started.id,
     });
     expect(
       requests[2]!.messages.find((message) => message.content === 'New task: new exact foreground')
         ?.sourceIds,
-    ).toEqual([startReceipt.businessCommandId]);
+    ).toEqual([started.id]);
     const included = await client.includeResult('s', old.id, {
       expectedStoreId,
       commandId: 'include',
@@ -167,33 +167,30 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       resultRevision: old.resultRevision,
     });
     const content = 'Follow up: 完整后继🙂\r\nKeep the exact original result.';
-    const followed = await client.followUp('s', {
+    const followed = await client.steer('s', {
       expectedStoreId,
       commandId: 'follow',
-      kind: 'input.follow_up',
-      afterRunId: run.id,
+      kind: 'input.steer',
+      targetRunId: run.id,
       contextSelectionId: selection.selection.id,
       content,
     });
     expect(included.command.status).toBe('accepted');
     expect(followed.status).toBe('accepted');
     const publicFollow = (await store.getCommand('follow'))!;
-    const followReceipt = publicFollow.receipt as {
-      businessCommandId: string;
-      humanInputCommandId: string;
-    };
-    expect(followReceipt.businessCommandId).toBeString();
-    expect(followReceipt.businessCommandId).not.toBe('follow');
-    expect(publicFollow.request).toEqual({
-      kind: 'input.follow_up',
-      content,
-      afterRunId: run.id,
-      contextSelectionId: selection.selection.id,
+    expect(publicFollow).toMatchObject({
+      id: 'follow',
+      kind: 'input.steer',
+      status: 'accepted',
+      request: {
+        kind: 'input.steer',
+        content,
+        targetRunId: run.id,
+        contextSelectionId: selection.selection.id,
+      },
     });
-    expect(await store.getCommand(followReceipt.humanInputCommandId)).toMatchObject({
-      kind: 'human.input',
-      request: { publicCommandId: 'follow', content, originalRequest: publicFollow.request },
-    });
+    expect(publicFollow.receipt).not.toHaveProperty('businessCommandId');
+    expect(publicFollow.receipt).not.toHaveProperty('humanInputCommandId');
     const first = await client.listPendingInputs('s', {
       storeId: expectedStoreId,
       afterSeq: '0',
@@ -215,7 +212,7 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       limit: 1,
     });
     expect(second.commands).toHaveLength(1);
-    expect(second.commands[0]!.id).toBe(followReceipt.businessCommandId);
+    expect(second.commands[0]!.id).toBe('follow');
     expect(second.commands[0]!.request).toEqual({
       kind: 'input.steer',
       targetRunId: run.id,
@@ -250,7 +247,7 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
         kind: 'input.reorder',
         expectedStoreId,
         commandId: 'reject-include-move',
-        commandIds: ['include', 'spare-queued-text', followReceipt.businessCommandId],
+        commandIds: ['include', 'spare-queued-text', 'follow'],
         expectedRevision: queue.revision,
       }),
     ).rejects.toMatchObject({ code: 'input_queue_members_changed' });
@@ -258,14 +255,14 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       kind: 'input.reorder',
       expectedStoreId,
       commandId: 'move-spare',
-      commandIds: ['spare-queued-text', followReceipt.businessCommandId],
+      commandIds: ['spare-queued-text', 'follow'],
       expectedRevision: queue.revision,
     });
     const moved = await client.getPendingInputQueue('s', { storeId: expectedStoreId });
     expect(moved.commands.map((command) => command.id)).toEqual([
       'include',
       'spare-queued-text',
-      followReceipt.businessCommandId,
+      'follow',
     ]);
     expect(moved.orders[0]).toBe(queue.orders[0]);
     await client.withdrawPendingInput('s', {
@@ -282,7 +279,6 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
     await runtime.waitForCommand('active-work', { timeoutMs: 5000 });
     await runtime.waitForCommand('follow', { timeoutMs: 5000 });
     expect((await store.getCommand('follow'))!.receipt).toMatchObject({
-      businessCommandId: followReceipt.businessCommandId,
       runId: run.id,
     });
     expect(requests).toHaveLength(4);
@@ -291,7 +287,7 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       status: 'succeeded',
     });
     expect(requests[3]!.messages.find((message) => message.content === content)?.sourceIds).toEqual(
-      [followReceipt.businessCommandId],
+      ['follow'],
     );
     expect(effects).toBe(1);
     expect((await store.getExecution(old.id))!.result).toEqual(old.result);

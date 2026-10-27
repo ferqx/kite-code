@@ -136,11 +136,9 @@ test.skipIf(process.platform !== 'darwin')(
             expect(titleCalls).toBe(1);
             expect(body.tools ?? []).toEqual([]);
             const users = body.messages.filter((message) => message.role === 'user');
-            expect(users).toHaveLength(2);
+            console.log('provider_title_wire', JSON.stringify(body.messages));
+            expect(users).toHaveLength(1);
             expect(users[0]!.content).toBe(composerSource('NATIVE_openai_newsession'));
-            expect(users[1]!.content).toMatch(
-              /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
-            );
             const frame = (delta: unknown, finish_reason: string | null) =>
               `data: ${JSON.stringify({ id: 'provider-title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
             return new Response(
@@ -264,29 +262,38 @@ test.skipIf(process.platform !== 'darwin')(
         const titleSession = (await cold.getSession(titleRun.sessionId))!;
         expect(titleSession.title).toBe('Providers');
         const titleExecutions = await cold.listExecutions(titleSession.id);
-        const titleIds = [
-          'agent/session-title',
-          'builtin.session-title/fallback',
-          'builtin.session-title/generate',
-        ];
+        const titleIds = ['builtin.session-title/fallback', 'builtin.session-title/generate'];
         const titleJobs = titleExecutions.filter((row) => titleIds.includes(row.definitionId));
         expect(titleJobs.map((row) => row.definitionId).sort()).toEqual(titleIds);
         for (const row of titleJobs)
-          expect(row).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
-        const carrier = titleJobs.find((row) => row.definitionId === 'agent/session-title')!;
+          expect(row).toMatchObject({
+            kind: 'job',
+            runId: null,
+            childSessionId: null,
+            status: 'succeeded',
+          });
         const generation = titleJobs.find(
           (row) => row.definitionId === 'builtin.session-title/generate',
         )!;
-        const titleChildId = carrier.childSessionId;
-        expect(titleChildId).toBeString();
-        expect(carrier.parentExecutionId).toBe(generation.id);
-        const titleChild = await cold.getView(titleChildId!);
-        expect(titleChild.session.parentSessionId).toBe(titleSession.id);
-        expect(titleChild.runs).toHaveLength(1);
-        expect(titleChild.runs[0]!.status).toBe('completed');
-        const titleChildExecutions = await cold.listExecutions(titleChildId!);
-        expect(titleChildExecutions).toHaveLength(1);
-        expect(titleChildExecutions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
+        const titleModels = titleExecutions.filter(
+          (row) => row.kind === 'model' && row.runId === null,
+        );
+        expect(titleModels).toHaveLength(1);
+        expect(titleModels[0]).toMatchObject({
+          definitionId: report.models.find((model) => model.provider === 'openai')!.id,
+          definitionVersion: '1',
+          sessionId: titleSession.id,
+          runId: null,
+          childSessionId: null,
+          parentExecutionId: generation.id,
+          status: 'succeeded',
+        });
+        expect((await cold.getView(titleSession.id)).runs).toHaveLength(1);
+        expect(
+          (await cold.listSessions()).filter(
+            (session) => session.parentSessionId === titleSession.id,
+          ),
+        ).toEqual([]);
         expect(
           titleExecutions
             .filter((row) => row.kind !== 'model')
@@ -323,12 +330,8 @@ test.skipIf(process.platform !== 'darwin')(
             sessionId: run.sessionId,
             originStoreId: storeId!,
           });
-          if (publicCommand.id !== command!.id)
-            expect(publicCommand.receipt).toMatchObject({
-              outcome: 'human_input_applied',
-              businessCommandId: command!.id,
-              runId: original!.id,
-            });
+          expect(publicCommand.id).toBe(command!.id);
+          expect(publicCommand.receipt).toMatchObject({ runId: original!.id });
           expect(object(command!.request).modelId).toBe(run.modelId);
           const executions = (await cold.listExecutions(run.sessionId)).filter(
             (x) => x.runId === run.id && x.kind === 'model',

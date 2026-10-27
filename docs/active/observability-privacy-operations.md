@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改本地结构化指标、health/status、alert、kill switch、incident runbook 或退出 flush 时。
-验证：`bun test tests/observability`、`bun run scripts/operations/rehearse-agent-incident.ts`、
+验证：`bun test ./tests/integration/observability`、`bun run scripts/operations/rehearse-agent-incident.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 相关：[Agent Note 0056](../../.agents/notes/implemented/architecture/2026-07-30-metadata-first-data-boundaries.md)、[Agent Note 0063](../../.agents/notes/implemented/process/2026-08-02-no-content-observability-and-single-maintainer-operations.md)、[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、Phase 3。
 
@@ -11,6 +11,10 @@ runbook 与本地 rehearsal。项目不建立 external cohort、长期服务等�
 观察或远程托管 observability 路线；这些内容不再是产品规则、发布 Gate 或未来 Task。
 当前版本不包含 synthetic evaluation cassette。reporter、metric、status 与 observability artifact 都不能读取
 Production Model Artifact 或任何未来实验输入，也不能把 Runtime restore/replay authority 当作 telemetry consent。
+
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
+[独立本地 rehearsal](../../scripts/operations/rehearse-agent-incident.ts)与同目录 metadata/evidence 工具保留，依赖通用发布脚本而非旧 Runtime。合成回放仍标记 `synthetic_contract_only`、`operationsReady=false` 与 evidence `not_run`；恢复源码和受控测试不恢复 cohort、长期 SLO 或任何运营资格。
 
 ## 数据与启用边界
 

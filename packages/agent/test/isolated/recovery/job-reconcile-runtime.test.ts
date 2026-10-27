@@ -31,8 +31,10 @@ async function assertExplicitBusinessWork(
 ) {
   const original = await runtime.waitForCommand('explicit-next');
   expect(original.status).toBe('applied');
-  const receipt = original.receipt as { runId: string; businessCommandId: string };
-  const business = (await store.getCommand(receipt.businessCommandId))!;
+  const receipt = original.receipt as { runId: string };
+  const business = (await store.getCommand(original.id))!;
+  expect(business.id).toBe(original.id);
+  expect(receipt).not.toHaveProperty('businessCommandId');
   expect(business).toMatchObject({
     status: 'applied',
     rootWorkCommandId: original.id,

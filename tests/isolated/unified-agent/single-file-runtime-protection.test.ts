@@ -101,6 +101,8 @@ test('actual single-file default Service protects loader companions without prot
       'storage/migrations/0002-recovery-audit.sql',
       'storage/migrations/0003-session-reconciliation.sql',
       'storage/migrations/0004-pending-input-order.sql',
+      'storage/migrations/0005-authorization-check.sql',
+      'storage/migrations/0006-input-file-imports.sql',
     ]) {
       privateDirectory(join(root, path.substring(0, path.lastIndexOf('/'))));
       cpSync(join(agent, path), join(root, path));
@@ -138,6 +140,8 @@ test('actual single-file default Service protects loader companions without prot
       'storage/worker/main.js',
       'storage/worker/observer-preload.js',
       'storage/migrations/0001-baseline.sql',
+      'storage/migrations/0005-authorization-check.sql',
+      'storage/migrations/0006-input-file-imports.sql',
       'extractor-worker.js',
       'extractor-worker.sha256',
       'stdio-guardian.js',
@@ -187,7 +191,7 @@ test('actual single-file default Service protects loader companions without prot
     const configBytes = JSON.stringify({
       modelId: 'fixed',
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
+        { id: 'files.read', definitionVersion: '5' },
         { id: 'files.write', definitionVersion: '3' },
       ],
       models: [

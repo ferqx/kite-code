@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSettings(page: import('playwright').Page) {
   if (!(await page.locator('.desktop-settings-dialog').isVisible()))
@@ -188,7 +189,19 @@ try {
             generation,
           })) as NativeState;
           identity(fresh);
-          const observationId = fresh.selection!.permissions!.observationId;
+          const facts = fresh.selection!.permissions!;
+          if (
+            fresh.permissionSubmissions.some((entry) =>
+              ['saved', 'submitting', 'unknown'].includes(entry.phase),
+            )
+          )
+            throw Error('permission_fixture_original_intent_pending');
+          if (
+            (kind === 'permission.mode' && facts.mode.mode === 'full') ||
+            (kind === 'permission.trust' && facts.trust.trusted)
+          )
+            break;
+          const observationId = facts.observationId;
           const before = intentIds(fresh);
           console.error(
             'native_permission_attempt ' +
@@ -222,6 +235,16 @@ try {
           }
         }
       }
+      const verified = (await window.kiteNative!.request({
+        method: 'permission.refresh',
+        generation,
+      })) as NativeState;
+      identity(verified);
+      if (
+        verified.selection!.permissions!.mode.mode !== 'full' ||
+        !verified.selection!.permissions!.trust.trusted
+      )
+        throw Error('permission_fixture_controls_unverified');
     },
     { generation: 1, storeId: storeId, sessionId: 's', workspaceId: 'w' },
   );
@@ -252,6 +275,7 @@ try {
   const draft = page.getByRole('textbox', { name: '当前会话私有草稿' });
   await closeSettings(page);
   await draft.fill('Held original model A');
+  await selectNativeFixtureModel(page, 'fixed-A', 'A');
   eq(await draft.innerText(), 'Held original model A');
   await inputDiagnostics(page, 'draft-filled');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
@@ -522,12 +546,15 @@ try {
   eq(await panel.locator('.settings-model-current').count(), 0);
   eq(await panel.getByRole('button', { name: '默认模型', exact: true }).count(), 0);
   await openConnectionModels(page, 'OpenAI-compatible');
-  await page
+  const enabledB = page
     .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
-    .getByRole('switch', { name: '启用模型 B', exact: true })
-    .locator('..')
-    .getByText('默认', { exact: true })
-    .waitFor();
+    .getByRole('switch', { name: '启用模型 B', exact: true });
+  await enabledB.waitFor();
+  eq(await enabledB.getAttribute('aria-checked'), 'true');
+  eq(await enabledB.locator('..').getByText('默认', { exact: true }).count(), 0);
+  const coldConfiguration = await (await controlFetch('configuration')).text();
+  eq(coldConfiguration.includes('// external editor retained'), true);
+  eq(JSON.parse(coldConfiguration.replace(/\n\/\/ external editor retained\n$/, '')).modelId, 'B');
   eq(await count(), 2);
   eq((await state(page)).selection!.runs.length, 2);
   await closeSettings(page);

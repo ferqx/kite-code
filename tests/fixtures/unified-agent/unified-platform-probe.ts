@@ -264,7 +264,7 @@ try {
   writeFileSync(
     configPath,
     configuration([
-      { id: 'files.read', definitionVersion: '4' },
+      { id: 'files.read', definitionVersion: '5' },
       { id: 'files.write', definitionVersion: '3' },
     ]),
     { mode: 0o600 },

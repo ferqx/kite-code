@@ -103,6 +103,7 @@ for (const rejectSummary of [false, true])
         name: profile.profile,
         accessKey: profile.profileAccessKey,
       };
+    host.permissionManagement!(runtime);
     const service = await startService({
         runtime,
         profile: target,

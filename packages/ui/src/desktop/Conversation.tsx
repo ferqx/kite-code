@@ -719,7 +719,9 @@ export function Conversation({
     if (content.current) observer.observe(content.current);
     return () => observer.disconnect();
   }, [loading, writeScroll, lazyHistory]);
-  // After each content/layout commit, follow only while the reader is at the bottom.
+  // Restore identity/window handoffs synchronously. Ordinary content geometry is
+  // followed by ResizeObserver before paint, after layout has already completed.
+  // Reading scrollHeight on every metadata commit would force that layout early.
   useLayoutEffect(() => {
     const element = viewport.current;
     if (!element || loading) {
@@ -735,7 +737,7 @@ export function Conversation({
           writeScroll(element, element.scrollTop);
       }
     }
-    if (restore.current || reading.current.follow) {
+    if (restore.current || (reading.current.follow && typeof ResizeObserver === 'undefined')) {
       if (reading.current.follow) writeScroll(element, element.scrollHeight);
       else if (
         lazyHistory &&

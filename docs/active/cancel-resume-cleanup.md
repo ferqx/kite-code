@@ -39,13 +39,15 @@ receipt 已确认，才把不再拥有 live executor 的 Tool 收敛为 cancelle
 `authorized_queued` receipt 和有效 Subagent continuation 继续保留，不能为清除 spinner 而写成用户拒绝。TUI 必须 await
 Host readiness，再重新读取 recovery 后的 event tail；注册前读取的 SessionData 不能用于最终 replay。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## Runtime 取消语义
 
 取消通过 AbortSignal 传播到模型、工具和 Subagent。用户停止当前轮次时，App shell 必须先通过 live Kernel control plane 原子持久化全部未终结工具的 `tool.cancelled` 与带 `cause=user` 的 `turn.aborted`，再触发 AbortSignal；这样活动 Effect lease 会因 revision 前移而失效，队列、active 列表和 transcript 工具调用/结果对共同收敛，不能留下永久 busy 状态。公共 `RunRuntimeAgentInput.signal` 也属于相同的取消边界：无论调用方是否持有 Kernel control，它一旦 abort 必须先写出同一组 durable cancellation facts，再解除 model、tool 或 interaction 等待；不得让 generator 静默结束而把 active turn 留在 Store。该操作只终止当前 turn，不把活动 task 改为 cancelled，下一条用户消息仍可沿当前任务上下文继续。重复取消不得追加重复 Tool Result。TUI 清理运行中 block 只是上述 Runtime 事实的展示投影，不是 Runtime 取消事实本身。
 
 当前 Run 中有准确预算 reservation 和持久派发记录的模型调用，在取消批次内写入 `model.invocation_interrupted(dispatchCertainty=attempted)`，并将 reservation 写为 unknown，保留服务商可能已经收到请求和用量尚未核算的事实。未启用预算的前台主模型已派发调用也在同批次标记 interrupted，避免本地终止后遗留 dispatching 状态。clean child terminal 还须证明本地事件通道已关闭、没有 dispatching 模型、活动或 unknown Run、pending 或 unknown effect。服务商不保证远端取消时，本地仍可在上述清理确认后删除会话历史；迟到 Provider 流回调必须被丢弃，不能写入已删除会话。父 Run 若因 child 模型 unknown 用量进入 reconciliation_required，删除需核对准确的 child terminal receipt 与预算关联；其他 unknown 执行继续拒绝。
 
-父 Run 取消后，已释放预算但从未派发的独立子 Session 只可凭原 Run 的持久 `cancelled` 状态、准确 `turn.aborted(cause=user)`、一次释放和 revision 0 无外部尝试证明补记取消；后来新开的 turn 不能否定旧证据，也不能成为旧取消的替代证明。该结算不再次释放预算或启动子任务，Service、Host 与 Store 的具体交接见 [Service owner](../../apps/kite-service/docs/runtime-application.md) 和 [Store owner](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
+父 Run 取消后，已释放预算但从未派发的独立子 Session 只可凭原 Run 的持久 `cancelled` 状态、准确 `turn.aborted(cause=user)`、一次释放和 revision 0 无外部尝试证明补记取消；后来新开的 turn 不能否定旧证据，也不能成为旧取消的替代证明。该结算不再次释放预算或启动子任务，Service、Host 与 Store 的具体交接见 [Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md) 和 [Store owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
 
 工具审批的显式reject与whole-turn cancel使用不同用户动作，但都终止当前turn。Kernel对Approval overlay的Esc/拒绝校验exact interactionId/generation，并在同一个durable action batch中写入focused `approval.rejected`与对应`tool.rejected`、其余未终结sibling的`tool.cancelled`、必要的`capability.reconciliation_resolved(decision=waived)`和`turn.aborted(cause=user)`。transaction提交后才传播AbortSignal；尚未开始的sibling不得再收到`tool.started`，已开始的sibling必须完成有界cleanup，Runner不得推进后续审批或再次调用模型。拒绝目标保持rejected，因批次终止的其他调用保持cancelled；同一Task旧turn中的rejection不能中止successor turn。终态batch必须闭合同一Tool下全部`recorded|running` Capability，不能只处理第一个invocation或只处理带receipt的invocation；缺少可信terminal evidence时以`capability.execution_unknown` fail closed，绝不能留下outlives-terminal-Tool。策略拒绝、sandbox缺失或系统自动审查失败继续按各自failure path处理。
 
@@ -330,4 +332,4 @@ outer Tool；自动审查明确拒绝时，必须在同一个 batch 先将 paren
 进入 rejected；技术异常或显式 ask_user 只推进原 queue record，不得终结 parent。每个 capability invocation 必须先获得
 Result/ack 或显式 unknown/reconciliation 终态。live/replay/restart 使用相同 generation/session guards。
 
-空闲释放由 Host mailbox 与命令串行，scheduled completion 和 coordinator 清理结束且无未决 effect/Provider 后才能释放 authority；下一条命令重新取得 generation。失权 cleanup 不能凭终态推断，显式恢复以 authority revision CAS 执行。相应回归见[Service 测试](../../apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts)。
+空闲释放由 Host mailbox 与命令串行，scheduled completion 和 coordinator 清理结束且无未决 effect/Provider 后才能释放 authority；下一条命令重新取得 generation。失权 cleanup 不能凭终态推断，显式恢复以 authority revision CAS 执行。相应回归见[Service 测试](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts)。

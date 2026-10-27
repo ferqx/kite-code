@@ -47,6 +47,16 @@ function createEntry(document: Document): Entry {
   return { container, resources: new Set(), used: 0, cost: new ConversationCacheCost(container) };
 }
 
+function createEntryChanged(
+  retire: (key: string, entry: Entry) => void,
+  key: string,
+  entry: Entry,
+) {
+  // Long-lived child callbacks must not retain a previous render's entire Map
+  // through a shared lexical context after another entry has been retired.
+  return () => retire(key, entry);
+}
+
 function admittedCost(entry: Entry) {
   const cost = entry.cost.snapshot();
   return cost &&
@@ -309,7 +319,7 @@ export function ConversationCache({
             active={entry === active}
             resources={entry.resources}
             cost={entry.cost}
-            onChanged={() => retireChanged(key, entry)}
+            onChanged={createEntryChanged(retireChanged, key, entry)}
             readActive={cache.readActive}
             interactive={!loading && (cache.interactive ?? cache.readActive)}
           >

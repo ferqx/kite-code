@@ -8,7 +8,12 @@ import type {
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
+import {
+  nextDesktopPresentation,
+  prepareDesktopDom,
+  promptValue,
+  setPromptText,
+} from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const priorBootstrap = {
@@ -184,7 +189,29 @@ function fixture(failedResult = false) {
         const target = button(name);
         expect(target).toBeDefined();
         target!.click();
+        if (target!.classList.contains('session-row')) await nextDesktopPresentation(dom);
       }),
+    chooseModel: async () => {
+      await act(async () => {
+        const trigger = host.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
+        expect(trigger.disabled).toBe(false);
+        trigger.click();
+      });
+      await act(async () => {
+        host.querySelector<HTMLButtonElement>('[aria-label^="选择模型，当前 "]')!.click();
+      });
+      await act(async () => {
+        const model = host.querySelector<HTMLElement>('[aria-label="选择模型 model"]');
+        expect(model).not.toBeNull();
+        model!.click();
+      });
+      await act(async () =>
+        host
+          .querySelector('[aria-label="模型与思考程度"]')!
+          .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+      );
+      expect(host.querySelector('[aria-label="模型与思考程度"]')).toBeNull();
+    },
     edit: async (target: HTMLElement, value: string) =>
       act(async () => {
         if (target.hasAttribute('contenteditable')) {
@@ -320,6 +347,8 @@ test('a late creation receipt cannot replace the scheduled page or the original 
       f.host.querySelector<HTMLTextAreaElement>('[aria-label="新对话草稿"]')!,
       'first new input',
     );
+    expect(f.button('发送首条消息')!.disabled).toBe(true);
+    await f.chooseModel();
     await f.click('发送首条消息');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     await f.click('安排任务');

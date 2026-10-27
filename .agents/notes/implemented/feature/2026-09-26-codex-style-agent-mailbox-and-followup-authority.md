@@ -11,7 +11,7 @@ Status: implemented
 本记录保留原决定的理由。Agent 身份与逐轮 task、QueueOnly 与 TriggerTurn、低权限结果与邮件、准确预算授权及唯一终态已由阶段 D 的独立子 Session 实现。下文历史接线草案中凡依赖父子 Agent 共用一个 Store Session、一个 Session revision、同 Session 邮箱事务或子 Agent 直接写父 State 的部分，已由[现行方案 §4.0](../../../../docs/plans/background-agent-shell-conversation-coordination.md)及[Agent Note 0191](2026-09-26-independent-agent-sessions-and-result-bridge.md)的每 Agent 独立 Session 边界替代，不再指导实施。当前跨线程事务与恢复范围以该记录和 owner 文档为准。
 
 ## Decision
-Agent 邮箱与续轮已采用每 Agent 独立持久 Session、来源 outbox 与目标 inbox、准确预算和结果桥接；队列消息不唤醒空闲目标，显式续轮与精确停止经 Host/Store 受理。原 `task` 结果仍由唯一结果桥接接纳，跨 Run 邮件保持低权限。当前实现、限制与验证由 [Host owner](../../../../packages/runtime-host/docs/execution-lifecycle.md) 和 [协调方案](../../../../docs/plans/background-agent-shell-conversation-coordination.md)维护。
+Agent 邮箱与续轮已采用每 Agent 独立持久 Session、来源 outbox 与目标 inbox、准确预算和结果桥接；队列消息不唤醒空闲目标，显式续轮与精确停止经 Host/Store 受理。原 `task` 结果仍由唯一结果桥接接纳，跨 Run 邮件保持低权限。当前实现、限制与验证由 [Host owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-host/docs/execution-lifecycle.md) 和 [协调方案](../../../../docs/plans/background-agent-shell-conversation-coordination.md)维护。
 
 ## Historical implementation choice (partially superseded)
 以下第 1–7 项保留原方案细节与取舍；共享父 Session 的接线范围已由 [Agent Note 0191](2026-09-26-independent-agent-sessions-and-result-bridge.md) 替代，不能作为当前实现契约。

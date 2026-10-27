@@ -73,7 +73,8 @@ export async function runDevelopmentDesktop(
     buildDevelopmentService,
     developmentServiceSourceRoots,
     startDesktopRenderer,
-    isDevelopmentServiceSource,
+    startDevelopmentServiceWatcher,
+    isDevelopmentServiceSourceEvent,
     createDesktopReloadQueue,
     createDesktopReloadChannel,
     startDesktopControl,
@@ -82,8 +83,10 @@ export async function runDevelopmentDesktop(
   let child: Bun.Subprocess<'pipe', 'pipe', 'inherit'> | undefined;
   let requested: 'SIGINT' | 'SIGTERM' | undefined;
   let control: Awaited<ReturnType<typeof startDesktopControl>> | undefined;
+  const watchAbort = new AbortController();
   const terminate = (signal: 'SIGINT' | 'SIGTERM') => {
     requested = signal;
+    watchAbort.abort();
     control?.stop();
   };
   const interrupt = () => terminate('SIGINT');
@@ -93,10 +96,30 @@ export async function runDevelopmentDesktop(
   let renderer: Awaited<ReturnType<typeof startDesktopRenderer>> | undefined;
   let reloadQueue: ReturnType<typeof createDesktopReloadQueue> | undefined;
   let channel: ReturnType<typeof createDesktopReloadChannel> | undefined;
+  let sourceWatcher: Awaited<ReturnType<typeof startDevelopmentServiceWatcher>> | undefined;
+  let watchError: Error | undefined;
+  let sourceChanged = false;
   try {
     renderer = await startDesktopRenderer(root);
     control = await startDesktopControl();
+    sourceWatcher = await startDevelopmentServiceWatcher({
+      template: renderer.server.watcher,
+      roots: developmentServiceSourceRoots(root),
+      signal: watchAbort.signal,
+      changed(event, file) {
+        if (!isDevelopmentServiceSourceEvent(root, event, file)) return;
+        if (reloadQueue) reloadQueue.changed();
+        else sourceChanged = true;
+      },
+      failed(error) {
+        watchError ??= error;
+        control?.stop();
+      },
+    });
+    if (requested) return requested === 'SIGINT' ? 130 : 143;
+    if (watchError) throw watchError;
     const service = await buildDevelopmentService(root, outdir);
+    if (watchError) throw watchError;
     let sourceSha256 = service.sourceSha256;
     await buildNativeDesktop(
       {
@@ -116,6 +139,7 @@ export async function runDevelopmentDesktop(
       outdir,
       { development: { ...renderer.configuration, control: control.configuration } },
     );
+    if (watchError) throw watchError;
     if (requested) return requested === 'SIGINT' ? 130 : 143;
     const env = { ...process.env };
     for (const name of ['NODE_PATH', 'NODE_OPTIONS', 'BUN_OPTIONS', 'ELECTRON_RUN_AS_NODE'])
@@ -130,6 +154,7 @@ export async function runDevelopmentDesktop(
         stderr: 'inherit',
       });
     channel = await control.attach(child.exited);
+    if (watchError) throw watchError;
     reloadQueue = createDesktopReloadQueue({
       async reload() {
         const fresh = await buildDevelopmentService(root, outdir);
@@ -146,26 +171,29 @@ export async function runDevelopmentDesktop(
           process.stderr.write(`${error.message}\n`);
       },
     });
-    renderer.server.watcher.add(developmentServiceSourceRoots(root));
-    renderer.server.watcher.on('all', (_event, file) => {
-      if (isDevelopmentServiceSource(root, file)) reloadQueue?.changed();
-    });
+    if (sourceChanged) reloadQueue.changed();
     process.stdout.write(
       `[desktop:dev] Service ready; UI hot update: ${renderer.configuration.rendererUrl}\n`,
     );
     const code = await child.exited;
+    if (watchError) throw watchError;
     return requested ? (requested === 'SIGINT' ? 130 : 143) : code;
   } catch (error) {
     if (requested) return requested === 'SIGINT' ? 130 : 143;
+    if (watchError) throw watchError;
     throw error;
   } finally {
     try {
-      await reloadQueue?.close();
-      await renderer?.close();
-      await control?.close();
-      await child?.exited;
-      await channel?.read;
-      rmSync(outdir, { recursive: true, force: true });
+      try {
+        await sourceWatcher?.close();
+      } finally {
+        await reloadQueue?.close();
+        await renderer?.close();
+        await control?.close();
+        await child?.exited;
+        await channel?.read;
+        rmSync(outdir, { recursive: true, force: true });
+      }
     } finally {
       process.removeListener('SIGINT', interrupt);
       process.removeListener('SIGTERM', stop);

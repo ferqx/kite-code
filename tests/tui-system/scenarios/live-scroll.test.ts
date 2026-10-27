@@ -69,7 +69,7 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
               violations.push(buffer);
           }
           for (const value of buffer.match(
-            /(?:THINKING_\d+|LIVE_\d+|OUTPUT_\d+_\d+|file-\d+\.ts|read-\d+|read \d+ files)/g,
+            /(?:THINKING_\d+|LIVE_\d+|OUTPUT_\d+_\d+|file-\d+\.ts|read-\d+|read \d+ files|Delegating ·[^\n]* · \d+s)/g,
           ) ?? [])
             observedUpdates.add(value);
         }, 25);

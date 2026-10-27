@@ -22,7 +22,7 @@
 
 中立 `usage` 事件是单次请求的最新统计快照，与 `finish` 独立。Agent 可在失败／取消时保留已经收到的快照；重复快照不累计为多次请求，工具仍须完整合法 `finish` 才能进入原授权流程。未收到的最终统计无法补造，也不承诺账单完整性。[SDK 本机 HTTP](test/sdk.test.ts)、[数值反例](test/usage.test.ts)及[真实 SQLite／冷读取](../agent/test/isolated/execution/model-usage.test.ts)分别核末尾空 choices、原始明细／总数、旧别名、未知与 0、取消／失败后的已收用量及零额外派发。持久取舍见[用量记录决定](../../.agents/notes/implemented/bug-fix/2026-10-16-provider-token-accounting.md)。
 
-这个公开工厂名称中的 `Compatible` 表示 OpenAI-compatible 外部协议。[架构命名检查](../../scripts/pre-release-architecture-policy.ts)只按该源码路径与完整符号分类；其他路径的同名实体、历史兼容名和版本化实体仍遵循原门禁。
+这个公开工厂名称中的 `Compatible` 表示 OpenAI-compatible 外部协议。下述命名分类是已删除旧守卫的历史说明；当前边界由新 workspace 守卫维护。[架构命名检查](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/pre-release-architecture-policy.ts)只按该源码路径与完整符号分类；其他路径的同名实体、历史兼容名和版本化实体仍遵循原门禁。
 
 测试使用带测试凭据的本地模拟 HTTP endpoint，证明传输映射与每次流尝试只发一个网络请求；不建立生产 Provider 兼容性、可用性或付费模型行为资格。
 

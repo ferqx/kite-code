@@ -40,6 +40,27 @@ test('actual ten workflows and all recursive eight-workspace script consumers re
   put(local, 'apps/kite-service/src/executable.ts', 'export {};');
   expect(checkUnifiedFormalConsumers(local).violations).toEqual([]);
 });
+test('explicit test files must exist without treating generated build outputs as test inputs', () => {
+  for (const [command, file] of [
+    [
+      'bun test --parallel=1 --max-concurrency=1 ./tests/isolated/current.test.ts',
+      'tests/isolated/current.test.ts',
+    ],
+    ['bun --cwd packages/agent test ./test/current.test.ts', 'packages/agent/test/current.test.ts'],
+  ] as const) {
+    const root = fixture(command);
+    expect(checkUnifiedFormalConsumers(root).violations).toContainEqual({
+      code: 'formal-test-file-missing',
+      path: file,
+      message: 'explicit bun test input must exist',
+    });
+    put(root, file, 'export {};');
+    expect(checkUnifiedFormalConsumers(root).violations).toEqual([]);
+  }
+  const root = fixture('bun build src/entry.ts --outfile dist/generated.test.ts');
+  put(root, 'src/entry.ts', 'export {};');
+  expect(checkUnifiedFormalConsumers(root).violations).toEqual([]);
+});
 test('unlisted aliases, cwd and CI direct old source are rejected before execution; computed fixture qualification stays pending', () => {
   for (const command of [
     'bun run --cwd apps/kite-service build',

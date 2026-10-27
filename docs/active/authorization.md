@@ -7,6 +7,8 @@
 相关：[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)、[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)、[Agent Note 0189](../../.agents/notes/implemented/bug-fix/2026-09-17-auto-review-uncertain-shell.md)、
 `tool-gated-autonomy.md`、`cancel-resume-cleanup.md`、`plan-mode-implementation.md`。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前 V1.3 正式授权
 
 三策略与 Shell 命令分析由 [Agent 独立权限模块](../../packages/agent/src/permissions/README.md)负责，正式宿主通过 `@kite-ai/agent/permissions` 与 `/permissions/shell` 装配。Service 保留接口、身份核对和当前宿主事实读取，不解释 Shell AST、签发命令摘要或实现模式分支；执行接纳、真实审核与最终控制 revision 复核仍归原 Core。模块与解析依赖 owner 的迁移不改变已有审批、恢复或系统沙箱合同。

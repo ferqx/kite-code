@@ -2,12 +2,17 @@
 
 状态：active
 
-读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicy` 时。
+读取时机：修改当前会话日志的 metadata、读取与隐私边界，或核对历史 SessionLogCollector、日志目录和 `sessionLoggingPolicy` 的设计时。
 
-验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts apps/kite-service/test/session-logger/metadata.test.ts apps/kite-service/test/session-logger/recorder.test.ts apps/kite-service/test/isolated/session-logger/writer.test.ts apps/kite-service/test/session-logger/active-session-lease.test.ts apps/kite-service/test/session-logger/retention.test.ts apps/kite-service/test/isolated/exclusive/session-logger/writer-security.test.ts apps/kite-service/test/model-invocation-gateway.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts`、
-`bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
+验证：当前会话日志运行 `bun test ./packages/agent/test/isolated/storage/session-logs.test.ts ./apps/service/test/isolated/session-logs.test.ts`；私有存储权限使用 `bun run scripts/runtime/unified-session-log-acl.ts`，另运行 `bun run typecheck`。本页下述旧 Session Logger 的验证记录仅供历史追溯。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`release/oss-first-release/evidence/2026-07-29-agent-production-local-data-privacy.md`、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)。
+
+## 当前实现与历史记录范围
+
+当前会话日志由 [Agent Store](../../packages/agent/src/storage/sqlite/session-logs.README.md)在既有 `change_event` 中记录有限私有 metadata，经 [Service](../../apps/service/README.md)提供读取。本页下文描述的 SessionLogCollector、JSONL writer、lease、retention 和旧 Runtime 事件投影属于已删除的旧 Session Logger；不能将这些机制视作当前实现或继续运行旧 smoke 脚本。隐私、授权与恢复边界仍按当前 owner 和适用跨包合同核对。
+
+## 旧 Session Logger 实现背景
 
 Session Logger的process-start identity读取已下沉为`@kite-ai/kite-local-runtime/config`共享primitive，原有Linux boot-id/start-ticks、macOS
 current-process fallback与`ps`比较、Windows native creation-time字符串保持不变。此重用只移除重复实现，不让config lock读取Session日志，也不改变
@@ -20,6 +25,8 @@ Session Logger 与 remote observability 是独立通道。启用本地 metadata/
 telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。Runtime 恢复输入与
 日志写入是两个独立域：Session Logger 不能作为 Runtime event source，也不能扩大 content allowlist 或复制
 production Artifact。
+
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## SAQ-10 审批队列日志边界
 

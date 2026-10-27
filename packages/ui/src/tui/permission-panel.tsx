@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
 import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
 import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
+import { useInkWindowSize } from './ink/window-size';
 import type { TuiPermissionSnapshot } from './permissions';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
@@ -19,6 +20,7 @@ type Choice =
 export function TuiPermissionPanel({ controller }: { controller: TuiController }) {
   const { t: originalLabel, language: inkLanguage } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation();
+  const compact = useInkWindowSize().rows < 32;
   const state = controller.state,
     observed = state.permissions;
   const [index, setIndex] = useState(0),
@@ -80,6 +82,7 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
   });
   return (
     <TuiOverlayFrame
+      compact={compact}
       title={
         <>
           {t('Permissions · original Session')}{' '}
@@ -125,7 +128,7 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
               key={mode}
               selected={i === index}
               primary={modeLabels[mode]}
-              secondary={descriptions[mode]}
+              secondary={!compact || i === index ? descriptions[mode] : undefined}
               trailing={
                 <OverlayStatusColumn
                   active={mode === observed.mode.mode}
@@ -138,7 +141,11 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
             {t('Future Session default:')} {makeDefault ? t('yes') : t('no')}{' '}
             {t('· D toggle · Enter review mode choice')}
           </Text>
-          <OverlaySection>{t('Workspace trust')}</OverlaySection>
+          {compact ? (
+            <Text bold>{t('Workspace trust')}</Text>
+          ) : (
+            <OverlaySection>{t('Workspace trust')}</OverlaySection>
+          )}
           <Text>
             {t('Workspace')} {testDiagnostics && terminalText(observed.trust.workspaceId)}
             {':'} {observed.trust.status}
@@ -150,7 +157,7 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
           </Text>
           <Text>
             {t('Identity')} {observed.trust.canonicalIdentity}{' '}
-            {testDiagnostics && (
+            {testDiagnostics && !compact && (
               <>
                 {t('· read scope')} {observed.trust.externalReadScopeDigest}
               </>
@@ -173,6 +180,7 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
             )}
           </Text>
           {testDiagnostics &&
+            !compact &&
             observed.grants.items.map(({ grant }) => (
               <Text key={grant.id}>{terminalText(JSON.stringify(grant))}</Text>
             ))}

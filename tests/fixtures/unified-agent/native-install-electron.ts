@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { NativeState } from '../../../apps/desktop/src/native-bridge';
+import { selectNativeFixtureModel } from '../../../apps/desktop/test/native-model-selection.fixture';
 
 // Finite harness facade: the runtime remains the installed workspace Playwright, not a test implementation.
 interface Locator {
@@ -181,6 +182,10 @@ try {
   childPid = Number(ps[0]![0]);
   assert.deepEqual(await query('locks'), { outer: true, inner: true });
   assert.equal((await query('uninstall')).blocked, true);
+  await selectNativeFixtureModel(
+    page as unknown as Parameters<typeof selectNativeFixtureModel>[0],
+    'fixed',
+  );
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('real installed Native task');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page.getByText('轮次：completed', { exact: true }).waitFor();

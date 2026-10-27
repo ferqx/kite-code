@@ -1,5 +1,7 @@
 # 通用 Agent
 
+2026-10-26，本轮失败修复已通过12份受影响 Agent 完整测试文件。普通输入的 Run、Model 和来源直接绑定原 Command；内部权限模型使用 `authorization.check`，不再把它算作子 Agent／业务 Run。原 Action 来源继承用当前 ensure／prepare／dispatch 检查链核对目标、输入、策略与模型身份，损坏后仍要求零派发事件；Files 协作从实际模型文本回执读取完整 baseline，保留真实 CAS 冲突、结果未知、取消、串行资源与恢复不重放断言。真实恢复 PTY 已核原 Session 和准确历史。此为受影响范围的定向资格，不代表全仓或跨平台验收。
+
 会话附件、输出文件和 Plan 当前文件已接入；机制与验证见 [Files](src/tools/files/README.md)、[Planning](src/business/planning/README.md)和[维护](src/maintenance/README.md)。客户端过程与发行资格分别归 [Desktop](../../apps/desktop/README.md)和 [Terminal](../../apps/cli/docs/terminal-release.md)，不从单项测试推定完整安装或其他平台资格。
 
 原后台 Job 目录可显式请求直接父 Tool 的有限只读来源，供 Desktop 区分后台启动与前台执行；默认响应、取消边与 Job 生命周期保持。[Store owner](src/storage/README.md#跨会话原-job-目录)维护事务范围、敏感字段排除及冷恢复证据。
@@ -34,7 +36,7 @@
 
 正式构建内联[声明的普通 JS 依赖](scripts/bundled-dependencies.ts)，包括独立 Web extraction Worker 的 Readability/Turndown；keyring、Files Node-API、tree-sitter WASM 与 jsdom 动态资源仍沿原外部资产闭包核验。生成物扫描、原许可全文及精确资源复制归 [Terminal owner](../../apps/cli/docs/terminal-release.md)，不改变权限或 Worker 生命周期。Windows 制品原 HANDLE 的类型/大小/身份、完整字节/SHA 和私有批量复制边界归 [platform owner](src/platform/README.md)。
 
-`@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。正式 Terminal 已消费通用 TUI；完整客户端迁移和正式旧路径退役仍按门禁核对。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+`@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。正式 Terminal 已消费通用 TUI。2026-10-26 已按用户要求删除其他旧架构模块，仅保留无运行依赖闭包的 `apps/kite-cli` 历史源码；客户端、资源及正式发布资格仍按实际门禁核对。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 公共当前会话视图保留最近的有限 Run/Execution 历史及原未结束／未知工作，长会话不会因最早200项投影而丢失当前 Run或较早的 live Job。查询只反映原事实，不改变取消和恢复资格；精确范围与真实长会话验收由[Store owner](src/storage/README.md#当前会话视图)维护。
 

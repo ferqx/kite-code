@@ -74,6 +74,7 @@ const application = await _electron.launch({
   env: { HOME: root, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
 });
 let servicePid: number | undefined;
+let observedGeneration = 1;
 const diagnostics: string[] = [];
 application.process().stderr?.on('data', (chunk) => diagnostics.push(String(chunk).slice(0, 1000)));
 try {
@@ -158,6 +159,7 @@ try {
     async () =>
       ((await window.kiteNative!.request({ method: 'attach' })) as NativeState).generation,
   );
+  observedGeneration = generation;
   const selected = await page.evaluate(
     async (generation) =>
       (await window.kiteNative!.request({
@@ -225,6 +227,44 @@ try {
     },
     { generation, storeId },
   );
+  // An applied trust receipt precedes publication of its refreshed read facts.
+  // Read that exact scope before submit can prepare workspace access again.
+  let permissions = (await page.evaluate(
+    async (generation) =>
+      await window.kiteNative!.request({ method: 'permission.refresh', generation }),
+    generation,
+  )) as NativeState;
+  const permissionDeadline = Date.now() + 10000;
+  for (;;) {
+    assert.equal(permissions.generation, generation);
+    assert.equal(permissions.selection?.storeId, storeId);
+    assert.equal(permissions.selection?.session.id, 's');
+    assert.equal(permissions.selection?.session.workspaceId, 'w');
+    const facts = permissions.selection?.permissions;
+    if (facts) {
+      assert.equal(facts.mode.storeId, storeId);
+      assert.equal(facts.mode.sessionId, 's');
+      assert.equal(facts.mode.scopeSessionId, 's');
+      assert.equal(facts.trust.storeId, storeId);
+      assert.equal(facts.trust.workspaceId, 'w');
+    }
+    if (
+      facts?.mode.mode === 'full' &&
+      facts.trust.trusted &&
+      permissions.selection.viewLoading === false &&
+      permissions.selection.permissionUnavailable !== true
+    )
+      break;
+    assert.ok(
+      Date.now() < permissionDeadline,
+      'original full and trusted permissions read settled',
+    );
+    await page.waitForTimeout(25);
+    permissions = (await page.evaluate(
+      async (generation) => await window.kiteNative!.request({ method: 'state', generation }),
+      generation,
+    )) as NativeState;
+  }
   await page.evaluate(
     async (generation) =>
       await window.kiteNative!.request({
@@ -355,15 +395,16 @@ try {
   expect(stopped).toBe(true);
   console.log('Native Settings read owned Service:', JSON.stringify({ servicePid, stopped }));
 } catch (error) {
+  console.error('native_error', error instanceof Error ? error.stack : error);
   console.error(
-    'native_attach',
-    await (await application.firstWindow()).evaluate(async () => {
+    'native_state',
+    await (await application.firstWindow()).evaluate(async (generation) => {
       try {
-        return await window.kiteNative!.request({ method: 'attach' });
+        return await window.kiteNative!.request({ method: 'state', generation });
       } catch (error) {
         return String(error);
       }
-    }),
+    }, observedGeneration),
   );
   console.error(
     'native_page',

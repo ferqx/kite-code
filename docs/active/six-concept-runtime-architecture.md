@@ -14,6 +14,8 @@
 不对应独立Worker进程或DB。旧 Service/Web 控制面不是当前运行入口。详见
 [`本机 App Server 与 Durable Session Runtime`](app-server-local-runtime.md)。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 总览
 
 Kite Code 的运行时由 Agent、Runtime Kernel、Capability、Policy、Execution、Verification 六个概念组成。概念不是 workspace 的同义词；workspace 用于强制依赖方向，概念用于定位 authority。
@@ -33,9 +35,9 @@ Agent → Capability → Policy → Execution → Verification
 | Execution | Runtime Host lifecycle + Builtin concrete mechanisms + App composition | ack 后执行一次，形成 receipt/unknown/terminal，并完成 cleanup |
 | Verification | Builtin verifier + Kernel verification domain | 从 Receipt/Artifact/注入 port 形成 evidence，由 Kernel 决定通过、修复、重规划、补偿或 waiver |
 
-桌面 renderer 仅消费 Native owner 的环境无关 `/client/protocol` 组合及 Runtime/Protocol/App contracts，通过冻结的具名 preload bridge 连接 Electron main-owned 配套 Service；不能导入 Electron、Node/Bun、Native I/O、Host、Store 或 Service concrete source。Electron 主进程单独拥有窗口、项目/Git/编辑器和 stdio lifecycle，不取得 Runtime 业务 authority。当前实现与验证限制见[桌面 owner](../../apps/kite-desktop/README.md)。
+桌面 renderer 仅消费 Native owner 的环境无关 `/client/protocol` 组合及 Runtime/Protocol/App contracts，通过冻结的具名 preload bridge 连接 Electron main-owned 配套 Service；不能导入 Electron、Node/Bun、Native I/O、Host、Store 或 Service concrete source。Electron 主进程单独拥有窗口、项目/Git/编辑器和 stdio lifecycle，不取得 Runtime 业务 authority。当前实现与验证限制见[桌面 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/README.md)。
 
-Web 与桌面共同消费[共享 React 页面](../../packages/kite-client-ui/README.md)。共享包不依赖任何 Runtime、协议、Host、Native 或 app workspace；两个入口只注入各自真实数据与已授权操作。页面复用不扩大 Browser principal 权限，也不将展示状态提升为执行权威。
+Web 与桌面共同消费[共享 React 页面](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/README.md)。共享包不依赖任何 Runtime、协议、Host、Native 或 app workspace；两个入口只注入各自真实数据与已授权操作。页面复用不扩大 Browser principal 权限，也不将展示状态提升为执行权威。
 
 ## Client Contract 与 SPI
 
@@ -101,7 +103,7 @@ codec并实现Native connector；package不组合Store或Runtime业务owner；cl
 Runtime或Store；Browser read context直接复用同一`kite-session.sqlite` Directory/Runtime/History/Checkpoint authority。Agent context仍可由
 内部Worker carrier以query-only private Runtime logical connection承载。Web只依赖client与contract，不依赖Service或Runtime package。
 
-`apps/kite-service/src/composition.ts` 负责具体 Runtime 依赖组装。默认 App Server owner 先打开当前 profile 的 `kite-session.sqlite`，注入 Session Store、Builtin assembly、Host、Runtime Server、History 与 App Control。物理/逻辑版本和非默认 adapter 的范围只在[Storage 格式与入口](../../packages/runtime-storage-sqlite/README.md#格式与实际入口)完整维护。
+`apps/kite-service/src/composition.ts` 负责具体 Runtime 依赖组装。默认 App Server owner 先打开当前 profile 的 `kite-session.sqlite`，注入 Session Store、Builtin assembly、Host、Runtime Server、History 与 App Control。物理/逻辑版本和非默认 adapter 的范围只在[Storage 格式与入口](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md#格式与实际入口)完整维护。
 
 一个 App Server process 可访问多个持久 Session，context 按完整 Project/Workspace identity 隔离；同一 Session 的多进程写入由持久 execution authority 裁决。不能把保留的 Worker factory 或旧 adapter 当成默认第二 writer，不使用 try-new-catch-old fallback。
 
@@ -174,9 +176,9 @@ Builtin concrete operation modules位于 `git/model/planning/subagent/verificati
 
 App Session 的执行权威位于 Runtime Host；Service 只保留面向命令的局部适配：
 
-- [Service composition](../../apps/kite-service/src/composition.ts) 通过 Runtime History 与 Store 快照提供 Session 列表、加载和事件读取；生命周期命令由 Host 与 Storage owner 受理；
+- [Service composition](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/composition.ts) 通过 Runtime History 与 Store 快照提供 Session 列表、加载和事件读取；生命周期命令由 Host 与 Storage owner 受理；
 - `rewind-service` 管理 checkpoint preview/fork/restore；
-- [turn-command-decision](../../apps/kite-service/src/bootstrap/runtime/turn-command-decision.ts) 与 [turn-coordinator](../../apps/kite-service/src/bootstrap/runtime/turn-coordinator.ts) 通过 live Kernel control 生成 Plan 模式进入事件；
+- [turn-command-decision](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/bootstrap/runtime/turn-command-decision.ts) 与 [turn-coordinator](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/bootstrap/runtime/turn-coordinator.ts) 通过 live Kernel control 生成 Plan 模式进入事件；
 - `context-compaction-service` 复用同一 Host control、Model Gateway、effect lease 与 storage ports；
 - `runtime-host/src/host/session-registry.ts` 管理每个 Session 的 mailbox、revision fencing、lifecycle 与 recovery；
 - Runtime Client/Service projection 形成 Session/TUI 可消费投影，Service 不再提供独立 legacy session-manager/session-runtime registry。
@@ -241,7 +243,7 @@ Approval rejection的durable settlement同样只由当前turn的事实决定：i
 
 ## SQLite storage
 
-`@kite-ai/runtime-storage-sqlite` 是 Host storage port 的 SQLite adapter。默认 App Server 使用 Session Store owner；物理格式、逻辑 epoch 与保留的旧布局见[Storage 入口表](../../packages/runtime-storage-sqlite/README.md#格式与实际入口)。不能把 adapter.ts 的旧 profile lifecycle 视为默认数据库 owner。
+`@kite-ai/runtime-storage-sqlite` 是 Host storage port 的 SQLite adapter。默认 App Server 使用 Session Store owner；物理格式、逻辑 epoch 与保留的旧布局见[Storage 入口表](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md#格式与实际入口)。不能把 adapter.ts 的旧 profile lifecycle 视为默认数据库 owner。
 
 跨包不变量：
 
@@ -251,7 +253,7 @@ Approval rejection的durable settlement同样只由当前turn的事实决定：i
 - 读取不取得执行权限；Directory/History/Checkpoint 的投影不能取代严格 Session 恢复检查。恢复点顺序使用 durable event position，不按显示时间猜测。
 - 默认 Session Store 的普通业务读取只接受当前格式；启动准备在独占维护与连续性校验下，才可将已验证的旧 Store 来源转换为私有候选并发布。准确来源、版本和失败边界以[本机 App Server Store 契约](app-server-local-runtime.md#store-与版本)为准；不建立 dual write 或执行 fallback。
 
-事务、Artifact、Run coverage、fork/rewind 与版本内检查的完整实现约束分别见[事务](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)、[恢复](../../packages/runtime-storage-sqlite/docs/authority-and-recovery.md)、[查询](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。Ack、Receipt、terminal 与 cleanup 的顺序不得因 adapter 选择而改写。
+事务、Artifact、Run coverage、fork/rewind 与版本内检查的完整实现约束分别见[事务](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/transactions-and-state.md)、[恢复](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/authority-and-recovery.md)、[查询](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。Ack、Receipt、terminal 与 cleanup 的顺序不得因 adapter 选择而改写。
 
 ## MCP、Subagent 与 Verification
 

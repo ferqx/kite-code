@@ -1,7 +1,7 @@
 # Runtime Application client boundary
 
 本页是 `apps/kite-cli` 的owner-local current authority，描述terminal App与parent-owned App Server Runtime Application的边界。Host/Store composition见
-[`apps/kite-service/docs/runtime-application.md`](../../kite-service/docs/runtime-application.md)。
+[`apps/kite-service/docs/runtime-application.md`](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)。
 
 ## 当前组合
 

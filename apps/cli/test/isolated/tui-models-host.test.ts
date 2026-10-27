@@ -316,34 +316,16 @@ for (const mode of ['paired', 'shared'] as const)
             .all(expected.content) as { id: string }[];
           expect(originals).toHaveLength(1);
           const original = (await proofStore.getCommand(originals[0]!.id))!;
-          const receipt = original.receipt as {
-            businessCommandId?: string;
-            humanInputCommandId?: string;
-            runId: string;
-          };
-          const businessId = receipt.businessCommandId ?? original.id;
+          const receipt = original.receipt as { runId: string };
+          const businessId = original.id;
           expect(original.status).toBe('applied');
           const run = (await proofStore.getRun(receipt.runId))!;
+          expect(receipt).toEqual({ runId: run.id });
           expect(run).toMatchObject({
-            originCommandId: businessId,
+            originCommandId: original.id,
             rootWorkCommandId: original.id,
           });
-          if (expected.content.startsWith('New task:')) {
-            expect(receipt.businessCommandId).toBeString();
-            expect(businessId).not.toBe(original.id);
-            expect(await proofStore.getCommand(receipt.humanInputCommandId!)).toMatchObject({
-              request: {
-                publicCommandId: original.id,
-                content: expected.content,
-                originalRequest: original.request,
-              },
-              receipt: { businessCommandId: businessId, state: 'decided' },
-            });
-            expect(await proofStore.getCommand(businessId)).toMatchObject({
-              status: 'applied',
-              receipt: { runId: run.id },
-            });
-          }
+          expect(original.request).toMatchObject({ kind: 'run.start', content: expected.content });
           const models = (await proofStore.listExecutions(original.sessionId)).filter(
             (execution) => execution.kind === 'model' && execution.runId === run.id,
           );

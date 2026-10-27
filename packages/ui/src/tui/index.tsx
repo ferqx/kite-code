@@ -43,8 +43,10 @@ import {
   InkExecutionGroupView,
   InkTaskProgress,
   InkThought,
+  inkExecutionHistoryMutable,
   inkShellCarrier,
   inkShellParent,
+  inkStandaloneJobAnchor,
   projectInkChild,
   projectInkExecutionGroups,
 } from './execution-projection';
@@ -72,6 +74,7 @@ import {
   settleInkModelStream,
 } from './model-stream-presentation';
 import { TuiOnboarding } from './onboarding-panel';
+import { TuiPanelViewport } from './panel-viewport';
 import { TuiPermissionPanel } from './permission-panel';
 import { TuiPlanReviewPanel } from './plan-review-panel';
 import { TuiPreferencePanel } from './preference-panel';
@@ -477,6 +480,16 @@ function TuiHistory({
     );
     const renderedGroups = new Set<string>();
     const placed = new Set<string>();
+    const standaloneAnchors = new Map(
+      snapshot
+        ? results.flatMap((execution) => {
+            const anchor = inkStandaloneJobAnchor(execution, snapshot, messages);
+            return anchor ? [[execution.id, anchor] as const] : [];
+          })
+        : [],
+    );
+    const historyMutable = (execution: Execution) =>
+      inkExecutionHistoryMutable(execution, snapshot);
     const phaseByExecution = new Map(
       exploration?.phases.flatMap((phase) =>
         phase.executionIds.map((id) => [id, phase] as const),
@@ -523,6 +536,7 @@ function TuiHistory({
       // locates it in the original Run, never after later unrelated messages.
       const source = callOwner(execution);
       return (
+        (source.runId !== null || source.kind !== 'job') &&
         source.sessionId === (message.originMessage?.sessionId ?? message.sessionId) &&
         source.runId === (message.originMessage ? message.originMessage.runId : message.runId) &&
         source.originStoreId === (message.originMessage?.storeId ?? snapshot?.storeId)
@@ -538,7 +552,7 @@ function TuiHistory({
         snapshot?.toolLabels?.find((label) => label.executionId === execution.id),
         snapshot?.jobTails?.find((tail) => tail.executionId === execution.id),
       ]),
-      mutable: executionLive(execution),
+      mutable: historyMutable(execution),
       ...(snapshot && projectInkChild(execution, snapshot, loadedOutputs)
         ? {
             subagentSteps: [projectInkChild(execution, snapshot, loadedOutputs)!.steps.length],
@@ -607,7 +621,7 @@ function TuiHistory({
             key: `group:${group.key}`,
             version: JSON.stringify(group),
             mutable: group.executionIds.some((id) =>
-              results.some((item) => item.id === id && executionLive(item)),
+              results.some((item) => item.id === id && historyMutable(item)),
             ),
             ...(group.kind === 'concurrent_subagents'
               ? {
@@ -630,6 +644,11 @@ function TuiHistory({
       ...localItems(null),
       ...transcript.flatMap((item, index): HistoryItem[] => {
         const message = item.message;
+        const before = results.filter(
+          (execution) =>
+            !placed.has(execution.id) && standaloneAnchors.get(execution.id) === message.id,
+        );
+        for (const execution of before) placed.add(execution.id);
         const timing =
           message.outputBody && snapshot?.executionTimings?.[message.outputBody.executionId];
         const model = snapshot?.view.executions.find(
@@ -744,6 +763,7 @@ function TuiHistory({
             <TuiToolResult item={item} />
           );
         return [
+          ...executionItems(before),
           ...(!testDiagnostics && (ownedResult || hiddenSettledMessage)
             ? []
             : [
@@ -753,7 +773,7 @@ function TuiHistory({
                     message.status === 'incomplete' ||
                     stream?.buffered ||
                     (!!model && executionLive(model)) ||
-                    related.some(executionLive),
+                    related.some(historyMutable),
                   // Completed previews seal in source order. An explicit full
                   // read changes this version and rebuilds the static prefix.
                   version: JSON.stringify([
@@ -863,7 +883,7 @@ function TuiHistory({
                   node: testDiagnostics ? (
                     <Text dimColor>{t('Recorded executions for this task')}</Text>
                   ) : null,
-                  mutable: remainder.some(executionLive),
+                  mutable: remainder.some(historyMutable),
                 },
                 ...executionItems(remainder),
               ]
@@ -2265,41 +2285,43 @@ function TuiSessionView({
           title={`${t('Pending cards ·')} ${cardOptions.length}`}
           hint={t('· Up/Down, Enter selects original card, Esc closes')}
         >
-          {cardOptions.slice(Math.max(0, cardIndex - 2), cardIndex + 3).map((item) => (
-            <Text key={interactionKey(item)}>
-              {cardOptions[cardIndex] === item ? '› ' : '  '}
-              {testDiagnostics ? (
-                <>
-                  {item.kind} [{terminalText(item.id)}
-                  {t('] original Session')} {terminalText(item.sessionId)} · Store{' '}
-                  {terminalText(item.originStoreId)} {t('· revision')} {item.revision}
-                </>
-              ) : (
-                <>
-                  {t(
-                    item.kind === 'approval'
-                      ? 'Approval'
-                      : item.kind === 'plan_review'
-                        ? 'Plan review'
-                        : 'Question',
-                  )}{' '}
-                  ·{' '}
-                  {terminalText(
-                    String(
-                      (item.request &&
-                        typeof item.request === 'object' &&
-                        !Array.isArray(item.request) &&
-                        (item.request.title ?? item.request.description)) ||
-                        '',
-                    ),
-                  )}
-                </>
-              )}
-              {cards.some((current) => interactionKey(current) === interactionKey(item))
-                ? ''
-                : t(' · changed; reopen to select')}
-            </Text>
-          ))}
+          {cardOptions
+            .slice(Math.max(0, cardIndex - 1), cardIndex + (rows < 32 ? 1 : 3))
+            .map((item) => (
+              <Text key={interactionKey(item)}>
+                {cardOptions[cardIndex] === item ? '› ' : '  '}
+                {testDiagnostics ? (
+                  <>
+                    {item.kind} [{terminalText(item.id)}
+                    {t('] original Session')} {terminalText(item.sessionId)} · Store{' '}
+                    {terminalText(item.originStoreId)} {t('· revision')} {item.revision}
+                  </>
+                ) : (
+                  <>
+                    {t(
+                      item.kind === 'approval'
+                        ? 'Approval'
+                        : item.kind === 'plan_review'
+                          ? 'Plan review'
+                          : 'Question',
+                    )}{' '}
+                    ·{' '}
+                    {terminalText(
+                      String(
+                        (item.request &&
+                          typeof item.request === 'object' &&
+                          !Array.isArray(item.request) &&
+                          (item.request.title ?? item.request.description)) ||
+                          '',
+                      ),
+                    )}
+                  </>
+                )}
+                {cards.some((current) => interactionKey(current) === interactionKey(item))
+                  ? ''
+                  : t(' · changed; reopen to select')}
+              </Text>
+            ))}
         </TuiOverlayFrame>
       )}
       {card && !cardChooser && !chooser && !blockingPanel && (
@@ -2416,184 +2438,197 @@ function TuiSessionView({
         </Box>
       )}
       {state.panel === 'context' && (
-        <TuiOverlayFrame title={t('Context')}>
-          <Text>
-            {t('Current selected Context projection, not actual Model input Inspector; Esc close')}
-          </Text>
-          <Text>{t('K: choose an original Context/Session request')}</Text>
-          {state.context ? (
-            <>
-              {testDiagnostics && (
-                <Text>
-                  {t('Selection')} {terminalText(state.context.selection.id)} {t('/ frozen upper')}{' '}
-                  {state.context.highWaterSeq}
-                </Text>
+        <TuiOverlayFrame compact title={t('Context')}>
+          <TuiPanelViewport
+            rows={Math.max(
+              3,
+              Math.min(rows - 1, availableRows ?? rows - 1) - (testDiagnostics ? 8 : 4),
+            )}
+            identity={JSON.stringify([state.sessionId, state.context?.selection.id])}
+          >
+            <Text>
+              {t(
+                'Current selected Context projection, not actual Model input Inspector; Esc close',
               )}
-              {state.context.messages.map((message) => (
-                <Box key={message.id} flexDirection="column">
-                  <Text bold>
-                    {testDiagnostics
-                      ? `${message.seq} [${terminalText(message.id)}]`
-                      : t(
-                          message.role === 'user'
-                            ? 'User'
-                            : message.role === 'assistant'
-                              ? 'Assistant'
-                              : message.role === 'tool'
-                                ? 'Tool result'
-                                : 'System',
-                        )}
+            </Text>
+            <Text>{t('K: choose an original Context/Session request')}</Text>
+            {state.context ? (
+              <>
+                {testDiagnostics && (
+                  <Text>
+                    {t('Selection')} {terminalText(state.context.selection.id)}{' '}
+                    {t('/ frozen upper')} {state.context.highWaterSeq}
                   </Text>
-                  <TerminalMarkdown content={message.content} />
-                </Box>
-              ))}
-              {state.context.resultSources.map((source) => (
-                <Box key={source.id} flexDirection="column">
-                  <Text bold>
-                    {t('Source')}{' '}
-                    {testDiagnostics
-                      ? `${terminalText(source.id)} [${terminalText(source.executionId)}]`
-                      : terminalText(
-                          state.snapshot?.view.executions.find(
-                            (item) => item.id === source.executionId,
-                          )?.definitionId ?? t('Recorded result'),
-                        )}
-                  </Text>
-                  <TuiResult value={source.result} />
-                </Box>
-              ))}
-            </>
-          ) : (
-            <Text>{t('Context reading/unavailable')}</Text>
-          )}
-          {state.panel === 'context' && (
-            <>
-              <Text>
-                {t(
-                  'Choose exact historical result with arrows; i explicitly includes into displayed active original Run or idle selection.',
                 )}
-              </Text>
-              {state.snapshot?.view.executions
-                .filter((e) => e.resultRevision !== null)
-                .map((e, i) => ({ e, i }))
-                .slice(Math.max(0, panelIndex - 2), panelIndex + 3)
-                .map(({ e, i }) => (
-                  <Text key={e.id}>
-                    {panelIndex === i ? '› ' : ''}
-                    {testDiagnostics ? (
-                      <>
-                        {terminalText(e.id)} {t('revision')}{' '}
-                        {terminalText(e.resultRevision ?? t('unavailable'))}
-                      </>
-                    ) : (
-                      terminalText(e.definitionId)
-                    )}{' '}
-                    {'/'} {testDiagnostics ? e.status : t(e.status)}
-                  </Text>
+                {state.context.messages.map((message) => (
+                  <Box key={message.id} flexDirection="column">
+                    <Text bold>
+                      {testDiagnostics
+                        ? `${message.seq} [${terminalText(message.id)}]`
+                        : t(
+                            message.role === 'user'
+                              ? 'User'
+                              : message.role === 'assistant'
+                                ? 'Assistant'
+                                : message.role === 'tool'
+                                  ? 'Tool result'
+                                  : 'System',
+                          )}
+                    </Text>
+                    <TerminalMarkdown content={message.content} />
+                  </Box>
                 ))}
-              <Text>
-                {t('Target Run')}{' '}
-                {testDiagnostics
-                  ? terminalText(state.snapshot?.view.runs.find((r) => r.isActive)?.id ?? 'idle')
-                  : t(
-                      state.snapshot?.view.runs.some((run) => run.isActive)
-                        ? 'Current task'
-                        : 'Next task',
-                    )}
-              </Text>
-              {state.snapshot?.environment?.usage && (
+                {state.context.resultSources.map((source) => (
+                  <Box key={source.id} flexDirection="column">
+                    <Text bold>
+                      {t('Source')}{' '}
+                      {testDiagnostics
+                        ? `${terminalText(source.id)} [${terminalText(source.executionId)}]`
+                        : terminalText(
+                            state.snapshot?.view.executions.find(
+                              (item) => item.id === source.executionId,
+                            )?.definitionId ?? t('Recorded result'),
+                          )}
+                    </Text>
+                    <TuiResult value={source.result} />
+                  </Box>
+                ))}
+              </>
+            ) : (
+              <Text>{t('Context reading/unavailable')}</Text>
+            )}
+            {state.panel === 'context' && (
+              <>
                 <Text>
                   {t(
-                    state.snapshot.environment.usage.scope === 'observed'
-                      ? 'Observed actual usage:'
-                      : 'Cumulative actual usage:',
-                  )}{' '}
-                  {state.snapshot.environment.usage.inputTokens?.toLocaleString() ??
-                    t('unavailable')}{' '}
-                  {t('input tokens')}
-                  {state.snapshot.environment.usage.outputTokens !== undefined &&
-                    ` · ${state.snapshot.environment.usage.outputTokens.toLocaleString()} ${t('output tokens')}`}
+                    'Choose exact historical result with arrows; i explicitly includes into displayed active original Run or idle selection.',
+                  )}
                 </Text>
-              )}
-              {state.snapshot?.environment?.usage?.missingInputCount !== undefined && (
-                <Text dimColor>
-                  {t('Usage coverage:')}{' '}
-                  {state.snapshot.environment.usage.executionCount -
-                    state.snapshot.environment.usage.missingInputCount}
-                  /{state.snapshot.environment.usage.executionCount} {t('input tokens')}
-                  {' · '}
-                  {state.snapshot.environment.usage.executionCount -
-                    (state.snapshot.environment.usage.missingOutputCount ?? 0)}
-                  /{state.snapshot.environment.usage.executionCount} {t('output tokens')}
+                {state.snapshot?.view.executions
+                  .filter((e) => e.resultRevision !== null)
+                  .map((e, i) => ({ e, i }))
+                  .slice(Math.max(0, panelIndex - 2), panelIndex + 3)
+                  .map(({ e, i }) => (
+                    <Text key={e.id}>
+                      {panelIndex === i ? '› ' : ''}
+                      {testDiagnostics ? (
+                        <>
+                          {terminalText(e.id)} {t('revision')}{' '}
+                          {terminalText(e.resultRevision ?? t('unavailable'))}
+                        </>
+                      ) : (
+                        terminalText(e.definitionId)
+                      )}{' '}
+                      {'/'} {testDiagnostics ? e.status : t(e.status)}
+                    </Text>
+                  ))}
+                <Text>
+                  {t('Target Run')}{' '}
+                  {testDiagnostics
+                    ? terminalText(state.snapshot?.view.runs.find((r) => r.isActive)?.id ?? 'idle')
+                    : t(
+                        state.snapshot?.view.runs.some((run) => run.isActive)
+                          ? 'Current task'
+                          : 'Next task',
+                      )}
                 </Text>
-              )}
-              {nextContext && (
-                <Box flexDirection="column">
+                {state.snapshot?.environment?.usage && (
                   <Text>
-                    {t('Next request context estimate:')}{' '}
-                    {nextContext.totalInputTokens.toLocaleString()}
+                    {t(
+                      state.snapshot.environment.usage.scope === 'observed'
+                        ? 'Observed actual usage:'
+                        : 'Cumulative actual usage:',
+                    )}{' '}
+                    {state.snapshot.environment.usage.inputTokens?.toLocaleString() ??
+                      t('unavailable')}{' '}
+                    {t('input tokens')}
+                    {state.snapshot.environment.usage.outputTokens !== undefined &&
+                      ` · ${state.snapshot.environment.usage.outputTokens.toLocaleString()} ${t('output tokens')}`}
                   </Text>
+                )}
+                {state.snapshot?.environment?.usage?.missingInputCount !== undefined && (
                   <Text dimColor>
-                    {t('Measured baseline:')}{' '}
-                    {nextContext.source === 'reported_baseline'
-                      ? nextContext.measuredInputTokens.toLocaleString()
-                      : t('unavailable')}
+                    {t('Usage coverage:')}{' '}
+                    {state.snapshot.environment.usage.executionCount -
+                      state.snapshot.environment.usage.missingInputCount}
+                    /{state.snapshot.environment.usage.executionCount} {t('input tokens')}
                     {' · '}
-                    {t(
-                      nextContext.source === 'reported_baseline'
-                        ? 'Estimated additions:'
-                        : 'Full local estimate:',
-                    )}{' '}
-                    {nextContext.estimatedInputTokens.toLocaleString()}
+                    {state.snapshot.environment.usage.executionCount -
+                      (state.snapshot.environment.usage.missingOutputCount ?? 0)}
+                    /{state.snapshot.environment.usage.executionCount} {t('output tokens')}
                   </Text>
-                  <Text dimColor>
-                    {t('Based on recorded sources and selected history; future input may differ.')}
-                  </Text>
-                </Box>
-              )}
-              {!nextContext && (
-                <Text dimColor>{t('Next request context estimate unavailable')}</Text>
-              )}
-              {verifiedContext ? (
-                <Box flexDirection="column">
-                  {verifiedContext.reportedInputTokens === undefined && (
+                )}
+                {nextContext && (
+                  <Box flexDirection="column">
                     <Text>
-                      {t('Last request actual input:')} {t('unavailable')}
+                      {t('Next request context estimate:')}{' '}
+                      {nextContext.totalInputTokens.toLocaleString()}
                     </Text>
-                  )}
-                  <Text>
-                    {t(
-                      verifiedContext.reportedInputTokens !== undefined
-                        ? 'Reported Model input tokens:'
-                        : 'Verified Model context estimate:',
-                    )}{' '}
-                    {(
-                      verifiedContext.reportedInputTokens ??
-                      verifiedContext.estimate.totalInputTokens
-                    ).toLocaleString()}
-                  </Text>
-                  {verifiedContext.utilization !== undefined && (
-                    <Text>
-                      {t('Context usage:')} {Math.round(verifiedContext.utilization * 100)}%{' · '}
-                      {t('Usable input:')} {verifiedContext.usableInputTokens!.toLocaleString()}
+                    <Text dimColor>
+                      {t('Measured baseline:')}{' '}
+                      {nextContext.source === 'reported_baseline'
+                        ? nextContext.measuredInputTokens.toLocaleString()
+                        : t('unavailable')}
+                      {' · '}
+                      {t(
+                        nextContext.source === 'reported_baseline'
+                          ? 'Estimated additions:'
+                          : 'Full local estimate:',
+                      )}{' '}
+                      {nextContext.estimatedInputTokens.toLocaleString()}
                     </Text>
-                  )}
-                  <Text dimColor>
-                    {t(
-                      verifiedContext.reportedInputTokens !== undefined
-                        ? 'Reported by the Provider for this request; future input may differ.'
-                        : 'Based on the last verified Model input; future input may differ.',
+                    <Text dimColor>
+                      {t(
+                        'Based on recorded sources and selected history; future input may differ.',
+                      )}
+                    </Text>
+                  </Box>
+                )}
+                {!nextContext && (
+                  <Text dimColor>{t('Next request context estimate unavailable')}</Text>
+                )}
+                {verifiedContext ? (
+                  <Box flexDirection="column">
+                    {verifiedContext.reportedInputTokens === undefined && (
+                      <Text>
+                        {t('Last request actual input:')} {t('unavailable')}
+                      </Text>
                     )}
-                  </Text>
-                  {verifiedContext.utilization === undefined && (
-                    <Text dimColor>{t('Context capacity estimate unavailable')}</Text>
-                  )}
-                </Box>
-              ) : (
-                <Text dimColor>{t('Context capacity estimate unavailable')}</Text>
-              )}
-            </>
-          )}
+                    <Text>
+                      {t(
+                        verifiedContext.reportedInputTokens !== undefined
+                          ? 'Reported Model input tokens:'
+                          : 'Verified Model context estimate:',
+                      )}{' '}
+                      {(
+                        verifiedContext.reportedInputTokens ??
+                        verifiedContext.estimate.totalInputTokens
+                      ).toLocaleString()}
+                    </Text>
+                    {verifiedContext.utilization !== undefined && (
+                      <Text>
+                        {t('Context usage:')} {Math.round(verifiedContext.utilization * 100)}%
+                        {' · '}
+                        {t('Usable input:')} {verifiedContext.usableInputTokens!.toLocaleString()}
+                      </Text>
+                    )}
+                    <Text dimColor>
+                      {t(
+                        verifiedContext.reportedInputTokens !== undefined
+                          ? 'Reported by the Provider for this request; future input may differ.'
+                          : 'Based on the last verified Model input; future input may differ.',
+                      )}
+                    </Text>
+                    {verifiedContext.utilization === undefined && (
+                      <Text dimColor>{t('Context capacity estimate unavailable')}</Text>
+                    )}
+                  </Box>
+                ) : (
+                  <Text dimColor>{t('Context capacity estimate unavailable')}</Text>
+                )}
+              </>
+            )}
+          </TuiPanelViewport>
         </TuiOverlayFrame>
       )}
       {state.notice && (testDiagnostics || !state.notice.startsWith('/plan [task]')) && (
@@ -2636,6 +2671,9 @@ function TuiSessionView({
           </Text>
         )}
       {testDiagnostics &&
+        ((!card && !cardChooser && !chooser) ||
+          state.intent?.kind === 'interaction.answer' ||
+          ['unknown', 'submitting', 'rejected'].includes(state.intent?.phase ?? '')) &&
         state.intent &&
         (testDiagnostics ||
           ['unknown', 'submitting', 'rejected'].includes(state.intent.phase) ||
@@ -2667,7 +2705,7 @@ function TuiSessionView({
           {t('Error:')} {terminalText(visibleError)}
         </Text>
       )}
-      {testDiagnostics && (
+      {testDiagnostics && !card && !cardChooser && !chooser && (
         <Text>
           {t(
             'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+O full output · Ctrl+C cancels exact original Command',
@@ -2738,6 +2776,10 @@ function TuiSessionView({
             </Text>
           )}
         <TuiComposer
+          availableRows={Math.max(
+            1,
+            Math.min(rows - 1, availableRows ?? rows - 1) - (testDiagnostics ? 6 : 2),
+          )}
           planning={state.planning}
           buffer={composer}
           files={state.fileCandidates}

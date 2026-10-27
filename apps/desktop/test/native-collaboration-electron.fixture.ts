@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { ElementHandle } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 const [candidate, home, control, storeId, desktopPackage] = process.argv.slice(2) as [
   string,
@@ -189,6 +190,7 @@ try {
     );
   }
   async function send(content: string) {
+    await selectNativeFixtureModel(page, 'fixed');
     await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(content);
     const button = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
     await until(() => button.isEnabled(), Boolean, 'ordinary send enabled');
@@ -351,17 +353,21 @@ try {
   await firstResultCard.getByText('CHILD_A_DONE_1', { exact: true }).waitFor();
   const firstResultId = (await firstResultCard.getAttribute('data-agent-result-source'))!;
   assert.ok(firstResultId);
-  assert.ok((await state()).selection!.runs.some((run) => run.isActive));
+  await until(
+    state,
+    (value) => value.selection!.runs.some((run) => run.isActive),
+    'held parent continuation is admitted in the original Native view',
+  );
   assert.equal(await firstResultCard.getAttribute('aria-label'), 'CHILD_A Agent 发送的消息');
   await firstResultCard.getByText('CHILD_A Agent 发送', { exact: true }).waitFor();
   const bubbleAppearance = async (node: ReturnType<typeof page.locator>) =>
     node.evaluate((element) => {
-      const style = getComputedStyle(element);
+      const style = getComputedStyle(element.querySelector('.user-message-body') ?? element);
       return {
         background: style.backgroundColor,
         borderRadius: style.borderRadius,
         padding: style.padding,
-        maxWidth: style.maxWidth,
+        maxWidth: getComputedStyle(element).maxWidth,
         fontSize: style.fontSize,
       };
     });
@@ -673,9 +679,14 @@ try {
     true,
   );
   const activeProcess = page.locator('.agent-turn[data-turn-status="running"]');
+  for (const group of await activeProcess
+    .locator('.tool-activity-aggregate > .tool-activity-summary')
+    .all())
+    if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
   const events = activeProcess
-    .locator('.tool-activity-summary')
-    .filter({ hasText: '等待 Agent 事件' });
+    .locator('article.tool-activity:not(.tool-activity-aggregate) > .tool-activity-summary')
+    .filter({ hasText: '等待 Agent 事件' })
+    .first();
   await events.waitFor();
   await events.click();
   await until(
@@ -805,6 +816,17 @@ try {
           state: await page.evaluate(
             async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
           ),
+          presentation: await page.evaluate(() => {
+            const target = window as typeof window & {
+              __backgroundFacts?: unknown;
+              __toolFacts?: unknown;
+            };
+            return {
+              background: target.__backgroundFacts,
+              tools: target.__toolFacts,
+              turns: [...document.querySelectorAll('.agent-turn')].map((node) => node.outerHTML),
+            };
+          }),
         }),
       );
     } catch {}

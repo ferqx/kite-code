@@ -161,7 +161,7 @@ Workspace。Store 8 target第一次新写之后禁止自动回到Store 7。旧bi
 KASAPI-01 contract和KASAPI-02 read-only façade可以先实施；任何Run route、mutation admission或`runs`capability都必须等Store 8迁移、
 reopen/fault/cutover Gate完成。
 
-原记录接受target contract时，Store 8尚未实现。其Run index、same-connection port与Store 7→8迁移后来作为非默认Workspace Worker profile交付；当前默认拓扑、可用API和保留的旧profile分别以[Store owner](../../../../packages/runtime-storage-sqlite/README.md)与[当前跨包说明](../../../../docs/active/sqlite-runtime-log-query.md)为准。上列顺序保留为当时的迁移取舍，不表示普通启动仍使用Store 7或Store 8。
+原记录接受target contract时，Store 8尚未实现。其Run index、same-connection port与Store 7→8迁移后来作为非默认Workspace Worker profile交付；当前默认拓扑、可用API和保留的旧profile分别以[Store owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md)与[当前跨包说明](../../../../docs/active/sqlite-runtime-log-query.md)为准。上列顺序保留为当时的迁移取舍，不表示普通启动仍使用Store 7或Store 8。
 
 ## Alternatives considered
 ### Store 7原地加optional Run table

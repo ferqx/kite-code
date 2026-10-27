@@ -17,6 +17,7 @@ import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { initializeLivePermissionFixture } from '../../../service/test/fixtures/live-permission-fixture';
 
 const questions: Json = {
   questions: [
@@ -161,6 +162,16 @@ async function fixture() {
     workspaceId: 'w',
     commandId: 'create',
     title: 'Questions',
+  });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    expectedStoreId,
+    subjectId: 'owner',
+    sessionId: 's',
+    workspaceId: 'w',
+    mode: 'full',
+    trusted: true,
   });
   return {
     root,

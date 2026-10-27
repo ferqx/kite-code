@@ -139,6 +139,7 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
   host.permissionManagement?.(runtime);
   const expectedStoreId = (await runtime.getMetadata()).storeId;
   const base = { expectedStoreId, subjectId: 'owner', sessionId: 's' };
+  let recoveryRuntime: ReturnType<typeof createRuntime> | undefined;
   try {
     await runtime.createWorkspace({
       expectedStoreId,
@@ -193,6 +194,19 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
       allowWaiver: true,
       allowReplan: true,
     });
+    const recoveryInput = {
+      command: (await store.getCommand('original'))!,
+      run,
+      session: (await store.getSession('s'))!,
+      workspace: (await store.getWorkspace('w'))!,
+      signal: new AbortController().signal,
+    };
+    await runtime.close();
+    const recoveryStore = await openSqliteStore({
+      dataRoot: profile.dataRoot,
+      profile: profile.profile,
+    });
+    recoveryRuntime = createRuntime({ store: recoveryStore, permissions });
     const changed = createDefaultProcessConfiguration({
       userConfigurationPath: profile.profilePath + '/config.jsonc',
       profile,
@@ -200,24 +214,26 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
       permissions,
       skillWorkflow: { userDecisions: { version: '1', allowWaiver: false, allowReplan: true } },
     });
-    await expect(
-      changed.resolveRecoveryRunConfiguration!({
-        command: (await store.getCommand('original'))!,
-        run,
-        session: (await store.getSession('s'))!,
-        workspace: (await store.getWorkspace('w'))!,
-        signal: new AbortController().signal,
-      }),
-    ).rejects.toThrow('recovery_configuration_changed');
+    changed.permissionManagement!(recoveryRuntime);
+    let driftError: unknown;
+    try {
+      await changed.resolveRecoveryRunConfiguration!(recoveryInput);
+    } catch (error) {
+      driftError = error;
+    }
+    expect(driftError).toBeInstanceOf(Error);
+    expect((driftError as Error).message).toContain('recovery_configuration_changed');
     expect(vault).toBe(1);
     expect(models).toBe(2);
-    const original = await host.resolveRecoveryRunConfiguration!({
-      command: (await store.getCommand('original'))!,
-      run,
-      session: (await store.getSession('s'))!,
-      workspace: (await store.getWorkspace('w'))!,
-      signal: new AbortController().signal,
+    const unchanged = createDefaultProcessConfiguration({
+      userConfigurationPath: profile.profilePath + '/config.jsonc',
+      profile,
+      credentialBackend: backend,
+      permissions,
+      skillWorkflow: { userDecisions: { version: '1', allowWaiver: true, allowReplan: true } },
     });
+    unchanged.permissionManagement!(recoveryRuntime);
+    const original = await unchanged.resolveRecoveryRunConfiguration!(recoveryInput);
     try {
       expect(
         (original.snapshot as { skillWorkflow: { userDecisions: Json } }).skillWorkflow
@@ -229,6 +245,7 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
       await original.dispose?.();
     }
   } finally {
+    await recoveryRuntime?.close();
     await runtime.close();
     provider.stop(true);
     rmSync(root, { recursive: true, force: true });

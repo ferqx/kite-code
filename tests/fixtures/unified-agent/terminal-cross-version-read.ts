@@ -1,7 +1,7 @@
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { getLoadedSqliteEngine } from '@kite-ai/agent/sqlite-engine';
-import { createClient } from '@kite-ai/client';
+import { createClient, type ModelOutputSnapshot } from '@kite-ai/client';
 import { requestDaemonBootstrap, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 
 // Compiled outside the checkout, with bare imports resolved only in the active candidate.
@@ -38,9 +38,12 @@ try {
   const view = await client.getView(sessionId);
   const messages = await client.listMessages(sessionId);
   const receipts = await Promise.all(commands.map((id) => client.getCommand(id)));
-  const outputs = [];
-  for (const execution of view.executions.filter((value) => value.kind === 'model'))
-    outputs.push(await client.getModelOutput(sessionId, execution.id));
+  const outputs: ModelOutputSnapshot[] = [];
+  const titleOutputs: ModelOutputSnapshot[] = [];
+  for (const execution of view.executions.filter((value) => value.kind === 'model')) {
+    const output = await client.getModelOutput(sessionId, execution.id);
+    (execution.runId === null ? titleOutputs : outputs).push(output);
+  }
   const after = await reader.getMetadata();
   if (before.storeId !== after.storeId || before.lastChangeCursor !== after.lastChangeCursor)
     throw Error('terminal_version_read_changed_store');
@@ -61,6 +64,7 @@ try {
       messages,
       receipts,
       outputs,
+      titleOutputs,
     }),
   );
 } finally {

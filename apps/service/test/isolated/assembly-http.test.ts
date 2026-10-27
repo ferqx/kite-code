@@ -409,7 +409,7 @@ test('a newly disabled file capability affects the next Run while an admitted wa
     });
     await until(async () => (await f.handle.client.getCommand('future')).status === 'applied');
     const futureCommand = await f.handle.client.getCommand('future');
-    const futureReceipt = futureCommand.receipt as { runId: string; businessCommandId: string };
+    const futureReceipt = futureCommand.receipt as { runId: string };
     await until(async () => !(await f.handle.client.getRun(futureReceipt.runId)).isActive);
     const current = await f.handle.client.getView('session');
     expect(existsSync(join(f.workspace, 'future.txt'))).toBe(false);
@@ -418,7 +418,7 @@ test('a newly disabled file capability affects the next Run while an admitted wa
     ).toBe(original);
     const future = current.runs.find((run) => run.id === futureReceipt.runId)!;
     expect(future).toMatchObject({
-      originCommandId: futureReceipt.businessCommandId,
+      originCommandId: futureCommand.id,
       rootWorkCommandId: 'future',
     });
     expect(future.configuration).toMatchObject({

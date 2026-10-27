@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -54,6 +55,7 @@ try {
   await permissions.getByText('当前模式：full；默认模式：auto', { exact: true }).waitFor();
   phase('run_begin');
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('one harmless local Model');
+  await selectNativeFixtureModel(page, 'local');
   await page.getByRole('button', { name: '发送明确的新轮次' }).press('Enter');
   await fetch(`${control}/entered`);
   await fetch(`${control}/release`);
@@ -90,8 +92,24 @@ try {
   await app.evaluate('globalThis.fetch=globalThis.__sessionOriginal');
   await panel.getByRole('button', { name: '打开已确认分叉' }).press('Enter');
   await page.locator('.session-header').getByTitle('Forked original', { exact: true }).waitFor();
+  await page.waitForFunction(async (sessionId) => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    return (
+      state.selection?.session.id === sessionId &&
+      !state.selection.viewLoading &&
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true'
+    );
+  }, confirmed.newSessionId);
   phase('fork_opened');
   await openSessionTools(page);
+  phase('full_read_begin');
+  await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
+  phase('full_tail_visible');
   const forked = await page.evaluate(async () => {
     const state = (await window.kiteNative!.request({
       method: 'state',
@@ -99,6 +117,7 @@ try {
     })) as NativeState;
     return state.selection!.session.id;
   });
+  assert.equal(forked, confirmed.newSessionId);
   assert.notEqual(forked, 's');
   const source = await page.evaluate(async (id) => {
     const value = await window.kiteNative!.request({
@@ -114,9 +133,6 @@ try {
   assert.equal(source?.originMessage?.sessionId, 's');
   assert.equal(source?.originMessage?.storeId, storeId);
   assert.equal(source?.runId, null);
-  phase('full_read_begin');
-  await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
-  phase('full_tail_visible');
   assert.ok((await page.locator('main').innerText()).length > 17 * 1048576);
   assert.equal(await count(), 1);
   await panel.getByRole('button', { name: '读取当前会话管理事实' }).click();

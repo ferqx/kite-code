@@ -60,6 +60,7 @@ type Wire = {
   pid: number;
   method: string;
   path: string;
+  explicitReconnectionLookup?: { commandId: string; sessionId: string; storeId: string };
   body?: {
     kind?: string;
     commandId?: string;
@@ -496,16 +497,21 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
           executionId,
         }),
       );
+    // Session projection also reads these same Execution IDs. Only its GETs
+    // lack the test-only scope of the real explicit-check Promise; original
+    // Command and reconnection Query routes remain unconditional guards.
     const originalGets = () =>
       wire().filter(
         (row) =>
           row.phase === phase &&
+          row.method === 'GET' &&
           (row.path.includes('mcp.reconnection') ||
             (original &&
-              (row.path.includes(original.commandId) || row.path.includes(original.executionId))) ||
+              (row.path.includes(original.commandId) ||
+                (row.explicitReconnectionLookup && row.path.includes(original.executionId)))) ||
             (readyOriginal &&
               (row.path.includes(readyOriginal.commandId) ||
-                row.path.includes(readyOriginal.executionId)))),
+                (row.explicitReconnectionLookup && row.path.includes(readyOriginal.executionId))))),
       ).length;
     async function safeWindow(stage: string) {
       const view = await (await connected()).getView('a');

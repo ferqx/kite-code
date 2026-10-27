@@ -90,7 +90,9 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 
-总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。旧源码与历史测试保留作参考，不进入正式产物或默认调度。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
+总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。除 `apps/kite-cli` 历史源码外，其他旧架构模块及其独占测试已删除；保留目录不具有运行依赖闭包，不进入正式产物或默认调度。旧实现与原验证证据通过删除前固定 revision 追溯。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
+
+正式命令/CI 中 `bun test` 明确列出的 `*.test/spec.*` 文件必须存在，包含 `--cwd` 解析后的输入；缺失由 [workspace 守卫](../../scripts/check-unified-workspaces.ts)以 `formal-test-file-missing` 拒绝。此检查不把 build 尚未生成的输出当测试输入，不改变运行预算、选择范围或原资格要求。
 
 单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限与决策来源独立核实。人工明确拒绝沿原Command取消本轮；自动审核拒绝仅保存准确目标的未派发失败与原因，交回后续Model继续原授权工作，不产生grant、不重投原工具，后续调用仍独立核验。取消、unknown和保存失败仍禁止推进。Run 结束与 lease release 等待全部已启动调用；后发持久化失败保原错误。显式接续复用非前缀的已结算结果，只有已声明的内部 continuation 可恢复监督，普通未知效果仍拒绝。当前实现与验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)。
 
@@ -309,6 +311,8 @@ Main 通过原固定 channel 的闭合生命周期通知撤销 renderer 旧读�
 Native 启动诊断只来自本次所属 Service 的闭合私有 stderr 帧，经 paired launcher 重建后由 Main 持有；通用错误不变造有效报告。保存沿两个无 payload 的固定 host IPC，renderer 不提供报告或路径，Main 只写系统对话框选定的新文件，等待后复核当前 frame／窗口／报告。重试清除前次资格，保存不打开业务 caller、不修改 Store、不获得执行或恢复 authority；当前实现与范围见[Native owner](../../apps/desktop/README.md#原启动诊断保存)和[Service owner](../../apps/service/README.md)。
 
 默认 Service 的项目来源目标选择只接受原 Workspace 内路径；越界 Files 输入不触发外部项目说明读取，仍由 Files 原边界以普通 Tool 失败返回，原 Run 可以继续解释。根说明不可读或内部目标来源不安全仍失败关闭，不能把来源错误普遍降级为可忽略。实现与验证归 [Service owner](../../apps/service/README.md)及其 [拒绝回归](../../apps/service/test/isolated/assembly-file-denial.test.ts)，未扩大文件授权。
+
+2026-10-26 已删除其余旧架构 workspace；仅保留 `apps/kite-cli` 的历史源码，且其运行依赖闭包已移除。当前构建、测试与正式入口仍只选择上述八 workspace，删除决定见[取舍](../../.agents/notes/implemented/architecture/2026-10-26-remove-legacy-modules-retain-kite-cli.md)。旧源码删除不代替现有平台、资源、恢复或发布门禁。
 
 ## 授权观察与执行资格
 

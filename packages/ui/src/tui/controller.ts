@@ -1200,9 +1200,11 @@ export class TuiController {
       )
         return;
     }
-    this.fileRead?.abort();
-    this.publish({ fileCandidates: undefined });
     const same = this.value.sessionId === sessionId;
+    if (!same) {
+      this.fileRead?.abort();
+      this.publish({ fileCandidates: undefined });
+    }
     const selectingHistory = this.value.sessionId !== undefined && !same;
     const preserveReconnectionReview =
       same && options.preserveReconnectionReview && !this.value.stale;
@@ -1341,6 +1343,8 @@ export class TuiController {
         same &&
         this.value.snapshot?.view.session.workspaceId !== snapshot.view.session.workspaceId
       ) {
+        this.fileRead?.abort();
+        this.publish({ fileCandidates: undefined });
         this.mcpToolsRead?.abort();
         this.mcpConnectionRead?.abort();
         this.mcpReconnectionRead?.abort();

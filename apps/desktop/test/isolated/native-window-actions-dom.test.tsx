@@ -151,7 +151,9 @@ test('actual Native page retains window actions and connects Windows menus to th
     expect(calls.length).toBe(before);
     await act(async () => menuAction!('new-conversation'));
     expect(promptValue(draft)).toBe('原草稿\n雪🙂');
-    expect(calls.length).toBe(before);
+    expect(calls.slice(before).map((request) => request.method)).toEqual([
+      'conversation.models.read',
+    ]);
     await act(async () => menuAction!('settings'));
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
     expect(menus[0]!.closest('[aria-hidden="true"]')).toBeNull();

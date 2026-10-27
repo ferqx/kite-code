@@ -6,9 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
+import type { ToolDefinition } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { presentedFileRead } from '../../../../packages/agent/test/fixtures/presented-file-read';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
@@ -25,6 +27,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
     writeFileSync(join(workspace, 'evidence.txt'), evidence);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
     const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
+    const capturedDefinitions: ToolDefinition[] = [];
     let summaries = 0;
     let decisions = 0;
     const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
@@ -90,6 +93,17 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
     });
     const runtime = createRuntime({
       ...host,
+      async resolveRunConfiguration(...args) {
+        const resolved = await host.resolveRunConfiguration!(...args);
+        capturedDefinitions.splice(
+          0,
+          capturedDefinitions.length,
+          ...[...(host.extensions ?? []), ...(resolved.extensions ?? [])].flatMap(
+            (extension) => extension.tools ?? [],
+          ),
+        );
+        return resolved;
+      },
       store,
       permissions: host.permissions!,
       artifacts: createArtifactStore({ profile, store }),
@@ -138,7 +152,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
           (message) =>
             message.role === 'tool' &&
             typeof message.content === 'string' &&
-            JSON.parse(message.content).content === evidence,
+            presentedFileRead(message.content)?.content === evidence,
         ),
       );
       expect(evidenceRequest).toBeDefined();
@@ -156,22 +170,30 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       ).toBe(expectedWindow);
       const models = view.executions.filter((execution) => execution.kind === 'model');
       expect(models).toHaveLength(shouldCompress ? 3 : 2);
-      const estimate = await runtime.readContextEstimate({
-        ...scope,
-        executionId: models.at(-1)!.id,
-      });
-      expect(estimate.contextWindowTokens).toBe(expectedWindow);
-      if (!shouldCompress) {
-        expect(estimate.totalInputTokens).toBeGreaterThan(32768);
-        expect(estimate.totalInputTokens).toBeLessThan(262144 * 0.75);
-      }
+      const retainedPresentations = [
+        {
+          id: 'fixture.retained-presentations',
+          version: '1',
+          apiMajor: 1 as const,
+          tools: capturedDefinitions.map((tool) => ({
+            ...tool,
+            async execute() {
+              throw Error('Historical definitions cannot dispatch');
+            },
+          })),
+        },
+      ];
       const compression = (await store.getSelectedContext({ expectedStoreId, sessionId: 's' }))
         .compression;
       if (shouldCompress)
         expect(compression).toMatchObject({ trigger: 'automatic', runId: view.runs[0]!.id });
       else expect(compression).toBeUndefined();
       expect(view.executions.filter((execution) => execution.kind === 'tool')).toHaveLength(1);
-      expect(view.executions.every((execution) => execution.status === 'succeeded')).toBe(true);
+      expect(
+        (await store.getView('s')).executions.every(
+          (execution) => execution.status === 'succeeded',
+        ),
+      ).toBe(true);
       const executionIds = view.executions.map((execution) => execution.id);
       await Bun.sleep(100);
       expect((await store.getView('s')).executions.map((execution) => execution.id)).toEqual(
@@ -179,11 +201,65 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       );
       expect(requests).toHaveLength(shouldCompress ? 3 : 2);
       await runtime.close();
+      const retainedStore = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      const retainedReader = createRuntime({
+        store: retainedStore,
+        extensions: retainedPresentations,
+        artifacts: createArtifactStore({ profile, store: retainedStore }),
+        permissions: {
+          async authorize() {
+            throw Error('Forecast cannot dispatch');
+          },
+        },
+      });
+      const estimate = await retainedReader
+        .readContextEstimate({ ...scope, executionId: models.at(-1)!.id })
+        .finally(() => retainedReader.close());
+      expect(estimate.contextWindowTokens).toBe(expectedWindow);
+      if (!shouldCompress) {
+        expect(estimate.totalInputTokens).toBeGreaterThan(32768);
+        expect(estimate.totalInputTokens).toBeLessThan(262144 * 0.75);
+      }
       // Cold historical estimates use the original Run, even after the user's file changes.
       writeFileSync(
         configurationPath,
         JSON.stringify({ model: null, compression: { thresholdTokens: 1 } }),
       );
+      // A true cold host without the original formatter declines the forecast.
+      const unavailableStore = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      const unavailable = createRuntime({
+        store: unavailableStore,
+        artifacts: createArtifactStore({ profile, store: unavailableStore }),
+        permissions: {
+          async authorize() {
+            throw Error('No forecast dispatch');
+          },
+        },
+      });
+      const originalInput = { ...scope, executionId: models.at(-1)!.id };
+      try {
+        let unavailableError: unknown;
+        try {
+          await unavailable.readContextEstimate(originalInput);
+        } catch (error) {
+          unavailableError = error;
+        }
+        expect(unavailableError).toMatchObject({ code: 'context_estimate_unavailable' });
+        expect((await unavailable.readModelInput(originalInput)).request.modelId).toBe(
+          (view.runs[0]!.configuration as { modelId: string }).modelId,
+        );
+      } finally {
+        await unavailable.close();
+      }
+      // Supplying the captured definitions qualifies an independent readonly reader.
       const coldStore = await openSqliteStore({
         dataRoot: profile.dataRoot,
         profile: profile.profile,
@@ -191,6 +267,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       });
       const cold = createRuntime({
         store: coldStore,
+        extensions: retainedPresentations,
         artifacts: createArtifactStore({ profile, store: coldStore }),
         permissions: {
           async authorize() {

@@ -5,6 +5,8 @@
 验证：既有正式路径用 `bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/verification tests/runtime` 与 `bun run check:core-boundary`；新通用路径用 `bun run test:unified-agent`、`bun run check:unified-agent-boundary`，类型检查用 `bun run typecheck`。实际范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 相关：[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 通用 Agent 迁移状态
 
 下方 State/Kernel、VerificationSpec 与旧 events/effects 说明只保存历史机制；它们已退出正式/default/CI 调度，不能作为新 Agent 的装配入口或当前验证证据。新通用 required 义务使用[扩展 scoped 判定与最终事务 read-set](../../packages/agent/src/storage/sqlite/requirements/README.md)，Planning 与 [Skill Workflow](../../packages/agent/src/business/skill-workflow/README.md)分别持有自己的业务记录；Core 不新增业务状态机或自动重放副作用。
@@ -73,7 +75,7 @@ Verification executor 的 Artifact reader 与 Tool receipt writer 必须来自�
 任何验证检查都不会启动模型，也不会用模型猜测缺失证据。Concrete Tool/Subagent runner import 由 App/Host static
 boundary 固定在 Pipeline dispatch adapter。
 
-所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。新 `unboundedCumulativeUsage` 主 Run 和 `durationOnlyChildRun` 子 Run 的 `required` 验证可持续 repair／reverify，不因 `repair.maxAttempts` 或历史累计 repair 计数进入 `budget_exhausted`；旧有限 Run 的持久额度仍适用。已持久化为 `budget_exhausted`、且仅由旧 repair 额度耗尽造成的记录在升级后的无累计额度 Run 中可以恢复；spec 无效或另有诊断时仍不得绕过。实现见 [repair policy](../../packages/agent-kernel/src/domains/verification/repair-policy.ts)、[reducer](../../packages/agent-kernel/src/domains/verification/reducer.ts)和 [scheduler](../../packages/agent-kernel/src/scheduler.ts)。
+所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。新 `unboundedCumulativeUsage` 主 Run 和 `durationOnlyChildRun` 子 Run 的 `required` 验证可持续 repair／reverify，不因 `repair.maxAttempts` 或历史累计 repair 计数进入 `budget_exhausted`；旧有限 Run 的持久额度仍适用。已持久化为 `budget_exhausted`、且仅由旧 repair 额度耗尽造成的记录在升级后的无累计额度 Run 中可以恢复；spec 无效或另有诊断时仍不得绕过。实现见 [repair policy](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/agent-kernel/src/domains/verification/repair-policy.ts)、[reducer](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/agent-kernel/src/domains/verification/reducer.ts)和 [scheduler](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/agent-kernel/src/scheduler.ts)。
 
 ## 完成与恢复语义
 

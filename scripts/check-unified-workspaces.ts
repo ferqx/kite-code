@@ -66,7 +66,7 @@ export function checkUnifiedFormalConsumers(root: string): {
     violations.push({ code, path, message });
   const packageAt = (cwd: string): Record<string, unknown> =>
     JSON.parse(readFileSync(resolve(root, cwd, 'package.json'), 'utf8'));
-  const paths = (path: string): void => {
+  const paths = (path: string, explicitTestFile = false): void => {
     if (!path || path === '.' || path === 'tests' || path === 'packages' || path === 'apps') {
       add('formal-discovery-too-wide', path, 'requires finite current suites/entrypoints');
       return;
@@ -75,7 +75,11 @@ export function checkUnifiedFormalConsumers(root: string): {
       add('formal-command-escape', path, 'outside repository');
       return;
     }
-    if (!existsSync(resolve(root, path))) return;
+    if (!existsSync(resolve(root, path))) {
+      if (explicitTestFile)
+        add('formal-test-file-missing', path, 'explicit bun test input must exist');
+      return;
+    }
     if (statSync(resolve(root, path)).isDirectory())
       for (const child of readdirSync(resolve(root, path))) paths(`${path}/${child}`);
     else if (/\.[cm]?[jt]sx?$/.test(path)) entrypoints.add(path.replaceAll('\\', '/'));
@@ -134,7 +138,10 @@ export function checkUnifiedFormalConsumers(root: string): {
             /\.[cm]?[jt]sx?$/.test(arg) ||
             existsSync(resolve(root, selected, arg))
           )
-            paths(relative(root, resolve(root, selected, arg)));
+            paths(
+              relative(root, resolve(root, selected, arg)),
+              kind === 'test' && /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(arg),
+            );
     }
   };
   try {

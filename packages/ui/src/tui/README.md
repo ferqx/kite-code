@@ -6,6 +6,10 @@
 
 短暂观察刷新保留同会话的可操作快照；明确重选会话时只查询保存的原未知请求，不重发。主屏的后继输入、后台任务和取消各自绑定原 Run，连续取消不会误取消已接受的下一任务。当前 Run 的已确认取消与历史 unknown 并列展示，不把旧未知改写为成功。审核选择在 native 键到达时更新，快速方向键／Enter 使用当前原卡的明确选择，原 revision、附件与重复提交门禁仍有效。
 
+[会话选择器](session-chooser.tsx)的删除确认在 80×24 终端保留完整危险说明与原目标，每个操作保留自身说明；移除重复的正文警告与按键段落，快捷键统一放在浮层 footer，使保留与删除选项都能显示。默认仍为保留，只有明确向下选择删除并 Enter 才提交，Esc／Ctrl+C 保留会话。组件边界由[选择器回归](../../test/tui/session-chooser.test.tsx)核验，真实小窗口流程归[正式 Terminal 入口](../../../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts)。
+
+[历史输出](index.tsx)将根 Session 中无 Run、无 parent 的独立 Job 按原 `rootWorkSeq` 定位在同 Store／Session 的后续消息之前；根 Command 与消息使用同一 Session 序列，子 Session、外来来源或无法核实的 Decimal64 不采用此定位，仍保留独立记录。这样自动标题等已完成 Job 不会在每条新消息后改换位置并清空原生滚动历史。公开 `spawn_agent` 的 Tool 成功受理与 child carrier 活动分开：准确父 Run 仍活动而 carrier 尚未投影，或准确 carrier 仍活动时，所属历史项保持动态交接，不把原 Tool 状态改成运行中；原 Run 已终态且缺 carrier 不无限等待。真实记录版本变化、晚完整正文和明确显示范围变化仍按原规则重建。[投影回归](../../test/tui/execution-ink-projection.test.tsx)核来源、代次和缺 carrier 边界，[原生历史回归](../../test/tui/scrollback.test.tsx)同时核普通追加不重播与真实 Job 结果修订必须重建；完整协作上滚过程由[真实 PTY 场景](../../../../tests/tui-system/scenarios/thought-scroll-live.test.ts)验证。
+
 Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认证连接实例；[活动资格](controller.ts)只在有未终结记录时比较它们。不同实例显示当前连接无法核实、仍可能在另一执行者运行，停止 Working／Thinking 及工具／子任务活动动画，保完整正文与原状态；不声明 owner 死亡、任务已中断或取消已完成，不自动恢复。缺少这些可选事实的旧 Port 保原观察行为，已经完成的历史不因此标未知。
 
 [子卡投影](execution-projection.tsx)识别准确注册的 `task.spawn`／`task.follow_up` v1 carrier，保留旧 `task`／`task.execute` 历史。无 preset 的新协作者不要求 role 参数；名称只作展示。稳定 child Session 的多轮历史分别通过 `child-start-${carrier.id}` 的唯一原 Run 关联，只显示同 Store／Session／Run／rootWork 的工具与审批，不将另一轮待审批展示在旧卡上；正在取消和已终态 carrier 不显示活动批准提示。准确人工 pending 优先显示“等待你的批准”。当前根会话准确活动 Run 的交互自动聚焦；child 卡通过 Ctrl+B 明确选择，Ctrl+B 后 Esc 返回父输入，原批准／问题答复仍绑定原卡和 revision。公开 Run 的 `carrierExecutionId` 沿准确启动／续接和封存报告父 Run 证明 report 后续轮；只把同 carrier／Store／rootWork 的步骤归入原卡，人工状态还须来自唯一活动 Run 的准确 authorization。旧 DTO 缺证明时保守不归入后续轮，不猜最新 Run；子完整日志仍按原只读入口可读。
@@ -61,6 +65,8 @@ Files 目录 Enter 只读预览并进入范围确认，默认 both，次序为 b
 缺失工作区的已保存会话可以由 Host 明确准入 `workspace_missing` observer；主屏保留已读消息而不追加只读恢复横幅，首次配置不把它当 Trust 或 Model ready，新会话 readiness 保持 false。原主要选择器、模型、设置和 MCP 根面板的 Ctrl+C 先请求原整轮取消，不回答隐藏审批；Source Question 与新增原申请／执行／MCP 子 reader 的 Ctrl+C 只关闭所属读取，当前 Workflow 纯读取也保持局部取消。执行和配置权限继续由 Host／Agent 保持，界面标记不是授权。
 
 [subagent-layout](subagent-layout.ts)按当前动态尾部、真实 child 步数和终端行数分配原步骤／子项预算；实际单 child 与 concurrent group 都接入预算，先折叠并显示最新摘要再进行有限裁切。`child-session-panel` 的详情用原 Markdown renderer 和 ScrollList 保持长代码、表格与 resize 阅读；Files 卡片接核实后的真实逐行变更，原路径、版本、基线和 UTF-8 门禁保留。
+
+[Context 有界阅读](panel-viewport.tsx)按实际终端预算保留完整内容，PgUp／PgDn 只移动本地阅读窗口；切换 Session 或 Context 选择会回到顶部，不生成 Include、Model 或执行写入。[窗口回归](../../test/tui/panel-viewport.test.tsx)核首尾分页和跨范围复位。窄终端的模型、权限和待决卡片目录保留所选行与确认入口，候选框沿宿主剩余行数分页；相同模型事实的刷新不重置用户选择，同会话、同 Workspace 与未编辑草稿的刷新保留原文件候选读取，切换范围和编辑仍使迟到页失效。[模型目录](../../test/tui/model-panel-window.test.tsx)与[文件候选](../../test/tui/file-candidates.test.tsx)覆盖这些刷新边界。
 
 Footer Context 独立消费同 Store／Session／Run 的准确 Model 输入统计，`reportedInputTokens` 存在时优先使用（包括 0），缺失时回退完整原请求估算。当前活动模型或准确下一模型 ID 匹配才显示占比；Context 面板分别标明服务端返回和本地估算，并保留最近已核原请求。累计用量只用于原 usage／cache，不代替容量；无明确冻结窗口时不猜百分比。[Chrome](../../test/tui/chrome.test.tsx)和[实际面板按键](../../test/tui/local-controls.test.tsx)核实测／回退、0及空闲换模型不串占比。可选下一模型目录暂缺时，Header 只保留同范围最近已核原模型显示，nextModelName／nextEffort 仍未知；不把显示来源的暂失当作历史 scope 变化清空原生滚动，也不借原模型取得下一模型容量。[Error boundary](error-boundary.tsx)把渲染失败转为普通错误页和 Enter／Esc 退出，诊断调用栈只在显式测试模式显示；Host 观察实际 Ink 结束并拥有清理。
 

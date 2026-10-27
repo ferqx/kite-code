@@ -13,7 +13,7 @@ Status: implemented
 不增加第二个 Store、配置表、后台协调进程、自动修复或协议方法。工作区 Trust 和执行命令的项目边界保持现有约束。
 
 ## 影响与证据
-历史会话的权限可以独立保存；执行恢复仍是单独的必要条件。当前机制见 [Service owner](../../../../apps/kite-service/docs/runtime-application.md#app-controlhistory-与-mutation) 与 [Store 事务](../../../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。[多工作区回归](../../../../apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts)覆盖配置不可用、恢复记录不变、版本冲突、并发回执和重启；[Store 回归](../../../../packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts)覆盖执行者 fencing 与失败回滚。
+历史会话的权限可以独立保存；执行恢复仍是单独的必要条件。当前机制见 [Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md#app-controlhistory-与-mutation) 与 [Store 事务](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/transactions-and-state.md)。[多工作区回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts)覆盖配置不可用、恢复记录不变、版本冲突、并发回执和重启；[Store 回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts)覆盖执行者 fencing 与失败回滚。
 
 ## Alternatives considered
 

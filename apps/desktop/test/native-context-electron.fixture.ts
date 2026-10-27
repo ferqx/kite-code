@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -26,6 +27,7 @@ try {
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('first harmless ledger');
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page.getByText('NATIVE FIRST COMPLETED', { exact: true }).first().waitFor();
   await page.getByText('轮次：completed', { exact: true }).waitFor();

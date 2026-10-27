@@ -88,14 +88,20 @@ finally:
       { origin_command_id: 'work', status: 'interrupted' },
       { status: 'completed' },
     ]);
-    expect(f.rows('SELECT count(*) AS n FROM run')).toEqual([{ n: 4 }]);
+    expect(f.rows('SELECT count(*) AS n FROM run')).toEqual([{ n: 2 }]);
+    expect(f.rows("SELECT count(*) AS n FROM command WHERE kind='authorization.check'")).toEqual([
+      { n: 2 },
+    ]);
+    expect(f.rows('SELECT count(*) AS n FROM session WHERE parent_id IS NOT NULL')).toEqual([
+      { n: 0 },
+    ]);
     expect(f.reviews).toHaveLength(2);
     expect(f.reviews.map((review) => review.body.tools ?? [])).toEqual([[], []]);
     expect(f.reviewProof().sort((a, b) => a.target.localeCompare(b.target))).toEqual(
       f.reviews
         .map((review) => ({
           state: 'succeeded',
-          outcome: 'succeeded',
+          outcome: null,
           decision: 'ask_user',
           target: (review.input.target as { executionId: string }).executionId,
         }))

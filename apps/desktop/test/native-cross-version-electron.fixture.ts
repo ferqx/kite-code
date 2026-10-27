@@ -19,6 +19,7 @@ import type {
 } from '../src/native-bridge';
 import { readNativeModelInput } from '../src/native-model-input';
 import { readNativeModelOutput } from '../src/native-model-output';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -391,6 +392,8 @@ async function run(page: Page, index: number) {
       { capture: true, once: true },
     );
   });
+  if (await page.locator('[data-model-picker] [data-model-trigger]').count())
+    await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill(expected.tasks[index]!);
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   assert.equal(
@@ -403,40 +406,45 @@ async function run(page: Page, index: number) {
       value.selection?.runs.length === index + 1 &&
       value.selection.runs.every((run) => run.status === 'completed'),
   );
+  const originalCommandId = completed.inputSubmissions.at(-1)!.command!.id;
+  // A concurrent observer can supersede this read. Query the exact original ID
+  // once, then wait for its owning observation to publish the durable terminal facts.
+  await page.evaluate(async (commandId) => {
+    await window.kiteNative!.request({ method: 'lookupInput', generation: 1, commandId });
+  }, originalCommandId);
+  const calibrated = await waitState(
+    page,
+    (value) =>
+      value.inputSubmissions.some(
+        (input) =>
+          input.command?.id === originalCommandId &&
+          input.command.status === 'applied' &&
+          input.phase === 'terminal',
+      ) &&
+      value.callerSubmissions?.some(
+        (input) => input.request.commandId === originalCommandId && input.phase === 'applied',
+      ) === true,
+  );
   if (index === 1) {
-    // The hot submission retains its original acceptance. Look up that same
-    // public ID before proving its completed business Run and Model request.
-    const observed = await page.evaluate(
-      async (commandId) =>
-        (await window.kiteNative!.request({
-          method: 'lookupInput',
-          generation: 1,
-          commandId,
-        })) as unknown,
-      completed.inputSubmissions.at(-1)!.command!.id,
-    );
-    const command = (
-      observed as { command?: { id: string; status: string; receipt: unknown } } | null
-    )?.command;
-    assert.ok(command);
-    assert.equal(command.id, completed.inputSubmissions.at(-1)!.command!.id);
+    const command = calibrated.inputSubmissions.find(
+      (input) => input.command?.id === originalCommandId,
+    )!.command!;
+    assert.equal(command.id, originalCommandId);
     assert.equal(command.status, 'applied');
-    const confirmed = await state(page);
     for (const original of completed.callerSubmissions!)
       assert.deepEqual(
-        confirmed.callerSubmissions!.find(
+        calibrated.callerSubmissions!.find(
           (value) => value.request.commandId === original.request.commandId,
         ),
         original.request.commandId === command.id ? { ...original, phase: 'applied' } : original,
       );
-    const receipt = command.receipt as { runId: string; businessCommandId: string };
-    assert.ok(receipt.businessCommandId);
-    assert.notEqual(receipt.businessCommandId, command.id);
+    const receipt = command.receipt as { runId: string };
+    const sourceCommandId = command.id;
     assert.ok(
       completed.selection!.runs.some(
         (run) =>
           run.id === receipt.runId &&
-          run.originCommandId === receipt.businessCommandId &&
+          run.originCommandId === sourceCommandId &&
           run.rootWorkCommandId === command.id &&
           run.status === 'completed',
       ),
@@ -474,15 +482,13 @@ async function run(page: Page, index: number) {
     });
     assert.equal(input.confirmation, 'succeeded');
     assert.deepEqual(
-      input.request.messages.find((message) =>
-        message.sourceIds?.includes(receipt.businessCommandId),
-      )?.sourceIds,
-      [receipt.businessCommandId],
+      input.request.messages.find((message) => message.sourceIds?.includes(sourceCommandId))
+        ?.sourceIds,
+      [sourceCommandId],
     );
     assert.equal(
-      input.request.messages.find((message) =>
-        message.sourceIds?.includes(receipt.businessCommandId),
-      )?.content,
+      input.request.messages.find((message) => message.sourceIds?.includes(sourceCommandId))
+        ?.content,
       expected.tasks[index],
     );
   }
@@ -501,8 +507,16 @@ async function run(page: Page, index: number) {
     (value) => value.request.commandId === completed.inputSubmissions[0]!.command!.id,
   );
   assert.ok(currentCaller);
-  assert.equal(currentCaller.phase, 'accepted');
-  assert.ok(completed.inputSubmissions.every((value) => value.phase === 'accepted'));
+  assert.equal(
+    calibrated.callerSubmissions!.find(
+      (value) => value.request.commandId === currentCaller.request.commandId,
+    )!.phase,
+    'applied',
+  );
+  assert.equal(calibrated.inputSubmissions.length, 1);
+  assert.equal(calibrated.inputSubmissions[0]!.command!.id, currentCaller.request.commandId);
+  assert.equal(calibrated.inputSubmissions[0]!.phase, 'terminal');
+  assert.equal(calibrated.inputSubmissions[0]!.command!.status, 'applied');
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
     .waitFor();
@@ -689,7 +703,11 @@ try {
     await app!.evaluate(() => {
       (globalThis as Globals).versionPhysical = [];
     });
-    await cold.page.getByRole('button', { name: '查询原移除', exact: true }).click();
+    const originalRemoval = cold.page
+      .getByRole('status')
+      .filter({ hasText: `空间“${saved.label}”移除结果待确认。` });
+    assert.equal(await originalRemoval.count(), 1);
+    await originalRemoval.getByRole('button', { name: '查看结果', exact: true }).click();
     const lookedUp = await waitState(
       cold.page,
       (value) =>
@@ -717,7 +735,9 @@ try {
     const coldIntent = (await state(cold.page)).callerSubmissions!.find(
       (row) => row.request.commandId === db9.intent.request.commandId,
     )!;
-    assert.deepEqual(coldIntent, db9.intent);
+    // Current Native resolves lost replies by querying the original command on reopen.
+    // Only the verified phase may advance; every original intent byte and identity stays fixed.
+    assert.deepEqual(coldIntent, { ...db9.intent, phase: 'applied' });
     assert.equal(await readCallerBody(cold.page, coldIntent), db9.body);
     const beforeExtension = await query<Facts>('snapshot');
     assert.deepEqual(

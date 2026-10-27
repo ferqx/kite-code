@@ -110,7 +110,7 @@ hard-limit 导致的压缩失败（`hard_limit`、`overflow_recovery_failed`）�
 
 ### Feature flag 渐进灰度
 
-原决定要求基础、自动和手动压缩可分别关闭，关闭后不回退旧压缩路径。当前配置中的开关为 `contextCompaction`、`contextCompactionAuto`、`contextCompactionManual`；[Service 默认值](../../../../apps/kite-service/src/config/features.ts)分别为开、关、开。自动压缩的实际准入还受其模式与配置控制；这些开关名称和默认值以现行 Service owner 为准，不沿用原方案中的 `*V1`／`*V2` 名称。
+原决定要求基础、自动和手动压缩可分别关闭，关闭后不回退旧压缩路径。当前配置中的开关为 `contextCompaction`、`contextCompactionAuto`、`contextCompactionManual`；[Service 默认值](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/config/features.ts)分别为开、关、开。自动压缩的实际准入还受其模式与配置控制；这些开关名称和默认值以现行 Service owner 为准，不沿用原方案中的 `*V1`／`*V2` 名称。
 
 ## Alternatives considered
 
@@ -118,7 +118,7 @@ hard-limit 导致的压缩失败（`hard_limit`、`overflow_recovery_failed`）�
 
 ## Consequences
 
-以下记录该决定当时的实现影响；当前字段、路径、开关和验证范围须以 [Builtin 模型上下文](../../../../packages/builtin-runtime/docs/model-and-context.md)、[Service 配置](../../../../apps/kite-service/src/config/features.ts)及相应源码核对。
+以下记录该决定当时的实现影响；当前字段、路径、开关和验证范围须以 [Builtin 模型上下文](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/docs/model-and-context.md)、[Service 配置](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/config/features.ts)及相应源码核对。
 
 - **RuntimeState schema 版本递增**：新增 `context` 字段（`ContextRuntimeState`），旧 snapshot migration 默认 `{ history: [] }`。
 - **新增 RuntimeEffect**：`compact_context`，scheduler 优先级位于 verification 之后、call_model 之前。

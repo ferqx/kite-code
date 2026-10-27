@@ -26,6 +26,7 @@ import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { decodeMcpAuthFact } from '../../host/tui-mcp-auth';
 import { decodeMcpSourcePage } from '../../host/tui-mcp-source-approval';
 import { installedDependency, verifyBuiltDependency } from '../fixtures/built-dependency-proof';
+import { managementActionWire } from '../fixtures/tui-activation-wire';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -589,7 +590,9 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
     ]);
     expect(peerCalls).toBe(0);
     expect(modelCalls).toBe(0);
-    expect(wire().filter((row) => row.method === 'POST')).toHaveLength(5);
+    expect(
+      managementActionWire(wire(), { warm: 2 }).filter((row) => row.method === 'POST'),
+    ).toHaveLength(5);
     expect(
       ledger('permissions.jsonl')
         .filter((row) => row.kind === 'job')
