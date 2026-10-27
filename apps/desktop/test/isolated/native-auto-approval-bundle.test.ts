@@ -23,6 +23,7 @@ import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
+import { NativeOwnedProcesses } from '../native-owned-processes.fixture';
 
 const require = createRequire(import.meta.url);
 const cases = ['approved', 'rejected', 'manual', 'unavailable', 'stopped'] as const;
@@ -64,6 +65,9 @@ test.skipIf(process.platform !== 'darwin')(
     const held = new Map<string, () => void>();
     let provider: ReturnType<typeof Bun.serve> | undefined,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let owned: NativeOwnedProcesses | undefined;
+    let completed = false;
+    const failures: unknown[] = [];
     try {
       if (!reuseCandidate) {
         const releaseModule = resolve(
@@ -150,7 +154,7 @@ test.skipIf(process.platform !== 'darwin')(
             expect(cases.includes(id as (typeof cases)[number])).toBe(true);
             expect(original.target.originStoreId).toBe(storeId!);
             expect(original.target.definitionId).toBe('files.write');
-            expect(original.target.definitionVersion).toBe('2');
+            expect(original.target.definitionVersion).toBe('3');
             expect(original.target.input.path).toBe(`auto-${id}.txt`);
             expect(original.originCommandRequest.content).toBe(originalTask(id));
             reviews.push(original);
@@ -222,7 +226,7 @@ test.skipIf(process.platform !== 'darwin')(
           tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
             id,
             enabled: id === 'ask_user' || id === 'files.write',
-            ...(id === 'files.write' ? { definitionVersion: '2' } : {}),
+            ...(id === 'files.write' ? { definitionVersion: '3' } : {}),
           })),
         }),
       );
@@ -232,10 +236,15 @@ test.skipIf(process.platform !== 'darwin')(
         readFileSync(
           resolve(import.meta.dir, '../native-auto-approval-electron.fixture.ts'),
           'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        )
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       const result = await Bun.build({
         entrypoints: [fixture],
@@ -254,6 +263,7 @@ test.skipIf(process.platform !== 'darwin')(
           home,
           provider.url.href.replace(/\/$/, ''),
           storeId!,
+          root,
         ],
         {
           cwd: home,
@@ -263,7 +273,22 @@ test.skipIf(process.platform !== 'darwin')(
           stdin: 'ignore',
         },
       );
-      const out = new Response(driver.stdout).text(),
+      owned = new NativeOwnedProcesses({
+        pid: driver.pid,
+        nodeExecutable: realpathSync(Bun.which('node')!),
+        driverPath: join(root, 'driver.js'),
+        root,
+      });
+      const out = new Response(
+          driver.stdout.pipeThrough(
+            new TransformStream({
+              transform(chunk, controller) {
+                owned!.capture();
+                controller.enqueue(chunk);
+              },
+            }),
+          ),
+        ).text(),
         err = new Response(driver.stderr).text();
       const timer = setTimeout(() => driver!.kill('SIGKILL'), 45000);
       try {
@@ -279,7 +304,7 @@ test.skipIf(process.platform !== 'darwin')(
         clearTimeout(timer);
       }
       expect(reviews.map((review) => review.target.sessionId)).toEqual([...cases]);
-      expect(bodies).toHaveLength(13);
+      expect(bodies).toHaveLength(14);
       const report = JSON.parse(readFileSync(join(home, 'auto-report.json'), 'utf8')) as {
         records: { id: string; executionId: string; runId: string; authorization: unknown }[];
         stopCommandId: string;
@@ -301,9 +326,7 @@ test.skipIf(process.platform !== 'darwin')(
           expect(execution?.sessionId).toBe(record.id);
           expect(execution?.runId).toBe(record.runId);
           expect(run?.isActive).toBe(false);
-          expect(run?.status).toBe(
-            record.id === 'stopped' || record.id === 'rejected' ? 'cancelled' : 'completed',
-          );
+          expect(run?.status).toBe(record.id === 'stopped' ? 'cancelled' : 'completed');
           expect(execution?.status).toBe(
             record.id === 'stopped'
               ? 'cancelled'
@@ -320,12 +343,17 @@ test.skipIf(process.platform !== 'darwin')(
         await cold.close();
       }
       expect(verifyNativeRuntimeBundle(moved).digest).toBe(bundle.digest);
+      completed = true;
+    } catch (cause) {
+      failures.push(cause);
     } finally {
       for (const release of held.values()) release();
+      owned?.capture();
       if (driver && driver.exitCode === null) {
         driver.kill('SIGTERM');
         await driver.exited;
       }
+      await owned?.settle(completed);
       provider?.stop(true);
       for (const lease of leases.reverse()) lease.release();
       mkdirSync(evidence, { recursive: true, mode: 0o700 });
@@ -338,8 +366,23 @@ test.skipIf(process.platform !== 'darwin')(
             copyFileSync(join(home, name), join(evidence, name));
         }
       console.log('automatic_check_evidence_retained', evidence);
-      rmSync(root, { recursive: true, force: true });
+      if (!owned || owned.confirmed) rmSync(root, { recursive: true, force: true });
+      else {
+        writeFileSync(
+          join(evidence, 'owned-cleanup.json'),
+          JSON.stringify(
+            { ...owned.metadata, errors: owned.errors.map((error) => error.message) },
+            null,
+            2,
+          ),
+        );
+        console.error('automatic_check_cleanup_unconfirmed', root, owned.metadata);
+        failures.push(new AggregateError(owned.errors, 'automatic_check_cleanup_unconfirmed'));
+      }
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, 'automatic_check_and_cleanup_failed');
   },
   120000,
 );

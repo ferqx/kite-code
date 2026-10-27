@@ -278,17 +278,24 @@ describe('runtime fault soak qualification verifier', () => {
     );
   });
 
-  test('keeps the workflow inputs fixed and passes them through quoted environment variables', () => {
+  test('keeps the current formal workflow on the unified producer and verifier', () => {
     const workflow = readFileSync(
       join(import.meta.dir, '../../../.github/workflows/runtime-resilience-qualification.yml'),
       'utf8',
     );
     expect(workflow).toContain('timeout-minutes: 190');
-    expect(workflow).toContain('type: choice');
-    expect(workflow).toContain('--seed="$QUALIFICATION_SEED"');
+    expect(workflow).toContain('bun run scripts/runtime/unified-soak.ts');
+    expect(workflow).toContain('--profile=qualification');
+    expect(workflow).toContain(
+      '--output=dist/unified-evidence/runtime-resilience-qualification.json',
+    );
     expect(workflow).toContain(`QUALIFICATION_WORKFLOW_REF: \${{ github.workflow_ref }}`);
     expect(workflow).toContain(`QUALIFICATION_WORKFLOW_SHA: \${{ github.workflow_sha }}`);
-    expect(workflow).toContain('verify-fault-soak-qualification.ts');
+    expect(workflow).toContain(
+      'bun run scripts/runtime/unified-soak-verify.ts dist/unified-evidence/runtime-resilience-qualification.json',
+    );
+    expect(workflow).not.toContain('scripts/runtime/run-fault-soak.ts');
+    expect(workflow).not.toContain('scripts/runtime/verify-fault-soak-qualification.ts');
     expect(workflow).not.toContain('--seed=${{');
     expect(workflow).not.toContain('--iterations=${{');
   });

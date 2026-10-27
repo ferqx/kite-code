@@ -158,7 +158,11 @@ try {
   );
   assert.ok(compressionOriginal, 'management_original_compression_identity_unavailable');
   await pump();
-  await send('新任务Queued after maintenance');
+  await key('新任务Queued after maintenance');
+  await wait('新任务Queued after maintenance');
+  // The queued successor must be observed while the original maintenance is held.
+  await wait('Queue follow-up after original maintenance Run >');
+  await key('\r');
   await wait('input.follow_up');
   writeFileSync(`${input.root}/release-summary`, 'explicit fixture release');
   await pump();

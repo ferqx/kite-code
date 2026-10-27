@@ -4,6 +4,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { semanticReviewContext } from '../../../src/authorization-review-context';
 import { canonicalJson, semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage';
@@ -419,7 +420,7 @@ async function reviewFixture(target: 'Action' | 'Tool', guarded = false) {
     }
     if (guarded) {
       // Fault setup only: the original planned Action retains its own guard.
-      // ensureAuthorizationReview then seals the actual guard-bearing target.
+      // ensureAuthorizationCheck then seals the actual guard-bearing target.
       (f.source as Record<string, Json>).guard = {
         kind: 'execution_group_quiescence',
         version: 1,
@@ -431,18 +432,53 @@ async function reviewFixture(target: 'Action' | 'Tool', guarded = false) {
         targetExecutionId,
       ]);
     }
-    const review = await f.store.ensureAuthorizationReview({
+    const review = await f.store.ensureAuthorizationCheck({
       expectedStoreId: f.base.expectedStoreId,
       owner: f.owner,
       targetExecutionId,
       policyRevision: 'exact-policy',
       request: { task: 'review original owned operation' },
-      reviewer: { id: 'reviewer', version: '1', modelId: 'fixed-reviewer' },
+      checker: { id: 'checker', version: '1', modelId: 'fixed-checker' },
     });
-    const input = await f.dispatch(review.operation.executionId!);
-    input.authorization.inputDigest = await semanticDigest(review.input);
-    input.freshness.source = review.source;
-    return { ...f, review, input, targetExecutionId };
+    const payload = review.input as Record<string, Json>;
+    const prepared = await f.store.prepareAuthorizationCheck({
+      expectedStoreId: f.base.expectedStoreId,
+      owner: f.owner,
+      executionId: review.execution.id,
+      input: {
+        modelId: 'fixed-checker',
+        requestId: review.execution.id,
+        tools: [],
+        messages: [
+          {
+            role: 'user',
+            content: canonicalJson({
+              ...payload,
+              decisionContext: semanticReviewContext(payload.decisionContext!),
+            }),
+          },
+        ],
+      },
+    });
+    const input = {
+      expectedStoreId: f.base.expectedStoreId,
+      owner: f.owner,
+      executionId: review.execution.id,
+    };
+    const dispatchCheck = () => f.store.dispatchAuthorizationCheck(input);
+    const rejectCheck = async () => {
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      expect(await code(dispatchCheck())).not.toBe('success');
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect(
+        f.db
+          .query(
+            "SELECT count(*) AS n FROM change_event WHERE object_id=? AND type='execution.dispatching'",
+          )
+          .get(review.execution.id),
+      ).toEqual({ n: 0 });
+    };
+    return { ...f, review, prepared, input, dispatchCheck, rejectCheck, targetExecutionId };
   } catch (error) {
     await f.close();
     throw error;
@@ -450,17 +486,20 @@ async function reviewFixture(target: 'Action' | 'Tool', guarded = false) {
 }
 
 for (const target of ['Action', 'Tool'] as const)
-  test(`actual ensureAuthorizationReview of an undispatched ${target} inherits only its sealed provenance without collector`, async () => {
+  test(`actual ensureAuthorizationCheck of an undispatched ${target} inherits only its sealed provenance without collector`, async () => {
     const f = await reviewFixture(target);
     try {
       expect((await f.store.getExecution(f.targetExecutionId))!.status).toBe('planned');
-      expect((await f.store.getCommand(f.review.operation.commandId))!.kind).toBe(
-        'authorization.review',
-      );
+      expect((await f.store.getCommand(f.review.commandId))!.kind).toBe('authorization.check');
       expect(f.review.source).toEqual(f.source);
-      expect((await f.store.markDispatching(f.input)).status).toBe('dispatching');
+      expect((await f.dispatchCheck()).status).toBe('dispatching');
       expect((await f.store.getExecution(f.targetExecutionId))!.status).toBe('planned');
-      expect((await f.store.getView(f.review.operation.childSessionId!)).runs).toEqual([]);
+      expect(f.review.execution).toMatchObject({
+        kind: 'model',
+        runId: null,
+        childSessionId: null,
+      });
+      expect((await f.store.getView('s')).runs).toEqual([]);
     } finally {
       await f.close();
     }
@@ -470,30 +509,34 @@ for (const drift of ['payload', 'target', 'policy', 'reviewer'] as const)
   test(`owned SQLite corruption: reviewer ${drift} drift cannot borrow undispatched target provenance`, async () => {
     const f = await reviewFixture('Tool');
     try {
-      const id = f.review.operation.executionId!;
+      const id = f.review.execution.id;
       if (drift === 'payload') {
-        const changed = { ...(f.review.input as object), request: { changed: true } } as Json;
+        const changed = {
+          ...(f.prepared.input as object),
+          messages: [{ role: 'user', content: 'changed' }],
+        } as Json;
         f.db.run('UPDATE execution SET intent_json=? WHERE id=?', [canonicalJson(changed), id]);
-        // Align the supplied digest with the corrupted input: refusal must also
-        // enforce the original sealed reviewer binding, beyond input hashing.
-        f.input.authorization.inputDigest = await semanticDigest(changed);
+        // The original prepared request digest must still bind the checker input.
       }
       if (drift === 'target')
         f.db.run('UPDATE execution SET intent_json=? WHERE id=?', [
           canonicalJson({ changed: true }),
           f.targetExecutionId,
         ]);
-      if (drift === 'policy')
-        f.db.run(
-          "UPDATE execution SET child_configuration_json=json_set(child_configuration_json,'$.snapshot.authorizationReview.policyRevision','different-policy') WHERE id=?",
-          [id],
-        );
-      if (drift === 'reviewer')
-        f.db.run(
-          "UPDATE execution SET child_configuration_json=json_set(child_configuration_json,'$.snapshot.modelId','different-reviewer') WHERE id=?",
-          [id],
-        );
-      await f.reject(f.input);
+      if (drift === 'policy' || drift === 'reviewer') {
+        const command = (await f.store.getCommand(f.review.commandId))!;
+        const request = structuredClone(command.request) as Record<string, Json>;
+        const payload = request.input as Record<string, Json>;
+        if (drift === 'policy') payload.policyRevision = 'different-policy';
+        else (payload.checker as Record<string, Json>).modelId = 'different-checker';
+        f.db.run('UPDATE command SET request_json=?,request_digest=?,operation_key=? WHERE id=?', [
+          canonicalJson(request),
+          await semanticDigest(request),
+          `check/${await semanticDigest(payload)}`,
+          command.id,
+        ]);
+      }
+      await f.rejectCheck();
     } finally {
       await f.close();
     }
@@ -507,14 +550,14 @@ test('guard-bearing original planned Action keeps its own authority while its ac
     expect(executionGuard(operations, row(f.targetExecutionId))).toMatchObject({
       originCommandId: 'action',
     });
-    expect(executionGuard(operations, row(f.review.operation.executionId!))).toBeNull();
+    expect(executionGuard(operations, row(f.review.execution.id))).toBeNull();
     // The actual sealed review is pending: its target cannot dispatch through a
     // trusted authorization decision before that independent review completes.
     await f.reject(
       { ...(await f.dispatch(f.targetExecutionId)), readSet: { records: [], recordLists: [] } },
-      'authorization_review_required',
+      'authorization_check_required',
     );
-    expect((await f.store.markDispatching(f.input)).status).toBe('dispatching');
+    expect((await f.dispatchCheck()).status).toBe('dispatching');
     expect((await f.store.getExecution(f.targetExecutionId))!.status).toBe('planned');
   } finally {
     await f.close();

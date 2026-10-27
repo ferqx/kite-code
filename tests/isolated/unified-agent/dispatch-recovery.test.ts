@@ -8,7 +8,7 @@ import { createFixedModel } from '@kite-ai/ai';
 import { startService } from '@kite-ai/service';
 import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
-test('an orphaned Run produces a local dispatch failure without repeated owner acquisition or implicit recovery', async () => {
+test('new work reconciles a proven orphaned Run once without replaying its original work', async () => {
   const dataRoot = temporaryDirectory('kite-dispatch-recovery-');
   let store = await openSqliteStore({ dataRoot, profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -60,6 +60,10 @@ test('an orphaned Run produces a local dispatch failure without repeated owner a
       { type: 'text_delta', text: 'healthy answer' },
       { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } },
     ],
+    [
+      { type: 'text_delta', text: 'independent healthy answer' },
+      { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } },
+    ],
   ]);
   const runtime = createRuntime({
     store: counted,
@@ -97,24 +101,34 @@ test('an orphaned Run produces a local dispatch failure without repeated owner a
         })
       ).status,
     ).toBe(202);
-    const error = await runtime.waitForCommand('new-work', { timeoutMs: 1000 }).then(
-      () => null,
-      (caught) => caught,
-    );
-    expect(error).toMatchObject({ code: 'recovery_required' });
+    const applied = await runtime.waitForCommand('new-work', { timeoutMs: 5000 });
     const response = await request('/v1/commands/new-work');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      status: 'accepted',
-      dispatchFailure: { code: 'recovery_required', instanceId: 'current-instance' },
+    const publicCommand = await response.json();
+    expect(publicCommand).toMatchObject({
+      status: 'applied',
+      receipt: { runId: (applied.receipt as { runId: string }).runId },
     });
-    expect(model.requests).toHaveLength(0);
-    expect(await store.getRun(originalRun.id)).toEqual(originalRun);
+    expect(publicCommand).not.toHaveProperty('dispatchFailure');
+    const reconciled = (await store.getRun(originalRun.id))!;
+    expect(reconciled).toMatchObject({
+      id: originalRun.id,
+      originCommandId: 'original',
+      status: 'interrupted',
+      isActive: false,
+    });
+    expect(model.requests).toHaveLength(1);
+    expect(
+      model.requests[0]!.messages.filter((message) => message.role === 'user').at(-1)?.content,
+    ).toBe('new work after orphaned Run');
+    expect(
+      (await store.getRun((applied.receipt as { runId: string }).runId))?.originCommandId,
+    ).toBe('new-work');
     expect(acquisitions).toBe(1);
-    // Past the owner handoff polling interval, a known failure is still quiescent.
+    // Past the owner handoff polling interval, the settled original work stays quiescent.
     await Bun.sleep(320);
     expect(acquisitions).toBe(1);
-    expect(await store.getCommand('new-work')).not.toHaveProperty('dispatchFailure');
+    expect(model.requests).toHaveLength(1);
     await runtime.submitCommand({
       expectedStoreId,
       commandId: 'healthy-work',
@@ -123,9 +137,9 @@ test('an orphaned Run produces a local dispatch failure without repeated owner a
       request: { kind: 'run.start', content: 'independent work' },
     });
     await runtime.waitForCommand('healthy-work');
-    expect(model.requests).toHaveLength(1);
+    expect(model.requests).toHaveLength(2);
     expect((await runtime.getView('healthy')).runs[0]!.status).toBe('completed');
-    expect(await store.getRun(originalRun.id)).toEqual(originalRun);
+    expect(await store.getRun(originalRun.id)).toEqual(reconciled);
     await runtime.cancelCommand({
       expectedStoreId,
       commandId: 'cancel-new-work',
@@ -134,7 +148,8 @@ test('an orphaned Run produces a local dispatch failure without repeated owner a
       subjectId: 'owner',
     });
     expect((await store.getCommand('new-work'))!.cancelRequestedAt).not.toBeNull();
-    expect(model.requests).toHaveLength(1);
+    expect(model.requests).toHaveLength(2);
+    expect(await store.getRun(originalRun.id)).toEqual(reconciled);
   } finally {
     await service.close();
     rmSync(dataRoot, { recursive: true, force: true });

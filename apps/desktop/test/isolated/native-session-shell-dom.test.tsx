@@ -1,7 +1,12 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
+import {
+  nextDesktopPresentation,
+  prepareDesktopDom,
+  promptValue,
+  setPromptText,
+} from '../native-page-dom.fixture';
 import { sessionSwitchBridge } from '../session-switch-bridge.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -20,7 +25,7 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, originals);
 bootstrap.window.close();
 
-function fixture(options?: Parameters<typeof sessionSwitchBridge>[0]) {
+function fixture(options?: Parameters<typeof sessionSwitchBridge>[0], diagnostics = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -51,12 +56,14 @@ function fixture(options?: Parameters<typeof sessionSwitchBridge>[0]) {
       });
     expect(check()).toBe(true);
   };
-  const click = async (id: string) =>
-    act(async () => {
+  const click = async (id: string) => {
+    await act(async () => {
       [...host.querySelectorAll('button')]
         .find((button) => button.textContent === `Session ${id.toUpperCase()}`)!
         .click();
     });
+    await act(async () => nextDesktopPresentation(dom));
+  };
   const ready = async (id: string) =>
     until(
       () =>
@@ -72,7 +79,7 @@ function fixture(options?: Parameters<typeof sessionSwitchBridge>[0]) {
     click,
     ready,
     async render() {
-      await act(async () => root.render(<NativeDesktop />));
+      await act(async () => root.render(<NativeDesktop testDiagnostics={diagnostics} />));
       await click('a');
       await ready('a');
     },
@@ -197,7 +204,7 @@ test('routine recalibration retains the approval mode, while an actual permissio
     await f.fail(true);
     await f.until(() => !f.host.querySelector('[data-permission-trigger]'));
     expect(f.query('.composer').dataset.sessionLoading).toBeUndefined();
-    expect(f.query('.environment-information').textContent).toContain('上次状态');
+    await f.until(() => f.query('.environment-information').getAttribute('data-stale') === 'true');
     expect(f.host.querySelector('.background-execution-stop')).toBeNull();
     await f.refresh(true);
     await f.until(() => !!f.host.querySelector('[data-permission-trigger]'));
@@ -244,7 +251,7 @@ test('a normally disabled empty send stays dim, and a running empty draft keeps 
 });
 
 test('a known environment failure stays visible while another selection is awaiting Main', async () => {
-  const f = fixture();
+  const f = fixture(undefined, true);
   try {
     await f.render();
     await f.fail(true);
@@ -280,7 +287,7 @@ test('a cold selection prepares its final model before publication, including in
     await f.until(() => f.pending('selection') > 0);
     await f.release('selection');
     await f.until(() => f.pending('models') > 0);
-    expect(f.query('.breadcrumb strong').textContent).toBe('Session A');
+    expect(f.query('.breadcrumb strong').textContent).toBe('Session B');
     expect(button.textContent).toContain('Model A');
     expect(button.disabled).toBe(true);
     expect(promptValue(editor)).toBe('Draft A');
@@ -289,8 +296,9 @@ test('a cold selection prepares its final model before publication, including in
     expect(
       f.requests.some((request) => request.method === 'messages' && request.sessionId === 'b'),
     ).toBe(false);
-    expect(f.host.textContent).toContain('Reply a');
-    expect(f.query('.breadcrumb strong').textContent).toBe('Session A');
+    expect(f.host.textContent).not.toContain('Reply a');
+    expect(f.host.textContent).not.toContain('Reply b');
+    expect(f.query('.breadcrumb strong').textContent).toBe('Session B');
     expect(button.textContent).toContain('Model A');
     await f.release('models');
     await f.until(() => f.pending('history') > 0);
@@ -380,7 +388,7 @@ test('a Main withdrawal during cold preparation remains unavailable instead of r
     await act(async () => f.withdraw());
     await f.release('models');
     await f.until(() => f.query('.breadcrumb strong').textContent === 'Session B');
-    expect(f.query('.environment-information').textContent).toContain('上次状态');
+    expect(f.query('.environment-information').getAttribute('data-stale')).toBe('true');
     expect(f.host.querySelector('[data-permission-trigger]')).toBeNull();
     expect(f.query<HTMLButtonElement>('.composer-actions button').disabled).toBe(true);
     expect(f.requests.filter((request) => businessMethods.has(request.method))).toHaveLength(0);

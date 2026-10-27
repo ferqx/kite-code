@@ -221,3 +221,14 @@ export function createOriginalDaemonHost(input: {
     },
   };
 }
+
+/** Release the isolated candidate and Profile only after every daemon birth stopped. */
+export function releaseOriginalDaemonFixture(input: {
+  candidate: Awaited<ReturnType<typeof buildOriginalDaemonCandidate>>;
+  daemon: ReturnType<typeof createOriginalDaemonHost>;
+  workspace: { cleanup(): void };
+}) {
+  if (!input.daemon.exitConfirmed) throw Error('original_daemon_fixture_cleanup_unconfirmed');
+  input.workspace.cleanup();
+  input.candidate.cleanup();
+}

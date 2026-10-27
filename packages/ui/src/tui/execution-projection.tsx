@@ -200,6 +200,68 @@ export function inkExecutionScope(execution: Execution, snapshot: TuiSnapshot): 
     execution.originStoreId === snapshot.storeId && execution.sessionId === snapshot.view.session.id
   );
 }
+/** Publication can still acquire the exact child carrier after spawn itself succeeded. */
+export function inkExecutionHistoryMutable(execution: Execution, snapshot?: TuiSnapshot): boolean {
+  if (['planned', 'dispatching', 'running'].includes(execution.status)) return true;
+  if (
+    !snapshot ||
+    !inkExecutionScope(execution, snapshot) ||
+    execution.kind !== 'tool' ||
+    execution.status !== 'succeeded' ||
+    execution.definitionVersion !== '1' ||
+    !frozenBuiltin(execution, snapshot, 'builtin.task', 'task.spawn')
+  )
+    return false;
+  const receipt = record(record(execution.result)?.details);
+  if (receipt?.accepted !== true || typeof receipt.agent_id !== 'string') return false;
+  const carriers = snapshot.view.executions.filter(
+    (carrier) =>
+      carrier.kind === 'job' &&
+      carrier.childSessionId === receipt.agent_id &&
+      carrier.parentExecutionId === execution.id &&
+      actualCarrierParent(carrier, execution, snapshot),
+  );
+  if (carriers.length === 1)
+    return ['planned', 'dispatching', 'running'].includes(carriers[0]!.status);
+  const runs = snapshot.view.runs.filter(
+    (run) =>
+      run.id === execution.runId &&
+      run.sessionId === execution.sessionId &&
+      run.originStoreId === execution.originStoreId,
+  );
+  return runs.length === 1 && runs[0]!.isActive;
+}
+
+/** Runless lifecycle Jobs keep their immutable sequence position before later messages. */
+export function inkStandaloneJobAnchor(
+  execution: Execution,
+  snapshot: TuiSnapshot,
+  messages: readonly Message[],
+): string | undefined {
+  const decimal64 = (value: unknown): value is string =>
+    typeof value === 'string' &&
+    /^(0|[1-9]\d*)$/.test(value) &&
+    BigInt(value) <= 9223372036854775807n;
+  if (
+    !inkExecutionScope(execution, snapshot) ||
+    snapshot.view.session.parentSessionId !== null ||
+    snapshot.view.session.rootSessionId !== snapshot.view.session.id ||
+    execution.kind !== 'job' ||
+    execution.runId !== null ||
+    execution.parentExecutionId !== null ||
+    execution.childSessionId !== null ||
+    !execution.rootWorkCommandId ||
+    !decimal64(execution.rootWorkSeq)
+  )
+    return undefined;
+  return messages.find(
+    (message) =>
+      !message.originMessage &&
+      message.sessionId === execution.sessionId &&
+      decimal64(message.seq) &&
+      BigInt(message.seq) > BigInt(execution.rootWorkSeq!),
+  )?.id;
+}
 export function inkToolArguments(
   execution: Execution,
   snapshot: TuiSnapshot,
@@ -342,9 +404,10 @@ function inkFileChangePresentation(
     execution.status !== 'succeeded' ||
     !/^[1-9][0-9]*$/.test(execution.resultRevision) ||
     !(
+      (['2', '3'].includes(execution.definitionVersion) &&
+        frozenBuiltin(execution, snapshot, 'builtin.files', 'files.write')) ||
       (execution.definitionVersion === '2' &&
-        (frozenBuiltin(execution, snapshot, 'builtin.files', 'files.write') ||
-          frozenBuiltin(execution, snapshot, 'builtin.files', 'files.edit'))) ||
+        frozenBuiltin(execution, snapshot, 'builtin.files', 'files.edit')) ||
       (execution.definitionVersion === '1' &&
         record(record(execution.result)?.details)?.fileScope === 'external_path' &&
         record(record(execution.result)?.details)?.workspaceCheckpoint === false &&

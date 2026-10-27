@@ -1,7 +1,15 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectProfileBackup, type RestoreProfileBackupInput } from '@kite-ai/agent/maintenance';
@@ -155,7 +163,9 @@ async function built(root: string) {
   });
   const migration = join(root, 'node_modules', '@kite-ai', 'agent', 'storage', 'migrations');
   mkdirSync(migration, { recursive: true });
-  for (const name of ['0001-baseline.sql', '0002-recovery-audit.sql'])
+  for (const name of readdirSync(join(repository, 'packages/agent/src/storage/migrations'))
+    .filter((name) => name.endsWith('.sql'))
+    .sort())
     copyFileSync(
       join(repository, 'packages/agent/src/storage/migrations', name),
       join(migration, name),

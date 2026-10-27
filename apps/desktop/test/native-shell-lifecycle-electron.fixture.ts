@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { Execution } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -253,6 +254,7 @@ async function close() {
   stage('ordinary_native_exit', { mainPid: pid, servicePid });
 }
 async function send(marker: string, count: number) {
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(marker);
   const button = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
   await until(
@@ -374,14 +376,56 @@ async function coldRead(baseline: Snapshot, count: number) {
   await directory();
   for (const output of baseline.jobs) await fullOutput(output);
   const rows = await currentPhysical(true);
-  assert.ok(rows.length > 0 && rows.every((row) => row.method === 'GET'));
+  assert.ok(
+    rows.length > 0 &&
+      rows.every(
+        (row) =>
+          row.method === 'GET' ||
+          (row.method === 'POST' && row.path === '/v1/sessions/native-shell/reconcile'),
+      ),
+  );
   assert.equal((await read<{ calls: number }>('count')).calls, count);
-  assert.deepEqual(await read('snapshot'), baseline);
+  const settled = await read<Snapshot>('snapshot');
+  const reconciledIds: string[] = [];
+  const expectedExecutions = baseline.executions.map((original) => {
+    const current = settled.executions.find((entry) => entry.id === original.id)!;
+    assert.ok(current);
+    if (current.status === original.status) return original;
+    assert.equal(original.definitionId, 'shell.command');
+    assert.equal(original.runId, null);
+    assert.ok(['running', 'dispatching'].includes(original.status));
+    assert.ok(baseline.jobs.some((job) => job.executionId === original.id));
+    assert.equal(current.status, 'outcome_unknown');
+    const result = current.result as { reconciliationCommandId?: string };
+    assert.match(result.reconciliationCommandId!, /^session-reconcile-[a-f0-9]{64}$/);
+    assert.deepEqual(current.result, {
+      code: 'recovery_outcome_unknown',
+      evidenceSource: 'owner_lost',
+      incomplete: false,
+      reconciliationCommandId: result.reconciliationCommandId,
+    });
+    reconciledIds.push(original.id);
+    return {
+      ...original,
+      status: 'outcome_unknown',
+      result: current.result,
+      resultRevision: String(BigInt(original.resultRevision) + 1n),
+    };
+  });
+  assert.deepEqual(settled, {
+    ...baseline,
+    executions: expectedExecutions,
+    cursor: String(
+      BigInt(baseline.cursor) + BigInt(reconciledIds.length ? reconciledIds.length + 1 : 0),
+    ),
+  });
   stage('cold_original_read_without_replay', {
     jobs: baseline.jobs.map((job) => job.executionId),
     cursor: baseline.cursor,
     providerCalls: count,
-    posts: 0,
+    businessPosts: 0,
+    reconciliations: rows.filter((row) => row.method === 'POST').length,
+    reconciledIds,
   });
 }
 try {

@@ -118,7 +118,8 @@ test('ordinary Ink keeps the original conversation layout and complete result; d
     expect(app.lastFrame()).toContain('/owned/workspace');
     expect(app.lastFrame()).toContain('Original complete answer');
     expect(app.lastFrame()).toContain('● files.read');
-    expect(app.lastFrame()).toContain('more lines');
+    expect(app.lastFrame()).toContain('Result preview truncated');
+    expect(app.lastFrame()).toContain('Ctrl+E to read the complete recorded result');
     // The original compact card keeps a bounded preview; its real detail reader retains every field.
     app.stdin.write('\u0005');
     await tick();

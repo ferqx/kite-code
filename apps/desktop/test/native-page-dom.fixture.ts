@@ -29,6 +29,21 @@ export function promptValue(element: Element | null | undefined) {
 
 /** Browser APIs used by the retained desktop layout; these do not simulate Native facts or writes. */
 export function prepareDesktopDom(dom: JSDOM) {
+  const stylePrototype = Object.getPrototypeOf(dom.window.document.createElement('div').style);
+  const clip = Object.getOwnPropertyDescriptor(stylePrototype, 'clip')!;
+  // Radix uses a zero clipping rectangle for visually hidden controls. Keep that
+  // geometry without JSDOM's deprecated numeric parser, which can stall in Bun.
+  Object.defineProperty(stylePrototype, 'clip', {
+    ...clip,
+    set(value: string) {
+      clip.set!.call(
+        this,
+        value === 'rect(0, 0, 0, 0)'
+          ? 'var(--native-test-clip-zero, rect(0px, 0px, 0px, 0px))'
+          : value,
+      );
+    },
+  });
   Object.assign(dom.window.Range.prototype, {
     getBoundingClientRect: () => new dom.window.DOMRect(),
     getClientRects: () => [],
@@ -66,6 +81,7 @@ export function prepareDesktopDom(dom: JSDOM) {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   return () => {
+    Object.defineProperty(stylePrototype, 'clip', clip);
     for (const [key, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);

@@ -459,7 +459,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     const read = join(root, 'read.mjs');
     writeFileSync(
       read,
-      `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const allExecutions=await s.listExecutions('formal-session');const titleIds=['builtin.session-title/fallback','builtin.session-title/generate','agent/session-title'];const executions=allExecutions.filter(e=>e.kind==='model');const titleExecutions=allExecutions.filter(e=>titleIds.includes(e.definitionId));const unexpectedExecutions=allExecutions.filter(e=>e.kind!=='model'&&!titleIds.includes(e.definitionId));const runs=await Promise.all([...new Set(executions.map(e=>e.runId))].map(id=>s.getRun(id)));console.log(JSON.stringify({session:await s.getSession('formal-session'),runs,executions,titleExecutions,unexpectedExecutions,messages:await s.listMessages('formal-session')}));}finally{await s.close();}`,
+      `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const allExecutions=await s.listExecutions('formal-session');const titleIds=['builtin.session-title/fallback','builtin.session-title/generate'];const executions=allExecutions.filter(e=>e.kind==='model'&&e.runId!==null);const titleModels=allExecutions.filter(e=>e.kind==='model'&&e.runId===null);const titleCommands=await Promise.all(titleModels.map(e=>s.getCommand(e.originCommandId)));const titleExecutions=allExecutions.filter(e=>titleIds.includes(e.definitionId));const unexpectedExecutions=allExecutions.filter(e=>e.kind!=='model'&&!titleIds.includes(e.definitionId));const runs=await Promise.all([...new Set(executions.map(e=>e.runId))].map(id=>s.getRun(id)));console.log(JSON.stringify({session:await s.getSession('formal-session'),runs,executions,titleModels,titleCommands,titleExecutions,unexpectedExecutions,sessions:await s.listSessions({limit:100}),messages:await s.listMessages('formal-session')}));}finally{await s.close();}`,
     );
     const before = await execute([runtime, read], workspace, home);
     expect(before.code).toBe(0);
@@ -472,21 +472,36 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     expect(first.session.title).toBe('Formal run');
     expect(
       first.titleExecutions.map((entry: { definitionId: string }) => entry.definitionId).sort(),
-    ).toEqual([
-      'agent/session-title',
-      'builtin.session-title/fallback',
-      'builtin.session-title/generate',
-    ]);
+    ).toEqual(['builtin.session-title/fallback', 'builtin.session-title/generate']);
     for (const entry of first.titleExecutions)
       expect(entry).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
     const titleGeneration = first.titleExecutions.find(
       (entry: { definitionId: string }) => entry.definitionId === 'builtin.session-title/generate',
     );
-    const titleCarrier = first.titleExecutions.find(
-      (entry: { definitionId: string }) => entry.definitionId === 'agent/session-title',
-    );
-    expect(titleCarrier.parentExecutionId).toBe(titleGeneration.id);
-    expect(titleCarrier.childSessionId).toBeString();
+    expect(first.titleModels).toHaveLength(1);
+    const titleModel = first.titleModels[0];
+    expect(titleModel).toMatchObject({
+      sessionId: 'formal-session',
+      kind: 'model',
+      runId: null,
+      status: 'succeeded',
+      parentExecutionId: titleGeneration.id,
+      childSessionId: null,
+    });
+    expect(first.titleCommands).toHaveLength(1);
+    expect(first.titleCommands[0]).toMatchObject({
+      id: titleModel.originCommandId,
+      kind: 'session.title',
+      sessionId: 'formal-session',
+      request: { parentExecutionId: titleGeneration.id },
+    });
+    expect(
+      first.sessions.filter(
+        (session: { parentSessionId: string | null }) => session.parentSessionId !== null,
+      ),
+    ).toEqual([]);
+    expect(first.messages).toHaveLength(2);
+    expect(JSON.stringify(first.messages)).not.toContain('Formal run');
     const launched = await execute(
       [process.execPath, server, '--server', socket, '--workspace', workspace, '--json'],
       workspace,
@@ -674,21 +689,26 @@ try{
     try {
       const tuiRun = facts.runs[1];
       const publicCommand = proofDb
-        .query<{ request_json: string; receipt_json: string }, [string]>(
-          'SELECT request_json,receipt_json FROM command WHERE id=?',
-        )
+        .query<
+          { kind: string; status: string; request_json: string; receipt_json: string },
+          [string]
+        >('SELECT kind,status,request_json,receipt_json FROM command WHERE id=?')
         .get(tuiRun.rootWorkCommandId)!;
       expect(JSON.parse(publicCommand.request_json).content).toBe('New task: formal TUI task');
-      expect(tuiRun.originCommandId).not.toBe(tuiRun.rootWorkCommandId);
+      expect(publicCommand.kind).toBe('run.start');
+      expect(publicCommand.status).toBe('applied');
+      expect(tuiRun.originCommandId).toBe(tuiRun.rootWorkCommandId);
       expect(JSON.parse(publicCommand.receipt_json)).toMatchObject({
         runId: tuiRun.id,
-        businessCommandId: tuiRun.originCommandId,
       });
+      expect(JSON.parse(publicCommand.receipt_json)).not.toHaveProperty('businessCommandId');
     } finally {
       proofDb.close();
     }
     expect(facts.unexpectedExecutions).toEqual([]);
     expect(facts.titleExecutions).toEqual(first.titleExecutions);
+    expect(facts.titleModels).toEqual(first.titleModels);
+    expect(facts.titleCommands).toEqual(first.titleCommands);
     expect(calls).toBe(2);
     const publicRead = join(root, 'public-read.mjs');
     writeFileSync(

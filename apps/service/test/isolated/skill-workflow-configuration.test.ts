@@ -994,11 +994,15 @@ test.each([
     const manifest = childView.runs[0]!.configuration as {
       tools: { extensionId: string; id: string; version: string }[];
     };
-    expect(manifest.tools).toContainEqual({
+    const originalManifest = (await store.getView('s')).runs.find(
+      (run) => run.originCommandId === 'fork',
+    )!.configuration as typeof manifest;
+    const originalRead = originalManifest.tools.find((tool) => tool.id === 'files.read');
+    expect(originalRead).toMatchObject({
       extensionId: 'builtin.files',
       id: 'files.read',
-      version: '4',
     });
+    expect(manifest.tools).toEqual([originalRead!]);
     expect(manifest.tools.some((tool) => tool.id === 'files.write')).toBe(false);
     const childRequests = requests.filter((request) =>
       JSON.stringify(request.messages).includes('Execute the explicitly activated Skill'),

@@ -85,3 +85,5 @@ document 与 revision feedback；不得写 `run.completed`、`task.completed` �
 显式 `task_wait` 是普通的有界只读工具调用，不替代该自动等待决定，也不解除 required obligation；其返回只能帮助模型协调，canonical background result 仍是完成守卫接受的唯一 child 终态事实。
 
 已实施的[Codex 式 Agent 通信设计](../plans/background-agent-shell-conversation-coordination.md#4-codex-式-agent-通信kite-接线决定)把 `followup_task` 视为显式 Agent 消息与续轮触发，不在发送方 Run 为每条 followup 建立 required claim；现有 `task(background=true)` 的原 required 义务及本节的结果接纳规则不变。跨 Run 邮箱消息有独立低权限输入身份，不能伪装原 task 的 `subagent.background_result_persisted`。
+
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。

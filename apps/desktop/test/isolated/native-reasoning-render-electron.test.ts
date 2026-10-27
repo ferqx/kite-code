@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -122,6 +129,8 @@ test.skipIf(process.platform !== 'darwin')(
     });
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let owner: NativeOwnedProcesses | undefined;
+    let outputReads: Promise<string>[] = [];
+    let readFailures: unknown[] = [];
     let succeeded = false;
     try {
       writeFileSync(
@@ -136,7 +145,7 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: [{ id: 'files.read', definitionVersion: '4' }],
+          tools: [{ id: 'files.read', definitionVersion: '5' }],
         }),
       );
       const serviceOutdir = join(root, 'apps/service/dist');
@@ -177,10 +186,15 @@ test.skipIf(process.platform !== 'darwin')(
         readFileSync(
           resolve(import.meta.dir, '../native-reasoning-render-electron.fixture.ts'),
           'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        )
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       expect(
         (
@@ -220,8 +234,20 @@ test.skipIf(process.platform !== 'darwin')(
         driverPath,
         root,
       });
-      const stdout = new Response(driver.stdout).text(),
-        stderr = new Response(driver.stderr).text();
+      const capture = (stream: ReadableStream<Uint8Array>, path: string) =>
+        new Response(
+          stream.pipeThrough(
+            new TransformStream<Uint8Array, Uint8Array>({
+              transform(chunk, target) {
+                appendFileSync(path, chunk);
+                target.enqueue(chunk);
+              },
+            }),
+          ),
+        ).text();
+      const stdout = capture(driver.stdout, join(root, 'driver.stdout.log')),
+        stderr = capture(driver.stderr, join(root, 'driver.stderr.log'));
+      outputReads = [stdout, stderr];
       let timer: ReturnType<typeof setTimeout> | undefined;
       const exit = await Promise.race([
         driver.exited,
@@ -246,6 +272,10 @@ test.skipIf(process.platform !== 'darwin')(
       driver?.kill('SIGKILL');
       if (driver) await driver.exited;
       await owner?.settle(succeeded);
+      const drained = await Promise.allSettled(outputReads);
+      readFailures = drained.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : [],
+      );
       if (owner?.confirmed && succeeded) rmSync(root, { recursive: true, force: true });
       else
         console.error(
@@ -255,6 +285,7 @@ test.skipIf(process.platform !== 'darwin')(
           owner?.errors,
         );
     }
+    expect(readFailures).toHaveLength(0);
     expect(owner?.confirmed).toBe(true);
     expect(owner?.errors).toHaveLength(0);
   },

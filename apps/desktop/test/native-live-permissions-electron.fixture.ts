@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron, type Page } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 export const livePermissionExpected = {
   main: {
@@ -322,6 +323,7 @@ async function verifyQueueWindow() {
   await visibleMode('accept_edits');
   const draft = page!.getByRole('textbox', { name: '当前会话私有草稿', exact: true });
   const submit = () => page!.locator('form.composer button[type="submit"]').click();
+  await selectNativeFixtureModel(page!, 'fixed');
   await draft.fill('QUEUE JOURNEY');
   await submit();
   const group = page!.getByRole('region', { name: '需要人工审批', exact: true });
@@ -342,7 +344,27 @@ async function verifyQueueWindow() {
   await command.hover();
   const tooltip = page!.locator('.approval-command-tooltip');
   await tooltip.waitFor();
-  assert.equal(await tooltip.innerText(), shellText);
+  const approvalId = (await group.getByRole('article').getAttribute('aria-label'))!.replace(
+    /^approval /,
+    '',
+  );
+  const originalApproval = (await state()).selection!.interactions.find(
+    (row) => row.id === approvalId,
+  );
+  assert.ok(originalApproval);
+  assert.equal(originalApproval.definitionId, 'shell.execute');
+  const completeRequest = JSON.parse(await tooltip.innerText());
+  assert.deepEqual(completeRequest, originalApproval.request);
+  assert.ok(
+    completeRequest && typeof completeRequest === 'object' && !Array.isArray(completeRequest),
+  );
+  const input = completeRequest.input;
+  assert.ok(input && typeof input === 'object' && !Array.isArray(input));
+  assert.equal(input.command, shellText);
+  assert.deepEqual(input.permissions, {
+    filesystem: 'full_access',
+    network: 'none',
+  });
   await screenshot('09a-queue-long-shell-full-hover');
   assert.equal(await group.locator('.approval-child').count(), 0);
   assert.equal(await group.getByRole('button', { name: /详情/ }).count(), 0);
@@ -506,8 +528,13 @@ async function verifyQueueWindow() {
     'edit places complete Markdown in ordinary composer',
   );
   assert.equal(await draft.locator('.prompt-bold').innerText(), 'alpha 说明');
-  assert.equal(await row(alpha).count(), 0);
-  assert.equal(await page!.getByRole('button', { name: /取消编辑|恢复排队/ }).count(), 0);
+  await row(alpha).waitFor({ state: 'detached' });
+  assert.equal(await row(alpha).count(), 0, 'the withdrawn original queue row leaves the DOM');
+  assert.equal(
+    await page!.getByRole('button', { name: /取消编辑|恢复排队/ }).count(),
+    0,
+    'editing does not create an automatic queue restore action',
+  );
   assert.equal((await queueFacts()).commands.length, 1, 'edit does not automatically submit');
   await screenshot('10-queue-edited-removed-and-draft');
   await submit();
@@ -565,11 +592,14 @@ async function assertApprovalGroup(cards: Record<(typeof roles)[number], string>
   const draft = page!.getByRole('textbox', { name: '当前会话私有草稿', exact: true });
   assert.equal(await draft.isVisible(), true);
   assert.equal(await page!.locator('[data-permission-trigger]').isVisible(), true);
+  const next = async () => {
+    await page!.keyboard.press('Escape');
+    await group.getByRole('button', { name: '下一项审批', exact: true }).click();
+  };
   let childAppearance: { icon: string | null; color: string | null } | undefined;
   for (const role of roles) {
     const item = group.getByRole('article', { name: `approval ${cards[role]}`, exact: true });
-    if (!(await item.isVisible()))
-      await group.getByRole('button', { name: '下一项审批', exact: true }).click();
+    if (!(await item.isVisible())) await next();
     await item.waitFor();
     assert.equal(await item.count(), 1);
     const pager = await group.locator('.approval-pager').innerText();
@@ -616,8 +646,8 @@ async function assertApprovalGroup(cards: Record<(typeof roles)[number], string>
     );
     await draft.hover();
   }
-  await group.getByRole('button', { name: '下一项审批', exact: true }).click();
-  await group.getByRole('button', { name: '下一项审批', exact: true }).click();
+  await next();
+  await next();
   const icon = group.locator('.approval-child-icon');
   assert.deepEqual(
     {
@@ -638,7 +668,17 @@ async function openChild(carrierId: string, final = false) {
   const detail = page!.locator('.session-tab-child');
   if (final)
     await detail.getByText(livePermissionExpected.child.finalReply, { exact: true }).waitFor();
-  else await detail.getByText('等待人工审批', { exact: false }).first().waitFor();
+  else {
+    await page!
+      .locator(`li[data-execution-id="${carrierId}"]`)
+      .getByText('等待你的批准', { exact: true })
+      .waitFor();
+    await detail.getByText('正在等待', { exact: true }).first().waitFor();
+    const current = actors(await facts()).child;
+    assert.equal(current.carrierId, carrierId);
+    assert.ok(current.cards.some((card) => card.state === 'pending' && card.answer === null));
+    assert.equal(current.effectExists, false);
+  }
   assert.equal(
     (await state()).selection?.session.id,
     'permission-root',
@@ -722,11 +762,54 @@ try {
     .getByRole('button', { name: 'Live permissions', exact: true })
     .and(page.locator('button.session-row'))
     .click();
-  const confirm = page.getByRole('button', { name: '确认项目读取范围', exact: true });
-  await confirm.click();
-  await page.getByRole('checkbox', { name: '我已核对所显示的项目及读取范围', exact: true }).check();
-  await page.getByRole('button', { name: '允许读取所显示的范围', exact: true }).click();
-  await confirm.waitFor({ state: 'detached' });
+  // The isolated owner establishes the exact persisted trust before the ordinary UI exercise.
+  await page.evaluate(
+    async (storeId) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const fresh = (await window.kiteNative!.request({
+          method: 'permission.refresh',
+          generation: 1,
+        })) as NativeState;
+        if (
+          !fresh.selection ||
+          fresh.selection.storeId !== storeId ||
+          fresh.selection.session.id !== 'permission-root' ||
+          fresh.selection.session.workspaceId !== 'w' ||
+          !fresh.selection.permissions
+        )
+          throw Error('live_permission_fixture_scope_changed');
+        const originals = JSON.stringify(
+          fresh.permissionSubmissions.map((row) => row.intent.commandId),
+        );
+        try {
+          await window.kiteNative!.request({
+            method: 'permission.trust',
+            generation: 1,
+            observationId: fresh.selection.permissions.observationId,
+            trusted: true,
+          });
+          return;
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            error.message !== 'permission_observation_changed' ||
+            attempt === 2
+          )
+            throw error;
+          const current = (await window.kiteNative!.request({
+            method: 'state',
+            generation: 1,
+          })) as NativeState;
+          if (
+            JSON.stringify(current.permissionSubmissions.map((row) => row.intent.commandId)) !==
+            originals
+          )
+            throw Error('live_permission_fixture_intent_changed');
+        }
+      }
+    },
+    (await facts()).storeId,
+  );
   assert.equal(await page.getByRole('button', { name: '会话工具', exact: true }).count(), 0);
   await until(
     state,
@@ -738,6 +821,7 @@ try {
   );
   stage = 'full_and_start';
   await chooseMode('full');
+  await selectNativeFixtureModel(page, 'fixed');
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('LIVE PERMISSIONS');
@@ -1018,9 +1102,17 @@ try {
     .replace(/https?:\/\/[^\s<>"']+/g, '[redacted-url]')
     .replace(/Bearer\s+[^\s<>"']+/gi, 'Bearer [redacted]')
     .slice(0, 1200);
-  writeFileSync(join(evidence, 'failure-stage.json'), JSON.stringify({ stage, errorMessage }), {
-    mode: 0o600,
-  });
+  const errorStack = (error instanceof Error ? error.stack : undefined)
+    ?.replace(/https?:\/\/[^\s<>"']+/g, '[redacted-url]')
+    .replace(/Bearer\s+[^\s<>"']+/gi, 'Bearer [redacted]')
+    .slice(0, 8000);
+  writeFileSync(
+    join(evidence, 'failure-stage.json'),
+    JSON.stringify({ stage, errorMessage, errorStack }),
+    {
+      mode: 0o600,
+    },
+  );
   if (page) {
     try {
       await screenshot('failure');

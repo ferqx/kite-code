@@ -189,6 +189,20 @@ function fixture(
     dom,
     calls,
     click,
+    async chooseModel() {
+      await click('选择模型');
+      for (const label of ['选择模型，当前 未选择', '选择模型 model']) {
+        await until(() => !!dom.window.document.querySelector(`[aria-label="${label}"]`));
+        await act(async () => {
+          dom.window.document.querySelector<HTMLElement>(`[aria-label="${label}"]`)!.click();
+        });
+      }
+      await act(async () => {
+        dom.window.document
+          .querySelector('[aria-label="模型与思考程度"]')!
+          .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      });
+    },
     render: (testDiagnostics = false) =>
       act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />)),
     notify: (event: NativeEvent = { generation: 1, kind: 'changed' }) =>
@@ -393,6 +407,7 @@ test('a mutation transport failure automatically checks the original intent with
     await f.render();
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
+    await f.chooseModel();
     await act(async () => {
       await setPromptText(
         f.dom.window.document.querySelector('[role="textbox"][aria-label="新对话草稿"]')!,
@@ -553,6 +568,7 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
     await f.render();
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
+    await f.chooseModel();
     await act(async () => {
       await setPromptText(
         f.dom.window.document.querySelector('[role="textbox"][aria-label="新对话草稿"]')!,

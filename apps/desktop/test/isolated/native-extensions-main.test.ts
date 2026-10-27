@@ -130,7 +130,9 @@ test('Native formal extensions caller completes mini-review through real SQLite,
   });
   const data = memoryPrivateData();
   let caller: NativeCaller | undefined;
-  const posts = () => wire.filter((entry) => entry.method === 'POST').length;
+  const posts = () =>
+    wire.filter((entry) => entry.method === 'POST' && entry.path === '/v1/sessions/s/commands')
+      .length;
   const send = (request: NativeExtensionsRequest) => caller!.invoke(request);
   async function select() {
     const attached = (await caller!.invoke({ method: 'attach' })) as NativeState;

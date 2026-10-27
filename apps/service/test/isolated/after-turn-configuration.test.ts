@@ -264,14 +264,18 @@ test('a trusted deny or JSONC-only completion intent allows ordinary child work 
       expect(f.requests.filter((request) => request.model === 'child')).toHaveLength(1);
       expect(f.requests.filter((request) => request.model === 'parent')).toHaveLength(2);
       await until(async () => {
-        const deferred = (
-          await f.store.listPendingJobReports({
-            expectedStoreId: f.identity.expectedStoreId,
-            sessionId: 'root',
-          })
-        ).commands.find(
-          (command) => (command.receipt as { outcome?: string })?.outcome === 'report_deferred',
+        const page = await f.store.listAgentMessages({
+          ...f.identity,
+        });
+        const messages = page.items.filter(
+          (message) => message.kind === 'result' && message.state === 'accepted',
         );
+        expect(messages.length).toBeLessThanOrEqual(1);
+        const command = messages[0] && (await f.store.getCommand(messages[0].id));
+        const deferred =
+          (command?.receipt as { outcome?: string })?.outcome === 'report_deferred'
+            ? command
+            : undefined;
         // The active-only preflight may publish deferred before the original
         // idle policy finishes. Observe its denial before measuring read-only queries.
         if (mode === 'deny' && !f.phases.includes('apply')) return undefined;

@@ -39,6 +39,7 @@ export function TuiComposer({
   onFileQuery,
   planning = false,
   planName,
+  availableRows,
 }: {
   buffer: ComposerBuffer;
   value: string;
@@ -54,6 +55,7 @@ export function TuiComposer({
   onFileQuery?(token?: FileToken): void;
   planning?: boolean;
   planName?: string;
+  availableRows?: number;
 }) {
   const [, render] = useReducer((n: number) => n + 1, 0);
   const { t, testDiagnostics } = useTuiPresentation();
@@ -190,7 +192,7 @@ export function TuiComposer({
   const window = candidateViewport(
     candidates.length,
     buffer.candidate,
-    rows,
+    Math.min(rows, availableRows ?? rows),
     visible.length + Number(start > 0) + Number(start + visible.length < lines.length),
   );
   const ghost =

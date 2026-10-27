@@ -294,20 +294,6 @@ try {
         const host = createDefaultProcessConfiguration({
           userConfigurationPath: profile.profilePath + '/config.jsonc',
           profile,
-          permissionPolicy:
-            mode === 'prep' || mode === 'tool'
-              ? {
-                  readPolicy: () => ({
-                    mode: 'full',
-                    workspaceTrust: true,
-                    revision: 'trusted-knowledge',
-                    allowed: [
-                      { kind: 'model', definitionId: 'local', definitionVersion: '1' },
-                      { kind: 'tool', definitionId: 'skills.load', definitionVersion: '1' },
-                    ],
-                  }),
-                }
-              : undefined,
         });
         const management = host.permissionManagement!;
         return {
@@ -347,7 +333,7 @@ try {
     title: 'original',
   });
   if (!runtime || !managementPort) throw Error('original runtime missing');
-  if (mode === 'ordinary' || mode === 'manual' || mode === 'late') {
+  {
     const identity = { expectedStoreId, subjectId, workspaceId: 'w' };
     const trust = await managementPort.readTrust(identity);
     await managementPort.setTrust({
@@ -357,6 +343,18 @@ try {
       canonicalIdentity: trust.canonicalIdentity,
       externalReadScopeDigest: trust.externalReadScopeDigest,
       ifRevision: trust.revision,
+    });
+  }
+  if (mode === 'prep' || mode === 'tool') {
+    const identity = { expectedStoreId, subjectId, sessionId: 's' };
+    const current = await managementPort.readMode(identity);
+    await managementPort.setMode({
+      ...identity,
+      commandId: 'full-mode',
+      mode: 'full',
+      makeDefault: false,
+      ifRevision: current.revision,
+      ifDefaultRevision: current.defaultRevision,
     });
   }
   const initial = {

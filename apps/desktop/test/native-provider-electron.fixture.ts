@@ -100,13 +100,19 @@ async function setDefaultModel(page: import('playwright').Page, modelId: string,
   // Direct fixture IPC has no component onSaved callback; reopening owns fresh UI observations.
   await closeSettings(page);
   await openSettings(page);
+  await page.getByRole('button', { name: '常规', exact: true }).click();
+  const model = readConfiguration().models?.find((value) => value.id === modelId);
+  assert.ok(model);
+  const defaultRow = page.locator('.settings-row').filter({
+    has: page.getByText('当前默认模型', { exact: true }),
+  });
+  await defaultRow.getByText(`${label} · ${model.model ?? model.id}`, { exact: true }).waitFor();
+  assert.equal(readConfiguration().modelId, modelId);
   await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
   await openConnectionModels(page, label);
   await page
     .getByRole('dialog', { name: `${label} 的模型管理`, exact: true })
-    .getByRole('switch', { name: `启用模型 ${modelId}`, exact: true })
-    .locator('..')
-    .getByText('默认', { exact: true })
+    .locator('.settings-model-options[aria-busy="false"]')
     .waitFor();
 }
 
@@ -292,6 +298,7 @@ try {
       alias === 'openai' || alias === 'deepseek' ? 'stored' : 'unchanged',
     );
     await page.getByRole('button', { name: '新增提供商', exact: true }).waitFor();
+    await page.getByRole('textbox', { name: '服务地址', exact: true }).waitFor({ state: 'hidden' });
     assert.equal(await page.getByRole('textbox', { name: '服务地址', exact: true }).count(), 0);
   }
   const config = readConfiguration();
@@ -324,17 +331,31 @@ try {
     (v) => v === id('compatible'),
     'default A absent',
   );
-  assert.equal(
-    await page
-      .getByRole('switch', { name: `启用模型 ${id('compatible')}`, exact: true })
-      .isDisabled(),
-    true,
-  );
+  const defaultToggle = page.getByRole('switch', {
+    name: `启用模型 ${id('compatible')}`,
+    exact: true,
+  });
+  assert.equal(await defaultToggle.isDisabled(), false);
+  for (const enabled of [false, true]) {
+    await defaultToggle.setChecked(enabled);
+    await until(
+      async () => {
+        const current = readConfiguration();
+        return {
+          modelId: current.modelId,
+          enabled: current.models?.find((model) => model.id === id('compatible'))?.enabled ?? true,
+        };
+      },
+      (value) => value.modelId === id('compatible') && value.enabled === enabled,
+      `default model toggle ${enabled} preserves its exact configured default`,
+    );
+    assert.equal(await defaultToggle.isChecked(), enabled);
+  }
   async function choose(alias: string) {
     await closeSettings(page);
     const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
     const popup = page.getByRole('dialog', { name: '模型与思考程度', exact: true });
-    if (!(await popup.count())) await picker.getByRole('button', { name: /^模型：/ }).click();
+    if (!(await popup.count())) await picker.locator('[data-model-trigger]').click();
     await popup.getByRole('button', { name: /^选择模型，当前/ }).click();
     await popup
       .getByRole('tablist', { name: '模型提供商', exact: true })
@@ -345,7 +366,7 @@ try {
   async function effort(value: string) {
     const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
     const popup = page.getByRole('dialog', { name: '模型与思考程度', exact: true });
-    if (!(await popup.count())) await picker.getByRole('button', { name: /^模型：/ }).click();
+    if (!(await popup.count())) await picker.locator('[data-model-trigger]').click();
     const label = ({ low: '轻度', high: '高' } as Record<string, string>)[value];
     assert.ok(label, 'fixture requests an explicit supported effort');
     const slider = popup.getByRole('slider', { name: '思考程度', exact: true });
@@ -392,7 +413,28 @@ try {
   await effort('high');
   assert.equal(readConfiguration().modelId, id('compatible'));
   await select('b');
-  assert.match(await page.getByRole('region', { name: '下一轮模型选择' }).innerText(), /model-a/);
+  await until(
+    async () =>
+      (await page.locator('[data-model-picker] [data-model-trigger]').innerText())
+        .trim()
+        .split('\n')[0],
+    (value) => value === '选择模型',
+    'unselected B model trigger ready',
+  );
+  assert.equal(
+    await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).isDisabled(),
+    true,
+    'unselected B cannot borrow A or the global default',
+  );
+  const untouchedB = await page.evaluate(
+    async () =>
+      await window.kiteNative!.request({
+        method: 'input.models.read',
+        generation: 1,
+      }),
+  );
+  assert.equal((untouchedB as { selectedModelId?: string }).selectedModelId, undefined);
+  assert.equal(readConfiguration().modelId, id('compatible'));
   await select('a');
   await send('NATIVE_openai_effort');
   await choose('ollama');
@@ -469,11 +511,16 @@ try {
   await openSessionTools(page);
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), beforeCreate);
   assert.equal(await page.getByRole('textbox', { name: '新对话草稿', exact: true }).count(), 1);
-  // This inspection replaces the reader's observation; let the picker finish its own GET first.
+  // A valid explicit same-Store recommendation restores A's last deliberate OpenAI choice,
+  // independently of the now-compatible global default. A re-selection below remains explicit.
   await page
     .getByRole('region', { name: '下一轮模型选择', exact: true })
-    .getByRole('button', { name: /^模型：model-a/ })
+    .getByRole('button', { name: '模型：model-openai，思考程度：高', exact: true })
     .waitFor();
+  assert.equal(
+    await page.getByRole('button', { name: '发送首条消息', exact: true }).isDisabled(),
+    true,
+  );
   const unbound = await page.evaluate(
     async () =>
       await window.kiteNative!.request({ method: 'conversation.models.read', generation: 1 }),

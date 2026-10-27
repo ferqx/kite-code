@@ -263,7 +263,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       writeFileSync(
         configPath,
         config([
-          { id: 'files.read', definitionVersion: '4' },
+          { id: 'files.read', definitionVersion: '5' },
           { id: 'files.write', definitionVersion: '3' },
         ]),
         { mode: 0o600 },
@@ -325,7 +325,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       expect(chatCommand.status).toBe('applied');
       expect(chat.status).toBe('completed');
       expect(chat).toMatchObject({
-        originCommandId: (chatCommand.receipt as { businessCommandId: string }).businessCommandId,
+        originCommandId: chatCommand.id,
         rootWorkCommandId: 'chat',
       });
       expect(requests).toHaveLength(4 + shellCalls);

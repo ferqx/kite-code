@@ -33,7 +33,15 @@ import {
   SettingsNavigationIcon,
   ToolActivity,
 } from '@kite-ai/ui/desktop';
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { AgentBrowserPanel } from './agent-browser-panel';
 import {
   AgentBrowserPresentation,
@@ -113,6 +121,7 @@ import { useNativeTheme } from './native-theme';
 import {
   groupNativeToolMessages,
   liveToolMessages,
+  NativeToolPresentation,
   useNativeToolMessages,
 } from './native-tool-messages';
 import {
@@ -1123,13 +1132,14 @@ function NativeDesktopContent({
     onChanged: async () => {
       await report(refresh, false);
     },
-    onOpenChild: (sessionId, executionId, title) => {
+    onOpenChild: (sessionId, executionId, title, childAgentIdentity) => {
       setChildTabRequest({
         parent: childParent,
         requestId: ++childTabSequence.current,
         sessionId,
         executionId,
         title,
+        childAgentIdentity,
       });
     },
   });
@@ -2099,6 +2109,21 @@ function NativeDesktopContent({
   const hasPendingRootInteraction = nativeRootInteractionBlocksComposer(selection);
   const canCompose =
     !!selection && !selection.session.parentSessionId && !hasPendingRootInteraction;
+  const cancelCurrentRunDisabled =
+    pending ||
+    executionUnconfirmed ||
+    !!selection?.permissionUnavailable ||
+    !!state?.callerUnavailable ||
+    historyState.phase !== 'complete' ||
+    !selection ||
+    selected.current !== selection.session.id ||
+    !!state?.callerSubmissions?.some(
+      (value) =>
+        value.request.kind === 'command.cancel' &&
+        value.scope.storeId === selection?.storeId &&
+        value.scope.sessionId === selection?.session.id &&
+        ['saved', 'submitting', 'unknown'].includes(value.phase),
+    );
   const savedFirstInput = useRef<string | undefined>(undefined);
   const firstInputIdentity =
     firstSubmission &&
@@ -2340,9 +2365,20 @@ function NativeDesktopContent({
     rejectedInputs,
     replyDisplayScope,
   ]);
+  const toolPresentation = useRef(new NativeToolPresentation());
   const messageModels = useMemo(() => {
-    const models = preparing ? [] : [...transcript.messages];
-    models.push(...liveTools.map((entry) => entry.message));
+    const models = preparing
+      ? []
+      : toolPresentation.current.project(
+          replyDisplayScope,
+          transcript.messages,
+          toolMessages.entries,
+          liveTools,
+          {
+            bridge,
+            key: JSON.stringify([state?.generation, directory?.storeId ?? selection?.storeId]),
+          },
+        );
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
       // Run observation can arrive before persisted user history. Keep the
@@ -2446,7 +2482,11 @@ function NativeDesktopContent({
     return groupNativeToolMessages(models);
   }, [
     preparing,
+    bridge,
+    state?.generation,
+    directory?.storeId,
     transcript.messages,
+    toolMessages.entries,
     liveTools,
     pendingInputModels,
     inputDeliveries,
@@ -3320,6 +3360,10 @@ function NativeDesktopContent({
                 sessionId: result.childSessionId,
                 executionId: result.executionId,
                 title: result.name,
+                childAgentIdentity: JSON.stringify([
+                  message.originMessage?.storeId ?? selection.storeId,
+                  result.childSessionId,
+                ]),
               });
             }}
           >
@@ -3425,16 +3469,31 @@ function NativeDesktopContent({
                     sessionId: activity.sessionId,
                     executionId: activity.executionId,
                     title: activity.childAgent.name,
+                    childAgentIdentity: activity.childAgent.identity,
                   }),
               }
             : undefined,
       };
     };
+    const childOperation = (model: (typeof group)[number]) =>
+      model.toolName === 'spawn_agent' || model.toolName === 'follow_up_agent';
     const agentTool = (model: (typeof group)[number]) => {
       const props = agentProps(model);
-      return props.childAgent ? (
+      return childOperation(model) ? (
         <ToolActivity
           {...props}
+          childAgent={
+            props.childAgent ??
+            (model.status === 'completed'
+              ? {
+                  identity: JSON.stringify([
+                    'native-child-tool',
+                    model.presentationKey ?? model.id,
+                  ]),
+                  name: '子 Agent',
+                }
+              : undefined)
+          }
           aggregate={false}
           messages={[model]}
           expanded={controls.expandedItems[model.presentationKey ?? model.id]}
@@ -3445,6 +3504,38 @@ function NativeDesktopContent({
         />
       ) : undefined;
     };
+    // A verified child operation is a direct navigation row. Keep it outside
+    // ordinary Tool disclosures, preserving the original tool order and the
+    // independent expansion identities of ordinary segments on either side.
+    if (group.some(childOperation)) {
+      const rows: ReactNode[] = [];
+      let ordinary: (typeof group)[number][] = [];
+      const flush = () => {
+        if (!ordinary.length) return;
+        const segment = ordinary;
+        ordinary = [];
+        const key = JSON.stringify(['native-tools', segment[0]!.presentationKey ?? segment[0]!.id]);
+        rows.push(
+          <Fragment key={key}>
+            {renderNativeTools(segment, {
+              ...controls,
+              activityId: key,
+              expanded: controls.expandedItems[key],
+              onToggle: (open) => controls.onToggleItem(key, open),
+            })}
+          </Fragment>,
+        );
+      };
+      for (const model of group) {
+        const row = agentTool(model);
+        if (row) {
+          flush();
+          rows.push(<Fragment key={model.presentationKey ?? model.id}>{row}</Fragment>);
+        } else ordinary.push(model);
+      }
+      flush();
+      return <>{rows}</>;
+    }
     const unverified = new Set(
       group
         .filter(
@@ -3661,9 +3752,13 @@ function NativeDesktopContent({
       onHeaderMouseDown={(clickCount) => {
         if (clickCount === 2)
           void window.kiteNative?.toggleWindowMaximize?.().catch((cause) =>
-            report(async () => {
-              throw cause;
-            }, false),
+            report(
+              async () => {
+                throw cause;
+              },
+              false,
+              true,
+            ),
           );
       }}
       workspaces={workspaceModels}
@@ -3823,7 +3918,6 @@ function NativeDesktopContent({
             !selection.viewLoading &&
             !directory?.unavailable
           }
-          onRefresh={environment.refreshChild}
           onTitleChange={onTitleChange}
           readingCache={childReadings.current}
           writeClipboardText={window.kiteNative?.writeClipboardText}
@@ -4061,7 +4155,25 @@ function NativeDesktopContent({
           </>
         )
       }
-      interaction={!preparing && hasPendingInteraction ? interactionCards : undefined}
+      interaction={
+        !preparing && hasPendingInteraction ? (
+          <>
+            {interactionCards}
+            {hasPendingRootInteraction &&
+              activeInputRun &&
+              activeInputRun.sessionId === selection?.session.id &&
+              activeInputRun.originStoreId === selection.storeId && (
+                <DesktopButton
+                  aria-label="停止任务"
+                  disabled={cancelCurrentRunDisabled || activeInputRun.status === 'cancelling'}
+                  onClick={() => void write(stopCurrentRun)}
+                >
+                  {activeInputRun.status === 'cancelling' ? '正在停止…' : '停止任务'}
+                </DesktopButton>
+              )}
+          </>
+        ) : undefined
+      }
       interactionHidesPrompt={!!hasPendingRootInteraction}
       composer={
         preparing && state && directory
@@ -4159,18 +4271,7 @@ function NativeDesktopContent({
                 cacheMetrics: cacheMetrics.metrics,
                 contextUsage: contextUsage.metrics,
                 stopping: activeInputRun?.status === 'cancelling',
-                cancelDisabled:
-                  pending ||
-                  !!selection.permissionUnavailable ||
-                  !!state.callerUnavailable ||
-                  historyState.phase !== 'complete' ||
-                  !!state.callerSubmissions?.some(
-                    (value) =>
-                      value.request.kind === 'command.cancel' &&
-                      value.scope.storeId === selection.storeId &&
-                      value.scope.sessionId === selection.session.id &&
-                      ['saved', 'submitting', 'unknown'].includes(value.phase),
-                  ),
+                cancelDisabled: cancelCurrentRunDisabled,
                 disabled: pending || inputQueue.busy || selected.current !== selection.session.id,
                 sessionLoading,
                 sending,

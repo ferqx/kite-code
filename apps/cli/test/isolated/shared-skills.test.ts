@@ -923,13 +923,13 @@ nativeTest(
       await until(
         async () =>
           f.sql<{ request_json: string }>(
-            "SELECT public.request_json FROM command public JOIN command raw ON raw.id=public.target_command_id AND raw.kind='human.input' WHERE public.session_id='active' AND public.kind='input.follow_up'",
+            "SELECT request_json FROM command WHERE session_id='active' AND kind='input.follow_up'",
           ),
         (rows) => rows.length === 1,
       );
       const request = JSON.parse(
         f.sql<{ request_json: string }>(
-          "SELECT public.request_json FROM command public JOIN command raw ON raw.id=public.target_command_id AND raw.kind='human.input' WHERE public.session_id='active' AND public.kind='input.follow_up'",
+          "SELECT request_json FROM command WHERE session_id='active' AND kind='input.follow_up'",
         )[0]!.request_json,
       );
       expect(request.afterRunId).toBe(held.id);
@@ -960,7 +960,7 @@ nativeTest(
       ).toBe(true);
       expect(
         f.sql(
-          "SELECT public.request_json FROM command public JOIN command raw ON raw.id=public.target_command_id AND raw.kind='human.input' WHERE public.session_id='active' AND public.kind='input.follow_up'",
+          "SELECT request_json FROM command WHERE session_id='active' AND kind='input.follow_up'",
         ).length,
       ).toBe(1);
     } finally {

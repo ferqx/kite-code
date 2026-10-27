@@ -152,23 +152,32 @@ test('native Conversation follows, restores manual reading and retires its obser
     expect(viewport.tabIndex).toBe(0);
     expect(host.querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
     expect(host.querySelector('[data-slot="scroll-area-scrollbar"]')).toBeNull();
+    let heightReads = 0;
     Object.defineProperties(viewport, {
-      scrollHeight: { get: () => height },
+      scrollHeight: {
+        get: () => {
+          heightReads++;
+          return height;
+        },
+      },
       clientHeight: { value: 100 },
     });
+    const resize = (target: Element) => {
+      for (const observer of observers)
+        if (observer.targets.has(target))
+          observer.callback([], observer as unknown as ResizeObserver);
+    };
     await render(0, 'tail 1');
+    expect(heightReads).toBe(0);
+    resize(viewport);
     expect(viewport.scrollTop).toBe(1000);
+    expect(heightReads).toBe(1);
     const message = host.querySelector('.message');
     await render(0, 'tail 1 while later metadata loads', true);
     expect(host.querySelector('.message') === message).toBe(true);
     expect(host.textContent).toContain('tail 1 while later metadata loads');
     expect(!!host.querySelector('.conversation-loading')).toBe(false);
     const column = viewport.querySelector('.reading-column')!;
-    const resize = (target: Element) => {
-      for (const observer of observers)
-        if (observer.targets.has(target))
-          observer.callback([], observer as unknown as ResizeObserver);
-    };
     // Child-local body reads and collapse animations resize content without a parent commit.
     height = 1500;
     resize(column);

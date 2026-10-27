@@ -7,12 +7,14 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import { NativeDisplayCache } from './native-display-cache';
 import type {
   NativeRunFact,
   NativeToolExecution,
   NativeToolMessageFact,
 } from './tool-messages-bridge';
 import { nativeShellCommandChunkBytes } from './tool-messages-bridge';
+import { nativeToolRequestTarget } from './tool-request-target';
 
 const emptyToolFacts: NativeToolMessageFact[] = [];
 
@@ -153,16 +155,19 @@ function shellInputMissing(fact: NativeToolMessageFact | undefined) {
       (['execute', 'launch'].includes(input.operation) && input.command === undefined))
   );
 }
-function withoutShellInput(fact: NativeToolMessageFact): NativeToolMessageFact {
-  return fact.shellInput
-    ? {
-        ...fact,
-        target: undefined,
-        inputSource: undefined,
-        shellInput: { operation: fact.shellInput.operation },
-        shellResultVerified: undefined,
-      }
-    : fact;
+function withoutToolInput(fact: NativeToolMessageFact): NativeToolMessageFact {
+  return {
+    ...fact,
+    target: undefined,
+    inputPending: true,
+    inputSource: undefined,
+    ...(fact.shellInput
+      ? {
+          shellInput: { operation: fact.shellInput.operation },
+          shellResultVerified: undefined,
+        }
+      : {}),
+  };
 }
 function shellCallCompatible(
   message: Message,
@@ -511,7 +516,7 @@ export function liveToolMessages(
         storeId: string;
         session: { id: string };
         runs: readonly NativeRunFact[];
-        executions: readonly NativeToolExecution[];
+        executions: readonly (NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>)[];
         interactions?: NativeSelection['interactions'];
       }
     | undefined,
@@ -581,7 +586,21 @@ export function liveToolMessages(
       return {
         execution,
         message: {
-          ...desktopToolMessage(execution, `native-execution:${execution.id}`, ''),
+          ...desktopToolMessage(
+            {
+              ...execution,
+              target: execution.definitionId.startsWith('shell.')
+                ? undefined
+                : (execution.target ??
+                  nativeToolRequestTarget(
+                    execution.toolInput,
+                    execution.definitionId,
+                    execution.definitionVersion,
+                  )),
+            },
+            `native-execution:${execution.id}`,
+            '',
+          ),
           ...(input ? { shell: nativeShellInputPresentation(input) } : {}),
           presentationKey: nativeToolPresentationKey(
             selection.storeId,
@@ -615,6 +634,118 @@ export function liveToolMessages(
         },
       };
     });
+}
+
+/** Admit whole tool rows independently; a pending sibling never hides a complete one. */
+export function completeNativeToolMessages(
+  messages: readonly DesktopMessage[],
+  facts: readonly NativeToolMessageFact[],
+  pendingMessageIds?: ReadonlySet<string>,
+): DesktopMessage[] {
+  const complete = new Set(
+    facts
+      .filter((fact) => !fact.inputPending && !pendingMessageIds?.has(fact.messageId))
+      .map((fact) => fact.messageId),
+  );
+  return messages.filter((message) => message.role !== 'tool' || complete.has(message.id));
+}
+
+export function nativeLiveToolPresentationReady(
+  entry: {
+    message: DesktopMessage;
+    execution: NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>;
+  },
+  facts: readonly NativeToolMessageFact[],
+): boolean {
+  if (!entry.message.shell)
+    return entry.execution.inputReady === true || entry.execution.toolInput !== undefined;
+  return facts.some(
+    (fact) =>
+      fact.messageId === entry.message.id &&
+      fact.executionId === entry.execution.id &&
+      !fact.inputPending &&
+      fact.shellInput !== undefined &&
+      fact.shellInput.commandNextOffset == null,
+  );
+}
+
+/** Retain only previously complete, exact-identity rows while replacement metadata loads. */
+export class NativeToolPresentation {
+  private scope: string | undefined;
+  private complete = new Map<string, DesktopMessage>();
+  private readonly cached = new NativeDisplayCache<readonly [string, DesktopMessage][]>();
+  private boundary: string | undefined;
+  private bridge: unknown;
+
+  project(
+    scope: string,
+    messages: readonly DesktopMessage[],
+    facts: readonly NativeToolMessageFact[],
+    live: readonly {
+      message: DesktopMessage;
+      execution: NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>;
+    }[],
+    boundary?: { bridge: unknown; key: string },
+  ): DesktopMessage[] {
+    if (boundary && (boundary.bridge !== this.bridge || boundary.key !== this.boundary)) {
+      this.bridge = boundary.bridge;
+      this.boundary = boundary.key;
+      this.cached.clear();
+      this.complete.clear();
+      this.scope = undefined;
+    }
+    if (this.scope !== scope) {
+      this.scope = scope;
+      this.complete = new Map(this.cached.get(scope));
+    }
+    const completeIds = new Set(
+      completeNativeToolMessages(messages, facts).map((message) => message.id),
+    );
+    const liveById = new Map(live.map((entry) => [entry.message.id, entry]));
+    const keep = new Set<string>();
+    const result = [...messages, ...live.map((entry) => entry.message)].flatMap((message) => {
+      if (message.role !== 'tool') return [message];
+      const key = message.presentationKey ?? message.id;
+      keep.add(key);
+      const entry = liveById.get(message.id);
+      const ready = entry
+        ? nativeLiveToolPresentationReady(entry, facts)
+        : completeIds.has(message.id);
+      if (ready) {
+        this.complete.set(key, message);
+        return [message];
+      }
+      const pending = facts.some(
+        (fact) =>
+          fact.inputPending &&
+          (fact.messageId === message.id || fact.executionId === entry?.execution.id),
+      );
+      if (pending) {
+        this.complete.delete(key);
+        return [];
+      }
+      if (entry) {
+        this.complete.delete(key);
+        return [];
+      }
+      const prior = this.complete.get(key);
+      if (!prior) return [];
+      return [
+        {
+          ...prior,
+          id: message.id,
+          turnId: message.turnId,
+          presentationGroupId: message.presentationGroupId,
+          settled: message.settled,
+          status: prior.settled ? prior.status : undefined,
+          executionUnconfirmed: true,
+        },
+      ];
+    });
+    for (const key of this.complete.keys()) if (!keep.has(key)) this.complete.delete(key);
+    this.cached.set(scope, [...this.complete]);
+    return result;
+  }
 }
 export function NativeLiveToolMessage({
   message,
@@ -808,6 +939,7 @@ function useNativeLiveShellInputs({
                   next[fact!.messageId] = input.commandNextOffset!;
                   fact = {
                     ...fact!,
+                    inputPending: true,
                     shellInput: { operation: input.operation, shellId: input.shellId },
                   };
                 } else fact = { ...fact!, shellInput: { ...input, command, commandOffset: 0 } };
@@ -987,7 +1119,8 @@ export function useNativeToolMessages({
         !previous ||
         previous.commandPending ||
         (!previous.inputReadFailed &&
-          previous.fact?.shellInput &&
+          previous.fact &&
+          (!previous.fact.definitionId.startsWith('shell.') || previous.fact.shellInput) &&
           (previous.callRevision !== inputRevisions.get(message.id)?.call ||
             (shellInputMissing(previous.fact) &&
               previous.inputRevision !== inputRevisions.get(message.id)?.omission))) ||
@@ -1074,6 +1207,7 @@ export function useNativeToolMessages({
                     next[message.id] = input.commandNextOffset!;
                     fact = {
                       ...fact!,
+                      inputPending: true,
                       shellInput: { operation: input.operation, shellId: input.shellId },
                     };
                   } else fact = { ...fact!, shellInput: { ...input, command, commandOffset: 0 } };
@@ -1089,7 +1223,7 @@ export function useNativeToolMessages({
                   previous && sameReceipt(previous.message, message)
                     ? previous.fact &&
                       (previous.callRevision !== inputRevisions.get(message.id)?.call
-                        ? withoutShellInput(previous.fact)
+                        ? withoutToolInput(previous.fact)
                         : previous.fact)
                     : fact && {
                         ...fact,
@@ -1124,7 +1258,7 @@ export function useNativeToolMessages({
                 previous && sameReceipt(previous.message, message)
                   ? previous.fact &&
                     (previous.callRevision !== inputRevisions.get(message.id)?.call
-                      ? withoutShellInput(previous.fact)
+                      ? withoutToolInput(previous.fact)
                       : previous.fact)
                   : undefined,
               observationRevision,
@@ -1187,8 +1321,8 @@ export function useNativeToolMessages({
           const current = messagesById.get(fact.messageId);
           if (!original || !current || !sameReceipt(original, current)) return [];
           return [
-            fact.shellInput && record.callRevision !== inputRevisions.get(fact.messageId)?.call
-              ? withoutShellInput(fact)
+            record.callRevision !== inputRevisions.get(fact.messageId)?.call
+              ? withoutToolInput(fact)
               : fact,
           ];
         }),

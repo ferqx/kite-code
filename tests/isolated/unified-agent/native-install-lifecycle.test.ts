@@ -332,6 +332,11 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         readFileSync(
           join(repositoryRoot, 'tests/fixtures/unified-agent/native-install-electron.ts'),
           'utf8',
+        ).replace(
+          "'../../../apps/desktop/test/native-model-selection.fixture'",
+          JSON.stringify(
+            join(repositoryRoot, 'apps/desktop/test/native-model-selection.fixture.ts'),
+          ),
         ),
       );
       const result = await Bun.build({

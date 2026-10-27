@@ -275,7 +275,19 @@ function SessionPageContent({
   const panelAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
-  const [tabsKey, setTabsKey] = useState<string>();
+  const tabsIntent = useRef<{ scope?: string; key?: string }>({});
+  const retireTabsPanel = useRef(false);
+  if (tabsIntent.current.scope !== props.readingKey) {
+    retireTabsPanel.current = tabsIntent.current.key !== undefined;
+    tabsIntent.current = { scope: props.readingKey };
+  }
+  const [, tabsChanged] = useState(0);
+  const setTabsKey = useCallback((key: string | undefined) => {
+    if (tabsIntent.current.key === key) return;
+    tabsIntent.current.key = key;
+    tabsChanged((value) => value + 1);
+  }, []);
+  const tabsKey = tabsIntent.current.key;
   const [detailsCollapsed, setDetailsCollapsed] = useState<boolean>();
   const presentedTabsKey = useRef<string | undefined>(undefined);
   const childTabOpener = useRef(tabModel.openChild);
@@ -321,7 +333,7 @@ function SessionPageContent({
   const hostDetailsOpen = !!props.detailPanel;
   useLayoutEffect(() => {
     if (hostDetailsOpen) setTabsKey(undefined);
-  }, [hostDetailsOpen]);
+  }, [hostDetailsOpen, setTabsKey]);
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
   const rightSidebarOpen =
@@ -419,23 +431,26 @@ function SessionPageContent({
       setTabsKey(open ? props.readingKey : undefined);
       schedulePanelChange(detailsPanelFrame, detailsPanel, open);
     },
-    [schedulePanelChange, props.readingKey],
+    [schedulePanelChange, props.readingKey, setTabsKey],
   );
-  const handledChildRequest = useRef<string | undefined>(undefined);
+  const handledChildRequest = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     const request = props.childTabRequest;
-    if (!hasTabs || !request) return;
-    const key = JSON.stringify([props.readingKey, request.requestId]);
-    if (handledChildRequest.current === key) return;
-    handledChildRequest.current = key;
+    if (!hasTabs || !request || !props.readingKey || props.loading) return;
+    // A retained request is one navigation intent. Temporary selection scopes
+    // and returning to its parent must not reopen it or close the current panel.
+    const key = request.requestId;
+    if (handledChildRequest.current !== undefined && key <= handledChildRequest.current) return;
     const opened = childTabOpener.current(
       { sessionId: request.sessionId, executionId: request.executionId },
       request.title,
+      request.childAgentIdentity,
     );
+    handledChildRequest.current = key;
     setTabLimitKey(opened ? undefined : props.readingKey);
     detailClose.current?.();
     changeTabsOpen(true);
-  }, [props.childTabRequest, hasTabs, props.readingKey, changeTabsOpen]);
+  }, [props.childTabRequest, hasTabs, props.readingKey, props.loading, changeTabsOpen]);
   const closeScheduledEditor = useCallback(
     (generation: number) => {
       if (scheduledEditorGeneration.current !== generation) return;
@@ -467,11 +482,11 @@ function SessionPageContent({
     if (environmentAnimationKey !== undefined) setEnvironmentAnimationKey(undefined);
   }, [props.readingKey, environmentAnimationKey]);
   useLayoutEffect(() => {
-    if (tabsKey !== undefined && tabsKey !== props.readingKey) {
-      collapseDetails();
-      setTabsKey(undefined);
+    if (retireTabsPanel.current && tabsIntent.current.scope === props.readingKey) {
+      retireTabsPanel.current = false;
+      if (!hostDetailsOpen) collapseDetails();
     }
-  }, [tabsKey, props.readingKey, collapseDetails]);
+  }, [props.readingKey, hostDetailsOpen, collapseDetails]);
   useEffect(() => {
     if (!props.scheduledTasks) {
       collapseDetails();
@@ -576,6 +591,7 @@ function SessionPageContent({
     const cancel = (event: KeyboardEvent) => {
       if (
         event.key !== 'Escape' ||
+        event.defaultPrevented ||
         document.querySelector('dialog[open]') ||
         document.querySelector('[role="dialog"]')
       )
@@ -894,7 +910,10 @@ function SessionPageContent({
                         title="标签页"
                         aria-controls="session-tabs"
                         onClick={() => {
-                          if (!tabsOpen) props.detailPanel?.onClose();
+                          if (!tabsOpen) {
+                            if (tabModel.tabs.length === 0) tabModel.addBrowser();
+                            props.detailPanel?.onClose();
+                          }
                           changeTabsOpen(!tabsOpen);
                         }}
                       >

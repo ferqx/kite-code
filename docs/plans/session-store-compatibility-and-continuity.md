@@ -2,7 +2,7 @@
 
 状态：已约定的默认入口、已验证格式转换、历史来源归并与原会话续聊已实施。Linux 产品迁移入口与 Windows 原生维护／发布资格仍待验证；真实用户数据恢复与未来版本兼容分别判断。
 
-当前实现以 [App Server 契约](../active/app-server-local-runtime.md)、[SQLite owner](../../packages/runtime-storage-sqlite/README.md)和[启动入口 owner](../../packages/kite-local-runtime/README.md)为准。本页保留尚未完成的资格、不可放宽的验收条件与历史证据边界，不作为另一份当前实现说明。
+当前实现以 [App Server 契约](../active/app-server-local-runtime.md)、[SQLite owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md)和[启动入口 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-local-runtime/README.md)为准。本页保留尚未完成的资格、不可放宽的验收条件与历史证据边界，不作为另一份当前实现说明。
 
 ## 产品要求与不变量
 
@@ -20,7 +20,7 @@ schema、epoch、事件语义与客户端协议分别判断。只支持经源 fi
 
 2026-09-17 的隔离四来源全链演练及当时本机收敛记录证明：185 个原 Session ID、33,593 个底层 Event、217 个 Run、563 个 receipt、175 个 named snapshot 保留；140 个 Session 仍要求恢复，未重派旧任务。正式 Service 列表与逐一打开确认当时的 185 个 ID，客户端投影共 15,912 个展示事件。这些数字是当时的快照证据，不代表后续用户库状态，也不证明任意未来格式。原始阶段记录可由 Git 历史追溯。
 
-另一个隔离副本曾验证旧会话执行权修正：原 299 条历史事件哈希不变，旧 Run 保持完成，新回复写回原 sessionId；这不是对用户原 Store 的写入，也不证明外部 Provider 联网。真实客户端、Store 转换及发布中断的验证入口分别见 [Desktop 原生验收](../../apps/kite-desktop/docs/native-validation.md)、[SQLite owner](../../packages/runtime-storage-sqlite/README.md)与[本机启动 owner](../../packages/kite-local-runtime/README.md)。
+另一个隔离副本曾验证旧会话执行权修正：原 299 条历史事件哈希不变，旧 Run 保持完成，新回复写回原 sessionId；这不是对用户原 Store 的写入，也不证明外部 Provider 联网。真实客户端、Store 转换及发布中断的验证入口分别见 [Desktop 原生验收](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md)、[SQLite owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md)与[本机启动 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-local-runtime/README.md)。
 
 ## 未完成的资格
 

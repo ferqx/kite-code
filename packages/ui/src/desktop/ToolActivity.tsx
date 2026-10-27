@@ -871,7 +871,7 @@ export function ToolRow({
           <span className="tool-step-heading">
             <span className="tool-step-title tool-label">{toolTitle(message)}</span>
             {target && (
-              <span className="tool-step-target">
+              <span className="tool-step-target" title={target}>
                 {file && openFile ? (
                   <Button className="file-link" onClick={() => openFile(target)}>
                     {target}
@@ -1098,10 +1098,7 @@ export function ToolActivity({
           (shell ? (
             <code className="tool-command tool-label">{shortCommand}</code>
           ) : (
-            <span
-              className="tool-step-target"
-              title={message.toolName === 'web_fetch' ? target : undefined}
-            >
+            <span className="tool-step-target" title={target}>
               {ask ? `· ${target}` : target}
             </span>
           ))}
@@ -1199,11 +1196,17 @@ export function ToolActivity({
                 <span className="tool-label">{label}</span>
                 {target &&
                   (messageOpenFile ? (
-                    <Button className="file-link" onClick={() => messageOpenFile(target)}>
+                    <Button
+                      className="file-link"
+                      title={target}
+                      onClick={() => messageOpenFile(target)}
+                    >
                       {target}
                     </Button>
                   ) : (
-                    <span className="tool-step-target">{target}</span>
+                    <span className="tool-step-target" title={target}>
+                      {target}
+                    </span>
                   ))}
               </TraceTitle>
               {hasDiff && (

@@ -1,14 +1,14 @@
 # 会话与执行协调
 
-会话是持久业务对象，连接、客户端导航与后台执行分别有 owner。先确定问题是提交、历史读取、执行归属还是展示，再进入模块。
+会话与原工作由 Agent Runtime/Store 拥有，Service 负责可信装配和公开请求；Client 与 UI 只保存原意图及读取代次。连接、导航和持久执行状态分别处理。
 
-## 深入顺序与协作
-
-| 专题 | 负责说明 |
+| 专题 | 负责范围 |
 | --- | --- |
-| [任务提交与终态](../flows/task-execution.md) | 从 command 到 commit 和 execution |
-| [会话加载与展示](../flows/session-history.md) | 从 navigation 到 history 与 projector |
-| [Host 命令](../../../packages/runtime-host/docs/commands-mailbox.md) | 幂等、mailbox、回执 |
-| [Service 组合](../../../apps/kite-service/docs/composition-and-execution.md) | 注入依赖与应用控制 |
+| [任务提交与终态](../flows/task-execution.md) | 当前机制与局部验证 |
+| [会话与历史](../flows/session-history.md) | 当前机制与局部验证 |
+| [Agent Runtime](../../../packages/agent/README.md) | 当前机制与局部验证 |
+| [Store 事务](../../../packages/agent/src/storage/README.md) | 当前机制与局部验证 |
 
-从对应专题读取实际代码与测试。只有发生跨模块影响时扩读其他主题；准确约束见[契约目录](contracts.md)，不要在本页复制接口和不变量。
+从实际 owner 深入代码与测试，跨模块变化再查[契约目录](contracts.md)。历史通过、源码存在和定向测试均不代替当前客户端全过程或平台发布资格。
+
+旧 Host/Kernel/SPI 实现的[历史说明](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/docs/development/subsystems/sessions.md)只供删除前设计与证据追溯，不能恢复为当前 owner 或运行入口。

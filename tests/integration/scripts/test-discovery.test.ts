@@ -22,7 +22,7 @@ import {
   testParallelism,
 } from '../../../scripts/test-suite';
 
-import { UNIFIED_TEST_SUITES } from '../../../scripts/unified-test-plan';
+import { UNIFIED_TEST_SUITES, unifiedTestInventory } from '../../../scripts/unified-test-plan';
 
 const repoRoot = join(import.meta.dir, '..', '..', '..');
 
@@ -155,13 +155,30 @@ describe('test discovery boundaries V2', () => {
     }
   });
 
-  test('keeps live sources out of default Bun test discovery', () => {
-    const liveFiles = collectTestFiles(join(repoRoot, 'tests', 'e2e', 'live'));
-    expect(liveFiles).toEqual([]);
+  test('keeps live sources and their supporting tests out of the default test plan', () => {
+    expect(
+      unifiedTestInventory(repoRoot).filter((path) => path.startsWith('tests/e2e/live/')),
+    ).toEqual([]);
     const liveCode = readdirSync(join(repoRoot, 'tests', 'e2e', 'live'), {
       recursive: true,
     }).filter((path) => String(path).endsWith('.live.ts'));
     expect(liveCode.length).toBeGreaterThan(0);
+
+    const root = fixture();
+    try {
+      const ordinary = 'apps/cli/test/current.test.ts';
+      const supporting = 'tests/e2e/live/model/supporting.test.ts';
+      const live = 'tests/e2e/live/model/provider.live.ts';
+      for (const path of [ordinary, supporting, live]) {
+        const absolute = join(root, path);
+        mkdirSync(join(absolute, '..'), { recursive: true });
+        writeFileSync(absolute, 'export {};\n');
+      }
+      expect(collectTestFiles(join(root, 'tests/e2e/live'))).toEqual([join(root, supporting)]);
+      expect(unifiedTestInventory(root)).toEqual([ordinary]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('distributes parallel-safe files across bounded stable process shards', () => {

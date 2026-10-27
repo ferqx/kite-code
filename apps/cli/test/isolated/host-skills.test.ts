@@ -334,33 +334,26 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
         selectedSkills: ['beta'],
       });
       const receipt = JSON.parse(publicCommand.receipt_json);
-      expect(receipt).toMatchObject({ outcome: 'human_input_applied' });
-      const raw = reopened
-        .query('SELECT request_json FROM command WHERE id=?')
-        .get(receipt.humanInputCommandId) as { request_json: string };
-      expect(JSON.parse(raw.request_json)).toMatchObject({
-        kind: 'human.input',
-        publicCommandId: secondIntent.commandId,
-        content: 'New task: load second',
-      });
-      const decision = reopened
-        .query('SELECT request_json FROM command WHERE id=?')
-        .get(receipt.decisionCommandId) as { request_json: string };
-      expect(JSON.parse(decision.request_json)).toMatchObject({
-        inputCommandId: receipt.humanInputCommandId,
-        proposal: { relation: 'independent_work', purpose: 'work' },
-      });
+      expect(typeof receipt.runId).toBe('string');
+      expect(receipt).toEqual({ runId: receipt.runId });
+      expect(
+        reopened
+          .query(
+            "SELECT count(*) AS n FROM command WHERE kind IN ('human.input','human.input.decision')",
+          )
+          .get(),
+      ).toEqual({ n: 0 });
       expect(
         reopened
           .query('SELECT status,root_work_command_id FROM command WHERE id=?')
-          .get(receipt.businessCommandId),
+          .get(secondIntent.commandId),
       ).toEqual({ status: 'applied', root_work_command_id: secondIntent.commandId });
       expect(
         reopened
           .query('SELECT origin_command_id,root_work_command_id,status FROM run WHERE id=?')
           .get(receipt.runId),
       ).toEqual({
-        origin_command_id: receipt.businessCommandId,
+        origin_command_id: secondIntent.commandId,
         root_work_command_id: secondIntent.commandId,
         status: 'completed',
       });
@@ -369,7 +362,7 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
         .get(receipt.runId) as { source_json: string };
       expect(JSON.parse(user.source_json)).toMatchObject({
         content: 'New task: load second',
-        sourceIds: [receipt.businessCommandId],
+        sourceIds: [secondIntent.commandId],
       });
       expect(
         reopened
@@ -379,7 +372,7 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
           .all(receipt.runId),
       ).toEqual(
         Array.from({ length: 2 }, () => ({
-          origin_command_id: receipt.businessCommandId,
+          origin_command_id: secondIntent.commandId,
           root_work_command_id: secondIntent.commandId,
         })),
       );

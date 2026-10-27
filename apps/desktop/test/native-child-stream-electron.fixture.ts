@@ -337,8 +337,18 @@ try {
       .click();
     await page
       .locator('.session-tab-child')
-      .getByRole('button', { name: '刷新子日志', exact: true })
+      .getByRole('region', { name: '子 Agent 详情', exact: true })
       .waitFor();
+    assert.equal(
+      await page.locator('.session-tab-child .native-child-detail-heading').count(),
+      0,
+      'child detail has no refresh or read-only notice heading',
+    );
+    assert.equal(
+      await page.getByRole('tab', { name: '新标签页', exact: true }).count(),
+      0,
+      'child navigation never creates an unrelated empty browser tab',
+    );
     assert.equal(
       await page.locator('.conversation').count(),
       2,
@@ -489,6 +499,7 @@ try {
     const firstOpenedAt = Date.now();
     await open(0);
     await page.getByRole('tab', { name: firstTitle, exact: true }).waitFor();
+    assert.equal(await page.getByRole('tab').count(), 1, 'first child opens only its detail tab');
     const firstOpenMs = Date.now() - firstOpenedAt;
     const active = await state();
     assert.ok(active.selection!.runs.some((run) => run.id === parentWait.runId && run.isActive));

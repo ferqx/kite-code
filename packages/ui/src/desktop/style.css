@@ -4601,16 +4601,18 @@ body {
   font: inherit;
   text-align: left;
 }
-.kite-client .environment-information .background-execution-detail span {
+.kite-client .environment-information .background-execution-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.kite-client .environment-information .background-execution-detail svg {
+.kite-client .environment-information .background-execution-identity svg {
   width: 14px;
   height: 14px;
   flex: none;
+}
+.kite-client .environment-information .background-execution-detail > svg {
   color: var(--muted-foreground);
 }
 .kite-client .environment-information .background-execution-detail:hover {
@@ -4626,6 +4628,7 @@ body {
 }
 .kite-client .environment-information .background-execution-name,
 .kite-client .environment-information .background-execution-group code {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5408,7 +5411,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.kite-client .session-tab [data-slot="tabs-trigger"] > svg {
+.kite-client .session-tab [data-slot="tabs-trigger"] svg {
   flex: none;
   width: 14px;
   height: 14px;
@@ -5452,14 +5455,6 @@ body {
   flex: 1;
   min-height: 0;
   flex-direction: column;
-}
-.kite-client .native-child-detail-heading {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 16px;
 }
 .kite-client .session-tab-child .conversation {
   flex: 1;

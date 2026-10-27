@@ -23,7 +23,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import {
+  activateSessionSearch,
+  submitCommand,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -78,6 +83,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
         15000,
       );
 
+      await submitCommand(tui1, '/session rename Hello from tui1');
       const output = tui1.viewport();
       expect(screenContains(output, 'Hello from tui1')).toBe(true);
       expect(screenContains(output, 'Response from the first instance.')).toBe(true);
@@ -153,7 +159,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
       expect(screenContains(panelOutput, '搜索')).toBe(true);
 
       // The session from tui1 should appear in the list.
-      // Session name is generated from the first user message by smart naming.
+      // The original Session keeps the explicit title set by this journey.
       expect(screenHasSessionRow(panelOutput, 'Hello from tui1', { active: false })).toBe(true);
     },
     TIMEOUT,
@@ -162,8 +168,9 @@ describe('TUI PTY System — Interrupt Resume', () => {
   step(
     'load persisted session → historical messages restored from DB',
     async () => {
-      // Runtime Server V1 keeps a fresh current row at index 0, so select the
-      // persisted historical row explicitly before loading it.
+      // Filter the exact original Session without assuming selector row order.
+      await activateSessionSearch(tui2);
+      await typeText(tui2, 'Hello from tui1');
       tui2.write('\x1b[B');
       await waitForCondition(
         () =>
@@ -243,6 +250,8 @@ describe('TUI PTY System — Interrupt Resume', () => {
         'interrupted session row to become selectable after restart recovery',
         15_000,
       );
+      await activateSessionSearch(tui3);
+      await typeText(tui3, 'Hello from tui1');
       tui3.write('\x1b[B');
       await waitForCondition(
         () =>

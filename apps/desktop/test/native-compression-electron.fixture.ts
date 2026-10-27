@@ -5,6 +5,7 @@ import { verifyModelInputSnapshot } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -75,6 +76,23 @@ try {
   });
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    return (
+      state.selection?.session.id === 's' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadContext
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   await page.evaluate(
     async ({ generation, storeId }) => {
@@ -96,7 +114,19 @@ try {
             generation,
           })) as NativeState;
           identity(fresh);
-          const observationId = fresh.selection!.permissions!.observationId;
+          const facts = fresh.selection!.permissions!;
+          if (
+            fresh.permissionSubmissions.some((entry) =>
+              ['saved', 'submitting', 'unknown'].includes(entry.phase),
+            )
+          )
+            throw Error('permission_fixture_original_intent_pending');
+          if (
+            (kind === 'permission.mode' && facts.mode.mode === 'full') ||
+            (kind === 'permission.trust' && facts.trust.trusted)
+          )
+            break;
+          const observationId = facts.observationId;
           const before = intentIds(fresh);
           console.error(
             'native_permission_attempt ' +
@@ -130,6 +160,16 @@ try {
           }
         }
       }
+      const verified = (await window.kiteNative!.request({
+        method: 'permission.refresh',
+        generation,
+      })) as NativeState;
+      identity(verified);
+      if (
+        verified.selection!.permissions!.mode.mode !== 'full' ||
+        !verified.selection!.permissions!.trust.trusted
+      )
+        throw Error('permission_fixture_controls_unverified');
     },
     { generation: 1, storeId },
   );
@@ -160,6 +200,7 @@ try {
     await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText(),
     'Original actual user source',
   );
+  await selectNativeFixtureModel(page, 'local');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   eq(
     await page.evaluate(() => (Reflect.get(window, '__compressionInputEvents') as string[]).length),
@@ -193,6 +234,7 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿' })
     .fill('New task: Qualifying second settled user turn');
+  await selectNativeFixtureModel(page, 'local');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page
     .getByTestId('content')
@@ -251,6 +293,23 @@ try {
   eq(await count(), 4);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    return (
+      state.selection?.session.id === 'other' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadContext
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   // The original caller intent remains queryable independently of the current view.
   await page.evaluate(async () => {
@@ -275,6 +334,23 @@ try {
   await app.evaluate('globalThis.fetch=globalThis.__compactOriginal');
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    return (
+      state.selection?.session.id === 's' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadContext
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   panel = page.getByRole('region', { name: '当前所选上下文' });
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();
@@ -329,6 +405,7 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿' })
     .fill('New task: Next explicit user');
+  await selectNativeFixtureModel(page, 'local');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await waitState(
     page,
@@ -432,6 +509,23 @@ try {
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    return (
+      state.selection?.session.id === 's' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadContext
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   panel = page.getByRole('region', { name: '当前所选上下文' });
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();
@@ -441,6 +535,23 @@ try {
   eq(await count(), 5);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    return (
+      state.selection?.session.id === 'other' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadContext
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   panel = page.getByRole('region', { name: '当前所选上下文' });
   await panel.getByRole('button', { name: '读取当前所选上下文' }).click();

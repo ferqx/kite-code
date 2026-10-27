@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeRequest, NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -173,6 +174,7 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿' })
     .fill('40 harmless original Job approvals');
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page.waitForFunction(async () => {
     const state = await window.kiteNative!.request({ method: 'state', generation: 1 });

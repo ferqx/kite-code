@@ -216,7 +216,27 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
     expect(f.titleCalls()).toBe(1);
     expect(first.stdout.includes('Bearer')).toBe(false);
     const counts = f.counts();
-    expect(counts).toMatchObject({ sessions: 2, runs: 2 });
+    expect(counts).toMatchObject({ sessions: 1, runs: 1 });
+    const titleDb = new Database(f.profile.databasePath, { readonly: true });
+    try {
+      const titleModels = titleDb
+        .query(
+          "SELECT e.session_id,e.run_id,e.child_session_id,e.state,p.adapter_id AS parent_definition,c.kind AS command_kind FROM execution e JOIN execution p ON p.id=e.parent_execution_id JOIN command c ON c.id=e.origin_command_id WHERE e.kind='model' AND e.run_id IS NULL",
+        )
+        .all();
+      expect(titleModels).toEqual([
+        {
+          session_id: 'original',
+          run_id: null,
+          child_session_id: null,
+          state: 'succeeded',
+          parent_definition: 'builtin.session-title/generate',
+          command_kind: 'session.title',
+        },
+      ]);
+    } finally {
+      titleDb.close();
+    }
     const status = await f.run(['run', '--execution-status']);
     expect(status.code).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
@@ -261,38 +281,27 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
         content: 'Follow up: again',
       });
       const receipt = JSON.parse(publicCommand.receipt_json);
-      expect(receipt).toMatchObject({ outcome: 'human_input_applied' });
-      const raw = database
-        .query('SELECT request_json FROM command WHERE id=?')
-        .get(receipt.humanInputCommandId) as { request_json: string };
-      expect(JSON.parse(raw.request_json)).toMatchObject({
-        kind: 'human.input',
-        publicCommandId: second.commandId,
-        content: 'Follow up: again',
-      });
-      const decision = database
-        .query('SELECT request_json FROM command WHERE id=?')
-        .get(receipt.decisionCommandId) as { request_json: string };
-      expect(JSON.parse(decision.request_json)).toMatchObject({
-        inputCommandId: receipt.humanInputCommandId,
-        proposal: {
-          relation: 'same_work',
-          purpose: 'work',
-          targetRootWorkCommandId: intent.commandId,
-        },
-      });
+      expect(receipt).toEqual({ runId: receipt.runId });
+      expect(typeof receipt.runId).toBe('string');
+      expect(
+        database
+          .query(
+            "SELECT count(*) AS n FROM command WHERE kind IN ('human.input','human.input.decision')",
+          )
+          .get(),
+      ).toEqual({ n: 0 });
       expect(
         database
           .query('SELECT status,root_work_command_id FROM command WHERE id=?')
-          .get(receipt.businessCommandId),
-      ).toEqual({ status: 'applied', root_work_command_id: intent.commandId });
+          .get(second.commandId),
+      ).toEqual({ status: 'applied', root_work_command_id: second.commandId });
       expect(
         database
           .query('SELECT origin_command_id,root_work_command_id,status FROM run WHERE id=?')
           .get(receipt.runId),
       ).toEqual({
-        origin_command_id: receipt.businessCommandId,
-        root_work_command_id: intent.commandId,
+        origin_command_id: second.commandId,
+        root_work_command_id: second.commandId,
         status: 'completed',
       });
       const user = database
@@ -300,7 +309,7 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
         .get(receipt.runId) as { source_json: string };
       expect(JSON.parse(user.source_json)).toMatchObject({
         content: 'Follow up: again',
-        sourceIds: [receipt.businessCommandId],
+        sourceIds: [second.commandId],
       });
       expect(
         database
@@ -308,17 +317,15 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
             "SELECT origin_command_id,root_work_command_id FROM execution WHERE run_id=? AND kind='model'",
           )
           .all(receipt.runId),
-      ).toEqual([
-        { origin_command_id: receipt.businessCommandId, root_work_command_id: intent.commandId },
-      ]);
+      ).toEqual([{ origin_command_id: second.commandId, root_work_command_id: second.commandId }]);
     } finally {
       database.close();
     }
     expect(f.calls()).toBe(2);
     expect(f.titleCalls()).toBe(1);
     expect(f.observed[1]!.some((text) => text.endsWith('\u0000original α tail'))).toBe(true);
-    expect(f.counts().sessions).toBe(2);
-    expect(f.counts().runs).toBe(3);
+    expect(f.counts().sessions).toBe(1);
+    expect(f.counts().runs).toBe(2);
   } finally {
     f.close();
   }

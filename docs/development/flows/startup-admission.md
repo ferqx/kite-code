@@ -1,31 +1,11 @@
-# 启动、连接与工作区准入
+# 启动与准入
 
-触发：TUI/CLI 启动或用户显式启动 daemon。产品步骤见[Server 生命周期](../../handbook/server/lifecycle.md)。
+客户端先固定明确 Profile、Workspace、候选与所需资产，再启动或连接对应 Service。正式入口由根 `agent/tui/desktop/server` 选择新 Terminal/Native；开发入口显式选择独立 development profile。
 
-```mermaid
-sequenceDiagram
-  participant C as TUI/CLI
-  participant N as Native client
-  participant S as Service
-  participant D as Store
-  C->>N: 选择 profile / workspace / transport
-  N->>S: 启动配套 stdio child 或连接显式 endpoint
-  S->>D: 打开当前 profile 的 Store 并组装 owner
-  N->>S: prepareAppControl → initialize 唯一协议连接
-  S-->>C: 信任范围与配置诊断
-  C->>S: 确认当前范围和 revision
-  N->>S: connect 复用连接，提交受信任范围内的 Runtime 操作
-  S->>D: mutation 按 Session revision / writer 校验
-  S-->>C: Runtime 操作结果
-```
+实现与局部验证：[启动与资产](../local-development.md)、[Service bootstrap](../../../apps/service/src/bootstrap.ts)、[配套进程](../../../apps/service/src/paired.ts)、[CLI 宿主](../../../apps/cli/README.md)。
 
-| 交接 | 负责模块 | 必须保持 |
-| --- | --- | --- |
-| 入口到连接 | release composition / Native | 默认 child 与显式 daemon 区分，不隐式发现替代进程 |
-| Trust request/decision | App Control / Service | canonical workspace、external-read scope 和 revision 一致 |
-| Runtime initialize | carrier / Server | 协议和绑定范围已验证，不以客户端字符串自报兼容 |
-| Store 访问 | Service / Storage | profile 与真实数据范围一致，读取不等于取得 writer |
+私有启动握手只证明所选子进程和资产准入；Client 的 Service 身份、公开能力及 Store 仍需核实。help/严格参数拒绝先于 Profile 与 Provider I/O。缺资产不回退旧路径，连接成功不授权工具。
 
-默认 child 配对失败在 UI 可用前失败；显式 daemon 的 endpoint、workspace 或协议不匹配明确返回诊断。initialize 与工作区执行准入不同：prepareAppControl 已调用 RuntimeClient.connect，确认信任后的 connect 复用这条连接；拒绝信任时不得提交 Runtime mutation，不 fallback 到内嵌 Runtime。Store 可在信任确认前由 Service 打开，这不授予工作区工具执行权限。结束条件是取得经过验证的访问对象，不是进程出现或浏览器页面打开。
+共同约束以[当前八 workspace 边界](../../active/unified-agent-boundary.md)及对应 owner 为准。定向测试、真实客户端过程和平台资格分别说明，不从源码存在或最终截图推定完整行为通过。
 
-源码：[release entrypoints](../../../scripts/release/entrypoints/)、[Native connection](../../../packages/kite-local-runtime/src/client/app-server-client.ts)、[Service App Control](../../../apps/kite-service/src/app-control/)。底层：[Native](../../../packages/kite-local-runtime/docs/native-client-and-control.md)、[Service](../../../apps/kite-service/docs/composition-and-execution.md)。验证：[Native tests](../../../packages/kite-local-runtime/test/)、[App Server 基线](../../../tests/release/app-server-decoupling-baseline.test.ts)。
+旧 Host/Kernel/SPI 实现的[历史说明](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/docs/development/flows/startup-admission.md)只供删除前设计与证据追溯，不能恢复为当前 owner 或运行入口。

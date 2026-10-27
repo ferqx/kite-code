@@ -186,7 +186,8 @@ test.each([
       (run) => run.id === (later.receipt as { runId: string }).runId,
     );
     expect(laterRun).toMatchObject({
-      rootWorkCommandId: 'work',
+      originCommandId: 'later',
+      rootWorkCommandId: 'later',
       status: 'completed',
       isActive: false,
     });

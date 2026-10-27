@@ -7,6 +7,8 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 验证：`bun run test:shell:native`、`bun test tests/isolated/unified-agent/formal-optional-capabilities.test.ts tests/isolated/unified-agent/native-runtime-protection.test.ts tests/isolated/unified-agent/unified-platform.test.ts`、`bun run scripts/release/unified-platform-probe.ts`、`bun run scripts/release/unified-platform-verify.ts`；三OS声明和formal verifier由[CI守卫](../../tests/integration/scripts/unified-ci.test.ts)核验，实际run仍必须另验。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前 V1.3 执行与发行
 
 CLI/TUI/Service 与平台/execution/release workflow 已选择新完整 Terminal/Native 闭包。macOS 默认 Shell 现选择宿主 Seatbelt/launchd resource coalition，允许 fork 并核完整 setsid/orphan 后代；Files 保准确 runtimeAssets 与原权限/read-set。非 Full/Full、私有根/祖先、网络及停止的实际范围归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)及[执行边界](execution-boundary.md)。显式 POSIX 和固定 confined 保各自合同，不能互借资格。

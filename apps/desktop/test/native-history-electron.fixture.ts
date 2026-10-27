@@ -199,7 +199,7 @@ try {
   };
   const network = (): Promise<NetworkFacts> =>
     app.evaluate(
-      `(()=>{const n=globalThis.__nativeHistoryNetwork;return {events:n.events,ready:n.ready,changes:n.changes,posts:n.posts,messages:n.messages,paused:!!n.release,held:n.held};})()`,
+      `(()=>{const n=globalThis.__nativeHistoryNetwork;if(!n.posts.every(path=>['/v1/sessions/s/rename','/v1/sessions/s/reconcile','/v1/sessions/other/reconcile'].includes(path)))throw Error('unexpected_history_mutation');return {events:n.events,ready:n.ready,changes:n.changes,posts:n.posts.filter(path=>!path.endsWith('/reconcile')),messages:n.messages,paused:!!n.release,held:n.held};})()`,
     ) as Promise<NetworkFacts>;
   async function until(expression: string) {
     const deadline = Date.now() + 10000;

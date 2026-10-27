@@ -157,10 +157,11 @@ test('safe transient failures continue beyond five attempts in the same Run', as
       request: { kind: 'run.start', content: 'New task: new work' },
     });
     const followup = await f.runtime.waitForCommand('followup');
-    const receipt = followup.receipt as { runId: string; businessCommandId: string };
-    const business = await f.runtime.getCommand(receipt.businessCommandId);
+    const receipt = followup.receipt as { runId: string };
+    const business = await f.runtime.getCommand(followup.id);
     expect(business?.receipt).toMatchObject({ runId: receipt.runId });
-    expect(business?.id).not.toBe(followup.id);
+    expect(business?.id).toBe(followup.id);
+    expect(receipt).not.toHaveProperty('businessCommandId');
     expect(attempts).toBe(7);
     expect(
       (await f.runtime.getView('session')).runs.find((r) => r.id === receipt.runId),

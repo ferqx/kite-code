@@ -115,12 +115,25 @@ try {
               const saved = execution.result.details.fileChange;
               assert.equal(entry.preview, 'available');
               const detail = await manager.detail(entry.changeId, `detail-${entry.changeId}`);
-              assert.deepEqual(detail, {
-                kind: 'fileChanges.detail',
-                changeId: entry.changeId,
-                text: saved.text,
-                truncated: saved.truncated,
-              });
+              assert.deepEqual(
+                detail,
+                entry.snapshot
+                  ? {
+                      kind: 'fileChanges.detail',
+                      changeId: entry.changeId,
+                      snapshot: true,
+                      offset: 0,
+                      nextOffset: null,
+                      truncated: false,
+                      text: entry.operation === 'write' ? input.written : input.edited,
+                    }
+                  : {
+                      kind: 'fileChanges.detail',
+                      changeId: entry.changeId,
+                      text: saved.text,
+                      truncated: saved.truncated,
+                    },
+              );
               assert.ok(!detail.text!.includes(input.currentContent));
             }
             await manager.open(entry.changeId, includeRead ? 'vscode' : 'zed', perform);

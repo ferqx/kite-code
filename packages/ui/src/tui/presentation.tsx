@@ -6,6 +6,7 @@ import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  'PgUp / PgDn: read complete panel': 'PgUp / PgDn：翻页阅读完整面板',
   'Recovery request in progress': '正在处理恢复申请',
   Continue: '继续',
   Close: '关闭',

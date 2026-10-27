@@ -1,5 +1,7 @@
 # 测试体系
 
+2026-10-26 已删除仅服务旧架构的测试、fixture 和工具脚本；旧架构只保留无运行依赖闭包的 `apps/kite-cli` 源码。当前默认发现以[统一计划](../scripts/unified-test-plan.ts)为准。本文固定 revision 链接与带历史日期的旧库存、旧入口拒绝、旧 library 记录仅说明当时证据，不属于当前测试入口，也不表示删除后的库存已完整执行。安全、恢复、平台与发布门禁按原适用范围保留。
+
 本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
 [Agent 任务质量真实验证](e2e/live/model/README.md#工具反馈与任务质量)使用独立合成工作区、真实 Files/Task/SQLite 和已配置模型，核搜索范围、当前调用链、角色选择、子交付与父验收。它沿显式测试入口执行，不进入默认测试发现；原始模型输入、工具回执与最终内容一起核对，保留失败，不能只以最终文本标记或工具调用计数判定正确。
@@ -46,7 +48,7 @@ Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认�
 
 历史 Store9/11 确属旧数据库格式；其转换按 D08 不适用，对应旅程改验隔离的新 Store／Profile 的会话、重启和维护能力，不能将这些结果记作旧格式兼容；实际旧 State26 文件只作为不读取、不覆盖的隔离反例，遵守 D08。当前新 Store 的版本与维护恢复验证继续由正式测试负责。可选的旧 lifecycle 诊断 fixture 与 `in-process-service-connector` 尚属历史参考，不参与当前 52 个旅程，也不证明全 Runtime 资源或出生后代资格。当前完整执行结果归[进度](../docs/plans/unified-agent-refactor-v1-progress.md)，下面此前默认结果保持其原提交和范围。
 
-当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出，当前合并后为 985 个默认文件；新增的权限树回归沿实际 Shell／Files consumer 核节点边界、错误优先级与独立叶校验。Files／MCP intent 文件、Native 分片和目录分页的测试继续保留各自业务断言，共享夹具只集中同域重复数据或传输，不改变默认发现、隔离与预算。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
+当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出；下述合并时的历史库存为 985 个默认文件；新增的权限树回归沿实际 Shell／Files consumer 核节点边界、错误优先级与独立叶校验。Files／MCP intent 文件、Native 分片和目录分页的测试继续保留各自业务断言，共享夹具只集中同域重复数据或传输，不改变默认发现、隔离与预算。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
 
 本轮原 TUI 迁移前最近完整默认为macOS `a99fdf29` 加当轮最终冻结改动的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1472.848秒，原四并发／604排空后7独占保持；4493输入、11资产、HEAD和Git零漂移。恢复Actions守卫、四份正式恢复、原Terminal／Web／80×24 TUI与Native头部错误／草稿完整文件均在该图内通过，原三轮失败及修复证据保留。准确冻结、原log与result归[集中收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。最终结果归档仅补文档，不重新命名未变执行输入为新一轮测试；原RSS／完整资源与出生后代仍未闭合，wholeV13／phaseExit保持false，Win/Linux只有配置完成与未实测备注。
 
@@ -54,7 +56,7 @@ Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认�
 
 2026-10-13 在 macOS 的 clean `4eddd7cc` 执行原 `bun run test`，752 个完整文件组成609个正式作业，原四并发及最后七个独占作业全部通过，实际退出0。执行前后4483个文件输入和11个运行时／Web资产输入无漂移，准确原始日志、冻结与审计结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前代码完整默认回归与用户原文粘贴确认)。[测试运行器自测](isolated/scripts/test-suite-runner.test.ts)和[TUI运行器自测](isolated/unified-agent/unified-tui-runner.test.ts)会在所属临时目录运行预期失败及同名夹具，原始日志包含它们的子记录；核定完整默认结果须同时核正式冻结计划、父用例断言、实际退出码和原总结，不能只累计所有 `[test:…]` 文本。本次没有修改运行器或过滤测试；完整默认通过不解除原RSS／资源观测、Win/Linux原系统或阶段退出门禁。
 
-[旧Desktop入口完整测试](isolated/unified-agent/retired-desktop-entrypoints.test.ts)随后新增，属于现行有限root suite：六个package命令和四个直接脚本均在旧archive／Profile／producer之前返回退役诊断／2，原数据字节与目录保持。标准tmpdir／路径及HOME／USERPROFILE／AppData／XDG使同一断言可在三端执行，无macOS-only skip。macOS受影响组合四完整文件31pass／522断言，保原release smoke与CI／consumer断言；默认发现现753文件且该文件恰一次。上述752文件完整回归只证明其冻结版本，不能称为这次新增后的完整默认或Win/Linux实测；当前退役切片及剩余门禁归[准确进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-desktop-普通开发准备与打包调用者退役)。
+[旧Desktop入口完整测试](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)在删除前新增，当时属于有限root suite：六个package命令和四个直接脚本均在旧archive／Profile／producer之前返回退役诊断／2，原数据字节与目录保持。标准tmpdir／路径及HOME／USERPROFILE／AppData／XDG使同一断言可在三端执行，无macOS-only skip。macOS受影响组合四完整文件31pass／522断言，保原release smoke与CI／consumer断言；默认发现现753文件且该文件恰一次。上述752文件完整回归只证明其冻结版本，不能称为这次新增后的完整默认或Win/Linux实测；当前退役切片及剩余门禁归[准确进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-desktop-普通开发准备与打包调用者退役)。
 
 [旧CLI/TUI与Service入口完整测试](isolated/unified-agent/retired-application-entrypoints.test.ts)再补真实源码普通启动及两个package构建的退役／原Profile保全，并以复制真实wrapper和无副作用历史port核原函数对象、同步API、实际Bun bundle与源码四private helper路由。port仅证明入口胶水，原历史方法另比原提交字节，不代完整旧运行库或OS资格。用户要求Web端保持现状，本轮Web退役改动已撤回，原Web回归保留；助手全文系统剪贴板仍未确认。最终两个退役完整文件3pass／181断言，未变的原release smoke、workspace与CI三完整文件30pass／422断言按本轮原运行复用。当前默认发现754完整文件／611作业（604并发、7独占），两个退役文件各恰一次；该切片提交时未运行754完整默认，后续当前整轮结果见上；阶段及原RSS／观测／平台门禁保持。准确红绿、范围与证据归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。
 
@@ -408,11 +410,11 @@ Windows另接[安装版本／维护完整caller](fixtures/unified-agent/windows-
 
 原a2b／837 legacy输入另由[精确声明投影](fixtures/unified-agent/predecessor-workspace-declarations.ts)识别 `cf6b4946e` 的 Agent context-estimate export／build／tokenizer 三件套与 UI scroll workspace 声明，以及 `21fd426d7` 的 UI Markdown export。只移除准确增量后交原全字节 matcher，resolved package 闭包不变；原 SHA 断言保留，实际当前 SHA 与具体 refinement 在 provenance 独立登记。缺项、重复、版本、路径、额外字段和闭包变化继续拒绝。Windows 保留独立路径限制，不借 POSIX source-entry 例外。[兼容输入守卫](fixtures/unified-agent/compatible-predecessor-input.ts)不借用这些 legacy 投影；新增独立[完整 raw 配对守卫](fixtures/unified-agent/predecessor-reviewed-input.ts)，仅承认固定 context、六项准确路径与双方完整 SHA。真实新增的 OpenAI resolved 闭包明确标为依赖增量，不标 identical；原11项 raw hash、两 SQL 原字节和固定 checksum 均保留。其[完整单元](isolated/unified-agent/predecessor-reviewed-input.test.ts)核不同旧 context、旧／当前任一字节、缺项／重复、包版本／URL／依赖／integrity、原闭包、live 脚本与 build entry 漂移均拒绝；五项未变化输入及 SQL 不进入例外。原 Terminal／Windows 单元继续以准确历史快照核原 SHA 与历史分支，另核实际当前输入及非 identical provenance；30e7的UI差异与21fd缺0002的真实 Git 反例保持。完整授权增量及运行边界归[Terminal owner](../apps/cli/docs/terminal-release.md#验证边界)。
 
-依赖镜像只跳过开发 renderer 所属的准确 `.vite-desktop-dev` 真实缓存目录，避免将当前生成物带入旧构建；同名符号链接和其他非链接依赖继续走原拒绝守卫，当前缓存不被清理。目录边界归[Terminal owner](../apps/cli/docs/terminal-release.md#验证边界)。
+依赖镜像只跳过开发 renderer 所属的准确 `.vite`／`.vite-desktop-dev` 真实缓存目录，避免将当前生成物带入旧构建；同名符号链接和其他非链接依赖继续走原拒绝守卫，当前缓存不被清理。目录边界归[Terminal owner](../apps/cli/docs/terminal-release.md#验证边界)。
 
 [前驱输入守卫](isolated/unified-agent/terminal-predecessor-inputs.test.ts)保原legacy分支，只接受同字节、根清单的已知 stdio CI 完整单行增量或对应Agent／Service的已知export/build双增量；实际原清单和当前清单输入核依赖变化、额外export、build target、metadata、错path及缺任一增量均拒绝。此有界unit对应真实构建前失败，不允许任意忽略清单字段或改写旧源码。
 
-该Native跨代码文件同时执行macOS/Linux，当前兼容链沿固定4a4c前驱；以下Linux结果仅属此前1b796锁输入和源码，当前组合留待重构后的Actions。Mac两项前端差异断言保持；历史Linux完整安装链核真实Agent差异，当时Main hash不同、renderer相同。driver使用manifest executable、明确ESM和平台ps，四次窗口均核Chromium sandbox。Linux arm64整文件374条Bun断言/actual0/171.298秒，原420秒整例、120秒driver和15秒窗口期限保持；准确范围归[Native owner](../apps/desktop/docs/native-release.md#linux-真代码升级与冷回退)。release candidate分平台调用整文件，Linux使用Xvfb，guard拒绝关闭/错平台/echo/过滤/缺显示；hosted与完整资格仍需实际结果。
+该Native跨代码文件同时执行macOS/Linux，当前 POSIX 兼容链使用固定12628前驱及12项输入／六份迁移的同字节守卫；以下Linux结果仅属此前1b796锁输入和源码，当前组合留待重构后的Actions。Mac两项前端差异断言保持；历史Linux完整安装链核真实Agent差异，当时Main hash不同、renderer相同。driver使用manifest executable、明确ESM和平台ps，四次窗口均核Chromium sandbox。Linux arm64整文件374条Bun断言/actual0/171.298秒，原420秒整例、120秒driver和15秒窗口期限保持；准确范围归[Native owner](../apps/desktop/docs/native-release.md#linux-真代码升级与冷回退)。release candidate分平台调用整文件，Linux使用Xvfb，guard拒绝关闭/错平台/echo/过滤/缺显示；hosted与完整资格仍需实际结果。
 
 [Model Inspector Core](../packages/agent/test/isolated/model-input/inspector.test.ts)、[Client 完整流](../packages/client/test/isolated/model-input.test.ts)、[实际 Service/Gateway](isolated/unified-agent/model-input.test.ts)和[Web DOM](../apps/web/test/model-input.test.tsx)分别验证准确原调用、完整交接和展示。>200 目录压力通过具名 Store 建立 planned intents，不称发生了相同数量的 Provider 调用；实际17MiB内容经过原scope Artifact/固定Model与Native/Browser，成功EOF/hash前不发布正文。真实流在首块后停住仍能取消，非法metadata先释放body；UI确认前零正文GET，隐藏/关闭/切换清正文，缺失settings明确unavailable。IAB验收固定无害内容，关闭后Model计数保持，不将当前Context或Runtime logs导航等同该原请求入口。
 
@@ -423,6 +425,8 @@ Windows另接[安装版本／维护完整caller](fixtures/unified-agent/windows-
 [冷审核恢复](../packages/agent/test/isolated/recovery/run-resume-check-ownership.test.ts)使用真实子进程留下已结算的审核及失去 owner 的原 Run。seed 完整写闭同目录临时文件后才发布原 ready，父仍在原五秒内观察并真实停止所持 child，不能以空文件存在代替完整 Store ID。异常独立关闭已取得的冷 Store／DB，保留原错误、ready 字节与可取得的 metadata；原 identity／proof／generation、13 个静态断言和每例十秒期限保持。临时目录及 URL 转换使用标准平台接口，Windows/Linux 原生资格仍后置；本机原并发完整回归和唯一控制复现的准确范围归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前默认回归与冷审核恢复交接)。
 
 ## 显式命令与 CI
+
+2026-10-26 续修将 POSIX 真实往返与历史拒绝分开：当前往返使用[原 builder](fixtures/unified-agent/terminal-predecessor.ts)中的固定 `12628a616e7614cbd60666d71896b1db9f74b0f5`，12项锁输入全部原字节相同、六份迁移逐字及固定 checksum 相同，仍核实际代码变化、干净旧源码和原候选。旧4a4c及legacy输入的批准摘要、反例与历史结果保留；旧schema拒绝不伪装成回滚成功。原锁输入追加配对的实际依赖变化、当前独有patch与平台限制沿[Terminal owner](../apps/cli/docs/terminal-release.md#验证边界)说明；尚未运行的平台不从本机取得资格。
 
 原 [交互历史 DOM](../apps/desktop/test/isolated/native-interaction-history-dom.test.tsx)核通用 JSON 答案、取消、准确反馈、只读按钮与迟到范围；[Main reader](../apps/desktop/test/native-interaction-history.test.ts)核43项分页、child 原关系、变化拒绝和历史／当前审批附件资格隔离。[真实 HTTP](isolated/unified-agent/client-interactions.test.ts)另核实际 child 卡和 Core 通用问题的原答案／受理、游标与效果不增长。原默认窗口保首次／冷读，计划历史原字节从已验证完整附件读取，不把格式化 Markdown 的显示文本当源字节。邻接附件 fixture 等实际通知读取失败／恢复后才断言，原拒绝、零写入和期限保持；准确失败与通过归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。
 
@@ -451,6 +455,8 @@ Windows managed Native 源码现另接四个稳定前门、两跳实际创建证
 
 macOS 另可显式执行 `bun run scripts/runtime/unified-soak.ts --profile=qualification --collect-blocked --output="${TMPDIR%/}/kite-full-soak/report.json"`，按原完整8outer／九点／60—168分钟预算采集，而不缩短到preflight。报告必须位于当前用户拥有且其他用户不可写的父目录；共享 `/private/tmp` 不能直接作父目录。支持的检查通过后仍blocked／inconclusive及退出1；实际失败则failed／退出1，formal拒绝保持。完成的各阶段复用原最终保留资源增长判定，增长失败保留私有原root与JSON，不以提前退出充作八轮通过。完整默认continuous消费父runner的同一已核验候选，源码外编译测试仍保两cycle／40Command、全部原断言与180秒预算，并核候选摘要和零重建。当前真实九点RSS增长失败、缺失Bun资源指标及全体后代资格仍单独记未具备，证据归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。
 
+[默认连续 Shell 夹具](fixtures/unified-agent/soak/continuous-default-shell.ts)按当前轮的准确 Tool call ID、名称、参数与唯一结果推进 Files、child 和 Shell。`input_pending` 等刷新回执只有在公共 SessionView 核实原 Store／Session／Run／rootWork、准确调用、未派发及未尝试适配器后才允许重新准备原请求；成功启动后仅按返回的 Shell 身份读取，不凭结果个数跳步，也不重发未知效果。当前 macOS arm64／Bun 1.4.2 的[原整文件](isolated/unified-agent/unified-default-shell-continuous.test.ts)为 1 pass／25 expects、82.83 秒，保留两 cycle／40 Command、20 Session、4 slots、每个 Shell 的 65536 单元、准确 child 完成、cold read、no replay 与原退出证据；180 秒期限和 formal／平台未取得的资格不变。
+
 私有[VM 协议完整测试](isolated/unified-agent/unified-soak-vm-observer.test.ts)无平台 skip，三端可用同一纯[严格读取器](../scripts/runtime/unified-soak-vm-observer.ts)核真实 Darwin 校准原记录、V1／V2 请求地址区别、64 位身份／时基／地址、完整 frame／footer、部分释放／并发顺序未知及输入／计算上限。原九项保持，现另核稀疏索引、密集真实输出拒绝、remap 存在性短路与全部 unmap 原序；本机完整 13 pass／16474 expects。默认 200 万／最高 1 亿计算预算保持，索引、排序、访问与区间处理计费。它不调用 FFI 或模拟 Windows／Linux 原生资格。[C 观察器](../scripts/runtime/native/unified-soak-vm-observer.darwin.c)仅为 macOS 私有导入诊断，本机校准核 syscall 原返回／errno、真实输入 hint 和两次部分 munmap；生产容量溢出整条拒绝，临时小容量校准保原 syscall 并由读取器拒绝 writeErrors。原 lifecycle RSS 是 probe 自身 PID，与默认 continuous 两 Service 的指标分开保留。本轮只离线复用原 450 秒／九点记录，完整交集仍超限，RSS／live allocation owner 及全资源／出生后代继续未闭合，准确范围见[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13rss-离线读取缺口与完整观测来源)。
 
 [Coalition 前缀整文件](isolated/unified-agent/unified-soak-coalition.test.ts)三端无 skip，纯解码核 64 位精度／byteOffset、失败与 untouched 数据、guardian仍活的计数关系及非法原身份先拒绝；本机3pass／12expects。它不把 syscall／共享 coalition 数字授为完整资格；本机一次原 PID unique／version／CID 守卫下的真实前缀读取只证明该来源可用。[原生 census 补丁](../native/runtime-observer/README.md)另保九项独立 Rust 单元测试；原生 SDK 选择与 Timer 实际准入修复后 native build 和真实局部释放通过，全部原语仍未接齐，未进入默认运行时或 Actions资产。按用户最新安排停止额外采集；原 RSS／观测／完整默认阶段门禁保持，范围归[收束进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13原生观测源码与性能诊断收束)。
@@ -473,7 +479,7 @@ Linux stdio Source后端现已接独立direct-program／namespace源码。新增
 forward-compatible response、bounded JSON/UTF-8 limits、Interaction/Run/resync invariants，以及OpenAPI/JSON Schema/wire/example/digest
 byte-exact generation；独立`check:agent-api-packages`验证zero-workspace dependency与browser-safe root export。`packages/agent-api-client/test/`
 验证cookie REST、contract header/Problem、path/cursor与`after_sequence`编码。`apps/kite-web/test/`验证Workspace懒加载、Session/History/
-Checkpoint presentation、generation隔离与迟到日志隔离；可见性轮询的验证缺口见[Web 验证](../apps/kite-web/docs/testing.md)。
+Checkpoint presentation、generation隔离与迟到日志隔离；可见性轮询的验证缺口见[Web 验证](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/docs/testing.md)。
 `apps/kite-service/test/agent-api/`验证Agent capability与Browser launch exchange、
 Workspace Trust/Directory scope、hash-only context/session、role/TTL/generation/revoke及bounded Workspace/Session/History/Checkpoint adapter，
 包括cursor checksum/filter、History through/boundary/after-sequence、Checkpoint path non-disclosure与drain。daemon Web carrier test证明
@@ -620,11 +626,11 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 `bun run test:desktop:native` 是显式配套 Service smoke，需先执行 `prepare:service`。它使用隔离 home/workspace、本地模型 fixture、真实 `DesktopHost` 与同 candidate stdio Service，验证配对 initialize、流式执行中的 renderer 重接、持久历史、活动模型 EOF 清理及后继进程读取；不调用外部 Provider，也不证明 Electron preload、原生窗口、目录对话框、隐藏/激活或工具进程树崩溃清理。
 
-`build:desktop` 构建 renderer 与 main/preload，再由官方 Electron Packager 生成 macOS `.app`。[packaged window smoke](../apps/kite-desktop/scripts/native-smoke.ts)用于在隔离 home/app data/workspace 下驱动真实制品，核对沙箱 bridge、IPC/Service、流式刷新重接、隐藏/激活和确认退出；只有脚本实际通过并登记准确制品后才能形成 Electron 原生资格。当前该结果仍 pending。迁移前 Tauri `.app` 的本机证据保留在[原生验收](../apps/kite-desktop/docs/native-validation.md)，不替代 Electron 或正式发布与其他平台资格。
+删除前的旧 Desktop 使用 `build:desktop` 构建 renderer 与 main/preload，再由官方 Electron Packager 生成 macOS `.app`。[packaged window smoke](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/scripts/native-smoke.ts)用于在隔离 home/app data/workspace 下驱动真实制品，核对沙箱 bridge、IPC/Service、流式刷新重接、隐藏/激活和确认退出；只有脚本实际通过并登记准确制品后才能形成 Electron 原生资格。当前该结果仍 pending。迁移前 Tauri `.app` 的本机证据保留在[原生验收](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md)，不替代 Electron 或正式发布与其他平台资格。
 
 文档结构测试中的子进程检查位于 `tests/isolated/scripts/docs-structure.test.ts`；普通 workspace/契约导航读取仍在 `tests/integration/docs-structure.test.ts`，原断言保持。
 
-桌面 Electron 安装包的显式窗口验收入口为 `bun run test:desktop:window`（先构建 `build:desktop`），通过隔离的源码外 `.app`、preload 与本机模型检查流式重接、隐藏恢复和退出；原生对话框由 fixture 代答，系统输入法和人工窗口操作资格见[桌面原生记录](../apps/kite-desktop/docs/native-validation.md)。
+旧 Desktop 曾用其当时的窗口入口与 `build:desktop`，通过隔离的源码外 `.app`、preload 与本机模型检查流式重接、隐藏恢复和退出；该构建入口已删除。当前新 Native 的 `test:desktop:window` 及候选准备见[Native owner](../apps/desktop/docs/native-release.md)，旧原生对话框 fixture、系统输入法和人工窗口操作资格仅按[历史桌面原生记录](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md)。
 
 
 原[OAuth Session](../apps/service/test/isolated/mcp-oauth-session.test.ts)和[默认 Source 集成](../apps/service/test/isolated/mcp-source-oauth-integration.test.ts)沿实际 SDK DCR／PKCE／callback、独立许可、Login取消、fresh连接和cold原Query核所属launcher的出生／真实exited与reap交接。私有可信spawn seam使用真实Bun child驱动原协议，原callback／整例期限和业务断言保持；该新资源证据不操作用户浏览器，实际OS浏览器既有资格沿认证owner保留。clear／refresh／revoke不生成launcher，旧六字段cold结果兼容、有限不可用与未知cleanup不改effect。
@@ -633,3 +639,52 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 原[Native 交互分页整文件](../apps/desktop/test/isolated/interaction-pages-electron.test.ts)在关闭/切换准备中核 Main 的真实 fetch 进入信号，保 pending 的实际结局；同一10秒准备预算内最多三次显式读取同 generation/Store/Session/Workspace 的新 state，仅确切观察失效且尚未进入 fetch 的只读拒绝可再读。已进入的读取和其他错误不重试；关闭前核尚未取消，之后核真实 abort、释放 held 回包并等待同一请求结束。IPC仍受原外层期限约束，该准备预算不冒称每次IPC的硬中断。原20卡分页、40效果、一次原答案POST、原身份、晚回包不换scope及35/45/60秒期限保持，生产SSE与过期guard不变；实际次数及整例/默认结果归本轮进度。
 
 该原窗口现同时核正常退出：只观察既有请求、实际 before-quit、退出期间的操作／启动弹窗，以及原 Electron 和准确所属 Service ChildProcess 的真实 close0／无信号；不注入 `native_draining`、新任务或延长窗口。退出时合法的读取拒绝只记录，不要求所有 IPC 成功；业务阶段原未知回执提示仍保留。清理失败与实际业务失败分别保留，强杀不能算普通退出。[读取归属 DOM](../apps/desktop/test/isolated/native-read-ownership-dom.test.tsx)保原八项，六项新增断言对应四类待完成读取的生命周期、取消后原草稿与零重发，以及当前真实错误／已提交未知回执仍显示。Radix 卸载的原零延迟焦点任务在销毁 DOM 前排空，避免跨 Event realm；这不是断言前等待或期限放宽。共享 DOM／codec 测试不新增平台条件，真实窗口仍保原 macOS 适用范围。准确运行归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12native-退出期间操作未完成误报)。
+
+
+2026-10-26，在 macOS arm64／Bun 1.4.2、`c53f66367fcd19c8f460a30a18ff3e54b9364a6a` 加本次旧模块删除与必要接线调整的工作树上，根及八个新 workspace 的 `bun run typecheck`、八 workspace 的 `bun run build` 和新架构边界检查通过。根脚本定向回归 6 个完整文件为 57 pass／0 fail／638 assertions；文档结构、映射与 Notes 的另 5 文件回归为 19 pass／0 fail／97 assertions，`check:docs` 与 `check:docs-impact` 通过。
+
+本次真实 PTY 定向运行 [sandbox-startup-input](tui-system/scenarios/sandbox-startup-input.test.ts) 整文件为 3 pass／0 fail／20 assertions，[workspace-trust](tui-system/scenarios/workspace-trust.test.ts) 整文件为 1 pass／0 fail／28 assertions。它们证明当前启动输入与信任场景的实际断言，不代表完整 TUI、Native、全默认或其他平台验收。
+
+本次 Native archive 定向回归为 4 pass／1 项 Windows 平台 skip／0 fail。Terminal bundle 整文件首次在沙箱内因端口 `0` 的 `EADDRINUSE` 失败；沙箱外运行曾在旧断言期待两条标题 user 消息处失败。随后按用户要求修复 [terminal-bundle.test.ts](isolated/unified-agent/terminal-bundle.test.ts)：精确核对标题专属 system instruction、原始 user input 与零 tools，并按[当前内部模型调用](../packages/agent/src/business/session-title/index.ts)验证同 Session 的 internal Model、`session.title` 原命令及其父 Execution，零 child Session、唯一主 Run、标题不进入正文与冷读持久结果均保留。macOS 实际重新构建后的完整文件为 1 pass／0 fail／1206 assertions，完成归档搬迁、安装、CLI 任务、daemon/TUI、升级回退、篡改拒绝与保数据卸载。Linux 专属维护分支的 Execution 数量同步为四条，逐对象 backup/restore 冷读等式保持，但该分支未在本机执行。当前标题合同的 `session-title.test.ts` 与 `session-title-generation.test.ts` 两个完整文件先前已执行为 44 pass／0 fail／394 assertions，相关生产代码本次未改。
+
+旧模块删除验证中，[test-discovery](integration/scripts/test-discovery.test.ts) 曾因假定 live 目录没有 `.test.ts` 而失败；当时 HEAD 已包含 [质量呈现测试](e2e/live/model/agent-task-quality-presentation-ab.test.ts)和[checkout 配对测试](e2e/live/model/agent-task-quality-checkout-ab.test.ts)。随后按用户要求修复测试：直接核对 `unifiedTestInventory` 不选择 live 目录，并以隔离夹具同时放入 `.live.ts`、辅助 `.test.ts` 和普通 owner 测试，验证文件发现与默认执行计划各自的边界。默认调度范围未改；`test-discovery`、`unified-default-plan`、`check-test-ownership` 三个完整文件实际执行为 15 pass／0 fail／97 assertions，不代表全默认测试已完整运行。
+
+2026-10-26 继续复核旧模块删除范围后，恢复独立 Windows runner 构建器、通用发布/运维 metadata/evidence 工具、历史报告 verifier 和共享测试原语；旧 Runtime、App Server、OSS producer/installer 不恢复。通用 canonical JSON 与 artifact layout 的实现从旧 Service 原样迁至 `scripts/release`，对应 18 个完整测试文件实际为 89 pass／0 fail／452 assertions；恢复的历史 soak report/verifier/resource-settle 三文件为 22 pass／0 fail／62 assertions，通用 schema、阈值、来源和拒绝条件保持。历史 verifier 不接回当前 unified formal workflow。
+
+独立 PTY 能力测试实际 4 pass，CI baseline guard 为 6 pass／151 assertions；TUI lifecycle harness 为 1 pass／2 assertions，保留原焦点订阅、零竞争 stdin listener、卸载清理和期限。此 harness 仅通过显式 leaf import 验证保留的旧 CLI 展示源码，不代表新 composer 或完整旧 CLI 的资格。文档影响检查与 scope 检查共 19 pass／244 assertions，恢复了每个当前 workspace 生产源码恰好一个 owner 的断言，并补齐新 CLI host、Desktop electron/scripts 的映射。原 MCP/Skills local E2E 七项完全依赖已删除的旧 Runtime 夹具，已随该闭包删除，未借恢复测试重新接入旧 writer。
+
+同日对 `scripts/` 专项复核覆盖 116 个保留文件（112 TS、1 PowerShell、3 原生源码/header）及 37 个待删脚本。当前根命令、CI、静态导入与动态资产引用没有指向待删旧入口；运行器和旧 Terminal 拒绝入口四个完整测试文件实际为 19 pass／0 fail／362 assertions。此前发布/运维 89 项测试按原输入逐字节不变复用；另以当前根 manifest/lock 实际调用 SBOM API，961 个组件仍标记 non-distributable、非生产 evidence，audit/license 为 not_run。架构、文档、发布证据与只读 Biome 检查通过；Windows 原生、真实模型与长时 soak 未在本次运行。
+
+根 `tsc --listFilesOnly` 实际覆盖脚本 112 份 TS 中的 71 份，其通过不能代表整个脚本目录。额外全目录 strict 检查使用继承根选项并匹配当前 Bun/Web API 的 ES2023、DOM/Iterable 类型库，仍在 `scripts/check-plan-execution-matrix.ts` 报三处既有类型诊断：Task heading capture 可能为 undefined，以及 matrix line 两次可能为 undefined。该文件逐字节等于 HEAD，当前 `check:plan-evidence` 实际仍通过；本次专项审查记录诊断，没有更改解析逻辑、默认类型检查范围或门禁。本次另纠正了 Session logging active 文档中指向已删旧 smoke 的当前验证入口。
+
+同日 `tests/` 专项审查核对保留与待删文件、原断言、共享夹具及默认/CI 路径，恢复了保留发布工具的 12 项执行前验证、签名/manifest/payload 篡改、symlink 与平台 claim 拒绝测试，三文件实际 12 pass／0 fail／32 assertions。测试专用合成制品 fixture 只写固定非生产数据并使用已有 encoder/signature contract，没有恢复旧 producer。另将保留 Rust runner 的 cancel HANDLE Option/take/join-before-close 原源码断言迁成独立测试，1 pass／4 assertions；这是源码检查，不是 Windows 实机资格。旧 smoke 的两个 consumer 删除后，未再被使用的 `native-sandbox-policy.ts` 开关 helper 同步删除。
+
+执行边界 CI 中不存在的 `authorization-review.test.ts` 按 Git 的 R084 重命名记录改为 `authorization-check.test.ts`，不是删去授权测试。CI guard 现同时核文件存在，正式命令检查也拒绝明确但不存在的测试输入；三份 guard 完整文件为 34 pass／513 assertions，当前授权测试整文件为 19 pass／208 assertions。原 grep/search_content 夹具映射补显式 `mode:content`，原内容和 CAS 断言保持，两份完整 harness 文件为 17 pass／87 assertions；此前该组合的 16 pass／1 fail 原失败仍保留。上述本机定向运行合计十个完整文件、83 pass／0 fail／844 assertions，根类型、架构、测试归属和文档检查通过。
+
+本轮默认库存仍为 1082 个唯一文件，TUI 库存为 113 个唯一文件；没有执行这两个完整库存或 Windows 原生/真实模型/长时 soak。Golden 与 E2E 导航已按实际入口更新：旧 golden 目录只有历史 JSON，显式 live 辅助测试与默认选择分开。历史合成制品测试和独立 native source 检查继续按其明确入口运行，不因此进入当前 formal 产品资格。
+
+同日按依赖初始化至构建的完整流程，在上述 macOS arm64／Bun 1.4.2 工作树实际执行 `bun install --frozen-lockfile`：安装 830 个包，根 postinstall 完成 Files Node-API 编译、资产准备和许可证收集；八个 workspace 的依赖链接均指向当前目录，根 manifest 与 lock 字节未变。随后 `bun run build` 的八 workspace 构建、`bun run typecheck` 的根及八 workspace 类型检查、`check:pre-release-architecture`、`check:test-ownership`、`check:docs`、`check:docs-impact`、`check:plan-evidence` 均通过。`format:check` 退出 0，检查 2871 个文件，仍有 2 warnings／183 infos，没有自动修复；根类型检查的脚本覆盖限制仍按上文保留。
+
+另实际启动三轮 `bun run test`，保持默认并发、期限和隔离。前两轮发现并修复了五份 Desktop 测试夹具与当前合同的偏差：[plan review](../apps/desktop/test/native-plan-review-dom.test.tsx)、[questionnaire](../apps/desktop/test/native-questionnaire-dom.test.tsx) 和 [drafts](../apps/desktop/test/isolated/native-drafts-dom.test.tsx)、[scheduled tasks](../apps/desktop/test/isolated/native-scheduled-tasks-dom.test.tsx) 在实际会话切换后等待既有 presentation 交接，后两者显式选择模型并保留选择前禁止发送；普通工具许可保持主输入草稿。[scheduled runner](../apps/desktop/test/scheduled-task-runner.test.ts) 改在真实 `receiveAgentMessages` 事务后核 report gate，以真实阻塞 Tool 验证未完成工作不结算，并单独验证保留的 deferred 事实。五个完整文件定向执行共 34 pass／0 fail／478 assertions；相关 Desktop 类型检查通过，未改生产实现或放宽安全、结果及期限断言。
+
+第三轮默认测试仍退出 1，实际失败为 [native-model-input.test.ts](../apps/desktop/test/native-model-input.test.ts) 的 205 条原始输入目录用例：Main 会话选择阶段抛出 `native_selection_changed`，尚未进入分页读取；其余三个并发 job 随 runner 中止为 143，不能算三个独立测试失败。单独执行 `bun test --parallel=1 --max-concurrency=1 ./apps/desktop/test/native-model-input.test.ts` 也得到 2 pass／1 fail／17 assertions。该测试及相关 NativeCaller／controller 生产实现与本轮清理前一致，[Desktop 当前说明](../apps/desktop/README.md) 已有同类失败记录。本次依赖初始化、构建与上述静态门禁通过，但完整默认测试未通过、剩余库存未跑完；未据此取得完整 TUI、Windows 原生、真实 Provider 或发布资格。
+
+随后按全量测试要求，在同一 macOS arm64／Bun 1.4.2／Node v22.21.1 工作树执行当前八 workspace 默认库存、完整 TUI 库存，以及未收录于这两个入口的发布合同、资格检查器、脚本、终端 harness 和离线模型辅助测试，共覆盖 1179 个唯一完整文件。原标准 `bun run test` 三轮均因真实失败停止；为覆盖未派发作业，沿现有计划与 `runTestJob` 分批执行全部原作业，保留原文件、命令、隔离 HOME、四并发、期限及并发排空后的七个独占作业，没有修改默认 runner。结果不能表述为一次标准默认命令全绿。
+
+最终默认库存 1082 文件组成 861 作业，719 pass／142 fail；TUI 113 文件为 72 pass／41 fail；补充 45 文件为 44 pass／1 fail。三个范围有重叠，合计 164 个唯一文件仍有失败记录；已修文件均以其实际完整文件复验记录更新结论，原失败日志保留。补充库存的唯一失败是 [scenario contract](tui-system/harness/scenario-contract.test.ts) 的四条既有场景约束，涉及 `app-server-daemon` 的共享夹具及清理、`first-run` 的 warmup 和 `mcp-project-approval` 的固定延迟；这三份场景当前均与 HEAD 同字节。缺少外部 baseline checkout 的一项离线对照和原平台 skip 保持，不计作相应资格。旧 `apps/kite-cli/test` 的 69 份源码参考仍不具备已删 Runtime 的运行依赖闭包，不属于当前新架构执行入口；本轮不运行真实 Provider、其他系统原生或长时发布资格。
+
+本轮修复了 Native SSE ready 与显式选择互相取消的竞态，以及真实 TUI 独立 Job／异步 spawn 交接引起的 Static 前缀重建和阅读位置跳动；80×24 删除确认合并重复警示和快捷键后仍保完整风险、原目标、默认保留与独立确认。测试夹具按当前公开 Tool、明确模型选择、直接原命令、Agent mailbox、封存版本及完整 Artifact 后端核实，未恢复隐藏前台 Task、旧 human wrapper 或放宽权限、未知效果、清理与期限。最后的自动审核例使用原总预算等待权威 VT 消费已收到的真实父正文，完整文件复验为 9 pass／134 assertions。最终根及八 workspace 类型检查、八 workspace 构建均通过。
+
+剩余失败包含 [Native 缓存回切](../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx) 时原已展开 Tool DOM 丢失，以及当前 `files.write@3` 尚未进入 [TUI 文件变化预览](../packages/ui/src/tui/execution-projection.tsx) 支持分支；原断言保留。另有旧版本 pin、旧输入包装证明、未明确选择模型的物理窗口夹具和未核清的取消／清理／负载失败。Terminal／Windows predecessor 的 lock 与 patch 库存拒绝已用 HEAD blobs 与当前字节独立对照，清理前后得到相同拒绝，未改批准摘要或门禁。全部原始作业、完整复验、源码冻结及失败清单保存在 `.cache/full-tests-20261026-215708/summary.json`；本次结论是全库存已执行、整体未通过，不能代替完整产品或发布验收。
+
+2026-10-27，继续修复上述失败，用户明确将 TUI 暂缓。本轮按当前磁盘与默认计划重新核对：1249 个有限测试文件由当前非 TUI 的 987 个、当前 TUI 的 193 个及仅保留源码的旧 `apps/kite-cli/test` 69 个组成；旧 CLI 中也有 TUI 命名，分区时只计入旧 CLI，不重复计算。非 TUI 为默认 955 个与补充 32 个，零交叉、零缺失；未新增永久 skip 或修改默认发现／调度范围。
+
+本轮沿现有 `runTestJob` 执行默认的 795 个原作业，保持四并发、隔离 HOME、原 flags／期限及排空后的六个独占作业，只将全局遇错停止延后以完成所有原作业。默认审计为 793 作业／953 文件通过，两个实际失败是 [开发启动](isolated/unified-agent/development-desktop.test.ts) 的监听就绪竞态和 [Native Electron](../apps/desktop/test/isolated/native-electron.test.ts) 的夹具权限读取交接；补充 32 作业全部通过，176 pass／1 skip／1073 assertions。默认原日志的 5450 pass／69 skip／2 fail／259710 assertions 保留，不被修复复验覆盖；嵌套测试刻意制造的失败未计为顶层实际失败。
+
+随后修复开发监听：独立监听器在初次构建前等待自身首次 ready，构建期间的变更交接原串行队列，目录创建／删除也触发准确源码重核；监听错误、启动取消和关闭沿本次自有资源清理，不借延时或扩大期限掩盖漏事件。Native 夹具在原两次权限写入后只作一次新权限读取，再核原 generation／Store／Session／Workspace 的 Full、信任与读取完成事实，然后以原命令 ID 首次提交；不重发已保存权限或业务 POST。具体边界归 [Desktop owner](../apps/desktop/README.md#开发热更新与服务重载)。
+
+两个失败修复后，开发重载、开发启动、开发 Shell、Native Electron、普通开发 renderer 诊断关闭及两个 predecessor 输入拒绝共七个完整文件重新执行，42 pass／0 fail／942 assertions，沿原隔离与期限。全量审计期间 3025 个源码／配置输入逐字节及 mode 未变；审计后仅三个开发实现文件、上述 Native 夹具和已有开发重载测试共五个非文档输入变化，其实际消费者已补完整文件验证，其余原成功记录按未变输入复用。原 120 个非 TUI 失败文件现均有完整文件通过证据，新增 Native Electron 失败也已修复；当前 987 文件范围无未修复失败。这是全量执行加受影响完整文件复验的结论，不能表述为一次未过滤的标准 `bun run test` 全绿。
+
+最终依赖初始化仍沿本轮实际 `bun install --frozen-lockfile` 和 Files 原生 postinstall 通过记录，根 manifest／lock 字节未改；最后开发监听变更后，八 workspace 构建、根及八 workspace 类型检查再次通过。非 TUI Biome、架构／同源 API／workspace、测试归属、计划证据和文档门禁按本次最终输入核对。默认及补充原有 70 项 skip 保留，含本机平台条件和缺少显式外部 baseline checkout 的离线对照；不计为对应资格。TUI 原失败与格式问题按用户要求暂缓，本机受控 Provider／Electron 结果不取得真实付费模型、其他平台原生或完整发布资格。原审计、修复复验及最终输入记录保存在 `.cache/full-tests-fix-20261026/summary.json`，此前失败证据继续保留。
+
+同日提交前，实际 staged 格式门禁要求处理此前暂缓的 TUI 格式诊断。本轮仅应用安全排版／import 排序，并在面板 reset effect 中显式读取原 `identity`，保留原依赖及变化时归零行为；未采用删除依赖的 unsafe fix。相对上述最终源码快照，十个变化文件均属于 TUI，实现与断言没有继续扩展；非 TUI 输入保持原字节。提交前再次检查构建、类型和实际提交门禁，这些静态结果不改变 TUI 尚未通过完整验收的结论。

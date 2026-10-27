@@ -1,6 +1,5 @@
 import type { ModelOutputSnapshot } from '@kite-ai/client';
 import {
-  Button,
   Conversation,
   ConversationActivityContext,
   ReadingStateCache,
@@ -10,7 +9,11 @@ import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react
 import { useNativeDiagnostics } from './native-diagnostics';
 import { nativeChildActivity, type useNativeEnvironment } from './native-environment';
 import { NativeModelOutputMessage } from './native-model-output-message';
-import { groupNativeToolMessages, liveToolMessages } from './native-tool-messages';
+import {
+  groupNativeToolMessages,
+  liveToolMessages,
+  NativeToolPresentation,
+} from './native-tool-messages';
 import { desktopTranscript, nativeReplyKey } from './native-transcript';
 
 export interface NativeChildDetailProps {
@@ -21,7 +24,6 @@ export interface NativeChildDetailProps {
   executionId?: string;
   executionUnconfirmed?: boolean;
   readActive: boolean;
-  onRefresh: () => void;
   writeClipboardText?: (text: string) => Promise<void>;
   onTitleChange: (title: string) => void;
   /** Owned by the parent so switching tabs retains bounded reading data, without hidden readers. */
@@ -37,7 +39,6 @@ export function NativeChildDetail({
   executionId,
   executionUnconfirmed = false,
   readActive,
-  onRefresh,
   writeClipboardText,
   onTitleChange,
   readingCache,
@@ -117,10 +118,24 @@ export function NativeChildDetail({
       }),
     [facts, messages, storeId, sessionId, outputs, readingKey, displayedReplies],
   );
+  const toolPresentation = useRef(new NativeToolPresentation());
   const models = useMemo(
     () =>
-      groupNativeToolMessages([...transcript.messages, ...liveTools.map((entry) => entry.message)]),
-    [transcript.messages, liveTools],
+      groupNativeToolMessages(
+        toolPresentation.current.project(
+          readingKey,
+          transcript.messages,
+          [...(facts?.presentation?.tools ?? []), ...(facts?.presentation?.liveTools ?? [])],
+          liveTools,
+        ),
+      ),
+    [
+      readingKey,
+      transcript.messages,
+      facts?.presentation?.tools,
+      facts?.presentation?.liveTools,
+      liveTools,
+    ],
   );
   const renderMessage: NonNullable<ComponentProps<typeof Conversation>['renderMessageContent']> = (
     model,
@@ -270,14 +285,8 @@ export function NativeChildDetail({
   };
   return (
     <section className="native-child-detail" aria-label="子 Agent 详情">
-      <div className="native-child-detail-heading">
-        <Button className="ghost" onClick={onRefresh} disabled={!detail || detail.loading}>
-          刷新子日志
-        </Button>
-        <span>子 Agent 会话仅供查看。</span>
-      </div>
       {diagnostics && facts?.presentation?.unavailable && (
-        <p role="alert">无法核对子会话轮次或工具状态，已保留原消息；可刷新子日志重新核对。</p>
+        <p role="alert">无法核对子会话轮次或工具状态，已保留原消息；后台将自动重新核对。</p>
       )}
       {diagnostics && detail?.error && (
         <p role="alert">

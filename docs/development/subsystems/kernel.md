@@ -1,13 +1,14 @@
-# Kernel 状态与调度
+# Agent 决策、执行与完成
 
-Kernel 对明确 facts 作纯决策，不执行 I/O。新行为必须落到正确 domain 与 reducer，并由现有 Host/Storage 边界执行和提交。
+旧独立 agent-kernel workspace 已删除。当前唯一 Loop 使用中立模型、输入与执行契约；Run/Execution/Job 和必要条件的最终持久判定归 Agent Store，I/O leaves 只在受控派发边界执行。
 
-## 深入顺序与协作
-
-| 专题 | 负责说明 |
+| 专题 | 负责范围 |
 | --- | --- |
-| [状态转换](../../../packages/agent-kernel/docs/state-transitions.md) | State/Event、decide/reduce |
-| [调度授权](../../../packages/agent-kernel/docs/scheduling-authorization.md) | traits、资源冲突与交互 |
-| [完成恢复](../../../packages/agent-kernel/docs/completion-recovery.md) | 证据、unknown、重放 |
+| [唯一 Loop](../../../packages/agent/src/loop.ts) | 当前机制与局部验证 |
+| [执行入口](../../../packages/agent/src/execution/index.ts) | 当前机制与局部验证 |
+| [Store](../../../packages/agent/src/storage/README.md) | 当前机制与局部验证 |
+| [required 条件](../../../packages/agent/src/storage/sqlite/requirements/README.md) | 当前机制与局部验证 |
 
-从对应专题读取实际代码与测试。只有发生跨模块影响时扩读其他主题；准确约束见[契约目录](contracts.md)，不要在本页复制接口和不变量。
+从实际 owner 深入代码与测试，跨模块变化再查[契约目录](contracts.md)。历史通过、源码存在和定向测试均不代替当前客户端全过程或平台发布资格。
+
+旧 Host/Kernel/SPI 实现的[历史说明](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/docs/development/subsystems/kernel.md)只供删除前设计与证据追溯，不能恢复为当前 owner 或运行入口。

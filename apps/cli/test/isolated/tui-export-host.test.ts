@@ -70,7 +70,7 @@ for (const mode of ['complete'] as readonly string[]) {
         const review = body.messages.some((message) => {
           if (message.role !== 'user' || !message.content) return false;
           try {
-            return JSON.parse(message.content).purpose === 'authorization_review';
+            return JSON.parse(message.content).purpose === 'authorization_check';
           } catch {
             return false;
           }
@@ -176,7 +176,7 @@ for (const mode of ['complete'] as readonly string[]) {
         JSON.stringify({
           modelId: 'local',
           tools: [
-            { id: 'files.write', definitionVersion: '2' },
+            { id: 'files.write', definitionVersion: '3' },
             { id: 'files.read', definitionVersion: '5' },
           ],
           models: [

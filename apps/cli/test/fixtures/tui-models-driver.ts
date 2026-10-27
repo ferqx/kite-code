@@ -52,7 +52,7 @@ const wait = async (text: string) => {
   } finally {
     db.close();
   }
-  throw Error(`expected ${text} tail=${pty.text().slice(-5000)}`);
+  throw Error(`expected ${text} viewport=${pty.viewport()}`);
 };
 // The onboarding redraw can exceed the 24-row viewport. Observe only the
 // newest complete synchronized redraw after the navigation key, never an old
@@ -171,6 +171,7 @@ try {
   await wait('Steer original active Run >');
   await send('/model');
   await wait('Desired default: one');
+  await wait('❯ one');
   await key('\x1b[B');
   await wait('compatible');
   await wait('❯ two');

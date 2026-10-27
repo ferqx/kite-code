@@ -20,7 +20,9 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
     const module = await import(
       resolve(import.meta.dir, '../../../cli/test/fixtures/recovery-profile.ts')
     );
-    const f = await module.recoveryProfile();
+    const f = await module.recoveryProfile(
+      kind === 'input.follow_up' ? { holdModelCommandId: 'native-original' } : {},
+    );
     let warm: Awaited<ReturnType<typeof f.launch>> | undefined,
       child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     const wire = `${f.root}-native-caller-${kind}.wire.jsonl`;

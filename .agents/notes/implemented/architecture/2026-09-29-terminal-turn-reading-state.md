@@ -19,4 +19,4 @@ Desktop 对每个 `turn.terminal` 投影一个不渲染的 `turn_terminal` 消�
 
 ## Consequences
 
-投影中每轮多一条隐藏标记；历史重放与重复终态事件必须按 Turn 身份去重。该标记只影响阅读布局，不改变 Runtime 结算事实。流式增量若尚未持久化，重读历史时仍可能不存在，折叠层不补造文字。当前行为见[Desktop 会话 UI](../../../../apps/kite-desktop/docs/conversation-ui.md)和[共享阅读层](../../../../packages/kite-client-ui/README.md)；Desktop 投影、历史重放及共享阅读测试覆盖四种终态、部分回复中断与手动重新展开。
+投影中每轮多一条隐藏标记；历史重放与重复终态事件必须按 Turn 身份去重。该标记只影响阅读布局，不改变 Runtime 结算事实。流式增量若尚未持久化，重读历史时仍可能不存在，折叠层不补造文字。当前行为见[Desktop 会话 UI](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/conversation-ui.md)和[共享阅读层](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/README.md)；Desktop 投影、历史重放及共享阅读测试覆盖四种终态、部分回复中断与手动重新展开。

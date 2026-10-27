@@ -8,6 +8,8 @@
 
 相关：[Agent Note 0002](../../.agents/notes/implemented/process/2026-07-02-plan-lifecycle.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前架构
 
 Plan 是 Runtime Kernel 管理的版本化 Artifact，不是模型消息中的临时字段。所有生命周期变化通过 `plan.*` Runtime events 进入 reducer；Scheduler 根据计划和交互状态产生模型调用、审核请求或执行 Effect。

@@ -38,8 +38,11 @@ describe('TUI PTY System — /compact after session switch', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Slash commands stay local; only the explicit session-1 message calls the model.
-    server.setResponses([{ message: { content: 'Session 1 response' }, delay: 50 }]);
+    // Manual compression summarizes the original selected conversation through the Model.
+    server.setResponses([
+      { message: { content: 'Session 1 response' }, delay: 50 },
+      { message: { content: 'Session 1 message was answered. No work remains.' } },
+    ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
@@ -79,7 +82,7 @@ describe('TUI PTY System — /compact after session switch', () => {
           request: expect.objectContaining({ kind: 'context.compress' }),
         }),
       );
-      expectCompactFailure(events);
+      expectCompactResult(events, true);
       const sessionEvents = observePersistedSessionEvents(workspace, sessionOneId);
       if (sessionEvents.status !== 'ready') {
         throw new Error('Session 1 durable event observation was lost.');
@@ -124,7 +127,7 @@ describe('TUI PTY System — /compact after session switch', () => {
           request: expect.objectContaining({ kind: 'context.compress' }),
         }),
       );
-      expectCompactFailure(events);
+      expectCompactResult(events, false);
       const oldSessionEvents = observePersistedSessionEvents(workspace, sessionOneId);
       if (oldSessionEvents.status !== 'ready') {
         throw new Error('Session 1 durable event observation was lost after /new.');
@@ -218,7 +221,7 @@ describe('TUI PTY System — /compact after session switch', () => {
     return observed;
   }
 
-  function expectCompactFailure(events: PersistedTurnEvent[]): void {
+  function expectCompactResult(events: PersistedTurnEvent[], summarized: boolean): void {
     const accepted = events.find(
       (event) => event.type === 'command.accepted' && event.kind === 'context.compress',
     );
@@ -229,11 +232,14 @@ describe('TUI PTY System — /compact after session switch', () => {
     expect(terminal).toMatchObject({
       type: 'run.finished',
       sourceType: 'run.finished',
-      status: 'failed',
-      reason: 'compression_not_reducible',
+      status: summarized ? 'completed' : 'failed',
+      reason: summarized ? null : 'compression_not_reducible',
     });
-    // The old retryable:false boolean is replaced by the actual refused Run
-    // reason and an exact zero-new-Provider assertion, not a fabricated event.
-    expect(server.getWorkRequestCount()).toBe(1);
+    // The original populated Session summarizes once; the new empty Session
+    // refuses locally and cannot replay or summarize the old Session.
+    expect(server.getWorkRequestCount()).toBe(2);
+    expect(JSON.stringify(server.getWorkRequests()[1]!.body.messages)).toContain(
+      'Session 1 response',
+    );
   }
 });

@@ -34,6 +34,15 @@ test('model window starts at actual default and effort, single Enter selection p
     await tick();
     expect(ui.lastFrame()).toContain('❯ Name 15');
     expect(ui.lastFrame()).not.toContain('Name 0');
+    ui.stdin.write('\x1b[B');
+    await tick();
+    expect(ui.lastFrame()).toContain('❯ Name 16');
+    state.models = structuredClone(state.models);
+    ui.rerender(<TuiModelPanel controller={controller} />);
+    await tick();
+    expect(ui.lastFrame()).toContain('❯ Name 16');
+    ui.stdin.write('\x1b[A');
+    await tick();
     ui.stdin.write('\r');
     await tick();
     expect(choices).toEqual([{ kind: 'default', modelId: 'model-15' }]);

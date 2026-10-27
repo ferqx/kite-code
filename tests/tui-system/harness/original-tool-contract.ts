@@ -229,6 +229,7 @@ export async function migrateOriginalToolCall(
         throw Error('original_tool_grep_regex_requires_scenario_migration');
       args = {
         text: a.pattern,
+        mode: 'content',
         ...(a.path === undefined ? {} : { path: workspacePath(text(a, 'path'), scope) }),
         ...(a.limit === undefined ? {} : { limit: a.limit }),
       };
@@ -352,6 +353,15 @@ export async function migrateOriginalToolCall(
             ? [tool.function.name as string]
             : [],
         );
+        const modelNames = rows
+          .filter((row) => row.definitionId === id && typeof row.modelName === 'string')
+          .map((row) => String(row.modelName));
+        if (
+          modelNames.length &&
+          new Set(modelNames).size === 1 &&
+          names.filter((name) => name === modelNames[0]).length === 1
+        )
+          return true;
         if (names.includes(id)) return true;
         const wire = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
         // The SDK encodes long internal IDs. Only accept an unambiguous

@@ -198,7 +198,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     await submitUserMessage(tui, modelServer, message, { timeout: 15_000 });
     await waitForText(() => tui!.viewport(), 'completed without provider', 15_000);
     expect(modelServer.getWorkRequestCount()).toBe(1);
-    expect(modelServer.hasRequestMessage(message, 0)).toBe(true);
+    expect(modelServer.hasRequestMessage(message, 0, 'work')).toBe(true);
     expect(screenContains(tui.viewport(), 'Session Waive')).toBe(false);
     await waitForCondition(
       () => {

@@ -173,11 +173,8 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           expect(titleRequests).toHaveLength(1);
           expect(body.tools ?? []).toEqual([]);
           const users = body.messages.filter((message) => message.role === 'user');
-          expect(users).toHaveLength(2);
+          expect(users).toHaveLength(1);
           expect(users[0]!.content).toBe('Ask the production default question');
-          expect(users[1]!.content).toMatch(
-            /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
-          );
           return new Response(
             `${chunk({ content: 'Questions' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`,
             { headers: { 'content-type': 'text/event-stream' } },
@@ -426,11 +423,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           expect(titleRequests).toHaveLength(1);
           const titleView = await (await connected()).getView(sessionId);
           expect(titleView.session.title).toBe('Questions');
-          const titleIds = [
-            'agent/session-title',
-            'builtin.session-title/fallback',
-            'builtin.session-title/generate',
-          ];
+          const titleIds = ['builtin.session-title/fallback', 'builtin.session-title/generate'];
           const titleJobs = titleView.executions.filter((row) =>
             titleIds.includes(row.definitionId),
           );
@@ -445,19 +438,23 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           ).toEqual([]);
           for (const row of titleJobs)
             expect(row).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
-          const carrier = titleJobs.find((row) => row.definitionId === 'agent/session-title')!;
           const generation = titleJobs.find(
             (row) => row.definitionId === 'builtin.session-title/generate',
           )!;
-          const titleChildId = carrier.childSessionId;
-          expect(titleChildId).toBeString();
-          expect(carrier.parentExecutionId).toBe(generation.id);
-          const titleChild = await (await connected()).getView(titleChildId!);
-          expect(titleChild.session.parentSessionId).toBe(sessionId);
-          expect(titleChild.runs).toHaveLength(1);
-          expect(titleChild.runs[0]!.status).toBe('completed');
-          expect(titleChild.executions).toHaveLength(1);
-          expect(titleChild.executions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
+          const titleModels = titleView.executions.filter(
+            (row) => row.kind === 'model' && row.runId === null,
+          );
+          expect(titleModels).toHaveLength(1);
+          expect(titleModels[0]).toMatchObject({
+            sessionId,
+            runId: null,
+            childSessionId: null,
+            parentExecutionId: generation.id,
+            status: 'succeeded',
+          });
+          expect(titleModels[0]).toMatchObject({ definitionId: 'local', definitionVersion: '1' });
+          expect(titleView.runs).toHaveLength(1);
+          expect(titleJobs.every((job) => job.childSessionId === null)).toBe(true);
           expect(modelRequests).toHaveLength(2);
           const result = modelRequests[1]!.messages.find((message) => message.role === 'tool');
           expect(result).toBeDefined();

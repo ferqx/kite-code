@@ -2,6 +2,8 @@
 
 [Controller](src/controller.ts)在核实所选 View 后，并行读取独立的扩展展示、待处理交互、Context、权限模式、工作区信任及活动原 Command，减少会话切换的串行请求等待。全部读取仍绑定同一 activation signal；必要事实完整核实后才发布快照，取消、迟到结果、原命令身份与写资格检查保持。[Controller 回归](test/controller.test.ts)覆盖并行启动、等待完整事实、100次快速选择及旧权限读取消；[刷新回归](test/native-refresh.test.ts)继续覆盖通知积压和读取期间撤销写资格。模型目录加载与切换期间的控件稳定显示合同保持。
 
+[NativeCaller](electron/native-caller.ts)将 SSE ready 的同选择 reconciliation 登记为当前读取的后继，等待原显式选择读取结束后才启动，避免互相取消代次；真正读取前重核选择、关闭与取消状态。显式选择等待已登记的后继完成，实际读取错误继续传回，切换后的迟到结果仍拒绝；其他只读调用保持原 drain 范围。2026-10-26 macOS arm64／Bun 1.4.2 在本轮清理工作树先复现模型输入目录的 `native_selection_changed`，修复后 [Caller 门控](test/native-caller.test.ts)、[原 205 请求目录](test/native-model-input.test.ts)、Controller 与刷新四个完整文件为 55 pass／0 fail／541 assertions，Desktop 类型检查通过。此为受控回归与真实 Core／Service 目录验证，不替代完整默认、实际窗口或其他平台资格；下文原失败记录保留当时范围。
+
 2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次读取 diff：上述两份完整回归13项81断言通过，Desktop／Agent typecheck通过。由[会话文件浏览器夹具](test/session-files-browser-runner.fixture.ts)派生的本机隔离入口 `.cache/session-switch-live.ts` 使用真实 NativeCaller／HTTP／SQLite、两个会话及受控分段模型，实际观察发送接管、会话切换、长回复上滚、草稿往返及页面重载后完整尾段；用户和Agent消息各保一份，切到其他会话没有旧正文或草稿。证据目录为 `.cache/session-files-browser-5ca00750-91c7-4e02-a403-651c05d15a66`，冷读截图为 `.cache/session-switch-final.png`。本次未量化真实安装窗口的切换延迟或复验原1.1GiB内存峰值。额外[导航DOM](test/isolated/native-session-navigation-dom.test.tsx)为27通过／3项执行状态断言失败；[会话外壳浏览器夹具](test/session-shell-browser-runner.fixture.ts)在“上次状态”文案断言失败，均未计为通过，也未改其断言。它们的模拟桥不经过本次Controller读取实现；原完整UI／安装资格不由本轮定向结果取得。
 
 普通 Workspace／明确外部路径写入的完整快照同样复用消息内交付卡。外部文件只提供原交付的阅读，不借用 Workspace 的编辑器打开权限。2026-10-23 最新 Main／交付 DOM 两文件12项118断言通过；工作文件删除、改动不改变原快照，中文跨页仍完整。受控浏览器中 Plan 修订为版本2后，选择 Auto 并批准，原待审卡退出、原轮次继续结束；此结果不外推 TUI／安装版资格。
@@ -34,7 +36,7 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 2026-10-23，Windows x64／Bun1.4.3、Chrome155.0.8059.85、`7af0dee6b` 加本次附件工作树：[图片浏览器夹具](test/image-previews-browser-runner.fixture.ts)的 `--attachments --observe` 在生产组件与样式中逐步观察深浅主题×1280／390px的发送占位→保存预览、滚动两端→键盘回翻、刷新→缓存切回、失败→仅附件→重开；正文位置、消息顺序、时间／复制数量和横向溢出均核对。发现并修正仅附件消息被空正文过滤、失败边框跨附件和窄屏焦点裁切；最终 `--attachments` 四组通过，并补核重开图片就绪与焦点轮廓。过程截图／报告位于本机 `.cache/image-previews-browser-SfuHgK`，最终复验位于 `.cache/image-previews-browser-Xpmahn`。[首条消息DOM回归](test/isolated/native-new-conversation-dom.test.tsx)70项通过，包含文字＋文件／仅文件的延迟选择与历史接管；图片读取、输入附件、消息复制及阅读滚动定向回归通过。此为隔离生产组件及受控桥接验收，未取得本轮完整安装版Electron、真实模型或其他平台资格；既有嵌套 `@keyframes` 编译提示保留。
 
-消息内容通过[共享 Markdown renderer](../../packages/ui/README.md#markdown-消息内容)显示 Mermaid、语法高亮／diff、提示块、公式及消息内标题／脚注跳转。主消息、子详情与后台正文沿原 `NativeModelOutputMessage` 复用；本文不扩展 Web 或 TUI 的独立展示能力。公式语法已加入 Worker 的同一固定 parser，图表／KaTeX排版留在 renderer；纯Worker入口不引入DOM或可视化库，原CSP、Main IPC、完整正文核验与复制资格保持。
+消息内容通过[共享 Markdown renderer](../../packages/ui/README.md#markdown-消息内容)显示 Mermaid、语法高亮／diff、提示块、公式及消息内标题／脚注跳转。主消息、子详情与后台正文沿原 `NativeModelOutputMessage` 复用；本文不扩展 Web 或 TUI 的独立展示能力。正文绘制沿共享 `StaticRange` 快照保留逐字素渐显；追加时重核每个绘制范围，不把绘制范围登记成随所有文字变更同步维护的live Range，原连续Text节点与用户选区保持。同一Document的待绘制节点先集中读来源颜色，再发布原逐字绘制，避免跨节点交错强制重算样式；同步正文、独立时序及隐藏／纠正／释放后的失效边界保持。公式语法已加入 Worker 的同一固定 parser，图表／KaTeX排版留在 renderer；纯Worker入口不引入DOM或可视化库，原CSP、Main IPC、完整正文核验与复制资格保持。
 
 2026-10-25，macOS arm64／Bun1.4.2、Chrome155.0.8059.86、`ccd1201d5`加本次样式工作树：`bun apps/desktop/test/markdown-content-browser-runner.fixture.ts`通过1280／390px及深浅主题，核代码底色／无外框、行内代码小圆角／无底线、引用、五类提示图标和标题、链接悬停／键盘聚焦、输入编辑、准确源码复制与原图表恢复。五类提示标题对实际合成底色均至少4.5:1；表格原字号、内边距、网格与透明表头保持。实际浏览器逐步观察深浅切换、图表生成、流式开始→追加→完成及390px换行；同一500px视口下表格的样式和几何与改动前完全一致，代码和行内代码的原节点在追加／完成后保留。报告和过程截图位于本机`.cache/markdown-content-browser-I8m5Eq`。原`bun apps/desktop/test/streaming-render-browser-runner.fixture.ts`四组场景通过，核选区、手动阅读、缓存返回和完成状态，材料位于`.cache/streaming-render-Rs1qbD`；仅后续链接优先级与提示标题配色由前述内容夹具重新构建核实，未改变流式管线。六个Markdown／代码复制／正文复制／输入编辑／流式／滚动回归逐文件独立运行通过27项／1073断言，UI与Desktop typecheck、定向Biome及文档结构／影响检查通过。此为隔离生产组件与受控Native桥接验证，未重验完整安装版Electron或真实Service／模型；既有嵌套`@keyframes`编译提示保留。
 
@@ -134,7 +136,7 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)通过 builder 的 `development` 选项构建 Main／preload 和首个独立 Service 版本，由[本地 Vite renderer](scripts/development-renderer.ts)提供页面。[重载协调器](../../scripts/development/desktop-reload.ts)在初次构建和每次重建后，以新 Bun 进程实际加载 Service 及外部 workspace 导入；不执行 `import.meta.main` 分支、不自动安装依赖，最长等待10秒，失败保留最多16K字符诊断并回收探测进程。缺失导出不能只因入口 bundle 生成而放行。加载检查不代替完整类型检查或业务验证。
 
-协调器监听 Service、Agent、AI、Client 的 `src`，合并连续保存、串行构建并保留旧版本字节；同时核源码内容摘要，避免外部 workspace 变化而入口 SHA 未变时跳过重载，内容相同不重启。检查中源码变化拒绝发布该版本，后续保存仍沿原队列处理；编译／加载检查失败保持旧服务。React 组件及 CSS 沿 Vite Fast Refresh，共享 UI 保存不重启 Service。
+协调器监听 Service、Agent、AI、Client 的 `src`。启动时从 Vite 公开声明的 `FSWatcher` 类构造器创建本次独立监听器，先注册 ready／error／变化处理，再一次加入 source roots；缺少的根沿最近存在目录及祖先去重监听，忽略其下缓存、node_modules 和 symlink。等待该实例真实首次扫描完成后才开始首个 Service 构建，构建期间变化先记 dirty、原重载队列就绪后接管；不向已经 ready 的 Vite UI watcher 晚加路径并误用其首次 ready。构造器形状不可用或建立监听失败明确拒绝启动；运行期监听错误停止本次准确父控制并非零退出，不能继续报告热更新可用。退出先关闭自有监听器，即使关闭失败仍执行原构建队列、Vite、控制通道及所属进程清理。原 UI watcher 继续负责页面 HMR，没有新增启动配置或依赖。协调器合并连续保存、串行构建并保留旧版本字节；同时核源码内容摘要，避免外部 workspace 变化而入口 SHA 未变时跳过重载，内容相同不重启。检查中源码变化拒绝发布该版本，后续保存仍沿原队列处理；编译／加载检查失败保持旧服务。React 组件及 CSS 沿 Vite Fast Refresh，共享 UI 保存不重启 Service。
 
 Main／preload及其IPC投影变更必须退出并重新启动`desktop:dev`，沿新启动构建加载；只刷新页面或新建会话不会替换旧主进程。重新启动沿原development profile读取已保存会话，不需重新提问或重跑工具；进程内未发送内容须按原草稿边界保留。完整操作边界归[本地开发](../../docs/development/local-development.md)。
 
@@ -143,6 +145,8 @@ Main／preload及其IPC投影变更必须退出并重新启动`desktop:dev`，�
 Vite 使用 middleware 模式，HTTP 与 HMR WebSocket 共用宿主拥有的 loopback 端口；其默认 SIGTERM／stdin EOF 退出处理不再接管整个开发进程。宿主信号处理器保留到 Vite、父通道与所属 Electron 收尾完成并清理私有应用目录，防止 Vite 直接退出而跳过清理。
 
 2026-10-24，macOS／Bun1.4.2：[真实开发 Main 回归](../../tests/isolated/unified-agent/development-desktop.test.ts)在隔离 Profile、独立 Electron 数据目录及最小 renderer 中逐步核缺失导出先于 Electron 启动失败、有效模块但后台失败返回非零、实际 Service／Native caller 就绪、外部依赖加载失败保留原 Service PID、修正保存后唯一一次更新及新旧 PID 退出；开发函数真实返回143后应用目录为空。未调用模型，不代表完整聊天界面、其他平台或安装版验收。
+
+2026-10-27，macOS arm64／Bun1.4.2，原隔离runner完整重跑开发重载12项／120断言、真实开发 Main7项／141断言（5208ms）、开发 Shell1项／38断言（2536ms）通过。新增回归在独立监听器首次 ready 后不等待便覆盖已有源码，随后立即创建子目录／文件及原本缺失的 Client source root，核真实事件、关闭后零投递、祖先去重、半启动错误／abort／运行期错误及不可用构造器拒绝。真实 Main 原30秒每场景预算与65秒整例预算不变，仍验证缺失导出、失败保原 Service PID、修正后恰一次更新、143返回和准确新旧进程退出／目录清理；不使用sleep后编辑或延长预算换取成功。本轮资格限定本机受控制品，未新增Windows／Linux实机资格。
 
 开发 Service 对 `@kite-ai/agent/jobs/shell` 的导入固定为当前 checkout 已构建的 `packages/agent/dist/jobs/shell.js`，以独立文件 URL 保留资产定位器的原模块位置；其余工作区导入继续使用当前源码。不能把源码 `.ts` 的资产不可用误判为宿主缺少 Shell，也不能内联定位器后按 Service 缓存目录寻找 guardian。资产准备、平台限制和实际权限仍归[默认 Shell 装配](../service/README.md#默认-shell-装配)，子 Agent 按父 Agent 实际工具范围继承。[开发 Shell 回归](../../tests/isolated/unified-agent/development-desktop-shell.test.ts)通过普通开发构建与 paired Service，在隔离 HOME／Profile／Workspace 和受控模型下，核 macOS 主 Agent、默认通用及 code 子 Agent 的真实工具声明、Shell 执行和完整短输出；不注入工具或审批策略。[构建回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)另核连续重建及中文／空格路径保留原资产 URL。本机执行证据不赋予 Windows／Linux Shell 或正式发行资格。
 
@@ -360,7 +364,7 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 会话标签页与内置浏览器
 
-会话 header 的“标签页”图标打开[共享 SessionTabs](../../packages/ui/src/desktop/SessionTabs.tsx)，默认新标签页，首页仅有“变更”工具。关闭最后一个网页、变更或子详情标签会沿原收起逻辑关闭右侧栏并返回顶栏按钮，再次打开显示新的空白页。旧直接“文件变更”按钮移除；原调宽、折叠、主题与无下边框 header 保留。标签模型在响应式 Group 之外，侧栏收起与窗口缩放不销毁网页；关闭网页、换阅读 scope、页面卸载或 root renderer 导航／崩溃时释放对应 WebContents。工具与子详情 reader 仅在当前可见标签挂载，覆盖／切换／收起会释放读取。环境卡打开子 Agent 时选择原 Session／Execution 的详情标签，重复打开复用原项；全部标签共享8项上限。主会话始终保持显示与自身读取，子详情的准确目标、正文与操作门禁见[环境与子详情 owner](#native-当前会话环境信息与子详情)。
+会话 header 的“标签页”图标打开[共享 SessionTabs](../../packages/ui/src/desktop/SessionTabs.tsx)，默认新标签页，首页仅有“变更”工具。关闭最后一个网页、变更或子详情标签会沿原收起逻辑关闭右侧栏并返回顶栏按钮，再次打开显示新的空白页。旧直接“文件变更”按钮移除；原调宽、折叠、主题与无下边框 header 保留。标签模型在响应式 Group 之外，侧栏收起与窗口缩放不销毁网页；关闭网页、换阅读 scope、页面卸载或 root renderer 导航／崩溃时释放对应 WebContents。工具与子详情 reader 仅在当前可见标签挂载，覆盖／切换／收起会释放读取。环境卡打开子 Agent 时选择原 Session／Execution 的详情标签，重复打开复用原项；全部标签共享8项上限。每次明确点击的单调请求 ID 只消费一次，等待实际阅读 scope 就绪后才打开；切会话、临时选择状态或返回原父会话不重放旧导航，不据此关闭当前任务面板。主会话始终保持显示与自身读取，子详情的准确目标、正文与操作门禁见[环境与子详情 owner](#native-当前会话环境信息与子详情)。
 
 [renderer adapter](src/native-browser-pane.tsx)通过[封闭浏览器 port](src/native-browser-bridge.ts)发送导航与可见 viewport，preload 只交付有限操作与有界显示 metadata。[Main controller](electron/native-browser.ts)复用当前主窗口、准确 mainFrame 和 renderer URL 的 sender 校验，校验地址后才分配最多8个 WebContentsView。顶层导航只支持 HTTP／HTTPS；网页的 WebSocket 子资源可使用无凭据的 ws／wss，不开放对应的顶层或子框架导航。纯文本交 Bing 搜索，localhost 默认 HTTP，普通域名默认 HTTPS。地址栏聚焦编辑期间保留输入，失焦后同步最后确认的页面地址，包含重定向结果。历史操作使用 Electron navigationHistory；网页弹窗的 HTTP 链接在当前标签打开，下载与外部协议拒绝并保留必要错误。
 
@@ -408,6 +412,14 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 原工具过程与结果阅读
 
+[目标提取](src/tool-request-target.ts)在已支持定义／版本中只选择明确的文件路径、查找／搜索条件及范围、目录、MCP查询／服务／资源／提示词、计划与Skill引用，目标最多4096个完整Unicode码点。不打印工具正文或任意扩展参数；无单一可读目标的验证记录、空输入读取及任意远端工具不猜字段。Shell继续走原命令分片和结果证明，网页显示继续沿共享UI去掉凭据／查询部分。
+
+[实时工具适配](src/native-tool-messages.tsx)只在原Store／Session的活动Run中，从已有公开Execution输入提取展示目标；子详情的 [execution投影](src/tool-messages-bridge.ts)只加有界target，不传输入payload或控制资格。保存的ModelOutput可将消息中的toolCalls留空，Main的 [原请求核验](electron/tool-message-fact.ts)因此在同原Execution／来源／Run／toolCallId且没有可见匹配声明时读取原Execution输入；可见调用重复、未完整、错定义或错调用不能绕过原门禁。缓存订阅同来源调用变化，冲突在重读完成前撤下目标，失败保原结果；文件打开仍独立由原成功文件目标reader授予。实现取舍沿[连续工具呈现Note](../../.agents/notes/implemented/bug-fix/2026-10-25-native-contiguous-tool-aggregation.md)。[目标表回归](test/tool-request-target.test.ts)、[实际工具DOM](test/isolated/native-tool-targets-dom.test.tsx)与[元数据DOM](test/isolated/native-tool-messages-dom.test.tsx)覆盖现行参数、父／子详情、排队→运行→省略Model声明的终态及冲突撤销；实际执行结果另记于本节。
+
+具体工具行先经过 [完整元数据门禁](src/native-tool-messages.tsx)：首次请求、回执或命令分片的展示事实未齐时不生成该条具体消息，完整一条才显示一条，不以全局loading阻塞其他完整工具。完整请求可以在排队或执行中显示，不等执行终态；合法空输入、参数非法的真实失败及未知schema不因没有target而被误判为未完成。子详情只投影inputReady与有界target，不传原参数payload。NativeToolPresentation仅保留同scope、同presentationKey已展示的完整消息，供回执独立核验期间阅读，不补不完整字段、不冒称成功；来源冲突或live输入资格撤销均清除旧展示，不保留或恢复命令复制。长目标沿原单行省略，悬停可看完整展示文字。
+
+2026-10-26，macOS arm64／Bun1.4.2，当前已执行：目标字段表34项／73断言、Main元数据30项／1268断言、完整元数据与准确交接DOM14项／162断言、实际Native聚合11项／421断言、子详情恢复3项／54断言通过；UI／Desktop typecheck、定向Biome、文档、边界和测试归属检查通过。隔离浏览器使用生产Conversation／ToolActivity和真实投影函数，核9类工具的首次metadata未齐→分批2条→完整9条，以及排队／运行、回执核验与来源撤销；深浅主题×1280／390px×单项／聚合共72阶段图及4张末项图，100次DOM变化／1264帧没有只有标题的半条工具行，目标title完整、手动阅读位置保持，无新增操作或页面错误。报告在本机 `.cache/tool-target-browser-F6ZKZc/report.json`。该快照夹具证明首次／分批门禁，已完整消息的准确交接保留另由Native组件及缓存DOM验证；不代证完整Electron IPC、Service、真实模型或安装版。扩展回归中的四项旧折叠、动画或旧版本名称失败以修改前源码复现，未计为通过。
+
 工具结果沿用户确认的原位展开方案：保留轻量工具行、连续工具聚合与原阅读身份，点击对应项在原位置阅读结果，不新增右侧工具详情页。计划、验证与 MCP 发现／资源工具按稳定 ID 显示可读动作名，结构化解释和对应图标仍需支持的准确版本；未知定义保原名称。正式 MCP 代理在元数据未核实时显示“MCP 工具”，已保存回执通过 [本地名称 reader](electron/mcp-tool-label.ts)读取原 `mcp.tools.snapshots`／`mcp.tools`，核 Store、Session、定义版本、快照绑定及原名称 hash 后显示 `MCP · 原工具名称`。名称预览不完整时沿公共 descriptor reader 读取原完整材料；没有匹配、元数据失败或外来源历史保持通用名称及原结果，不借当前远端目录猜名称。每页工具回执的可选名称共用最多32次元数据／制品读取、从首次名称查询起250ms期限及256KiB完整descriptor预算；超限或超时仅降级名称，不撤回原结果或取消同页／并行回执读取，避免历史目录扫描阻塞首次正文。所有查询只读本地保存事实，不连接或调用 MCP；读取关闭及换会话继续取消所属 GET，迟到名称不得发布到新会话。[元数据回归](test/native-tool-messages.test.ts)覆盖多快照／大目录的共享上限、超时原结果与并行页保全、descriptor限额及关闭取消。
 
 展开详情的 Home／End 保留内层原生滚动，并让相应首／尾边缘进入外层阅读区的可见窗口，避免聚合内差异滚到底部后末行仍被外层裁住。聚合总高、正文完整性、折叠选择和输入位置仍沿原规则；鼠标滚轮与横向阅读保持原边界交接。
@@ -433,13 +445,13 @@ Native 对 `web_fetch@1` 沿准确版本表投影“读取网页”及网页图�
 
 子详情 reader 仅返回已封存 carrier／Store／rootWork 内的准确 Run 与有限 execution.authorization DTO；renderer再核出处，唯一活动 Run 的人工 pending 优先显示“等待你的批准”，不能从 waiting 状态推断授权。打开准确 A 子详情读取该状态、再返回父输入也由上述真实窗口核实。未取得准确控制 DTO 的旧缓存保原生命周期，不伪造审批状态；同一稳定 Session 的旧卡仍绑定原 carrier。
 
-[NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；元数据核对前和无法核实的条目保留在原工具聚合中，默认收起，缺少执行状态时不推断成功或结果未知，“状态待核对”仅在显式测试诊断中显示；只有用户逐项展开才挂载原正文及其读取控件，不先将原结果 JSON 显示为消息正文再替换。读取失败仍保留原文和明确重试入口。[回执渲染回归](test/isolated/native-tool-receipt-render-dom.test.tsx)直接使用 NativeDesktop，核展示信息未到、失败、未知／未来版本及不支持格式的收起阅读和切会话清理。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
+[NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；首次完整元数据未齐、明确不匹配或格式不支持的条目整条隐藏，不先显示只有标题的工具行，也不借原结果推断目标。曾完整核实的工具按原会话保留只读展示缓存；普通刷新或返回仍在8项非活动会话缓存内的页面时保留原行、展开正文及阅读位置，重新核实时不恢复操作资格。缓存边界绑定 bridge、generation 与 Store，明确冲突撤销对应旧行。只有用户逐项展开才挂载原正文及其读取控件，不先将原结果 JSON 显示为消息正文再替换。[回执渲染回归](test/isolated/native-tool-receipt-render-dom.test.tsx)直接使用 NativeDesktop，核展示信息未到、读取失败、未知／未来版本及不支持格式的准入边界和切会话清理。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
 
 Native 将 Tool 的 `planned` 映射为 UI `queued`，显示“等待执行”；`dispatching` 与 `running` 映射为 UI `running`，显示“执行中”并使用运行标记。普通 Tool 的实际调用等待结果期间仍为 `dispatching`，不能将它视为排队；读取、修改与独立工具行均保留执行状态文字，聚合标题只显示动作，运行与等待状态保留在各工具行。执行权观察继续约束忙碌与读取资格，普通界面不追加“执行状态待核实”；准确审批提示、停止请求和终态语义保持；确认未派发的审批拒绝／取消沿共享工具行只保留审批标签，不重复未执行或停止文字，Shell详情也不重复等待审批。自动审批未通过沿共享ToolApproval显示14px警告色盾牌图标，悬停或键盘聚焦只提示审批状态，完整拒绝原因仅在展开详情显示；其他工具行附属状态使用13px辅助色，独立的真实异常保留异常色与逐项展开详情，适配不改后端 ledger、执行准入或并发。[原工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)沿实际适配与组件核待派发、已派发、终态和混合探索聚合。
 
 Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 failed、`authorization.dispatched=false`、Core `adapterAttempted/dispatchCommitted=false` 且准确刷新 code 与 content 一致时投影只读 `decisionRefresh`。Native 适配为中性的 `not_executed`，显示上下文／工具信息已更新、此次未执行；聚合标题不追加状态计数，逐项状态仍区分此次未执行与真实失败。持久 ledger 不被改写，冷历史复用相同核验；缺证明、实际派发失败及伪造 details 均保原事实。[Main](test/native-tool-messages.test.ts)及[DOM](test/isolated/native-tool-messages-dom.test.tsx)验证四项重新评估与一项真实失败混合时保留各项准确状态。
 
-Files等工具目标仅展示同一原来源／Run、结果之前且已读历史中唯一 Model call 的请求字段；重复 callId 不建立执行关联，有歧义不补目标。Shell原命令另沿下述确切Tool输入投影。请求文本不证明实际文件变更，也不授予打开文件资格。成功 Files 路径按钮仍沿独立原 receipt／观察 ID；Files read 的当前版本4与保留版本3均核原 baseline，write/edit 仍限版本2。文件读取失败行内保留简短状态，点击该工具展开完整异常原因；不附行内错误预览，也不提供文件打开动作。
+Files等工具目标仅展示同一原来源／Run、结果之前且已读历史中唯一 Model call 的请求字段；重复 callId 不建立执行关联，有歧义不补目标。Shell原命令另沿下述确切Tool输入投影。请求文本不证明实际文件变更，也不授予打开文件资格。成功 Files 路径按钮仍沿独立原 receipt／观察 ID；Files read 的当前版本5与保留版本3、4均核原 baseline；write 支持保存版本2与当前版本3，edit 支持版本2。未来版本不沿旧格式推断路径或打开资格。文件读取失败行内保留简短状态，点击该工具展开完整异常原因；不附行内错误预览，也不提供文件打开动作。
 
 唯一原调用属于已知 `files.list@1` 且省略 path 或传空字符串时，目标按该版本的已知默认值显示 `.`，表示工作区根目录；显式路径保原文。缺原调用、重复身份或未知版本不补默认路径，目录文本不获得文件打开动作。[Main 回归](test/native-tool-messages.test.ts)核默认／显式路径及缺来源／歧义／未来版本，[原组件 DOM](test/isolated/native-tool-messages-dom.test.tsx)核目录行实际保留根路径。
 
@@ -548,6 +560,16 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
 
 ## 会话消息渲染验证
+
+### 本次全量失败修复
+
+2026-10-27，macOS arm64／Bun1.4.2／Electron44.3.0／Chromium152.0.7977.78，原[多会话完整窗口回归](test/isolated/native-multi-session-stream-electron.test.ts)沿原runner、隔离HOME／Profile与生产制品完成：4个父会话、12个子会话、16条实际流及120次切换，1项／5条Bun断言、driver内原全过程断言通过，83549ms正常退出并确认所属进程清理。明确选择ready模型、私有草稿、准确父子正文、旧scope不混入、读取取消不停止业务、零新增Provider调用、准确父树和单子停止、剩余流继续及最终结算均保留；使用受控固定Provider，不代表真实付费模型或其他平台资格。
+
+同一原负载的普通构建对照中，限定来源前有81个≥50ms长任务，限定后为0（原门槛少于12不变），切换P50／P95为397／589ms。暖态时间线曾记录单次样式重算85–101ms、涉及约2万个样式元素；当前共享绘制按每个文字来源限定`:where`规则，保持逐字素、240ms渐显、18ms普通间隔及420ms整批上限。StaticRange与同Document先读色后绘制也保持原完整Text／选区，不通过降载、分组渐显或修改后台节流取得结果。相关单机微基准的两次阴性结果不足以代表Native结构，最终修复以原实际窗口对照为依据。
+
+缓存仍沿原8项预算和完整成本扫描准入。实际保留链定位到旧渲染闭包捎带旧entries Map及空portal，entry回调改为只捕获原retire函数、准确key和entry。检查点按准确root、唯一container和唯一TICK核已拥有的追加正文；结构节点从483到672（增189，原400限额），监听器970到968（原30限额），没有排除未知或重复树、扩大缓存或丢弃正文。原始失败、暖态trace、API分步记录、阴性微基准与通过日志保留在本轮本机`.cache/full-tests-fix-20261026/`及对应隔离测试证据中；完整全仓结果由当前整体runner记录，局部通过不覆盖未取得的发布／平台资格。
+
+本轮相关原caller／recovery、context／compression、grants／models／drafts／sessions、extensions／Job输出／bundled Files、交互／问卷／历史／恢复／reasoning、Provider／实时权限及协作窗口，均通过原完整文件定向回归。夹具沿实际菜单明确选模型、准确冻结binding、同隔离HOME与fresh权限观察；保原完整字节／SHA、准确scope和ID、冷查回零业务重放、终态和lease／所属进程清理，未新增普通客户端诊断入口。Native产品与共享UI的本轮实现说明在本文和[UI owner](../../packages/ui/README.md#markdown-消息内容)，历史日期的验证记录保留原事实。
 
 ### 大会话首次构建
 
@@ -840,6 +862,20 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 当前会话环境信息与子详情
 
+环境行将原 Store／子 Session 组合交给共享 `ChildAgentIcon`，与工具消息及审批使用相同稳定身份，不按标题、状态或本次 carrier 重新分配。恢复历史沿原 Store 保持外观；无法导航的已知子会话仍显示图标，缺身份时使用通用子 Agent 图标。显示、点击与停止资格仍分别由原 metadata 和回调决定。
+
+环境行、工具消息和子结果入口打开详情时，同步把该原身份交给共享SessionTabs的`childAgentIdentity`，标签图标使用同一分配；结果历史沿原消息Store，环境恢复历史沿原Execution Store。该装饰字段不参与Session／Execution去重或读取准入，标签改名仍保留同一图标节点，SVG沿共享14px尺寸。
+
+同日标签图标补齐：[共享标签回归](../../packages/ui/test/isolated/desktop-session-tabs.test.tsx)10项／174断言、[Native导航](test/isolated/native-session-navigation-dom.test.tsx)定向2项／40断言及UI／Desktop typecheck通过。Chrome隔离夹具在深浅主题×800／390px×运行／完成八组合核标签、环境卡与审批的图标分配、实测颜色和14×14px尺寸完全一致，重命名保持，原环境详情点击正常、无横向溢出及页面错误；证据在本机 `.cache/child-tab-icon-yxMPRQ/report.json`。该范围使用生产共享组件与environmentDisplay，不代证完整Electron或安装版。
+
+2026-10-26，macOS arm64／Bun1.4.2，环境行图标修复：[共享子Agent展示](../../packages/ui/test/isolated/desktop-agent-activity.test.tsx)3项／1266断言、[Native环境卡](test/native-background-panel.test.tsx)12项／288断言及UI／Desktop typecheck通过。生产组件、实际environmentDisplay与共享样式在本机Chrome隔离夹具中观察深浅主题×800／390px×运行／完成八组状态，重命名后图标和颜色仍与审批一致，SVG实测14×14px、无横向溢出，八次原详情点击正常；无导航目标时也保留图标。报告在本机 `.cache/environment-child-icon-GilZs4/report.json`。该范围不代证完整Electron或安装版。
+
+[NativeChildDetail](src/native-child-detail.tsx)直接显示共享 Conversation，顶部不再渲染“刷新子日志”按钮、只读说明或对应占位。日志更新与失败后的重读继续由原 environment reader 自动处理；子详情的只读权限、复制资格及标签关闭释放规则保持。共享标签模型按入口创建，首次点击子 Agent 消息只打开对应详情；关闭最后一页后重新点击子 Agent 也不预建空白网页，已有网页仍保留。
+
+2026-10-26，macOS arm64／Bun1.4.2，本次顶部移除工作树：[导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)定向1项／43断言与[自动恢复](test/isolated/native-environment-child-recovery-dom.test.tsx)3项／56断言通过。普通[Electron 子详情](test/isolated/native-child-stream-electron.test.ts)的 Responses 范围通过，实际观察首次打开、流式追加、完成重入三阶段；100次父／子导航记录630次DOM变化，零欢迎页／重复消息，reader峰值2、关闭后为0。截图与过程记录保存在本机 `dist/acceptance/child-detail-header-20261026/responses`。使用本机受控 Provider，不增加外部真实模型或安装包资格。[复制回归](test/isolated/native-child-copy-dom.test.tsx)2项通过、2项失败；两项失败以修改前组件和测试复现，未计为通过。
+
+同日修复多余空白网页标签：[共享标签生命周期](../../packages/ui/test/isolated/desktop-session-tabs.test.tsx)10项／167断言与 Native 导航定向5项／130断言通过，覆盖消息点击、重复打开、末页关闭后重开及保留已有网页。上述普通 Electron Responses 范围重新通过，首次打开只有一个子详情标签，100次导航及三阶段截图均无额外空白网页；613次DOM变化无欢迎页／重复消息，关闭后在读为0。证据在本机 `dist/acceptance/child-detail-tabs-20261026/responses`，仍限该隔离受控环境。
+
 [引导交接组合回归](test/isolated/native-new-conversation-dom.test.tsx)通过真实 Composer、DesktopInput、回环 HTTP、SQLite 和 Runtime／固定 Adapter，核引导 POST 已落库但回执丢失后，切到另一会话编辑草稿，再重连仅查询原 Command；原输入只出现一次、下一模型请求原文和来源各一次，另一草稿保持。另核提交与原 Turn 完成的两个顺序：受理归原 Run，目标先结束则保留草稿，不自动改成后续输入。[阅读回归](../../packages/ui/test/isolated/desktop-conversation-scroll.test.tsx)在受控 DOM 几何下核离底选区、sending→saved、增量回复、终态折叠和回会话的锚点／展开状态；这类确定性证据不冒称完整 Electron 视口资格。
 
 [子结果消息](src/native-presentation.ts)直接消费公开 `Message.agentResult`，由 [transcript](src/native-transcript.ts)保留原 Source ID／顺序并交给共享 Conversation 的独立消息边界。Store 只为原父 Turn 已结束、准确 report 实际创建后续 Run 的子结果投影该 DTO；active 原轮接纳继续沿普通工具和处理过程，终态和冷读都不补气泡。客户端不根据当前 Run 是否活动猜接纳时机，因此刚由结果唤起、仍执行中的续 Run 已能显示对应消息。消息复用普通输入气泡和同一个 MessageItem，头部为“〔名称〕Agent 发送”，正文使用原 Markdown。失败／取消／未知保真实结果，大正文按 `contentComplete:false` 明示尚未完整展示。[Native 入口](src/native.tsx)按准确 child Session／carrier 打开已有详情 reader，不从后来最新任务猜目标。冷历史重新投影不新增结果或模型调用，内部 Model 无该 DTO。来源证明和模型只接收一次结果归 [Store owner](../../packages/agent/src/storage/README.md#人类工作与完成报告事务)，分组回归归 [transcript DOM](test/isolated/native-transcript-dom.test.tsx)，实际窗口沿[协作夹具](test/isolated/native-collaboration-bundle.test.ts)。
@@ -1110,7 +1146,7 @@ renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定
 
 显式自动测试模式的主输入以“先审核计划”明确选择本次任务，选择本身零业务 POST；普通启动及 `desktop:dev` 不提供此辅助选择。idle 保存原 `run.start`，活动任务保存准确 `afterRunId/contextSelectionId` 的 `input.follow_up`；两者只带闭合 `builtin.planning@1 {mode:'plan'}`，不改变当前原 Run。选择按原 Store/Workspace/Session 隔离，已知正回执后复位，失败或未知保留。默认 Service 负责装配原 Run 计划义务与必要条件，调用者不自报只读定义或批准权。
 
-共享 Plan 面板显示准确当前版本的完整正文、步骤和原材料，Auto/Accept Edits 只取实际 offered modes 且不默认选择。修改要求作为原反馈由真实 `planning.review` ToolResult 交给下一 Model，新版继续独立审核。拒绝本版不是取消原任务；明确原申请取消仍走原 Command。所选会话出现 pending approval/question/plan_review 时隐藏主输入，终态恢复原主草稿；Plan/approval 保留原任务停止入口。取消原 Run 不撤销已有事实，已派发 review 的未知结果及退出提示继续保留。
+共享 Plan 面板显示准确当前版本的完整正文、步骤和原材料，Auto/Accept Edits 只取实际 offered modes 且不默认选择。修改要求作为原反馈由真实 `planning.review` ToolResult 交给下一 Model，新版继续独立审核。拒绝本版不是取消原任务；“停止任务”固定当前已核实活动 Run 的原 Command，复用主输入停止的权限、历史与 caller 校准门禁；取消中和结果未知时不能换新命令补发。普通工具 pending approval 保留主输入与权限选择；根会话 question、plan_review 及特殊来源授权隐藏主输入，结束后恢复原主草稿。准确活动原任务保留停止入口。取消原 Run 不撤销已有事实，已派发 review 的未知结果及退出提示继续保留。
 
 页面 Plan Map 保存 Store/source/presentation Session/id/revision/inputDigest 的模式和反馈，与 Question、主草稿各自独立。准确 Main accepted answer_saved、实际同原卡替换或非 pending、以及精确原 Run 已观察 cancelled 才清对应原键；遗漏 bounded pending 页、读取失败、Promise resolve 不清草稿。完整页面刷新或退出不保证未提交 Plan 草稿恢复。
 

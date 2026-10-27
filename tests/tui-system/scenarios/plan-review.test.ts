@@ -120,7 +120,6 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
       // The current review contract requires an explicit mode; no empty Enter approval.
       tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '❯', 5_000);
       tui.write('\x1b[B');
       await waitForText(() => tui.viewport(), '2. 在接受编辑模式下开始执行', 5_000);
       await tui.settleScreen();

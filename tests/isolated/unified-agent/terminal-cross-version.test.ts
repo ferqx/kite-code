@@ -22,6 +22,7 @@ import { createFixedModel } from '@kite-ai/ai';
 import type { Command, ModelOutputSnapshot, ServerInfo, SessionView } from '@kite-ai/client';
 import { inspectProcess } from '@kite-ai/service/daemon';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import {
   packTerminalBundle,
   unpackTerminalBundle,
@@ -34,8 +35,8 @@ import {
 } from '../../../scripts/release/terminal-bundle';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 import {
-  COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
-  materializeCompatibleTerminalPredecessor,
+  CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
+  materializeCurrentSchemaTerminalPredecessor,
   materializeTerminalPredecessor,
   TERMINAL_PREDECESSOR_COMMIT,
 } from '../../fixtures/unified-agent/terminal-predecessor';
@@ -62,6 +63,7 @@ interface Snapshot {
   messages: { id: string; outputBody?: { executionId: string; contentBytes: string } }[];
   receipts: Command[];
   outputs: ModelOutputSnapshot[];
+  titleOutputs: ModelOutputSnapshot[];
 }
 async function execute(argv: string[], cwd: string, home: string, timeoutMs = 30000) {
   const child = Bun.spawn(argv, {
@@ -110,12 +112,13 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
   const instances: string[] = [];
   const stopped: number[] = [];
   const requestFacts: { task: string; contextHasB: boolean }[] = [];
+  let titleCalls = 0;
   let daemonLive = false,
     succeeded = false;
   let provider: ReturnType<typeof Bun.serve> | undefined;
   try {
-    const predecessor = await materializeCompatibleTerminalPredecessor({ root, repositoryRoot });
-    expect(predecessor.provenance.commit).toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
+    const predecessor = await materializeCurrentSchemaTerminalPredecessor({ root, repositoryRoot });
+    expect(predecessor.provenance.commit).toBe(CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT);
     expect(predecessor.provenance.platform).toBe(process.platform);
     expect(predecessor.provenance.sourceRemoved).toBe(true);
     expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
@@ -126,7 +129,7 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
       bunExecutable: process.execPath,
     });
     expect(current.manifest.source.commit).toBe(currentHead);
-    expect(currentHead).not.toBe(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT);
+    expect(currentHead).not.toBe(CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT);
     expect(current.manifest.productVersion).toBe(predecessor.candidate.manifest.productVersion);
     expect(current.candidateId).not.toBe(predecessor.candidate.digest);
     const oldFiles = new Map(
@@ -183,6 +186,20 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
       port: 0,
       async fetch(request) {
         const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
+        if (
+          body.messages.some(
+            (message) =>
+              message.role === 'system' && text(message.content) === sessionTitleInstructions,
+          )
+        ) {
+          titleCalls++;
+          const frame = (delta: unknown, reason: string | null) =>
+            `data: ${JSON.stringify({ id: 'version-title', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+          return new Response(
+            `${frame({ content: 'Cross-version' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
         const task = text(
           [...body.messages]
             .reverse()
@@ -269,6 +286,19 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
       expect(result.process.instanceId).toBe(instances.at(-1)!);
       expect(result.view.session.id).toBe(sessionId);
       expect(result.outputs).toHaveLength(commandIds.length);
+      expect(titleCalls).toBe(1);
+      expect(result.titleOutputs).toHaveLength(1);
+      expect(result.titleOutputs[0]!.output).toMatchObject({
+        content: 'Cross-version',
+        complete: true,
+      });
+      expect(result.titleOutputs[0]!.runId).toBeNull();
+      if (snapshots.length) {
+        const prior = snapshots[0]!.titleOutputs[0]!;
+        expect(result.titleOutputs[0]!.executionId).toBe(prior.executionId);
+        expect(result.titleOutputs[0]!.bodyHash).toBe(prior.bodyHash);
+        expect(result.titleOutputs[0]!.output).toEqual(prior.output);
+      }
       expect(result.view.runs).toHaveLength(commandIds.length);
       expect(result.view.runs.every((run) => run.status === 'completed')).toBe(true);
       expect(result.receipts.map((receipt) => receipt.id)).toEqual(commandIds);
@@ -292,13 +322,10 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
         expect(run.originCommandId).toBe(sourceCommandId);
         if (typeof receipt.runId !== 'string') throw Error('terminal_version_run_receipt_missing');
         expect(run.id).toBe(receipt.runId);
-        if (index === 1) {
-          expect(receipt.businessCommandId).toBeString();
-          expect(sourceCommandId).not.toBe(commandIds[index]!);
-          // The predecessor reads the original business origin but predates this optional DTO field.
-          if (candidate.candidateId === newer.candidateId)
-            expect(run.rootWorkCommandId).toBe(commandIds[index]!);
-        } else expect(sourceCommandId).toBe(commandIds[index]!);
+        expect(sourceCommandId).toBe(commandIds[index]!);
+        // The historical reader predates this optional DTO field, but must retain the exact original command origin.
+        if (candidate.candidateId === newer.candidateId)
+          expect(run.rootWorkCommandId).toBe(commandIds[index]!);
         expect(output.output.complete).toBe(true);
         expect(output.output.content === bodies[index]).toBe(true);
         expect(hash(output.output.content)).toBe(hash(bodies[index]!));

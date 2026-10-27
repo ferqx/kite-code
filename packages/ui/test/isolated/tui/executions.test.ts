@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 test('actual 80x24 original Job stop, complete paged output and completed-parent child logs stay independent', async () => {
   const program = `import os,pty,subprocess,select,time,signal,json,re,tempfile,fcntl,termios,struct,shutil
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));temporary=tempfile.TemporaryDirectory(prefix='kite-job-reader-');root=os.path.join(temporary.name,'runtime');os.mkdir(root,0o700);statefile=os.path.join(temporary.name,'state.json');facts=os.path.join(temporary.name,'facts.json');wire=os.path.join(temporary.name,'wire.jsonl');env=dict(os.environ);env.update(KITE_TUI_ROOT=root,KITE_TUI_STATE=statefile,KITE_TUI_FACTS=facts,KITE_TUI_WIRE=wire)
+master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));temporary=tempfile.TemporaryDirectory(prefix='kite-job-reader-');root=os.path.join(temporary.name,'runtime');os.mkdir(root,0o700);statefile=os.path.join(temporary.name,'state.json');facts=os.path.join(temporary.name,'facts.json');wire=os.path.join(temporary.name,'wire.jsonl');env=dict(os.environ);env.update(KITE_TUI_VIEWPORT=os.path.join(temporary.name,'viewport.txt'),KITE_TUI_ROOT=root,KITE_TUI_STATE=statefile,KITE_TUI_FACTS=facts,KITE_TUI_WIRE=wire)
 p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dir, 'executions.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';full=b''
 def pump():
  global buffer,full
@@ -20,12 +20,9 @@ def waitfor(condition,label):
   pump()
 def visible(text):return text in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace')))
 def wait_selection(current,target):
- begin=(chr(27)+'[?2026h').encode();end=(chr(27)+'[?2026l').encode()
  def selected():
-  start=buffer.rfind(begin);finish=buffer.find(end,start+len(begin)) if start>=0 else -1
-  if finish<0:return False
-  frame=buffer[start+len(begin):finish].decode(errors='replace')
-  lines=re.sub(chr(27)+r'\\[[0-?]*[ -/]*[@-~]','',frame).splitlines()
+  try:lines=open(env['KITE_TUI_VIEWPORT']).read().splitlines()
+  except:return False
   return any(line.strip().startswith('Session '+current+' · ') for line in lines) and any('Select Session (arrows/Enter, Esc)' in line for line in lines) and any(line.strip().startswith('❯ '+target) for line in lines)
  waitfor(selected,'current Session '+current+' chooser target '+target)
  print('EXECUTION_SELECTION_FRAME '+current+' -> '+target,flush=True)
@@ -34,10 +31,8 @@ def key(data):
  buffer=b'';os.write(master,data);end=time.monotonic()+.12
  while time.monotonic()<end:pump()
 def last_frame_lines():
- begin=(chr(27)+'[?2026h').encode();end=(chr(27)+'[?2026l').encode()
- start=buffer.rfind(begin);finish=buffer.find(end,start+len(begin)) if start>=0 else -1
- if finish<0:return []
- return [line.strip() for line in re.sub(chr(27)+r'\\[[0-?]*[ -/]*[@-~]','',buffer[start+len(begin):finish].decode(errors='replace')).splitlines()]
+ try:return [line.strip() for line in open(env['KITE_TUI_VIEWPORT']).read().splitlines()]
+ except:return []
 def stop_confirmation(job,present):
  lines=last_frame_lines()
  target='› '+job['definitionId']+' ['+job['id']+'] '
@@ -67,7 +62,7 @@ def pick(id):
 try:
  waitfor(lambda:visible('New Run'),'ready');route('work');waitfor(lambda:any(r['status']=='completed' for r in state().get('runs',[])),'actual parent done');waitfor(lambda:all(state().get('outputProduced',{}).get(id) for id in ['long-one','long-two']),'actual both output producers persisted')
  jobs=state()['jobs'];one=next(j for j in jobs if j['definitionId']=='long-one');two=next(j for j in jobs if j['definitionId']=='long-two');child=next(j for j in jobs if j.get('childSessionId'));assert one['id']!=two['id'];assert one['status']=='running' and two['status']=='running';assert child['status'] in ['running','succeeded'];assert len(posts())==1
- reopen();pick(one['id']);mark('hold-output');key(b'o');waitfor(lambda:os.path.exists(os.path.join(root,'output-held')),'actual first output page received');key(b'\\x03');key(b'\\x12');waitfor(lambda:visible('Other original root'),'Session chooser');wait_selection('a','PTY original [a]');key(b'\\x1b[B');wait_selection('a','Other original root [b]');key(b'\\r');waitfor(lambda:state().get('sessionId')=='b','explicit other scope');mark('release-output');time.sleep(.2);assert len(posts())==1;assert state().get('read') is None
+ reopen();pick(one['id']);mark('hold-output');key(b'o');waitfor(lambda:os.path.exists(os.path.join(root,'output-held')),'actual first output page received');key(b'\\x03');key(b'\\x12');wait_selection('a','PTY original [a]');key(b'\\x1b[B');wait_selection('a','Other original root [b]');key(b'\\r');waitfor(lambda:state().get('sessionId')=='b','explicit other scope');mark('release-output');time.sleep(.2);assert len(posts())==1;assert state().get('read') is None
  key(b'\\x12');wait_selection('b','Other original root [b]');key(b'\\x1b[A');wait_selection('b','PTY original [a]');key(b'\\r');waitfor(lambda:state().get('sessionId')=='a','return original scope');reopen();pick(one['id']);key(b'o');waitfor(lambda:state().get('read',{}).get('phase')=='ready' and state()['read']['target']['executionId']==one['id'],'one complete original output');assert len(state()['read']['output']['items'])==223;assert state()['read']['output']['highWaterSeq']=='223';assert any(item['droppedBytes']=='17' and item['content']=='' for item in state()['read']['output']['items']);assert any('AFTER_GAP_ORIGINAL_long-one' in item['content'] for item in state()['read']['output']['items'])
  pick(two['id']);key(b'o');waitfor(lambda:state().get('read',{}).get('phase')=='ready' and state()['read']['target']['executionId']==two['id'],'two distinct complete output');assert all('long-one' not in item['content'] for item in state()['read']['output']['items']);assert len(posts())==1
  waitfor(lambda:state().get('childCalls')==3 and state().get('effects')==200 and next(j for j in state()['jobs'] if j['id']==child['id'])['status']=='succeeded','original child completed after parent');pick(child['id']);key(b'c');waitfor(lambda:state().get('read',{}).get('phase')=='ready' and 'child' in state()['read'],'actual child full history');assert len(state()['read']['child']['messages'])>200

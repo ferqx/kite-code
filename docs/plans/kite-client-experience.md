@@ -1,6 +1,6 @@
 # Kite 客户端界面与协作体验
 
-状态：in_progress。整体交互设计已确认，左侧列表与右侧会话第一阶段已实施，其余界面继续按目标稿推进。已在用户提供的 shadcn 组件文件中完成交互细节修订；21 个业务状态统一放在交互原型页；原客户端页保留入口索引，组件页维护共享源和样例，原库页面保留。能力是否已经交付继续以源码、运行证据和[desktop owner](../../apps/kite-desktop/README.md)为准。
+状态：in_progress。整体交互设计已确认，左侧列表与右侧会话第一阶段已实施，其余界面继续按目标稿推进。已在用户提供的 shadcn 组件文件中完成交互细节修订；21 个业务状态统一放在交互原型页；原客户端页保留入口索引，组件页维护共享源和样例，原库页面保留。能力是否已经交付继续以源码、运行证据和[desktop owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/README.md)为准。
 
 ## 已确认需求
 
@@ -68,7 +68,7 @@
 
 ## 组件视觉标准与验收
 
-间距用途、排版与对齐、图标按钮状态、颜色和验收方式统一由[客户端设计规范](../../packages/kite-client-ui/docs/design-system.md)维护。保留当前 Figma 布局，图像生成的风格探索不替代此稿；计划不再复制另一份视觉数值表。
+间距用途、排版与对齐、图标按钮状态、颜色和验收方式统一由[客户端设计规范](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/docs/design-system.md)维护。保留当前 Figma 布局，图像生成的风格探索不替代此稿；计划不再复制另一份视觉数值表。
 
 本轮规范收紧将发送／停止改为同位置、同尺寸的图标主控，更多与导航动作使用标准矢量图标；普通业务文字采用明确的字号／行高档位。共享组件与业务实例都须复查，不能只确认组件源修改成功。消息内容较长时由消息区滚动，不能把 Composer 挤出底部；文字列与容器随可用空间和内容布局。
 
@@ -122,11 +122,11 @@
 
 ## 会话消息与工具渲染
 
-2026-09-14 本轮已按用户确认的 HTML 原型落实读取／搜索聚合、Shell 输出展开、文件 diff、Ask 回执、压缩标记、子 Agent 仅工具过程及分体审批按钮。该轮明确取舍优先于下方早期样例中的参数面板、Shell 内重复命令和子 Agent 常驻结果；当前行为与视觉以[共享 UI owner](../../packages/kite-client-ui/README.md)及[设计规范](../../packages/kite-client-ui/docs/design-system.md#会话消息结构)为准。其余丰富工具结果、子会话下钻等仍属未完成目标，不因本轮展示调整宣称交付。
+2026-09-14 本轮已按用户确认的 HTML 原型落实读取／搜索聚合、Shell 输出展开、文件 diff、Ask 回执、压缩标记、子 Agent 仅工具过程及分体审批按钮。该轮明确取舍优先于下方早期样例中的参数面板、Shell 内重复命令和子 Agent 常驻结果；当前行为与视觉以[共享 UI owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/README.md)及[设计规范](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/docs/design-system.md#会话消息结构)为准。其余丰富工具结果、子会话下钻等仍属未完成目标，不因本轮展示调整宣称交付。
 
-2026-09-29 已确认 Desktop 的单轮消息形态以准确 Turn 身份组织过程和最终回复：过程在活动时展开、最终回复落定后默认折叠，工具聚合始终默认折叠且运行中摘要显示当前动作与目标；原始思考正文不展示，仅活动 Turn 顶部显示简短状态。Web Public History 缺少可信轮次身份，继续平铺。此取舍优先于下方早期样例中“成功后收起工具”“思考卡片”的默认态描述；当前实现边界以[桌面会话 owner](../../apps/kite-desktop/docs/conversation-ui.md)、[共享 UI owner](../../packages/kite-client-ui/README.md)及[Web 会话 owner](../../apps/kite-web/docs/session-presentation.md)为准。
+2026-09-29 已确认 Desktop 的单轮消息形态以准确 Turn 身份组织过程和最终回复：过程在活动时展开、最终回复落定后默认折叠，工具聚合始终默认折叠且运行中摘要显示当前动作与目标；原始思考正文不展示，仅活动 Turn 顶部显示简短状态。Web Public History 缺少可信轮次身份，继续平铺。此取舍优先于下方早期样例中“成功后收起工具”“思考卡片”的默认态描述；当前实现边界以[桌面会话 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/conversation-ui.md)、[共享 UI owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/README.md)及[Web 会话 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/docs/session-presentation.md)为准。
 
-2026-09-11 按“仔细检查 Agent 会话消息、涵盖所有工具消息”补齐设计。以下是共享桌面／Web 的目标呈现；Figma 已有可编辑样例，客户端尚未完整实现，不能用样例中的状态、文件、回答或计数证明真实执行。视觉数值由[设计规范](../../packages/kite-client-ui/docs/design-system.md#会话消息结构)维护。
+2026-09-11 按“仔细检查 Agent 会话消息、涵盖所有工具消息”补齐设计。以下是共享桌面／Web 的目标呈现；Figma 已有可编辑样例，客户端尚未完整实现，不能用样例中的状态、文件、回答或计数证明真实执行。视觉数值由[设计规范](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/docs/design-system.md#会话消息结构)维护。
 
 ### 默认阅读只保留有用的信息
 
@@ -154,7 +154,7 @@
 
 一轮会话保留用户输入、必要的阶段说明、工具过程、明确来源的子 Agent 回传、最终回复，以及真实终态。工具完成与整轮完成分别表达，工具不能把前后不同阶段的正文合成一段，也不能在终态后留下第二条 loading 记录。
 
-工具调用以既有 `toolId` 稳定更新。桌面应保留 [Runtime Client](../../packages/runtime-contract/src/notifications.ts) 已提供的 `presentation` 和 `presentationGroupId`，分别处理 `exploration`、`standalone`、`hidden`；分类的生产来源是 [model effect](../../apps/kite-service/src/bootstrap/runtime/model-effect.ts) 和 [event projector](../../apps/kite-service/src/runtime-client/event-projector.ts)。同一准确 Turn 内、各有明确分组 ID 的相邻探索工具可以跨模型批次视觉聚合，保留每条的原始分组 ID、调用顺序和结果；正文、独立操作、交互、子代理归属或不同 Turn 是分隔边界。缺少准确 Turn 时只聚合相同明确分组；缺失分组时不按时间接近或相同名称补造父关系。
+工具调用以既有 `toolId` 稳定更新。桌面应保留 [Runtime Client](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-contract/src/notifications.ts) 已提供的 `presentation` 和 `presentationGroupId`，分别处理 `exploration`、`standalone`、`hidden`；分类的生产来源是 [model effect](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/bootstrap/runtime/model-effect.ts) 和 [event projector](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/runtime-client/event-projector.ts)。同一准确 Turn 内、各有明确分组 ID 的相邻探索工具可以跨模型批次视觉聚合，保留每条的原始分组 ID、调用顺序和结果；正文、独立操作、交互、子代理归属或不同 Turn 是分隔边界。缺少准确 Turn 时只聚合相同明确分组；缺失分组时不按时间接近或相同名称补造父关系。
 
 `hidden` 不生成普通工具卡，但不能连带丢掉对应的子代理摘要或必须处理的交互。只读 `task` 的外层调用可能被服务标为 hidden；主消息展示子代理的真实来源、状态和回传正文，不再重复铺一份原始 `task` JSON。写入型委派若是 standalone，可保留可折叠的父工具；结果正文仍只呈现一次。发送／接收回执只有在对应事实存在时显示，不能由 completed 推断“已收到”。
 
@@ -162,7 +162,7 @@
 
 ### 完整工具覆盖
 
-以内置契约的 [KNOWN_TOOL_NAMES](../../packages/builtin-runtime/src/tool-contracts.ts) 逐项核对，共 19 项；动态 MCP 和无法识别的工具另外兜底。下表规定可核对的信息与边界，不要求全部字段同时出现在默认消息中；按上节规则区分普通阅读、展开详情与诊断。字段只在真实结果提供时使用，不从计数、工具名字或示例补数据。
+以内置契约的 [KNOWN_TOOL_NAMES](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/src/tool-contracts.ts) 逐项核对，共 19 项；动态 MCP 和无法识别的工具另外兜底。下表规定可核对的信息与边界，不要求全部字段同时出现在默认消息中；按上节规则区分普通阅读、展开详情与诊断。字段只在真实结果提供时使用，不从计数、工具名字或示例补数据。
 
 | 工具 | 折叠时的操作摘要 | 按需核对的内容与边界 |
 | --- | --- | --- |
@@ -188,7 +188,7 @@
 | 动态 MCP | 安全的服务／操作标签 | 仅使用 App 已允许的 displayLabel、脱敏参数与结果。文本、结构化结果、资源链接保持来源；不支持的媒体显示 MIME／可用说明，不自动请求远程内容或把它当作无输出 |
 | 未识别工具 | 已提供的安全名称，缺失时为“工具执行” | 同样保留生命周期、参数与原始文本。格式无法识别时使用可读的通用详情，不丢消息，不从任意 JSON 推导成功或文件变更 |
 
-同时核对 [RuntimeToolDisplayName](../../packages/runtime-contract/src/notifications.ts) 的全部 20 个展示类别：15 个与当前内置名称相同，另有 `mcp_tool`、`other` 与协议保留的 `glob`、`skill`、`request_plan_review`。后三者收到时使用安全的通用记录或已存在的交互事实，不据它们新增可调用工具。当前 `read_plan`、`activate_skill`、`read_skill_reference`、`complete_skill` 经 projector 会归入 `other`，仅有脱敏标签；若实施专用内容投影，应沿现有闭合词表和协议补齐身份，不能把自由标签当成 schema 判别器。
+同时核对 [RuntimeToolDisplayName](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-contract/src/notifications.ts) 的全部 20 个展示类别：15 个与当前内置名称相同，另有 `mcp_tool`、`other` 与协议保留的 `glob`、`skill`、`request_plan_review`。后三者收到时使用安全的通用记录或已存在的交互事实，不据它们新增可调用工具。当前 `read_plan`、`activate_skill`、`read_skill_reference`、`complete_skill` 经 projector 会归入 `other`，仅有脱敏标签；若实施专用内容投影，应沿现有闭合词表和协议补齐身份，不能把自由标签当成 schema 判别器。
 
 ### 状态、输出和交互
 
@@ -230,9 +230,9 @@
 
 | 差异 | 当前证据与后续 owner |
 | --- | --- |
-| 分类、分组和归属事实 | [桌面 projectEvent](../../apps/kite-desktop/src/presentation.ts)与共享 [Message](../../packages/kite-client-ui/src/types.ts)现保留 presentation／presentationGroupId／presentationOwner；owner从queued贯穿terminal，恢复只收到终态时仍可正确归属。[工具活动](../../packages/kite-client-ui/src/ToolActivity.tsx)只消费显式分组和归属，standalone 与缺失分类保持独立，有owner的hidden子工具异常归入所属task，旧记录没有owner时保留独立异常入口 |
-| 多数工具仍是通用原始文本 | [工具活动](../../packages/kite-client-ui/src/ToolActivity.tsx)已统一状态、目标、摘要和技术详情层级，并为 Shell 提供单层分支；19 项完整结构化结果仍需随各工具真实契约逐项补齐。未知数据保留通用输出，不建立第二套运行注册表 |
-| 排队和终态表达 | Desktop 与 [Web pageMessages](../../apps/kite-web/src/presentation/page.ts)现保留 queued；共享 Message 区分 queued／waiting／cancelled／unknown，Web 工具结果不再把取消／未知降为 failed。会话级 WebSessionStatus 仍是更粗的目录状态，不替代工具终态 |
+| 分类、分组和归属事实 | [桌面 projectEvent](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/src/presentation.ts)与共享 [Message](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/src/types.ts)现保留 presentation／presentationGroupId／presentationOwner；owner从queued贯穿terminal，恢复只收到终态时仍可正确归属。[工具活动](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/src/ToolActivity.tsx)只消费显式分组和归属，standalone 与缺失分类保持独立，有owner的hidden子工具异常归入所属task，旧记录没有owner时保留独立异常入口 |
+| 多数工具仍是通用原始文本 | [工具活动](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/src/ToolActivity.tsx)已统一状态、目标、摘要和技术详情层级，并为 Shell 提供单层分支；19 项完整结构化结果仍需随各工具真实契约逐项补齐。未知数据保留通用输出，不建立第二套运行注册表 |
+| 排队和终态表达 | Desktop 与 [Web pageMessages](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-web/src/presentation/page.ts)现保留 queued；共享 Message 区分 queued／waiting／cancelled／unknown，Web 工具结果不再把取消／未知降为 failed。会话级 WebSessionStatus 仍是更粗的目录状态，不替代工具终态 |
 | 流式与分流输出 | Desktop 对服务已合帧的 tool.progress 按 stream 分别保留累计 stdout/stderr，终态使用结构化 result 覆盖；源截断行数等尚未进入共享 Message，仍需按 Runtime 已提供事实补齐 |
 | 过程与交互回执 | Desktop 已按 request/segment identity 接入允许公开的 reasoning.activity，按 plan identity 原位更新 plan.progress／plan.completed，并在 input.answered 使用 Runtime 安全 summary；不读取或用 Figma 补出私有推理、问题或回答原文 |
 | 子代理与媒体有数据边界 | 已有父工具关系和步骤可用，但独立详情、发送／接收回执和丰富媒体结果仍受现有接口限制；缺失信息时展示已知结果，不以模型返回的任意对象扩展客户端授权 |
@@ -273,7 +273,7 @@ Composer 持续保留。空闲时，有可发送内容才启用发送；运行�
 
 ### Web 与桌面共用页面
 
-状态：iteration_complete。2026-09-08 用户确认两端必须共用同一份页面代码，通过端侧权限策略提供不同操作。已提取 [kite-client-ui](../../packages/kite-client-ui/README.md)，由两端入口共同消费主页面、侧栏、消息阅读、输入组件及样式；共享层只接收展示数据和已授权的操作，不依赖 Tauri、Runtime 或 REST。入口保留协议投影、路由与宿主接入，不再各自维护会话主页面。
+状态：iteration_complete。2026-09-08 用户确认两端必须共用同一份页面代码，通过端侧权限策略提供不同操作。已提取 [kite-client-ui](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/README.md)，由两端入口共同消费主页面、侧栏、消息阅读、输入组件及样式；共享层只接收展示数据和已授权的操作，不依赖 Tauri、Runtime 或 REST。入口保留协议投影、路由与宿主接入，不再各自维护会话主页面。
 
 Web 沿用当前 Browser principal 的只读策略，不注入发送、新建、审批、停止、配置写入和本地文件打开操作；桌面按当前信任、连接和运行状态提供操作。共享页面据实际可用操作呈现控件，服务端继续校验授权。此次不扩展 Browser mutation 或底层执行协议。Web 的多工作区、URL 前进后退、日志、模型上下文、恢复点与主题功能保留；诊断与原生辅助面板通过现有 owner 接入页面。
 
@@ -281,11 +281,11 @@ Web 沿用当前 Browser principal 的只读策略，不注入发送、新建、
 
 本轮共享 UI 5 项、Web 13 项、桌面 22 项与服务端只读 API 33 项测试通过；18 个 workspace 类型检查、两端构建及相关边界检查通过。HTML 预览核对两端常用／最小窗口、Web 深浅主题与窄屏、预览／URL 返回、Markdown 和审批输入布局，测试数据未进入生产入口。原生 IPC 与宿主操作未改动，本轮未重跑系统输入法及 Tauri 窗口资格；Web 既有取消／未知状态投影和深链接快照优先级差异仍由其 owner 文档记录，未以页面迁移宣称修复。构建仍提示约 554 KB（桌面）和 580 KB（Web）的单包体积。过度设计检查通过；架构取舍见 [Agent Note 0179](../../.agents/notes/implemented/feature/2026-09-08-shared-web-desktop-conversation-page.md)。
 
-2026-09-08 用户确认优先通过 HTML 页面预览调整界面；后续实施遵循 desktop owner 的 [HTML 预览优先流程](../../apps/kite-desktop/docs/conversation-ui.md#html-预览优先的界面迭代)，并同步已确认调整的代码与文档。
+2026-09-08 用户确认优先通过 HTML 页面预览调整界面；后续实施遵循 desktop owner 的 [HTML 预览优先流程](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/conversation-ui.md#html-预览优先的界面迭代)，并同步已确认调整的代码与文档。
 
 ### 第一阶段：左侧列表与右侧会话
 
-状态：iteration_complete。实现与验证范围见[两栏会话界面](../../apps/kite-desktop/docs/conversation-ui.md)，产品行为已归位到桌面手册；原生窗口与系统输入法复验仍需单独进行。2026-09-08 用户要求先交付左侧列表和右侧会话功能；本轮 Figma 是结构指引，视觉仍可调整，不做逐像素复刻。三个 Kite 页面均保留；当前业务状态已统一到原型页，分布以本文“可编辑稿与当前状态”为准。
+状态：iteration_complete。实现与验证范围见[两栏会话界面](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/conversation-ui.md)，产品行为已归位到桌面手册；原生窗口与系统输入法复验仍需单独进行。2026-09-08 用户要求先交付左侧列表和右侧会话功能；本轮 Figma 是结构指引，视觉仍可调整，不做逐像素复刻。三个 Kite 页面均保留；当前业务状态已统一到原型页，分布以本文“可编辑稿与当前状态”为准。
 
 | 区域 | 本阶段交付 | 数据与边界 |
 | --- | --- | --- |
@@ -295,7 +295,7 @@ Web 沿用当前 Browser principal 的只读策略，不注入发送、新建、
 | 输入与交互 | 底部输入持续保留；Enter 发送、Shift+Enter 换行、中文组词不误发；空白禁用发送；运行／等待时唯一主控为停止；审批、问题和计划面板放在输入上方 | `currentRun` 与 active interaction queue 是执行权威；发送、停止和回答沿现有命令及 revision，提交中阻止重复动作，未确认不伪造成功；运行中仅保留草稿，TUI 的排队输入不在本阶段迁移 |
 | 辅助功能 | 模型／Provider 设置从明确入口按需打开；既有文件变更阅读与编辑器入口保留；断线、信任和加载失败可见且可操作 | 复用 `Settings`、`Interaction` 和共享 `FileChanges` 和现有 IPC；不增加新的服务进程、存储、凭据、自动恢复或重放机制 |
 
-首阶段在 `apps/kite-desktop` 中拆分导航、会话阅读与输入组件；后续共用页面阶段已将这些组件、基础控件与样式归位到 [kite-client-ui](../../packages/kite-client-ui/README.md)，两端入口依赖该共享包，不相互引用 app 源码。Markdown 使用成熟的 React 渲染器，不执行消息中的 HTML；文件链接沿已有 native 校验打开。现有 Runtime／App Control／History 契约不扩展，TUI renderer 和 Ink 类型不进入桌面端。
+首阶段在 `apps/kite-desktop` 中拆分导航、会话阅读与输入组件；后续共用页面阶段已将这些组件、基础控件与样式归位到 [kite-client-ui](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/kite-client-ui/README.md)，两端入口依赖该共享包，不相互引用 app 源码。Markdown 使用成熟的 React 渲染器，不执行消息中的 HTML；文件链接沿已有 native 校验打开。现有 Runtime／App Control／History 契约不扩展，TUI renderer 和 Ink 类型不进入桌面端。
 
 本阶段不接入多项目同时运行、跨空间全文检索、置顶／未读持久化、工作台主题与时间筛选、独立子代理详情、浏览器／终端／完整 Git 审阅、运行中消息队列与恢复回放。基础工作台已按现有目录事实接入正在推进和最近会话；不建立独立待处理入口或分组，没有生产数据的筛选入口也不作为无效按钮出现。当前项目的会话列表显示已取得的摘要，未订阅后台会话时不声称其状态实时。
 
@@ -303,9 +303,9 @@ Web 沿用当前 Browser principal 的只读策略，不注入发送、新建、
 
 验收覆盖：空项目与空会话、约 50／200 项列表的键盘定位；点击直接加载会话、快速选择不串历史；两会话草稿与阅读位置；中文组词、空白和重复提交；Markdown 与长工具输出；正在阅读历史时继续流式输出；审批／拒绝／问题／计划与停止、断线重连不重发。沿用真实 App Server 导航、历史、开发闭环和回执丢失测试，补充 UI 交互和投影回归，执行 typecheck、build、文档及边界检查。浏览器／DOM 验证与 Tauri 原生窗口、系统输入法验收分开报告。
 
-本阶段已同步[桌面手册](../handbook/clients/desktop/README.md)与[desktop owner](../../apps/kite-desktop/README.md)，已交付事实归位，本文继续保留后续设计。过度设计检查通过；桌面测试 24 项通过，类型、构建、文档和相关边界检查通过，构建仍提示约 550 KB 的单包体积。
+本阶段已同步[桌面手册](../handbook/clients/desktop/README.md)与[desktop owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/README.md)，已交付事实归位，本文继续保留后续设计。过度设计检查通过；桌面测试 24 项通过，类型、构建、文档和相关边界检查通过，构建仍提示约 550 KB 的单包体积。
 
-此前设计轮次只修改设计稿和需求文档；第一阶段已将[两栏主界面](../../apps/kite-desktop/src/App.tsx)和 HTML 标题改为 kite。当前 [Electron 窗口配置](../../apps/kite-desktop/electron/main.ts)与开发包也使用 kite 展示名；迁移继续复用原 `dev.kite-code.desktop` userData 目录、Service identity 与数据边界，展示名统一不改动这些 authority。
+此前设计轮次只修改设计稿和需求文档；第一阶段已将[两栏主界面](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/src/App.tsx)和 HTML 标题改为 kite。当前 [Electron 窗口配置](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/electron/main.ts)与开发包也使用 kite 展示名；迁移继续复用原 `dev.kite-code.desktop` userData 目录、Service identity 与数据边界，展示名统一不改动这些 authority。
 
 桌面展示层负责布局、选择、展开、草稿和阅读位置；任务、Run、交互、子代理关系、工具记录、结果证据与连接状态继续沿 Runtime Client 和现有服务 owner 核实。工作台搜索、阅读位置保存和子代理详情需要的数据，在实际实现前查明生产来源、刷新和失败行为。通用日常任务的文件工作区与权限承载也需按具体流程实现，不能从画面中的“个人工作区”推导已有无项目执行能力。
 
@@ -339,7 +339,7 @@ Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型
 
 状态：iteration_complete（实现与自动化验证完成，原生界面验收待补）。2026-09-10 用户确认实施：全局“新对话”入口与空间同级，首次发送才创建会话；项目列表保存用户已打开目录，项目和已有本地分支选择立即生效。分支切换有活动任务或工作区改动时阻止，不自动 stash、清理或创建 worktree。这是对前述新会话目标的明确实施授权。
 
-共享页面保持同一实现，Web 只读；独立准备草稿、欢迎建议、可切换上下文栏、真实原生目录与 Git、首次发送和未知回执恢复由[新对话 owner](../../apps/kite-desktop/docs/new-conversation.md)归位。设计稿在本轮更新为带图标的统一浅底上下文栏，已保留其设计说明；菜单示例不当成真实分支或项目。
+共享页面保持同一实现，Web 只读；独立准备草稿、欢迎建议、可切换上下文栏、真实原生目录与 Git、首次发送和未知回执恢复由[新对话 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/new-conversation.md)归位。设计稿在本轮更新为带图标的统一浅底上下文栏，已保留其设计说明；菜单示例不当成真实分支或项目。
 
 验收按用户确认顺序覆盖 HTML 宽屏／最小窗口／窄屏、真实临时 Git 仓库、项目列表持久化、首次发送只创建一次和失败保留草稿、两端回归与原生配套服务。系统目录选择器、真实窗口鼠标操作和系统输入法需要独立原生场景；不能用 HTML 测试数据或 Rust 单元测试替代这些资格。
 
@@ -349,7 +349,7 @@ Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型
 
 ## 应用历史与普通工作目录修复
 
-状态：iteration_complete。用户确认历史读取应独立于项目环境，且工作目录可能用于非代码任务、没有 Git。当前实现与验证归位到[历史与恢复](../../apps/kite-desktop/docs/history-and-recovery.md)，架构取舍见 [Agent Note 0182](../../.agents/notes/implemented/bug-fix/2026-09-11-neutral-desktop-history.md)。历史按持久空间分页，跨空间阅读保留原任务；断线有界自动重接且不重放命令。普通工作目录不要求 Git，实际执行仍核对可用路径与授权。新版系统窗口与输入法的人工资格仍按原生验收边界单独处理。
+状态：iteration_complete。用户确认历史读取应独立于项目环境，且工作目录可能用于非代码任务、没有 Git。当前实现与验证归位到[历史与恢复](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/history-and-recovery.md)，架构取舍见 [Agent Note 0182](../../.agents/notes/implemented/bug-fix/2026-09-11-neutral-desktop-history.md)。历史按持久空间分页，跨空间阅读保留原任务；断线有界自动重接且不重放命令。普通工作目录不要求 Git，实际执行仍核对可用路径与授权。新版系统窗口与输入法的人工资格仍按原生验收边界单独处理。
 
 ## 新对话选择与 Session 模型隔离
 
@@ -357,4 +357,4 @@ Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型
 
 ## 本地启动性能
 
-状态：in_progress（主要 Service 启动瓶颈已优化；迁移前新构建产物首次运行仍超出 300ms，完整 Electron 窗口绘制资格待补）。2026-09-11 用户要求连接与首屏目录进入 300ms 预算；已移除重复全库检查与全历史解码，使用完整 SHA-256 加速及首次计数时才加载 tokenizer。校验边界见 [Agent Note 0183](../../.agents/notes/implemented/testing/2026-09-11-bounded-startup-validation.md)，样本、条件与尚未覆盖的端到端范围见[启动 owner](../../apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。不把迁移前分段计时或并发负载下的样本当作 Electron 系统启动硬实时保证。
+状态：in_progress（主要 Service 启动瓶颈已优化；迁移前新构建产物首次运行仍超出 300ms，完整 Electron 窗口绘制资格待补）。2026-09-11 用户要求连接与首屏目录进入 300ms 预算；已移除重复全库检查与全历史解码，使用完整 SHA-256 加速及首次计数时才加载 tokenizer。校验边界见 [Agent Note 0183](../../.agents/notes/implemented/testing/2026-09-11-bounded-startup-validation.md)，样本、条件与尚未覆盖的端到端范围见[启动 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。不把迁移前分段计时或并发负载下的样本当作 Electron 系统启动硬实时保证。

@@ -18,6 +18,7 @@ import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
+import { managementActionWire } from '../fixtures/tui-activation-wire';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -385,7 +386,11 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
     expect(existsSync(join(root, 'mcp-admit'))).toBe(false);
     expect(selectionPosts('warm')).toHaveLength(2);
     expect(selectionPosts('cold')).toHaveLength(0);
-    expect(ledger().filter((row) => row.phase === 'cold' && row.method === 'POST')).toHaveLength(0);
+    expect(
+      managementActionWire(ledger(), { warm: 2, cold: 2 }).filter(
+        (row) => row.phase === 'cold' && row.method === 'POST',
+      ),
+    ).toHaveLength(0);
     expect(ledger().filter((row) => row.path.endsWith('/cancel'))).toHaveLength(0);
     const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
       records: { intent: { request: { commandId: string } } }[];

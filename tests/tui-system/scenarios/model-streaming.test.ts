@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import {
+  activateSessionSearch,
+  submitCommand,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -336,6 +341,7 @@ describe('TUI PTY System — late reasoning after visible content', () => {
       expect(compactLines[thinkingHeader + 1]).toBe('');
       expect(server.getWorkRequests()[0]?.body.stream).toBe(true);
 
+      await submitCommand(tui, '/session rename Reproduce late reasoning');
       // Persist the settled live projection, then load it through the normal
       // PTY resume flow. A replay must not resurrect the transient spinner,
       // private reasoning string, or a duplicate answer block.
@@ -352,6 +358,8 @@ describe('TUI PTY System — late reasoning after visible content', () => {
         'the late-reasoning session to appear in /resume',
         10_000,
       );
+      await activateSessionSearch(resumedTui);
+      await typeText(resumedTui, 'Reproduce late reasoning');
       resumedTui.write('\x1b[B');
       await waitForCondition(
         () =>

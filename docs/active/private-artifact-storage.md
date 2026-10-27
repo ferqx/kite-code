@@ -8,6 +8,8 @@
 
 相关：[Agent Note 0056](../../.agents/notes/implemented/architecture/2026-07-30-metadata-first-data-boundaries.md)、[Agent Note 0109](../../.agents/notes/implemented/testing/2026-08-18-model-invocation-evidence-and-replay.md)、[Agent Note 0127](../../.agents/notes/implemented/simplification/2026-08-23-remove-rav1-speculative-authority.md)、`model-provider-boundary.md`。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前存储模型
 
 `packages/builtin-runtime/src/model/private-immutable-artifacts.ts` 是共享的私有、不可变、内容寻址原语。每个实例必须在App注入的durable
@@ -27,9 +29,9 @@ subagent-lifecycles/handles/
 Store 9对应`model_artifacts`、`plan_artifacts`、`capability_artifacts`、`filesystem_preimage_artifacts`、
 `sandbox_preparation_artifacts`、`subagent_task_artifacts`、`subagent_lifecycle_artifacts`与`subagent_continuation_artifacts`。
 `filesystem_preimage_artifacts`是mutation ready-before-commit evidence；它与Session checkpoint用的`runtime_file_preimages`不是同一领域，
-不得合表或相互 fallback；当前存储与恢复边界见[Runtime Authority](runtime-authority-boundary.md)及[SQLite Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
+不得合表或相互 fallback；当前存储与恢复边界见[Runtime Authority](runtime-authority-boundary.md)及[SQLite Artifact owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
 
-Store11 引入私有 `subagent_checkpoint_artifacts`、`agent_followup_admission_artifacts` 与 `agent_mail_bodies`，分别保存子 Agent 续轮上下文、已受理续轮授权快照和私有消息正文；当前 Store15 沿用相同的私有引用与读取授权边界，并解除这些子 Run 私有产物的旧单件字节上限。旧格式只在受维护保护的私有候选中转换，不能在普通业务读取中静默改写。Agent 邮箱事件只保存 ref、digest 与来源，正文读取仍要求准确 Session 执行 handle、活动 task 和模型 invocation 准入证明；当前正式 App Server 已开放模型可见邮箱及受控续轮，实际事务与跨线程投递见 [SQLite 事务 owner](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
+Store11 引入私有 `subagent_checkpoint_artifacts`、`agent_followup_admission_artifacts` 与 `agent_mail_bodies`，分别保存子 Agent 续轮上下文、已受理续轮授权快照和私有消息正文；当前 Store15 沿用相同的私有引用与读取授权边界，并解除这些子 Run 私有产物的旧单件字节上限。旧格式只在受维护保护的私有候选中转换，不能在普通业务读取中静默改写。Agent 邮箱事件只保存 ref、digest 与来源，正文读取仍要求准确 Session 执行 handle、活动 task 和模型 invocation 准入证明；当前正式 App Server 已开放模型可见邮箱及受控续轮，实际事务与跨线程投递见 [SQLite 事务 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
 
 旧同 Session 邮箱表保留但其生产能力开关关闭；当前独立子 Session 的结果和消息 Artifact 必须绑定准确子线程、父线程接收意图及投递 receipt。不可变 ref 与 digest 不能自证跨 Session 权限或父结果已接纳。子终态 Artifact 可以先于父接纳持久存在，待投递记录须可恢复；父确认丢失时只重放投递回执，不重新执行子任务或复制正文到 canonical Event。多 App Server owner 尚无完整跨 Session 可达性快照，Artifact GC 保持关闭。
 
@@ -41,7 +43,7 @@ Host `ArtifactPort` 只提供 type-erased namespace registry；它不统一 ref/
 
 ## Ref 与完整性
 
-内容寻址 private Artifact 的重复发布保留首次创建时间，其余身份、正文与稳定元数据必须完全相同；完整 Store 写入规则与真实 backend 回归见 [Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
+内容寻址 private Artifact 的重复发布保留首次创建时间，其余身份、正文与稳定元数据必须完全相同；完整 Store 写入规则与真实 backend 回归见 [Artifact owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
 
 Artifact ref 只包含 path-free `artifactId`、封闭 `kind`、`sha256:` integrity identifier 与 UTF-8 byte length。ID 和 integrity identifier 都从 domain-separated canonical bytes 的 SHA-256 得到；它们用于内容寻址、损坏检测和 identity mixup 检测，不是密码学 authenticity，也不抵御能够改写文件并重算 digest 的同用户 attacker。
 
@@ -63,9 +65,9 @@ KASD Session Store复用相同typed table/ref contract，每次Artifact mutation
 Artifact表没有可证明完整的跨Session reachability snapshot，多App Server owner显式禁用全部Artifact GC；首次真实GC需求必须另行设计
 maintenance barrier，不能由任一App Server自行扫描后删除。
 
-带回执的根 Session 树删除是窄范围例外：Store 在同一写事务中收集树内已保存的 typed Artifact ref，删除整棵树后只清理可证明不再被保留 Store 行引用的候选正文。共享 ref、归属不明的孤立正文保留；该操作不启用常规全库 GC，也不承诺物理覆写。当前实现与验证见 [SQLite Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
+带回执的根 Session 树删除是窄范围例外：Store 在同一写事务中收集树内已保存的 typed Artifact ref，删除整棵树后只清理可证明不再被保留 Store 行引用的候选正文。共享 ref、归属不明的孤立正文保留；该操作不启用常规全库 GC，也不承诺物理覆写。当前实现与验证见 [SQLite Artifact owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
 
-Model、Capability result 和 filesystem preimage 私有 Artifact 不再施加旧默认 16 MiB 单件上限；Capability store 的旧 `maxArtifactBytes` 参数保留源兼容但不作为写入拒绝额度。独立子 Run 的私有 Task／结果／lifecycle／continuation／checkpoint／followup admission Artifact 在 Store15 也不再施加旧单件固定字节上限。这些 Artifact 均须满足 canonical 格式、内容摘要、准确字节长度、所属执行权与物理存储检查；容量规则不能代替完整性验证。回归见 [Capability Artifact](../../packages/builtin-runtime/test/capability-artifact-size.test.ts) 与 [filesystem preimage](../../packages/builtin-runtime/test/persistence/filesystem-preimage-artifacts.test.ts)。
+Model、Capability result 和 filesystem preimage 私有 Artifact 不再施加旧默认 16 MiB 单件上限；Capability store 的旧 `maxArtifactBytes` 参数保留源兼容但不作为写入拒绝额度。独立子 Run 的私有 Task／结果／lifecycle／continuation／checkpoint／followup admission Artifact 在 Store15 也不再施加旧单件固定字节上限。这些 Artifact 均须满足 canonical 格式、内容摘要、准确字节长度、所属执行权与物理存储检查；容量规则不能代替完整性验证。回归见 [Capability Artifact](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/test/capability-artifact-size.test.ts) 与 [filesystem preimage](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/test/persistence/filesystem-preimage-artifacts.test.ts)。
 
 ## Runtime 生命周期
 

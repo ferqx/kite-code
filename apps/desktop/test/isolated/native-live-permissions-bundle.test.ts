@@ -181,7 +181,7 @@ test.skipIf(process.platform !== 'darwin')(
               if (message.role !== 'user' || typeof message.content !== 'string') return [];
               try {
                 const value = JSON.parse(message.content);
-                return value?.purpose === 'authorization_review' ? [value] : [];
+                return value?.purpose === 'authorization_check' ? [value] : [];
               } catch {
                 return [];
               }
@@ -358,10 +358,15 @@ test.skipIf(process.platform !== 'darwin')(
         readFileSync(
           resolve(import.meta.dir, '../native-live-permissions-electron.fixture.ts'),
           'utf8',
-        ).replace(
-          "import { _electron, type Page } from 'playwright';",
-          `import type {Page} from 'playwright';import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        )
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron, type Page } from 'playwright';",
+            `import type {Page} from 'playwright';import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       expect(
         (

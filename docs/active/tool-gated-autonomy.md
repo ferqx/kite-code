@@ -10,6 +10,8 @@
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、[Agent Note 0007](../../.agents/notes/implemented/architecture/2026-07-14-capability-bindings.md)、[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)、[Agent Note 0042](../../.agents/notes/implemented/feature/2026-07-25-file-tool-semantics-and-write-safety.md)、[Agent Note 0048](../../.agents/notes/implemented/bug-fix/2026-07-29-durable-user-turn-cancellation.md)、[Agent Note 0049](../../.agents/notes/implemented/bug-fix/2026-07-30-effect-aware-read-scheduling.md)、[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)、[Agent Note 0111](../../.agents/notes/implemented/feature/2026-08-18-governed-local-provider-seams.md)、[Agent Note 0114](../../.agents/notes/implemented/testing/2026-08-18-stable-subagent-actor-identity-for-strict-replay.md)、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前 V1.3 正式工具授权
 
 正式 CLI/TUI/Native、Service 和唯一 Agent 使用请求批准（`accept_edits`）、自动审核（`auto`）、完全访问（`full`）三策略，旧 raw `ask` 输入与持久控制明确拒绝。Shell 的单次 filesystem/network 请求由最终接纳的权限快照决定实际范围；未知脚本不取得“已证明只读”资格，默认范围由 OS 拦截越界，失败不自动扩权重放。Auto 的 `ask_user` 是审核决定中的人工回退，普通 `ask_user` 工具仍只提供信息，不构成第四种权限。
@@ -424,7 +426,7 @@ lifecycle attempt，child 模型及工具/Shell/MCP 调用各自链接独立 res
 interaction，不属于 dispatch 或 lifecycle attempt，因而不进入 resource admission；child tool/shell permit 使用
 durable FIFO waiter、原子 promotion + reservation 与有界 wait deadline；超时通过主 Runtime 的
 canonical failure terminal 收敛，不转换成普通 child tool error。
-Service 选择 Tool／Task 的预留及释放未派发预留时，只接受 `reserved`／`dispatch_started` 状态的准确 `tool:<toolCallId>`、当前获批回执的 `:approval:<receiptId>` 或当前 suspended attempt 的 `:resume:<parentAttempt>`。调用 ID 本身可以含冒号；若后缀身份同时是其他调用的原始 ID，拒绝将其关联到本调用。缺少本调用预留时在 Host acknowledgement 与机制调用之前拒绝；正常调用的 admission digest 不包含 sibling 的预留，局部失败也不能释放 sibling。验证见 [预留身份回归](../../apps/kite-service/test/runtime/tool-reservation-identity.test.ts)及[失败隔离](../../apps/kite-service/test/isolated/runtime/runtime-tool-effect-failure-isolation.test.ts)。
+Service 选择 Tool／Task 的预留及释放未派发预留时，只接受 `reserved`／`dispatch_started` 状态的准确 `tool:<toolCallId>`、当前获批回执的 `:approval:<receiptId>` 或当前 suspended attempt 的 `:resume:<parentAttempt>`。调用 ID 本身可以含冒号；若后缀身份同时是其他调用的原始 ID，拒绝将其关联到本调用。缺少本调用预留时在 Host acknowledgement 与机制调用之前拒绝；正常调用的 admission digest 不包含 sibling 的预留，局部失败也不能释放 sibling。验证见 [预留身份回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/test/runtime/tool-reservation-identity.test.ts)及[失败隔离](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/test/isolated/runtime/runtime-tool-effect-failure-isolation.test.ts)。
 本地 Provider 最终 gate 明确拒绝且能证明未 dispatch 时可携带证明 release；已经执行部分
 command/MCP check 的组合 Verification 必须转 `unknown`，不能整体退款。`resourceBudget`
 开启但 `boundedCancellation` 关闭时，模型不披露 writer、Shell 或 child capability，
@@ -458,7 +460,7 @@ handler。
 
 Builtin operation receipt/result projection 只产生模型内容、双流内容与 Runtime 结果元数据，不包含 display hint。Skill 与 Plan executor 输出可以携带领域 events；capability-backed `tool_search` 没有第二 concrete executor，Builtin prepared adapter 从 frozen search result 逐字段投影既有 `capability.search_completed` 与 stdout。App Tool Pipeline 只按顺序提交这些事实并形成 terminal，不重新计算搜索结果。App 根据持久 RuntimeEvent 与结果元数据决定展示。Skill activation 的 disclosure、approval 与 fork adapter 仍属于 App tool coordinator 的跨领域治理边界。
 
-`read_skill_reference` 与 `complete_skill` 已迁入 Builtin catalog：entry parser 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 完整读取声明文件，不设旧的 128 KiB 字节额度，仍要求非 symlink 且位于 Skill 根目录内。Workflow 编译绑定 canonical root 与目录对象身份并纳入 revision；已有 root alias 只有仍指向编译根目录时可读，后续换绑失败。引用读取通过 no-follow FD、下级目录身份、真实路径与读取前后文件身份校验，不能在 catalog snapshot 后经中间目录 symlink 越界；验证见 [引用边界回归](../../packages/builtin-runtime/test/skills/reference-boundary.test.ts)。completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
+`read_skill_reference` 与 `complete_skill` 已迁入 Builtin catalog：entry parser 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 完整读取声明文件，不设旧的 128 KiB 字节额度，仍要求非 symlink 且位于 Skill 根目录内。Workflow 编译绑定 canonical root 与目录对象身份并纳入 revision；已有 root alias 只有仍指向编译根目录时可读，后续换绑失败。引用读取通过 no-follow FD、下级目录身份、真实路径与读取前后文件身份校验，不能在 catalog snapshot 后经中间目录 symlink 越界；验证见 [引用边界回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/test/skills/reference-boundary.test.ts)。completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
 
 `activate_skill` 也已迁入 Builtin catalog：Controller 保留 disclosure、approval 与 mode-policy 前置治理；entry parser 负责 activation validation、inline/fork 生命周期、fork 结构化输出校验、frame close 和 verification 投影。fork 子 Agent 仅作为受治理 provider adapter 注入。
 

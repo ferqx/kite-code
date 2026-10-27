@@ -1,8 +1,8 @@
 # 本机 App Server 与 Durable Session Runtime
 
-本文保留重构前App Server／Store的历史边界与威胁模型，源码定位和当前合同归[通用Agent边界](unified-agent-boundary.md)及[新Desktop owner](../../apps/desktop/README.md)。旧Desktop普通开发／构建／服务准备入口现已明确退役，六个package命令和四个直接脚本只返回退役诊断／退出码2；实际回归归[调用者测试](../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)。下方旧拓扑、验证命令和“当前”实现描述仅指其历史版本，不是现行正式启动或新数据写入许可。历史源码／制品的保留不闭合V1.3的RSS、观测、平台或最终退役门禁。
+本文保留重构前App Server／Store的历史边界与威胁模型，源码定位和当前合同归[通用Agent边界](unified-agent-boundary.md)及[新Desktop owner](../../apps/desktop/README.md)。旧Desktop普通开发／构建／服务准备入口现已明确退役，六个package命令和四个直接脚本只返回退役诊断／退出码2；实际回归归[调用者测试](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)。下方旧拓扑、验证命令和“当前”实现描述仅指其历史版本，不是现行正式启动或新数据写入许可。历史源码／制品的保留不闭合V1.3的RSS、观测、平台或最终退役门禁。
 
-旧CLI/TUI／Service普通启动与构建亦已明确拒绝；历史library函数和Service私有helper另保原方法／对象／同步语义，普通App Server不进入该保留通路。准确入口、实际胶水验证和原源码比对见[旧Service owner](../../apps/kite-service/README.md)及[本轮证据](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。Web按本轮用户要求保持现状；保留这些历史接口不构成当前Stage或平台通过。
+旧CLI/TUI／Service普通启动与构建亦已明确拒绝；历史library函数和Service私有helper另保原方法／对象／同步语义，普通App Server不进入该保留通路。准确入口、实际胶水验证和原源码比对见[旧Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/README.md)及[本轮证据](../plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-clituiservice-普通入口退役与历史导入保留)。Web按本轮用户要求保持现状；保留这些历史接口不构成当前Stage或平台通过。
 
 > 实施中：[会话存储兼容性与连续性 V1](../plans/session-store-compatibility-and-continuity.md)已统一正式数据入口；已验证转换路径及未完成的平台资格见该计划，不由入口统一推导完整跨版本兼容。
 
@@ -15,9 +15,11 @@
 `bun run --cwd apps/kite-desktop test`、`bun run test:desktop:native`、`bun run release:build`、`bun run release:verify`、
 `bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前拓扑
 
-开发中的 [Electron 桌面客户端](../../apps/kite-desktop/README.md)沿用自有配套 child 与同 build 配对边界：Electron main 持有 stdio 进程，沙箱 renderer 通过冻结的具名 preload bridge 复用环境无关 TypeScript client。host 与 renderer 构建和分层测试已经接入，packaged 原生窗口已通过[本机自动验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)；迁移前 Tauri 的阶段 0 结果不自动成为 Electron 资格。下图列出既有正式入口。
+开发中的 [Electron 桌面客户端](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/README.md)沿用自有配套 child 与同 build 配对边界：Electron main 持有 stdio 进程，沙箱 renderer 通过冻结的具名 preload bridge 复用环境无关 TypeScript client。host 与 renderer 构建和分层测试已经接入，packaged 原生窗口已通过[本机自动验收](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)；迁移前 Tauri 的阶段 0 结果不自动成为 Electron 资格。下图列出既有正式入口。
 
 `prepare:service` 复用 release owner 验证 candidate，只提取当前目标的 stdio Service 与 `desktop.json`。`build:electron` 要求该清单存在，并把 candidate build ID、服务摘要、expected server version 与环境变量名白名单编入 main bundle；打开项目只从自身资源目录启动摘要匹配的服务，不根据运行时更新的清单换版本。开发包与打包版均使用 canonical config root，不因 checkout、schema 或 epoch 改变正常数据入口；数据目录校验类型、owner 并限制为私有权限。Electron carrier 的单消费者、16 帧有界队列、1 MiB 帧、EOF 清理与异常结果由 desktop owner 维护，不能把终止自有 child 等同于停止共享 daemon。
 
@@ -25,11 +27,11 @@ Electron `before-quit` 先经 renderer 使用既有 Runtime 连接完整查询�
 
 桌面具名 `runtimeStatus` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtimeOpen` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。Electron renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；主进程还在 document 导航、renderer 崩溃或销毁时主动 detach。新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；当前宿主取舍见 [Agent Note 0184](../../.agents/notes/implemented/feature/2026-09-12-electron-desktop-runtime-host.md)。
 
-桌面 stdio App Server 可以省略执行 Workspace，先读取同一 profile 的持久历史。`history/list_sessions` 返回有界摘要、cursor 和 Store Workspace membership；目录、历史日志、选中会话的投影查询及订阅均只读取持久事实，不触发旧执行清理。执行命令在受控恢复 scope 内核验旧执行，必要时完成资源清理与持久收尾；恢复失败不隐藏历史。投影查询返回的持久 revision 同时发布给 Host 订阅，订阅建立期间 Store 水位推进后仍须达到一致的初始水位，不使客户端无限等待加载。创建任务须显式请求并授权目标 Workspace；已有会话执行按其持久 Workspace identity 路由和核对既有信任，不以进程启动目录、Desktop项目登记或原目录仍存在限制续聊。原目录缺失时保留其持久身份和原路径，Shell/文件能力在实际调用时报告不可用；不创建替代目录、不回落到进程cwd，也不因读取历史扩大工具权限。已有会话的 `set_interaction_mode` 按持久 Session 身份核对目标 Workspace Trust，再进入同一 Host 的命令事务；不绑定进程当前执行项目，也不改变它。该操作不申请执行租约：已有本地 Runtime 时沿其 execution fence 提交，否则只在 idle／recovery_required 且版本一致时提交权限事务，保留恢复事实；仍受目标 Trust、并发执行所有权、revision 与持久回执约束，不因可读历史获得授权；完整机制见 [Service owner](../../apps/kite-service/docs/runtime-application.md#app-controlhistory-与-mutation)。历史读取不会授予写权限，停止与退出只处理当前 owner 的任务。
+桌面 stdio App Server 可以省略执行 Workspace，先读取同一 profile 的持久历史。`history/list_sessions` 返回有界摘要、cursor 和 Store Workspace membership；目录、历史日志、选中会话的投影查询及订阅均只读取持久事实，不触发旧执行清理。执行命令在受控恢复 scope 内核验旧执行，必要时完成资源清理与持久收尾；恢复失败不隐藏历史。投影查询返回的持久 revision 同时发布给 Host 订阅，订阅建立期间 Store 水位推进后仍须达到一致的初始水位，不使客户端无限等待加载。创建任务须显式请求并授权目标 Workspace；已有会话执行按其持久 Workspace identity 路由和核对既有信任，不以进程启动目录、Desktop项目登记或原目录仍存在限制续聊。原目录缺失时保留其持久身份和原路径，Shell/文件能力在实际调用时报告不可用；不创建替代目录、不回落到进程cwd，也不因读取历史扩大工具权限。已有会话的 `set_interaction_mode` 按持久 Session 身份核对目标 Workspace Trust，再进入同一 Host 的命令事务；不绑定进程当前执行项目，也不改变它。该操作不申请执行租约：已有本地 Runtime 时沿其 execution fence 提交，否则只在 idle／recovery_required 且版本一致时提交权限事务，保留恢复事实；仍受目标 Trust、并发执行所有权、revision 与持久回执约束，不因可读历史获得授权；完整机制见 [Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md#app-controlhistory-与-mutation)。历史读取不会授予写权限，停止与退出只处理当前 owner 的任务。
 
-桌面[新对话准备](../../apps/kite-desktop/docs/new-conversation.md)不创建 Runtime Session，首次发送沿既有创建／发送命令执行。已打开项目列表属于原生应用偏好，不充当信任或 Session authority。Git 分支选择是显式本地宿主操作，仅切换已登记当前项目的已有本地分支：客户端检查项目任务，关闭自有 Service 并等待清理后，原生宿主再次核实路径、分支、HEAD 与工作区改动。失败或未知结果只重新读取实际状态，不自动重试或回滚；不扩展 Browser REST 写权限，也不承诺协调外部程序的 Git 操作。
+桌面[新对话准备](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/new-conversation.md)不创建 Runtime Session，首次发送沿既有创建／发送命令执行。已打开项目列表属于原生应用偏好，不充当信任或 Session authority。Git 分支选择是显式本地宿主操作，仅切换已登记当前项目的已有本地分支：客户端检查项目任务，关闭自有 Service 并等待清理后，原生宿主再次核实路径、分支、HEAD 与工作区改动。失败或未知结果只重新读取实际状态，不自动重试或回滚；不扩展 Browser REST 写权限，也不承诺协调外部程序的 Git 操作。
 
-桌面空间移除由 Service 一次批量数据事务完成。存在本进程实际执行时先发出取消信号，资源收尾由 Service 异步跟踪，不阻塞删除响应。删除不读取历史业务状态，也不要求 cleanup、lease 或恢复标签满足条件。Desktop 收到成功回执后移除本机项目登记，不再前后遍历会话或等待独立 finalize；请求结果未知时保留登记供重试。被删会话的实时订阅关闭，迟到写入由 tombstone 拒绝；旧空间删除标记在数据删除事务中清除。具体失败与恢复见 [Service owner](../../apps/kite-service/docs/runtime-application.md)和[桌面历史](../../apps/kite-desktop/docs/history-and-recovery.md)。
+桌面空间移除由 Service 一次批量数据事务完成。存在本进程实际执行时先发出取消信号，资源收尾由 Service 异步跟踪，不阻塞删除响应。删除不读取历史业务状态，也不要求 cleanup、lease 或恢复标签满足条件。Desktop 收到成功回执后移除本机项目登记，不再前后遍历会话或等待独立 finalize；请求结果未知时保留登记供重试。被删会话的实时订阅关闭，迟到写入由 tombstone 拒绝；旧空间删除标记在数据删除事务中清除。具体失败与恢复见 [Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)和[桌面历史](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/history-and-recovery.md)。
 
 ```text
 default:
@@ -55,7 +57,7 @@ no-follow/owner校验，并把client与child统一到最终canonical target。Wi
 桌面模型配置使用既有 Native Provider write，以及 App Control 的默认模型选择和模型启用状态写入；后两者按 Workspace revision 做 CAS。启用状态保存在用户配置，Service 快照显式投影，运行时不会默认选择已禁用模型，也会拒绝显式调用它。当前默认模型须先切换后才能禁用。凭据只进入精确写入接口，结果未知先查询且不重放。计划审核由 Service 同时向实时与 History 投影封闭的有界 review 正文和截断标记，参与稳定交互身份比对；没有新增 Store、进程或业务重试队列。
 Runtime `start_turn` 的可选思考档位只进入当次 Run 的冻结配置与持久 `turn.started` 事实；恢复按活动 turnId 还原覆盖，不写 Provider 全局配置。服务在准入时拒绝无法真实发送档位的 Provider，恢复时 Provider 变为不支持则保留需恢复状态，不能静默执行另一档位。缺省参数继续采用原 Provider 配置。
 
-桌面设置中的 MCP 状态、认证／取消认证／重连及 Skills 目录复用已存在的 App Control 方法；请求绑定完整 Workspace identity 和 Server revision，操作未知时不重放，Browser principal 不取得该控制能力。具体页面与验证范围见[扩展设置](../../apps/kite-desktop/docs/extensions.md)。
+桌面设置中的 MCP 状态、认证／取消认证／重连及 Skills 目录复用已存在的 App Control 方法；请求绑定完整 Workspace identity 和 Server revision，操作未知时不重放，Browser principal 不取得该控制能力。具体页面与验证范围见[扩展设置](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/extensions.md)。
 
 桌面变更阅读复用已提交文件工具记录与终态输出。原生编辑器跳转绑定当前连接，校验项目内普通文件后仅启动固定编辑器；不会把事件中的路径当成任意本机访问权限。Store 与活动 Bridge 的工作区摘要保持同 revision 一致，恢复验证覆盖真实写入、测试及继续会话。
 
@@ -104,7 +106,7 @@ alive/uncertain/drift 全部保留。普通 disconnect 不改变 daemon；显式
 
 ## Store 与版本
 
-实现依据：[resolveManagedLocalAppServerTarget](../../scripts/release/app-server-client.ts)将 `runtimeRoot` 与 `configRoot` 指向同一 `home.root`；[Desktop host](../../apps/kite-desktop/electron/host.ts)从 canonical config root 构造进程参数；[createKiteAppServerRuntimeOwner](../../apps/kite-service/src/app-server.ts)将其交给 Store composition。[配对测试](../../tests/release/app-server-client.test.ts)断言源码入口使用该位置。
+实现依据：[resolveManagedLocalAppServerTarget](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/release/app-server-client.ts)将 `runtimeRoot` 与 `configRoot` 指向同一 `home.root`；[Desktop host](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/electron/host.ts)从 canonical config root 构造进程参数；[createKiteAppServerRuntimeOwner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/app-server.ts)将其交给 Store composition。[配对测试](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/release/app-server-client.test.ts)断言源码入口使用该位置。
 
 Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`。当前目标格式为 schema 14、`kite-session-history-generation-2026-09-28`；启动准备对已验证的 Store 9、Store 10、准确旧 epoch 11、Store 12 和 Store 13 执行受维护保护的备份、候选转换、连续性校验和发布。旧根会话 ID、State、事件及历史投影须保持；未知 epoch 或未经证明的语义明确拒绝，不能仅凭 schema 数字迁移。
 
@@ -154,7 +156,7 @@ Web shell 注入由 instanceId/buildId 派生的非凭据身份摘要，每个 A
 
 验收与尚待取得的跨平台证据见[实施计划](../plans/daemon-upgrade-lifecycle.md)。
 
-桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。后续页携带首个页面的内容 digest；同水位内容变化时丢弃已收页面并最多重读一次，避免拼接不同版本。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 会停止客户端后续分页；服务端宣告 `history/cancel` 时，客户端还会按原 RPC id 请求取消已发出的读取。Electron renderer adapter 必须按 notification schema 接受无自身 id 的历史取消，并将目标 requestId 转换为原请求的同一页面代次 wire id；正常取消不能触发共享连接 detach，旧页面代次仍不得取消新页面的请求。子会话详情在订阅回执前被关闭时，Client 以原订阅请求 ID 调用 `runtime/unsubscribe`，由 Service 清理待建立或已建立的子订阅；只有该取消接口失败才关闭 logical connection，不因正常快速切换切断其他会话的连接。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。后台执行列表在重连后先标记过期；当前代次的新鲜查询即使 aggregate generation、watermark 与会话 revision 未变化，也能确认列表仍有效并解除过期标记，旧代次或较低水位不能解除。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
+桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。后续页携带首个页面的内容 digest；同水位内容变化时丢弃已收页面并最多重读一次，避免拼接不同版本。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 会停止客户端后续分页；服务端宣告 `history/cancel` 时，客户端还会按原 RPC id 请求取消已发出的读取。Electron renderer adapter 必须按 notification schema 接受无自身 id 的历史取消，并将目标 requestId 转换为原请求的同一页面代次 wire id；正常取消不能触发共享连接 detach，旧页面代次仍不得取消新页面的请求。子会话详情在订阅回执前被关闭时，Client 以原订阅请求 ID 调用 `runtime/unsubscribe`，由 Service 清理待建立或已建立的子订阅；只有该取消接口失败才关闭 logical connection，不因正常快速切换切断其他会话的连接。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。后台执行列表在重连后先标记过期；当前代次的新鲜查询即使 aggregate generation、watermark 与会话 revision 未变化，也能确认列表仍有效并解除过期标记，旧代次或较低水位不能解除。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
 
 Service 从持久 Store 读取未由当前进程持有执行权的会话时，已完成／失败／取消的 Run 保留真实终态和 outcome；只有未收尾或 unknown 的运行使用 recovery_required 投影。缺少当前 execution owner 不能推翻已持久化的终态；该读取不修复或改写 Store。桌面历史重启回归同时核对 list_sessions 和 get_session_projection 的 completed 状态。
 
@@ -169,11 +171,11 @@ source CLI/TUI、paired Desktop 和 installed CLI/TUI 的旧写入者观测按�
 
 准备在私有副本完成严格9/11转换和10来源合并，维护期全量核验后才发布唯一canonical。固定短期意图优先于正常打开，发布后生产读取失败保留恢复阶段；未结清历史来源不能显示成空列表。实际支持矩阵与尚未完成的资格见[会话连续性计划](../plans/session-store-compatibility-and-continuity.md)。此机制不使任意旧安装或手动历史可执行文件自动获得跨版本并发兼容资格。
 
-[Store 13→14 打包升级回归](../../apps/kite-desktop/scripts/session-store13-packaged-upgrade.test.ts)以无活动写连接的隔离 WAL 旧库启动真实 macOS Desktop 与配套 Service，核对父子历史保留及二次启动不重做迁移；本机执行结果与制品边界见[桌面原生验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)。对受影响数据的只读候选检查已定位到转换后旧执行 owner 的连续性拒绝，而非这轮维护准入；隔离备份转换与发布验证见[存储 owner](../../packages/runtime-storage-sqlite/README.md)。
+[Store 13→14 打包升级回归](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/scripts/session-store13-packaged-upgrade.test.ts)以无活动写连接的隔离 WAL 旧库启动真实 macOS Desktop 与配套 Service，核对父子历史保留及二次启动不重做迁移；本机执行结果与制品边界见[桌面原生验收](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)。对受影响数据的只读候选检查已定位到转换后旧执行 owner 的连续性拒绝，而非这轮维护准入；隔离备份转换与发布验证见[存储 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/README.md)。
 
 已完成历史会话的遗留 `recovery_required` 不直接成为新一轮门禁：发送取得执行权前，在 Store writer 事务内核对无 owner、无 lease、无活跃或未知 Run、无未决 effect 和完整已完成 State。满足条件只确认旧 cleanup 并使用既有 acquire；不改历史或重发旧操作，真正未决执行保留恢复要求。
 
 
 关闭会话后的投影加载统一保留该 Host 已发布的 closed 状态，避免只读快照将其回退为 open；较新的清理或恢复事实仍推进投影及订阅版本，但不能仅因版本增加而重新开启会话。
 
-子 Agent 的创建、运行、等待、自动审批及终态由持久事件投影给客户端；客户端不得将本地停止动画等同于已取消。主任务主动取消／关闭会话与服务异常终止使用显式停止原因级联到子执行；已清理的等待子任务在命令事务中收尾，活跃子任务在清理确认后收尾，崩溃遗留由持有恢复执行权的服务补正。自动审批排队与真正执行通过 `auto_review.requested`／`auto_review.started` 区分，后者必须在模型派发前取得持久确认。开始与失败事件的可选 status 字段保留旧事件读取路径；旧终态没有足够原因时不能臆造用户取消。该链路复用原会话库与执行权，具体阶段及恢复边界见 [Service owner](../../apps/kite-service/docs/runtime-application.md) 和[恢复手册](../handbook/features/recovery.md)。
+子 Agent 的创建、运行、等待、自动审批及终态由持久事件投影给客户端；客户端不得将本地停止动画等同于已取消。主任务主动取消／关闭会话与服务异常终止使用显式停止原因级联到子执行；已清理的等待子任务在命令事务中收尾，活跃子任务在清理确认后收尾，崩溃遗留由持有恢复执行权的服务补正。自动审批排队与真正执行通过 `auto_review.requested`／`auto_review.started` 区分，后者必须在模型派发前取得持久确认。开始与失败事件的可选 status 字段保留旧事件读取路径；旧终态没有足够原因时不能臆造用户取消。该链路复用原会话库与执行权，具体阶段及恢复边界见 [Service owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md) 和[恢复手册](../handbook/features/recovery.md)。

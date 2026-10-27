@@ -389,41 +389,14 @@ try {
     modelGate.release();
     await runtime.waitForCommand('work', { timeoutMs: 5000 });
     const publicInput = await runtime.waitForCommand('explicit-steer', { timeoutMs: 5000 });
-    const application = publicInput.receipt as {
-      humanInputCommandId: string;
-      decisionCommandId: string;
-      businessCommandId: string;
-    };
-    expect(publicInput.receipt).toMatchObject({
-      outcome: 'human_input_applied',
-      runId: active.id,
-      sourceCommandId: application.businessCommandId,
-    });
-    const raw = (await store.getCommand(application.humanInputCommandId))!;
-    expect(raw.request).toMatchObject({
-      publicCommandId: 'explicit-steer',
-      content: '补充：new exact user input',
-      originalRequest: { kind: 'input.steer', targetRunId: active.id },
-    });
-    expect(raw.receipt).toMatchObject({
-      state: 'decided',
-      decisionCommandId: application.decisionCommandId,
-      businessCommandId: application.businessCommandId,
-    });
-    expect(await store.getCommand(application.decisionCommandId)).toMatchObject({
-      status: 'applied',
-      request: {
-        inputCommandId: raw.id,
-        inputDigest: raw.requestDigest,
-        proposal: { relation: 'same_work', purpose: 'work', targetRootWorkCommandId: 'work' },
-      },
-    });
-    expect(await store.getCommand(application.businessCommandId)).toMatchObject({
-      status: 'applied',
+    expect(publicInput).toMatchObject({
+      id: 'explicit-steer',
       kind: 'input.steer',
+      status: 'applied',
       request: { targetRunId: active.id, content: '补充：new exact user input' },
-      receipt: { runId: active.id },
+      receipt: { outcome: 'input_applied', runId: active.id },
     });
+    expect(await store.getCommand('explicit-steer')).toMatchObject(publicInput);
     expect((await control.getView('s')).runs).toMatchObject([
       { id: active.id, originCommandId: 'work', status: 'completed' },
     ]);
@@ -432,7 +405,7 @@ try {
       model.requests[1]!.messages.some(
         (message) =>
           message.content === '补充：new exact user input' &&
-          message.sourceIds?.includes(application.businessCommandId),
+          message.sourceIds?.includes('explicit-steer'),
       ),
     ).toBe(true);
   } catch (error) {

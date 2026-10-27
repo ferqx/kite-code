@@ -5,6 +5,8 @@
 验证：`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:unified-api`与当前根默认测试；具体MCP/Service/Caller实际断言和平台范围沿对应owner及[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。
 相关：[Agent Note 0010](../../.agents/notes/implemented/architecture/2026-07-15-mcp-supervisor-control-plane.md)、[Agent Note 0013](../../.agents/notes/implemented/feature/2026-07-16-mcp-credential-store-and-oauth-session.md)、[Agent Note 0014](../../.agents/notes/implemented/feature/2026-07-17-mcp-tool-visibility-and-policy.md)、[Agent Note 0015](../../.agents/notes/implemented/architecture/2026-07-17-mcp-provider-availability-boundary.md)、[Agent Note 0016](../../.agents/notes/implemented/feature/2026-07-17-mcp-provider-action-runtime-lifecycle.md)、[Agent Note 0017](../../.agents/notes/implemented/feature/2026-07-17-required-mcp-provider-admission.md)、[Agent Note 0018](../../.agents/notes/implemented/feature/2026-07-19-mcp-tui-select-management-center.md)、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`packages/builtin-runtime/src/mcp/supervisor.ts`、`packages/builtin-runtime/src/mcp/control-types.ts`、`apps/kite-cli/src/tui/mcp/`。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前通用 Agent 边界
 
 正式/default/CI已使用八workspace通用Agent与Service。当前MCP生命周期、原catalogue、Source、强制重连与最终wire准入由[Agent MCP owner](../../packages/agent/src/mcp/README.md)承担，可信来源/transport装配归[Service](../../apps/service/README.md)，共享TUI与薄Caller分别归[UI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md)。原Query不恢复transport或许可，独立Action/Job沿同一Execution；恢复与发布不变量见[当前跨包合同](mcp-config-management.md#强制重连的来源发布与恢复边界)。
@@ -63,7 +65,7 @@ Provider readiness 前稳定拒绝，local stdio 也始终关闭。普通开发�
 
 Connection Manager health、discovery、list-changed 和 call circuit 变化均触发订阅。业务调用重试由 Runtime/Execution 负责，Manager 不重放 SDK Tool Call。Supervisor 将连接状态与 config catalog 投影为新的稳定 snapshot；snapshot revision 对规范化的可见字段计算，同一内容不会因 React render 产生伪 revision。
 
-`callCapability` 在 transport admission 与 write guard 的异步等待结束后、发送 SDK Tool 请求前重新核验当前 callable、generation、descriptor revision／availability 和工具存在性。相同 generation 的目录刷新不能让旧 schema 或审批继续派发；确定未发送的版本漂移不记录外部 unknown。验证见 [stale dispatch boundary](../../packages/builtin-runtime/test/mcp/stale-dispatch-boundary.test.ts)。
+`callCapability` 在 transport admission 与 write guard 的异步等待结束后、发送 SDK Tool 请求前重新核验当前 callable、generation、descriptor revision／availability 和工具存在性。相同 generation 的目录刷新不能让旧 schema 或审批继续派发；确定未发送的版本漂移不记录外部 unknown。验证见 [stale dispatch boundary](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/builtin-runtime/test/mcp/stale-dispatch-boundary.test.ts)。
 
 ## Snapshot 与诊断
 
@@ -96,4 +98,4 @@ HTTP 401 产生的 `login_required` 从 Detail 进入 authenticate route；只�
 
 Runtime 已在默认关闭的 `mcpProviderAction` 后提供持久 Provider Action lifecycle。它只向 App shell 请求固定 `login`、`approve` 或 `retry`，不获得配置 mutation API。TUI 使用既有 foreground/background interrupt routing 收集显式决定，再由 `TuiMcpController` 调用相同 control-plane command；完成后返回新的 directory revision，Runtime 以新 turn 重新进入模型边界。CLI 没有该 App controller 时安全 defer。Provider Action 与 `/mcp` Overlay 是两个入口，但共享 controller 与 Runtime facts。
 
-模型调用前不再检查全部 required Provider。离线、未登录或尚未批准的 MCP 不阻止无关请求；只有实际使用对应能力时进入既有可用性、认证和授权检查。`mcpProviderAction` 仍控制真实 Provider Action，不再控制全局准入。`required` 暂保留在配置和管理投影中以表示原配置事实，不再产生会话等待或豁免。历史全局等待的定向接续见 [Service Runtime](../../apps/kite-service/docs/runtime-application.md)。
+模型调用前不再检查全部 required Provider。离线、未登录或尚未批准的 MCP 不阻止无关请求；只有实际使用对应能力时进入既有可用性、认证和授权检查。`mcpProviderAction` 仍控制真实 Provider Action，不再控制全局准入。`required` 暂保留在配置和管理投影中以表示原配置事实，不再产生会话等待或豁免。历史全局等待的定向接续见 [Service Runtime](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/docs/runtime-application.md)。

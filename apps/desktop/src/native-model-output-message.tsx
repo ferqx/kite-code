@@ -55,10 +55,11 @@ export function NativeModelOutputMessage({
         storeId={props.storeId}
         autoRead={autoRead}
         suspended={props.suspended}
+        hasVerifiedCandidate={props.verifiedSnapshot !== undefined}
         openFile={openFile}
       />
     ),
-    [props.message, props.storeId, autoRead, props.suspended, openFile],
+    [props.message, props.storeId, props.verifiedSnapshot, autoRead, props.suspended, openFile],
   );
   return (
     <RetainedModelOutput
@@ -82,6 +83,7 @@ function NativeMarkdownBody({
   storeId,
   autoRead,
   suspended,
+  hasVerifiedCandidate,
   openFile,
 }: {
   text: string;
@@ -90,6 +92,7 @@ function NativeMarkdownBody({
   storeId: string;
   autoRead: boolean;
   suspended?: boolean;
+  hasVerifiedCandidate: boolean;
   openFile?: (path: string) => void;
 }) {
   const scope = JSON.stringify([
@@ -110,7 +113,14 @@ function NativeMarkdownBody({
     | undefined
   >(undefined);
   const previous = committed.current?.scope === scope ? committed.current : undefined;
-  const retained = autoRead && !verified && previous?.hasVerified && previous.text.startsWith(text);
+  // A host-supplied snapshot that the shared verifier rejected is not a pending
+  // read. Retire its previous full display as well as its copy eligibility.
+  const retained =
+    autoRead &&
+    !verified &&
+    !hasVerifiedCandidate &&
+    previous?.hasVerified &&
+    previous.text.startsWith(text);
   const displayed = retained ? previous.text : text;
   const prepared = retained ? previous.prepared : nativePreparedMarkdown(verified, displayed);
   useLayoutEffect(() => {

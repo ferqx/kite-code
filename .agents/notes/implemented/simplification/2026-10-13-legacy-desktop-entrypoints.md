@@ -21,6 +21,6 @@ Status: implemented
 
 ## Consequences
 
-从当前checkout按旧开发步骤运行会明确失败，旧Vite热更新不宣称已迁入；当前Native用户功能和正式构建／安装／版本／维护链沿新owner。新[完整调用者测试](../../../../tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)核十条实际调用、诊断／退出码和旧数据原字节／目录保全，使用标准临时路径及三端HOME环境，无平台skip。macOS已实际通过；原正式release smoke与消费者／CI守卫组合通过，未运行范围和准确证据见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-desktop-普通开发准备与打包调用者退役)。
+从当前checkout按旧开发步骤运行会明确失败，旧Vite热更新不宣称已迁入；当前Native用户功能和正式构建／安装／版本／维护链沿新owner。新[完整调用者测试](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/tests/isolated/unified-agent/retired-desktop-entrypoints.test.ts)核十条实际调用、诊断／退出码和旧数据原字节／目录保全，使用标准临时路径及三端HOME环境，无平台skip。macOS已实际通过；原正式release smoke与消费者／CI守卫组合通过，未运行范围和准确证据见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13旧-desktop-普通开发准备与打包调用者退役)。
 
 这些结果不解除原Shell失败、RSS／完整资源观测、Win/Linux原系统资格或§35阶段退出门禁。

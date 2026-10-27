@@ -308,13 +308,15 @@ test.skipIf(process.platform !== 'darwin')(
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
-        readFileSync(
-          resolve(import.meta.dir, '../native-background-electron.fixture.ts'),
-          'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        readFileSync(resolve(import.meta.dir, '../native-background-electron.fixture.ts'), 'utf8')
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       expect(
         (
@@ -379,7 +381,7 @@ test.skipIf(process.platform !== 'darwin')(
       const report = JSON.parse(readFileSync(join(home, 'background-report.json'), 'utf8')) as {
         pids: number[];
         physical: { method: string; path: string }[];
-        coldPhysical: { method: string }[];
+        coldPhysical: { method: string; path: string }[];
         coldProviderCalls: number;
         callsBeforeCold: number;
         executionIds: string[];
@@ -394,7 +396,14 @@ test.skipIf(process.platform !== 'darwin')(
       expect(report.restoredStoreId).not.toBe(report.originalStoreId);
       expect(report.pids).toHaveLength(3);
       for (const pid of report.pids) expect(() => process.kill(pid, 0)).toThrow();
-      expect(report.coldPhysical.every((row) => row.method === 'GET')).toBe(true);
+      expect(
+        report.coldPhysical.every(
+          (row) =>
+            row.method === 'GET' ||
+            (row.method === 'POST' &&
+              /^\/v1\/sessions\/(original-root|newer-root)\/reconcile$/.test(row.path)),
+        ),
+      ).toBe(true);
       expect(report.coldProviderCalls).toBe(report.callsBeforeCold);
       expect(calls.length).toBe(report.callsBeforeCold);
       expect(report.executionIds).toHaveLength(4);

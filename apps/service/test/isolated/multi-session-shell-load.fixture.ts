@@ -1,4 +1,4 @@
-import { renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { runServiceProcess } from '../../src/main';
@@ -7,6 +7,7 @@ import { mixedShellConfiguration } from './multi-session-shell-load.shared';
 import type { LoadTelemetry } from './multi-session-stream-load.types';
 
 let slots = 4;
+let modelStartsPath = '';
 let timer: ReturnType<typeof setInterval> | undefined;
 await runServiceProcess({
   configure(startup, host) {
@@ -16,6 +17,7 @@ await runServiceProcess({
       metricsPath: string;
     };
     slots = input.slots;
+    modelStartsPath = `${input.metricsPath}.model-starts.jsonl`;
     const profile = selectProfile({
       dataRoot: startup.profile.dataRoot,
       profile: startup.profile.profile,
@@ -91,14 +93,46 @@ await runServiceProcess({
       permissionManagement(runtime: Parameters<typeof bindPermissions>[0]) {
         bindPermissions(runtime);
         // This isolated host explicitly owns its mode controller; the production external-authority rejection remains.
-        return createPermissionManagement({ runtime, profile });
+        return createPermissionManagement({
+          runtime,
+          profile,
+          nativeShellRead: process.platform === 'darwin',
+        });
       },
     };
   },
   decorateConfiguration(configuration) {
+    const resolve = configuration.resolveRunConfiguration;
+    const observed = resolve
+      ? {
+          ...configuration,
+          async resolveRunConfiguration(input: Parameters<typeof resolve>[0]) {
+            const selected = await resolve(input);
+            const model = selected.model;
+            if (!model) return selected;
+            return {
+              ...selected,
+              model: {
+                ...(model.describeRequest
+                  ? { describeRequest: model.describeRequest.bind(model) }
+                  : {}),
+                stream(...args: Parameters<typeof model.stream>) {
+                  // Private fixture observation at the real compatible adapter boundary.
+                  // A rejected dispatch cannot reach this call or the Provider wire.
+                  appendFileSync(
+                    modelStartsPath,
+                    `${JSON.stringify({ executionId: args[0].requestId, sessionId: input.session.id })}\n`,
+                  );
+                  return model.stream(...args);
+                },
+              },
+            };
+          },
+        }
+      : configuration;
     return slots === 4
-      ? configuration
-      : { ...configuration, modelConcurrency: slots, processConcurrency: slots };
+      ? observed
+      : { ...observed, modelConcurrency: slots, processConcurrency: slots };
   },
   async beforeResourceClose() {
     clearInterval(timer);

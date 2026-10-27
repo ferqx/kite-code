@@ -121,7 +121,7 @@ test.skipIf(process.platform !== 'darwin')(
           },
         ],
         tools: [
-          { id: 'files.read', definitionVersion: '4' },
+          { id: 'files.read', definitionVersion: '5' },
           { id: 'files.write', definitionVersion: '3' },
         ],
       });
@@ -216,7 +216,7 @@ test.skipIf(process.platform !== 'darwin')(
       expect(toolMessages[0]!.content).not.toContain('file_path_protected');
       expect(toolMessages[1]!.content).toContain('实际邻居');
       for (const message of toolMessages.slice(2))
-        expect(message.content).toBe('file_path_protected');
+        expect(message.content).toMatch(/^file_path_protected(?:$| \()/);
       const view = await client.getView('s'),
         tools = view.executions.filter((execution) => execution.kind === 'tool');
       expect(tools).toHaveLength(calls.length);
@@ -266,7 +266,8 @@ test.skipIf(process.platform !== 'darwin')(
       ).toEqual(tools.map((execution) => [execution.id, execution.definitionId, execution.status]));
       for (const execution of coldTools.filter((execution) => execution.status === 'failed'))
         expect(execution.result).toMatchObject({
-          content: 'file_path_protected',
+          outcome: 'failed',
+          content: expect.stringMatching(/^file_path_protected(?:$| \()/),
           details: { code: 'file_path_protected' },
         });
       const providerCount = requests.length;

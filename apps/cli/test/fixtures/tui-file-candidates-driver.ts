@@ -3,8 +3,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
-const [runner, workspace, profilePath, wire, transcript, quoteName, servicePidPath] =
-  process.argv.slice(2) as [string, string, string, string, string, string, string];
+const [runner, workspace, profilePath, wire, transcript, quoteName, servicePidPath, storeId] =
+  process.argv.slice(2) as [string, string, string, string, string, string, string, string];
 const abort = new AbortController();
 const interrupted = () => abort.abort(Error('owned_file_candidates_interrupted'));
 const shutdown = (message: unknown) => {
@@ -34,13 +34,25 @@ const wait = async (text: string) => {
     await Bun.sleep(20);
   }
 };
-const posts = () =>
-  readFileSync(wire, 'utf8')
+const posts = () => {
+  const rows = readFileSync(wire, 'utf8')
     .trim()
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line))
     .filter((row) => row.method === 'POST');
+  const activation = rows.filter((row) => row.path === '/v1/sessions/files/reconcile');
+  assert.ok(activation.length <= 2);
+  for (const row of activation)
+    assert.deepEqual(row.body, {
+      expectedStoreId: storeId,
+      expectedOwnerGeneration: '0',
+      commandId:
+        assert.match(row.body.commandId, /^session-reconcile-[a-f0-9]{64}$/) ?? row.body.commandId,
+    });
+  if (activation.length > 1) assert.deepEqual(activation[0].body, activation[1].body);
+  return rows.filter((row) => row.path !== '/v1/sessions/files/reconcile');
+};
 const draft = async (expected: string) => {
   const end = Date.now() + 5000;
   const path = join(profilePath, 'ui/tui.json');

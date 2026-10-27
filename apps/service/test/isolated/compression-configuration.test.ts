@@ -117,6 +117,7 @@ for (const { guardedReset, rejectedSummary } of [
       artifacts: createArtifactStore({ profile, store }),
       permissions: host.permissions!,
     });
+    host.permissionManagement!(runtime);
     const target = {
       dataRoot: profile.dataRoot,
       name: profile.profile,
@@ -206,6 +207,7 @@ for (const { guardedReset, rejectedSummary } of [
         content: '新任务：Additional settled user turn',
       });
       const settled = await runtime.waitForCommand('additional-history', { timeoutMs: 5000 });
+      expect(settled).toMatchObject({ status: 'applied' });
       const settledApplication = settled.receipt as { runId: string };
       expect(
         (await client.getView('s')).runs.find((run) => run.id === settledApplication.runId),

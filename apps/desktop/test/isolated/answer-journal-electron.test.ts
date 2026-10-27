@@ -78,13 +78,15 @@ test.skipIf(process.platform !== 'darwin')(
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
-        readFileSync(
-          resolve(import.meta.dir, '../answer-journal-electron.fixture.ts'),
-          'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        readFileSync(resolve(import.meta.dir, '../answer-journal-electron.fixture.ts'), 'utf8')
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       const built = await Bun.build({
         entrypoints: [fixture],

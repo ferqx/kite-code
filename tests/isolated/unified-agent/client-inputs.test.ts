@@ -191,7 +191,7 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
       });
       expect(receipt.id).toBe(`steer-${i}`);
       expect(receipt.status).toBe('accepted');
-      businessIds.push((receipt.receipt as { businessCommandId: string }).businessCommandId);
+      businessIds.push(receipt.id);
     }
     const ids: string[] = [];
     let afterSeq: string | undefined;
@@ -235,17 +235,19 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
     for (let i = 0; i < 12; i++) {
       const command = await f.client.getCommand(`steer-${i}`);
       expect(command.status).toBe('applied');
-      expect(command.receipt).toMatchObject({ outcome: 'human_input_applied', runId: f.run.id });
-      const application = (await readOrdinaryCommandApplication(f.client, command))!;
+      expect(command.receipt).toMatchObject({ runId: f.run.id });
+      const application = (await readOrdinaryCommandApplication(f.client, command, {
+        targetRunId: f.run.id,
+      }))!;
       expect(application.run?.id).toBe(f.run.id);
       const businessId = application.sourceCommandId;
-      expect(businessId).not.toBe(command.id);
-      const raw = await f.store.getCommand(
-        (command.receipt as { humanInputCommandId: string }).humanInputCommandId,
-      );
+      expect(businessId).toBe(command.id);
+      const raw = await f.store.getCommand(command.id);
       expect(raw?.request).toMatchObject({
         content: `steer content ${i}`,
-        publicCommandId: command.id,
+        kind: 'input.steer',
+        targetRunId: f.run.id,
+        contextSelectionId: f.contextSelectionId,
       });
       expect(messages.find((message) => message.originCommandId === businessId)).toMatchObject({
         content: `steer content ${i}`,
@@ -270,7 +272,9 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
         contextSelectionId: f.contextSelectionId,
       }),
     ).toEqual(original);
-    const originalApplication = (await readOrdinaryCommandApplication(f.client, original))!;
+    const originalApplication = (await readOrdinaryCommandApplication(f.client, original, {
+      targetRunId: f.run.id,
+    }))!;
     expect(
       (await f.client.listMessages('s')).filter(
         (message) => message.originCommandId === originalApplication.sourceCommandId,
@@ -338,17 +342,24 @@ test('precise original Run cancellation preserves queued explicit follow-up whil
         ).status,
       ).toBe('accepted');
     const queued = await f.client.getCommand('follow-one');
-    const queuedBusinessId = (queued.receipt as { businessCommandId: string }).businessCommandId;
+    expect(queued.id).toBe('follow-one');
+    expect((await f.store.getCommand(queued.id))?.request).toMatchObject({
+      afterRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+    });
     expect(
       (await f.client.listPendingInputs('s', { storeId: f.expectedStoreId })).commands.map(
         (command) => command.id,
       ),
-    ).toEqual([queuedBusinessId]);
+    ).toEqual(['follow-one', 'follow-two']);
     const pendingInput = await f.client.getCommand('follow-two');
-    const pendingRawId = (pendingInput.receipt as { humanInputCommandId: string })
-      .humanInputCommandId;
+    const pendingRawId = pendingInput.id;
     expect(pendingInput.status).toBe('accepted');
-    expect((await f.store.getCommand(pendingRawId))?.receipt).toMatchObject({ state: 'pending' });
+    expect((await f.store.getCommand(pendingRawId))?.request).toMatchObject({
+      kind: 'input.follow_up',
+      afterRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+    });
     await f.client.cancelCommand('s', {
       expectedStoreId: f.expectedStoreId,
       commandId: 'cancel-follow-two',
@@ -359,14 +370,11 @@ test('precise original Run cancellation preserves queued explicit follow-up whil
     expect(cancelledRaw?.cancelRequestedAt).not.toBeNull();
     expect(cancelledRaw?.receipt).not.toHaveProperty('decisionCommandId');
     expect(
-      (
-        await f.store.readHumanWorkState({
-          expectedStoreId: f.expectedStoreId,
-          sessionId: 's',
-          subjectId: 'owner',
-        })
-      ).selectedWork?.rootWorkCommandId,
-    ).toBe('follow-one');
+      (await f.client.listPendingInputs('s', { storeId: f.expectedStoreId })).commands.map(
+        (command) => command.id,
+      ),
+    ).toEqual(['follow-one']);
+    expect((await f.client.getRun(f.run.id)).isActive).toBe(true);
     await f.client.cancelRun('s', {
       expectedStoreId: f.expectedStoreId,
       commandId: 'cancel-original',

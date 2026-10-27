@@ -246,7 +246,15 @@ try {
   stage('close_details_scope_reopen_and_explicit_refresh');
   physical.push(...(await app!.evaluate(() => (globalThis as FixtureGlobals).jobPhysical)));
   assert.ok(
-    physical.every((row) => row.method === 'GET'),
+    physical.every(
+      (row) =>
+        row.method === 'GET' ||
+        (row.method === 'POST' &&
+          [
+            '/v1/sessions/job-output-window/reconcile',
+            '/v1/sessions/second-output-window/reconcile',
+          ].includes(row.path)),
+    ),
     JSON.stringify(physical),
   );
   await page.context().tracing.stop({ path: join(home!, 'window-trace.zip') });
@@ -256,7 +264,11 @@ try {
   await open();
   const coldPhysical = await app!.evaluate(() => (globalThis as FixtureGlobals).jobPhysical);
   assert.ok(
-    coldPhysical.every((row) => row.method === 'GET'),
+    coldPhysical.every(
+      (row) =>
+        row.method === 'GET' ||
+        (row.method === 'POST' && row.path === '/v1/sessions/job-output-window/reconcile'),
+    ),
     JSON.stringify(coldPhysical),
   );
   await page.context().tracing.stop({ path: join(home!, 'cold-trace.zip') });

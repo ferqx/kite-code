@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { sleep, submitCommand } from '../harness/input-helpers';
+import { submitCommand } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -117,7 +117,6 @@ describe('TUI PTY System — project MCP approval', () => {
     await waitForText(() => tui!.viewport(), '❯ 批准并连接', 10_000);
     tui.write('\r');
     // Read the saved original decision explicitly; answering is not publication proof.
-    await waitForText(() => tui!.viewport(), '❯', 10_000);
     await submitCommand(tui, '/mcp', 20);
     await waitForText(() => tui!.viewport(), 'project_stdio', 10_000);
     const select = async (label: string) => {
@@ -127,8 +126,18 @@ describe('TUI PTY System — project MCP approval', () => {
         if (screenContains(viewport, `❯ ${label}`)) return;
         if (Date.now() >= deadline)
           throw Error(`original_project_source_navigation:${label}\n${viewport}`);
-        if (/❯\s+\S/u.test(viewport)) tui!.write('\x1b[B');
-        await sleep(50);
+        await waitForCondition(
+          () => /❯\s+\S/u.test(tui!.viewport()),
+          'MCP menu cursor to become visible',
+          Math.max(1, deadline - Date.now()),
+        );
+        tui!.write('\x1b[B');
+        await waitForCondition(
+          () => tui!.viewport() !== viewport,
+          'MCP menu to render the next selection',
+          Math.max(1, deadline - Date.now()),
+        );
+        await tui!.settleScreen();
       }
     };
     await select('项目来源');

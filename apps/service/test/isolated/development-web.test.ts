@@ -588,6 +588,13 @@ test('Cookie Browser reads the accurate original Run beyond the recent View with
     f.release();
     await f.client.startRun('s', {
       expectedStoreId: f.storeId,
+      commandId: 'protocol-seal',
+      kind: 'run.start',
+      content: 'Establish the session protocol',
+    });
+    await f.runtime.waitForCommand('protocol-seal', { timeoutMs: 5000 });
+    await f.client.startRun('s', {
+      expectedStoreId: f.storeId,
       commandId: 'historical-first',
       kind: 'run.start',
       content: 'Original complete work',
@@ -607,7 +614,8 @@ test('Cookie Browser reads the accurate original Run beyond the recent View with
       await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }
     const recent = await f.browser.getView('s');
-    expect(recent.runs).toHaveLength(200);
+    expect(recent.runs).toHaveLength(201);
+    expect(recent.runs[0]!.originCommandId).toBe('protocol-seal');
     expect(recent.runs.some((run) => run.id === runId)).toBe(false);
     const original = await f.client.getRun(runId);
     expect(original.configuration).toBeDefined();
@@ -645,7 +653,7 @@ test('Cookie Browser reads the accurate original Run beyond the recent View with
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(before.lastChangeCursor);
     expect(await f.client.getRun(runId)).toEqual(original);
     expect(f.models).toBe(priorModels);
-    expect(f.models).toBe(202);
+    expect(f.models).toBe(203);
     expect(f.jobs).toBe(0);
     expect(
       f.requests

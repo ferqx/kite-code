@@ -103,7 +103,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
       ],
       tools: [
         { id: 'files.read', definitionVersion: '5' },
-        { id: 'files.write', definitionVersion: '2' },
+        { id: 'files.write', definitionVersion: '3' },
       ],
     }),
   );

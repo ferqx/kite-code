@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Execution } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 const [candidate, home, control, storeId] = process.argv.slice(2) as [
   string,
@@ -82,7 +83,17 @@ try {
   }
   async function label(text: string) {
     await expandRun();
-    const heading = page.locator('.tool-edit-heading').filter({ hasText: text }).first();
+    for (const group of await page
+      .locator('.tool-activity-aggregate > .tool-activity-summary')
+      .all())
+      if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
+    const heading =
+      text.startsWith('已') || text === '自动审批未通过'
+        ? page
+            .locator('.tool-activity')
+            .filter({ has: page.getByRole('img', { name: text, exact: true }) })
+            .first()
+        : page.locator('.tool-activity-summary').filter({ hasText: text }).first();
     await heading.waitFor();
     await heading.scrollIntoViewIfNeeded();
     // A nonzero child box can still be clipped by the expanding Turn. Observe
@@ -145,6 +156,7 @@ try {
   });
   for (const id of cases) {
     await select(id);
+    await selectNativeFixtureModel(page, 'fixed');
     if (id === 'approved') {
       await mode(1);
       await modeRead('auto');
@@ -232,23 +244,18 @@ try {
           (execution) => execution.id === target.id,
         )!.authorization!.check!.reason;
         assert.ok(reason);
-        assert.ok(
-          (await page
-            .locator('.tool-edit-heading')
-            .filter({ hasText: '等待人工审批' })
-            .first()
-            .textContent())!.includes(reason),
-        );
+        await page.locator('.approval-command').focus();
+        const request = page.locator('.approval-command-tooltip code');
+        await request.waitFor();
+        assert.deepEqual(JSON.parse((await request.textContent())!), card.request);
+        await page.keyboard.press('Escape');
         await page.getByRole('button', { name: '批准一次', exact: true }).click();
       }
       await until(
         state,
         (value) =>
           value.selection!.runs.some(
-            (run) =>
-              run.id === target.runId &&
-              !run.isActive &&
-              run.status === (id === 'rejected' ? 'cancelled' : 'completed'),
+            (run) => run.id === target.runId && !run.isActive && run.status === 'completed',
           ),
         'original Run reached its exact terminal status',
       );
@@ -262,6 +269,8 @@ try {
     else if (id === 'rejected') {
       await label('自动审批未通过');
       assert.equal(original.authorization!.dispatched, false);
+      assert.equal(original.status, 'failed');
+      assert.equal((original.result as { outcome?: string } | null)?.outcome, 'failed');
     } else if (id === 'stopped') {
       await label('自动审批已停止');
       assert.equal(original.authorization!.dispatched, false);
@@ -294,7 +303,7 @@ try {
   );
   assert.equal(answerPosts, 2);
   const beforeCold = await (await fetch(`${control}/count`)).text();
-  assert.equal(beforeCold, '13');
+  assert.equal(beforeCold, '14');
   await app!.evaluate(({ app }) => app.quit());
   await app!.close();
   app = undefined;
@@ -339,7 +348,14 @@ try {
   throw error;
 } finally {
   if (app) {
-    await app.evaluate(({ app }) => app.quit()).catch(() => {});
+    // Failure cleanup acknowledges only this isolated fixture's pending-work
+    // quit confirmation; business assertions have already failed above.
+    await app
+      .evaluate(({ app, dialog }) => {
+        dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+        app.quit();
+      })
+      .catch(() => {});
     await app.close().catch(() => {});
   }
 }

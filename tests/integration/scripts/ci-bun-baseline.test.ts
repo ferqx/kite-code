@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
-import { FORMAL_QUALIFICATION_BUN_VERSION } from '../../../scripts/runtime/verify-fault-soak-qualification';
 
 const repositoryRoot = join(import.meta.dir, '..', '..', '..');
 const workflowRoot = join(repositoryRoot, '.github', 'workflows');
+const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.2';
 
 describe('CI Bun baseline', () => {
   test('pins every third-party workflow action to an immutable current-runtime commit', () => {
@@ -122,7 +122,7 @@ describe('CI Bun baseline', () => {
     const currentPaths = [
       'packages/agent/test/isolated/jobs/confined-shell.test.ts',
       'packages/agent/test/isolated/files/runtime.test.ts',
-      'packages/agent/test/isolated/execution/authorization-review.test.ts',
+      'packages/agent/test/isolated/execution/authorization-check.test.ts',
       'apps/service/test/isolated/runtime-assets.test.ts',
       'tests/isolated/unified-agent/formal-optional-capabilities.test.ts',
       'tests/isolated/unified-agent/native-runtime-protection.test.ts',
@@ -144,7 +144,10 @@ describe('CI Bun baseline', () => {
       'tests/mcp-transport-boundary-concurrency.test.ts',
     ];
 
-    for (const path of currentPaths) expect(workflow, path).toContain(path);
+    for (const path of currentPaths) {
+      expect(existsSync(join(repositoryRoot, path)), path).toBe(true);
+      expect(workflow, path).toContain(path);
+    }
     for (const path of retiredPaths) expect(workflow, path).not.toContain(path);
   });
 });

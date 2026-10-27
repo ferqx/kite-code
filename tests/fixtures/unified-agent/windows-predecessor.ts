@@ -15,7 +15,10 @@ import {
   COMPATIBLE_PREDECESSOR_INPUT_PATHS,
   COMPATIBLE_PREDECESSOR_MIGRATIONS,
 } from './compatible-predecessor-input';
-import { matchReviewedPredecessorInput } from './predecessor-reviewed-input';
+import {
+  matchReviewedCurrentOnlyPredecessorInput,
+  matchReviewedPredecessorInput,
+} from './predecessor-reviewed-input';
 import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-declarations';
@@ -41,7 +44,7 @@ export function windowsPredecessorLockedInputPaths(manifest: {
   patchedDependencies?: Record<string, string>;
 }): string[] {
   const patches = Object.values(manifest.patchedDependencies ?? {});
-  if (patches.some((path) => !/^patches\/[a-zA-Z0-9@._+-]+\.patch$/.test(path)))
+  if (patches.some((path) => !/^patches\/(?:[a-zA-Z0-9@._+-]|%2F)+\.patch$/.test(path)))
     throw Error('windows_predecessor_patch_path_invalid');
   return [
     'bun.lock',
@@ -287,7 +290,12 @@ async function materializeWindowsPredecessorVersion(
     path: string;
     evidence: NonNullable<ReturnType<typeof matchReviewedPredecessorInput>>;
   }[] = [];
-  const inputs = windowsPredecessorLockedInputPaths(currentManifest);
+  const previousManifest = JSON.parse(
+    (
+      await command(git, ['show', `${predecessorCommit}:package.json`], repository, true)
+    ).toString(),
+  ) as { patchedDependencies?: Record<string, string> };
+  const inputs = windowsPredecessorLockedInputPaths(previousManifest);
   if (compatible) assertCompatiblePredecessorInputPaths(inputs);
   for (const path of inputs) {
     const previous = await command(git, ['show', `${predecessorCommit}:${path}`], repository, true);
@@ -316,6 +324,17 @@ async function materializeWindowsPredecessorVersion(
         projectedSha256: sha(refinement.bytes),
       });
   }
+  const additionalCurrentInputs = windowsPredecessorLockedInputPaths(currentManifest)
+    .filter((path) => !inputs.includes(path))
+    .map((path) => {
+      const proof = matchReviewedCurrentOnlyPredecessorInput(
+        compatible ? 'compatible' : 'windows_legacy',
+        path,
+        readFileSync(join(repository, path)),
+      );
+      if (!proof) throw Error(`windows_predecessor_additional_input_changed:${path}`);
+      return proof;
+    });
   const migrations = compatible
     ? COMPATIBLE_PREDECESSOR_MIGRATIONS
     : [{ path: baseline, sha256: baselineSha }];
@@ -401,6 +420,7 @@ await buildNativeCandidate({terminalRoot:${JSON.stringify(terminal)},electronDis
     native,
     sourceCommit: predecessorCommit,
     lockedInputs,
+    additionalCurrentInputs,
     reviewedDeclarations,
     reviewedInputIncrements,
     schemaCapability: compatible ? ('recovery-audit-v1' as const) : ('baseline-v1' as const),
@@ -409,4 +429,4 @@ await buildNativeCandidate({terminalRoot:${JSON.stringify(terminal)},electronDis
 }
 
 const MIRROR_DEPENDENCIES =
-  "\nimport {\n  cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,\n  readlinkSync, realpathSync, rmSync, symlinkSync,\n} from 'node:fs';\nimport { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';\nconst [installed, target, source, workspaceJSON, repository] = process.argv.slice(2);\nconst inside = (root, path) => {\n  const part = relative(root, path);\n  return part === '' || (!isAbsolute(part) && part !== '..' && !part.startsWith('..' + sep));\n};\ncpSync(installed, target, {\n  recursive: true,\n  verbatimSymlinks: true,\n  filter: path => {\n    if (relative(installed, path).split(sep).includes('@kite-ai')) return false;\n    if (!lstatSync(path).isSymbolicLink()) return true;\n    // Installed history may retain renamed workspace scopes. Determine their targets\n    // without following the link during traversal; no current repository source is copied.\n    const declared = resolve(dirname(path), readlinkSync(path));\n    const resolved = existsSync(path) ? realpathSync(path) : declared;\n    return !(inside(repository, resolved) && !inside(installed, resolved));\n  },\n});\nfunction walk(folder) {\n  for (const name of readdirSync(folder)) {\n    const path = join(folder, name), stat = lstatSync(path);\n    if (stat.isDirectory()) walk(path);\n    else if (stat.isSymbolicLink()) {\n      const link = readlinkSync(path);\n      const original = resolve(dirname(join(installed, relative(target, path))), link);\n      if (!inside(installed, original))\n        throw Error('terminal_predecessor_dependency_link_escape:' + path);\n      if (isAbsolute(link)) {\n        rmSync(path);\n        const mapped = join(target, relative(installed, original));\n        if (lstatSync(mapped).isDirectory()) symlinkSync(mapped, path, 'junction');\n        else cpSync(mapped, path);\n      }\n      if (existsSync(path) && !inside(target, realpathSync(path)))\n        throw Error('terminal_predecessor_dependency_realpath_escape:' + path);\n    }\n  }\n}\nwalk(target);\nfunction mirrorLocal(installedFolder, oldFolder) {\n  mkdirSync(oldFolder, { recursive: true });\n  for (const name of readdirSync(installedFolder)) {\n    const path = join(installedFolder, name), oldPath = join(oldFolder, name);\n    const stat = lstatSync(path);\n    // The renderer's owned Vite cache is generated output, not an installed dependency.\n    if (path === join(repository, 'apps/desktop/node_modules/.vite-desktop-dev') && stat.isDirectory()) continue;\n    if (stat.isSymbolicLink()) {\n      const declared = resolve(dirname(path), readlinkSync(path));\n      const resolved = existsSync(path) ? realpathSync(path) : declared;\n      if (inside(repository, resolved) && !inside(installed, resolved)) continue;\n      if (!inside(installed, resolved))\n        throw Error('terminal_predecessor_local_dependency_escape:' + path);\n      const mapped = join(target, relative(installed, resolved));\n      if (!existsSync(mapped) || !inside(target, realpathSync(mapped)))\n        throw Error('terminal_predecessor_local_dependency_missing:' + path);\n      if (lstatSync(mapped).isDirectory()) symlinkSync(mapped, oldPath, 'junction');\n      else cpSync(mapped, oldPath);\n    } else if (stat.isDirectory()) {\n      if (existsSync(join(path, 'package.json')))\n        throw Error('terminal_predecessor_local_dependency_not_link:' + path);\n      mirrorLocal(path, oldPath);\n    } else throw Error('terminal_predecessor_local_dependency_not_link:' + path);\n  }\n}\nfor (const path of JSON.parse(workspaceJSON)) {\n  const local = join(repository, path, 'node_modules');\n  if (existsSync(local)) mirrorLocal(local, join(source, path, 'node_modules'));\n}\nfor (const path of JSON.parse(workspaceJSON)) {\n  const pkg = JSON.parse(readFileSync(join(source, path, 'package.json'), 'utf8'));\n  const link = join(target, pkg.name);\n  mkdirSync(dirname(link), { recursive: true });\n  symlinkSync(join(source, path), link, 'junction');\n  if (realpathSync(link) !== realpathSync(join(source, path)))\n    throw Error('terminal_predecessor_workspace_resolution_mismatch');\n}\n";
+  "\nimport {\n  cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,\n  readlinkSync, realpathSync, rmSync, symlinkSync,\n} from 'node:fs';\nimport { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';\nconst [installed, target, source, workspaceJSON, repository] = process.argv.slice(2);\nconst inside = (root, path) => {\n  const part = relative(root, path);\n  return part === '' || (!isAbsolute(part) && part !== '..' && !part.startsWith('..' + sep));\n};\ncpSync(installed, target, {\n  recursive: true,\n  verbatimSymlinks: true,\n  filter: path => {\n    if (relative(installed, path).split(sep).includes('@kite-ai')) return false;\n    if (!lstatSync(path).isSymbolicLink()) return true;\n    // Installed history may retain renamed workspace scopes. Determine their targets\n    // without following the link during traversal; no current repository source is copied.\n    const declared = resolve(dirname(path), readlinkSync(path));\n    const resolved = existsSync(path) ? realpathSync(path) : declared;\n    return !(inside(repository, resolved) && !inside(installed, resolved));\n  },\n});\nfunction walk(folder) {\n  for (const name of readdirSync(folder)) {\n    const path = join(folder, name), stat = lstatSync(path);\n    if (stat.isDirectory()) walk(path);\n    else if (stat.isSymbolicLink()) {\n      const link = readlinkSync(path);\n      const original = resolve(dirname(join(installed, relative(target, path))), link);\n      if (!inside(installed, original))\n        throw Error('terminal_predecessor_dependency_link_escape:' + path);\n      if (isAbsolute(link)) {\n        rmSync(path);\n        const mapped = join(target, relative(installed, original));\n        if (lstatSync(mapped).isDirectory()) symlinkSync(mapped, path, 'junction');\n        else cpSync(mapped, path);\n      }\n      if (existsSync(path) && !inside(target, realpathSync(path)))\n        throw Error('terminal_predecessor_dependency_realpath_escape:' + path);\n    }\n  }\n}\nwalk(target);\nfunction mirrorLocal(installedFolder, oldFolder) {\n  mkdirSync(oldFolder, { recursive: true });\n  for (const name of readdirSync(installedFolder)) {\n    const path = join(installedFolder, name), oldPath = join(oldFolder, name);\n    const stat = lstatSync(path);\n    // The renderer's owned Vite cache is generated output, not an installed dependency.\n    if (['.vite', '.vite-desktop-dev'].some(cache => path === join(repository, 'apps/desktop/node_modules', cache)) && stat.isDirectory()) continue;\n    if (stat.isSymbolicLink()) {\n      const declared = resolve(dirname(path), readlinkSync(path));\n      const resolved = existsSync(path) ? realpathSync(path) : declared;\n      if (inside(repository, resolved) && !inside(installed, resolved)) continue;\n      if (!inside(installed, resolved))\n        throw Error('terminal_predecessor_local_dependency_escape:' + path);\n      const mapped = join(target, relative(installed, resolved));\n      if (!existsSync(mapped) || !inside(target, realpathSync(mapped)))\n        throw Error('terminal_predecessor_local_dependency_missing:' + path);\n      if (lstatSync(mapped).isDirectory()) symlinkSync(mapped, oldPath, 'junction');\n      else cpSync(mapped, oldPath);\n    } else if (stat.isDirectory()) {\n      if (existsSync(join(path, 'package.json')))\n        throw Error('terminal_predecessor_local_dependency_not_link:' + path);\n      mirrorLocal(path, oldPath);\n    } else throw Error('terminal_predecessor_local_dependency_not_link:' + path);\n  }\n}\nfor (const path of JSON.parse(workspaceJSON)) {\n  const local = join(repository, path, 'node_modules');\n  if (existsSync(local)) mirrorLocal(local, join(source, path, 'node_modules'));\n}\nfor (const path of JSON.parse(workspaceJSON)) {\n  const pkg = JSON.parse(readFileSync(join(source, path, 'package.json'), 'utf8'));\n  const link = join(target, pkg.name);\n  mkdirSync(dirname(link), { recursive: true });\n  symlinkSync(join(source, path), link, 'junction');\n  if (realpathSync(link) !== realpathSync(join(source, path)))\n    throw Error('terminal_predecessor_workspace_resolution_mismatch');\n}\n";

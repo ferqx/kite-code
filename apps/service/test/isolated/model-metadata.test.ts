@@ -191,14 +191,16 @@ test('production paired Service freezes actual SDK settings and dispatch control
       (command) => command.status === 'applied',
     );
     const publicSecond = await client.getCommand('second');
-    const secondReceipt = publicSecond.receipt as { runId: string; businessCommandId: string };
+    const secondReceipt = publicSecond.receipt as { runId: string };
+    expect(publicSecond).toMatchObject({ id: 'second', kind: 'run.start', status: 'applied' });
+    expect(secondReceipt).not.toHaveProperty('businessCommandId');
     await until(
       () => client.getRun(secondReceipt.runId),
       (run) => !run.isActive,
     );
     expect(await client.getRun(secondReceipt.runId)).toMatchObject({
       status: 'completed',
-      originCommandId: secondReceipt.businessCommandId,
+      originCommandId: publicSecond.id,
       rootWorkCommandId: 'second',
     });
     const second = (await client.listModelInputs('s')).items.at(-1)!;

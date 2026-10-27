@@ -212,7 +212,7 @@ test.skipIf(process.platform !== 'darwin')(
             if (message.role !== 'user' || typeof message.content !== 'string') return [];
             try {
               const payload = JSON.parse(message.content);
-              return payload?.purpose === 'authorization_review' ? [payload] : [];
+              return payload?.purpose === 'authorization_check' ? [payload] : [];
             } catch {
               return [];
             }
@@ -366,7 +366,18 @@ test.skipIf(process.platform !== 'darwin')(
             expect(typeof value.digest).toBe('string');
             expect(/^[a-f0-9]{64}$/.test(value.digest)).toBe(true);
             expect(Number.isInteger(value.version) && value.version >= 1).toBe(true);
-            expect(Object.keys(value).sort()).toEqual(['digest', 'planId', 'version']);
+            expect(value.filePath).toBe(
+              join(
+                profile.profilePath,
+                'files',
+                createHash('sha256').update(storeId!).digest('hex'),
+                createHash('sha256').update(sessionId).digest('hex'),
+                'plans',
+                createHash('sha256').update(`p-${sessionId}`).digest('hex'),
+                'plan.md',
+              ),
+            );
+            expect(Object.keys(value).sort()).toEqual(['digest', 'filePath', 'planId', 'version']);
             pointers.set(sessionId, {
               planId: value.planId,
               version: value.version,
@@ -533,19 +544,21 @@ test.skipIf(process.platform !== 'darwin')(
               modelCapabilities: { contextWindowTokens: 1_000_000 },
             },
           ],
-          tools: [{ id: 'files.write', definitionVersion: '2' }],
+          tools: [{ id: 'files.write', definitionVersion: '3' }],
         }),
       );
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
-        readFileSync(
-          resolve(import.meta.dir, '../native-plan-review-electron.fixture.ts'),
-          'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        readFileSync(resolve(import.meta.dir, '../native-plan-review-electron.fixture.ts'), 'utf8')
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       const result = await Bun.build({
         entrypoints: [fixture],
@@ -600,7 +613,7 @@ test.skipIf(process.platform !== 'darwin')(
       ]);
       const reviewRequests: {
         purpose: string;
-        reviewer: { id: string; modelId: string };
+        checker: { id: string; modelId: string };
         originCommandRequest: { content: string };
         rootWorkRequest: { content: string };
         target: {
@@ -618,7 +631,7 @@ test.skipIf(process.platform !== 'darwin')(
           if (message.role !== 'user' || typeof message.content !== 'string') return [];
           try {
             const payload = JSON.parse(message.content);
-            return payload?.purpose === 'authorization_review' ? [payload] : [];
+            return payload?.purpose === 'authorization_check' ? [payload] : [];
           } catch {
             return [];
           }
@@ -629,8 +642,8 @@ test.skipIf(process.platform !== 'darwin')(
           expect(reviews).toHaveLength(1);
           expect(body.tools ?? []).toEqual([]);
           const review = reviews[0] as (typeof reviewRequests)[number];
-          expect(review.reviewer.id).toBe('builtin.auto');
-          expect(review.reviewer.modelId).toBe('fixed');
+          expect(review.checker.id).toBe('builtin.auto');
+          expect(review.checker.modelId).toBe('fixed');
           expect(review.originCommandRequest.content).toBe(planTask(review.target.sessionId));
           expect(review.rootWorkRequest.content).toBe(review.originCommandRequest.content);
           expect(review.target.originStoreId).toBe(storeId);
@@ -639,7 +652,7 @@ test.skipIf(process.platform !== 'darwin')(
             review.target.definitionId,
           );
           expect(review.target.definitionVersion).toBe(
-            review.target.definitionId === 'files.write' ? '2' : '1',
+            review.target.definitionId === 'files.write' ? '3' : '1',
           );
           if (review.target.definitionId === 'files.write')
             expect(review.target.input.path).toBe(`effect-${review.target.sessionId}.txt`);
@@ -722,12 +735,12 @@ test.skipIf(process.platform !== 'darwin')(
             definitionVersion: review.target.definitionVersion,
             input: review.target.input,
             authorization: {
-              review: { status: 'succeeded', decision: 'ask_user' },
+              check: { status: 'succeeded', decision: 'ask_user' },
               human: { accepted: true, state: 'answered', decision: 'approve' },
             },
           });
-          expect(target?.authorization?.review?.executionId).toBeDefined();
-          const child = await cold.getExecution(target!.authorization!.review!.executionId);
+          expect(target?.authorization?.check?.executionId).toBeDefined();
+          const child = await cold.getExecution(target!.authorization!.check!.executionId);
           expect(child).toMatchObject({ status: 'succeeded', originStoreId: storeId });
         }
         for (const definitionId of ['planning.write', 'planning.review', 'planning.update'])
@@ -826,7 +839,7 @@ test.skipIf(process.platform !== 'darwin')(
             sessionId: original.sessionId,
             presentationSessionId: original.sessionId,
             definitionId: 'files.write',
-            definitionVersion: '2',
+            definitionVersion: '3',
           });
           expect(card.request).toEqual(original.request);
           expect(card.answer).toEqual({

@@ -29,7 +29,12 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace, observePersistedUserMessageSession } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedSessionSummaries,
+  observePersistedUserMessageSession,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 40000;
 
@@ -692,21 +697,43 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       // overview rather than relying on a new-session projection.
       await submitCommand(tui, '/exit');
       await tui.waitForExit();
+      const original = requirePersistedRuntimeReady(
+        observePersistedUserMessageSession(workspace, 'Inspect after a standalone command'),
+      );
+      expect(original).toBeDefined();
+      // The title extension can replace the input-derived fallback. Select the
+      // saved title of the exact original Session, rather than its old fallback.
+      const saved = requirePersistedRuntimeReady(observePersistedSessionSummaries(workspace)).find(
+        (session) => session.threadId === original!.threadId,
+      );
+      expect(saved?.name).toBeTruthy();
       server.setResponses([]);
       tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
       await submitCommand(tui, '/resume');
       await waitForCondition(
         () =>
-          screenHasSessionRow(tui.viewport(), 'Inspect after a standalone', {
+          screenHasSessionRow(tui.viewport(), saved!.name, {
             active: false,
           }) && !screenContains(tui.viewport(), 'Loading...'),
         'historical post-Bash session to appear in /resume',
         10_000,
       );
-      tui.write('\x1b[B');
+      if (!screenHasSessionRow(tui.viewport(), saved!.name, { selected: true, active: false })) {
+        const rows = stripAnsi(tui.viewport()).split('\n');
+        const originalRow = rows.findIndex((row) =>
+          screenHasSessionRow(`会话列表\n${row}`, saved!.name, { active: false }),
+        );
+        const selectedRow = rows.findIndex((row) => /^\s*[>❯◌⏳]\s/u.test(row));
+        expect(originalRow).toBeGreaterThanOrEqual(0);
+        expect(selectedRow).toBeGreaterThanOrEqual(0);
+        expect(originalRow).not.toBe(selectedRow);
+        // The empty current Session can sort below the dated historical row.
+        // Navigate from the actual visible cursor instead of assuming its order.
+        tui.write(originalRow < selectedRow ? '\x1b[A' : '\x1b[B');
+      }
       await waitForCondition(
         () =>
-          screenHasSessionRow(tui.viewport(), 'Inspect after a standalone', {
+          screenHasSessionRow(tui.viewport(), saved!.name, {
             selected: true,
             active: false,
           }),
@@ -1021,7 +1048,13 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(lines.filter((line) => line.includes('searched 2 file patterns'))).toHaveLength(1);
       expect(lines.filter((line) => line.includes('ran 2 shell commands'))).toHaveLength(1);
       expect(lines.filter((line) => line === 'REAL_SESSION_RENDER_DONE')).toHaveLength(1);
-      expect(lines.filter((line) => line.includes('请问你想做什么？'))).toHaveLength(1);
+      // The earlier completed greeting can have scrolled out of the viewport;
+      // its original Static material must still occur exactly once in history.
+      expect(
+        stripAnsi(tui.scrollback())
+          .split('\n')
+          .filter((line) => line.includes('请问你想做什么？')),
+      ).toHaveLength(1);
       expect(settled).not.toContain(internalReasoning);
       expect(settled).not.toContain('└─ The user asked');
       narrations.forEach((narration) => {

@@ -442,6 +442,8 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(shellRow.querySelector('.background-execution-name')?.textContent).toBe('Shell');
       expect(region.textContent).not.toContain(shell.execution.id);
       expect(region.textContent).toContain('原子智能体');
+      expect(region.querySelector('[data-execution-id="job-2"] [data-child-icon]')).not.toBeNull();
+      expect(shellRow.querySelector('[data-child-icon]')).toBeNull();
       expect(region.textContent).not.toContain(other.execution.id);
       expect(region.textContent).not.toContain(foreground.execution.id);
       await act(async () => {
@@ -511,6 +513,9 @@ test('environment excludes internal title generation while retaining delegated c
       const display = environmentDisplay(items, storeId);
       expect(display.rows.map((row) => row.executionId)).toEqual(['job-2', 'job-3']);
       expect(display.rows[0]?.displayName).toBe('Child session-title');
+      expect(display.rows[0]?.childAgentIdentity).toBe(
+        JSON.stringify([delegated.execution.originStoreId, 'delegated-child']),
+      );
       expect([...display.children]).toEqual([['job-2', 'delegated-child']]);
       expect(JSON.stringify(items)).toBe(original);
     }

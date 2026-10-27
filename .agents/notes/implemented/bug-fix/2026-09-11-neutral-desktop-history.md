@@ -12,7 +12,7 @@ Status: implemented
 跨空间选择只改变阅读订阅；实际发送才验证并切换执行项目。保留每个 Service 一个执行工作区的边界，不新增多工作区执行协调器。传输 detach 与关闭进程分开，自动重接只恢复查询，不重放命令。独立只读请求有并发上限，使慢辅助查询不阻塞历史与任务控制。
 
 ## 约束
-不新增数据库、持久缓存、执行队列或服务进程。Workspace membership 只用于归组，实际写操作仍核对当前工作区授权。无法恢复的执行及未知命令结果仍由用户检查实际状态。当前行为、边界和验证见[历史与恢复](../../../../apps/kite-desktop/docs/history-and-recovery.md)。
+不新增数据库、持久缓存、执行队列或服务进程。Workspace membership 只用于归组，实际写操作仍核对当前工作区授权。无法恢复的执行及未知命令结果仍由用户检查实际状态。当前行为、边界和验证见[历史与恢复](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/history-and-recovery.md)。
 
 ## Alternatives considered
 

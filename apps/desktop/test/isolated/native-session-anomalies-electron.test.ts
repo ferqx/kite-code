@@ -263,7 +263,7 @@ test.skipIf(process.platform !== 'darwin')(
         tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
           id,
           enabled: id === 'files.write',
-          ...(id === 'files.write' ? { definitionVersion: '2' } : {}),
+          ...(id === 'files.write' ? { definitionVersion: '3' } : {}),
         })),
       });
       writeFileSync(userConfiguration.path, configuration);

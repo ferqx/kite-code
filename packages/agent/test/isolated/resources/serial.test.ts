@@ -124,16 +124,17 @@ test('ordinary serial Tool completion and cancellation preserve original cold re
     await submit('cancelled', 'New task: cancelled');
     await entered.promise;
     const publicCommand = (await store.getCommand('cancelled'))!;
-    const receipt = publicCommand.receipt as { businessCommandId: string; runId: string };
-    const business = (await store.getCommand(receipt.businessCommandId))!;
+    const receipt = publicCommand.receipt as { runId: string };
+    const business = (await store.getCommand(publicCommand.id))!;
     expect(publicCommand).toMatchObject({
       status: 'applied',
-      receipt: { outcome: 'human_input_applied' },
+      kind: 'run.start',
+      receipt: { runId: receipt.runId },
     });
     expect(business).toMatchObject({
       status: 'applied',
-      kind: 'input.follow_up',
-      request: { content: 'New task: cancelled', afterRunId: completed.runId },
+      kind: 'run.start',
+      request: { content: 'New task: cancelled' },
       originStoreId: storeId,
       sessionId: 's',
       subjectId: 'owner',

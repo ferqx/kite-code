@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 import { promptText } from './prompt-editor-text.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
@@ -43,6 +44,12 @@ async function launch() {
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openDraftTools(page);
   return { app, page };
 }
@@ -80,6 +87,12 @@ try {
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   assert.equal(await promptText(page.getByRole('textbox').first()), text);
   assert.equal(await (await fetch(`${control}/count`)).text(), '0');
@@ -100,6 +113,12 @@ try {
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   assert.equal(await promptText(page.getByRole('textbox').first()), text);
   // Test-only Inspector instrumentation sends the real POST over Node's actual TCP socket.
@@ -108,7 +127,13 @@ try {
   await app.evaluate(`(() => {
     const original=globalThis.fetch, http=process.getBuiltinModule('node:http');globalThis.__creationPosts=0;
     globalThis.fetch=(input,init)=> {
-      if(init?.method!=='POST'||new URL(String(input)).pathname!=='/v1/sessions') return original(input,init);
+      const path=new URL(String(input)).pathname;
+      // The renderer may reconcile an unknown first-message creation with a safe
+      // GET. Keep that original read unavailable until the intentional restart.
+      if(globalThis.__creationCommandId&&path==='/v1/commands/'+globalThis.__creationCommandId&&init?.method!=='POST')
+        return Promise.reject(new TypeError('owned_original_creation_read_loss'));
+      if(init?.method!=='POST'||path!=='/v1/sessions') return original(input,init);
+      globalThis.__creationCommandId=JSON.parse(init.body).commandId;
       globalThis.__creationPosts++;
       return new Promise((resolve,reject)=> {
         const request=http.request(String(input),{method:'POST',headers:init.headers},response=> {
@@ -130,6 +155,7 @@ try {
   await page
     .getByRole('textbox', { name: '新对话草稿', exact: true })
     .fill('first original draft after unknown creation');
+  await selectNativeFixtureModel(page, 'local');
   await page.getByRole('button', { name: '发送首条消息', exact: true }).click();
   await page.getByRole('button', { name: '确定', exact: true }).click();
   await openDraftTools(page);

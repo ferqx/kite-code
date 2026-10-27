@@ -18,4 +18,4 @@ Desktop 的轮次状态需要在执行中和结束后展示耗时。同一个 Ru
 
 ## Consequences
 
-Runtime Contract、Service、Protocol 与 Client 共同传递可选的规范化时间字段；这些字段只用于展示，不改变执行或结算权威。新写入的持久事件可显示准确轮次耗时，旧记录及缺失端点保持兼容。对应行为由 Runtime 实时／历史边界测试、Desktop 投影测试与共享会话测试验证；[产品行为](../../../../docs/handbook/clients/desktop/README.md)和[Desktop owner 文档](../../../../apps/kite-desktop/docs/conversation-ui.md)记录当前展示规则。
+Runtime Contract、Service、Protocol 与 Client 共同传递可选的规范化时间字段；这些字段只用于展示，不改变执行或结算权威。新写入的持久事件可显示准确轮次耗时，旧记录及缺失端点保持兼容。对应行为由 Runtime 实时／历史边界测试、Desktop 投影测试与共享会话测试验证；[产品行为](../../../../docs/handbook/clients/desktop/README.md)和[Desktop owner 文档](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/conversation-ui.md)记录当前展示规则。

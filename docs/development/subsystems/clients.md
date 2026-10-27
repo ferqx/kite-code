@@ -1,20 +1,16 @@
 # 客户端接入与展示
 
-TUI 使用 Native Runtime 和终端投影，Web 使用 Public REST 与页面状态；共享结果语义，不共享全部操作、刷新或渲染机制。
+CLI/TUI、Desktop 与 Web 共用公开 Client 和有限展示事实。CLI/Desktop 的可信宿主拥有配套进程、资产与持久原意图；renderer 和浏览器不取得 Store/执行 authority。共享 UI 不扩大客户端的能力。
 
-开发中的 [Electron 桌面客户端](../../../apps/kite-desktop/README.md)已接入纯 TypeScript Client、沙箱 preload、具名 IPC、Electron main host 与同 build 配套 Service。renderer 和 host 构建及分层测试已经接入；packaged Electron 原生窗口已通过[本机自动验收](../../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)，不扩大 Web 权限。迁移前 Tauri 的原生结果只保留为历史证据。
-
-Web 与桌面共用 [React 会话页面](../../../packages/kite-client-ui/README.md)，端侧入口分别负责协议、路由、宿主与已授权操作；共享页面不拥有执行或传输权威。
-
-## 深入顺序与协作
-
-| 专题 | 负责说明 |
+| 专题 | 负责范围 |
 | --- | --- |
-| [TUI 模块](../../../apps/kite-cli/README.md) | 导航、投影、输入、终端 |
-| [Web 模块](../../../apps/kite-web/README.md) | 路由、请求、更新与诊断 |
-| [桌面模块](../../../apps/kite-desktop/README.md) | Electron、preload/IPC、配套服务、开发与验证限制 |
-| [Native 接入](../../../packages/kite-local-runtime/docs/native-client-and-control.md) | 配对、App Control、transport |
-| [Public API](../../../packages/agent-api-contract/docs/public-wire.md) | Browser DTO 与生成规范 |
-| [Web 链路](../flows/web-queries.md) | 分页、条件更新与错误 |
+| [CLI/TUI](../../../apps/cli/README.md) | 当前机制与局部验证 |
+| [通用 UI](../../../packages/ui/README.md) | 当前机制与局部验证 |
+| [Desktop](../../../apps/desktop/README.md) | 当前机制与局部验证 |
+| [Web](../../../apps/web/README.md) | 当前机制与局部验证 |
+| [Client](../../../packages/client/README.md) | 当前机制与局部验证 |
+| [Web 查询](../flows/web-queries.md) | 当前机制与局部验证 |
 
-从对应专题读取实际代码与测试。只有发生跨模块影响时扩读其他主题；准确约束见[契约目录](contracts.md)，不要在本页复制接口和不变量。
+从实际 owner 深入代码与测试，跨模块变化再查[契约目录](contracts.md)。历史通过、源码存在和定向测试均不代替当前客户端全过程或平台发布资格。
+
+旧 Host/Kernel/SPI 实现的[历史说明](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/docs/development/subsystems/clients.md)只供删除前设计与证据追溯，不能恢复为当前 owner 或运行入口。

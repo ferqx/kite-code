@@ -69,11 +69,7 @@ Windows 的 `desktop:dev` 在构建／创建应用目录前执行 [Electron 权�
 
 `npm run agent`、`npm run tui`、`npm run desktop` 仍选择正式候选。首次运行这组命令，先执行 `npm run release:build`，再执行 `npm run release:build -- --product native` 生成 Desktop 候选。缺失候选时分别返回 `terminal_bundle_unavailable`／`native_bundle_unavailable` 和准备命令，未通过完整验证时不进入 Profile。源码变化不会自动更新候选；需要重新生成时，先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。构建不覆盖正在使用或已有的目录。
 
-旧 `apps/kite-desktop` 的 `dev`、`dev:web`、`build`、`build:desktop`、`prepare:service`、`build:electron` 已退役，直接执行原开发／Electron构建／打包／服务准备脚本也返回 `legacy_desktop_entrypoint_retired` 和退出码2。诊断给出上表的当前 Native 构建、启动和验证命令；拒绝发生在读取旧archive、打开Profile、构建或启动服务之前。旧开发Vite热更新属于[历史实现](../../apps/kite-desktop/README.md)，当前正式候选仍固定资源；上面的开发热更新是新宿主的独立实现。旧源码和制品可追溯，当前数据不会交给旧writer；全部旧authority删除与阶段退出仍按原门禁核对。
-
-旧CLI/TUI源码普通启动及旧CLI／Service `build`、旧Service普通App Server启动也已沿同一leaf退役，错误码分别为 `legacy_terminal_entrypoint_retired`、`legacy_service_entrypoint_retired`，退出2。当前替代入口在上表，不自动转发旧参数／数据。历史runCli、同步runTui／MCP判定和runKiteServiceMain仍供明确library用途，Service原私有helper保原路由；它们不恢复旧普通启动。保留范围和实际source／bundle证据归[旧CLI](../../apps/kite-cli/README.md)、[旧Service](../../apps/kite-service/README.md)。用户要求Web端保持现状，旧Web不纳入本轮退役；全部旧producer／源码最终删除仍按原阶段条件核对。
-
-旧OSS的 `build-oss-candidate.ts`、`verify-oss-candidate.ts`、`smoke-oss-candidate.ts` 和 `install-oss-candidate.ts` 普通命令亦已退役，后者包括status／install／rollback／uninstall；全部在旧依赖、archive、prefix或Profile前输出 `legacy_release_entrypoint_retired`／2。当前构建／核验／smoke使用根 `release:build`／`release:verify`／`release:smoke`；安装／回退／卸载准确参数见 `release:install --help`、`release:terminal --help`、`release:native --help`，不将旧参数／状态格式转发给新产品。历史安装library和完整旧smoke检查仍明确保留，边界归[发布owner](../active/release-control.md#历史-oss-工具与明确验收)，不授旧writer读取新基线数据。
+2026-10-26 已删除旧 Desktop、Service、Web 及旧 Runtime/Kernel/contract 等 workspace，同时清理其独占的测试、构建和发布脚本；旧架构只保留 [apps/kite-cli](../../apps/kite-cli/README.md) 供源码阅读。其依赖闭包已删除，不再提供旧 library 导入、构建或普通启动。旧命令的拒绝行为和旧制品证据属于[删除前历史](https://github.com/ferqx/kite-code/tree/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts)，不作为当前命令列表。正式和开发入口只使用上表的新架构；删除旧源码不改变 unknown、数据保护、平台或发布门禁。
 
 `cli:dev`、`tui:dev` 和 `web:dev` 验证实际 Bun 与已构建 Service 的 SHA，通过私有 bootstrap 准入。缺资产局部失败；help/version 与严格参数拒绝先于 Profile 或 Provider I/O。开发 entry SHA 只标识所选入口，完整发行资格另行核对。
 

@@ -350,8 +350,14 @@ export function screenHasSessionRow(
   expected: { selected?: boolean; active?: boolean } = {},
 ): boolean {
   if (!screenContains(raw, '会话列表')) return false;
-
-  for (const line of stripAnsi(raw).split(/\r?\n/)) {
+  const lines = stripAnsi(raw).split(/\r?\n/);
+  const heading = lines.findLastIndex((line) => /^\s*── 会话列表(?:\s|─)/u.test(line));
+  const footer = lines.findIndex(
+    (line, index) => index > heading && /↑↓ 导航\s+Enter 选择/u.test(line),
+  );
+  const completeOverlay = heading >= 0 && footer > heading;
+  const rows = completeOverlay ? lines.slice(heading + 1, footer) : lines;
+  for (const line of rows) {
     const trimmedLine = line.trim();
     const legacyBordered = trimmedLine.startsWith('│');
     const row = legacyBordered ? trimmedLine.slice(1, -1).trim() : trimmedLine;
@@ -363,11 +369,12 @@ export function screenHasSessionRow(
     const rowPrefix = /^\s*(?<cursor>>|❯|◌|⏳)?\s*(?<active>●)?\s*$/.exec(prefix);
     if (!rowPrefix) continue;
 
-    // The current unified overlay has no side borders, so require its stable
-    // right-hand timestamp/loading column. This prevents conversation history
-    // with the same name from being mistaken for a selector row.
+    // updatedAt is optional. A complete overlay supplies row scope without a
+    // timestamp; partial projections still need a timestamp/loading column.
+    // Conversation text above the overlay never supplies a selector row.
     if (
       !legacyBordered &&
+      !completeOverlay &&
       !/\b\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b/u.test(suffix) &&
       !suffix.includes('Loading...')
     ) {

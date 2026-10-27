@@ -4,6 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 const [launcher, home, control, storeId] = process.argv.slice(2) as [
   string,
@@ -145,6 +146,7 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('Create the saved source for a review');
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   await page
     .locator('.agent-turn-final')
@@ -256,11 +258,19 @@ try {
   await panel.getByText('Review native-review-one: marked', { exact: true }).waitFor();
   await panel.getByText('Review native-review-two: unmarked', { exact: true }).waitFor();
   const coldRows = await physical();
-  assert.ok(coldRows.length > 0 && coldRows.every((value) => value.method === 'GET'));
+  assert.ok(
+    coldRows.length > 0 &&
+      coldRows.every(
+        (value) =>
+          value.method === 'GET' ||
+          (value.method === 'POST' && value.path === '/v1/sessions/s/reconcile'),
+      ),
+  );
   assert.equal(await count(), 1);
   stage('cold_original_commands_and_views_without_replay', {
     commandIds: commands,
-    posts: 0,
+    businessPosts: 0,
+    reconciliations: coldRows.filter((value) => value.method === 'POST').length,
     modelCalls: await count(),
   });
   await close();

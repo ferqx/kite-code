@@ -47,10 +47,14 @@ describe('TUI PTY System — /compact persistence', () => {
     async () => {
       const sessionSearchIdentity = 'restart persistence target identity';
       const sessionResponse = 'Restart persistence target response';
-      server.setResponses([{ message: { content: sessionResponse }, delay: 10 }]);
+      server.setResponses([
+        { message: { content: sessionResponse }, delay: 10 },
+        { message: { content: 'The original persistence task was answered.' } },
+      ]);
       await submitUserMessage(tui, server, sessionSearchIdentity, { timeout: 15_000 });
       await waitForText(() => tui.outputSinceLastAction(), sessionResponse, 15_000);
       await waitForTuiReady(tui);
+      await submitCommand(tui, `/session rename ${sessionSearchIdentity}`);
 
       const command = '/compact';
       let targetSession: { threadId: string; name: string } | undefined;

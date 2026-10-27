@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { ElectronApplication, Page } from 'playwright';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 import {
   installNativeAnomalyNetwork,
   loseNativeAnomalyReceipt,
@@ -287,12 +288,11 @@ async function launch() {
               element.getBoundingClientRect().height > 0,
           )
           .map((element) => {
-            const text = (
-              live && element instanceof HTMLElement
-                ? element.innerText
-                : (element.textContent ?? '')
-            ).trim();
             const user = element.matches('.message.user');
+            const body = user ? (element.querySelector('.typeset') ?? element) : element;
+            const text = (
+              live && body instanceof HTMLElement ? body.innerText : (body.textContent ?? '')
+            ).trim();
             return {
               role: user ? 'user' : 'agent',
               kind: user ? 'user' : element.matches('.agent-turn') ? 'turn' : 'assistant',
@@ -428,6 +428,7 @@ async function send(page: Page, marker: string) {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill(promptFor(marker));
+  await selectNativeFixtureModel(page, 'local');
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
 }
 function original(facts: Facts, marker: string) {
@@ -637,7 +638,7 @@ async function completed(page: Page, marker: string, expectedPosts = 1) {
     expectedPosts,
   );
   await probe(page);
-  const users = await page.locator('.message.user').allInnerTexts();
+  const users = await page.locator('.message.user .typeset').allInnerTexts();
   assert.equal(
     users.filter(
       (text) => (live ? visibleInputMarker(text) : contentMarker(text.trim())) === marker,

@@ -184,10 +184,10 @@ test('actual Core original Model input reaches Native and Browser intact, remain
       content: 'New task: New selected input',
     });
     const selectedCommand = await runtime.waitForCommand('new-run', { timeoutMs: 5000 });
-    const selectedReceipt = selectedCommand.receipt as { runId: string; businessCommandId: string };
+    const selectedReceipt = selectedCommand.receipt as { runId: string };
     expect(await client.getRun(selectedReceipt.runId)).toMatchObject({
       status: 'completed',
-      originCommandId: selectedReceipt.businessCommandId,
+      originCommandId: selectedCommand.id,
       rootWorkCommandId: 'new-run',
     });
     const historical = await browser.getModelInput('session', executionId);

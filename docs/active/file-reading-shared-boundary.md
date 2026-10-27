@@ -7,6 +7,8 @@
 
 相关：[Agent Note 0111](../../.agents/notes/implemented/feature/2026-08-18-governed-local-provider-seams.md)、[Agent Note 0113](../../.agents/notes/implemented/architecture/2026-08-18-descriptor-relative-workspace-mutation-publication.md)、[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0122](../../.agents/notes/implemented/bug-fix/2026-08-18-windows-handle-locked-workspace-mutation.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)。
 
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
 ## 当前统一 Files 与历史 Provider
 
 V1.3 正式 Service 的 Files 工具及检查点恢复沿 `@kite-ai/agent/files`、原 Core 派发和可信 Workspace scope，不调用下方旧 `WorkspaceFilesystemProvider`。共享六工具、完整正文、baseline、预览及 restore／remove 的当前合同归 [Files owner](../../packages/agent/src/tools/files/README.md)。[平台分派](../../packages/agent/src/tools/files-io.ts)现接 POSIX 原 FD 和 Windows x64 原 HANDLE；Windows 不改普通 Workspace 既有 DACL，拒绝 reparse／名称等价绕过，实际原生和安装版资格仍未完成。

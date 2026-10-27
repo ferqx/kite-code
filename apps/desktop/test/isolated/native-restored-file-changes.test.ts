@@ -12,6 +12,7 @@ import type { AgentClient, Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
+import { nativeFileReadBaseline } from '../native-file-result.fixture';
 
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {
   const end = Date.now() + 10000;
@@ -76,19 +77,18 @@ test('restored Native Files read original write/edit previews and read/write/edi
       else if (step === 1 || step === 3) {
         const read = body.messages.filter((message) => message.role === 'tool').at(-1);
         if (!read) throw Error('original_restored_file_baseline_missing');
-        const facts = JSON.parse(read.content) as { path: string; baseline: Json };
-        if (facts.path !== relativePath) throw Error('original_restored_file_baseline_path');
+        const baseline = nativeFileReadBaseline(read.content, relativePath);
         call =
           step === 1
             ? {
                 name: 'write_file',
-                input: { path: relativePath, base: facts.baseline, content: written },
+                input: { path: relativePath, base: baseline, content: written },
               }
             : {
                 name: 'edit_file',
                 input: {
                   path: relativePath,
-                  base: facts.baseline,
+                  base: baseline,
                   old_text: 'written α🙂',
                   new_text: 'edited 原🌿',
                   expected_matches: 1,
@@ -129,8 +129,8 @@ test('restored Native Files read original write/edit previews and read/write/edi
         { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
       ],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
-        { id: 'files.write', definitionVersion: '2' },
+        { id: 'files.read', definitionVersion: '5' },
+        { id: 'files.write', definitionVersion: '3' },
         { id: 'files.edit', definitionVersion: '2' },
       ],
     }),
@@ -293,6 +293,8 @@ test('restored Native Files read original write/edit previews and read/write/edi
           relativePath,
           filePath,
           currentContent,
+          written,
+          edited,
           protectedRoots: [profile.profilePath],
         }),
         { mode: 0o600 },

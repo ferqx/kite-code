@@ -13,7 +13,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveWorkspaceGitMetadataReadOnlyRoots } from '../../../packages/builtin-runtime/src/git/metadata-scope';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
@@ -51,7 +50,14 @@ describe('TUI PTY System — Workspace Trust', () => {
     execFileSync('git', ['init', '--bare', '--quiet', externalGitDir]);
     externalGitDir = realpathSync(externalGitDir);
     writeFileSync(join(workspace.workspace, '.git'), `gitdir: ${externalGitDir}\n`);
-    expect(resolveWorkspaceGitMetadataReadOnlyRoots(workspace.workspace)).toEqual([externalGitDir]);
+    expect(
+      realpathSync(
+        execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+          cwd: workspace.workspace,
+          encoding: 'utf8',
+        }).trim(),
+      ),
+    ).toBe(externalGitDir);
 
     server.setResponses([]);
 

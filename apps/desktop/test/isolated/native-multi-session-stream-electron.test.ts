@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -85,6 +92,66 @@ globalThis.fetch = Object.assign(async (...args) => {
     return response;
   } catch(error) { close(); throw error; }
 }, { preconnect: originalFetch.preconnect });
+`;
+
+const revealCostInstrumentation = String.raw`
+(() => {
+  const metrics = globalThis.multiRevealCosts = {};
+  const record = (name, start) => {
+    const elapsed = performance.now() - start;
+    const row = metrics[name] ??= { calls: 0, totalMs: 0, maximumMs: 0 };
+    row.calls++; row.totalMs += elapsed; row.maximumMs = Math.max(row.maximumMs, elapsed);
+  };
+  const wrap = (host, name, label) => {
+    const original = host[name];
+    host[name] = function(...args) {
+      const start = performance.now();
+      try { return Reflect.apply(original, this, args); }
+      finally { record(label, start); }
+    };
+  };
+  wrap(CharacterData.prototype, 'appendData', 'appendData');
+  const originalComputedStyle = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = function(...args) {
+    const start = performance.now();
+    const style = Reflect.apply(originalComputedStyle, this, args);
+    record('computedStyle', start);
+    return new Proxy(style, { get(target, key) {
+      const start = performance.now();
+      const value = Reflect.get(target, key, target);
+      record('computedProperty.' + String(key), start);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+  };
+  wrap(Element.prototype, 'animate', 'animate');
+  wrap(Animation.prototype, 'cancel', 'cancel');
+  wrap(Element.prototype, 'closest', 'closest');
+  wrap(globalThis, 'matchMedia', 'matchMedia');
+  wrap(CSSStyleDeclaration.prototype, 'setProperty', 'styleSet');
+  wrap(CSSStyleDeclaration.prototype, 'removeProperty', 'styleRemove');
+  const OriginalHighlight = Highlight;
+  globalThis.Highlight = class extends OriginalHighlight {
+    constructor(...ranges) { const start = performance.now(); super(...ranges); record('highlightConstructor', start); }
+  };
+  const segments = new Intl.Segmenter().segment('x');
+  wrap(Intl.Segmenter.prototype, 'segment', 'segment');
+  wrap(Object.getPrototypeOf(segments), 'containing', 'containing');
+  wrap(Object.getPrototypeOf(segments[Symbol.iterator]()), 'next', 'segmentNext');
+  wrap(CSS.highlights, 'set', 'highlightSet');
+  wrap(CSS.highlights, 'delete', 'highlightDelete');
+  const OriginalStaticRange = StaticRange;
+  globalThis.StaticRange = class extends OriginalStaticRange {
+    constructor(init) { const start = performance.now(); super(init); record('staticRange', start); }
+  };
+  const textContent = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+  Object.defineProperty(Node.prototype, 'textContent', { ...textContent, set(value) {
+    if (this.nodeType !== 1 || this.tagName !== 'STYLE' || !String(value).startsWith('::highlight(kite-reveal'))
+      return Reflect.apply(textContent.set, this, [value]);
+    const start = performance.now();
+    try { return Reflect.apply(textContent.set, this, [value]); }
+    finally { record('revealStyleText', start); }
+  } });
+})();
 `;
 
 test.skipIf(process.platform !== 'darwin')(
@@ -404,6 +471,10 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
       const mainPath = join(outdir, 'main.cjs');
       writeFileSync(join(outdir, 'runtime-main.cjs'), readFileSync(mainPath));
       writeFileSync(mainPath, `${mainInstrumentation}\nrequire('./runtime-main.cjs');\n`);
+      if (process.env.KITE_NATIVE_MULTI_PROFILE === '1') {
+        const rendererPath = join(outdir, 'renderer.js');
+        writeFileSync(rendererPath, revealCostInstrumentation + readFileSync(rendererPath, 'utf8'));
+      }
       const source = join(root, 'driver.ts'),
         driverPath = join(root, 'driver.js');
       writeFileSync(
@@ -412,6 +483,10 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
           resolve(import.meta.dir, '../native-multi-session-stream-electron.fixture.ts'),
           'utf8',
         )
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
           .replace(
             "import { _electron } from 'playwright';",
             `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
@@ -466,8 +541,19 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
         driverPath,
         root,
       });
-      const stdout = new Response(driver.stdout).text(),
-        stderr = new Response(driver.stderr).text();
+      const retain = (stream: ReadableStream<Uint8Array>, path: string) =>
+        new Response(
+          stream.pipeThrough(
+            new TransformStream<Uint8Array, Uint8Array>({
+              transform(chunk, controller) {
+                appendFileSync(path, chunk);
+                controller.enqueue(chunk);
+              },
+            }),
+          ),
+        ).text();
+      const stdout = retain(driver.stdout, join(root, 'driver.stdout.log')),
+        stderr = retain(driver.stderr, join(root, 'driver.stderr.log'));
       let timer: ReturnType<typeof setTimeout> | undefined;
       const exit = await Promise.race([
         driver.exited,

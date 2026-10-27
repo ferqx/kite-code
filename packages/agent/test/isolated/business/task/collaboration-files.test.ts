@@ -18,6 +18,7 @@ import { createFileTools, createWorkspaceFiles, type FileBaseline } from '../../
 import { createWorkspaceSerialLocks } from '../../../../src/resources';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
+import { presentedFileRead } from '../../../fixtures/presented-file-read';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -71,7 +72,7 @@ for (const scenario of ['unselected-content', 'same-content-new-inode'] as const
         const last = request.messages.filter((message) => message.role === 'tool').at(-1);
         let body: ReturnType<typeof JSON.parse>;
         try {
-          body = last ? JSON.parse(last.content) : null;
+          body = last ? (presentedFileRead(last.content) ?? JSON.parse(last.content)) : null;
         } catch {
           body = { error: last!.content };
         }
@@ -282,7 +283,9 @@ for (const unknown of [false, true])
         const messages = request.messages.filter((message) => message.role === 'tool');
         let body: ReturnType<typeof JSON.parse>;
         try {
-          body = messages.length ? JSON.parse(messages.at(-1)!.content) : null;
+          body = messages.length
+            ? (presentedFileRead(messages.at(-1)!.content) ?? JSON.parse(messages.at(-1)!.content))
+            : null;
         } catch {
           body = { error: messages.at(-1)!.content };
         }
@@ -305,8 +308,9 @@ for (const unknown of [false, true])
         }
         if (stage === 1) {
           for (const message of messages) {
-            const read = JSON.parse(message.content);
-            if (read.path === 'X' || read.path === 'Y') bases.set(read.path, read.baseline);
+            const read = presentedFileRead(message.content);
+            expect(read).toBeDefined();
+            if (read!.path === 'X' || read!.path === 'Y') bases.set(read!.path, read!.baseline);
           }
           events = call('write_file', { path: 'X', base: bases.get('X'), content: 'X=committed' });
         } else if (stage === 2) {

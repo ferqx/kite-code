@@ -6,7 +6,12 @@ import { join } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import {
+  activateSessionSearch,
+  submitCommand,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
 import { type PtyProcess, spawnPreInkTui, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -71,6 +76,7 @@ describe('TUI PTY System — current Profile startup cancellation (original Stor
         'original user event persisted',
         10_000,
       );
+      await submitCommand(first, '/session rename Question before startup cancellation');
       if (!originalId) throw new Error('Original Session ID was not persisted.');
       const sessionId = originalId;
       await submitCommand(first, '/exit');
@@ -154,6 +160,8 @@ describe('TUI PTY System — current Profile startup cancellation (original Stor
         'historical Session row after interrupted startup',
         15_000,
       );
+      await activateSessionSearch(restarted);
+      await typeText(restarted, 'Question before startup cancellation');
       restarted.write('\x1b[B');
       await waitForCondition(
         () =>

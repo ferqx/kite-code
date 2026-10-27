@@ -73,7 +73,7 @@ rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Ter
 
 Windows 注册 CLI/TUI 另由 [完整 installed TUI caller](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费准确 Terminal／Native 候选：同一个独立稳定 `kite-tui.exe` 先用 Terminal，再用登记后的 Native 双层闭包；实际键盘任务、全文／思考、导出、准确取消、草稿及冷读零重放，正常退出须原 Job 未 Terminate／完整 EOF／Job0／双 EX，撤登记和最终卸载保原数据。此调用者已接 release job，但 Windows 实际运行尚未取得，按用户安排交后续 Actions；它不把窗口、真正跨代码切换、Shell／RSS 或阶段资格记为通过。完整合同及预算归 [Terminal owner](../../cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。
 
-同一安装调用者支持显式 `--predecessor=<absolute-original-native>` 真代码分支，由[统一入口](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)调用固定 `4a4c0e440b2098e5b4ec58c5831452773b39228f` 原源码自己的两类 builder。11项锁输入沿[Terminal 输入守卫](../../cli/docs/terminal-release.md#验证边界)核原字节相同或已审查的完整 raw 配对；两份迁移 SQL 仍逐字相同，另核固定 checksum；原两版 `0.1.0`、clean source、不同 commit／candidate／实际 Agent SHA 均独立核对。该前驱支持0002和DB9，属于同 schema 跨代码兼容。原837输入与历史SHA仍保独立legacy守卫，不计DB9旧writer拒绝或已发布predecessor资格。
+同一安装调用者支持显式 `--predecessor=<absolute-original-native>` 真代码分支，由[统一入口](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)调用固定 `4a4c0e440b2098e5b4ec58c5831452773b39228f` 原源码自己的两类 builder。11项锁输入沿[Terminal 输入守卫](../../cli/docs/terminal-release.md#验证边界)核原字节相同或已审查的完整 raw 配对；两份迁移 SQL 仍逐字相同，另核固定 checksum；原两版 `0.1.0`、clean source、不同 commit／candidate／实际 Agent SHA 均独立核对。这是 Windows 独立调用者仍使用的旧基线，只覆盖其0001／0002迁移与DB9；当前完整 Core 0001–0006 迁移的往返兼容资格尚未取得，不能沿用 POSIX 当前固定前驱的结论。原837输入与历史SHA仍保独立legacy守卫，不计DB9旧writer拒绝或已发布predecessor资格。
 
 真分支从零参数稳定 `kite-desktop.exe` 完成 A任务／A原Main与Service alive、双SH时选B／B冷读并明确新任务／回退A冷读B并明确第三任务／最终B冷读全部原历史四窗口，后继真实Provider请求必须含此前完整正文，冷读游标／Provider保持。普通完整短结果与sealed描述符按实际存储分别核原身份／正文／bytes／hash，不要求短正文必须有sealed引用；三任务为完整固定短正文，不授350KiB或17MiB窗口展示资格。四窗原owner自然退出／未Terminate和双EX后，B installed CLI按原backup／inspect／restore新Store／status链执行，再从B第五冷窗口核全部原Command／Run／Execution及结果／出处，Provider恰3；最终只卸载一次并保Core／Native DB／config原字节。显式基础420秒、各独立UIA driver45秒／launch与页面及退出10秒、维护180秒／CLI30秒，取统一绝对期限的更小值，默认120秒／180秒及原95条断言保持。原生Windows整链尚未执行，资格保留；与Terminal共享物化、mandatory CI及真实输入边界归[Terminal owner](../../cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，准确本机修正与证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
 
@@ -111,7 +111,9 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 
 ## 真实代码升级与冷回退
 
-[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。当前固定真实兼容提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`，由其自己的 Terminal／Native builder 构建。11项锁输入核原字节相同或已审查的完整 raw 配对，Core format 1 的0001／0002两份迁移仍另核原字节和固定 checksum；不把仅同 format major 当成反向读写兼容。原源码前后干净、闭包、实际Agent／候选不同、Mac Main／renderer字节差异、源码删除、归档搬迁和原输出删除守卫保持。原a2b的DB7及旧Core schema不被修改，另供安全拒绝反例；3140／Linux1b796只保历史证据。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
+[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。当前 POSIX 完整往返使用 `materializeCurrentSchemaTerminalPredecessor` 固定真实提交 `12628a616e7614cbd60666d71896b1db9f74b0f5`，由其自己的 Terminal／Native builder 构建。12项 manifest／lock／patch 输入逐字节相同，Core format 1 的0001–0006六份迁移同时核原字节和固定 checksum；不把仅同 format major 当成反向读写兼容。旧 `4a4c0e440`、a2b 与837输入守卫及负例保持，不修改旧 reader 或历史候选；Windows 的独立前驱资格不随 POSIX 调整而取得。原源码前后干净、闭包、实际Agent／候选不同、Mac Main／renderer字节差异、源码删除、归档搬迁和原输出删除守卫保持。原a2b的DB7及旧Core schema不被修改，另供安全拒绝反例；3140／Linux1b796只保历史证据。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
+
+当前兼容冷窗口仅沿原申请 GET 核对回执；`unknown` 收到准确 `applied` 回执后可前进，原请求 body、scope、摘要和业务身份保持。状态校准不增加业务 POST 或 Provider，也不修改下方历史日期记录的当时结论。
 
 2026-10-21合并输入继续沿[Terminal精确原始输入守卫](../../cli/docs/terminal-release.md#验证边界)追加登记：仅 `bun.lock`、UI清单和Agent清单三个当前完整SHA更新至当日审查scope，分别记录Lexical完整resolved闭包、编辑器生产依赖和Workflow Worker资产构建。原三个固定前驱、previous字节、context、11项路径与两份SQL／checksum不变，旧源码仍用自己的lock与builder。Lexical实际依赖增加与Agent仅追加构建分别说明，不借本地短测或Terminal通过宣称Native新整链、Windows原生或完整默认资格。
 
@@ -133,7 +135,7 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 
 Linux使用实际Electron dist和manifest executable路径、Node `.mjs`、准确`ps` argv/父PID，仅转发`DISPLAY`/`XAUTHORITY`。[窗口driver](../test/native-cross-version-electron.fixture.ts)四次均显式开启Chromium sandbox并核实际sandbox/contextIsolation=true、nodeIntegration=false及没有no-sandbox。原420秒整例、120秒driver、15秒窗口和上述原Store/Command/Run/Model/正文/caller/零重放/双lease/数据保留断言不变。Canonical Ubuntu Base24.04.5、Docker VM原生arm64、UID501、Bun1.4.2/Electron44.3.0/Node22.21.1/Xvfb实际整文件1pass/374条Bun断言及driver断言，actual0/171.298秒，四次窗口普通退出结束于driver80.070秒。回退后的新任务实收到352041字节B全文，最终卸载保Core/Native DB/config原字节和inode。
 
-准确候选、失败、摘要和阶段回归归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-真实代码升级与冷回退)。release candidate另在macOS和Linux调用整个文件，Linux在Xvfb中执行，静态守卫拒绝平台缩减、关闭、echo、过滤或缺显示。上述结果只适用于当时锁输入和源码；当前固定 4a4c0e440 的 Linux 兼容组合尚未运行，按用户顺序在重构完成后交 GitHub Actions 核对。历史Linux arm64两个本地原始代码候选的有限兼容链不替代已发布predecessor/T029、G1 hosted Ubuntu x64、Windows、四Auth/Vault、新signal故障窗口或全部§35/T/E；生产安装、回退和默认宿主Shell语义没有修改。
+准确候选、失败、摘要和阶段回归归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-真实代码升级与冷回退)。release candidate另在macOS和Linux调用整个文件，Linux在Xvfb中执行，静态守卫拒绝平台缩减、关闭、echo、过滤或缺显示。上述结果只适用于当时锁输入和源码；当前固定 12628a616 的 Linux 兼容组合尚未运行，按用户顺序在重构完成后交 GitHub Actions 核对。历史Linux arm64两个本地原始代码候选的有限兼容链不替代已发布predecessor/T029、G1 hosted Ubuntu x64、Windows、四Auth/Vault、新signal故障窗口或全部§35/T/E；生产安装、回退和默认宿主Shell语义没有修改。
 
 ## Linux arm64 安装生命周期
 

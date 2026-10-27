@@ -76,6 +76,7 @@ describe('TUI PTY System — Session Switching', () => {
 
       // Wait for the mock model response
       await waitForText(() => tui.viewport(), 'Session 1 response', 15000);
+      await submitCommand(tui, '/session rename Message in session 1');
 
       const output = tui.viewport();
       expect(screenContains(output, 'Message in session 1')).toBe(true);
@@ -128,6 +129,7 @@ describe('TUI PTY System — Session Switching', () => {
 
       // Wait for the second model response
       await waitForText(() => tui.viewport(), 'Session 2 response', 15000);
+      await submitCommand(tui, '/session rename Message in session 2');
       await waitForCondition(
         () => {
           const observation = observePersistedSessionSummaries(workspace);

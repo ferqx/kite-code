@@ -8,6 +8,21 @@ import { DatabaseSync } from 'node:sqlite';
 import type { NativeCallerMetadata, NativeDraft, NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
 
+async function observedState(
+  page: import('playwright').Page,
+  accepts: (state: NativeState) => boolean,
+): Promise<NativeState> {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    const value = (await page.evaluate(async () =>
+      window.kiteNative!.request({ method: 'state', generation: 1 }),
+    )) as NativeState;
+    if (accepts(value)) return value;
+    if (Date.now() >= deadline) throw Error('native_caller_observation_timeout');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -25,7 +40,7 @@ async function launch() {
     executablePath: electronExecutable,
     args: [outdir!, `--user-data-dir=${join(root!, 'caller-electron-data')}`],
     cwd: outdir,
-    env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: { HOME: process.env.HOME!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
   });
   application = app;
@@ -35,10 +50,17 @@ async function launch() {
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Original recovery', exact: true }).click();
   await page.locator('.session-header').getByTitle('Original recovery', { exact: true }).waitFor();
+  await observedState(
+    page,
+    (state) => state.selection?.session.id === 's' && !state.selection.viewLoading,
+  );
+  await page.locator('[role="textbox"][aria-label="当前会话私有草稿"]').waitFor();
   await openSessionTools(page);
-  const ready = (await page.evaluate(
-    async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
-  )) as NativeState;
+  // Assert the same complete Main snapshot that satisfied the readiness check.
+  const ready = await observedState(
+    page,
+    (state) => state.selection?.session.id === 's' && !state.selection.viewLoading,
+  );
   assert.equal(ready.selection?.session.id, 's');
   assert.equal(ready.selection?.viewLoading, false);
   return { app, page };
@@ -52,8 +74,16 @@ const rows = (commandId: string = input.commandId) => {
           'SELECT id,kind,status,subject_id,request_digest,receipt_json FROM command WHERE id=?',
         )
         .all(commandId),
-      runs: db.prepare('SELECT id,origin_command_id,status FROM run').all(),
-      executions: db.prepare('SELECT id,kind,state,cancel_requested_at FROM execution').all(),
+      runs: db
+        .prepare(
+          'SELECT id,origin_command_id,status,is_active,initialization_state,reason FROM run',
+        )
+        .all(),
+      executions: db
+        .prepare(
+          'SELECT id,run_id,kind,adapter_id,state,dispatched,result_json,cancel_requested_at FROM execution',
+        )
+        .all(),
     };
   } finally {
     db.close();
@@ -61,6 +91,28 @@ const rows = (commandId: string = input.commandId) => {
 };
 try {
   let { app, page } = await launch();
+  if (input.kind === 'input.steer') {
+    // Selection reconciles the seeded orphan. Steering needs a live owner, so
+    // explicitly resume this same original Run before preparing its exact input.
+    await page.getByLabel('Recovery operation', { exact: true }).selectOption('run');
+    await page.getByLabel('Original recovery ID', { exact: true }).fill(input.targetRunId);
+    await page.getByRole('button', { name: 'Prepare original recovery', exact: true }).click();
+    await page.getByRole('button', { name: 'Submit original recovery once', exact: true }).click();
+    await page.getByText(/Recovery run · resumed/).waitFor();
+    const live = await observedState(page, (value) => {
+      const selected = value.selection;
+      return (
+        selected?.session.id === 's' &&
+        selected.runs.some((run) => run.id === input.targetRunId && run.isActive) &&
+        selected.interactions.some(
+          (card) => card.runId === input.targetRunId && card.state === 'pending',
+        )
+      );
+    });
+    assert.equal(live.selection!.runs.find((run) => run.id === input.targetRunId)!.isActive, true);
+    assert.equal(typeof live.selection!.session.contextSelectionId, 'string');
+    input.contextSelectionId = live.selection!.session.contextSelectionId;
+  }
   let siblingId: string | undefined;
   let parentBusiness: { runId: string; businessCommandId: string } | undefined;
   if (input.kind === 'execution.cancel') {
@@ -116,19 +168,14 @@ try {
     assert.equal(commands.length, 1);
     assert.equal(commands[0]!.status, 'applied');
     const receipt = JSON.parse(String(commands[0]!.receipt_json)) as {
-      businessCommandId: string;
-      sourceCommandId: string;
       runId: string;
     };
-    assert.ok(receipt.businessCommandId);
-    assert.notEqual(receipt.businessCommandId, applied.request.commandId);
-    assert.equal(receipt.sourceCommandId, receipt.businessCommandId);
-    parentBusiness = { runId: receipt.runId, businessCommandId: receipt.businessCommandId };
+    parentBusiness = { runId: receipt.runId, businessCommandId: applied.request.commandId };
     assert.ok(
       state.selection!.runs.some(
         (run) =>
           run.id === receipt.runId &&
-          run.originCommandId === receipt.businessCommandId &&
+          run.originCommandId === applied.request.commandId &&
           run.rootWorkCommandId === applied.request.commandId &&
           run.status === 'completed',
       ),
@@ -165,6 +212,7 @@ try {
       textDigest: createHash('sha256').update(saved.content).digest('hex'),
     };
   }
+  const executionIdsBeforeSubmit = new Set(rows().executions.map((row) => row.id));
   console.error('caller checkpoint submit');
   const metadata = (await page.evaluate(
     async ({ input, draft }) => {
@@ -196,6 +244,35 @@ try {
   assert.equal(await app.evaluate('globalThis.__callerPosts'), 1);
   assert.deepEqual(await readNativeCallerRequest(page, 1, input.commandId), input);
   assert.equal(rows().commands.length, 1);
+  if (input.kind === 'input.follow_up' || input.kind === 'input.steer') {
+    // Capture the original input's first legitimate dispatch before crashing:
+    // the steer has completed its successor Model; follow-up holds its own Model.
+    // The cold ID comparison then isolates replay from initial scheduling.
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      const facts = rows();
+      const originalRun = facts.runs.find((run) =>
+        input.kind === 'input.steer'
+          ? run.id === input.targetRunId
+          : run.origin_command_id === input.commandId,
+      );
+      if (
+        originalRun &&
+        facts.executions.some(
+          (execution) =>
+            execution.run_id === originalRun.id &&
+            execution.kind === 'model' &&
+            (input.kind === 'input.steer'
+              ? originalRun.status === 'completed' && execution.state === 'succeeded'
+              : execution.state === 'dispatching' && execution.dispatched === 1) &&
+            !executionIdsBeforeSubmit.has(execution.id),
+        )
+      )
+        break;
+      if (Date.now() >= deadline) throw Error('original_input_model_not_started');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
   if (siblingId) {
     const originalParent = parentBusiness;
     assert.ok(originalParent);
@@ -222,6 +299,7 @@ try {
   )) as NativeState;
   assert.equal(JSON.stringify(before).includes(input.content ?? '__absent__'), false);
   const beforeFacts = rows();
+  console.error('caller original crash snapshot', JSON.stringify(beforeFacts));
   writeFileSync(`${base}.before.json`, JSON.stringify({ metadata, facts: beforeFacts }));
   const children = execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' })
     .trim()
@@ -261,7 +339,10 @@ try {
     .waitFor();
   assert.equal(await app.evaluate('globalThis.__callerPosts'), 0);
   const gets = (await app.evaluate('globalThis.__callerGets')) as string[];
-  assert.deepEqual(gets, [`/v1/commands/${input.commandId}`, `/v1/commands/${input.commandId}`]);
+  // The renderer may also reconcile the saved unknown row after its cold
+  // selection completes. Every read must still query this one original ID.
+  assert.ok(gets.length >= 2 && gets.length <= 3);
+  assert.ok(gets.every((path) => path === `/v1/commands/${input.commandId}`));
   const afterFacts = rows();
   assert.equal(afterFacts.commands.length, 1);
   assert.deepEqual(
@@ -310,6 +391,7 @@ try {
   console.log('native-caller-window-qualified', input.kind, base);
 } catch (error) {
   console.error('caller primary error', error);
+  console.error('caller original persistent facts', JSON.stringify(rows()));
   if (application) {
     const page = await application.firstWindow();
     console.error((await page.locator('body').innerText()).slice(-15000));

@@ -131,13 +131,17 @@ B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也�
 
 ## Windows 真实代码升级与冷回退调用者
 
-[统一调用者](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)消费同 release job 已 build／verify／smoke 的准确 Terminal／Native，两者 inner 身份必须一致。[兼容前驱](../../../tests/fixtures/unified-agent/compatible-predecessor-input.ts)固定真实提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`：11项锁输入沿下文同一守卫核原字节相同或已审查的完整 raw 配对；`0001-baseline` 与 `0002-recovery-audit` 两份 SQL 仍同时核原字节和固定 checksum。该提交已具 Windows 两类 builder／build port 及 DB9；原源码自己的两个 builder 构建，成功后删除旧源码，不修改 manifest、版本或生产 helper。两版均为 `0.1.0`，完整候选和实际 Agent 字节必须不同。原 `837a2b8c` 输入、历史 SHA 与独立路径许可仍保为 legacy 守卫，不将仅支持旧 Core schema 的代码计作当前兼容回退。当前 Windows 原生资格仍待实际执行，不沿用 macOS 或历史前驱结果。
+[统一调用者](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)消费同 release job 已 build／verify／smoke 的准确 Terminal／Native，两者 inner 身份必须一致。[兼容前驱](../../../tests/fixtures/unified-agent/compatible-predecessor-input.ts)固定真实提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`：11项锁输入沿下文同一守卫核原字节相同或已审查的完整 raw 配对；`0001-baseline` 与 `0002-recovery-audit` 两份 SQL 仍同时核原字节和固定 checksum。该提交已具 Windows 两类 builder／build port 及 DB9，但仅支持当时的 `0001`／`0002` 基线，不具当前六迁移的完整往返资格；原源码自己的两个 builder 构建，成功后删除旧源码，不修改 manifest、版本或生产 helper。两版均为 `0.1.0`，完整候选和实际 Agent 字节必须不同。原 `837a2b8c` 输入、历史 SHA 与独立路径许可仍保为 legacy 守卫，不将仅支持旧 Core schema 的代码计作当前兼容回退。当前 Windows 原生资格仍待实际执行，不沿用 macOS 或历史前驱结果。
 
 [Terminal 链](../../../tests/fixtures/unified-agent/windows-terminal-cross-version.qualification.ts)从稳定 `kite.exe` 执行 A 原任务，原 A paired CLI／Service 和使用锁仍 live 时选择 B，正常退出后 B 读取原历史并明确继续，再冷回退 A 读取 B、继续原会话，最终 B 冷读全部三任务。B 的352041 UTF-8字节完整 Unicode 正文必须实际进入回退后 A 的新 Provider 请求。各自安装候选的公开 Runtime 读取普通完整短正文及 sealed 长正文，核原 Store／Command／Run／Execution、完整 body／bytes／hash／出处及 readonly 游标；正式 `context read` 核完整原消息身份，不冒称该页面打印 sealed 全文。冷读零模型重放，指针切换不恢复数据；原 Job／HANDLE／FILETIME核进程，成功必须实际 exit0、双流 EOF、自然 Job0／未 Terminate、严格 Close、所有候选 EX及唯一卸载保原 DB／config。
 
 执行 `bun run tests/fixtures/unified-agent/windows-cross-version.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>`；统一绝对期限1140000ms，分别保物化180秒、Terminal360秒／每命令30秒、Native基础420秒和维护180秒，并包含收尾。原同代码安装120秒、TUI及POSIX调用者／预算／断言保持；新mandatory步骤位于三条原Windows caller之后，CI守卫核准确双输入、六个无条件 build／verify／smoke、真实 Windows matrix／MSVC和顺序。当前源码与macOS读取验证不授Windows原生资格；实际构建／安装／回退交后续GitHub Actions，原RSS／观测／Shell合同和完整阶段门禁保持。Native窗口与维护行为归[Native owner](../../desktop/docs/native-release.md#windows-managed-native-当前实现)，准确证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
 
 ## 验证边界
+
+2026-10-26 全量修复重新核对了前驱资格：POSIX 完整往返改用真实提交 `12628a616e7614cbd60666d71896b1db9f74b0f5`，其12项 manifest／lock／patch 输入全部与当前原字节一致，六份 `0001`–`0006` SQL 同时核历史字节、当前字节及固定 checksum。该版本早于当前 Model 输出公共投影修复，仍须证明实际 Agent／候选不同、原源码干净及由自身 builder 构建；没有改写旧 reader 或数据库。旧 `4a4c0e440` 只有当时的恢复审计迁移，不能再把它当作当前新增迁移后的可回退版本；其原输入守卫和历史证据继续保留。Windows 的独立前驱／平台资格不随 POSIX 调整而取得。
+
+同轮对原三个历史 context 的锁输入追加封闭配对：新增 Markdown／PDF 依赖、Radix 清理 patch 和准确 PDF live 脚本；原当前 SHA 仍保留为历史合法配对。163项新增 resolved 条目逐一核对，原 resolved 条目仅有 `highlight.js@10.7.3` 从根移至 `cli-highlight/highlight.js`，其完整 URL／依赖／integrity 保持。当前独有 Radix patch 以独立 `additionalCurrentInputs` 核准确路径和完整 SHA，不伪造旧声明；旧11项输入及 SQL 拒绝边界不放宽。开发依赖镜像仅排除 renderer 所属准确 `.vite`／`.vite-desktop-dev` 真实生成目录，符号链接和其他非链接依赖仍走原守卫。
 
 完整选择器与独立 Service／Daemon 使用[同一 Terminal verifier](../../service/src/runtime-assets.ts)，普通资产完整 SHA 的大小文件分流与多块／短尾拒绝证据归[Service owner](../../service/README.md)。目录、链接、实际引擎与使用锁守卫保持；当前正式入口的分段时钟及完整默认结果归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
 
@@ -148,7 +152,7 @@ B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也�
 - [安装负例](../../../tests/isolated/unified-agent/terminal-install.test.ts)、[归档负例](../../../tests/isolated/unified-agent/terminal-archive.test.ts)
 - [依赖闭包](../../../tests/isolated/unified-agent/terminal-dependencies.test.ts)、[完整选择器](../../../tests/isolated/unified-agent/terminal-artifact.test.ts)
 
-原 bundle 生命周期测试的同源码版本标记只证明指针机制。当前[跨代码版本整例](../../../tests/isolated/unified-agent/terminal-cross-version.test.ts)固定真实兼容前驱 `4a4c0e440b2098e5b4ec58c5831452773b39228f`，由其原源码和原 builder 生成候选；11项 lock／workspace／patch 原始输入逐一核对，只接受原字节相同或下述已审查的完整 raw 配对，另核 `0001`、`0002` SQL 原字节和各自固定 checksum。format major 1 不代表任意迁移版本互通，只有双方实际支持同一闭合 schema 才进入 A→B→A→B 兼容链。两者 productVersion 均为 `0.1.0`，实际 Agent 字节及候选 ID 必须不同；原 npm 闭包、干净旧源码、原 builder、源码删除、归档搬迁与输出删除守卫保持。不能修改旧 reader、恢复旧 DB 或删除审计 schema 来获得兼容。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
+原 bundle 生命周期测试的同源码版本标记只证明指针机制。当前[跨代码版本整例](../../../tests/isolated/unified-agent/terminal-cross-version.test.ts)固定真实兼容前驱 `12628a616e7614cbd60666d71896b1db9f74b0f5`，由其原源码和原 builder 生成候选；12项 lock／workspace／patch 输入全部逐字相同，`0001`–`0006` 六份 SQL 另核双方原字节和各自固定 checksum。下文旧前驱的封闭配对继续用于其历史守卫及不兼容拒绝链，不代替当前往返的同字节要求。format major 1 不代表任意迁移版本互通，只有双方实际支持同一闭合 schema 才进入 A→B→A→B 兼容链。两者 productVersion 均为 `0.1.0`，实际 Agent 字节及候选 ID 必须不同；原 npm 闭包、干净旧源码、原 builder、源码删除、归档搬迁与输出删除守卫保持。不能修改旧 reader、恢复旧 DB 或删除审计 schema 来获得兼容。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
 
 2026-10-18用户确认增加[精确原始输入守卫](../../../tests/fixtures/unified-agent/predecessor-reviewed-input.ts)：`compatible`、`terminal_legacy`、`windows_legacy` 分别绑定各自固定前驱，仅为 `bun.lock`、根 package、Agent／AI／UI／Service 六项准确路径登记双方完整 SHA-256。它只承认 `eeea65f5f` 的 Responses OpenAI 声明及两个完整 resolved 包、`9ff6904a0` 的构建／UI 声明、`bcf70ce84` 的 session-title 入口，以及本轮 `test:model:tools:live` 准确脚本行。OpenAI `4.0.19` 与其嵌套 provider-utils `5.0.12` 是实际依赖新增，不能称为声明投影或依赖未变。其余五项原输入保持逐字比较；两 SQL 不进入此例外。2026-10-19（UTC）真实模型测试新增 `test:model:collaboration:live` 后，根 package 的完整当前 SHA 更新为 `4c7e7320475e5c030c4221e30f408bb21b290de5a4c73fcd830f5efb4f0e4a14`，仅该路径的审查 scope 更新为当日，并在 provenance 登记第二条准确 live 脚本及增量；其余五项配对、原前驱字节和 SQL 校验保持。缺失、重复、改名、追加命令及未知字节仍拒绝，不能普遍忽略 scripts。
 
@@ -172,7 +176,7 @@ B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也�
 
 原 a2b Terminal 另有独立240秒拒绝整例：当前公共 Runtime 生成真实0002和已完成原历史，经实际安装旧 CLI／旧 Store leaf 核 `store_incompatible`、诊断 `data_unavailable`、原历史拒绝，旧进程正常退出后核EX、原Core／配置bytes与inode、当前完整View／cursor不变；不恢复或复制数据库。
 
-上述新测试沿默认 isolated 每文件进程、进程内 concurrency=1 运行，可与其他隔离文件共享槽；构建输出、旧 clone、reader、安装和数据均位于自有临时根。Linux arm64 的历史 1b796 组合沿完整文件通过336条Bun断言，实际0／60.741秒；该结果只适用于当时锁输入与源码。当前固定 4a4c0e440 的 Linux 兼容组合尚未运行，按用户顺序在重构完成后由 GitHub Actions 核对；原360秒整例和30秒命令期限保持。准确环境、候选、失败和执行归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-真实代码升级与冷回退)。release candidate现对macOS/Linux另调用整个跨代码文件，守卫拒绝错误平台、关闭、echo或过滤命令。原生平台CI仍待执行，Windows 安装源码与待验资格归上节。已发布旧样本、断电恢复、平台签名、生产sandbox/exporter、全部平台资格及完整T/E仍未由本机Terminal组合证明。
+上述新测试沿默认 isolated 每文件进程、进程内 concurrency=1 运行，可与其他隔离文件共享槽；构建输出、旧 clone、reader、安装和数据均位于自有临时根。Linux arm64 的历史 1b796 组合沿完整文件通过336条Bun断言，实际0／60.741秒；该结果只适用于当时锁输入与源码。当前固定 12628a616 的 Linux 兼容组合尚未运行，按用户顺序在重构完成后由 GitHub Actions 核对；原360秒整例和30秒命令期限保持。准确环境、候选、失败和执行归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-真实代码升级与冷回退)。release candidate现对macOS/Linux另调用整个跨代码文件，守卫拒绝错误平台、关闭、echo或过滤命令。原生平台CI仍待执行，Windows 安装源码与待验资格归上节。已发布旧样本、断电恢复、平台签名、生产sandbox/exporter、全部平台资格及完整T/E仍未由本机Terminal组合证明。
 
 ## Linux 当前引擎与安装维护链
 

@@ -375,10 +375,15 @@ test.skipIf(process.platform !== 'darwin')(
         readFileSync(
           resolve(import.meta.dir, '../native-shell-lifecycle-electron.fixture.ts'),
           'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        )
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       expect(
         (
@@ -427,9 +432,13 @@ test.skipIf(process.platform !== 'darwin')(
       expect(report.storeId).toBe(storeId);
       expect(report.jobs).toHaveLength(3);
       expect(report.servicePids).toHaveLength(3);
-      expect(report.coldPhysical.every((row: { method: string }) => row.method === 'GET')).toBe(
-        true,
-      );
+      expect(
+        report.coldPhysical.every(
+          (row: { method: string; path: string }) =>
+            row.method === 'GET' ||
+            (row.method === 'POST' && row.path === '/v1/sessions/native-shell/reconcile'),
+        ),
+      ).toBe(true);
       expect(readFileSync(effects, 'utf8').trim().split('\n').sort()).toEqual(labels.sort());
       expect(calls).toHaveLength(4);
       expect(calls.map(({ marker, content }) => ({ marker, content }))).toEqual([

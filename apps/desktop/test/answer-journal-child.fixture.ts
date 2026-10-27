@@ -32,7 +32,7 @@ await runServiceProcess({
                 id: 'fixed',
                 enabled: true,
                 configured: true,
-                provider: 'fixture',
+                provider: 'compatible',
                 model: 'fixed',
                 diagnostics: [],
               },

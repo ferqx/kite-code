@@ -203,13 +203,15 @@ test.skipIf(process.platform !== 'darwin')(
       driverPath = join(root, 'driver.js');
     writeFileSync(
       fixture,
-      readFileSync(
-        resolve(import.meta.dir, '../native-model-settings-electron.fixture.ts'),
-        'utf8',
-      ).replace(
-        "import { _electron } from 'playwright';",
-        `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-      ),
+      readFileSync(resolve(import.meta.dir, '../native-model-settings-electron.fixture.ts'), 'utf8')
+        .replace(
+          "'./native-model-selection.fixture'",
+          JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+        )
+        .replace(
+          "import { _electron } from 'playwright';",
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+        ),
     );
     directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
     writeFileSync(

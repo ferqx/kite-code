@@ -11,6 +11,8 @@ import {
 import { refinePredecessorWorkspaceDeclarations } from '../../fixtures/unified-agent/predecessor-workspace-declarations';
 import {
   COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
+  CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS,
+  CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
   matchTerminalPredecessorInput,
   TERMINAL_PREDECESSOR_COMMIT,
   withoutReviewedTuiLockDeclarations,
@@ -410,4 +412,43 @@ test('actual Terminal inputs keep eleven raw proofs and label only approved comp
     ).toThrow(`compatible_predecessor_input_changed:${path}`);
   }
   expect(matchTerminalPredecessorInput('unreviewed', previous, previous)).toBeUndefined();
+});
+
+test('current-schema roundtrip uses genuine historical code with all six exact migrations and all twelve unchanged locked inputs', () => {
+  const originalInput = (path: string) => {
+    const result = Bun.spawnSync(
+      ['git', 'show', `${CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
+      { cwd: repository },
+    );
+    expect(result.exitCode).toBe(0);
+    return result.stdout;
+  };
+  const manifest = JSON.parse(Buffer.from(originalInput('package.json')).toString());
+  const paths = [
+    ...COMPATIBLE_PREDECESSOR_INPUT_PATHS.filter((path) => !path.startsWith('patches/')),
+    ...(Object.values(manifest.patchedDependencies) as string[]),
+  ];
+  expect(paths).toHaveLength(12);
+  expect(new Set(paths).size).toBe(12);
+  for (const path of paths)
+    expect(originalInput(path)).toEqual(readFileSync(resolve(repository, path)));
+  expect(CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS).toHaveLength(6);
+  for (const migration of CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS) {
+    const previous = originalInput(migration.path);
+    const current = readFileSync(resolve(repository, migration.path));
+    expect(previous).toEqual(current);
+    expect(createHash('sha256').update(previous).digest('hex')).toBe(migration.sha256);
+    expect(createHash('sha256').update(current).digest('hex')).toBe(migration.sha256);
+  }
+  const legacyLastMigration = Bun.spawnSync(
+    [
+      'git',
+      'ls-tree',
+      COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
+      'packages/agent/src/storage/migrations/0006-input-file-imports.sql',
+    ],
+    { cwd: repository },
+  );
+  expect(legacyLastMigration.exitCode).toBe(0);
+  expect(legacyLastMigration.stdout.byteLength).toBe(0);
 });

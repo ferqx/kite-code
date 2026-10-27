@@ -18,7 +18,7 @@ Status: implemented
 ## Consequences
 新对话入口可在无连接时使用，但发送仍受真实项目、模型与信任约束。原生项目文件是本地选择偏好，不能推导文件执行权限。不同程序的 Git 操作不受单个桌面宿主锁协调；本轮通过发送前复查和切换前拒绝已观测冲突处理，不建立全局目录锁或自动重试。
 
-实现、限制与验证见[新对话 owner](../../../../apps/kite-desktop/docs/new-conversation.md)。回退时撤销新入口和对应 Native commands；已有 Session／History 格式不变，项目选择文件不需要迁移。
+实现、限制与验证见[新对话 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/new-conversation.md)。回退时撤销新入口和对应 Native commands；已有 Session／History 格式不变，项目选择文件不需要迁移。
 
 ## Historical relationships
 

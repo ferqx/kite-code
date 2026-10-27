@@ -279,7 +279,9 @@ try {
       const viewport = normalized(active!.viewport());
       if (
         frame.fresh &&
-        viewport.includes('Session a · Idle') &&
+        viewport.includes(`[${ordinary.id}]`) &&
+        viewport.includes('original Session a · pending · revision 1') &&
+        viewport.includes('❯ Allow once') &&
         !viewport.includes('Project sources')
       )
         break;

@@ -17,7 +17,7 @@
 
 本次现场证据：当前 checkout 的旧 daemon 返回 `protocol_version_mismatch`；release client 曾将它分类为 unavailable，随后 dead cleanup 返回 alive。本次已修复错误分类与 Web 启动失败中止，并增加独立生命周期接口以支持跨业务版本停止与重启。
 
-设计时实现入口为 [release client](../../scripts/release/app-server-daemon.ts)、[daemon owner](../../apps/kite-service/src/app-server-daemon.ts)、[endpoint owner](../../apps/kite-service/src/native-endpoint.ts)。原 `server/status`、`server/shutdown` 依赖 Runtime initialize；shutdown 会取消活动执行。目标增加稳定生命周期入口和显式 restart，不改变 Session writer 的 Store authority，不恢复 manager、watcher 或 previous-build client。
+设计时实现入口为 [release client](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts/release/app-server-daemon.ts)、[daemon owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/app-server-daemon.ts)、[endpoint owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/native-endpoint.ts)。原 `server/status`、`server/shutdown` 依赖 Runtime initialize；shutdown 会取消活动执行。目标增加稳定生命周期入口和显式 restart，不改变 Session writer 的 Store authority，不恢复 manager、watcher 或 previous-build client。
 
 设计时 TUI 手册将退出和取消区分为用户动作，但未完整说明自有服务退出对活动执行的影响；stdio transport 与 Service EOF 收尾表明自有进程不会作为共享 daemon 保留。本次已对照真实 PTY/子进程验证并补齐手册说明，明确自有服务与共享 daemon 的区别。
 

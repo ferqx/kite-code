@@ -94,46 +94,17 @@ async function proveBusiness(
     const original = row(commandId);
     expect(original.status).toBe('applied');
     expect(JSON.parse(original.request_json)).toMatchObject({ content });
-    const receipt = JSON.parse(original.receipt_json) as {
-      runId: string;
-      businessCommandId?: string;
-      humanInputCommandId?: string;
-      decisionCommandId?: string;
-    };
-    const businessId = receipt.businessCommandId ?? original.id;
+    const receipt = JSON.parse(original.receipt_json) as { runId: string };
+    const businessId = original.id;
     const publicCommand = await client.getCommand(commandId);
-    expect(publicCommand.receipt).toMatchObject({ runId: receipt.runId });
-    if (receipt.businessCommandId) {
-      expect(businessId).not.toBe(original.id);
-      const raw = row(receipt.humanInputCommandId!);
-      expect(raw).toMatchObject({
-        kind: 'human.input',
-        status: 'applied',
-        session_id: original.session_id,
-        origin_store_id: original.origin_store_id,
-        subject_id: original.subject_id,
-      });
-      expect(JSON.parse(raw.request_json)).toMatchObject({
-        publicCommandId: original.id,
-        content,
-        originalRequest: JSON.parse(original.request_json),
-      });
-      expect(JSON.parse(raw.receipt_json)).toMatchObject({
-        businessCommandId: businessId,
-        decisionCommandId: receipt.decisionCommandId,
-        state: 'decided',
-      });
-      const decision = row(receipt.decisionCommandId!);
-      expect(decision).toMatchObject({
-        kind: 'human.input.decision',
-        status: 'applied',
-        session_id: original.session_id,
-        subject_id: original.subject_id,
-      });
-      expect(JSON.parse(decision.receipt_json)).toMatchObject({ businessCommandId: businessId });
-      expect(row(businessId)).toMatchObject({ status: 'applied', session_id: original.session_id });
-      expect(JSON.parse(row(businessId).receipt_json)).toMatchObject({ runId: receipt.runId });
-    }
+    expect(publicCommand.receipt).toEqual({ runId: receipt.runId });
+    expect(
+      db
+        .query(
+          "SELECT count(*) AS n FROM command WHERE kind IN ('human.input','human.input.decision')",
+        )
+        .get(),
+    ).toEqual({ n: 0 });
     const run = await client.getRun(receipt.runId);
     expect(run).toMatchObject({ originCommandId: businessId, rootWorkCommandId });
     const view = await client.getView(original.session_id);
@@ -176,9 +147,6 @@ async function proveBusiness(
       run,
       view,
       tools,
-      decisionRequest: receipt.decisionCommandId
-        ? JSON.parse(row(receipt.decisionCommandId).request_json)
-        : undefined,
     };
   } finally {
     db.close();
@@ -385,31 +353,12 @@ nativeTest(
           ),
         ),
       ).toBe(0);
-      const resumed = await f.proof('cli', 'Follow up: resume complete answer', first.command.id);
+      const resumed = await f.proof('cli', 'Follow up: resume complete answer');
       expect(resumed.run.status).toBe('completed');
-      const resumeApplication = resumed.command.receipt as {
-        decisionCommandId: string;
-        businessCommandId: string;
-      };
-      expect(await f.client.getCommand(resumeApplication.decisionCommandId)).toMatchObject({
-        kind: 'human.input.decision',
-        status: 'applied',
-        originStoreId: f.storeId,
-        sessionId: 'cli',
-        receipt: { businessCommandId: resumeApplication.businessCommandId },
-      });
-      expect(resumed.decisionRequest).toMatchObject({
-        proposal: {
-          relation: 'same_work',
-          purpose: 'work',
-          targetRootWorkCommandId: first.command.id,
-          selectionEffect: 'keep',
-          basis: {
-            kind: 'explicit_text',
-            instruction: 'Follow up: resume complete answer',
-          },
-        },
-      });
+      expect(resumed.command.kind).toBe('run.start');
+      expect(resumed.command.receipt).toEqual({ runId: resumed.run.id });
+      expect(resumed.run.id).not.toBe(first.run.id);
+      expect(await f.client.getRun(first.run.id)).toEqual(first.run);
 
       await f.alive();
       expect((await f.client.getView('other')).runs.some((run) => run.isActive)).toBe(true);

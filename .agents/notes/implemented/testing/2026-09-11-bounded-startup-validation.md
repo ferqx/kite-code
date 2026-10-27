@@ -13,7 +13,7 @@ Status: implemented
 Service 程序仍逐次完整校验 SHA-256，使用现有算法支持的加速实现。Tokenizer 的词表初始化推迟到第一次真实计数，计数结果与授权语义不变。
 
 ## 影响与证据
-损坏内容在对应读取／恢复边界报错，不要求整个应用先拒绝启动。当前机制与并发回归见[存储 owner](../../../../packages/runtime-storage-sqlite/docs/transactions-and-state.md#按会话恢复校验)，性能样本与窗口验证限制见[Desktop 启动](../../../../apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。
+损坏内容在对应读取／恢复边界报错，不要求整个应用先拒绝启动。当前机制与并发回归见[存储 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/runtime-storage-sqlite/docs/transactions-and-state.md#按会话恢复校验)，性能样本与窗口验证限制见[Desktop 启动](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。
 
 ## Alternatives considered
 

@@ -25,6 +25,22 @@ try {
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
+    return (
+      state &&
+      'selection' in state &&
+      state.selection?.session.id === 's' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadPermissionGrants
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   const panel = page.getByRole('region', { name: '当前会话授权目录' });
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
@@ -40,6 +56,31 @@ try {
   assert.equal(await app.evaluate('globalThis.__grantPosts'), 1);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
+    return (
+      state &&
+      'selection' in state &&
+      state.selection?.session.id === 'other' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadPermissionGrants
+    );
+  });
+  await page.waitForFunction(async () => {
+    const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
+    return (
+      state &&
+      'selection' in state &&
+      state.selection?.session.id === 'other' &&
+      !state.selection.viewLoading
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText(/实际会话：other；授权版本：/).waitFor();
@@ -52,12 +93,44 @@ try {
   await app.evaluate('globalThis.fetch=globalThis.__grantOriginal');
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
+    return (
+      state &&
+      'selection' in state &&
+      state.selection?.session.id === 's' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadPermissionGrants
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText('此页没有授权记录。', { exact: true }).waitFor();
   assert.equal(await count(), 0);
   await page.getByRole('button', { name: 'Native B', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native B', { exact: true }).waitFor();
+  await page.waitForFunction(async () => {
+    const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
+    return (
+      state &&
+      'selection' in state &&
+      state.selection?.session.id === 'other' &&
+      !state.selection.viewLoading &&
+      state.selection.canReadPermissionGrants
+    );
+  });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+        ?.getAttribute('contenteditable') === 'true',
+  );
   await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText(/实际会话：other；授权版本：/).waitFor();

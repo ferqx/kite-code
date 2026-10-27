@@ -1,15 +1,16 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ClientError, createServiceLifecycleClient } from '@kite-ai/client';
 import { retainProcessObservation, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { callerCanonical } from '../../host/caller-intents';
-import { runSelectedDaemon } from '../../host/daemon';
+import type { runSelectedDaemon } from '../../host/daemon';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { recoveryProfile } from '../fixtures/recovery-profile';
+import { workflowManifest } from '../fixtures/workflow-manifest';
 
 const repo = resolve(import.meta.dir, '../../../..');
 // Unknown native closure retains the actual owner and its self-owned files for diagnosis.
@@ -45,7 +46,26 @@ async function stopCaller(child: Bun.Subprocess) {
 for (const connection of ['paired', 'shared'] as const)
   test(`actual ${connection} work argv durable POST loss + SIGKILL and cold caller argv first GET loss preserve complete Workflow request and zero POST`, async () => {
     const started = Date.now();
-    const f = await recoveryProfile();
+    const f = await recoveryProfile({ holdModelCommandId: 'cli-original' });
+    const skill = join(f.profile.profilePath, 'skills', 'caller-owned');
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(
+      join(skill, 'SKILL.md'),
+      `---\n${JSON.stringify({ ...workflowManifest('caller-owned'), input_schema: { type: 'object', properties: { full: { type: 'string' } }, required: ['full'], additionalProperties: false } })}\n---\nPreserve this original no-effect caller workflow.\n`,
+    );
+    const config = JSON.parse(readFileSync(f.userConfiguration.path, 'utf8'));
+    writeFileSync(
+      f.userConfiguration.path,
+      JSON.stringify({ ...config, skills: [{ id: 'caller-owned', path: skill }] }),
+    );
+    writeFileSync(
+      join(f.profile.profilePath, 'skill-workflow.jsonc'),
+      JSON.stringify({
+        version: 1,
+        features: { skillActivation: true, skillWorkflow: true, verification: false },
+      }),
+      { mode: 0o600 },
+    );
     const candidateParent = join(f.root, 'candidate-parent');
     privateDirectory(candidateParent);
     const candidateRoot = join(candidateParent, 'candidate');
@@ -58,6 +78,55 @@ for (const connection of ['paired', 'shared'] as const)
       ...(process.platform === 'win32' ? {} : { explicitSocket: join(f.root, 'cli.sock') }),
     }).socket;
     let daemonArtifact: Parameters<typeof runSelectedDaemon>[0]['artifact'];
+    // A separate owned launcher selects the fixture HOME before Bun caches it.
+    // Retain that launcher's lifetime until explicit daemon stop under --no-orphans.
+    const daemonRunner = join(f.root, 'daemon-runner.ts');
+    writeFileSync(
+      daemonRunner,
+      `import {runSelectedDaemon} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/daemon.ts')).href)}; const input=JSON.parse(process.argv[2]!);await runSelectedDaemon({...input,write(){}});if(input.arguments.action==='start'){console.log('OWNED_DAEMON_READY');await Bun.stdin.text();}`,
+    );
+    let daemonLauncher: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+    let daemonOutput: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    const runFixtureDaemon = async (input: Parameters<typeof runSelectedDaemon>[0]) => {
+      const host = Bun.spawn([process.execPath, daemonRunner, JSON.stringify(input)], {
+        env: { ...process.env, ...f.userConfiguration.homeEnvironment },
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      if (input.arguments.kind === 'server' && input.arguments.action === 'start') {
+        daemonLauncher = host;
+        daemonOutput = host.stdout.getReader();
+        const ready = await daemonOutput.read();
+        if (ready.done || !new TextDecoder().decode(ready.value).includes('OWNED_DAEMON_READY'))
+          throw Error(
+            `caller_fixture_daemon_start_failed:${await new Response(host.stderr).text()}`,
+          );
+        return;
+      }
+      host.stdin.end();
+      const [code, out, err] = await Promise.all([
+        host.exited,
+        new Response(host.stdout).text(),
+        new Response(host.stderr).text(),
+      ]);
+      if (code !== 0) throw Error(`caller_fixture_daemon_failed:${out}\n${err}`);
+      if (daemonLauncher) {
+        daemonLauncher.stdin.end();
+        const [launcherCode, launcherErr] = await Promise.all([
+          daemonLauncher.exited,
+          new Response(daemonLauncher.stderr).text(),
+        ]);
+        if (launcherCode !== 0)
+          throw Error(`caller_fixture_daemon_launcher_exit_unknown:${launcherErr}`);
+        if (daemonOutput) {
+          while (!(await daemonOutput.read()).done) {}
+          daemonOutput.releaseLock();
+          daemonOutput = undefined;
+        }
+        daemonLauncher = undefined;
+      }
+    };
     let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let building: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let buildResult: Promise<[string, string, number]> | undefined;
@@ -212,7 +281,7 @@ for (const connection of ['paired', 'shared'] as const)
       seed = undefined;
       if (connection === 'shared') {
         daemonArtifact = artifact;
-        await runSelectedDaemon({
+        await runFixtureDaemon({
           arguments: {
             kind: 'server',
             action: 'start',
@@ -240,7 +309,11 @@ for (const connection of ['paired', 'shared'] as const)
             definitionVersion: '1',
             input: {
               activations: [
-                { skillId: 'skill:unconfigured', input: { full: '保留完整正文🙂\r\n' } },
+                {
+                  key: 'original-workflow',
+                  skillId: 'skill:caller-owned',
+                  input: { full: '保留完整正文🙂\r\n' },
+                },
               ],
             },
           },
@@ -254,6 +327,7 @@ for (const connection of ['paired', 'shared'] as const)
           `import{appendFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{runSelectedCLI}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/index.ts')).href)};import{parseCLIArguments}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/src/arguments.ts')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};const actualSpawn=Bun.spawn.bind(Bun);Bun.spawn=((...args)=>{const original=actualSpawn(...args);const command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(artifact.entrypoint)})){writeFileSync(${JSON.stringify(`${currentPIDPath}.spawned`)},JSON.stringify({pid:original.pid,start:readProcessStartIdentity(original.pid),entrypoint:${JSON.stringify(artifact.entrypoint)}}));}return original;});const actual=fetch;let drop=true,forwarding='';const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});const json=await response.json();appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',mode:${JSON.stringify(mode)},method:req.method,json})+'\\n');res.socket!.destroy();${mode === 'post' ? "if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');" : ''}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const address=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',mode:${JSON.stringify(mode)},method,path:url.pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');${mode === 'prepared' ? `if(method==='POST'&&url.pathname==='/v1/sessions/s/commands'){writeFileSync(${JSON.stringify(`${base}.prepared-barrier`)},'prepared');if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');}` : ''}if(drop&&${mode === 'post' ? "method==='POST'&&url.pathname==='/v1/sessions/s/commands'" : mode === 'get' ? "method==='GET'&&url.pathname==='/v1/commands/cli-original'" : 'false'}){drop=false;forwarding=url.href;const pending=actual('http://127.0.0.1:'+address.port+url.pathname,args[1]);${mode === 'post' ? `if(process.platform==='win32'){void pending.catch(()=>{});await new Promise(()=>{});}` : ''}return pending;}return actual(...args);},{preconnect:actual.preconnect});const hostExit=new AbortController();try{process.exitCode=await runSelectedCLI({exitSignal:hostExit.signal,arguments:parseCLIArguments(${JSON.stringify(argv)}),artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)},onLaunched:c=>writeFileSync(${JSON.stringify(currentPIDPath)},JSON.stringify({pid:c.pid,start:readProcessStartIdentity(c.pid),bootstrap:c.bootstrap})),write:l=>{console.log(l);if(${mode === 'normal'}&&JSON.parse(l).kind==='work.event'&&(JSON.parse(l).line.startsWith('accepted ')||JSON.parse(l).line.includes('outcome_unknown')))hostExit.abort();},prompt:l=>process.stderr.write(l)});}finally{relay.close();}`,
         );
         child = Bun.spawn([process.execPath, runner], {
+          env: { ...process.env, ...f.userConfiguration.homeEnvironment },
           stdout: 'pipe',
           stderr: 'pipe',
           stdin: 'ignore',
@@ -364,8 +438,20 @@ for (const connection of ['paired', 'shared'] as const)
         ['caller', 'lookup', 's', '--input', JSON.stringify(intent)],
         'normal',
       );
-      expect(second.out).toContain('"phase":"accepted"');
-      expect(second.code).toBe(2);
+      const observed = JSON.parse(second.out);
+      expect(observed.phase).toBe(connection === 'shared' ? 'applied' : 'accepted');
+      expect(second.code).toBe(connection === 'shared' ? 0 : 2);
+      if (connection === 'shared') {
+        const applied = observed.command;
+        expect(applied.id).toBe(request.commandId);
+        expect(applied.status).toBe('applied');
+        const stored = f.rows(
+          `SELECT origin_command_id,root_work_command_id FROM run WHERE id='${applied.receipt.runId}'`,
+        );
+        expect(stored).toEqual([
+          { origin_command_id: request.commandId, root_work_command_id: request.commandId },
+        ]);
+      }
       const same = await launch(['work', 's', '--input', JSON.stringify(request)], 'normal');
       expect(same.code).toBe(2);
       const drift = await launch(
@@ -516,7 +602,7 @@ for (const connection of ['paired', 'shared'] as const)
         }
       if (daemonArtifact)
         try {
-          await runSelectedDaemon({
+          await runFixtureDaemon({
             arguments: {
               kind: 'server',
               action: 'stop',
@@ -677,28 +763,11 @@ test('actual paired main work JSON waits through original Tool approval and comp
     });
     expect(original.request_digest).toBe(lines[0].intent.requestDigest);
     const application = JSON.parse(original.receipt_json);
-    expect(application).toMatchObject({ outcome: 'human_input_applied', runId: result.run.id });
-    expect(result.run.originCommandId).toBe(application.businessCommandId);
-    expect(result.run.rootWorkCommandId).toBe('cli-complete');
-    const raw = f.rows(
-      "SELECT i.request_json,i.request_digest FROM command p JOIN command i ON i.id=json_extract(p.receipt_json,'$.humanInputCommandId') WHERE p.id='cli-complete'",
-    )[0] as { request_json: string; request_digest: string };
-    expect(JSON.parse(raw.request_json)).toMatchObject({
-      kind: 'human.input',
-      publicCommandId: request.commandId,
-      content: request.content,
-      originalRequest: JSON.parse(original.request_json),
-    });
-    const decision = f.rows(
-      "SELECT d.request_json FROM command p JOIN command d ON d.id=json_extract(p.receipt_json,'$.decisionCommandId') WHERE p.id='cli-complete'",
-    )[0] as { request_json: string };
-    expect(JSON.parse(decision.request_json)).toMatchObject({
-      inputCommandId: application.humanInputCommandId,
-      inputDigest: raw.request_digest,
-      proposal: { relation: 'independent_work', purpose: 'work' },
-    });
+    expect(application).toEqual({ runId: result.run.id });
+    expect(result.run.originCommandId).toBe(request.commandId);
+    expect(result.run.rootWorkCommandId).toBe(request.commandId);
     const business = f.rows(
-      "SELECT b.id,b.status,b.origin_store_id,b.root_work_command_id,b.receipt_json FROM command p JOIN command b ON b.id=json_extract(p.receipt_json,'$.businessCommandId') WHERE p.id='cli-complete'",
+      "SELECT id,status,origin_store_id,root_work_command_id,receipt_json FROM command WHERE id='cli-complete'",
     )[0] as {
       id: string;
       status: string;
@@ -707,16 +776,17 @@ test('actual paired main work JSON waits through original Tool approval and comp
       receipt_json: string;
     };
     expect(business).toMatchObject({
-      id: application.businessCommandId,
+      id: request.commandId,
       status: 'applied',
       origin_store_id: f.storeId,
-      root_work_command_id: 'cli-complete',
+      root_work_command_id: request.commandId,
     });
-    expect(JSON.parse(business.receipt_json)).toMatchObject({
-      runId: result.run.id,
-      humanInputCommandId: application.humanInputCommandId,
-      decisionCommandId: application.decisionCommandId,
-    });
+    expect(JSON.parse(business.receipt_json)).toEqual({ runId: result.run.id });
+    expect(
+      f.rows(
+        "SELECT count(*) AS n FROM command WHERE kind IN ('human.input','human.input.decision')",
+      ),
+    ).toEqual([{ n: 0 }]);
     const executions = f.rows(
       "SELECT e.kind,e.origin_command_id,e.origin_store_id,e.root_work_command_id FROM command p JOIN execution e ON e.run_id=json_extract(p.receipt_json,'$.runId') WHERE p.id='cli-complete' ORDER BY e.rowid",
     ) as {

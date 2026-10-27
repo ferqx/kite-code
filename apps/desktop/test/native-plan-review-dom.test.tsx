@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { verifyInteractionAnswerReceipt } from '../src/controller';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../src/native-bridge';
-import { prepareDesktopDom, promptValue } from './native-page-dom.fixture';
+import { nextDesktopPresentation, prepareDesktopDom, promptValue } from './native-page-dom.fixture';
 
 test('Native page keeps exact plan drafts across sessions, missing pages and read failure; accepted answers or observed original Run cancellation clear only that draft', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -196,6 +196,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       )!;
       expect(button).toBeDefined();
       button.click();
+      if (button.classList.contains('session-row')) await nextDesktopPresentation(dom);
     });
   const text = () =>
     host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
@@ -344,7 +345,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       request: { grants: ['approve_once'] },
     };
     await refresh();
-    expect(mainInput() === null).toBe(true);
+    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
     expect(posts).toBe(1);
   } finally {
     await act(async () => root.unmount());

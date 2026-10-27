@@ -431,36 +431,28 @@ test('each trusted Run selects its own extension context hook without substituti
     });
     const receipt = second.receipt as {
       runId: string;
-      businessCommandId: string;
-      humanInputCommandId: string;
     };
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe(second.id);
-    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      request: {
-        publicCommandId: second.id,
-        content: 'New task: second',
-        originalRequest: second.request,
-      },
-    });
-    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
+    expect(receipt.runId).toBeString();
+    expect(receipt).not.toHaveProperty('businessCommandId');
+    expect(receipt).not.toHaveProperty('humanInputCommandId');
+    expect(await f.store.getCommand(second.id)).toMatchObject({
       status: 'applied',
       request: { content: 'New task: second' },
       receipt: { runId: receipt.runId },
     });
     expect(await f.store.getRun(receipt.runId)).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: second.id,
       rootWorkCommandId: second.id,
     });
     expect(f.model.requests).toHaveLength(2);
     expect(await f.store.getExecution(f.model.requests[1]!.requestId)).toMatchObject({
       runId: receipt.runId,
-      originCommandId: receipt.businessCommandId,
+      originCommandId: second.id,
       status: 'succeeded',
     });
     expect(
       f.model.requests[1]!.messages.find((m) => m.content === 'New task: second')?.sourceIds,
-    ).toEqual([receipt.businessCommandId]);
+    ).toEqual([second.id]);
     for (const [index, request] of f.model.requests.entries()) {
       const message = request.messages.find((m) => m.sourceIds?.includes('perrun:business'))!;
       expect(message.role).toBe('user');

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeAnswerRecord } from '../electron/answer-journal';
 import type { NativeRequest, NativeState } from '../src/native-bridge';
+import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -55,6 +56,7 @@ try {
       }
     }, privatePath);
   await page.getByRole('button', { name: 's', exact: true }).click();
+  await selectNativeFixtureModel(page, 'fixed');
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('one original question');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   const shown = await until((s) => s.selection?.interactions.length === 1);

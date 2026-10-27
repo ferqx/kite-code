@@ -6,7 +6,7 @@
 
 Runtime 功能开关注册在 `apps/kite-service/src/config/features.ts`；CLI只保留显式拒绝已退役本地override的presentation parser。配置从用户级和项目级 `kite-code.jsonc` 的可选 `features` 对象读取；项目值覆盖用户值。
 
-当前公开 CLI 拒绝 `--feature`（包括 true/false），不能使用旧的单次运行覆盖示例。配置与 release composition 按各自边界解析已注册名称；实际默认值见 [features 源码](../../apps/kite-service/src/config/features.ts)。
+当前公开 CLI 拒绝 `--feature`（包括 true/false），不能使用旧的单次运行覆盖示例。配置与 release composition 按各自边界解析已注册名称；实际默认值见 [features 源码](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-service/src/config/features.ts)。
 
 新增开关必须默认 `false` 并覆盖两个取值的测试。Kite Code 未发布；当 current 路径成为唯一生产语义后，必须删除旧分支与对应 flag，不保留回滚 alias。只有相关 Agent Note 已记录实施决定、当前 owner 文档与实现一致，且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。
 
@@ -106,3 +106,5 @@ telemetry 也全部关闭。production composition 必须携带 registry 接受�
 压缩原因固定为 `manual | auto`。自动模式固定为 `off | shadow | live`：`off` 不判断，`shadow` 只计算 trigger eligibility 术语（触发资格）且不调用摘要模型、不写 checkpoint 术语（检查点），`live` 命中阈值后产生 `reason=auto`。默认 flag 术语（功能开关）为 `false`，且未配置 `autoMode` 时按 `off` 处理。
 
 通用 HTTP 400、其他 Provider 术语（模型供应商）失败、token ratio 术语（文本计量比例）或压缩失败都不会创建 hard block 术语（硬阻断）；用户可在会话恢复交互后自行执行 `/compact`。
+
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。

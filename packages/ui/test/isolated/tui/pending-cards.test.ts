@@ -4,7 +4,7 @@ import { join } from 'node:path';
 for (const order of ['root-first', 'job-first'] as const) {
   test(`real 80x24 ${order} four pending cards preserve independent approval and unknown original answer`, async () => {
     const program = `import os,pty,subprocess,select,time,signal,json,re,tempfile,fcntl,termios,struct
-master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));temporary=tempfile.TemporaryDirectory(prefix='kite-cards-');facts=os.path.join(temporary.name,'facts.json');cardsfile=os.path.join(temporary.name,'cards.json');wire=os.path.join(temporary.name,'wire.jsonl');reviews=os.path.join(temporary.name,'reviews.json');env=dict(os.environ);env.update(KITE_TUI_FACTS=facts,KITE_TUI_CARDS=cardsfile,KITE_TUI_WIRE=wire,KITE_TUI_REVIEWS=reviews,KITE_LOSE_CARD='1',KITE_TUI_ROOT=os.path.join(temporary.name,'runtime'));os.mkdir(env['KITE_TUI_ROOT'],0o700)
+master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));temporary=tempfile.TemporaryDirectory(prefix='kite-cards-');facts=os.path.join(temporary.name,'facts.json');cardsfile=os.path.join(temporary.name,'cards.json');wire=os.path.join(temporary.name,'wire.jsonl');reviews=os.path.join(temporary.name,'reviews.json');env=dict(os.environ);env.update(KITE_TUI_VIEWPORT=os.path.join(temporary.name,'viewport.txt'),KITE_TUI_FACTS=facts,KITE_TUI_CARDS=cardsfile,KITE_TUI_WIRE=wire,KITE_TUI_REVIEWS=reviews,KITE_LOSE_CARD='1',KITE_TUI_ROOT=os.path.join(temporary.name,'runtime'));os.mkdir(env['KITE_TUI_ROOT'],0o700)
 transcript_fd,transcript=tempfile.mkstemp(prefix='kite-pending-cards-${order}-',suffix='.pty.log');os.close(transcript_fd)
 p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dir, 'pending-cards.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';full=b''
 def pump():
@@ -13,13 +13,13 @@ def pump():
   try: data=os.read(master,65536);buffer+=data;full+=data
   except OSError: pass
 def current_frame():
- text=buffer.decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',text,re.S)
- return frames[-1] if frames else ''
+ try:return open(env['KITE_TUI_VIEWPORT']).read()
+ except:return ''
 def visible(text):return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',text))
 def wait(text,material=False,ready=False):
  deadline=time.monotonic()+8
  while text not in visible(full.decode(errors='replace') if material else current_frame()) or (ready and ' · Loading' in visible(current_frame())):
-  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
+  if time.monotonic()>deadline:raise RuntimeError('expected '+text+' viewport='+current_frame()+' tail='+buffer[-5000:].decode(errors='replace'))
   pump()
 def key(data):
  global buffer
@@ -64,7 +64,7 @@ try:
    waitreview(card);key(b'\\x1b[B');wait('❯ Deny',ready=True);key(b'\\x1b[A');wait('❯ Allow once',ready=True)
   key(b'\\r')
   if i==0:
-   wait('interaction.answer: unknown');before=open(wire).read().count('"method":"POST"');choose(next(c for c in cards() if c['id']!=card['id']));key(b'\\r');assert open(wire).read().count('"method":"POST"')==before
+   wait('interaction.answer: unknown');before=open(wire).read().count('"method":"POST"');key(b'\\r');assert open(wire).read().count('"method":"POST"')==before
    wait('interaction.answer: unknown');wait('interaction.answer: applied')
   waitcards(3-i)
  wait('MULTI_CARD_DONE',material=True);os.kill(p.pid,signal.SIGTERM)

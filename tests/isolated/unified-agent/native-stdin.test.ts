@@ -78,11 +78,7 @@ test.skipIf(process.platform !== 'darwin')(
           expect(titleCalls).toBe(1);
           expect(body.tools ?? []).toEqual([]);
           const titleUsers = body.messages.filter((message) => message.role === 'user');
-          expect(titleUsers).toHaveLength(2);
-          expect(titleUsers[0]!.content).toBe('完整 Native stdin 申请 中🪁');
-          expect(titleUsers[1]!.content).toMatch(
-            /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
-          );
+          expect(titleUsers).toEqual([{ role: 'user', content: '完整 Native stdin 申请 中🪁' }]);
           const frame = (delta: unknown, finish_reason: string | null) =>
             `data: ${JSON.stringify({ id: 'stdin-title', object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
           return new Response(
@@ -382,11 +378,7 @@ test.skipIf(process.platform !== 'darwin')(
       expect(view.runs).toHaveLength(1);
       expect(titleCalls).toBe(1);
       expect(view.session.title).toBe('输入问答');
-      const titleIds = [
-        'agent/session-title',
-        'builtin.session-title/fallback',
-        'builtin.session-title/generate',
-      ];
+      const titleIds = ['builtin.session-title/fallback', 'builtin.session-title/generate'];
       const titleExecutions = view.executions.filter((execution) =>
         titleIds.includes(execution.definitionId),
       );
@@ -399,7 +391,11 @@ test.skipIf(process.platform !== 'darwin')(
             !titleIds.includes(execution.definitionId),
         ),
       ).toEqual([]);
-      expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(2);
+      expect(
+        view.executions.filter(
+          (execution) => execution.kind === 'model' && execution.runId !== null,
+        ),
+      ).toHaveLength(2);
       expect(
         view.executions.filter((execution) => execution.definitionId === 'ask_user'),
       ).toHaveLength(1);
@@ -408,18 +404,20 @@ test.skipIf(process.platform !== 'darwin')(
       const generation = titleExecutions.find(
         (execution) => execution.definitionId === 'builtin.session-title/generate',
       )!;
-      const carrier = titleExecutions.find(
-        (execution) => execution.definitionId === 'agent/session-title',
-      )!;
-      const titleChildSessionId = carrier.childSessionId;
-      expect(titleChildSessionId).toBeString();
-      expect(carrier.parentExecutionId).toBe(generation.id);
-      const titleChild = await client.getView(titleChildSessionId!);
-      expect(titleChild.session.parentSessionId).toBe(original.sessionId);
-      expect(titleChild.runs).toHaveLength(1);
-      expect(titleChild.runs[0]!.status).toBe('completed');
-      expect(titleChild.executions).toHaveLength(1);
-      expect(titleChild.executions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
+      const titleModels = view.executions.filter(
+        (execution) => execution.kind === 'model' && execution.runId === null,
+      );
+      expect(titleModels).toHaveLength(1);
+      const titleModel = titleModels[0]!;
+      expect(titleModel).toMatchObject({
+        sessionId: original.sessionId,
+        kind: 'model',
+        runId: null,
+        status: 'succeeded',
+        parentExecutionId: generation.id,
+        childSessionId: null,
+      });
+      expect(view.executions.some((execution) => execution.childSessionId !== null)).toBe(false);
       const history = await client.listMessages(original.sessionId, {
         afterSeq: '0',
         upperSeq: view.session.nextSeq,

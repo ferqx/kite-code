@@ -1,51 +1,11 @@
-# 审批、问答、方案审核与继续
+# 审批、问题与计划交互
 
-触发：Kernel/执行流程产生需要用户处理的 interaction。产品入口见[TUI 交互](../../handbook/clients/tui/guides/approvals-and-questions.md)。
+原 Execution 创建待人交互，Service/Client 交付有限事实，UI 只提交原 Interaction 的答案。权限模式、普通问答、计划审阅及 MCP 认证分别沿各 owner 的受控操作处理。
 
-## 当前交接与身份
+实现与局部验证：[权限](../../../packages/agent/src/permissions/README.md)、[普通问题](../../../packages/agent/src/tools/ask-user/README.md)、[计划](../../../packages/agent/src/business/planning/README.md)、[TUI](../../../packages/ui/src/tui/README.md)、[Desktop](../../../apps/desktop/README.md)。
 
-执行侧的 [CliRuntimeBridge.inspectCommand](../../../apps/kite-service/src/bootstrap/runtime/CliRuntimeBridge.ts) 从当前 pending interaction 或 State 恢复 effect，核对完整 interaction identity，并由 `mapRuntimeInteractionResponseToUserAction` 把 `respond_interaction` 转成用户动作。检查通过后才由 [RuntimeSessionCoordinator.commitInteractionCommand](../../../apps/kite-service/src/bootstrap/runtime/RuntimeSessionCoordinator.ts) 在命令事务中提交事件及回执；[DefaultRuntimeHost.command](../../../packages/runtime-host/src/host/runtime-host.ts) 只在 applied 回执持久化后 activation，并把同一 command/revision 绑定的 prepared continuation 交给执行调度。这里的 queue/projection 是持久状态的客户端视图，面板关闭不是执行继续的证据。
+答案必须绑定原 Store/Session/Run/Interaction 和实际 revision，迟到答复不能继续后来工作。模式改变须经原持久控制与最终派发复核，界面移除卡片不表示批准。写入未知只查原申请；取消、unknown 和必要条件不能被交互显示覆盖。
 
-TUI 的 [interactionCommandForAction](../../../apps/kite-cli/src/service-mode/tui-client.ts) 发送 interaction、`expectedRevision` 与按类型编码的 response；同文件的 Native client 等待 applied/idempotent 回执。revision 竞态时重新读取权威 projection，只有稳定 identity 仍相同才用同一 command ID 重建交互与 CAS revision；不存在、已结算或身份不匹配的交互不能继续提交。`#submitUserAction` 按 interaction ID 在已登记 Session 中查找唯一所属记录，不以当前前台 Session 重新归属；后台仍有效的交互不能等同于过期交互。facade 按交互身份路由与 TUI 当前焦点提交属于不同边界，不能由其一推断另一方的时序行为。问答的结构化选项 ID 用于内部校验，投给模型与历史的是问题和选项文案，见[客户端 owner 说明](../../../apps/kite-cli/docs/approvals-and-interactions.md)。
+共同约束以[当前八 workspace 边界](../../active/unified-agent-boundary.md)及对应 owner 为准。定向测试、真实客户端过程和平台资格分别说明，不从源码存在或最终截图推定完整行为通过。
 
-```mermaid
-sequenceDiagram
-  participant K as Kernel
-  participant H as Host / Service
-  participant D as Store
-  participant C as Client
-  K-->>H: 当前 interaction 与 owner
-  H->>D: 持久交互事实
-  H-->>C: active queue / projection
-  C->>H: respond_interaction + identity + revision
-  H->>H: Host revision / Service interaction identity 校验
-  alt 前置 revision 冲突或 interaction 不匹配
-    H-->>C: conflict / rejected（不提交本次交互决定）
-  else 接受当前响应进入命令事务
-    H->>K: 当前用户动作与决定 facts
-    K-->>H: 状态变化与后续 effect
-    H->>D: 事务内提交决定、状态与 applied receipt
-    D-->>H: 持久回执复核
-    H-->>C: applied receipt / canonical projection
-    H->>H: 按调度与 cleanup 条件继续
-  end
-```
-
-[Host 命令处理](../../../packages/runtime-host/src/host/runtime-host.ts)在前置 revision 冲突或 bridge 返回 terminal inspection 时直接返回；[Service bridge](../../../apps/kite-service/src/bootstrap/runtime/CliRuntimeBridge.ts)可在用户动作映射前返回 `interaction_mismatch`。图中的前置拒绝是请求校验结果，与用户有效提交“拒绝工具”的持久决定不同。事务本身也可能失败，未取得 applied 回执不能宣称决定已提交；此图不把恢复准入等其他事实概括为“整个请求绝无写入”。[持久命令测试](../../../packages/runtime-host/test/persistent-command-host.test.ts)的 `does not persist terminal non-applied receipts` 断言该 terminal 路径不保存命令回执、不调用决定 commit。
-
-| 交接 | 要求 |
-| --- | --- |
-| 展示 | 只对当前 active interaction 取焦点，后台 pending 不抢占 |
-| 用户提交 | interactionId、generation、owner、Session/revision 对应当前请求 |
-| 提交结果 | receipt 未接受前保持交互；错误不伪装已回答 |
-| 继续 | 以 Kernel 决定与真实执行状态为准，不以关闭面板为准 |
-
-重复 projection 不追加第二个相同问题；旧交互回答不能作用于新会话。snapshot 按完整 queue 替换本地集合，不能把旧 pending 永久并入。方案批准同时确定相应执行方式，不用前置模式切换破坏审核身份。
-
-拒绝与 Ctrl+C 整轮取消分别记录语义，但都需要真实 terminal 和清理。回答提交失败保留诊断与原请求，不能补发无关 cancel。
-
-适用范围：审批、问答和方案审核的上述客户端动作核实到 TUI；Service/Host/Kernel 的提交语义是共享路径。CLI 也有 [respondInteractionCommand](../../../apps/kite-cli/src/cli/index.ts) 入口，但其呈现和重试不由 TUI 断言覆盖；Web 只读。Desktop 交互需按其 UI 调用与回执处理单独核实。原始设计理由未找到；现有明确约束是回答必须匹配当前交互身份、回执和 revision，避免过期回答作用于新请求。
-
-验证入口：[Native TUI facade 测试](../../../apps/kite-cli/test/service-mode/tui-client.test.ts)覆盖 queue 替换、交互冲突重试及 stale cancel；[Host 测试](../../../packages/runtime-host/test/runtime-host.test.ts)覆盖恢复后 continuation。当前产品手册记录了 [Esc 拒绝提交态差异](../../handbook/clients/tui/guides/approvals-and-questions.md)，不能把 Enter 的等待反馈推广到 Esc。
-
-底层：[客户端交互](../../../apps/kite-cli/docs/approvals-and-interactions.md)、[Kernel](../../../packages/agent-kernel/docs/scheduling-authorization.md)、[Host](../../../packages/runtime-host/docs/commands-mailbox.md)。验证：[approval queue](../../../packages/agent-kernel/test/approval-queue.test.ts)、[交互治理](../../../packages/agent-kernel/test/interaction-governance.test.ts)、[问答 PTY](../../../tests/tui-system/scenarios/ask-user-esc.test.ts)。
+旧 Host/Kernel/SPI 实现的[历史说明](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/docs/development/flows/interactions.md)只供删除前设计与证据追溯，不能恢复为当前 owner 或运行入口。

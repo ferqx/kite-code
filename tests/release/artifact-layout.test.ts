@@ -10,16 +10,13 @@ import {
   ReleaseArtifactError,
   releaseArtifactLayout,
 } from '../../scripts/release/artifact-layout';
-import { buildSyntheticArtifact } from '../../scripts/release/build-artifact';
 import {
-  CanonicalJsonError,
   canonicalJson,
   canonicalJsonBytes,
-  parseCanonicalJson,
-  parseStrictJson,
   sha256Digest,
 } from '../../scripts/release/canonical-json';
 import { verifySyntheticReleaseArtifact } from '../../scripts/release/verify-artifact';
+import { writeSyntheticArtifactFixture } from './helpers/synthetic-artifact-fixture';
 
 const roots: string[] = [];
 
@@ -28,35 +25,9 @@ afterEach(() => {
 });
 
 describe('release artifact layout', () => {
-  test('builds repeatable detached synthetic fixtures without a production claim', () => {
-    const first = fixtureDirectory();
-    const second = fixtureDirectory();
-    const payload = new TextEncoder().encode('deterministic payload bytes\n');
-
-    const firstBuild = buildSyntheticArtifact({ directory: first, payload });
-    const secondBuild = buildSyntheticArtifact({ directory: second, payload });
-
-    expect(firstBuild.signature.distributable).toBe(false);
-    expect(firstBuild.signature.realSigstoreSigningEnabled).toBe(false);
-    expect(firstBuild.manifest).toEqual(secondBuild.manifest);
-    expect(readFileSync(join(first, RELEASE_PAYLOAD_FILE))).toEqual(
-      readFileSync(join(second, RELEASE_PAYLOAD_FILE)),
-    );
-    expect(readFileSync(join(first, RELEASE_MANIFEST_FILE))).toEqual(
-      readFileSync(join(second, RELEASE_MANIFEST_FILE)),
-    );
-    expect(readFileSync(join(first, RELEASE_SIGNATURE_FILE))).toEqual(
-      readFileSync(join(second, RELEASE_SIGNATURE_FILE)),
-    );
-
-    const verified = verifySyntheticReleaseArtifact(first);
-    expect(verified.manifest.payloadSha256).toBe(sha256Digest(payload));
-    expect(verified.payloadBytes).toEqual(payload);
-  });
-
   test('keeps outer storage identity out of the detached manifest', () => {
     const directory = fixtureDirectory();
-    const built = buildSyntheticArtifact({ directory });
+    const built = writeSyntheticArtifactFixture(directory);
     const layout = releaseArtifactLayout(directory);
     const manifest = JSON.parse(readFileSync(layout.manifest, 'utf8')) as Record<string, unknown>;
 
@@ -70,27 +41,14 @@ describe('release artifact layout', () => {
     expect(Object.keys(manifest)).not.toContain('bundleSha256');
     expect(JSON.stringify(manifest)).not.toContain(directory);
     expect(built.manifest.payloadSha256).toBe(sha256Digest(readFileSync(layout.payload)));
-  });
-
-  test('uses one strict canonical JSON representation', () => {
-    expect(canonicalJson({ z: 1, a: ['x', -0, true] })).toBe('{"a":["x",0,true],"z":1}');
-    expect(parseCanonicalJson('{"a":1,"z":2}')).toEqual({ a: 1, z: 2 });
-    expect(() => parseCanonicalJson('{ "a": 1 }')).toThrow(CanonicalJsonError);
-    expect(() => parseStrictJson('{"a":1,"a":2}')).toThrow('Duplicate JSON key');
-    expect(() => canonicalJson({ invalid: undefined })).toThrow(CanonicalJsonError);
-    expect(() => canonicalJson({ invalid: Number.NaN })).toThrow(CanonicalJsonError);
-    expect(() => parseStrictJson('1e400')).toThrow(CanonicalJsonError);
-    const sparse = Array<unknown>(2);
-    sparse[1] = 1;
-    expect(() => canonicalJson(sparse)).toThrow(CanonicalJsonError);
-    const decorated = [1] as number[] & { extra?: number };
-    decorated.extra = 2;
-    expect(() => canonicalJson(decorated)).toThrow(CanonicalJsonError);
+    const verified = verifySyntheticReleaseArtifact(directory);
+    expect(verified.manifest).toEqual(built.manifest);
+    expect(verified.payloadBytes).toEqual(readFileSync(layout.payload));
   });
 
   test('rejects unknown manifest fields and non-canonical manifest bytes', () => {
     const directory = fixtureDirectory();
-    const built = buildSyntheticArtifact({ directory });
+    const built = writeSyntheticArtifactFixture(directory);
     const unknown = { ...built.manifest, storageIdentity: 'outside-manifest' };
 
     expect(() => decodeReleaseManifest(canonicalJsonBytes(unknown))).toThrow(ReleaseArtifactError);

@@ -399,7 +399,7 @@ test.skipIf(process.platform !== 'darwin')(
           tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
             id,
             enabled: enabled.has(id),
-            ...(id === 'files.write' ? { definitionVersion: '2' } : {}),
+            ...(id === 'files.write' ? { definitionVersion: '3' } : {}),
           })),
         }),
       );
@@ -409,6 +409,9 @@ test.skipIf(process.platform !== 'darwin')(
         readFileSync(
           resolve(import.meta.dir, '../native-collaboration-electron.fixture.ts'),
           'utf8',
+        ).replace(
+          "'./native-model-selection.fixture'",
+          JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
         ),
       );
       expect(
