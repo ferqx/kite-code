@@ -697,6 +697,10 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 
 ## 原运行中消息队列
 
+主 Composer 的 Enter／普通发送沿 [nativeTextIntent](src/native-input.ts)固定为 `input.follow_up`，带本次下一轮模型选择。每条队列项旁独立“引导发送”经 `input.queue.steer` 只传已观察的原 ID；Main 保完整原请求，重新核原活动 Run／selection，复用原 caller journal 保存 `input.steer` 与 `queuedInputCommandId` 后才 POST。Store 原子转换保证原后继任务不再执行；附件保持原引用，新计划／Skill 选择不转换，原活动模型不改变。unknown／丢响应只查准确原请求，不因队列仍可见重发。队列中的已受理后继输入不再同时显示会话占位；转换成功撤下原临时投递，Main metadata 保留新 steer 的准确原队列 ID，避免把有意撤下的旧申请显示为启动失败，冷重开仍按该原关系识别。
+
+[主屏 DOM](test/isolated/native-new-conversation-dom.test.tsx)核普通发送只排队、显式引导和新草稿保持；[Main 队列](test/native-input-queue.test.ts)核完整正文／附件、闭合 IPC 与旧观察撤销；[真实 HTTP](../../tests/isolated/unified-agent/client-inputs.test.ts)核原子转换、原回执丢失／冷 journal 零重投、独立消息一次及前台工具完整收尾。更完整的真实模型继续工具和自动压缩交错归[模型验收](../../tests/e2e/live/model/README.md#运行中引导与自动压缩)。
+
 [renderer hook](src/native-input-queue.ts)与 [Main owner](electron/native-input-queue.ts)通过封闭 [队列桥](src/input-queue-bridge.ts)读取当前根 Session 的真实 pending 输入，不将已提交命令伪装成本地数组。`pending_input_queue` capability 与当前 generation／viewSelection／history epoch／Store／Session／Workspace 核实后，Main 穷尽固定 revision 页并保留正文，给 renderer 仅提供当前 observation、可见条目及有限操作。每次完整观察最多4096成员、3MiB文本，超限拒绝而不截断；`result.include` 不作为提示词展示，仍参与后端固定槽与 revision。
 
 同一准确 scope 的普通 View／历史校准保留已观察队列的 DOM 和全文悬浮层，只暂停编辑、删除和调序；重新核实时不靠卸载组件重置展示。真实观察失败仍显示错误并禁写；切换 Store、会话或读取代次不复用旧队列。
@@ -1312,7 +1316,7 @@ Native 的 [消息投影](src/native-presentation.ts)将准确 `firstOutput: rea
 
 [真实恢复整例](test/isolated/native-restored-compression-input.test.tsx)使用实际压缩、公开 backup/restore、两次全新 Service／Client／Caller 与完整 NativeDesktop DOM，核真实父回调、确认前零正文读取、完整原 request／metadata／当前 cursor／多块 IPC、Close 和迟到 Main open 回复的 Session 取消。原压缩／Execution／Run／Command 保持，恢复后全 GET／Model0；[同 Session DOM 回归](test/native-context-dom.test.tsx)另保跨 Session 不显示入口。最终五个唯一原完整作业28文件105pass／1027Bun断言，原压缩窗口另41Node断言和两个所属 PID 退出；准确红绿与冻结输入见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-native-压缩原输入入口)。新 DOM 整例没有 Node 私有 UI 数据库，实际草稿不可用告警明确确认；布局替身不证明新的 preload／Electron／installed 恢复窗口。已有原压缩、Model 输入窗口分别复验其原范围，完整 P5／P6 与阶段退出仍未闭合。
 
-[Native 输入选择](src/native-input.ts) 使用点击时已核实的 active Command 和 Run：手动压缩或重置期间普通文本封存原 afterRunId/contextSelectionId 为 follow-up，普通活动工作封存 targetRunId 为 steer，空闲才创建新轮次。Native 显式启用 portable controller 的 active Command 读取，其他 portable 宿主默认行为不变。持久通知刷新每个 Promise 只执行一次实际 GET；dirty 的后继读取在下一事件循环启动，明确用户请求只等待已捕获的读取，再做自身核对，不等待全部通知或 Model 完成。授权目录只读 GET 同 Context 一样使用此前成功选择的原 Workspace，避免后继通知暂时清空 snapshot 时误当切换；清除授权仍要求当前 fresh snapshot，临时加载不能扩大写资格。
+[Native 输入选择](src/native-input.ts) 使用点击时已核实的 active Command 和 Run：手动压缩或重置期间普通文本封存原 afterRunId/contextSelectionId 为 follow-up，普通活动工作同样封存为 follow-up，只有队列条目旁的显式引导才封存 targetRunId 为 steer；空闲才创建新轮次。Native 显式启用 portable controller 的 active Command 读取，其他 portable 宿主默认行为不变。持久通知刷新每个 Promise 只执行一次实际 GET；dirty 的后继读取在下一事件循环启动，明确用户请求只等待已捕获的读取，再做自身核对，不等待全部通知或 Model 完成。授权目录只读 GET 同 Context 一样使用此前成功选择的原 Workspace，避免后继通知暂时清空 snapshot 时误当切换；清除授权仍要求当前 fresh snapshot，临时加载不能扩大写资格。
 
 [压缩范围测试](test/native-compression.test.ts)、[输入选择测试](test/native-input.test.ts)、[真实窗口](test/isolated/native-compression-electron.test.ts)与[实际活动 Model 刷新 barrier](test/isolated/native-refresh-active.test.ts)核对完整重点、真实摘要与经公开校验的下一持久 ModelInput、旧可见历史、物理回执丢失只查原命令、unsafe reset 保留原点、无点 reset 和冷启动只读零额外 Provider、维护输入原 follow-up 以及不受后继 GET 阻塞的准确 steer。窗口含 33 条 Node 断言并核实两次原 Service PID 已退出；Provider 仅为自有本机固定兼容 SDK，不涉及远端服务。
 

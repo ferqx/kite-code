@@ -7726,6 +7726,12 @@
         "type": "string",
         "const": "input.steer"
       },
+      "queuedInputCommandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
       "content": {
         "type": "string",
         "maxLength": 1048576
@@ -21590,6 +21596,12 @@
             "type": "string",
             "const": "input.steer"
           },
+          "queuedInputCommandId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
           "content": {
             "type": "string",
             "maxLength": 1048576
@@ -23798,6 +23810,12 @@
                       "type": "string",
                       "const": "input.steer"
                     },
+                    "queuedInputCommandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
                     "content": {
                       "type": "string",
                       "maxLength": 1048576
@@ -24446,6 +24464,12 @@
                     "kind": {
                       "type": "string",
                       "const": "input.steer"
+                    },
+                    "queuedInputCommandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
                     },
                     "content": {
                       "type": "string",

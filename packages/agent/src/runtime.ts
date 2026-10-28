@@ -6387,6 +6387,7 @@ export class AgentRuntime {
       let capturedInputVersion = 0;
       let inboxVersion = 0;
       let capturedInboxVersion = 0;
+      let toolBatchActive = false;
       let inputTask: Promise<number> | undefined;
       const receivePendingInputs = () => {
         if (inputTask) return inputTask;
@@ -6403,6 +6404,7 @@ export class AgentRuntime {
               limit: 50,
             });
             for (const input of page.commands) {
+              if (toolBatchActive && input.kind === 'input.steer') break;
               try {
                 await this.options.store.applyInput({
                   expectedStoreId: run.originStoreId,
@@ -6524,6 +6526,7 @@ export class AgentRuntime {
         return 0;
       };
       const checkpoint = async () => {
+        // Guidance waits for all foreground calls, including admission/approval waits.
         await receivePendingInputs();
       };
       const scope = {
@@ -7014,17 +7017,20 @@ export class AgentRuntime {
         getTools: modelTools,
         prepareToolCalls: registerToolRequests,
         beginToolBatch: (calls, signal, cancel) => {
-          if (!orderedToolAdmission) return undefined;
-          const current = createToolDispatchBatch(
-            calls.map((call) => call.id),
-            signal,
-            cancel,
-          );
+          toolBatchActive = true;
+          const current = orderedToolAdmission
+            ? createToolDispatchBatch(
+                calls.map((call) => call.id),
+                signal,
+                cancel,
+              )
+            : undefined;
           toolAdmission = current;
           return {
-            settled: current.settled,
+            settled: (callId, result, dispatched) => current?.settled(callId, result, dispatched),
             finish() {
-              current.finish();
+              current?.finish();
+              toolBatchActive = false;
               if (toolAdmission === current) toolAdmission = undefined;
             },
           };

@@ -3,6 +3,8 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { buildWindowsAccess } from '../../../../../apps/desktop/scripts/build-windows-access';
+import { initializeDesktopBuildEnvironment } from '../../../../../scripts/development/windows-desktop-environment';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -25,7 +27,13 @@ test('actual Node DB9 reuses complete original caller rows in v18 restore and ne
     const store = await openSqliteStore(profile),
       storeId = (await store.getMetadata()).storeId;
     await store.close();
-    const old = await nodeCallerAssets(root, profile, storeId);
+    let windowsAsset: { path: string; sha256: string } | undefined;
+    if (process.platform === 'win32') {
+      initializeDesktopBuildEnvironment();
+      const built = await buildWindowsAccess(root);
+      windowsAsset = { path: join(root, built.relativePath), sha256: built.sha256 };
+    }
+    const old = await nodeCallerAssets(root, profile, storeId, 'seed', windowsAsset);
     const path = join(selectProfile(profile).profilePath, 'desktop-private/data.sqlite');
     const directory = join(root, 'node-extension');
     privateDirectory(directory);
@@ -35,7 +43,8 @@ test('actual Node DB9 reuses complete original caller rows in v18 restore and ne
       `
 import {acquireDesktopProfileAccess} from ${JSON.stringify(resolve('apps/desktop/electron/profile-access.ts'))};
 import {openPrivateData} from ${JSON.stringify(resolve('apps/desktop/electron/private-data.ts'))};
-import {NativeCallerJournal} from ${JSON.stringify(resolve('apps/desktop/electron/caller-journal.ts'))};
+import {NativeCallerJournal,callerDigest,callerTextDigest,callerTarget} from ${JSON.stringify(resolve('apps/desktop/electron/caller-journal.ts'))};
+import {canonicalCallerCommandRequest} from ${JSON.stringify(resolve('packages/client/src/index.ts'))};
 import {NativeExtensions} from ${JSON.stringify(resolve('apps/desktop/electron/extensions.ts'))};
 const input=JSON.parse(process.argv[2]);
 const lease=await acquireDesktopProfileAccess(input.access);
@@ -48,10 +57,17 @@ try {
  invokeExtension:async()=>{posts++;throw Error('unexpected_post')}};
  const journal=new NativeCallerJournal(client,data);
  if(input.action==='seed'){
+  const request={kind:'input.steer',expectedStoreId:input.storeId,commandId:'queue-guidance',targetRunId:'original_run',contextSelectionId:'original_context',queuedInputCommandId:'original_queued',content:'原始引导 雪🙂\\r\\n'};
+  const scope={storeId:input.storeId,sessionId:'original_session',workspaceId:'w'};
+  data.beginCaller({intent:{scope,subjectId:'original_subject',request,target:callerTarget(scope,request),bodyDigest:callerDigest(request),requestDigest:callerTextDigest(canonicalCallerCommandRequest(request))},phase:'submitting'});
+  data.finishCaller(request.commandId,'unknown');
+  const check=new (await import('node:sqlite')).DatabaseSync(input.profilePath+'/desktop-private/data.sqlite',{readOnly:true});try{if(check.prepare('PRAGMA user_version').get().user_version!==9)throw Error('guidance_did_not_select_current_caller_format');}finally{check.close();}
   await journal.prepare('original_session',{kind:'extension.invoke',expectedStoreId:input.storeId,commandId:'original-extension',extensionId:'example.independent',actionId:'analyze',definitionVersion:'2026.10+preview',input:{body:'雪🙂\\r\\n'.repeat(30000)+'ORIGINAL_EXTENSION_TAIL',future:{arbitrary:[null,true,3.5]}}});
   journal.releaseFirst('original-extension');
+
  }
  if(input.action==='cold')try{await journal.submit('original-extension')}catch{}
+ if(input.action==='cold')try{await journal.submit('queue-guidance')}catch{}
  if(input.action==='foreign'){
   const leaf=new NativeExtensions(client,()=>undefined,journal);
   const result=await leaf.lookup('original-extension');
@@ -85,6 +101,7 @@ try {
             storeId: id,
             profilePath: selectProfile(profile).profilePath,
             access: {
+              ...(windowsAsset ? { windowsAsset } : {}),
               profile,
               bunExecutable: realpathSync(process.execPath),
               bunSha256: sha(readFileSync(process.execPath)),
@@ -109,7 +126,15 @@ try {
       }
     }
     const seeded = await node('seed');
-    expect(seeded.records).toHaveLength(6);
+    expect(seeded.records).toHaveLength(7);
+    expect(
+      seeded.records.find((row) => row.intent.request.commandId === 'queue-guidance')?.intent
+        .request,
+    ).toMatchObject({
+      queuedInputCommandId: 'original_queued',
+      targetRunId: 'original_run',
+      content: '原始引导 雪🙂\r\n',
+    });
     expect(seeded.posts).toBe(0);
     expect(seeded.records.slice(0, 5)).toEqual(old.records);
     const extension = seeded.records.find(
@@ -142,7 +167,7 @@ try {
     expect(readFileSync(path)).toEqual(restored);
     const cold = await node('cold');
     expect(cold.posts).toBe(0);
-    expect(cold.gets).toBe(1);
+    expect(cold.gets).toBe(2);
     expect(
       cold.records.find((row) => row.intent.request.commandId === 'original-extension')!.phase,
     ).toBe('unknown');
@@ -157,6 +182,33 @@ try {
     rmSync(root, { recursive: true, force: true });
   }
 }, 60000);
+
+test('queued guidance linkage is retained only by the current Native caller grammar; old file/DB formats remain closed', async () => {
+  const { verifyCallerIntentRecords } = await import('../../../src/maintenance/caller-intents');
+  const request = {
+    kind: 'input.steer',
+    expectedStoreId: 'store',
+    commandId: 'guide',
+    targetRunId: 'run',
+    contextSelectionId: 'selection',
+    queuedInputCommandId: 'original_queued',
+    content: '完整引导 雪🙂\r\n',
+  };
+  const record = {
+    intent: {
+      scope: { storeId: 'store', workspaceId: 'workspace', sessionId: 'session' },
+      subjectId: 'subject',
+      request,
+      target: { kind: 'run', id: 'run', contextSelectionId: 'selection' },
+      bodyDigest: 'a'.repeat(64),
+      requestDigest: 'b'.repeat(64),
+    },
+    phase: 'unknown',
+  };
+  expect(verifyCallerIntentRecords([record], false, true, true)).toBe(false);
+  expect(() => verifyCallerIntentRecords([record], false, true, false)).toThrow();
+  expect(() => verifyCallerIntentRecords([record])).toThrow();
+});
 
 test('closed DB9 extension caller codec accepts public JSON cardinality and leaves old caller grammar closed', async () => {
   const { verifyCallerIntentRecords } = await import('../../../src/maintenance/caller-intents');

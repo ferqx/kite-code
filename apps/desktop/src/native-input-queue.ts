@@ -10,14 +10,18 @@ export function useNativeInputQueue({
   selection,
   historyEpoch,
   available,
+  steeringAvailable = true,
   onEditText,
+  onSteered,
 }: {
   bridge: NativeBridge;
   generation: number;
   selection?: NativeSelection;
   historyEpoch: number;
   available: boolean;
+  steeringAvailable?: boolean;
   onEditText: (text: string) => boolean;
+  onSteered?: (originalCommandId: string) => void;
 }) {
   const storeId = selection?.storeId,
     sessionId = selection?.session.id,
@@ -167,9 +171,64 @@ export function useNativeInputQueue({
     unresolved.length > 0;
   const queue: QueuedMessagesProps | undefined = observation
     ? {
-        items: observation.entries,
+        items: observation.entries.map((item) => ({
+          ...item,
+          steerable: item.steerable && steeringAvailable,
+        })),
         disabled: blocked,
         pendingId: busy ? operation?.id : undefined,
+        onSteer: async (targetCommandId) => {
+          if (
+            blocked ||
+            !steeringAvailable ||
+            !observation.entries.some((item) => item.id === targetCommandId && item.steerable) ||
+            lock.current
+          )
+            return;
+          lock.current = true;
+          setOperation({ scope, id: targetCommandId });
+          try {
+            const result = await bridge.request({
+              method: 'input.queue.steer',
+              generation,
+              observationId: observation.observationId,
+              targetCommandId,
+            });
+            if (
+              !result ||
+              !('request' in result) ||
+              result.request.kind !== 'input.steer' ||
+              !('phase' in result) ||
+              !('scope' in result) ||
+              result.scope.storeId !== storeId ||
+              result.scope.sessionId !== sessionId ||
+              result.scope.workspaceId !== workspaceId
+            )
+              throw Error('input_queue_submission_mismatch');
+            if (latest.current.scope === scope && ['accepted', 'applied'].includes(result.phase))
+              onSteered?.(targetCommandId);
+            if (latest.current.scope === scope && ['unknown', 'rejected'].includes(result.phase))
+              setState((previous) => ({
+                ...previous,
+                error:
+                  result.phase === 'unknown'
+                    ? '引导发送结果尚未确认，请核对原申请。'
+                    : '排队消息已变化，引导未发送。',
+              }));
+          } catch {
+            if (latest.current.scope === scope)
+              setState((previous) => ({
+                ...previous,
+                error: '引导发送结果尚未确认，请核对原申请。',
+              }));
+          } finally {
+            lock.current = false;
+            if (latest.current.scope === scope) {
+              setOperation(undefined);
+              refreshQueue();
+            }
+          }
+        },
         onEdit: (targetCommandId) => {
           if (
             blocked ||

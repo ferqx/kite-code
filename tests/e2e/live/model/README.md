@@ -2,6 +2,14 @@
 
 子 Agent 协作 V1.1 按[69 个主用例](collaboration-v1.1-cases.md)区分自然输入、正常产品操作和精确交错。当前已迁移六工具 smoke，并新增独立 Service/Client live 驱动；实际执行结果、失败修复和未覆盖变体以用例文档的执行记录为准，局部通过不代表整张矩阵通过。
 
+## 运行中引导与自动压缩
+
+[前台工具／压缩 runner](foreground-guidance-boundaries.live.ts)使用真实已配置模型、默认标准摘要器、真实 Runtime／SQLite／HTTP，以及 Native 的 Main 队列 owner 与原 caller journal。三例分别验证回复引导后继续工具、引导先于自动压缩、真实摘要内容已到达时提交引导。同步门只延迟原工具或实际 Provider 事件，既不生成也不改写模型回复。每节只读一次，独立核实工具必须实际执行一次；引导后的首个业务响应先有正文、后有工具调用，再由后续真实模型完成报告。原始请求、流事件、摘要发布身份及独立 user sourceID 保留供全文审阅。
+
+`KITE_RUN_LIVE_COLLABORATION=1 bun run tests/e2e/live/model/foreground-guidance-boundaries.live.ts /absolute/evidence-directory`，上限30次请求／600秒。初始[浏览器 runner](foreground-guidance.live.ts)与[明确生产组件制品](../../../../apps/desktop/test/foreground-guidance-build.fixture.ts)另覆盖 Enter只排队、条目旁按钮、原工具完成后才交付；它使用共享 Composer／队列 hook 与真实 Main owner、HTTP、模型，不冒充完整 NativeDesktop／Electron IPC窗口。
+
+2026-10-28，Windows x64／Bun1.4.3，当前工作树：`deepseek-v4-flash`／chat-completions／high／4096，三类扩展场景3／4／5次实际请求全部HTTP200，共12次。正文全文已审阅：均先回答当前进度，再调用尚未执行的核实工具，最后交付30项检查、3项待复核及实际确认码。压缩前引导产生1份标准自动摘要；摘要中引导产生2次真实摘要调用，仅含该引导的新摘要发布，旧摘要正文没有进入后继业务请求。各业务请求保留完整独立引导一次，原三节均仅读取一次，核实工具一次、同一Run完成，终态只读零新请求。证据在本机 `dist/acceptance/foreground-guidance-boundaries/`；初始2请求浏览器过程和夹具键修复证据另在 `dist/acceptance/foreground-guidance/`。这是当前模型和明确交错的限定样本，未覆盖其他模型、完整安装客户端或跨平台。
+
 ## 工具反馈与任务质量
 
 当前实现不包含按搜索／读取次数注入的收束提醒。下述 2026-10-24 r1–r3 保留为隔离实验历史：触发和送达不证明收益，固定次数不能替代任务进展，实验后已撤回该机制。保留的是搜索准确范围、字面匹配反馈、读取原文片段和 child 原执行取证预览；全文质量仍与机械断言分开审阅。

@@ -2031,6 +2031,9 @@ export async function startService(options: ServiceOptions) {
             ...(request.images === undefined ? {} : { images: request.images }),
             ...(request.files === undefined ? {} : { files: request.files }),
             contextSelectionId: request.contextSelectionId,
+            ...(request.queuedInputCommandId
+              ? { queuedInputCommandId: request.queuedInputCommandId }
+              : {}),
           },
         });
         break;

@@ -484,7 +484,9 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       if (bytes > 16777216 || rows.length >= 128) throw Error('caller_capacity_exceeded');
       const value = validateCallerRecord(JSON.parse(row.state));
       if (
-        value.intent.request.kind === 'extension.invoke' &&
+        (value.intent.request.kind === 'extension.invoke' ||
+          (value.intent.request.kind === 'input.steer' &&
+            value.intent.request.queuedInputCommandId !== undefined)) &&
         Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9
       )
         throw Error('caller_storage_unavailable');
@@ -1111,7 +1113,9 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         )
           throw Error('caller_capacity_exceeded');
         if (
-          value.intent.request.kind === 'extension.invoke' &&
+          (value.intent.request.kind === 'extension.invoke' ||
+            (value.intent.request.kind === 'input.steer' &&
+              value.intent.request.queuedInputCommandId !== undefined)) &&
           Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9
         ) {
           if (Number(database().prepare('PRAGMA user_version').get()!.user_version) < 8)

@@ -1365,6 +1365,36 @@ export class NativeCaller {
       case 'input.queue.reorder':
         result = await this.inputQueue.mutate(request);
         break;
+      case 'input.queue.steer': {
+        if (
+          this.requireCaller()
+            .records()
+            .some(
+              (row) =>
+                row.intent.request.kind === 'input.steer' &&
+                row.intent.request.queuedInputCommandId === request.targetCommandId &&
+                ['submitting', 'unknown'].includes(row.phase),
+            )
+        )
+          throw new ClientError('input_queue_observation_unavailable');
+        const { sessionId, intent } = await this.inputQueue.prepareSteer(request);
+        this.writableScope(sessionId);
+        const journal = this.requireCaller();
+        await journal.prepare(sessionId, intent);
+        this.changed();
+        try {
+          await journal.submit(intent.commandId);
+        } catch {
+          /* Durable original lookup only. */
+        } finally {
+          this.changed();
+        }
+        const row = journal
+          .records()
+          .find((item) => item.intent.request.commandId === intent.commandId)!;
+        result = callerMetadata(row);
+        break;
+      }
       case 'input.queue.lookup':
         result = await this.inputQueue.lookup(request.commandId);
         break;

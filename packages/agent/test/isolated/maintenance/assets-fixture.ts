@@ -71,6 +71,7 @@ export async function nodeAssets(
   profile: { dataRoot: string; profile: string },
   storeId: string,
   action: 'seed' | 'read' | 'add' = 'seed',
+  windowsAsset?: { path: string; sha256: string },
 ) {
   const directory = join(root, 'node-ui-fixture');
   privateDirectory(directory);
@@ -137,6 +138,7 @@ try {
         storeId,
         profilePath: selected.profilePath,
         access: {
+          ...(windowsAsset ? { windowsAsset } : {}),
           profile,
           bunExecutable: process.execPath,
           bunSha256: digest(process.execPath),

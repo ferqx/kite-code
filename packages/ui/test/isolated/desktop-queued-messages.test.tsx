@@ -65,6 +65,32 @@ afterAll(() => {
   }
 });
 
+test('only the explicit guidance button sends its exact queued input; pending and ineligible rows cannot steer', async () => {
+  const sent: string[] = [];
+  const props = {
+    items: [
+      { id: 'a', text: '进度？', steerable: true },
+      { id: 'b', text: '计划', steerable: false },
+    ],
+    onEdit: () => {},
+    onDelete: () => {},
+    onReorder: () => {},
+    onSteer: (id: string) => {
+      sent.push(id);
+    },
+  };
+  await render(<QueuedMessages {...props} />);
+  expect(sent).toEqual([]);
+  expect(buttons('引导发送排队消息')).toHaveLength(2);
+  expect(buttons('引导发送排队消息')[1]!.disabled).toBe(true);
+  await act(async () => buttons('引导发送排队消息')[0]!.click());
+  expect(sent).toEqual(['a']);
+  expect(host().querySelectorAll('[data-queued-prompt]')).toHaveLength(2);
+  await render(<QueuedMessages {...props} pendingId="a" />);
+  await act(async () => buttons('引导发送排队消息')[0]!.click());
+  expect(sent).toEqual(['a']);
+});
+
 test('queue safely renders Markdown and delegates edits and deletion without optimistic withdrawal or edit state', async () => {
   const edits: string[] = [],
     deletes: string[] = [];

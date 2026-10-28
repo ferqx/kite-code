@@ -1023,13 +1023,6 @@ function NativeDesktopContent({
     ['planned', 'dispatching', 'running'].includes(job.status),
   ).length;
   const unknownJobs = jobs.filter((job) => job.status === 'outcome_unknown').length;
-  const needsNextModel =
-    executionUnconfirmed ||
-    !activeInputRun ||
-    planMode ||
-    ['context.compress', 'context.compression.reset'].includes(
-      selection?.activeCommand?.kind ?? '',
-    );
   const nextModelReady =
     resolvedChoice?.identity === choiceIdentity &&
     resolvedChoice.ready &&
@@ -1154,6 +1147,22 @@ function NativeDesktopContent({
     bridge,
     generation: state?.generation ?? generation.current,
     selection,
+    onSteered: (commandId) =>
+      setInputDeliveries((previous) => {
+        if (!previous.has(commandId)) return previous;
+        const next = new Map(previous);
+        next.delete(commandId);
+        return next;
+      }),
+    steeringAvailable:
+      !executionUnconfirmed &&
+      !state?.callerUnavailable &&
+      !state?.callerSubmissions?.some(
+        (row) =>
+          row.scope.storeId === selection?.storeId &&
+          row.scope.sessionId === selection?.session.id &&
+          ['saved', 'submitting', 'unknown'].includes(row.phase),
+      ),
     historyEpoch: state?.historyEpoch ?? 0,
     available:
       readingParent &&
@@ -1913,7 +1922,6 @@ function NativeDesktopContent({
           submittedText,
           planMode,
           resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice : undefined,
-          executionUnconfirmed,
         ),
         ...(files.length ? { files: files.map(({ name, uri }) => ({ name, uri })) } : {}),
       };
@@ -2258,6 +2266,14 @@ function NativeDesktopContent({
           preparing ||
           input.storeId !== selection?.storeId ||
           input.sessionId !== selection.session.id ||
+          state?.callerSubmissions?.some(
+            (row) =>
+              row.scope.storeId === input.storeId &&
+              row.scope.sessionId === input.sessionId &&
+              row.request.kind === 'input.steer' &&
+              row.request.queuedInputCommandId === id &&
+              row.phase !== 'rejected',
+          ) ||
           displayMessages.some((message) => savedNativeInput(message, id, input, selection))
         )
           return [];
@@ -2276,6 +2292,12 @@ function NativeDesktopContent({
                 ? 'unknown'
                 : 'sending'
           : input.phase;
+        if (
+          input.kind === 'input.follow_up' &&
+          phase === 'accepted' &&
+          !selection.runs.some((run) => run.originCommandId === id)
+        )
+          return [];
         return [
           {
             ...nativePendingInputMessage(id, input, phase, selection),
@@ -2283,14 +2305,34 @@ function NativeDesktopContent({
           },
         ];
       }),
-    [inputDeliveries, preparing, selection, displayMessages, state?.inputSubmissions],
+    [
+      inputDeliveries,
+      preparing,
+      selection,
+      displayMessages,
+      state?.inputSubmissions,
+      state?.callerSubmissions,
+    ],
   );
   const rejectedInputs = useMemo(() => {
     const rejected = new Map<string, string | undefined>();
     if (!selection) return rejected;
+    const transferred = new Set(
+      (state?.callerSubmissions ?? [])
+        .filter(
+          (row) =>
+            row.scope.storeId === selection.storeId &&
+            row.scope.sessionId === selection.session.id &&
+            row.request.kind === 'input.steer' &&
+            row.phase !== 'rejected',
+        )
+        .map((row) => row.request.queuedInputCommandId)
+        .filter(Boolean),
+    );
     for (const row of state?.callerSubmissions ?? [])
       if (
         row.phase === 'rejected' &&
+        !transferred.has(row.request.commandId) &&
         ['run.start', 'input.follow_up'].includes(row.request.kind) &&
         row.scope.storeId === selection.storeId &&
         row.scope.sessionId === selection.session.id
@@ -2299,6 +2341,7 @@ function NativeDesktopContent({
     for (const input of state?.inputSubmissions ?? [])
       if (
         input.phase === 'rejected' &&
+        !transferred.has(input.intent.commandId) &&
         ['run.start', 'input.follow_up'].includes(input.intent.kind) &&
         input.intent.expectedStoreId === selection.storeId &&
         input.sessionId === selection.session.id
@@ -4265,7 +4308,7 @@ function NativeDesktopContent({
                   selection.permissionUnavailable ||
                   (firstSubmission?.creation.sessionId === selection.session.id &&
                     firstSubmission.result?.phase === 'unknown') ||
-                  (needsNextModel && !nextModelReady),
+                  !nextModelReady,
                 inputLabel: '当前会话私有草稿',
                 sendLabel: activeInputRun
                   ? planMode
@@ -4276,7 +4319,7 @@ function NativeDesktopContent({
                             selection.activeCommand?.kind ?? '',
                           )
                         ? '排队压缩后的输入'
-                        : '引导当前轮次'
+                        : '排队后续输入'
                   : planMode
                     ? '发送计划任务'
                     : '发送明确的新轮次',

@@ -167,7 +167,15 @@ export function validateInputAdmission(
   if (value.kind !== 'input.steer' && value.kind !== 'input.follow_up') return null;
   const keys =
     value.kind === 'input.steer'
-      ? ['kind', 'content', 'images', 'files', 'targetRunId', 'contextSelectionId']
+      ? [
+          'kind',
+          'content',
+          'images',
+          'files',
+          'targetRunId',
+          'contextSelectionId',
+          'queuedInputCommandId',
+        ]
       : [
           'kind',
           'content',
@@ -204,6 +212,40 @@ export function validateInputAdmission(
     input.sessionId,
   );
   if (value.kind === 'input.steer') {
+    if (value.queuedInputCommandId !== undefined) {
+      if (
+        trustedChild ||
+        typeof value.queuedInputCommandId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(value.queuedInputCommandId)
+      )
+        throw new AgentError('invalid_input_request');
+      const queued = db.row(
+        'SELECT * FROM command WHERE id=? AND session_id=?',
+        value.queuedInputCommandId,
+        input.sessionId,
+      );
+      if (
+        !queued ||
+        queued.origin_store_id !== input.expectedStoreId ||
+        queued.subject_id !== input.subjectId
+      )
+        throw new AgentError('input_not_found');
+      if (queued.kind !== 'input.follow_up' || queued.status !== 'accepted' || queued.cancelled)
+        throw new AgentError('input_already_consumed');
+      const original = request(queued);
+      if (
+        original.afterRunId !== value.targetRunId ||
+        original.contextSelectionId !== value.contextSelectionId ||
+        original.content !== value.content ||
+        canonicalJson(original.images ?? []) !==
+          canonicalJson((value.images ?? []) as unknown as Json) ||
+        canonicalJson(original.files ?? []) !==
+          canonicalJson((value.files ?? []) as unknown as Json) ||
+        (Array.isArray(original.extensionInputs) && original.extensionInputs.length > 0) ||
+        (Array.isArray(original.selectedSkills) && original.selectedSkills.length > 0)
+      )
+        throw new AgentError('input_target_changed');
+    }
     if (
       typeof value.targetRunId !== 'string' ||
       !value.targetRunId ||
@@ -258,6 +300,7 @@ export function assertInputBoundary(
   db: SqliteOperations,
   runId: string,
   interpretationInputId?: string,
+  toolBatch = false,
 ): void {
   const run = db.row('SELECT * FROM run WHERE id=?', runId);
   // An already dispatched child/reviewer may settle its actual result while the
@@ -279,10 +322,10 @@ export function assertInputBoundary(
   }
   if (
     db.row(
-      "SELECT id FROM command WHERE cancelled=0 AND kind IN ('input.steer','result.include') AND input_target_run_id=? AND status='accepted' LIMIT 1",
+      `SELECT id FROM command WHERE cancelled=0 AND kind ${toolBatch ? "= 'result.include'" : "IN ('input.steer','result.include')"} AND input_target_run_id=? AND status='accepted' LIMIT 1`,
       runId,
     ) ||
-    (run && hasPendingAgentMail(db, runId, String(run.session_id)))
+    (!toolBatch && run && hasPendingAgentMail(db, runId, String(run.session_id)))
   )
     throw new AgentError('input_pending');
 }
@@ -415,11 +458,18 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
     )
       throw new AgentError('input_order_conflict');
     const planned = db.rows(
+      // The Store also protects callers other than the live Loop checkpoint.
+      // Guidance is not a cancellation request for a pending foreground Tool.
+      "SELECT id FROM execution WHERE run_id=? AND kind='tool' AND state IN ('planned','dispatching','running') LIMIT 1",
+      input.runId,
+    );
+    if (input.kind === 'steer' && planned.length) throw new AgentError('input_tools_pending');
+    const supersedable = db.rows(
       "SELECT id,kind,call_id,result_revision FROM execution WHERE run_id=? AND state='planned' AND dispatched=0 AND kind IN ('model','tool') ORDER BY id LIMIT 4097",
       input.runId,
     );
-    if (planned.length > 4096) throw new AgentError('input_scope_too_large');
-    for (const execution of planned) {
+    if (supersedable.length > 4096) throw new AgentError('input_scope_too_large');
+    for (const execution of supersedable) {
       if (BigInt(execution.result_revision!) >= 9223372036854775807n)
         throw new AgentError('sequence_exhausted');
       superseded.push(String(execution.id));
@@ -445,7 +495,7 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
         db.run("UPDATE interaction SET state='cancelled' WHERE id=?", card.id);
         db.event(String(card.presentation_session_id), String(card.id), 'interaction.superseded');
       }
-      const original = planned.find((execution) => execution.id === id)!;
+      const original = supersedable.find((execution) => execution.id === id)!;
       if (original.kind === 'tool')
         db.appendMessage(
           String(command.session_id),

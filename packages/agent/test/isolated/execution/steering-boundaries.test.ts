@@ -119,7 +119,7 @@ test('steering at the actual finish transaction continues its original Run; late
 }, 10000);
 
 for (const order of ['human-first', 'result-first'] as const)
-  test(`one checkpoint distinguishes real human retirement from final-only child data (${order})`, async () => {
+  test(`one checkpoint preserves the foreground Tool before human guidance and final-only child data (${order})`, async () => {
     const parent = gate();
     const f = await fixture({
       child: true,
@@ -136,7 +136,7 @@ for (const order of ['human-first', 'result-first'] as const)
       await until(async () => f.requests[1], 'parent Model in flight');
       const run = (await f.store.getView('root')).runs[0]!;
       if (order === 'human-first')
-        await f.steer('guide', 'Only summarize; retire the old unstarted effect.');
+        await f.steer('guide', 'Please summarize progress after the current tools finish.');
       f.childGate.release();
       const mail = await until(
         async () => (await f.inbox()).items.find((item) => item.kind === 'result'),
@@ -144,26 +144,29 @@ for (const order of ['human-first', 'result-first'] as const)
       );
       expect(mail).toMatchObject({ state: 'accepted', receivedSourceId: null });
       if (order === 'result-first')
-        await f.steer('guide', 'Only summarize; retire the old unstarted effect.');
+        await f.steer('guide', 'Please summarize progress after the current tools finish.');
       parent.release();
       await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
       const view = await f.store.getView('root');
       expect(view.runs.map((entry) => entry.id)).toEqual([run.id]);
-      expect(f.effects).toEqual([]);
+      expect(f.effects).toEqual(['effect']);
       expect(f.requests).toHaveLength(3);
-      exactInput(f.requests[2]!, 'guide', 'Only summarize; retire the old unstarted effect.');
+      exactInput(
+        f.requests[2]!,
+        'guide',
+        'Please summarize progress after the current tools finish.',
+      );
       const retired = view.executions.find((entry) => entry.callId === 'old-effect')!;
       expect(retired).toMatchObject({
-        status: 'cancelled',
-        authorization: { dispatched: false },
-        result: { content: 'superseded_by_user_input', details: { inputCommandId: 'guide' } },
+        status: 'succeeded',
+        authorization: { dispatched: true },
       });
       expect(
         f.requests[2]!.messages.filter((message) => message.toolCallId === 'old-effect'),
       ).toHaveLength(1);
       expect(
         f.requests[2]!.messages.find((message) => message.toolCallId === 'old-effect')!.content,
-      ).toContain('superseded_by_user_input');
+      ).not.toContain('superseded_by_user_input');
       expect(
         f.requests[2]!.messages.filter((message) =>
           message.toolCalls?.some((call) => call.id === 'old-effect'),

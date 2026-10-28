@@ -114,6 +114,8 @@ Native 与 CLI/TUI 的未决恢复意图属于明确 UI 资产。[assets.ts](ass
 
 ## 普通 caller 请求的离线字节资产
 
+普通 steer 的可选 `queuedInputCommandId` 仅由当前 Native DB9/DB10 caller 语法保留，核准确 ID 并计入两种摘要；CLI/TUI v1 文件及旧 DB3–DB8 不接受该字段，旧 manifest 语法不放宽，也不提升格式版本。[DB9 caller 测试](../../test/isolated/maintenance/desktop-extensions.test.ts)实际3项27断言通过：在真实 Node／SQLite 首先保存队列转引导关系，选择既有 DB9 标记，然后完成原字节备份、新 Store 恢复、冷／foreign零POST及新旧语法隔离。最初夹具缺少 `windowsAsset`，HEAD 原版同样在准备阶段失败；该测试现显式沿既有 Windows builder 生成并校验准确资产，有限传给所属 Node 夹具，不改生产权限或原无资产拒绝。2026-10-28 Windows x64／Bun1.4.3 沿标准非macOS 30秒预算运行旧 [caller 文件套件](../../test/isolated/maintenance/caller-intents.test.ts)，9项通过、2项文件权限／no-follow测试失败；相同两项在 HEAD 原版测试及原版验证器对照中同样失败。本次不修改原访问安全实现。原日志在本机 `dist/acceptance/guidance-change/`。
+
 CLI/TUI v1 文件的 [caller-intents.ts](caller-intents.ts) 是维护私有结构验证器，仅使用 Node 与 Agent 自身端口，无 Client/CLI/UI workspace 依赖。它核对完整 fatal UTF-8、closed v1 文档与 intent/scope/request/target/draft 字段、既有五种公开 Start/Steer/FollowUp/CancelCommand/CancelExecution 请求结构、全局原 commandId 唯一、128 records/16MiB 既有 caller 边界，以及准确原 Store/Workspace/Session、subject、目标与 Decimal64 draft revision。模型选择、skills、extensionInputs 使用当前公开 DTO 原有限字段约束，input 完整 JSON 不另加 count/depth/工作正文配额。
 
 源与副本均必须实际私有 0600、当前 UID、regular、nlink1、非 symlink；父目录私有，缺实际 O_NOFOLLOW 支持拒绝。打开 FD 前后核对 inode/size/ctime/owner/mode，采集/inspect/restore 再验证完整文件 proof。恢复保留原请求、Plan extension input、正文 Unicode/换行、scope/subject/目标、两种原摘要、phase、draft 与原字节，不换成新 Store，也不发 POST。既有五类请求的 bodyDigest/requestDigest 只按 lowercase SHA-256 元数据结构保存，不重算或改写，不把它们当 Core receipt、查询许可或权限；调用者冷 lookup 仍独立核原命令/subject/requestDigest。

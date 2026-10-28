@@ -89,6 +89,7 @@ const inputFiles = z.array(inputFileReference).max(128);
 const inputImages = z.array(inputImage).max(10);
 const steerInput = z.strictObject({
   kind: z.literal('input.steer'),
+  queuedInputCommandId: id.optional(),
   content: additionalInputContent,
   images: inputImages.optional(),
   files: inputFiles.optional(),

@@ -257,7 +257,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 ## 统一消息接收
 
-[Runtime](../runtime.ts)以 `receivePendingInputs` 串行汇合原用户输入与[Agent 邮箱](sqlite/agent-mail-operations.ts)。用户引导继续使用 `applyInput` 与原队列／前驱校验，普通 Agent 消息和最终结果共用 `listAgentMessages/receiveAgentMessages`；用户输入与低信任 inbox 保留不同的输入失效语义，Agent 数据不能撤销尚未派发决定或产生工具批准。
+[Runtime](../runtime.ts)以 `receivePendingInputs` 串行汇合原用户输入与[Agent 邮箱](sqlite/agent-mail-operations.ts)。用户引导继续使用 `applyInput` 与原队列／前驱校验，普通 Agent 消息和最终结果共用 `listAgentMessages/receiveAgentMessages`；用户引导等待原前台 Tool 批次收尾，低信任 inbox 保留自身接收与来源语义，Agent 数据不能撤销尚未派发决定或产生工具批准。
 
 新的 `agent_completion` 在 carrier 终态事务中，将原唯一 `job.report` Command 封存 `mailboxVersion:1` 与原邮箱目标列。`job.report.continue` 继承同一协议。两者仍保原稳定 ID、父会话准入与 Run origin，由[结果邮件证明](sqlite/result-mail.ts)核准确 child／carrier／revision／订阅；新项不进入 `listPendingJobReports` 的旧扫描，没有第二条 accepted 命令或新增表。未标记旧报告与非 Agent Job 保留原读取、应用和恢复协议，读取不补迁移或重新排队。
 

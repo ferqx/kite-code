@@ -6,6 +6,10 @@ import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelRequest } from '@kite-ai/ai';
+import { NativeCallerJournal } from '../../../apps/desktop/electron/caller-journal';
+import { NativeCaller } from '../../../apps/desktop/electron/native-caller';
+import type { NativeEvent, NativeState } from '../../../apps/desktop/src/native-bridge';
+import { memoryPrivateData } from '../../../apps/desktop/test/private-data.fixture';
 import { startService } from '../../../apps/service/src';
 import { createClient, readOrdinaryCommandApplication } from '../../../packages/client/src';
 
@@ -27,7 +31,7 @@ async function code(work: Promise<unknown>, expected: string) {
   }
   expect((error as { code?: string })?.code).toBe(expected);
 }
-function gatedModel(oldTool = false) {
+function gatedModel(oldTool = false, toolCount = 1) {
   const requests: ModelRequest[] = [];
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -54,6 +58,13 @@ function gatedModel(oldTool = false) {
         signal.throwIfAborted();
         if (oldTool) {
           yield { type: 'tool_call', id: 'old-call', name: 'fixture.old', arguments: '{}' };
+          for (let index = 1; index < toolCount; index++)
+            yield {
+              type: 'tool_call',
+              id: `old-call-${index}`,
+              name: 'fixture.old',
+              arguments: '{}',
+            };
           yield {
             type: 'finish',
             reason: 'tool_calls',
@@ -67,12 +78,18 @@ function gatedModel(oldTool = false) {
   };
   return { model, requests, release };
 }
-async function fixture(oldTool = false) {
+async function fixture(
+  oldTool = false,
+  options: {
+    toolCount?: number;
+    onTool?: (count: number, signal: AbortSignal) => Promise<void>;
+  } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-inputs-')));
   const selected = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(selected);
   const expectedStoreId = (await store.getMetadata()).storeId;
-  const model = gatedModel(oldTool);
+  const model = gatedModel(oldTool, options.toolCount);
   let effects = 0;
   const runtime = createRuntime({
     store,
@@ -95,8 +112,9 @@ async function fixture(oldTool = false) {
             version: '1',
             description: 'Harmless counted old decision',
             inputSchema: { type: 'object' },
-            async execute() {
+            async execute(_input, context) {
               effects++;
+              await options.onTool?.(effects, context.signal);
               return { outcome: 'succeeded', content: 'counted old decision' };
             },
           },
@@ -165,6 +183,8 @@ async function fixture(oldTool = false) {
       run,
       expectedStoreId,
       contextSelectionId,
+      service,
+      profile,
       get effects() {
         return effects;
       },
@@ -176,7 +196,7 @@ async function fixture(oldTool = false) {
   }
 }
 
-test('real Loop applies twelve accepted steer inputs before old Tool dispatch; public provenance and immutable first Model are preserved', async () => {
+test('real Loop finishes the old Tool before twelve independent guidance messages reach the next Model', async () => {
   const f = await fixture(true);
   try {
     const businessIds: string[] = [];
@@ -218,7 +238,7 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
     ).toBe(false);
     f.model.release();
     await f.runtime.waitForCommand('original', { timeoutMs: 5000 });
-    expect(f.effects).toBe(0);
+    expect(f.effects).toBe(1);
     expect(f.model.requests).toHaveLength(2);
     const messages = await f.client.listMessages('s');
     expect(
@@ -284,6 +304,255 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
       (await f.client.listPendingInputs('s', { storeId: f.expectedStoreId })).commands,
     ).toHaveLength(0);
   } finally {
+    await f.close();
+  }
+}, 15000);
+
+test('guidance cannot abort or overtake any foreground sibling; the next Model sees all real results before the independent user input', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const signals: AbortSignal[] = [];
+  const f = await fixture(true, {
+    toolCount: 3,
+    onTool: async (_count, signal) => {
+      signals.push(signal);
+      await gate;
+      signal.throwIfAborted();
+    },
+  });
+  try {
+    f.model.release();
+    await until(
+      async () => f.effects,
+      (count) => count === 3,
+    );
+    await f.client.steer('s', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'during-tools',
+      kind: 'input.steer',
+      content: '请先回复现在的进度。',
+      targetRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+    });
+    await Bun.sleep(50);
+    expect(f.model.requests).toHaveLength(1);
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+    expect((await f.client.getCommand('during-tools')).status).toBe('accepted');
+    release();
+    await f.runtime.waitForCommand('original', { timeoutMs: 5000 });
+    expect(f.effects).toBe(3);
+    const next = f.model.requests[1]!.messages;
+    expect(next.filter((message) => message.role === 'tool')).toHaveLength(3);
+    expect(
+      next.filter(
+        (message) => message.role === 'user' && message.content === '请先回复现在的进度。',
+      ),
+    ).toHaveLength(1);
+    expect(
+      next.findIndex((message) => message.sourceIds?.includes('during-tools')),
+    ).toBeGreaterThan(
+      Math.max(...next.map((message, index) => (message.role === 'tool' ? index : -1))),
+    );
+  } finally {
+    release();
+    await f.close();
+  }
+}, 15000);
+
+test('queue-to-guidance is atomic, preserves exact text, rejects stale/changed input and never starts a duplicate follow-up', async () => {
+  const f = await fixture(true);
+  const content = '  独立问题 **进度**\r\n雪🙂  ';
+  try {
+    await f.client.followUp('s', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'queued',
+      kind: 'input.follow_up',
+      content,
+      afterRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+    });
+    const intent = {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'promoted',
+      kind: 'input.steer' as const,
+      content,
+      targetRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+      queuedInputCommandId: 'queued',
+    };
+    await code(
+      f.client.steer('s', { ...intent, commandId: 'wrong-body', content: 'changed' }),
+      'input_target_changed',
+    );
+    expect((await f.client.getCommand('queued')).status).toBe('accepted');
+    const receipt = await f.client.steer('s', intent);
+    expect(receipt.status).toBe('accepted');
+    expect(await f.client.getCommand('queued')).toMatchObject({
+      status: 'rejected',
+      receipt: { outcome: 'steered_before_apply', steerCommandId: 'promoted' },
+    });
+    expect(await f.client.steer('s', intent)).toEqual(receipt);
+    await code(
+      f.client.steer('s', { ...intent, commandId: 'duplicate' }),
+      'input_already_consumed',
+    );
+    f.model.release();
+    await f.runtime.waitForCommand('original', { timeoutMs: 5000 });
+    expect(f.effects).toBe(1);
+    expect((await f.client.getView('s')).runs).toHaveLength(1);
+    expect(
+      (await f.client.listMessages('s')).filter((message) => message.content === content),
+    ).toHaveLength(1);
+    expect(f.model.requests[1]!.messages).toContainEqual({
+      role: 'user',
+      content,
+      sourceIds: ['promoted'],
+    });
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+test('a lost queue-to-guidance HTTP receipt is recovered by its original durable caller ID without another POST or duplicate Run', async () => {
+  const f = await fixture(true);
+  let posts = 0;
+  const relay = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      const body = request.method === 'POST' ? await request.text() : undefined;
+      const intent = body ? JSON.parse(body) : undefined;
+      const headers = new Headers(request.headers);
+      headers.set('host', new URL(f.service.endpoint).host);
+      const response = await fetch(`${f.service.endpoint}${url.pathname}${url.search}`, {
+        method: request.method,
+        headers,
+        ...(body === undefined ? {} : { body }),
+      });
+      if (intent?.kind === 'input.steer') {
+        posts++;
+        await response.arrayBuffer();
+        return new Response('lost after commit', { status: 502 });
+      }
+      return response;
+    },
+  });
+  const client = createClient({
+    endpoint: relay.url.href,
+    token: f.service.bootstrap.token,
+    expected: { profile: f.profile, apiMajor: 1, requiredCapabilities: ['commands', 'inputs'] },
+  });
+  const data = memoryPrivateData();
+  try {
+    await client.connect();
+    const content = '完整进度问题\n雪🙂';
+    await f.client.followUp('s', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'queued-lost',
+      kind: 'input.follow_up',
+      afterRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+      content,
+    });
+    const request = {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'guide-lost',
+      kind: 'input.steer' as const,
+      targetRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+      queuedInputCommandId: 'queued-lost',
+      content,
+    };
+    const journal = new NativeCallerJournal(client, data);
+    await journal.prepare('s', request);
+    await expect(journal.submit(request.commandId)).rejects.toThrow();
+    expect(journal.records()[0]!.phase).toBe('unknown');
+    expect((await f.client.getCommand('queued-lost')).status).toBe('rejected');
+    const cold = new NativeCallerJournal(client, data);
+    expect((await cold.lookup(request.commandId)).id).toBe(request.commandId);
+    expect(posts).toBe(1);
+    f.model.release();
+    await f.runtime.waitForCommand('original', { timeoutMs: 5000 });
+    expect((await cold.lookup(request.commandId)).status).toBe('applied');
+    expect(posts).toBe(1);
+    expect(f.effects).toBe(1);
+    expect((await f.client.getView('s')).runs).toHaveLength(1);
+    expect(
+      (await f.client.listMessages('s')).filter((message) => message.content === content),
+    ).toHaveLength(1);
+  } finally {
+    client.disposeNetwork();
+    relay.stop(true);
+    await f.close();
+  }
+}, 15000);
+
+test('real Native Main sends one observed queue item and publishes durable caller changes for recovery and cold source suppression', async () => {
+  const f = await fixture(true);
+  const events: NativeEvent[] = [];
+  const client = createClient({
+    endpoint: f.service.endpoint,
+    token: f.service.bootstrap.token,
+    expected: {
+      profile: f.profile,
+      apiMajor: 1,
+      requiredCapabilities: ['commands', 'inputs', 'pending_input_queue'],
+    },
+  });
+  await client.connect();
+  const native = new NativeCaller(client, (event) => events.push(event), memoryPrivateData());
+  try {
+    await f.client.followUp('s', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'main-queued',
+      kind: 'input.follow_up',
+      afterRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+      content: '请直接回答进度',
+    });
+    const attached = (await native.invoke({ method: 'attach' })) as NativeState;
+    const state = (await native.invoke({
+      method: 'select',
+      generation: attached.generation,
+      sessionId: 's',
+    })) as NativeState;
+    const observed = await native.invoke({
+      method: 'input.queue.read',
+      generation: state.generation,
+      viewSelection: state.selection!.viewSelection!,
+      historyEpoch: state.historyEpoch ?? 0,
+      readId: 'main-guide',
+    });
+    if (!observed || !('observationId' in observed)) throw Error('queue observation absent');
+    const before = events.length;
+    const sent = await native.invoke({
+      method: 'input.queue.steer',
+      generation: state.generation,
+      observationId: observed.observationId,
+      targetCommandId: 'main-queued',
+    });
+    expect(sent).toMatchObject({
+      phase: 'accepted',
+      request: { kind: 'input.steer', queuedInputCommandId: 'main-queued' },
+    });
+    expect(events.length).toBeGreaterThan(before);
+    const saved = (await native.invoke({
+      method: 'state',
+      generation: state.generation,
+    })) as NativeState;
+    expect(
+      saved.callerSubmissions?.filter((row) => row.request.kind === 'input.steer'),
+    ).toHaveLength(1);
+    expect((await f.client.getCommand('main-queued')).status).toBe('rejected');
+    f.model.release();
+    await f.runtime.waitForCommand('original', { timeoutMs: 5000 });
+    expect(f.effects).toBe(1);
+  } finally {
+    f.model.release();
+    await native.disposeNetwork();
     await f.close();
   }
 }, 15000);

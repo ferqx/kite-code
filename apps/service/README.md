@@ -41,6 +41,10 @@ Windows daemon 在本进程首次完整准入后，把原 live artifact owner �
 
 `GET /v1/sessions/{id}/inputs` 的有限 response request 联合包括 steer、follow-up 和 Core 已接受的 `result.include`；只读投影保原 selection／execution／result revision／target Run，继续按原 seq 分页供兼容读取。接口不能过滤掉 result include 来迁就客户端显示；TUI 只把文本输入显示为队列并正常推进所有 cursor。Runtime checkpoint 与可变更队列使用上面的独立顺序 reader，原普通输入写路由与权限保持；[真实混合页回归](test/isolated/pending-inputs.test.ts)核旧读取的完整原申请与零重执行。
 
+## 运行中引导的原子转换
+
+HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core 原命令；Service 不按正文判别引导、不改写原队列申请，也不增加协议或工具版本。Store 核准确 pending follow-up、原主体／Session／前驱／selection／正文／附件并原子转换；完整前台工具批次先收尾，随后新模型输入接收独立引导。真实 HTTP 的转换、失败回滚、旧目标拒绝及丢回执原 ID 查询由[输入回归](../../tests/isolated/unified-agent/client-inputs.test.ts)与[Store 回归](../../packages/agent/test/isolated/storage/inputs.test.ts)覆盖。自动压缩继续使用原标准摘要器，真实模型交错范围见[模型验收](../../tests/e2e/live/model/README.md#运行中引导与自动压缩)。
+
 ## 默认装配与业务规则归属
 
 普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含 `files.read_path`（模型名称 `read_user_file`），使模型可以读取用户明确引用的普通工作区外文件；`files.write_path/edit_path` 不随此默认开启。显式禁用／移除仍生效，嵌入式最小默认保持仅 `ask_user`。工具可见不等于执行授权：外部读取继续经过准确目标、原生身份、当前权限和 protected/private 检查，既不扩大工作区文件工具的根，也不加载外部目录的项目说明。[默认装配回归](test/isolated/configuration.test.ts)以真实 paired Service／SDK／原生文件读取核默认选择、外部完整结果进入下一 Model，以及显式禁用；[工作区越界回归](test/isolated/assembly-file-denial.test.ts)仍核误用 `read_file` 的普通失败。缺选原因与只读范围归[Note](../../.agents/notes/implemented/bug-fix/2026-10-19-default-external-file-read.md)，原生真实模型附件资格归 [Desktop owner](../desktop/README.md#markdown-与附件输入)。

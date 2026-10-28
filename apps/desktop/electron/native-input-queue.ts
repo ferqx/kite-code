@@ -4,6 +4,7 @@ import {
   ClientError,
   type Command,
   type PendingInputQueue,
+  type SteerCommandRequest,
 } from '@kite-ai/client';
 import type {
   NativeInputQueueObservation,
@@ -28,7 +29,11 @@ const unavailable = () => new ClientError('input_queue_observation_unavailable')
 export class NativeInputQueue {
   private sequence = 0;
   private epoch = 0;
-  private observed?: { scope: Scope; facts: NativeInputQueueObservation };
+  private observed?: {
+    scope: Scope;
+    facts: NativeInputQueueObservation;
+    inputs: Map<string, PendingInputQueue['commands'][number]['request']>;
+  };
   private reading?: { readId: string; abort: AbortController };
   private mutation = false;
   private readonly inflight = new Map<string, Promise<NativeInputQueueSubmission>>();
@@ -113,6 +118,7 @@ export class NativeInputQueue {
       view.session.deletedAt !== null
     )
       throw unavailable();
+    return view;
   }
   async read(
     request: Extract<NativeInputQueueRequest, { method: 'input.queue.read' }>,
@@ -129,9 +135,14 @@ export class NativeInputQueue {
     const abort = new AbortController();
     this.reading = { readId: request.readId, abort };
     try {
-      await this.root(scope);
+      const view = await this.root(scope);
+      const active = view.runs.find((run) => run.isActive);
+      const activeCommand = active
+        ? await this.client.getCommand(active.originCommandId)
+        : undefined;
       const items: NativeInputQueueObservation['entries'] = [],
         seen = new Set<string>();
+      const inputs = new Map<string, PendingInputQueue['commands'][number]['request']>();
       let revision: string | undefined,
         afterOrder: string | undefined,
         bytes = 0,
@@ -170,6 +181,7 @@ export class NativeInputQueue {
           seen.add(command.id);
           if (command.request.kind === 'result.include') continue;
           const input = command.request;
+          inputs.set(command.id, structuredClone(input));
           bytes += Buffer.byteLength(input.content);
           if (bytes > 3 * 1048576) throw new ClientError('input_queue_too_large');
           const editable =
@@ -189,6 +201,16 @@ export class NativeInputQueue {
                 ? '包含附件的消息'
                 : '空白消息',
             editable,
+            steerable:
+              input.kind === 'input.follow_up' &&
+              !!active &&
+              input.afterRunId === active.id &&
+              input.contextSelectionId === view.session.contextSelectionId &&
+              !['context.compress', 'context.compression.reset'].includes(
+                activeCommand?.kind ?? '',
+              ) &&
+              !input.extensionInputs?.length &&
+              !input.selectedSkills?.length,
           });
         }
         if (
@@ -223,7 +245,7 @@ export class NativeInputQueue {
           .map((row) => this.metadata(row)),
       };
       if (!this.same(scope) || epoch !== this.epoch) throw unavailable();
-      this.observed = { scope, facts: structuredClone(facts) };
+      this.observed = { scope, facts: structuredClone(facts), inputs };
       return facts;
     } finally {
       if (this.reading?.abort === abort) this.reading = undefined;
@@ -240,6 +262,56 @@ export class NativeInputQueue {
     )
       throw unavailable();
     return observed;
+  }
+  async prepareSteer(
+    request: Extract<NativeInputQueueRequest, { method: 'input.queue.steer' }>,
+  ): Promise<{ sessionId: string; intent: SteerCommandRequest }> {
+    const { scope, facts, inputs } = this.observation(request.observationId);
+    if (
+      request.generation !== scope.generation ||
+      !facts.entries.some((item) => item.id === request.targetCommandId && item.steerable)
+    )
+      throw unavailable();
+    const view = await this.root(scope);
+    const run = view.runs.find((item) => item.isActive);
+    const command = await this.client.getCommand(request.targetCommandId);
+    const input = inputs.get(request.targetCommandId);
+    if (
+      !this.same(scope) ||
+      !run ||
+      command.originStoreId !== scope.storeId ||
+      command.sessionId !== scope.sessionId ||
+      command.subjectId !== scope.subjectId ||
+      command.status !== 'accepted' ||
+      command.kind !== 'input.follow_up' ||
+      input?.kind !== 'input.follow_up' ||
+      input.afterRunId !== run.id ||
+      input.contextSelectionId !== view.session.contextSelectionId ||
+      input.extensionInputs?.length ||
+      input.selectedSkills?.length
+    )
+      throw new ClientError('input_queue_target_unavailable');
+    const origin = await this.client.getCommand(run.originCommandId);
+    if (
+      !this.same(scope) ||
+      ['context.compress', 'context.compression.reset'].includes(origin.kind)
+    )
+      throw unavailable();
+    this.observed = undefined;
+    return {
+      sessionId: scope.sessionId,
+      intent: {
+        expectedStoreId: scope.storeId,
+        commandId: randomUUID(),
+        kind: 'input.steer',
+        queuedInputCommandId: command.id,
+        content: input.content,
+        ...(input.images?.length ? { images: input.images } : {}),
+        ...(input.files?.length ? { files: input.files } : {}),
+        targetRunId: run.id,
+        contextSelectionId: input.contextSelectionId,
+      },
+    };
   }
   async mutate(
     request: Extract<

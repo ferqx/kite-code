@@ -135,7 +135,9 @@ export type NativeCallerRecord = {
   phase: 'submitting' | 'unknown' | 'accepted' | 'applied' | 'rejected';
 };
 export type NativeCallerMetadata = Omit<NativeCallerIntent, 'request'> & {
-  request: Pick<NativeCallerCommandRequest, 'kind' | 'commandId' | 'expectedStoreId'>;
+  request: Pick<NativeCallerCommandRequest, 'kind' | 'commandId' | 'expectedStoreId'> & {
+    queuedInputCommandId?: string;
+  };
   phase: NativeCallerRecord['phase'];
 };
 export type NativeCallerBody = {

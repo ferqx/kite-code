@@ -77,6 +77,7 @@ function requestTarget(
       'selectedSkills',
       'extensionInputs',
       'targetRunId',
+      ...(allowExtension ? ['queuedInputCommandId'] : []),
       'contextSelectionId',
       'afterRunId',
       'targetCommandId',
@@ -100,7 +101,13 @@ function requestTarget(
     selection(request);
     target = { kind: 'session', id: sessionId };
   } else if (kind === 'input.steer') {
-    request = object(value, [...common, 'content', 'targetRunId', 'contextSelectionId']);
+    request = object(
+      value,
+      [...common, 'content', 'targetRunId', 'contextSelectionId'],
+      allowExtension ? ['queuedInputCommandId'] : [],
+    );
+    if (request.queuedInputCommandId !== undefined && !id(request.queuedInputCommandId))
+      throw invalid();
     text(request.content, 1, 1048576);
     if (!id(request.targetRunId) || !id(request.contextSelectionId)) throw invalid();
     target = {

@@ -61,6 +61,7 @@ function fixture() {
     corrupt = false;
   let calls = 0,
     lookups = 0;
+  let active = false;
   let commands = [pending('first'), pending('second')];
   const saved = new Map<string, Command>(),
     queries: unknown[] = [],
@@ -70,7 +71,14 @@ function fixture() {
     serverInfo: { storeId: 'store', subjectId: 'user', capabilities: ['pending_input_queue'] },
     getView: async (sessionId: string) => ({
       storeId: current.storeId,
-      session: { id: sessionId, workspaceId: 'workspace', parentSessionId: null, deletedAt: null },
+      session: {
+        id: sessionId,
+        workspaceId: 'workspace',
+        parentSessionId: null,
+        deletedAt: null,
+        contextSelectionId: 'context',
+      },
+      runs: active ? [{ id: 'run', originCommandId: 'origin', isActive: true }] : [],
     }),
     getPendingInputQueue: async (_sessionId: string, input: unknown) => {
       queries.push(input);
@@ -89,7 +97,12 @@ function fixture() {
     getCommand: async (id: string) => {
       lookups++;
       if (lookupFail) throw Error('lookup_lost');
-      return { ...saved.get(id)!, ...(corrupt ? { requestDigest: 'wrong' } : {}) };
+      return {
+        ...(id === 'origin'
+          ? { id, kind: 'run.start' }
+          : (saved.get(id) ?? commands.find((item) => item.id === id)!)),
+        ...(corrupt ? { requestDigest: 'wrong' } : {}),
+      };
     },
   } as unknown as AgentClient;
   async function post(input: WithdrawPendingInputRequest | ReorderPendingInputsRequest) {
@@ -130,6 +143,9 @@ function fixture() {
     data,
     queries,
     saved,
+    setActive: (value: boolean) => {
+      active = value;
+    },
     get calls() {
       return calls;
     },
@@ -159,6 +175,54 @@ function fixture() {
     },
   };
 }
+
+test('guidance uses Main-owned complete queued input, rejects stale scope and consumes observation once without a renderer body', async () => {
+  const f = fixture();
+  f.setActive(true);
+  const item = pending('first');
+  item.kind = 'input.follow_up';
+  item.request = {
+    kind: 'input.follow_up',
+    content: '完整\r\n雪🙂',
+    afterRunId: 'run',
+    contextSelectionId: 'context',
+    files: [{ name: 'read.txt', uri: 'file:///read.txt' }],
+  };
+  f.setCommands([item]);
+  const owner = f.create();
+  const observed = await owner.read(read);
+  expect(observed.entries[0]).toMatchObject({ editable: false, steerable: true });
+  const request = {
+    method: 'input.queue.steer' as const,
+    generation: 1,
+    observationId: observed.observationId,
+    targetCommandId: 'first',
+  };
+  expect(decodeNativeRequest(request)).toEqual(request);
+  expect(() => decodeNativeRequest({ ...request, content: 'forged' })).toThrow(
+    'invalid_native_request',
+  );
+  const prepared = await owner.prepareSteer(request);
+  expect(prepared).toMatchObject({
+    sessionId: 'session',
+    intent: {
+      kind: 'input.steer',
+      queuedInputCommandId: 'first',
+      content: '完整\r\n雪🙂',
+      targetRunId: 'run',
+      contextSelectionId: 'context',
+      files: item.request.files,
+    },
+  });
+  expect(f.calls).toBe(0);
+  await expect(owner.prepareSteer(request)).rejects.toThrow('input_queue_observation_unavailable');
+  const later = await owner.read(read);
+  f.setActive(false);
+  await expect(
+    owner.prepareSteer({ ...request, observationId: later.observationId }),
+  ).rejects.toThrow('input_queue_target_unavailable');
+  await owner.close();
+});
 
 test('closed queue IPC accepts only observed identities; renderer cannot forge content, Store, requests or operation IDs', () => {
   const original = {
@@ -419,8 +483,8 @@ test('attachment-only inputs remain visible, deletable and movable without becom
   ]);
   const observed = await owner.read(read);
   expect(observed.entries).toEqual([
-    { id: 'file-only', text: '包含附件的消息', editable: false },
-    { id: 'image-only', text: '包含附件的消息', editable: false },
+    { id: 'file-only', text: '包含附件的消息', editable: false, steerable: false },
+    { id: 'image-only', text: '包含附件的消息', editable: false, steerable: false },
   ]);
   const result = await owner.mutate({
     method: 'input.queue.reorder',

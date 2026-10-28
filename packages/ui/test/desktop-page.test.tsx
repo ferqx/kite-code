@@ -132,7 +132,7 @@ test('a passive run status notice does not hide the composer', () => {
   );
   expect(html).toContain('正在等待后台结果');
   expect(html).toContain('aria-label="任务输入"');
-  expect(html).toContain('aria-label="发送运行中引导"');
+  expect(html).toContain('aria-label="排队后续输入"');
 });
 
 test('a required subagent wait appears once after transcript content only while history is visible', () => {

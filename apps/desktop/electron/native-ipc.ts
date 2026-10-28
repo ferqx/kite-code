@@ -34,6 +34,7 @@ const requestBytes = 1048576,
 const fields: Record<NativeRequest['method'], readonly string[]> = {
   'input.queue.read': ['readId', 'viewSelection', 'historyEpoch'],
   'input.queue.close': ['readId'],
+  'input.queue.steer': ['observationId', 'targetCommandId'],
   'input.queue.withdraw': ['observationId', 'targetCommandId', 'purpose'],
   'input.queue.reorder': ['observationId', 'commandIds'],
   'input.queue.lookup': ['commandId'],
@@ -334,6 +335,10 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
           Number(input.viewSelection) < 0 ||
           !Number.isSafeInteger(input.historyEpoch) ||
           Number(input.historyEpoch) < 0)) ||
+      (method === 'input.queue.steer' &&
+        (!id(input.targetCommandId) ||
+          !Number.isSafeInteger(input.observationId) ||
+          Number(input.observationId) < 1)) ||
       (method === 'input.queue.withdraw' &&
         (!id(input.targetCommandId) || !['edit', 'delete'].includes(String(input.purpose)))) ||
       (method === 'input.queue.reorder' &&

@@ -11,7 +11,7 @@ test('submitted prompts remove every final LF or CRLF without trimming Markdown 
   expect(promptTextForSend('text\n \n\n')).toBe('text\n ');
 });
 
-test('Native text during compression/reset binds follow-up to the original Run and selection; ordinary active work steers', () => {
+test('Native ordinary sends always queue during an active Run, including compression/reset', () => {
   const selection = {
     storeId: 'original-store',
     session: { id: 'original-session', contextSelectionId: 'original-selection' },
@@ -42,8 +42,8 @@ test('Native text during compression/reset binds follow-up to the original Run a
   }
   selection.activeCommand!.kind = 'run.start';
   expect(nativeTextIntent(selection, 'new-command', 'steer')).toMatchObject({
-    kind: 'input.steer',
-    targetRunId: 'original-run',
+    kind: 'input.follow_up',
+    afterRunId: 'original-run',
     contextSelectionId: 'original-selection',
   });
   expect(nativeTextIntent({ ...selection, runs: [] }, 'new-command', 'new')).toMatchObject({
@@ -95,7 +95,7 @@ test('Native explicit Plan freezes a new Run or queued follow-up with the closed
   });
   selection.session.contextSelectionId = 'later-selection';
   expect(queued.kind === 'input.follow_up' && queued.contextSelectionId).toBe('original-selection');
-  expect(nativeTextIntent(active, 'ordinary', 'ordinary text').kind).toBe('input.steer');
+  expect(nativeTextIntent(active, 'ordinary', 'ordinary text').kind).toBe('input.follow_up');
 });
 
 test('Native input freezes next model and temporary effort only for a new root Run; active steering keeps the original route', () => {
@@ -123,10 +123,12 @@ test('Native input freezes next model and temporary effort only for a new root R
       kind: 'run.start',
     },
   } as unknown as NativeSelection;
-  const steer = nativeTextIntent(active, 'steer', 'ordinary input', false, choice);
-  expect(steer.kind).toBe('input.steer');
-  expect('modelId' in steer).toBe(false);
-  expect('reasoningEffort' in steer).toBe(false);
+  const queued = nativeTextIntent(active, 'queued', 'ordinary input', false, choice);
+  expect(queued).toMatchObject({
+    kind: 'input.follow_up',
+    modelId: 'later-model',
+    reasoningEffort: 'high',
+  });
   expect(nativeTextIntent(active, 'follow-up', 'next plan', true, choice)).toMatchObject({
     kind: 'input.follow_up',
     afterRunId: 'run',
@@ -155,14 +157,10 @@ test('Native unconfirmed ownership freezes queued follow-up identity and next mo
     },
   } as unknown as NativeSelection;
   const before = structuredClone(selection);
-  const intent = nativeTextIntent(
-    selection,
-    'new-command',
-    '  precise input 雪🙂 ',
-    false,
-    { modelId: 'next-model', reasoningEffort: 'high' },
-    true,
-  );
+  const intent = nativeTextIntent(selection, 'new-command', '  precise input 雪🙂 ', false, {
+    modelId: 'next-model',
+    reasoningEffort: 'high',
+  });
   expect(intent).toEqual({
     kind: 'input.follow_up',
     commandId: 'new-command',
@@ -174,18 +172,11 @@ test('Native unconfirmed ownership freezes queued follow-up identity and next mo
     reasoningEffort: 'high',
   });
   expect(selection).toEqual(before);
-  expect(nativeTextIntent(selection, 'held-command', 'held input').kind).toBe('input.steer');
+  expect(nativeTextIntent(selection, 'held-command', 'held input').kind).toBe('input.follow_up');
   expect(() =>
-    nativeTextIntent({ ...selection, activeCommand: undefined }, 'x', 'x', false, undefined, true),
+    nativeTextIntent({ ...selection, activeCommand: undefined }, 'x', 'x', false, undefined),
   ).toThrow('active_command_identity_unavailable');
   expect(() =>
-    nativeTextIntent(
-      { ...selection, permissionUnavailable: true },
-      'x',
-      'x',
-      false,
-      undefined,
-      true,
-    ),
+    nativeTextIntent({ ...selection, permissionUnavailable: true }, 'x', 'x', false, undefined),
   ).toThrow('session_view_unavailable');
 });

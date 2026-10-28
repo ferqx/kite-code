@@ -210,22 +210,24 @@ function tool(execute: ToolDefinition['execute']): ToolDefinition {
   };
 }
 
-test('steer supersedes an unstarted approved decision with paired result, fresh model and fresh approval', async () => {
-  const model = createFixedModel([call('old-call', 'old'), call('new-call', 'new'), [finish]]);
+test('guidance preserves the original pending approval and executes its tool before the next Model', async () => {
+  const model = createFixedModel([call('old-call', 'old'), [finish]]);
   const effects: string[] = [];
   const f = await fixture(model, { permissions: ask }, [
     tool(async (input) => {
       effects.push((input as { value: string }).value);
-      return { outcome: 'succeeded', content: 'effect' };
+      return { outcome: 'succeeded', content: 'original effect completed' };
     }),
   ]);
   try {
     await f.submit();
     const old = await f.pending();
-    const oldExecution = await f.store.getExecution(old.executionId);
-    await f.steer('steer', 'Follow up: new user direction');
-    const next = await f.pending(old.id);
-    const steerId = await f.appliedSteer('steer');
+    const before = await f.store.getExecution(old.executionId);
+    await f.steer('steer', '请先回复进度');
+    await Bun.sleep(50);
+    expect(model.requests).toHaveLength(1);
+    expect(effects).toEqual([]);
+    expect((await f.store.getCommand('steer'))?.status).toBe('accepted');
     expect(
       (
         await f.runtime.getInteraction({
@@ -234,62 +236,30 @@ test('steer supersedes an unstarted approved decision with paired result, fresh 
           interactionId: old.id,
         })
       )?.state,
-    ).toBe('cancelled');
-    expect(await f.store.getExecution(old.executionId)).toMatchObject({
-      status: 'cancelled',
-      authorization: { dispatched: false },
-    });
-    expect(
-      (
-        await f.runtime.getInteraction({
-          expectedStoreId: f.expectedStoreId,
-          sessionId: 's',
-          interactionId: old.id,
-        })
-      )?.acceptedDecisionRevision,
-    ).toBeNull();
-    expect((await f.store.getExecution(old.executionId))?.input).toEqual(oldExecution?.input);
-    expect((await f.store.getExecution(old.executionId))?.result).toMatchObject({
-      content: 'superseded_by_user_input',
-      details: { adapterAttempted: false },
-    });
-    expect(effects).toEqual([]);
-    expect(next.executionId).not.toBe(old.executionId);
-    expect(next.inputDigest).not.toBe(old.inputDigest);
-    const second = model.requests[1]!;
-    expect(
-      second.messages.find((value) => value.content === 'Follow up: new user direction')?.sourceIds,
-    ).toEqual([steerId]);
-    expect(second.messages.find((value) => value.content === 'original work')?.sourceIds).toContain(
-      'work',
-    );
-    expect(
-      second.messages.some((value) => value.toolCalls?.some((call) => call.id === 'old-call')),
-    ).toBe(true);
-    expect(second.messages.find((value) => value.toolCallId === 'old-call')?.content).toContain(
-      'superseded_by_user_input',
-    );
+    ).toBe('pending');
+    expect((await f.store.getExecution(old.executionId))?.input).toEqual(before?.input);
     await f.runtime.answerInteraction({
       expectedStoreId: f.expectedStoreId,
-      commandId: 'approve-new',
+      commandId: 'approve-original',
       subjectId: 'owner',
       presentationSessionId: 's',
-      interactionId: next.id,
-      expectedRevision: next.revision,
+      interactionId: old.id,
+      expectedRevision: old.revision,
       answer: { kind: 'approval', decision: 'approve' },
     });
     await f.runtime.waitForCommand('work');
-    const view = await f.runtime.getView('s');
-    expect(effects).toEqual(['new']);
-    expect(view.runs).toHaveLength(1);
-    expect(view.runs[0]?.status).toBe('completed');
-    expect(model.requests).toHaveLength(3);
-    expect(
-      view.executions
-        .filter((value) => value.kind === 'tool')
-        .map((value) => value.status)
-        .sort(),
-    ).toEqual(['cancelled', 'succeeded']);
+    const steerId = await f.appliedSteer('steer');
+    expect(effects).toEqual(['old']);
+    expect((await f.store.getExecution(old.executionId))?.status).toBe('succeeded');
+    expect(model.requests).toHaveLength(2);
+    const messages = model.requests[1]!.messages;
+    expect(messages.find((message) => message.toolCallId === 'old-call')?.content).toBe(
+      'original effect completed',
+    );
+    expect(messages.find((message) => message.content === '请先回复进度')?.sourceIds).toEqual([
+      steerId,
+    ]);
+    expect((await f.runtime.getView('s')).runs).toHaveLength(1);
   } finally {
     await f.close();
   }

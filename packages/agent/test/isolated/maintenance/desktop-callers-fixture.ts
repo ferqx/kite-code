@@ -12,8 +12,9 @@ export async function nodeCallerAssets(
   profile: { dataRoot: string; profile: string },
   storeId: string,
   action: 'seed' | 'read' = 'seed',
+  windowsAsset?: { path: string; sha256: string },
 ) {
-  if (action === 'seed') await nodeAssets(root, profile, storeId);
+  if (action === 'seed') await nodeAssets(root, profile, storeId, 'seed', windowsAsset);
   const directory = join(root, 'node-caller-fixture');
   privateDirectory(directory);
   const helper = join(root, 'node-ui-fixture/profile-access-helper.js');
@@ -77,6 +78,7 @@ try {
         storeId,
         profilePath: selectProfile(profile).profilePath,
         access: {
+          ...(windowsAsset ? { windowsAsset } : {}),
           profile,
           bunExecutable: process.execPath,
           bunSha256: hash(process.execPath),

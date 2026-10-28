@@ -130,7 +130,7 @@ QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完
 
 普通输入直接由原公共 Command 进入当前主 Agent；不生成独立 raw/归属决定/处理轮，也不按正文自动暂停、继续或改选工作。steer 在准确活动 Run 的安全边界应用，队列等准确前驱结束，新轮次使用当前显式模型配置。旧记录与明确控制只保兼容，旧 processing 恢复在 scope/恢复校验后且加载配置前拒绝。准确取消、停止、root stop、Rewind、unknown 和 fence 仍有效，具体归[输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
-用户输入与 Agent 通信由 Runtime 同一串行接收入口汇合，仍分别保留用户引导与低信任 inbox 的失效语义。新 `agent_completion` 将原唯一结果 Command 封存为 typed 邮箱项，经现有邮箱查询／接收／水位去重；原 Source、准入回执和父续 Run origin 保持，不另建影子队列或复制正文。活动轮接纳与 idle 续跑共用该收件入口，续跑仍核原配置、当前授权与用户队列优先；未标记旧报告和非 Agent Job 保留准确旧协议。具体事务与兼容边界归 [Store owner](../../packages/agent/src/storage/README.md#统一消息接收)。
+用户输入与 Agent 通信由 Runtime 同一串行接收入口汇合，仍分别保留独立用户指令与低信任 inbox 的来源和权限语义。新 `agent_completion` 将原唯一结果 Command 封存为 typed 邮箱项，经现有邮箱查询／接收／水位去重；原 Source、准入回执和父续 Run origin 保持，不另建影子队列或复制正文。活动轮接纳与 idle 续跑共用该收件入口，续跑仍核原配置、当前授权与用户队列优先；未标记旧报告和非 Agent Job 保留准确旧协议。具体事务与兼容边界归 [Store owner](../../packages/agent/src/storage/README.md#统一消息接收)。
 
 普通收件的公开 `Message.agentMessage` 由 Runtime 核原邮箱回执、发送 Tool／主体／父子关系、接收 Message／Run／selection 和原 Artifact 后只读投影；system 展示携真实发送者及完整正文，未核实来源或正文明确不可读。Service／Client 同源 schema 只交付这些展示事实，Native 复用原过程和 MessageItem，保原 Run 分组，不创建额外输入、Source、轮次或授权。物理内部占位和模型上下文的低信任装配保持独立，邮件内容不能取得用户或工具执行身份。
 
@@ -218,7 +218,7 @@ Interaction 只有实际发起 Session 的权威请求，父展示与回答引�
 
 [完整 Model 正文](../../packages/agent/src/model-body/README.md)把 Tool summary 和原 Artifact 全文一起交给实际 Model；大请求、来源与 Auto 审核使用准确原 scope 的不可变正文和有限持久 header。Provider 前完整核实并展开，成功 Model 保存实际 inputBodyHash。最终 SQL 事务仅核 metadata/原绑定与真实执行 proof，不读取正文或调用 Provider。64KiB 路由阈值不裁剪任务或来源；Worker 有限队列和控制预留保持。Auto 专用 carrier 的 planned-parent 准入只能由具名 Store 方法提供，公开 snapshot 不生成豁免；审查是同 Loop 的一个无 Tool Model，文本自报引用不授予权限。审核历史只包含明确的语义消息字段，Provider 私有 continuation 不进入审核普通正文、后续审核历史或公开 Inspector；原私有请求仍在原 scope 完整验证，投影不替代原 carrier／payload 绑定证明。大请求的人工回退附件需要客户端实际完整加载资格，不能把引用展示当作已经审阅全文。
 
-steer 定位原活动 Run 的安全检查点，follow-up 保留独立命令及原前驱；已派发调用不会因新输入而改写原决策。模型输入取当前上下文选择，分别穷尽消息与结果引用的固定上界分页。合法 pending delivery 仅由原执行 owner 在准备模型请求时消费，完成游标保存在执行事实中，不依赖可裁剪通知。idle 或只读查询不创建模型请求。Rewind 核实整个执行组，原子隔离旧 pending 并保留历史；显式 include 只增加准确原来源，不重跑、不恢复旧交付。子内部结果与父 carrier 结果保持各自 Session 范围，实际模型请求记录准确 source IDs。
+steer 定位原活动 Run 整批前台 Tool 收尾后的安全检查点，排队、审批等待及资源等待工具不被引导退休；follow-up 保留独立命令及原前驱。`queuedInputCommandId` 将准确 pending follow-up 原子转为独立 steer，原请求、正文与附件可追溯，丢回执只读原新命令；已派发调用不会因新输入而改写原决策。模型输入取当前上下文选择，分别穷尽消息与结果引用的固定上界分页。合法 pending delivery 仅由原执行 owner 在准备模型请求时消费，完成游标保存在执行事实中，不依赖可裁剪通知。idle 或只读查询不创建模型请求。Rewind 核实整个执行组，原子隔离旧 pending 并保留历史；显式 include 只增加准确原来源，不重跑、不恢复旧交付。子内部结果与父 carrier 结果保持各自 Session 范围，实际模型请求记录准确 source IDs。
 
 孤儿执行已核实结算后的 Rewind，在同一事务核准确 checkpoint、owner／generation 与全组已结算事实后退休旧接续边界，保留已结算历史并保存新选择。新普通输入继续经过当前权限与 unknown fence；旧 Run 不因 checkpoint 退休取得恢复资格。任一校验或事务失败保持原 checkpoint 和选择，具体实现与强杀回归归 [Store owner](../../packages/agent/src/storage/README.md)。
 

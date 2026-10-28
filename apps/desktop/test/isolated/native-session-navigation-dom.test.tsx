@@ -1218,7 +1218,23 @@ test('parent history refresh stays active during a child tab and gates writes un
   try {
     await f.render();
     await f.click('Original');
-    expect(action('引导当前轮次').disabled).toBe(false);
+    // Ordinary busy sends now select a model for the queued next Run.
+    await f.click('选择模型');
+    for (const label of ['选择模型，当前 未选择', '选择模型 model']) {
+      await until(() => !!f.host.ownerDocument.querySelector(`[aria-label="${label}"]`));
+      await act(async () =>
+        f.host.ownerDocument.querySelector<HTMLElement>(`[aria-label="${label}"]`)!.click(),
+      );
+    }
+    await act(async () =>
+      f.host.ownerDocument.querySelector('[aria-label="模型与思考程度"]')!.dispatchEvent(
+        new f.host.ownerDocument.defaultView!.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(action('排队后续输入').disabled).toBe(false);
     expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
       false,
     );
@@ -1235,8 +1251,8 @@ test('parent history refresh stays active during a child tab and gates writes un
       f.host.querySelector('[role="textbox"][contenteditable]')!.getAttribute('contenteditable') !==
         'true',
     ).toBe(false);
-    expect(action('引导当前轮次').disabled).toBe(true);
-    await f.click('引导当前轮次');
+    expect(action('排队后续输入').disabled).toBe(true);
+    await f.click('排队后续输入');
     const permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]');
     expect(permission === null || permission.disabled).toBe(true);
     await f.edit('');
@@ -1256,7 +1272,7 @@ test('parent history refresh stays active during a child tab and gates writes un
       false,
     );
     await f.edit('Original private draft');
-    expect(action('引导当前轮次').disabled).toBe(false);
+    expect(action('排队后续输入').disabled).toBe(false);
   } finally {
     await f.close();
   }
@@ -2249,7 +2265,7 @@ test('an owner observation for an earlier Run cannot mark a later active Run unc
   }
 });
 
-test('an unconfirmed Native execution queues the new input on its exact Run while held execution still steers', async () => {
+test('ordinary Native input queues on the exact Run for held, unheld and unknown execution', async () => {
   for (const owner of ['unheld', 'unknown', 'held'] as const) {
     const f = fixture(true, false, '');
     f.runningParent();
@@ -2259,31 +2275,27 @@ test('an unconfirmed Native execution queues the new input on its exact Run whil
       await f.render();
       await f.click('Original');
       await f.edit('continue exact input 雪🙂');
-      const label = owner === 'held' ? '引导当前轮次' : '排队后续输入';
+      const label = '排队后续输入';
       const send = () => f.host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
-      if (owner !== 'held') {
-        expect(send()?.disabled).toBe(true);
-        await f.click('选择模型');
-        for (const label of ['选择模型，当前 未选择', '选择模型 model']) {
-          await until(() => !!f.host.ownerDocument.querySelector(`[aria-label="${label}"]`));
-          await act(async () => {
-            const choice = f.host.ownerDocument.querySelector<HTMLElement>(
-              `[aria-label="${label}"]`,
-            );
-            expect(choice).not.toBeNull();
-            choice!.click();
-          });
-        }
+      expect(send()?.disabled).toBe(true);
+      await f.click('选择模型');
+      for (const label of ['选择模型，当前 未选择', '选择模型 model']) {
+        await until(() => !!f.host.ownerDocument.querySelector(`[aria-label="${label}"]`));
         await act(async () => {
-          const popup = f.host.ownerDocument.querySelector('[aria-label="模型与思考程度"]')!;
-          popup.dispatchEvent(
-            new f.host.ownerDocument.defaultView!.KeyboardEvent('keydown', {
-              key: 'Escape',
-              bubbles: true,
-            }),
-          );
+          const choice = f.host.ownerDocument.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+          expect(choice).not.toBeNull();
+          choice!.click();
         });
       }
+      await act(async () => {
+        const popup = f.host.ownerDocument.querySelector('[aria-label="模型与思考程度"]')!;
+        popup.dispatchEvent(
+          new f.host.ownerDocument.defaultView!.KeyboardEvent('keydown', {
+            key: 'Escape',
+            bubbles: true,
+          }),
+        );
+      });
       await until(() => !!send() && !send()!.disabled);
       await f.click(label);
       const submissions = f.requests.filter(
@@ -2295,13 +2307,12 @@ test('an unconfirmed Native execution queues the new input on its exact Run whil
         generation: 1,
         sessionId: 'root',
         intent: {
-          kind: owner === 'held' ? 'input.steer' : 'input.follow_up',
+          kind: 'input.follow_up',
           expectedStoreId: 'store',
           content: 'continue exact input 雪🙂',
           contextSelectionId: 'context',
-          ...(owner === 'held'
-            ? { targetRunId: original!.id }
-            : { afterRunId: original!.id, modelId: 'model' }),
+          afterRunId: original!.id,
+          modelId: 'model',
         },
       });
       expect('extensionInputs' in submissions[0]!.intent).toBe(false);

@@ -16,6 +16,7 @@ export interface QueuedPrompt {
   text: string;
   /** Inputs with images or other context cannot be replaced by a text-only draft. */
   editable?: boolean;
+  steerable?: boolean;
 }
 export interface QueuedMessagesProps {
   items: readonly QueuedPrompt[];
@@ -24,6 +25,7 @@ export interface QueuedMessagesProps {
   onEdit: (id: string) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
   onReorder: (ids: readonly string[]) => void | Promise<void>;
+  onSteer?: (id: string) => void | Promise<void>;
 }
 
 /** Presentation only: the host withdraws or reorders the actual pending inputs. */
@@ -131,6 +133,20 @@ export function QueuedMessages(props: QueuedMessagesProps) {
                     <MessageContent text={item.text} />
                   </TooltipContent>
                 </Tooltip>
+                {props.onSteer && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="引导发送排队消息"
+                    disabled={blocked || !item.steerable}
+                    onClick={() => {
+                      if (!blocked && item.steerable) void props.onSteer?.(item.id);
+                    }}
+                  >
+                    引导发送
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"

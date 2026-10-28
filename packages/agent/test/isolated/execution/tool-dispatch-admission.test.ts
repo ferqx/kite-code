@@ -282,7 +282,7 @@ test('default ordered admission releases the next Tool after dispatch while the 
     await f.close();
   }
 });
-test('steer retires approved-waiting ordered decisions and their sibling without failing the Run', async () => {
+test('guidance preserves an approved-waiting ordered Tool and its queued sibling', async () => {
   const effects: string[] = [];
   const f = await fixture(
     ['external', 'read'].map((name) =>
@@ -323,6 +323,17 @@ test('steer retires approved-waiting ordered decisions and their sibling without
         content: 'Follow up: Stop the old effects and summarize instead',
       },
     });
+    expect((await f.store.getCommand('steer'))?.status).toBe('accepted');
+    expect(f.model.requests).toHaveLength(1);
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'approve-original',
+      subjectId: 'owner',
+      presentationSessionId: 's',
+      interactionId: interaction.id,
+      expectedRevision: interaction.revision,
+      answer: { kind: 'approval', decision: 'approve' },
+    });
     await f.runtime.waitForCommand('work', { timeoutMs: 3000 });
     const steer = (await f.store.getCommand('steer'))!;
     expect(steer).toMatchObject({ status: 'applied', receipt: { runId: run.id } });
@@ -356,11 +367,10 @@ test('steer retires approved-waiting ordered decisions and their sibling without
     expect(tools).toHaveLength(2);
     for (const old of tools)
       expect(old).toMatchObject({
-        status: 'cancelled',
-        authorization: { dispatched: false },
-        result: { content: 'superseded_by_user_input' },
+        status: 'succeeded',
+        authorization: { dispatched: true },
       });
-    expect(effects).toEqual([]);
+    expect(effects).toEqual(['external', 'read']);
     expect(f.model.requests).toHaveLength(2);
     expect(
       f.model.requests[1]!.messages.find(
@@ -375,7 +385,7 @@ test('steer retires approved-waiting ordered decisions and their sibling without
           interactionId: interaction.id,
         })
       )?.state,
-    ).toBe('cancelled');
+    ).toBe('answered');
   } finally {
     await f.close();
   }

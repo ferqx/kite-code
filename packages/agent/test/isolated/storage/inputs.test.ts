@@ -273,58 +273,27 @@ test('message first-publication time survives streamed updates, finalization and
     await f.cleanup();
   }
 });
-test('steer preserves real Run/order/provenance, supersedes only unstarted calls/cards and leaves dispatched request immutable', async () => {
+test('guidance waits for planned tools and approvals, preserves dispatched requests, then applies twelve original messages in order', async () => {
   const f = await fixture();
   try {
     await f.plan('decision-model', 'model');
     await dispatch(f, 'decision-model');
+    const calls = [
+      { id: 'old-tool', name: 'fixed', arguments: JSON.stringify({ content: 'original request' }) },
+    ];
     await f.store.finishExecution({
       ...f.write,
       executionId: 'decision-model',
       status: 'succeeded',
-      result: {
-        toolCalls: [
-          {
-            id: 'old-tool',
-            name: 'fixed',
-            arguments: JSON.stringify({ content: 'original request' }),
-          },
-        ],
-      },
-      message: {
-        role: 'assistant',
-        content: '',
-        toolCalls: [
-          {
-            id: 'old-tool',
-            name: 'fixed',
-            arguments: JSON.stringify({ content: 'original request' }),
-          },
-        ],
-      },
+      result: { toolCalls: calls },
+      message: { role: 'assistant', content: '', toolCalls: calls },
     });
     await f.plan('live-model', 'model');
     await dispatch(f, 'live-model');
     await f.plan('old-tool');
-    await f.plan('live-question');
-    await dispatch(f, 'live-question');
     await f.store.requestInteraction({
       ...f.write,
-      interactionId: 'question',
-      executionId: 'live-question',
-      attempt: 1,
-      kind: 'question',
-      definitionId: 'fixed',
-      definitionVersion: '1',
-      inputDigest: await semanticDigest({ content: 'original request' }),
-      policyRevision: '1',
-      requiredRefs: [],
-      source: f.source,
-      request: { prompt: 'still waiting' },
-    });
-    await f.store.requestInteraction({
-      ...f.write,
-      interactionId: 'old-approval',
+      interactionId: 'approval',
       executionId: 'old-tool',
       attempt: 1,
       kind: 'approval',
@@ -336,7 +305,7 @@ test('steer preserves real Run/order/provenance, supersedes only unstarted calls
       source: f.source,
       request: { title: 'original params' },
     });
-    for (let n = 0; n < 12; n++) await f.steer(`steer-${n}`);
+    for (let n = 0; n < 12; n++) await f.steer('steer-' + n);
     const page = await f.store.listPendingInputs({
       expectedStoreId: f.expectedStoreId,
       sessionId: 's',
@@ -344,7 +313,7 @@ test('steer preserves real Run/order/provenance, supersedes only unstarted calls
       targetRunId: f.run.id,
       limit: 5,
     });
-    expect(page.commands.map((c) => c.id)).toEqual([
+    expect(page.commands.map((row) => row.id)).toEqual([
       'steer-0',
       'steer-1',
       'steer-2',
@@ -352,64 +321,32 @@ test('steer preserves real Run/order/provenance, supersedes only unstarted calls
       'steer-4',
     ]);
     expect(page.nextAfterSeq).toBe(page.commands[4]!.seq);
-    expect(
-      (
-        await f.store.listPendingInputs({
-          expectedStoreId: f.expectedStoreId,
-          sessionId: 's',
-          afterSeq: page.nextAfterSeq!,
-          limit: 20,
-        })
-      ).commands,
-    ).toHaveLength(7);
     await rejected(f.apply('steer-1'), 'input_order_conflict');
     await rejected(f.finish(), 'input_pending');
-    await rejected(dispatch(f, 'old-tool'), 'input_pending');
-    const first = await f.apply('steer-0');
-    expect(first.supersededExecutionIds).toEqual(['old-tool']);
-    expect(first.message.sourceIds).toEqual(['steer-0']);
-    expect(first.message.contextSelectionId).toBe(f.contextSelectionId);
-    expect(first.message.originCommandId).toBe('steer-0');
-    expect(first.message.inputKind).toBe('input.steer');
-    expect(first.command.rootWorkCommandId).toBe('work');
-    expect(first.run.id).toBe(f.run.id);
-    expect(first.run.status).toBe('waiting_interaction');
-    expect((await f.store.getExecution('old-tool'))?.result).toMatchObject({
-      content: 'superseded_by_user_input',
-      details: { adapterAttempted: false },
-    });
+    await rejected(f.apply('steer-0'), 'input_tools_pending');
+    await rejected(dispatch(f, 'old-tool'), 'interaction_decision_required');
     expect(
       (
         await f.store.getInteraction({
           expectedStoreId: f.expectedStoreId,
           sessionId: 's',
-          interactionId: 'old-approval',
+          interactionId: 'approval',
         })
       )?.state,
-    ).toBe('cancelled');
-    expect((await f.store.getExecution('live-model'))?.status).toBe('dispatching');
-    expect((await f.store.getExecution('live-model'))?.input).toEqual({
-      content: 'original request',
-    });
-    expect(await f.apply('steer-0')).toEqual(first);
-    for (let n = 1; n < 12; n++) await f.apply(`steer-${n}`);
-    expect(
-      (await f.store.listPendingInputs({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
-        .commands,
-    ).toHaveLength(0);
+    ).toBe('pending');
     await f.store.answerInteraction({
       expectedStoreId: f.expectedStoreId,
-      commandId: 'answer-question',
+      commandId: 'approve',
       presentationSessionId: 's',
-      interactionId: 'question',
+      interactionId: 'approval',
       expectedRevision: '1',
       subjectId: 'user',
-      answer: { kind: 'question', answers: 'answer' },
+      answer: { kind: 'approval', decision: 'approve' },
     });
     await f.store.acceptInteractionDecision({
       ...f.write,
-      interactionId: 'question',
-      executionId: 'live-question',
+      interactionId: 'approval',
+      executionId: 'old-tool',
       attempt: 1,
       decisionRevision: '2',
       definitionId: 'fixed',
@@ -419,26 +356,112 @@ test('steer preserves real Run/order/provenance, supersedes only unstarted calls
       requirements: [],
       freshness: { checked: true, source: f.source },
     });
-    expect((await f.store.getRun(f.run.id))?.status).toBe('running');
+    await f.store.markDispatching({
+      ...f.write,
+      executionId: 'old-tool',
+      authorization: {
+        allowed: true,
+        revision: '1',
+        definitionVersion: '1',
+        inputDigest: await semanticDigest({ content: 'original request' }),
+        interactionId: 'approval',
+        decisionRevision: '2',
+      },
+      requirements: [],
+      freshness: { checked: true, source: f.source },
+    });
+    await rejected(f.apply('steer-0'), 'input_tools_pending');
+    await f.store.finishExecution({
+      ...f.write,
+      executionId: 'old-tool',
+      status: 'succeeded',
+      result: { outcome: 'succeeded', content: 'real result' },
+      message: {
+        role: 'tool',
+        content: 'real result',
+        toolCallId: 'old-tool',
+        sourceIds: ['old-tool'],
+      },
+    });
+    const first = await f.apply('steer-0');
+    expect(first.supersededExecutionIds).toEqual([]);
+    expect(first.message).toMatchObject({
+      sourceIds: ['steer-0'],
+      originCommandId: 'steer-0',
+      inputKind: 'input.steer',
+      contextSelectionId: f.contextSelectionId,
+    });
+    expect(first.command.rootWorkCommandId).toBe('work');
+    expect(await f.apply('steer-0')).toEqual(first);
+    for (let n = 1; n < 12; n++) await f.apply('steer-' + n);
+    expect((await f.store.getExecution('old-tool'))?.status).toBe('succeeded');
+    expect(await f.store.getExecution('live-model')).toMatchObject({
+      status: 'dispatching',
+      input: { content: 'original request' },
+    });
     const messages = await f.store.listMessages('s', { limit: 100 });
     expect(
-      messages.some(
-        (m) => m.role === 'assistant' && m.toolCalls?.some((call) => call.id === 'old-tool'),
-      ),
-    ).toBe(true);
+      messages
+        .filter((message) => message.role === 'tool' && message.toolCallId === 'old-tool')
+        .map((message) => message.content),
+    ).toEqual(['real result']);
     expect(
       messages
-        .filter((m) => m.role === 'tool' && m.toolCallId === 'old-tool')
-        .map((m) => ({ content: m.content, sourceIds: m.sourceIds })),
-    ).toEqual([{ content: 'superseded_by_user_input', sourceIds: ['old-tool'] }]);
-    expect(messages.filter((m) => m.inputKind === 'input.steer').map((m) => m.content)).toEqual(
-      Array.from({ length: 12 }, (_, n) => `steer-${n}`),
-    );
-    expect(new Set(messages.filter((m) => m.inputKind).map((m) => m.id)).size).toBe(12);
+        .filter((message) => message.inputKind === 'input.steer')
+        .map((message) => message.content),
+    ).toEqual(Array.from({ length: 12 }, (_, n) => 'steer-' + n));
+    expect(
+      new Set(messages.filter((message) => message.inputKind).map((message) => message.id)).size,
+    ).toBe(12);
   } finally {
     await f.cleanup();
   }
 });
+test('failed atomic queue-to-guidance admission rolls back the original queue and an exact retry withdraws only once', async () => {
+  const f = await fixture();
+  try {
+    await f.follow('queued');
+    const request = {
+      kind: 'input.steer' as const,
+      content: 'queued',
+      targetRunId: f.run.id,
+      contextSelectionId: f.contextSelectionId,
+      queuedInputCommandId: 'queued',
+    };
+    f.db.exec(
+      "CREATE TRIGGER fail_guide BEFORE INSERT ON command WHEN NEW.id='guide' BEGIN SELECT RAISE(ABORT,'fixture_guide_fault'); END",
+    );
+    let failed = false;
+    try {
+      await f.store.acceptCommand({ ...f.base, commandId: 'guide', request });
+    } catch {
+      failed = true;
+    }
+    expect(failed).toBe(true);
+    expect((await f.store.getCommand('queued'))?.status).toBe('accepted');
+    expect(await f.store.getCommand('guide')).toBeNull();
+    f.db.exec('DROP TRIGGER fail_guide');
+    const accepted = await f.store.acceptCommand({ ...f.base, commandId: 'guide', request });
+    expect(await f.store.acceptCommand({ ...f.base, commandId: 'guide', request })).toEqual(
+      accepted,
+    );
+    expect((await f.store.getCommand('queued'))?.receipt).toMatchObject({
+      outcome: 'steered_before_apply',
+      steerCommandId: 'guide',
+    });
+    await rejected(
+      f.store.acceptCommand({ ...f.base, commandId: 'duplicate-guide', request }),
+      'input_already_consumed',
+    );
+    await f.apply('guide');
+    expect(
+      (await f.store.listMessages('s')).filter((message) => message.content === 'queued'),
+    ).toHaveLength(1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('cancellation before input application creates zero messages; exact Run cancellation consumes pending steer but preserves new followup intent', async () => {
   const f = await fixture();
   try {

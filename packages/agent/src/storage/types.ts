@@ -105,6 +105,7 @@ export type CommandRequest =
     }
   | {
       kind: 'input.steer';
+      queuedInputCommandId?: string;
       content: string;
       images?: readonly InputImage[];
       files?: readonly InputFileReference[];

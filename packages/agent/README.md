@@ -243,7 +243,7 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 ## 人类输入、工作选择与可靠结果
 
-[Runtime](src/runtime.ts) 的 `submitCommand` 直接保存并派发原 `run.start/input.steer/input.follow_up`，不调用独立输入分类器、不生成 `human.input/decision` 或处理 Run。普通 Loop 理解当前用户要求并决定必要工具；没有额外的判定回复。`input.steer` 在安全检查点进入准确活动 Run，`input.follow_up` 等准确前驱结束；新轮次使用用户本次明确配置，旧 Run 不复活。原文、附件、公开 Command ID 和实际 Run 直接对应。[输入 owner](src/storage/sqlite/inputs/README.md)维护准入、配对与取消细节。
+[Runtime](src/runtime.ts) 的 `submitCommand` 直接保存并派发原 `run.start/input.steer/input.follow_up`，不调用独立输入分类器、不生成 `human.input/decision` 或处理 Run。普通 Loop 理解当前用户要求并决定必要工具；没有额外的判定回复。`input.steer` 等原整批前台 Tool（含排队／审批等待）收尾后，在安全检查点作为独立用户消息进入准确活动 Run，`input.follow_up` 等准确前驱结束；新轮次使用用户本次明确配置，旧 Run 不复活。原文、附件、公开 Command ID 和实际 Run 直接对应。运行中引导先直接回应新输入，再继续必要工具；自动压缩保留原输入来源，过期摘要不越过新引导发布。三类真实模型验证归[引导与压缩验收](../../tests/e2e/live/model/README.md#运行中引导与自动压缩)。[输入 owner](src/storage/sqlite/inputs/README.md)维护准入、配对与取消细节。
 
 `modelMessages` 在新 Model 输入中为当前 Store／Session 其他已中断、取消或失败轮次的人类输入追加准确生命周期说明：原输入是完整历史，本身不是待办或本轮授权；不能从终态推定副作用未发生或允许重试。说明由真实 Message／Command／Run 及主体、Session、原 Store 关系证明，不按正文判断任务。当前 Run（包括显式 `run.resume`）的输入保持普通指令；本次明确输入仍可授权新的工作。原 Message／Source、SQL 顺序、附件、tool call 配对及已封存 Model intent 不改写，不新增公开消息或分类模型。Fork 已封存历史及外 origin Store 的恢复历史不读取来源 Run 后来的可变状态重新解释；完整输入检查和回归边界见[上下文 owner](src/storage/sqlite/context/README.md)。
 

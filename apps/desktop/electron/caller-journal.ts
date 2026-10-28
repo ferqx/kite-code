@@ -143,6 +143,9 @@ export function callerMetadata(row: NativeCallerRecord): NativeCallerMetadata {
       kind: request.kind,
       commandId: request.commandId,
       expectedStoreId: request.expectedStoreId,
+      ...(request.kind === 'input.steer' && request.queuedInputCommandId
+        ? { queuedInputCommandId: request.queuedInputCommandId }
+        : {}),
     },
     phase: row.phase === 'submitting' ? 'unknown' : row.phase,
   };
@@ -445,7 +448,14 @@ export class NativeCallerJournal {
           !responseReceived &&
           r.kind === 'input.steer' &&
           error instanceof ClientError &&
-          error.code === 'input_target_stopped' &&
+          (error.code === 'input_target_stopped' ||
+            (r.queuedInputCommandId !== undefined &&
+              [
+                'input_not_found',
+                'input_already_consumed',
+                'input_target_changed',
+                'context_selection_changed',
+              ].includes(error.code))) &&
           error.status !== undefined &&
           error.status >= 400 &&
           error.status < 500;

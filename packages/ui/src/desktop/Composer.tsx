@@ -854,14 +854,14 @@ export function Composer(props: ComposerProps) {
                       : props.submitStatus
                         ? `发送消息：${props.submitStatus}`
                         : props.active
-                          ? '发送运行中引导'
+                          ? '排队后续输入'
                           : '发送消息')
                   }
                   title={
                     props.sendLabel ??
                     (props.sending
                       ? '正在发送消息'
-                      : props.submitStatus || (props.active ? '发送运行中引导' : '发送消息'))
+                      : props.submitStatus || (props.active ? '排队后续输入' : '发送消息'))
                   }
                   aria-busy={props.sending || undefined}
                   disabled={!canSend}

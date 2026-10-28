@@ -1355,6 +1355,7 @@ export type IncludeResultRequest = {
 };
 export type SteerCommandRequest = {
   kind: 'input.steer';
+  queuedInputCommandId?: string;
   content: string;
   images?: Array<{
     name: string;
@@ -3783,6 +3784,7 @@ type CommandRequest___schema0 =
 export type CommandRequest =
   | {
       kind: 'input.steer';
+      queuedInputCommandId?: string;
       content: string;
       images?: Array<{
         name: string;
@@ -4109,6 +4111,7 @@ export type PendingInputPage = {
     request:
       | {
           kind: 'input.steer';
+          queuedInputCommandId?: string;
           content: string;
           images?: Array<{
             name: string;
@@ -4223,6 +4226,7 @@ export type PendingInputQueue = {
     request:
       | {
           kind: 'input.steer';
+          queuedInputCommandId?: string;
           content: string;
           images?: Array<{
             name: string;

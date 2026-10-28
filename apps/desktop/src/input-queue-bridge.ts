@@ -16,6 +16,12 @@ export type NativeInputQueueRequest =
     }
   | { method: 'input.queue.close'; generation: number; readId: string }
   | {
+      method: 'input.queue.steer';
+      generation: number;
+      observationId: number;
+      targetCommandId: string;
+    }
+  | {
       method: 'input.queue.withdraw';
       generation: number;
       observationId: number;
@@ -46,7 +52,7 @@ export type NativeInputQueueObservation = {
   readId: string;
   observationId: number;
   revision: string;
-  entries: { id: string; text: string; editable: boolean }[];
+  entries: { id: string; text: string; editable: boolean; steerable?: boolean }[];
   submissions: NativeInputQueueSubmission[];
 };
 export type NativeInputQueueResult = NativeInputQueueObservation | NativeInputQueueSubmission;

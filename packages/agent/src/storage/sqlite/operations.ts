@@ -1383,6 +1383,18 @@ export class SqliteOperations {
           const session = this.row('SELECT * FROM session WHERE id=?', input.sessionId);
           if (!session || session.delete_requested) throw new AgentError('session_not_found');
           const inputBinding = validateInputAdmission(this, input);
+          if (input.request.kind === 'input.steer' && input.request.queuedInputCommandId) {
+            const targetId = input.request.queuedInputCommandId;
+            const target = this.row('SELECT * FROM command WHERE id=?', targetId)!;
+            this.run(
+              "UPDATE command SET status='rejected',cancelled=1,cancel_requested_at=?,receipt_json=? WHERE id=?",
+              Date.now(),
+              canonicalJson({ outcome: 'steered_before_apply', steerCommandId: input.commandId }),
+              targetId,
+            );
+            recordHumanCommandRejection(this, target, 'steered_before_apply', false);
+            this.event(input.sessionId, targetId, 'input.withdrawn');
+          }
           closeReconciledHistory(this, input);
           this.insertCommand(input, input.request as unknown as Json, digest, 'accepted', {
             commandId: input.commandId,
@@ -1837,6 +1849,7 @@ export class SqliteOperations {
               this,
               String(execution.run_id),
               humanInputInterpretation(this, execution) ?? undefined,
+              execution.kind === 'tool',
             );
           assertMutationIntent(this, execution);
           verifyPermissionGrantDispatch(this, input);
