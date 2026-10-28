@@ -6421,12 +6421,15 @@ export class AgentRuntime {
                   ![
                     'input_cancelled',
                     'input_order_conflict',
+                    'input_tools_pending',
                     'input_target_stopped',
                     'context_selection_changed',
                   ].includes(error.code)
                 )
                   throw error;
-                if (error.code === 'input_order_conflict') break;
+                // Completion-governance Tools also checkpoint outside Loop batches.
+                // The Store defers guidance until their original calls settle.
+                if (['input_order_conflict', 'input_tools_pending'].includes(error.code)) break;
                 if ((await this.options.store.getCommand(input.id))?.status === 'accepted')
                   await this.options.store.rejectCommand({
                     expectedStoreId: run.originStoreId,

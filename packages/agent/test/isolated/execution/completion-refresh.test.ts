@@ -517,17 +517,14 @@ async function fixture(
   };
 }
 
-test('steer retires a completion Tool awaiting approval and the same Run completes under fresh input', async () => {
+test('guidance preserves a pending completion approval, then applies once after the original Tool settles', async () => {
   const f = await fixture('steer');
   try {
     await f.submit();
     const first = await f.cardOrTerminal();
-    expect({
-      reason: first.run.reason,
-      active: first.run.isActive,
-      approval: !!first.card,
-    }).toMatchObject({ reason: null, active: true, approval: true });
-    const old = first.card!;
+    expect(first.run).toMatchObject({ reason: null, isActive: true });
+    const original = first.card!;
+    expect(original).toBeDefined();
     const originalRun = first.run.id;
     const session = (await f.store.getSession('s'))!;
     await f.runtime.submitCommand({
@@ -540,73 +537,83 @@ test('steer retires a completion Tool awaiting approval and the same Run complet
         content: 'Follow up: Use the new completion direction',
       },
     });
-    const next = await f.cardOrTerminal(old.id);
-    expect({
-      active: next.run.isActive,
-      reason: next.run.reason,
-      freshApproval: !!next.card,
-    }).toMatchObject({ active: true, reason: null, freshApproval: true });
-    const fresh = next.card!;
-    expect(fresh.id).not.toBe(old.id);
-    expect(fresh.executionId).not.toBe(old.executionId);
-    const modelCount = f.model.requests.length;
-    const late = await f.runtime.answerInteraction({
-      ...f.base,
-      commandId: 'late-old-allow',
-      presentationSessionId: 's',
-      interactionId: old.id,
-      expectedRevision: old.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
-    });
-    expect(late.receipt).toMatchObject({
-      outcome: 'answer_saved',
-      interactionId: old.id,
-      cancelled: true,
-    });
-    const readCard = (interactionId: string) =>
-      f.store.getInteraction({
+    // Let the original approval wait's checkpoint observe the accepted guidance.
+    await Bun.sleep(50);
+    expect(await f.run()).toMatchObject({ id: originalRun, isActive: true, reason: null });
+    expect((await f.store.getCommand('steer'))?.status).toBe('accepted');
+    expect(
+      await f.store.getInteraction({
         expectedStoreId: f.base.expectedStoreId,
         sessionId: 's',
-        interactionId,
-      });
-    expect(await readCard(old.id)).toMatchObject({
-      state: 'cancelled',
-      acceptedDecisionRevision: null,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
-    });
-    expect(await readCard(fresh.id)).toEqual(fresh);
-    expect(fresh).toMatchObject({ state: 'pending', answer: null, acceptedDecisionRevision: null });
-    expect(await f.store.getExecution(fresh.executionId)).toMatchObject({
+        interactionId: original.id,
+      }),
+    ).toEqual(original);
+    expect(await f.store.getExecution(original.executionId)).toMatchObject({
       status: 'planned',
       authorization: { dispatched: false },
     });
     expect(f.effects).toEqual([]);
-    expect(f.model.requests).toHaveLength(modelCount);
-    expect((await f.store.getView('s')).runs).toHaveLength(1);
-    expect(await f.run()).toMatchObject({ id: originalRun, isActive: true });
-    await f.approve(next.card!);
-    expect(await f.done()).toMatchObject({ id: originalRun, status: 'completed' });
+    expect(f.model.requests).toHaveLength(2);
+    await f.approve(original);
+    expect(await f.done()).toMatchObject({ id: originalRun, status: 'completed', reason: null });
     await f.assertAppliedSteer('steer', originalRun);
-    expect(f.model.requests).toHaveLength(3);
-    expect(
-      f.model.requests[2]!.messages.some(
-        (message) => message.content === 'Follow up: Use the new completion direction',
-      ),
-    ).toBe(true);
     expect(f.effects).toHaveLength(1);
-    expect(await f.store.getExecution(fresh.executionId)).toMatchObject({
+    expect(f.effects[0]).toMatchObject({ direction: 'original' });
+    expect(await f.store.getExecution(original.executionId)).toMatchObject({
       status: 'succeeded',
       authorization: {
         dispatched: true,
-        human: { interactionId: fresh.id, accepted: true, decision: 'approve' },
+        human: { interactionId: original.id, accepted: true, decision: 'approve' },
       },
-      interactionBinding: { interactionId: fresh.id },
     });
-    expect(await f.store.getExecution(old.executionId)).toMatchObject({
-      status: 'cancelled',
-      authorization: { dispatched: false },
-      result: { details: { adapterAttempted: false } },
+    expect(f.model.requests).toHaveLength(3);
+    expect(
+      f.model.requests[2]!.messages.filter(
+        (message) => message.content === 'Follow up: Use the new completion direction',
+      ),
+    ).toHaveLength(1);
+    expect((await f.store.getView('s')).runs).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('cancelling the original Run while completion guidance waits prevents late approval and input replay', async () => {
+  const f = await fixture('steer');
+  try {
+    await f.submit();
+    const first = await f.cardOrTerminal();
+    const original = first.card!;
+    const session = (await f.store.getSession('s'))!;
+    await f.runtime.submitCommand({
+      ...f.base,
+      commandId: 'waiting-guidance',
+      request: {
+        kind: 'input.steer',
+        targetRunId: first.run.id,
+        contextSelectionId: session.contextSelectionId,
+        content: 'Do not replay after cancellation',
+      },
     });
+    await Bun.sleep(50);
+    expect((await f.store.getCommand('waiting-guidance'))?.status).toBe('accepted');
+    expect(await f.run()).toMatchObject({ id: first.run.id, isActive: true, reason: null });
+    await f.runtime.cancelCommand({
+      ...f.base,
+      commandId: 'cancel-original',
+      targetCommandId: 'work',
+    });
+    expect(await f.done()).toMatchObject({ id: first.run.id, status: 'cancelled' });
+    await f.approve(original);
+    expect((await f.store.getCommand('waiting-guidance'))?.status).toBe('rejected');
+    expect(f.effects).toEqual([]);
+    expect(f.model.requests).toHaveLength(2);
+    expect(
+      (await f.store.listMessages('s')).some(
+        (message) => message.content === 'Do not replay after cancellation',
+      ),
+    ).toBe(false);
+    expect((await f.store.getView('s')).runs).toHaveLength(1);
   } finally {
     await f.close();
   }

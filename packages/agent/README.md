@@ -267,7 +267,7 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 [引导组合边界回归](test/isolated/execution/steering-boundaries.test.ts)核真实首个内容 delta 之后的两波更正、完成事务与迟到原目标、human steer 与子最终结果两种到达顺序、引导已应用后停止／结果竞争、等待问题时的引导与准确／迟到答复，以及 Runtime 对重排、撤回后的实际消费。后继请求核完整原文和原 Command 来源，已派发效果不改写，停止与冷读不复活，邮件不能取得引导或批准权限。压缩、SIGKILL、引用资料、附件及多层委派的组合入口归 [压缩 owner](src/storage/sqlite/context/compression.README.md)。
 
-[完成边界回归](test/isolated/execution/completion-refresh.test.ts)另核引导退休旧审批后，迟到允许只保存到已取消的旧卡；新卡、原 revision 与准确调用保持 pending，零额外 Model 和工具效果。只有新卡获得自己的准确批准，原 Run 才能完成；实际执行授权和 interaction binding 均须指向新卡，不能从旧答复借权。
+[完成边界回归](test/isolated/execution/completion-refresh.test.ts)另核完成治理直接派发的前台 Tool 同样保留原审批与调用身份。Store 返回 `input_tools_pending` 时，检查点暂缓消费引导，不拒绝该输入或使原 Run 失败；原卡获得准确批准并完成原 Tool 后，才将引导一次送入后续模型。原 Run 被明确取消后，迟到批准不执行工具、不重放输入或启动新 Run；真实权限拒绝和来源刷新仍沿原路径收尾。
 
 短模型输出的首个非空正文 delta 立即保存 partial，包含先前已有 reasoning 且距上次保存不足100ms的情况；后续增量仍按原100ms／32KiB条件合并，`firstOutput` 继续表示原首频道。否则在首字后网络暂停时，客户端可能一直只读到 reasoning 并显示思考状态。[真实 Runtime／SQLite 首正文回归](test/isolated/execution/model-content-progress.test.ts)在首字已被消费、没有 finish 和后续事件的准确暂停点，核实际 Message、`readModelOutput`、后续节流和最终完整正文；纯正文对照不重复保存首段。
 

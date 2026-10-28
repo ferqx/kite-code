@@ -28,4 +28,6 @@ Loop 的 Tool 批次期间不应用用户 steer，所有原前台 Tool（包括�
 
 引导不能用来绕过或取消原待批工具，显式停止仍使用原停止入口。含新 Plan／Skill 选择的队列输入保持后继任务；转引导不替换活动模型配置。转换原申请的有意撤下不作为启动失败显示，队列和持久消息各自只展示一次。
 
+完成治理 Tool 由 Runtime 直接派发，不经过 Loop 的 `beginToolBatch`。这条审批等待中的检查点同样必须把 Store 的 `input_tools_pending` 视为暂缓，而不是令 Tool/Run 失败；原审批被批准并完成原调用后，才应用准确原引导。完成治理回归保留真实权限拒绝、来源刷新及取消边界，不依赖工具名称放行。
+
 验证入口、实际样本和未验平台范围归[Store 输入 owner](../../../../packages/agent/src/storage/sqlite/inputs/README.md)、[Native 队列 owner](../../../../apps/desktop/README.md#原运行中消息队列)和[真实模型验收](../../../../tests/e2e/live/model/README.md#运行中引导与自动压缩)。
