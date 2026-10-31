@@ -132,6 +132,20 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 同日按用户要求改用已配置真实 `deepseek-v4-flash`／chat-completions／medium，沿[真实模型整窗口入口](../../tests/e2e/live/model/README.md#普通桌面会话异常)重验上述三类故障。真实第 02 轮发现原 Run 未重放，但新模型缺少旧 Run 已中断事实，在新 Run 又发起旧文件写入；该失败保留在 `dist/acceptance/session-anomalies-live-20261022-02.json`，不能计为通过。后端补齐[历史输入生命周期投影](../../packages/agent/README.md#人类输入工作选择与可靠结果)后，提示词、模型和断言不变的第 03 轮通过：11 次真实 200 请求，六条原输入／Command／Run，五个完成任务各一次实际写入，旧中断任务只有原一次 Model、零工具且旧文件不存在。回执丢失确认实际 202／357 字节后截断，原 POST 一次、仅原 ID GET 查回；断线与强杀的响应 gate 均先收到真实响应正文而未向 Service 转发。11 个阶段逐次暂停观察，另核 313 帧窗口、168 份顺序采样和 18,604 次 DOM 扫描，输入先于对应状态／工具／实际回复，未发现重复气泡、顺序倒置或会话外异常文案。最终正常退出／第三次冷开保持原业务身份、11 次调用及五份文件不变，三次启动的六个所属原 PID 均确认消失；外层及 driver 均退出 0。准确代码 hash、阶段截图／轨迹、冷事实及清理证据在 `dist/acceptance/session-anomalies-live-20261022-03.json.workspace/evidence`。第 01 轮夹具识别／取消判定失败同样保留。范围仍为本机隔离源码构建、明确文件任务和 Main 作用域 HTTP 故障，未做系统全局断网、安装版、其他模型或平台验收。
 
+## Windows 数据权限预检与恢复
+
+[Main](electron/main.ts) 在正式候选原交接／制品准入之后、BrowserWindow／paired Service／Core 与 UI SQLite 之前，通过 [启动控制器](electron/profile-permissions.ts)调用固定 Node-API `profilePermissions(dataRoot,profile)`。它只读取所选数据根、`.coordination`、准确 Profile 协调键、Profile 与 `desktop-private` 目录、原 `profile-use.lock`、Core/UI 主数据库及 WAL/SHM/journal 的元数据；缺失对象不创建，不枚举或改写其他 Profile。元数据不可核实不能当作安全空目录。该流程适用于正常正式制品和显式开发制品，不是测试诊断入口，不接 renderer、Model 或 HTTP 修复请求。
+
+原普通 `profileShared`、Bun 私有路径、Service 独立准入、reparse／单链接／SID／DACL／使用锁验证保持。初始问题只提供默认退出和重新检查；只有原生检查证明 current SID owner、原 owner-FA 和适用的 protected DACL 完整，所有额外 ACE 均仅授读取／执行时，才提供用户明确选择的修复。foreign write、deny／未知 ACE、foreign owner、未受保护目录、链接或访问不可核实时保留阻断，不通过重置 ACL 把可能遭改写的数据变成“安全”。
+
+[原生维护实现](native/windows-access/profile-permissions.h)封存原 root/target FileID、owner/group/DACL，不持有跨确认窗口的 OS 资源。用户选择后重新 pin 全部祖先，以原数据根 `MAXIMUM_ALLOWED` HANDLE 排除已有消费者并阻止新消费者；重核原 root/target 身份与权限快照。备份通过 current SID 私有 CREATE_NEW、完整写入和 Flush 先持久化于数据根的随机 `permissions-backup-*.txt`，包含原路径、Volume/FileID 和原 owner/group/DACL。备份失败或碰撞不修改目标、不覆盖已有备份。之后只对原 target HANDLE 写 DACL，owner/group/SACL 不改；使用 [SetSecurityInfo 的 MAXIMUM_ALLOWED 语义](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo)阻止 ACE 向子项传播。原生私有政策和 FileID 重新通过、所有 HANDLE 严格关闭后再重新执行全套启动预检。修改后核验失败保留 unknown，不自动回滚或重提；关闭未知保原资源，不放行替代启动。关闭／取消期间的迟到确认不发起修复。
+
+[流程回归](test/profile-permissions.test.ts)核默认退出、取消、明确修复、只重查、占用、失败／unknown 与晚到确认；[原 Main 生命周期回归](test/isolated/native-main-scheduling-lifecycle.test.ts)核确认窗口期间 renderer／Service／SQLite 均未创建，取消仍零启动，修复后先重查再进入原启动流程。[完整 Windows 后端回归](test/isolated/windows-node-access.test.ts)通过实际 Electron 加载原 Node-API，核只读元数据、私有备份、子项 ACL 与数据原字节、可写／deny／未保护拒绝、身份与 ACL 漂移、备份碰撞、busy、伪造 native receiver，以及修复后原 SQLite／Store／草稿冷读取。有限后端与 Main 端口验证不授完整 installed Native 或其他平台资格。长期取舍见[显式权限恢复决定](../../.agents/notes/implemented/bug-fix/2026-10-31-desktop-private-permission-recovery.md)。
+
+2026-10-31，`69c097587` 加本工作树，Windows x64／Bun1.4.3／Electron44.3.0：上述三个完整文件按各自隔离要求分别执行，11＋32＋12＝55项／507条Bun断言通过，原生夹具另执行Node断言；新增冷重开实际启动独立Service，核原Store、唯一原会话／标题、未增加历史消息及原UI草稿。Desktop类型检查、定向Biome、依赖边界、测试归属和文档检查通过。合并执行流程文件与独占Main文件的一轮出现超时，不计为通过；随后按现有隔离要求完整逐文件复验通过，未扩大期限或放宽断言。
+
+同日本机逐步观察普通固定renderer测试制品（开发资产、独立HOME／AppData／数据根、测试诊断关闭）：额外只读ACL→启动权限弹窗→默认Enter退出1，数据根仍为空且ACL未变；重开→明确点击备份并修复→实际生成同提示文件名的私有备份并恢复currentSID-only→正常新对话页面→菜单退出0；第三次冷启动无重复权限弹窗，普通页面正常、Ctrl+Q退出0。按测试根过滤的进程查询确认自有Electron／Service均已退出，未操作其他用户窗口或调用模型。过程与最终状态由本次窗口操作观察及本机 `.cache/permissions-window-d62eaa2c-8a46-4793-a9d8-9edbeb0dedfe` 的三次退出日志和原权限备份互证；首次缺少测试AppData的提前退出记录保留。此范围不代完整受信安装前门、安装包／升级、其他平台或真实模型资格。
+
 ## 开发热更新与服务重载
 
 根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)通过 builder 的 `development` 选项构建 Main／preload 和首个独立 Service 版本，由[本地 Vite renderer](scripts/development-renderer.ts)提供页面。[重载协调器](../../scripts/development/desktop-reload.ts)在初次构建和每次重建后，以新 Bun 进程实际加载 Service 及外部 workspace 导入；不执行 `import.meta.main` 分支、不自动安装依赖，最长等待10秒，失败保留最多16K字符诊断并回收探测进程。缺失导出不能只因入口 bundle 生成而放行。加载检查不代替完整类型检查或业务验证。

@@ -35,6 +35,8 @@ bun run release:native uninstall --prefix /absolute/install/native
 
 ## Windows managed Native 当前实现
 
+正式 Main 的数据权限异常与用户明确发起的备份／定点修复归 [Desktop 权限恢复 owner](../README.md#windows-数据权限预检与恢复)。它位于原可信候选准入之后、Service／SQLite 之前，保留正常私有 ACL、独立使用权与原数据完整性拒绝；不更改安装包 ACL 或创建链。后端和隔离 Main 回归不替代本节完整 installed 窗口／维护资格。
+
 2026-10-17 范围审查的完整 Native候选为 `bc08c49a12bc7c767cd4fb6f68e7e08755dc46721ed8ea771549efadd5bdb2d2`，inner 为 Terminal `e9046c4e26d627ba99875131733a19d16545f71f45c8723af25a37ba88bc6e0a`。官方 Electron 输入73份原文件在 build 前后逐项保持。原整链 r20 中，A/B 两个实际窗口均读取原完整历史、实际 exit0、Main/Service dead、Job0/未Terminate、strict Close 和双 EX；第三次回退 A 时触发原45秒 UIA截止，基础120秒和维护180秒均未扩大。第三冷窗口、恢复后窗口与 installed Native维护没有通过证据，不能以两个窗口或 Node探针授完整资格。
 
 随后只补 bundled 原 manifest 许可来源的 r23 构建及完整校验候选为 `a7f3f3f24136de32437e2b3012d8c82e9de162904f2af06bbeaee7ce6ed61e97`，inner 为 Terminal `9f594260a611c2c5742785daa46cf7a681711fadcce7f5885e5f340e073c7025`。官方73份输入原哈希保持；当前 r23 没有第三冷窗口或维护恢复通过证据，原失败与门禁继续保留。

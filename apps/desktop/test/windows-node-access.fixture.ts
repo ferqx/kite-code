@@ -21,7 +21,18 @@ const send = (phase: string, facts: Record<string, unknown> = {}) =>
     }),
   );
 const commands = createInterface({ input: process.stdin });
-if (input.mode === 'candidate-denied') {
+if (input.mode === 'repair-permissions') {
+  const backend = loadWindowsAccess(input.windowsAsset);
+  const issue = backend.profilePermissions(input.profile.dataRoot, input.profile.profile);
+  assert.ok(issue?.repairable);
+  assert.equal(issue.path, input.profile.dataRoot);
+  issue.repair();
+  assert.equal(
+    backend.profilePermissions(input.profile.dataRoot, input.profile.profile),
+    undefined,
+  );
+  send('permissions-repaired', { backupPath: issue.backupPath });
+} else if (input.mode === 'candidate-denied') {
   const backend = loadWindowsAccess(input.windowsAsset);
   assert.equal(typeof backend.candidateShared, 'function');
   assert.throws(
@@ -64,9 +75,33 @@ if (input.mode === 'candidate-denied') {
     profile,
   });
   const data = openPrivateData(profile.profilePath, access);
-  assert.deepEqual(data.read(input.scope), input.draft);
-  data.close();
-  access.close();
+  let service: Awaited<ReturnType<typeof launchPairedService>> | undefined;
+  try {
+    assert.deepEqual(data.read(input.scope), input.draft);
+    if (input.reopenService) {
+      service = await launchPairedService({
+        profile,
+        entrypoint: input.service,
+        executable: input.access.bunExecutable,
+        spawnChild: spawnNodePairedChild,
+        instanceId: crypto.randomUUID(),
+        buildId: 'owned-windows-holder',
+        apiMajor: 1,
+        requiredCapabilities: ['sessions', 'history'],
+      });
+      assert.equal(service.bootstrap.storeId, input.scope.storeId);
+      const sessions = await service.client.listSessions();
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0]!.id, 's');
+      assert.equal(sessions[0]!.title, 'original');
+      assert.deepEqual(await service.client.listMessages('s'), []);
+    }
+  } finally {
+    data.close();
+    access.close();
+    await service?.close();
+    if (service) assert.equal(await service.exited, 0);
+  }
   send('cold-original', { draft: input.draft });
 } else if (input.mode === 'gc') {
   const backend = loadWindowsAccess(input.windowsAsset);

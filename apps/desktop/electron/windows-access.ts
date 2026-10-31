@@ -7,7 +7,14 @@ export interface WindowsAccessLease {
   preparePrivateUi(): void;
   verifyPrivateUi(): void;
 }
+export interface WindowsProfilePermissionIssue {
+  readonly path: string;
+  readonly backupPath: string;
+  readonly repairable: boolean;
+  repair(): void;
+}
 type Backend = {
+  profilePermissions(dataRoot: string, profile: string): WindowsProfilePermissionIssue | undefined;
   artifactShared(root: string): WindowsAccessLease;
   profileShared(dataRoot: string, profile: string): WindowsAccessLease;
   candidateShared(
@@ -25,7 +32,9 @@ export function loadWindowsAccess(asset: { path: string; sha256: string }): Back
   verifyNativeAsset(asset.path, asset.sha256);
   const backend = createRequire(import.meta.url)(asset.path) as Backend;
   if (
-    Object.keys(backend).sort().join(',') !== 'artifactShared,candidateShared,profileShared' ||
+    Object.keys(backend).sort().join(',') !==
+      'artifactShared,candidateShared,profilePermissions,profileShared' ||
+    typeof backend.profilePermissions !== 'function' ||
     typeof backend.artifactShared !== 'function' ||
     typeof backend.profileShared !== 'function' ||
     typeof backend.candidateShared !== 'function'

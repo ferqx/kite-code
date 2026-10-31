@@ -39,10 +39,12 @@ import {
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
+import { ensureDesktopProfilePermissions } from './profile-permissions';
 import { canonicalProtectedPath } from './protected-path';
 import { inspectNativeQuitWork, settleDesktopQuit } from './quit-settlement';
 import { ScheduledTaskRunner } from './scheduled-task-runner';
 import { assertNativeSqliteEngine } from './sqlite-engine';
+import { loadWindowsAccess } from './windows-access';
 import {
   acquireWindowsNativeCandidate,
   parseWindowsNativeHandoff,
@@ -434,6 +436,27 @@ void app
   .whenReady()
   .then(async () => {
     if (stoppingNativeProcess || exitAllowed) return;
+    if (process.platform === 'win32' && windowsAsset) {
+      const profile = selectProfile(
+        assets.profile ?? {
+          dataRoot: join(homedir(), '.kite-code', 'unified-agent'),
+          profile: 'default',
+        },
+      );
+      const backend = loadWindowsAccess(windowsAsset);
+      const admitted = await ensureDesktopProfilePermissions({
+        dataRoot: profile.dataRoot,
+        inspect: () => backend.profilePermissions(profile.dataRoot, profile.profile),
+        show: (options) => dialog.showMessageBox(options),
+        active: () => !stoppingNativeProcess && !exitAllowed,
+      });
+      if (!admitted) {
+        reportDevelopmentStartup(Error('native_profile_permissions_cancelled'));
+        stopNativeProcess(1);
+        return;
+      }
+      if (stoppingNativeProcess || exitAllowed) return;
+    }
     const rendererPath = join(app.getAppPath(), 'index.html'),
       rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
     window = new BrowserWindow({

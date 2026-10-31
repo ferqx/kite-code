@@ -16,13 +16,19 @@
 #include <utility>
 #include <set>
 #include <cmath>
+#include <exception>
 
 // All signatures and registration types come from the pinned official Node-API headers.
-#define API_LIST(X) X(napi_get_cb_info) X(napi_get_value_string_utf16) X(napi_create_object) X(napi_create_function) X(napi_set_named_property) X(napi_wrap) X(napi_unwrap) X(napi_get_undefined) X(napi_throw_error) X(napi_get_global) X(napi_get_named_property) X(napi_call_function) X(napi_create_string_utf8) X(napi_create_string_utf16) X(napi_get_property_names) X(napi_get_array_length) X(napi_get_element) X(napi_is_array) X(napi_get_value_double)
+#define API_LIST(X) X(napi_get_cb_info) X(napi_get_value_string_utf16) X(napi_create_object) X(napi_create_function) X(napi_set_named_property) X(napi_wrap) X(napi_unwrap) X(napi_get_undefined) X(napi_throw_error) X(napi_get_global) X(napi_get_named_property) X(napi_call_function) X(napi_create_string_utf8) X(napi_create_string_utf16) X(napi_get_property_names) X(napi_get_array_length) X(napi_get_element) X(napi_is_array) X(napi_get_value_double) X(napi_get_boolean) X(napi_type_tag_object) X(napi_check_object_type_tag)
 #define DECLARE(name) static decltype(&name) p_##name;
 API_LIST(DECLARE)
 static void need(bool ok) { if (!ok) throw std::runtime_error("windows_access_denied"); }
 static void check(napi_status status) { need(status == napi_ok); }
+static const napi_type_tag leaseTag = {0x6b6974656c656173, 0x6577696e646f7773};
+static const napi_type_tag permissionTag = {0x6b6974657065726d, 0x697373696f6e736e};
+static void tagged(napi_env env, napi_value object, const napi_type_tag& tag) {
+  bool matches = false; check(p_napi_check_object_type_tag(env, object, &tag, &matches)); need(matches);
+}
 struct Handle {
   HANDLE value = INVALID_HANDLE_VALUE;
   explicit Handle(HANDLE h = INVALID_HANDLE_VALUE) : value(h) {}
@@ -712,6 +718,7 @@ static std::wstring profileKey(const std::wstring& root, const std::wstring& pro
   return result;
 }
 static std::vector<std::unique_ptr<Lease>> failedLeases;
+#include "profile-permissions.h"
 static void finalize(napi_env, void* data, void*) {
   std::unique_ptr<Lease> lease(static_cast<Lease*>(data));
   try { lease->release(); } catch (...) { failedLeases.push_back(std::move(lease)); }
@@ -726,6 +733,7 @@ static napi_value operation(napi_env env, napi_callback_info info) {
     napi_value self, args[1]; void* action; size_t argc = 1;
     check(p_napi_get_cb_info(env, info, &argc, args, &self, &action));
     need(argc == 0);
+    tagged(env, self, leaseTag);
     Lease* lease; check(p_napi_unwrap(env, self, reinterpret_cast<void**>(&lease)));
     if (action == reinterpret_cast<void*>(1)) lease->release();
     else if (action == reinterpret_cast<void*>(2)) lease->preparePrivateUi();
@@ -774,6 +782,7 @@ static napi_value factory(napi_env env, napi_callback_info info) {
       napi_value function; check(p_napi_create_function(env, method.first, NAPI_AUTO_LENGTH, operation, method.second, &function));
       check(p_napi_set_named_property(env, object, method.first, function));
     }
+    check(p_napi_type_tag_object(env, object, &leaseTag));
     check(p_napi_wrap(env, object, lease.get(), finalize, nullptr, nullptr));
     lease.release(); return object;
   } catch (const std::exception& error) {
@@ -793,5 +802,7 @@ NAPI_MODULE_INIT() {
     napi_value function;
     if (p_napi_create_function(env, item.first, NAPI_AUTO_LENGTH, factory, item.second, &function) != napi_ok || p_napi_set_named_property(env, exports, item.first, function) != napi_ok) return nullptr;
   }
+  napi_value inspection;
+  if (p_napi_create_function(env, "profilePermissions", NAPI_AUTO_LENGTH, inspectProfilePermissions, nullptr, &inspection) != napi_ok || p_napi_set_named_property(env, exports, "profilePermissions", inspection) != napi_ok) return nullptr;
   return exports;
 }

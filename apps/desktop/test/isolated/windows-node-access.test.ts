@@ -220,6 +220,59 @@ assert.throws(()=>first.verify());console.log('LONG_LOCAL_PROFILE_CONFIRMED');`;
   30000,
 );
 
+test.skipIf(process.platform !== 'win32')(
+  'actual Electron metadata recovery backs up before targeted ACL repair and preserves busy, drift, write exposure and original data refusals',
+  async () => {
+    const root = join(tmpdir(), `kite-profile-permissions-${crypto.randomUUID()}`);
+    privateDirectory(root);
+    try {
+      const nativeRoot = join(root, 'native');
+      privateDirectory(nativeRoot);
+      const built = await buildWindowsAccess(nativeRoot);
+      const fixture = await Bun.build({
+        entrypoints: [join(import.meta.dir, '../profile-permissions-native.fixture.ts')],
+        target: 'node',
+        format: 'cjs',
+        outdir: root,
+        naming: 'permissions.cjs',
+      });
+      if (!fixture.success)
+        throw new AggregateError(fixture.logs, 'permissions_fixture_build_failed');
+      const electron = createRequire(join(import.meta.dir, '../../package.json'))(
+        'electron',
+      ) as string;
+      const result = spawnSync(
+        electron,
+        [join(root, 'permissions.cjs'), join(nativeRoot, built.relativePath), root],
+        {
+          env: { SystemRoot: process.env.SystemRoot, PATH: '', ELECTRON_RUN_AS_NODE: '1' },
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 45000,
+        },
+      );
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe('PROFILE_PERMISSIONS_NATIVE_PASS');
+      expect(result.stderr).toBe('');
+      const security = (
+        await import('@kite-ai/agent/windows-path-security')
+      ).defaultWindowsPathSecurity()!;
+      for (const directory of ['repaired', 'busy', 'file']) {
+        const backup = readdirSync(join(root, directory)).find((name) =>
+          name.startsWith('permissions-backup-'),
+        )!;
+        const pin = security.retainPrivateFile(join(root, directory, backup));
+        pin.verify();
+        pin.close();
+        expect(backup).toBeTruthy();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  60000,
+);
+
 async function nativeFixture() {
   const { acquireProfileAccess } = await import(
     join(import.meta.dir, '../../../../packages/agent/src/platform/profile.ts')
@@ -530,6 +583,46 @@ test.skipIf(process.platform !== 'win32')(
       expect(spawnSync('icacls.exe', [f.roots[0]!], { encoding: 'utf8' }).stdout).toBe(
         before.stdout,
       );
+    } finally {
+      await f.close();
+    }
+  },
+  60000,
+);
+test.skipIf(process.platform !== 'win32')(
+  'repairing extra read permission allows a cold Native reopen of the original SQLite draft and Store without replay',
+  async () => {
+    const f = await nativeFixture();
+    try {
+      const holder = f.spawn();
+      const held = await holder.next('paired-held');
+      holder.send('close');
+      await holder.next('closed');
+      expect(await holder.child.exited).toBe(0);
+      const database = join(f.input.profile.dataRoot, 'owned', 'core.db');
+      const bytes = readFileSync(database);
+      const acl = spawnSync(
+        'icacls.exe',
+        [f.input.profile.dataRoot, '/grant', '*S-1-1-0:(OI)(CI)(RX)'],
+        { encoding: 'utf8' },
+      );
+      expect(acl.status).toBe(0);
+      const repair = f.spawn({ ...f.input, mode: 'repair-permissions' });
+      const repaired = await repair.next('permissions-repaired');
+      expect(await repair.child.exited).toBe(0);
+      expect(readFileSync(repaired.backupPath, 'utf8')).toContain('Owner/Group/DACL:');
+      expect(readFileSync(database)).toEqual(bytes);
+      const cold = f.spawn({
+        ...f.input,
+        mode: 'cold',
+        reopenService: true,
+        scope: { storeId: held.storeId, workspaceId: 'w', rootSessionId: 's' },
+        draft: held.draft,
+      } as typeof f.input);
+      const restored = await cold.next('cold-original');
+      expect(restored.draft).toEqual(held.draft);
+      expect(await cold.child.exited).toBe(0);
+      f.free();
     } finally {
       await f.close();
     }

@@ -11,6 +11,7 @@ import type { AgentClient } from '@kite-ai/client';
 import type { DevelopmentServiceReload } from '../../electron/development';
 import type { ScheduledTaskClock, ScheduledTaskRunner } from '../../electron/scheduled-task-runner';
 import { createScheduledTaskData } from '../../electron/scheduled-tasks';
+import type { WindowsProfilePermissionIssue } from '../../electron/windows-access';
 import type { NativeCreation } from '../../src/native-bridge';
 
 function deferred<T = void>() {
@@ -45,6 +46,7 @@ async function mainFixture(
   holdRendererLoad = false,
   barrierService = 1,
   holdAppReady = false,
+  permissionIssue?: WindowsProfilePermissionIssue,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-main-scheduling-'));
   const mainPath = fileURLToPath(new URL('../../electron/main.ts', import.meta.url));
@@ -67,6 +69,9 @@ async function mainFixture(
   const rendererEntered = deferred(),
     rendererLoad = deferred();
   const appReady = deferred();
+  const permissionEntered = deferred();
+  const permissionResult = deferred<{ response: number; checkboxChecked: boolean }>();
+  let pendingPermission = permissionIssue;
   const trace: string[] = [],
     errors: unknown[] = [];
   const dialogs: unknown[][] = [];
@@ -223,6 +228,11 @@ async function mainFixture(
         showErrorBox: (...args: unknown[]) => errors.push(args),
         showMessageBox: async (...args: unknown[]) => {
           dialogs.push(args);
+          if ((args[0] as { title?: string }).title === 'Kite 数据权限异常') {
+            trace.push('permissions:dialog');
+            permissionEntered.resolve();
+            return permissionResult.promise;
+          }
           if (!holdMenu) throw Error('unexpected_fixture_dialog');
           menuEntered.resolve();
           return menuResult.promise;
@@ -233,7 +243,26 @@ async function mainFixture(
       nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }),
       Tray: FixtureTray,
     },
-    selectProfile: () => ({ profilePath: join(root, 'profile') }),
+    selectProfile: () => ({
+      dataRoot: root,
+      profile: 'profile',
+      profilePath: join(root, 'profile'),
+    }),
+    loadWindowsAccess: () => ({
+      profilePermissions() {
+        trace.push('permissions:inspect');
+        return (
+          pendingPermission && {
+            ...pendingPermission,
+            repair() {
+              trace.push('permissions:repair');
+              pendingPermission!.repair();
+              pendingPermission = undefined;
+            },
+          }
+        );
+      },
+    }),
     parseNativeAssets: (value: unknown) => value,
     verifyNativeAsset: () => {},
     unused: () => {
@@ -408,6 +437,7 @@ async function mainFixture(
     './native-browser': `${prefix}export const registerNativeBrowserIpc = () => f.register;`,
     './private-data': exports(['openPrivateData']),
     './profile-access': exports(['acquireDesktopProfileAccess']),
+    './windows-access': exports(['loadWindowsAccess']),
     './protected-path': exports(['canonicalProtectedPath']),
     './native-ipc':
       exports(['registerNativeIpc']) +
@@ -450,7 +480,9 @@ async function mainFixture(
           relativePath: 'profile-access.js',
           sha256: 'c'.repeat(64),
         }),
-        __KITE_DESKTOP_WINDOWS_ACCESS__: 'null',
+        __KITE_DESKTOP_WINDOWS_ACCESS__: permissionIssue
+          ? JSON.stringify({ relativePath: 'windows-access.node', sha256: 'f'.repeat(64) })
+          : 'null',
         __KITE_DESKTOP_DEVELOPMENT__: JSON.stringify({
           rendererUrl: 'http://127.0.0.1:43219/',
           cspNonce: 'd'.repeat(32),
@@ -490,7 +522,7 @@ async function mainFixture(
     });
     if (!result.success) throw new AggregateError(result.logs, 'main_fixture_build_failed');
     await import(pathToFileURL(result.outputs[0]!.path).href);
-    if (!holdAppReady) await registered.promise;
+    if (!holdAppReady && !permissionIssue) await registered.promise;
     await connected.promise;
   } catch (error) {
     for (const socket of sockets) socket.destroy();
@@ -500,7 +532,13 @@ async function mainFixture(
     throw error;
   }
   return {
-    open,
+    get open() {
+      return open;
+    },
+    registered: registered.promise,
+    permissionEntered: permissionEntered.promise,
+    answerPermission: (response: number) =>
+      permissionResult.resolve({ response, checkboxChecked: false }),
     reload,
     entered: entered.promise,
     release: () => release.resolve(),
@@ -575,6 +613,52 @@ async function mainFixture(
 }
 
 const replacement = { id: 'a'.repeat(32), sha256: 'b'.repeat(64) };
+
+for (const response of [0, 1]) {
+  test.skipIf(process.platform !== 'win32')(
+    `Main permission response ${response} gates renderer, Service and database before first launch`,
+    async () => {
+      let repairs = 0;
+      const f = await mainFixture('none', false, false, false, false, 1, false, {
+        path: 'C:\\owned\\data',
+        backupPath: 'C:\\owned\\data\\permissions-backup.txt',
+        repairable: true,
+        repair() {
+          repairs++;
+        },
+      });
+      try {
+        await f.permissionEntered;
+        expect(f.windowCount()).toBe(0);
+        expect(f.services).toHaveLength(0);
+        expect(f.resources).toHaveLength(0);
+        expect(repairs).toBe(0);
+        f.answerPermission(response);
+        if (response === 0) {
+          expect(await f.exited).toBe(1);
+          expect(f.services).toHaveLength(0);
+          expect(f.resources).toHaveLength(0);
+          expect(repairs).toBe(0);
+        } else {
+          await f.registered;
+          await f.open();
+          expect(f.trace.slice(0, 4)).toEqual([
+            'permissions:inspect',
+            'permissions:dialog',
+            'permissions:repair',
+            'permissions:inspect',
+          ]);
+          expect(repairs).toBe(1);
+          expect(f.services).toHaveLength(1);
+          expect(f.resources).toHaveLength(1);
+        }
+      } finally {
+        await f.close(response === 0 ? 1 : 0);
+      }
+    },
+    15000,
+  );
+}
 
 for (const barrier of ['launch', 'profile'] as const) {
   test(`Main reload fences an opening caller held at ${barrier} before creating its scheduler`, async () => {

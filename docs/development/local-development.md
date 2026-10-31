@@ -39,6 +39,8 @@ npm run desktop:dev
 
 四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
 
+Windows 数据目录若被其他程序增加授权（例如 Agent 沙箱读取组），Desktop 会在启动 Service／SQLite 前显示准确路径和处理选项，默认退出；符合有限安全条件时可主动备份并修复该对象，操作见[桌面手册](../handbook/clients/desktop/README.md)。取消后开发命令返回 `native_profile_permissions_cancelled`，不删除 Profile。验证权限错误须使用测试自有的数据根，不在真实用户目录制造故障；正式 Native 默认数据根 `~/.kite-code/unified-agent` 与开发入口保持独立。
+
 `desktop:dev` 在启动 Electron 前，用独立 Bun 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。
 
 页面、组件和样式（包括共享 UI）使用 Vite／React Fast Refresh，保存后即时更新，通常保留组件的页面状态；不能进行 Fast Refresh 的模块由 Vite 重新加载。Service 以及 Agent、AI、Client 的 `src` 源码保存后合并连续变更，构建到新的私有 Service 版本并再次检查运行时加载；同时比较这些源码的内容摘要，外部依赖变化不会因入口字节未变而被跳过，内容未变不重启。检查失败保持旧服务，修正保存后可再次检查。在同一 Electron 窗口内关闭并核实旧配套服务实际退出，再按新 SHA／build 身份准入新服务并重载页面。运行中的开发任务会正常取消和收尾，不自动重发或接续；Service 重载会重置页面内存中的未保存状态，持久数据保留。
