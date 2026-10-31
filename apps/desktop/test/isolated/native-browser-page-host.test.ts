@@ -474,6 +474,73 @@ function fixture() {
   return { host, scope, port, calls, paints, listeners, remove, attached: () => attached };
 }
 
+test('same-value page visibility does not repeat decoration or changed notifications', () => {
+  const f = fixture();
+  let changes = 0;
+  f.port.changed = () => changes++;
+  f.host.present(f.port.id, false);
+  f.host.present(f.port.id, false);
+  expect(f.paints).toEqual([]);
+  expect(changes).toBe(0);
+  f.host.present(f.port.id, true);
+  expect(f.paints).toHaveLength(1);
+  expect(f.paints.at(-1)).toMatchObject({ visible: true, agent: false, navigation: 0 });
+  expect(changes).toBe(1);
+  f.host.present(f.port.id, true);
+  f.host.present(f.port.id, true);
+  expect(f.paints).toHaveLength(1);
+  expect(changes).toBe(1);
+  f.host.present(f.port.id, false);
+  expect(f.paints).toHaveLength(2);
+  expect(f.paints.at(-1).visible).toBe(false);
+  expect(changes).toBe(2);
+  f.host.present(f.port.id, false);
+  f.host.present('another-page', true);
+  expect(f.paints).toHaveLength(2);
+  expect(changes).toBe(2);
+});
+
+test('phase, typing cursor and navigation publish independently while page visibility stays true', async () => {
+  const f = fixture();
+  const published: ReturnType<typeof f.host.state>[] = [];
+  f.port.changed = () => published.push(f.host.state(f.port.id));
+  f.host.present(f.port.id, true);
+  f.host.arm(f.port.id, f.scope);
+  expect(published.at(-1)?.phase).toBe('armed');
+  expect(f.paints.at(-1)).toMatchObject({ visible: true, agent: false });
+  const lease = (await f.host.request({
+    op: 'acquire',
+    ...f.scope,
+    browserId: 'b',
+    executionId: 'j',
+  })) as { leaseId: string };
+  expect(published.at(-1)?.phase).toBe('acquiring');
+  await f.host.request({ op: 'confirm', leaseId: lease.leaseId });
+  expect(published.at(-1)?.phase).toBe('agent');
+  expect(f.paints.at(-1)).toMatchObject({ visible: true, agent: true, navigation: 0 });
+  f.port.typingCursor = async () => ({ x: 40, y: 60 });
+  await f.host.request({
+    op: 'cdp',
+    leaseId: lease.leaseId,
+    method: 'Input.insertText',
+    params: { text: 'ordinary' },
+  });
+  expect(f.paints.at(-1)).toMatchObject({
+    visible: true,
+    cursor: { x: 40, y: 60, phase: 'type', navigation: 0 },
+  });
+  const beforeNavigation = published.length;
+  f.host.navigate(f.port.id);
+  expect(published).toHaveLength(beforeNavigation + 1);
+  expect(published.at(-1)?.navigation).toBe(1);
+  expect(f.paints.at(-1)).toMatchObject({ visible: true, navigation: 1, cursor: null });
+  const paints = f.paints.length,
+    changes = published.length;
+  f.host.present(f.port.id, true);
+  expect(f.paints).toHaveLength(paints);
+  expect(published).toHaveLength(changes);
+});
+
 const captureId = '00000000-0000-4000-8000-000000000001';
 function visualProof(f: Awaited<ReturnType<typeof activeFixture>>) {
   const metadata = {

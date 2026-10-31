@@ -322,6 +322,10 @@ export interface NativeBrowserBridge {
   presentBrowserLayout?(
     request: Extract<NativeBrowserRequest, { action: 'present' }>,
   ): NativeBrowserState | NativeBrowserLayoutReceipt | null;
+  /** Async calibration of an already-visible hosted page; cannot create or reveal it. */
+  presentBrowserLayoutAsync?(
+    request: Extract<NativeBrowserRequest, { action: 'present' }>,
+  ): Promise<NativeBrowserState | NativeBrowserLayoutReceipt | null>;
   watchBrowserLayoutFrame?(listener: (ack: NativeBrowserLayoutFrameAck) => void): () => void;
   showBrowserMenu?(request: NativeBrowserMenuRequest): Promise<NativeBrowserMenuAction | null>;
   cancelBrowserMenu?(requestId: string): void;

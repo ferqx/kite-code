@@ -7,7 +7,6 @@ import type {
   WebContentsView,
 } from 'electron';
 import * as electron from 'electron';
-import { cancelNativeWindowLayout, queueNativeWindowLayout } from './native-window-layout';
 
 /** The application needs this public composition, not BrowserWindow's hidden primary View. */
 export type NativeRootWindow = BaseWindow & {
@@ -108,10 +107,11 @@ export function createNativeRootWindow(options: BrowserWindowConstructorOptions)
     if (!contents.isDestroyed()) root.setBackgroundColor(color);
   };
   let previousFocus: WebContents = contents;
-  const resizeLayout = () => {
+  const resize = () => {
+    // Without a hosted browser, Root is the whole window. Keep its bounds in
+    // this native callback; queued work can lag AppKit's window zoom animation.
     if (!closed && !roots.get(window)?.hosted) setNativeRootBounds(window);
   };
-  const resize = () => queueNativeWindowLayout(window, resizeLayout);
   // A hidden WebContentsView need not have a capture surface. Completing the
   // actual load admits showing Root; screenshots never gate application startup.
   window.on('resize', resize);
@@ -158,7 +158,6 @@ export function createNativeRootWindow(options: BrowserWindowConstructorOptions)
     closed = true;
     loadSequence++;
     roots.delete(window);
-    cancelNativeWindowLayout(window, resizeLayout);
     window.off('resize', resize);
     if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: false });
   });

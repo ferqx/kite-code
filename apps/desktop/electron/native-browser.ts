@@ -118,6 +118,26 @@ function currentPanelMeasurement(
   }
   return true;
 }
+function assertPanelMeasurement(
+  bounds: NativeBrowserBounds,
+  layout: NativeBrowserLayout,
+  width: number,
+  height: number,
+): void {
+  if (!currentPanelMeasurement(layout, width, height)) throw Error('invalid_browser_request');
+  const measured = projectNativeBrowserBounds(
+    bounds,
+    layout,
+    layout.windowWidth,
+    layout.windowHeight,
+  );
+  if (
+    !measured ||
+    Math.abs(measured.x - bounds.x) > 1 ||
+    Math.abs(measured.width - bounds.width) > 1
+  )
+    throw Error('invalid_browser_request');
+}
 function httpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -1163,22 +1183,7 @@ export function registerNativeBrowserIpc(options: {
     const [width = 0, height = 0] = window.getContentSize();
     // Renderer measurements are inputs, never another native geometry writer.
     if (!layout && tab.presentation?.layout) throw Error('invalid_browser_request');
-    if (layout) {
-      if (!currentPanelMeasurement(layout, width / zoom, height / zoom))
-        throw Error('invalid_browser_request');
-      const measured = projectNativeBrowserBounds(
-        bounds,
-        layout,
-        layout.windowWidth,
-        layout.windowHeight,
-      );
-      if (
-        !measured ||
-        Math.abs(measured.x - bounds.x) > 1 ||
-        Math.abs(measured.width - bounds.width) > 1
-      )
-        throw Error('invalid_browser_request');
-    }
+    if (layout) assertPanelMeasurement(bounds, layout, width / zoom, height / zoom);
     tab.presentation = { bounds, ...(layout ? { layout } : {}), width, height, zoom };
     applyCurrentLayout(tab);
   };
@@ -2016,7 +2021,11 @@ export function registerNativeBrowserIpc(options: {
       throw Error('invalid_browser_request');
     return request.scope.generation;
   };
-  const layoutCommit = (event: Electron.IpcMainEvent, value: unknown) => {
+  const applyLayout = (
+    event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
+    value: unknown,
+    hostedOnly: boolean,
+  ) => {
     try {
       assertNativeSender(event, disposed ? undefined : window, rendererUrl);
       const request = parseNativeBrowserRequest(value);
@@ -2051,6 +2060,29 @@ export function registerNativeBrowserIpc(options: {
         )
       )
         throw Error('browser_page_scope_denied');
+      // Async requests only calibrate an existing live native presentation.
+      // A queued request cannot bootstrap or revive a page after withdrawal.
+      if (
+        hostedOnly &&
+        (active !== request.id ||
+          !window.isVisible() ||
+          window.isMinimized() ||
+          !tab.view.getVisible() ||
+          !tab.presentation?.layout ||
+          !tab.presentationScope ||
+          !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
+            (key) => tab.presentationScope![key] === scope[key],
+          ) ||
+          !chromeHost?.readyFor(request.id, scope))
+      )
+        throw Error('invalid_browser_request');
+      if (hostedOnly) {
+        const [width = 0, height = 0] = window.getContentSize(),
+          zoom = owner.getZoomFactor();
+        // Reject stale queued dimensions before advancing the current witness,
+        // revision or presentation anchor used by later valid calibrations.
+        assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
+      }
       const revisionGeneration = presentationGeneration(tab, request);
       if (!request.witness) {
         cancelLayout();
@@ -2064,7 +2096,7 @@ export function registerNativeBrowserIpc(options: {
       if (active === request.id && tab.view.getVisible()) tab.presentationScope = scope;
       chromeHost?.update();
       delete tab.presentationFrame;
-      event.returnValue = {
+      return {
         ok: true,
         value: tab.state,
         ...(request.witness
@@ -2085,7 +2117,7 @@ export function registerNativeBrowserIpc(options: {
           : {}),
       };
     } catch (cause) {
-      event.returnValue = {
+      return {
         ok: false,
         code:
           cause instanceof Error && cause.message === 'browser_page_scope_denied'
@@ -2094,8 +2126,12 @@ export function registerNativeBrowserIpc(options: {
       };
     }
   };
+  const layoutCommit = (event: Electron.IpcMainEvent, value: unknown) => {
+    event.returnValue = applyLayout(event, value, false);
+  };
   // Older isolated Main fakes may omit EventEmitter methods; production IpcMain has them.
   ipcMain.on?.(nativeBrowserLayoutChannel, layoutCommit);
+  ipcMain.handle(nativeBrowserLayoutChannel, (event, value) => applyLayout(event, value, true));
   const menuCancel = (event: Electron.IpcMainEvent, requestId: unknown) => {
     try {
       assertNativeSender(event, disposed ? undefined : window, rendererUrl);
@@ -2430,6 +2466,7 @@ export function registerNativeBrowserIpc(options: {
     for (const id of [...tabs.keys()]) close(id, true);
     ipcMain.removeHandler(nativeBrowserChannel);
     ipcMain.removeHandler(nativeBrowserMenuChannel);
+    ipcMain.removeHandler(nativeBrowserLayoutChannel);
     ipcMain.off?.(nativeBrowserLayoutChannel, layoutCommit);
     ipcMain.off?.(nativeBrowserMenuCancelChannel, menuCancel);
     browsing.webRequest.onBeforeRequest(null);

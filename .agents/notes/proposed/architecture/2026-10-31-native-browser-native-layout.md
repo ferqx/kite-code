@@ -30,6 +30,21 @@ Chrome host撤除独立resize调度，layout不再顺带请求Root viewport。Ro
 
 2026-10-31用户在两项原生候选验证后明确选择“先保留当前实现，明确保留缩放缺口”。当前已接入的原生分栏及统一尺寸提交／去重保持，不继续引擎补丁、结构试验或重复实机；失败候选不接入普通客户端。此决定仅结束本轮实施与调查，未将缩窗空带／闪烁判为通过，也未降低原产品预期。整体Note继续proposed，保留已实施部分、未取得资格和原反例；文档收尾复用未变源码的既有验证，不新增模型或客户端。
 
+## 未托管Root双击缩放回归
+
+用户随后新增反馈：未打开浏览器时普通窗口双击缩放也出现更明显黑边。原BaseWindow改造将非托管Root尺寸更新延后到setImmediate，使其在原生动画回调中保留上一尺寸；最小修复让未托管Root在自身resize回调内同步跟随全窗，已托管浏览器仍归原controller队列和裁剪。Root不再加入共享队列，不改变页面、观察、输入或回执；同值bounds仍省写。
+
+同Electron冻结修前／修后工厂的真实双击对照确认大L空区回归消除；最新开发UI连续过程也未见大空区、整块黑空或旧布局回闪。BrowserWindow基线与修后均仍有细窄暗边，不能将此局部回归修复改写为全局无闪烁。该新失败只重新打开未托管Root职责，不恢复引擎补丁或此前右浏览器缩放试验；不以内容视图重挂扩大焦点、输入盾和兄弟视图的生命周期范围。实际源证据及38项296断言归Desktop owner；整篇仍proposed。
+
+
+## 稳定hosted量测的异步边界
+
+用户新增已打开网页后快速拉伸卡顿，原慢速验收未覆盖。本轮先移除同值present重复装饰，但高速反例仍在：Root量测sendSync等待Main，在原生live-resize期间阻塞Root绘制。仅窗口尺寸变化时切异步的候选仍会在同尺寸回程与ResizeObserver重入时重新同步，实测停顿更长，故否决；不将该候选或去重计数写成卡顿解决。
+
+当前稳定hosted正向校准全部沿原channel的异步invoke，最多一个在途，后续完成时重测当前DOM；不保留过时矩形队列。Main在修改witness／revision／anchor前验证当前几何、active／visible、已有presentation、准确scope及Chrome binding，异步入口不能bootstrap或复活已撤页。首次绑定、bootstrap、未托管兼容路径与旧preload仍同步；hide不等待正向队列，卸载和scope变化拒绝迟到回复。该部分替代上节“保留同步IPC”的稳定hosted范围，不改变首次与兼容同步回执的理由，也不改变统一Main几何owner、工具或协议版本。
+
+相同高速助手的冻结组件及最新完整开发UI已记录Root响应性改善，纯分栏也未回入同步；定向边界回归及当前连续画面资格归[Desktop owner](../../../../apps/desktop/README.md#macos-原生分栏与浏览器工具栏2026-10-31)。这是响应性修复，原生窗口宽灰余带仍有反例，整体Note继续proposed。Main／preload须完整重启才加载，Renderer HMR不能升级已运行的旧桥。
+
 ## Alternatives considered
 
 - 保持旧 PNG 衔接：已有真实过程证实旧宽正文、暗空与最终恢复；无法满足连续缩小。

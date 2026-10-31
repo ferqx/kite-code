@@ -343,7 +343,7 @@ function fixture(nativeOwned = false) {
       off: (key: string) => events.delete(key),
       handle: (key: string, handler: (event: IpcMainInvokeEvent, input: unknown) => unknown) =>
         handlers.set(key, handler),
-      removeHandler() {},
+      removeHandler: (key: string) => handlers.delete(key),
     } as unknown as IpcMain,
     automation,
     selectedScope: () => scope,
@@ -365,7 +365,13 @@ function fixture(nativeOwned = false) {
       { sender: owner, senderFrame: owner.mainFrame } as unknown as IpcMainInvokeEvent,
       { action: 'present', id: 'page', bounds, ...(layout ? { layout } : {}) },
     );
+  const asyncLayout = handlers.get(nativeBrowserLayoutChannel);
   return {
+    asyncLayoutRegistered: () => handlers.has(nativeBrowserLayoutChannel),
+    asyncLayout: (input: unknown, frame = owner.mainFrame, sender = owner) => {
+      expect(typeof asyncLayout).toBe('function');
+      return asyncLayout!({ sender, senderFrame: frame } as unknown as IpcMainInvokeEvent, input);
+    },
     display: (input: unknown, frame = owner.mainFrame) => {
       const event = {
         sender: owner,
@@ -1940,6 +1946,124 @@ if (process.platform === 'darwin')
   });
 
 if (process.platform === 'darwin') {
+  test('async layout calibrates only an already visible native-hosted page and retains its original document', async () => {
+    const f = fixture(true);
+    const chrome = nativeChrome!;
+    chrome.ready = true;
+    f.state.phase = 'human';
+    try {
+      const initial = drawRequest(f, 1600, 800, '00112233445566778899aabb');
+      expect(await f.asyncLayout(initial)).toMatchObject({ ok: false });
+      expect(f.view.getVisible()).toBe(false);
+      expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+      const loads = f.contents.loads;
+      const next = drawRequest(f, 1600, 900, 'ffeeddccbbaa998877665544');
+      expect(await f.asyncLayout(next)).toMatchObject({ ok: true, waiting: false });
+      expect(f.view.getBounds()).toEqual({ x: 901, y: 100, width: 699, height: 600 });
+      expect(f.view.getVisible()).toBe(true);
+      expect(f.contents.loads).toBe(loads);
+      expect(f.contents.destroyed).toBe(false);
+      expect(f.owner.frame).toBeUndefined();
+      expect(await f.asyncLayout({ ...next, witness: { ...next.witness, step: 2 } })).toMatchObject(
+        { ok: true, waiting: false },
+      );
+      expect(
+        await f.asyncLayout({ ...initial, witness: { ...initial.witness, step: 2 } }),
+      ).toMatchObject({ ok: false });
+      expect(f.view.getBounds().x).toBe(901);
+    } finally {
+      f.close();
+    }
+  });
+
+  for (const boundary of [
+    'hide',
+    'close',
+    'scope',
+    'root-frame',
+    'sender',
+    'not-hosted',
+    'revision',
+    'bounds',
+    'window-size',
+    'inactive',
+  ] as const)
+    test(`async layout cannot apply a queued calibration after ${boundary}`, async () => {
+      const f = fixture(true);
+      const chrome = nativeChrome!;
+      chrome.ready = true;
+      f.state.phase = 'human';
+      try {
+        const initial = drawRequest(f, 1600, 800, '00112233445566778899aabb');
+        initial.presentationRevision = 2;
+        expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+        const next = {
+          ...drawRequest(f, 1600, 900, 'ffeeddccbbaa998877665544'),
+          presentationRevision: 2,
+        };
+        let frame = f.owner.mainFrame,
+          sender = f.owner;
+        const delayed = Promise.resolve().then(() => f.asyncLayout(next, frame, sender));
+        if (boundary === 'hide') f.present(null);
+        if (boundary === 'close') f.invoke({ action: 'close', id: 'page' });
+        if (boundary === 'scope') f.scope.viewSelection++;
+        if (boundary === 'root-frame') frame = { url: f.owner.mainFrame.url };
+        if (boundary === 'sender') sender = f.contents;
+        if (boundary === 'not-hosted') chrome.ready = false;
+        if (boundary === 'revision') next.presentationRevision = 1;
+        if (boundary === 'bounds') {
+          next.bounds.x += 40;
+          next.presentationRevision = 3;
+        }
+        if (boundary === 'window-size') {
+          f.contentSize[0] = 1400;
+          next.presentationRevision = 3;
+        }
+        if (boundary === 'inactive') {
+          f.invoke({ action: 'navigate', id: 'other', input: 'http://localhost/other' });
+          expect(f.sync({ ...initial, id: 'other' })).toMatchObject({ ok: true, waiting: false });
+        }
+        const bounds = f.view.getBounds(),
+          writes = f.view.boundsWrites.length,
+          visibility = f.view.visibility.length,
+          layouts = chrome.layouts.length;
+        expect(await delayed).toMatchObject({ ok: false });
+        expect(f.view.getBounds()).toEqual(bounds);
+        expect(f.view.boundsWrites).toHaveLength(writes);
+        expect(f.view.visibility.slice(visibility)).not.toContain(true);
+        expect(chrome.layouts).toHaveLength(layouts);
+        expect(f.contents.destroyed).toBe(boundary === 'close');
+        if (boundary === 'bounds')
+          expect(
+            await f.asyncLayout({ ...initial, witness: { ...initial.witness, step: 2 } }),
+          ).toMatchObject({ ok: true, waiting: false });
+        if (boundary === 'window-size')
+          expect(
+            await f.asyncLayout({
+              ...drawRequest(f, 1400, 700, '8899aabbccddeeff00112233'),
+              presentationRevision: 2,
+            }),
+          ).toMatchObject({ ok: true, waiting: false });
+      } finally {
+        f.close();
+      }
+    });
+
+  test('disposing removes the async layout handler and a previously queued callback cannot restore its page', async () => {
+    const f = fixture(true);
+    const chrome = nativeChrome!;
+    chrome.ready = true;
+    f.state.phase = 'human';
+    const initial = drawRequest(f, 1600, 800, '00112233445566778899aabb');
+    expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+    expect(f.asyncLayoutRegistered()).toBe(true);
+    const delayed = Promise.resolve().then(() => f.asyncLayout(initial));
+    f.close();
+    expect(f.asyncLayoutRegistered()).toBe(false);
+    expect(await delayed).toMatchObject({ ok: false });
+    expect(f.contents.destroyed).toBe(true);
+  });
+
   test('sync calibration and its queued native resize share one output while a different calibration still commits', async () => {
     const f = fixture(true);
     const chrome = nativeChrome!;

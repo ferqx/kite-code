@@ -53,6 +53,44 @@ import {
 } from '../src/native-menu-bridge';
 import { createBrowserDisplayBootstrap } from './browser-display-bootstrap';
 
+type BrowserLayoutReply = NativeBrowserReply & {
+  waiting?: boolean;
+  frozenKey?: string;
+  frozenWidth?: number;
+  frozenHeight?: number;
+};
+function readBrowserLayoutReply(
+  input: Parameters<NonNullable<NativeBrowserBridge['presentBrowserLayout']>>[0],
+  reply: BrowserLayoutReply,
+): ReturnType<NonNullable<NativeBrowserBridge['presentBrowserLayout']>> {
+  if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+  if (reply.value !== null && !isNativeBrowserState(reply.value))
+    throw Error('invalid_browser_state');
+  if (input.witness) {
+    if (
+      typeof reply.waiting !== 'boolean' ||
+      (reply.frozenKey !== undefined &&
+        (!/^[a-f0-9]{32}$/.test(reply.frozenKey) ||
+          ![reply.frozenWidth, reply.frozenHeight].every(
+            (n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 32768,
+          )))
+    )
+      throw Error('invalid_browser_presentation');
+    return {
+      state: reply.value,
+      waiting: reply.waiting,
+      ...(reply.frozenKey
+        ? {
+            frozenKey: reply.frozenKey,
+            frozenWidth: reply.frozenWidth,
+            frozenHeight: reply.frozenHeight,
+          }
+        : {}),
+    };
+  }
+  return reply.value;
+}
+
 const bridge: NativeBridge &
   NativeBrowserBridge &
   NativeThemeBridge &
@@ -112,38 +150,16 @@ const bridge: NativeBridge &
     return reply.value;
   },
   presentBrowserLayout(input) {
-    const reply = ipcRenderer.sendSync(nativeBrowserLayoutChannel, input) as NativeBrowserReply & {
-      waiting?: boolean;
-      frozenKey?: string;
-      frozenWidth?: number;
-      frozenHeight?: number;
-    };
-    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
-    if (reply.value !== null && !isNativeBrowserState(reply.value))
-      throw Error('invalid_browser_state');
-    if (input.witness) {
-      if (
-        typeof reply.waiting !== 'boolean' ||
-        (reply.frozenKey !== undefined &&
-          (!/^[a-f0-9]{32}$/.test(reply.frozenKey) ||
-            ![reply.frozenWidth, reply.frozenHeight].every(
-              (n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 32768,
-            )))
-      )
-        throw Error('invalid_browser_presentation');
-      return {
-        state: reply.value,
-        waiting: reply.waiting,
-        ...(reply.frozenKey
-          ? {
-              frozenKey: reply.frozenKey,
-              frozenWidth: reply.frozenWidth,
-              frozenHeight: reply.frozenHeight,
-            }
-          : {}),
-      };
-    }
-    return reply.value;
+    return readBrowserLayoutReply(
+      input,
+      ipcRenderer.sendSync(nativeBrowserLayoutChannel, input) as BrowserLayoutReply,
+    );
+  },
+  async presentBrowserLayoutAsync(input) {
+    return readBrowserLayoutReply(
+      input,
+      (await ipcRenderer.invoke(nativeBrowserLayoutChannel, input)) as BrowserLayoutReply,
+    );
   },
   watchBrowserLayoutFrame(listener) {
     const receive = (_event: unknown, value: unknown) => {

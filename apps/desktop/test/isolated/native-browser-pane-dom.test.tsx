@@ -758,6 +758,312 @@ test('measured Native layout follows the production Panel resize policy and refu
   }
 });
 
+type MeasuredPresent = Extract<NativeBrowserRequest, { action: 'present' }>;
+type LayoutReply =
+  | NativeBrowserState
+  | import('../../src/native-browser-bridge').NativeBrowserLayoutReceipt
+  | null;
+
+function measuredLayoutPortFixture(asyncPort = true) {
+  const dom = new JSDOM('<div id="root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const restoreLayout = prepareDesktopDom(dom);
+  const prior = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    IS_REACT_ACT_ENVIRONMENT: Reflect.get(globalThis, 'IS_REACT_ACT_ENVIRONMENT'),
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  let width = 1400,
+    height = 800,
+    fraction = 0.6,
+    unmounted = false;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, get: () => width });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, get: () => height });
+  const originalRect = window.HTMLElement.prototype.getBoundingClientRect;
+  window.HTMLElement.prototype.getBoundingClientRect = function () {
+    const left = Math.round((width - 1) * fraction);
+    if (this.id === 'port-group') return new dom.window.DOMRect(0, 0, width, height);
+    if (this.id === 'port-content') return new dom.window.DOMRect(0, 0, left, height);
+    if (this.id === 'port-handle') return new dom.window.DOMRect(left, 0, 1, height);
+    if (this.id === 'port-details')
+      return new dom.window.DOMRect(left + 1, 0, width - left - 1, height);
+    if (this.classList.contains('native-browser-viewport'))
+      return new dom.window.DOMRect(left + 1, 74, width - left - 1, height - 74);
+    return originalRect.call(this);
+  };
+  const observers: LayoutObserver[] = [];
+  class LayoutObserver {
+    targets = new Set<Element>();
+    readonly callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+      observers.push(this);
+    }
+    observe(target: Element) {
+      this.targets.add(target);
+    }
+    unobserve(target: Element) {
+      this.targets.delete(target);
+    }
+    disconnect() {
+      this.targets.clear();
+    }
+  }
+  Object.assign(window, { ResizeObserver: LayoutObserver });
+  Object.assign(globalThis, { ResizeObserver: LayoutObserver });
+  const state: NativeBrowserState = {
+    id: 'browser',
+    url: 'https://example.test/original',
+    title: 'Original page',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  };
+  const events: { port: 'sync' | 'async' | 'legacy'; input: MeasuredPresent }[] = [];
+  const pending: {
+    input: MeasuredPresent;
+    resolve(reply?: LayoutReply): void;
+    reject(error?: Error): void;
+  }[] = [];
+  Object.assign(window, {
+    kiteNative: {
+      presentBrowserLayout(input: MeasuredPresent) {
+        events.push({ port: 'sync', input });
+        return null;
+      },
+      ...(asyncPort
+        ? {
+            presentBrowserLayoutAsync(input: MeasuredPresent) {
+              events.push({ port: 'async', input });
+              return new Promise<LayoutReply>((resolve, reject) => {
+                pending.push({
+                  input,
+                  resolve: (reply = null) => resolve(reply),
+                  reject: (error = Error('browser_layout_failed')) => reject(error),
+                });
+              });
+            },
+          }
+        : {}),
+      async browserRequest(input: NativeBrowserRequest) {
+        if (input.action === 'present') events.push({ port: 'legacy', input });
+        return input.action === 'state' ? state : null;
+      },
+      watchBrowser() {
+        return () => {};
+      },
+    },
+  });
+  const root = createRoot(document.getElementById('root')!);
+  const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 };
+  const policy = JSON.stringify({
+    minSize: '200px',
+    maxSize: '100%',
+    groupResizeBehavior: 'preserve-relative-size',
+    collapsible: false,
+  });
+  const flush = (action: () => void = () => {}) =>
+    act(async () => {
+      action();
+      await Bun.sleep(40);
+    });
+  const unmount = () =>
+    flush(() => {
+      if (!unmounted) root.unmount();
+      unmounted = true;
+    });
+  return {
+    events,
+    pending,
+    scope,
+    flush,
+    positive(port: 'sync' | 'async' | 'legacy') {
+      return events.filter((event) => event.port === port && event.input.bounds);
+    },
+    render(chromeHosted = true, currentScope = scope) {
+      return flush(() =>
+        root.render(
+          <div
+            id="port-group"
+            className="client-panels"
+            data-slot="resizable-panel-group"
+            style={{ display: 'flex', flexDirection: 'row' }}
+          >
+            <div id="port-content" data-panel data-native-browser-layout={policy} />
+            <div id="port-handle" data-slot="resizable-handle" />
+            <div id="port-details" data-panel data-native-browser-layout={policy}>
+              <NativeBrowserPane
+                id="browser"
+                visible
+                chromeHosted={chromeHosted}
+                tools={null}
+                scope={currentScope}
+                onTitleChange={() => {}}
+              />
+            </div>
+          </div>,
+        ),
+      );
+    },
+    resize(nextWidth: number, nextHeight = height) {
+      return flush(() => {
+        width = nextWidth;
+        height = nextHeight;
+        window.dispatchEvent(new dom.window.Event('resize'));
+      });
+    },
+    split(nextFraction: number) {
+      return flush(() => {
+        fraction = nextFraction;
+        const details = document.getElementById('port-details')!;
+        for (const observer of observers)
+          if (observer.targets.has(details))
+            observer.callback([], observer as unknown as ResizeObserver);
+      });
+    },
+    unmount,
+    async close() {
+      await unmount();
+      await flush(() => {
+        for (const item of pending) item.resolve();
+      });
+      restoreLayout();
+      Object.assign(globalThis, prior);
+      dom.window.close();
+    },
+  };
+}
+
+test('stable hosted measurements including same-window splitter changes use one asynchronous port and remeasure the latest layout', async () => {
+  const f = measuredLayoutPortFixture();
+  try {
+    await f.render();
+    expect(f.positive('sync').length).toBeGreaterThan(0);
+    expect(f.pending).toHaveLength(0); // bootstrap still establishes layout synchronously
+    const sync = f.positive('sync').length;
+    await f.resize(1100, 760);
+    expect(f.pending).toHaveLength(1);
+    expect(f.pending[0]!.input.layout).toMatchObject({ windowWidth: 1100, windowHeight: 760 });
+    expect(f.positive('sync')).toHaveLength(sync);
+    await f.resize(1000, 720);
+    await f.resize(1200, 740);
+    await f.split(0.5); // latest DOM is read after the in-flight result, not queued now
+    expect(f.pending).toHaveLength(1);
+    expect(f.positive('sync')).toHaveLength(sync);
+    await f.flush(() => f.pending[0]!.resolve());
+    expect(f.pending).toHaveLength(2);
+    expect(f.pending[1]!.input.layout).toMatchObject({ windowWidth: 1200, windowHeight: 740 });
+    expect(f.pending[1]!.input.bounds).toMatchObject({ x: 601, width: 599, height: 666 });
+    expect(f.pending.some((item) => item.input.layout?.windowWidth === 1000)).toBe(false);
+    expect(f.positive('sync')).toHaveLength(sync);
+    await f.flush(() => f.pending[1]!.resolve());
+    expect(f.pending).toHaveLength(2);
+    await f.split(0.55);
+    expect(f.pending).toHaveLength(3);
+    expect(f.positive('sync')).toHaveLength(sync);
+    expect(f.pending[2]!.input.layout).toMatchObject({ windowWidth: 1200, windowHeight: 740 });
+    expect(f.pending[2]!.input.bounds).toMatchObject({ x: 660, width: 540 });
+    await f.resize(1200, 740); // a same-window resize notification cannot reenter sync IPC
+    expect(f.positive('sync')).toHaveLength(sync);
+    expect(f.pending).toHaveLength(3);
+    await f.flush(() => f.pending[2]!.resolve());
+    expect(f.positive('legacy')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('returning to the last committed window size while another size is in flight still restores its latest layout', async () => {
+  const f = measuredLayoutPortFixture();
+  try {
+    await f.render();
+    const sync = f.positive('sync').length;
+    await f.resize(1100, 760);
+    expect(f.pending).toHaveLength(1);
+    await f.resize(1400, 800);
+    expect(f.pending).toHaveLength(1);
+    await f.flush(() => f.pending[0]!.resolve());
+    expect(f.pending).toHaveLength(2);
+    expect(f.pending[1]!.input.layout).toMatchObject({ windowWidth: 1400, windowHeight: 800 });
+    expect(f.positive('sync')).toHaveLength(sync);
+    await f.flush(() => f.pending[1]!.resolve());
+    expect(f.pending).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const fallback of ['not-hosted', 'missing-async-port'] as const)
+  test(`window measurements keep the synchronous compatibility path when ${fallback}`, async () => {
+    const f = measuredLayoutPortFixture(fallback !== 'missing-async-port');
+    try {
+      await f.render(fallback !== 'not-hosted');
+      const count = f.positive('sync').length;
+      expect(count).toBeGreaterThan(0);
+      await f.resize(1100, 760);
+      expect(f.positive('sync')).toHaveLength(count + 1);
+      expect(f.positive('sync').at(-1)!.input.layout).toMatchObject({
+        windowWidth: 1100,
+        windowHeight: 760,
+      });
+      expect(f.pending).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const boundary of ['unmount', 'scope'] as const)
+  for (const outcome of ['reply', 'rejection'] as const)
+    test(`a pending hosted layout ${outcome} after ${boundary} cannot revive the old measurement or suppress hide`, async () => {
+      const f = measuredLayoutPortFixture();
+      try {
+        await f.render();
+        await f.resize(1100, 760);
+        expect(f.pending).toHaveLength(1);
+        await f.resize(1200, 740);
+        expect(f.pending).toHaveLength(1);
+        const nextScope = { ...f.scope, generation: 2, viewSelection: 3 };
+        const beforeBoundary = f.events.length;
+        if (boundary === 'unmount') await f.unmount();
+        else await f.render(true, nextScope);
+        expect(
+          f.events
+            .slice(beforeBoundary)
+            .filter(
+              ({ port, input }) =>
+                port === 'legacy' &&
+                !input.bounds &&
+                input.scope?.generation === f.scope.generation &&
+                input.presentationRevision === f.pending[0]!.input.presentationRevision,
+            ),
+        ).toHaveLength(1);
+        const afterBoundary = f.events.length;
+        await f.flush(() => {
+          if (outcome === 'reply') f.pending[0]!.resolve();
+          else f.pending[0]!.reject();
+        });
+        expect(f.events).toHaveLength(afterBoundary);
+        expect(f.pending).toHaveLength(1);
+        if (boundary === 'scope') {
+          await f.resize(1150, 730);
+          expect(f.pending).toHaveLength(2);
+          expect(f.pending[1]!.input.scope).toEqual(nextScope);
+          await f.flush(() => f.pending[1]!.resolve());
+        }
+      } finally {
+        await f.close();
+      }
+    });
+
 test('redirects preserve a focused address edit, then show the latest page URL on blur', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',

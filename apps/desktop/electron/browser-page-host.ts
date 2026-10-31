@@ -717,7 +717,7 @@ export class NativeBrowserPageHost {
   }
   present(id: string, visible: boolean) {
     const page = this.pages.get(id);
-    if (!page) return;
+    if (!page || page.visible === visible) return;
     page.visible = visible;
     this.paint(page);
   }

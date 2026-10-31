@@ -3,10 +3,11 @@ import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
 import { createBrowserDisplayBootstrap } from '../../electron/browser-display-bootstrap';
-import type {
-  NativeBrowserBridge,
-  NativeBrowserDisplayIntent,
-  NativeBrowserRequest,
+import {
+  type NativeBrowserBridge,
+  type NativeBrowserDisplayIntent,
+  type NativeBrowserRequest,
+  nativeBrowserLayoutChannel,
 } from '../../src/native-browser-bridge';
 
 const intent: NativeBrowserDisplayIntent = {
@@ -293,6 +294,104 @@ test('built preload removes its actual staging sheet with Electron 44.3 author-o
     } finally {
       dom.window.close();
     }
+  }
+});
+
+test('built preload uses invoke for hosted calibration and shares exact sync layout result validation', async () => {
+  const built = await Bun.build({
+    entrypoints: [resolve(import.meta.dir, '../../electron/preload.ts')],
+    target: 'node',
+    format: 'cjs',
+    packages: 'bundle',
+    external: ['electron'],
+  });
+  expect(built.success).toBe(true);
+  let bridge!: NativeBrowserBridge, reply: unknown;
+  const calls: { transport: string; channel: string; input: unknown }[] = [];
+  runInNewContext(await built.outputs[0]!.text(), {
+    document: { defaultView: null },
+    exports: {},
+    module: { exports: {} },
+    require(name: string) {
+      expect(name).toBe('electron');
+      return {
+        contextBridge: {
+          exposeInMainWorld(_name: string, value: NativeBrowserBridge) {
+            bridge = value;
+          },
+        },
+        ipcRenderer: {
+          sendSync(channel: string, input: unknown) {
+            if (channel === 'kite:native:browser-display') return null;
+            calls.push({ transport: 'sync', channel, input });
+            return reply;
+          },
+          async invoke(channel: string, input: unknown) {
+            calls.push({ transport: 'async', channel, input });
+            return reply;
+          },
+          on() {},
+          removeListener() {},
+        },
+        webFrame: {},
+        webUtils: {},
+      };
+    },
+  });
+  expect(typeof bridge.presentBrowserLayoutAsync).toBe('function');
+  const input: Extract<NativeBrowserRequest, { action: 'present' }> = {
+    action: 'present',
+    id: 'page',
+    bounds: intent.bounds,
+    witness: { key: 'a'.repeat(24), step: 1 },
+  };
+  const state = {
+    id: 'page',
+    url: 'https://example.com/',
+    title: 'Page',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  };
+  for (const transport of ['sync', 'async'] as const) {
+    const read = (request = input) =>
+      transport === 'sync'
+        ? Promise.resolve().then(() => bridge.presentBrowserLayout!(request))
+        : bridge.presentBrowserLayoutAsync!(request);
+    reply = { ok: true, value: state, waiting: false };
+    expect(await read()).toEqual({ state, waiting: false });
+    expect(calls.at(-1)).toEqual({ transport, channel: nativeBrowserLayoutChannel, input });
+    reply = { ok: true, value: state };
+    expect(await read({ ...input, witness: undefined })).toEqual(state);
+    reply = { ok: true, value: null };
+    expect(await read({ ...input, witness: undefined })).toBeNull();
+    reply = { ok: false, code: 'browser_page_scope_denied' };
+    await expect(read()).rejects.toThrow('browser_page_scope_denied');
+    reply = { ok: true, value: { id: 'unverified' }, waiting: false };
+    await expect(read()).rejects.toThrow('invalid_browser_state');
+    for (const invalid of [
+      { waiting: 'yes' },
+      { waiting: true, frozenKey: 'invalid', frozenWidth: 100, frozenHeight: 100 },
+      { waiting: true, frozenKey: 'a'.repeat(32), frozenWidth: 0, frozenHeight: 100 },
+    ]) {
+      reply = { ok: true, value: state, ...invalid };
+      await expect(read()).rejects.toThrow('invalid_browser_presentation');
+    }
+    reply = {
+      ok: true,
+      value: state,
+      waiting: true,
+      frozenKey: 'a'.repeat(32),
+      frozenWidth: 100,
+      frozenHeight: 200,
+    };
+    expect(await read()).toEqual({
+      state,
+      waiting: true,
+      frozenKey: 'a'.repeat(32),
+      frozenWidth: 100,
+      frozenHeight: 200,
+    });
   }
 });
 

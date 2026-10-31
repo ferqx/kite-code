@@ -239,7 +239,7 @@ test('a superseded load cannot claim readiness and loadFile uses the same curren
   window.destroy();
 });
 
-test('physical hosted geometry is preserved and unhosted resize waits until the native callback ends', async () => {
+test('unhosted Root follows native resize immediately while hosted geometry remains controller-owned', async () => {
   const value = createNativeRootWindow({ show: false }),
     window = value as unknown as Window;
   const root = getNativeRootView(value)! as unknown as ContentsView;
@@ -261,14 +261,22 @@ test('physical hosted geometry is preserved and unhosted resize waits until the 
   expect(root.bounds.width).toBe(820);
   window.size[0] = 900;
   window.emit('resize');
-  expect(root.bounds.width).toBe(820);
+  expect(root.bounds.width).toBe(900);
+  const resizedWrites = root.boundsWrites;
+  window.emit('resize');
+  expect(root.boundsWrites).toBe(resizedWrites);
   await new Promise<void>((resolve) => setImmediate(resolve));
   expect(root.bounds.width).toBe(900);
   window.size[0] = 920;
   window.emit('resize');
+  expect(root.bounds.width).toBe(920);
   window.destroy();
+  const closedWrites = root.boundsWrites;
+  window.size[0] = 940;
+  window.emit('resize');
   await new Promise<void>((resolve) => setImmediate(resolve));
-  expect(root.bounds.width).toBe(900);
+  expect(root.bounds.width).toBe(920);
+  expect(root.boundsWrites).toBe(closedWrites);
   expect(root.webContents.closes).toBe(1);
 });
 

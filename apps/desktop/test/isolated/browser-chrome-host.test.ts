@@ -541,20 +541,20 @@ test('unbound Root resize stays with its factory while viewport synchronization 
     const commands = f.root.webContents.commands.length;
     f.size[0] = 920;
     f.window.emit('resize');
+    expect(f.root.getBounds()).toEqual({ x: 0, y: 0, width: 920, height: 700 });
     f.size[0] = 820;
     f.window.emit('resize');
-    expect(f.root.boundsHistory).toEqual([]);
+    const expectedBounds = [
+      { x: 0, y: 0, width: 920, height: 700 },
+      { x: 0, y: 0, width: 820, height: 700 },
+    ];
+    expect(f.root.boundsHistory).toEqual(expectedBounds);
     expect(f.root.webContents.commands).toHaveLength(commands);
     await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.root.boundsHistory).toEqual(expectedBounds);
     f.host.syncViewport();
     await tick();
-    expect(f.root.boundsHistory.length).toBeGreaterThan(0);
-    expect(
-      f.root.boundsHistory.every(
-        (bounds) =>
-          bounds.x === 0 && bounds.y === 0 && bounds.width === 820 && bounds.height === 700,
-      ),
-    ).toBe(true);
+    expect(f.root.boundsHistory).toEqual(expectedBounds);
     expect(f.root.webContents.commands.slice(commands)).toHaveLength(1);
     expect(f.root.webContents.commands.at(-1)?.params).toMatchObject({ width: 820, height: 700 });
     expect(f.chrome().getVisible()).toBe(false);

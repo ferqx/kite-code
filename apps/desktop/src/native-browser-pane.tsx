@@ -373,6 +373,9 @@ export function NativeBrowserPane({
     let frame: number | undefined;
     let last = '';
     let pending = '';
+    let committedLayout = false;
+    let asyncLayout = false;
+    let asyncLayoutDirty = false;
     let sequence = 0;
     let stopped = false;
     let recoveryAnimating = false;
@@ -606,6 +609,18 @@ export function NativeBrowserPane({
       }
       const { bounds, layout, key } = measured;
       if ((!pending && key === last) || key === pending) return;
+      if (bounds && layout && chromeHostedRef.current && asyncLayout) {
+        // Keep one calibration in flight. Its completion remeasures the live
+        // DOM, rather than dispatching a queue of obsolete window rectangles.
+        asyncLayoutDirty = true;
+        return;
+      }
+      const asyncCalibration =
+        bounds &&
+        layout &&
+        chromeHostedRef.current &&
+        host.presentBrowserLayoutAsync &&
+        committedLayout;
       const sent = ++sequence;
       pending = key;
       const input = {
@@ -653,13 +668,44 @@ export function NativeBrowserPane({
         if (stopped || sent !== sequence) return;
         last = key;
         pending = '';
+        committedLayout = !!layout;
       };
       const rejected = () => {
         if (!stopped && sent === sequence) pending = '';
       };
-      // Only completed positive layout measurements use the bounded sync port.
-      // Hide/lifecycle and isolated legacy bridges retain their asynchronous path.
-      if (bounds && layout && host.presentBrowserLayout) {
+      // Main already owns native window projection and invalidates old input.
+      // Do not block Root painting on Main's AppKit live-resize callback. The
+      // asynchronous port admits calibration only for the still-hosted page.
+      // Bootstrap and fallback stay synchronous. Once hosted, even returning to
+      // a previous size or changing a splitter must not re-enter sendSync while
+      // Main may still be inside a native resize/compositor transaction.
+      if (asyncCalibration) {
+        if (!presentationScope) {
+          rejected();
+          return;
+        }
+        asyncLayout = true;
+        try {
+          if (input.witness) draw(input);
+          void host.presentBrowserLayoutAsync!(input)
+            .then((value) => {
+              if (stopped || sent !== sequence) return;
+              freeze(value);
+              committed();
+            }, rejected)
+            .catch(rejected)
+            .finally(() => {
+              asyncLayout = false;
+              if (asyncLayoutDirty && !stopped) {
+                asyncLayoutDirty = false;
+                publish();
+              }
+            });
+        } catch {
+          asyncLayout = false;
+          rejected();
+        }
+      } else if (bounds && layout && host.presentBrowserLayout) {
         if (!presentationScope) {
           rejected();
           return;
