@@ -9,6 +9,7 @@ import {
   type NativeBrowserPresentationFrame,
   type NativeBrowserRequest,
   type NativeBrowserRestoreResult,
+  type NativeBrowserRestoreScope,
   nativeBrowserChannel,
   nativeBrowserLayoutChannel,
   nativeBrowserLayoutFrameChannel,
@@ -153,6 +154,8 @@ class FakeView {
   visible = false;
   readonly visibility: boolean[] = [];
   bounds = { x: 0, y: 0, width: 0, height: 0 };
+  readonly boundsWrites: Electron.Rectangle[] = [];
+  readonly radiusWrites: number[] = [];
   readonly options: { webPreferences?: Record<string, unknown> };
   constructor(options: { webPreferences?: Record<string, unknown> } = {}) {
     this.options = options;
@@ -169,9 +172,12 @@ class FakeView {
     return { ...this.bounds };
   }
   setBounds(bounds: typeof this.bounds) {
+    this.boundsWrites.push({ ...bounds });
     this.bounds = { ...bounds };
   }
-  setBorderRadius() {}
+  setBorderRadius(radius: number) {
+    this.radiusWrites.push(radius);
+  }
   setBackgroundColor() {}
 }
 let popupTemplate: Electron.MenuItemConstructorOptions[] = [],
@@ -221,20 +227,39 @@ let nativeChrome:
       ready: boolean;
       layouts: { id: string; bounds: Electron.Rectangle }[];
       releases: (string | undefined)[];
+      invalidations: number;
+      viewportSyncs: number;
       pageScope(): unknown;
     }
   | undefined;
 mock.module('../../electron/browser-chrome-host', () => ({
-  createNativeBrowserChromeHost(options: { getPage(id: string): { scope?: unknown } | undefined }) {
+  createNativeBrowserChromeHost(options: {
+    getPage(id: string): { id: string; scope?: unknown } | undefined;
+    currentScope(forInput: boolean): NativeBrowserRestoreScope | undefined;
+  }) {
+    const initialScope = options.currentScope(false);
+    const boundScope = initialScope && { ...initialScope };
     const state = {
       ready: false,
       layouts: [] as { id: string; bounds: Electron.Rectangle }[],
       releases: [] as (string | undefined)[],
+      invalidations: 0,
+      viewportSyncs: 0,
       pageScope: () => options.getPage('page')?.scope,
     };
     nativeChrome = state;
     return {
-      readyFor: () => state.ready,
+      readyFor: (id: string, scope?: NativeBrowserRestoreScope) =>
+        state.ready &&
+        options.getPage(id)?.id === id &&
+        JSON.stringify(options.currentScope(false)) === JSON.stringify(boundScope) &&
+        (!scope || JSON.stringify(scope) === JSON.stringify(boundScope)),
+      invalidateGeometry() {
+        state.invalidations++;
+      },
+      syncViewport() {
+        state.viewportSyncs++;
+      },
       update() {},
       layout(id: string, bounds: Electron.Rectangle) {
         state.layouts.push({ id, bounds });
@@ -1855,13 +1880,19 @@ if (process.platform === 'darwin')
           ).toString('base64'),
         });
         await f.page.send('Page.captureScreenshot', {});
-        expect((f.page.captureMeta() as { metadata: unknown }).metadata).not.toBeNull();
+        const proof = f.page.captureMeta() as { metadata: { captureId: string } };
+        expect(proof.metadata).not.toBeNull();
+        expect(await f.page.validateCapture!(proof.metadata.captureId)).toBe(true);
         f.contentSize[0] = width;
+        const invalidations = chrome.invalidations;
         // No Root resize measurement or paint has run at this point.
         f.window.emit('resize');
+        expect(chrome.invalidations).toBe(invalidations + 1);
         expect(f.view.getBounds()).toEqual(prior);
         expect(f.view.getVisible()).toBe(true);
         expect(f.page.captureMeta()).toMatchObject({ metadata: null });
+        expect(await f.page.validateCapture!(proof.metadata.captureId)).toBe(false);
+        expect(f.view.getBounds()).toEqual(prior);
         await new Promise<void>((resolve) => setImmediate(resolve));
         const projected = projectNativeBrowserBounds(initial.bounds, initial.layout, width, 1200)!;
         expect(f.view.getBounds()).toEqual({
@@ -1907,6 +1938,123 @@ if (process.platform === 'darwin')
       f.close();
     }
   });
+
+if (process.platform === 'darwin') {
+  test('sync calibration and its queued native resize share one output while a different calibration still commits', async () => {
+    const f = fixture(true);
+    const chrome = nativeChrome!;
+    chrome.ready = true;
+    try {
+      f.state.phase = 'acquiring';
+      await f.page.attach();
+      f.state.phase = 'agent';
+      const shield = views.at(-1)!;
+      // Exact 50%/55% allocations after the 1px separator avoid exercising
+      // the existing Panel percentage rounding in this output-dedup regression.
+      f.contentSize[0] = 1601;
+      const initial = drawRequest(f, 1601, 800, '00112233445566778899aabb');
+      initial.bounds.radius = 8;
+      expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      for (const view of [f.view, shield]) {
+        view.boundsWrites.length = 0;
+        view.radiusWrites.length = 0;
+        view.visibility.length = 0;
+      }
+      const writes = () =>
+        [f.view, shield].map((view) => ({
+          bounds: view.boundsWrites.length,
+          radius: view.radiusWrites.length,
+          visibility: view.visibility.length,
+        }));
+      f.contentSize[0] = 1201;
+      f.window.emit('resize');
+      expect(f.view.getBounds()).toEqual({ x: 801, y: 100, width: 800, height: 600 });
+      expect(writes().every((value) => value.bounds === 0)).toBe(true);
+      const measured = drawRequest(f, 1201, 600, 'ffeeddccbbaa998877665544');
+      measured.bounds.radius = 8;
+      // The same effect revision can calibrate more than one size.
+      expect(measured.presentationRevision).toBe(initial.presentationRevision);
+      expect(f.sync(measured)).toMatchObject({ ok: true, waiting: false });
+      expect(f.view.getBounds()).toEqual({ x: 601, y: 100, width: 600, height: 600 });
+      expect(shield.getBounds()).toEqual(f.view.getBounds());
+      expect(writes()).toEqual([
+        { bounds: 1, radius: 0, visibility: 0 },
+        { bounds: 1, radius: 0, visibility: 0 },
+      ]);
+      const afterSync = writes();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(writes()).toEqual(afterSync);
+      expect(f.sync(measured)).toMatchObject({ ok: true, waiting: false });
+      expect(writes()).toEqual(afterSync);
+
+      const calibrated = drawRequest(f, 1201, 660, '8899aabbccddeeff00112233');
+      calibrated.bounds.radius = 8;
+      expect(f.sync(calibrated)).toMatchObject({ ok: true, waiting: false });
+      expect(f.view.getBounds()).toEqual({ x: 661, y: 100, width: 540, height: 600 });
+      expect(shield.getBounds()).toEqual(f.view.getBounds());
+      expect(writes().map((value) => value.bounds)).toEqual([2, 2]);
+      const afterCalibration = writes();
+      const newOwner = { ...calibrated, presentationRevision: 2 };
+      expect(f.sync(newOwner)).toMatchObject({ ok: true, waiting: false });
+      expect(writes()).toEqual(afterCalibration);
+      expect(
+        f.invoke({
+          action: 'present',
+          id: 'page',
+          bounds: null,
+          scope: { ...f.scope },
+          presentationRevision: 1,
+        }),
+      ).toMatchObject({ ok: false });
+      expect(f.sync({ ...newOwner, witness: { ...newOwner.witness, step: 2 } })).toMatchObject({
+        ok: true,
+        waiting: false,
+      });
+      expect(writes()).toEqual(afterCalibration);
+      expect(f.view.getVisible()).toBe(true);
+      expect(shield.getVisible()).toBe(true);
+    } finally {
+      f.close();
+    }
+  });
+
+  test('queued native resize cannot replay obsolete geometry after hide, close or selection replacement', async () => {
+    for (const boundary of ['hide', 'close', 'selection'] as const) {
+      const f = fixture(true);
+      const chrome = nativeChrome!;
+      chrome.ready = true;
+      f.state.phase = 'human';
+      try {
+        const initial = drawRequest(f, 1600, 800, '00112233445566778899aabb');
+        expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        f.contentSize[0] = 1200;
+        const invalidations = chrome.invalidations;
+        f.window.emit('resize');
+        expect(chrome.invalidations).toBe(invalidations + 1);
+        if (boundary === 'hide') expect(f.present(null)).toMatchObject({ ok: true });
+        if (boundary === 'close')
+          expect(f.invoke({ action: 'close', id: 'page' })).toMatchObject({ ok: true });
+        if (boundary === 'selection') f.scope.viewSelection++;
+        const bounds = f.view.getBounds();
+        const boundsWrites = f.view.boundsWrites.length;
+        const visibilityStart = f.view.visibility.length;
+        const layouts = chrome.layouts.length;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(f.view.getBounds()).toEqual(bounds);
+        expect(f.view.boundsWrites).toHaveLength(boundsWrites);
+        expect(f.view.visibility.slice(visibilityStart)).not.toContain(true);
+        expect(chrome.layouts).toHaveLength(layouts);
+        if (boundary === 'hide') expect(f.view.getVisible()).toBe(false);
+        expect(f.contents.destroyed).toBe(boundary === 'close');
+        if (boundary === 'close') expect(f.window.contentView.children).not.toContain(f.view);
+      } finally {
+        f.close();
+      }
+    }
+  });
+}
 test('same-frame grey calibration accepts nonidentity display curves and rejects collapsed levels, old nonces and the first step', () => {
   for (const scale of [0.25, 0.5, 1, 2]) {
     const f = fixture();

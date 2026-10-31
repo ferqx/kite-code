@@ -69,12 +69,17 @@ class Contents extends EventEmitter {
 class View {
   children: View[] = [];
   bounds = { x: 0, y: 0, width: 0, height: 0 };
+  boundsWrites = 0;
   colors: string[] = [];
   addChildView(view: View) {
     this.children.push(view);
   }
   setBounds(value: typeof this.bounds) {
+    this.boundsWrites++;
     this.bounds = { ...value };
+  }
+  getBounds() {
+    return { ...this.bounds };
   }
   setBackgroundColor(value: string) {
     this.colors.push(value);
@@ -238,7 +243,13 @@ test('physical hosted geometry is preserved and unhosted resize waits until the 
   const value = createNativeRootWindow({ show: false }),
     window = value as unknown as Window;
   const root = getNativeRootView(value)! as unknown as ContentsView;
+  const writes = root.boundsWrites;
+  expect(setNativeRootBounds(value)).toBe(true);
+  expect(root.boundsWrites).toBe(writes);
   expect(setNativeRootBounds(value, { x: 0, y: 0, width: 600, height: 700 })).toBe(true);
+  const clippedWrites = root.boundsWrites;
+  expect(setNativeRootBounds(value, { x: 0, y: 0, width: 600, height: 700 })).toBe(true);
+  expect(root.boundsWrites).toBe(clippedWrites);
   window.size[0] = 820;
   window.emit('resize');
   expect(root.bounds.width).toBe(600);

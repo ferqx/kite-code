@@ -83,14 +83,22 @@ export function createBrowserInputShield(window: BrowserWindow, onFailure: () =>
     sync(view: WebContentsView | undefined, blocked: boolean) {
       target = blocked ? view : undefined;
       if (!shield || !contents || disposed || contents.isDestroyed()) return;
-      if (!target || !target.getVisible()) {
-        shield.setVisible(false);
+      if (!target?.getVisible()) {
+        if (shield.getVisible()) shield.setVisible(false);
         return;
       }
-      shield.setBounds(target.getBounds());
+      const next = target.getBounds(),
+        previous = shield.getBounds();
+      if (
+        next.x !== previous.x ||
+        next.y !== previous.y ||
+        next.width !== previous.width ||
+        next.height !== previous.height
+      )
+        shield.setBounds(next);
       const children = window.contentView.children;
       if (children[children.length - 1] !== shield) window.contentView.addChildView(shield);
-      shield.setVisible(true);
+      if (!shield.getVisible()) shield.setVisible(true);
       if (target.webContents.isFocused()) {
         focusApp();
         if (target.webContents.isFocused()) fail();

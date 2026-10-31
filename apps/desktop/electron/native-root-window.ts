@@ -48,7 +48,10 @@ export function setNativeRootBounds(window: NativeRootWindow, bounds?: Rectangle
   )
     return false;
   record.hosted = !!bounds;
-  record.view.setBounds(bounds ?? { x: 0, y: 0, width, height });
+  const next = bounds ?? { x: 0, y: 0, width, height },
+    actual = record.view.getBounds();
+  if ((['x', 'y', 'width', 'height'] as const).some((key) => actual[key] !== next[key]))
+    record.view.setBounds(next);
   return true;
 }
 

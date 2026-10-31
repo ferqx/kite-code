@@ -53,6 +53,7 @@ type BrowserTab = {
   initialization?: Promise<void>;
   sizeEpoch: number;
   viewportSize?: { width: number; height: number };
+  borderRadius?: number;
   presentation?: {
     bounds: NativeBrowserBounds;
     layout?: NativeBrowserLayout;
@@ -1141,7 +1142,6 @@ export function registerNativeBrowserIpc(options: {
     id: string,
     bounds: NativeBrowserBounds | null,
     layout?: NativeBrowserLayout,
-    nativeProjection = false,
   ) => {
     const tab = tabs.get(id);
     if (!tab) return;
@@ -1159,40 +1159,51 @@ export function registerNativeBrowserIpc(options: {
       syncInput();
       return;
     }
-    const zoom = window.webContents.getZoomFactor();
+    const zoom = owner.getZoomFactor();
     const [width = 0, height = 0] = window.getContentSize();
-    if (!nativeProjection) {
-      const measuredBounds = bounds;
-      // A transient unsupported/mixed Renderer sample must not downgrade the
-      // known Panel anchor or hide an already visible page and input shield.
-      if (!layout && tab.presentation?.layout) throw Error('invalid_browser_request');
-      if (layout) {
-        if (!currentPanelMeasurement(layout, width / zoom, height / zoom))
-          throw Error('invalid_browser_request');
-        const measured = projectNativeBrowserBounds(
-          bounds,
-          layout,
-          layout.windowWidth,
-          layout.windowHeight,
-        );
-        if (
-          !measured ||
-          Math.abs(measured.x - bounds.x) > 1 ||
-          Math.abs(measured.width - bounds.width) > 1
-        )
-          throw Error('invalid_browser_request');
-        const current = projectNativeBrowserBounds(bounds, layout, width / zoom, height / zoom);
-        if (!current) throw Error('invalid_browser_request');
-        bounds = current;
-      }
-      tab.presentation = {
-        bounds: measuredBounds,
-        ...(layout ? { layout } : {}),
-        width,
-        height,
-        zoom,
-      };
+    // Renderer measurements are inputs, never another native geometry writer.
+    if (!layout && tab.presentation?.layout) throw Error('invalid_browser_request');
+    if (layout) {
+      if (!currentPanelMeasurement(layout, width / zoom, height / zoom))
+        throw Error('invalid_browser_request');
+      const measured = projectNativeBrowserBounds(
+        bounds,
+        layout,
+        layout.windowWidth,
+        layout.windowHeight,
+      );
+      if (
+        !measured ||
+        Math.abs(measured.x - bounds.x) > 1 ||
+        Math.abs(measured.width - bounds.width) > 1
+      )
+        throw Error('invalid_browser_request');
     }
+    tab.presentation = { bounds, ...(layout ? { layout } : {}), width, height, zoom };
+    applyCurrentLayout(tab);
+  };
+  // Both native resize predictions and accepted Renderer corrections are
+  // computed here against the current window, then diffed at the native output.
+  const applyCurrentLayout = (tab: BrowserTab) => {
+    const anchor = tab.presentation;
+    if (
+      !anchor ||
+      disposed ||
+      window.isDestroyed() ||
+      tabs.get(tab.state.id) !== tab ||
+      tab.view.webContents.isDestroyed()
+    )
+      return;
+    const zoom = owner.getZoomFactor();
+    const [width = 0, height = 0] = window.getContentSize();
+    const bounds = anchor.layout
+      ? projectNativeBrowserBounds(anchor.bounds, anchor.layout, width / zoom, height / zoom)
+      : anchor.bounds;
+    if (!bounds) {
+      present(tab.state.id, null);
+      return;
+    }
+    const id = tab.state.id;
     // Round into the measured container, so fractional CSS edges cannot cover chat.
     const x = Math.max(0, Math.min(width, Math.ceil(bounds.x * zoom)));
     const y = Math.max(0, Math.min(height, Math.ceil(bounds.y * zoom)));
@@ -1209,7 +1220,7 @@ export function registerNativeBrowserIpc(options: {
     for (const [otherId, other] of tabs)
       if (otherId !== id) {
         stopNativeFrames(other);
-        other.view.setVisible(false);
+        if (other.view.getVisible()) other.view.setVisible(false);
         automation?.present(otherId, false);
       }
     if (active !== id) cancelMenu();
@@ -1225,17 +1236,31 @@ export function registerNativeBrowserIpc(options: {
     }
     // Crop the app Root with its own native bounds before moving the live page.
     // A slow Root paint can no longer cover or receive input in the right column.
+    chromeHost?.syncViewport();
     chromeHost?.layout(id, { x, y, ...viewportSize }, tab.presentationScope);
-    tab.view.setBounds({ x, y, ...viewportSize });
-    tab.view.setBorderRadius(
-      Math.floor(Math.min(Math.round(bounds.radius * zoom), (right - x) / 2, (bottom - y) / 2)),
+    const previous = tab.view.getBounds();
+    if (
+      previous.x !== x ||
+      previous.y !== y ||
+      previous.width !== viewportSize.width ||
+      previous.height !== viewportSize.height
+    )
+      tab.view.setBounds({ x, y, ...viewportSize });
+    const radius = Math.floor(
+      Math.min(Math.round(bounds.radius * zoom), viewportSize.width / 2, viewportSize.height / 2),
     );
-    tab.view.setVisible(window.isVisible() && !window.isMinimized());
+    if (tab.borderRadius !== radius) {
+      tab.view.setBorderRadius(radius);
+      tab.borderRadius = radius;
+    }
+    const visible = window.isVisible() && !window.isMinimized();
+    if (tab.view.getVisible() !== visible) tab.view.setVisible(visible);
     rendererPresented = true;
     if (tab.scope && replacedPresentation.get(scopeKey(tab.scope)) === id)
       replacedPresentation.delete(scopeKey(tab.scope));
     automation?.present(id, window.isVisible() && !window.isMinimized());
     syncInput();
+    chromeHost?.update();
     startNativeFrames(tab);
     if (!displayShieldReady)
       void inputShield.prepare().then(
@@ -2356,36 +2381,39 @@ export function registerNativeBrowserIpc(options: {
   owner.on('render-process-gone', rendererFailed);
   owner.on('preload-error', rendererFailed);
   owner.on('dom-ready', displayReady);
-  // Apply all native child geometry together after the enclosing AppKit resize
-  // callback. Updating child frames inside that callback can precede the actual
-  // window frame in the desktop compositor and expose its bare right edge.
+  // Native events and synchronous Renderer corrections share the same current-
+  // window calculation. The queued event coalesces work; it is not a guarantee
+  // that independent native surfaces will be presented in the same OS frame.
   const applyNativeResize = () => {
     if (disposed || window.isDestroyed()) return;
     const tab = active ? tabs.get(active) : undefined;
     if (tab?.presentation?.layout && chromeHost?.readyFor(tab.state.id, tab.presentationScope)) {
-      const [width = 0, height = 0] = window.getContentSize();
-      const zoom = owner.getZoomFactor();
-      const projected = projectNativeBrowserBounds(
-        tab.presentation.bounds,
-        tab.presentation.layout,
-        width / zoom,
-        height / zoom,
-      );
-      if (projected) present(tab.state.id, projected, undefined, true);
-      else present(tab.state.id, null);
+      const scope = (options.grantScope ?? options.selectedScope)?.();
+      if (
+        scope &&
+        tab.presentationScope &&
+        (['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
+          (key) => scope[key] === tab.presentationScope![key],
+        )
+      )
+        applyCurrentLayout(tab);
+    } else {
+      // Bootstrap and withdrawn Root still need the current logical viewport.
+      chromeHost?.syncViewport();
     }
     syncInput();
   };
   const resize = () => {
     if (retainedDisplay && !displayCurrent()) cancelRetainedDisplay();
     cancelMenu();
+    chromeHost?.invalidateGeometry();
     const tab = active ? tabs.get(active) : undefined;
     if (tab?.presentation?.layout && chromeHost?.readyFor(tab.state.id, tab.presentationScope)) {
       // The old coordinates cease to qualify immediately, before deferred
       // visual layout. Never let a captured old basis span this native resize.
       tab.sizeEpoch++;
-      queueNativeWindowLayout(window, applyNativeResize);
     }
+    if (chromeHost) queueNativeWindowLayout(window, applyNativeResize);
     syncInput();
   };
   window.on('resize', resize);

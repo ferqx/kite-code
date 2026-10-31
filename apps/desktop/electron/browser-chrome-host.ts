@@ -26,9 +26,19 @@ import {
   type NativeRootWindow,
   setNativeRootBounds,
 } from './native-root-window';
-import { cancelNativeWindowLayout, queueNativeWindowLayout } from './native-window-layout';
 
 type Bounds = { x: number; y: number; width: number; height: number };
+type Metrics = { width: number; height: number; zoom: number; epoch: number; frame: WebFrameMain };
+const sameBounds = (a: Bounds, b: Bounds) =>
+  (['x', 'y', 'width', 'height'] as const).every((key) => a[key] === b[key]);
+const sameMetrics = (a: Metrics | undefined, b: Metrics | undefined) =>
+  !!a &&
+  !!b &&
+  a.width === b.width &&
+  a.height === b.height &&
+  a.zoom === b.zoom &&
+  a.epoch === b.epoch &&
+  a.frame === b.frame;
 type Page = {
   id: string;
   view: WebContentsView;
@@ -83,11 +93,16 @@ export function createNativeBrowserChromeHost(options: {
   let loading: Promise<void> | undefined;
   let root: WebContentsView | undefined;
   let debuggerOwned = false;
-  let pendingMetrics: { width: number; height: number } | undefined;
-  let metricsBusy = false;
+  let desiredMetrics: Metrics | undefined;
+  let inflightMetrics: Metrics | undefined;
+  let appliedMetrics: Metrics | undefined;
   let metricsEpoch = 0;
   let geometryEpoch = 0;
   const revisions = new Map<string, number>();
+  const deliveries = new WeakMap<
+    WebContents,
+    { frame: WebFrameMain; snapshot: NativeBrowserChromeSnapshot | undefined; key: string }
+  >();
   const acknowledgements = new Map<
     number,
     {
@@ -101,6 +116,12 @@ export function createNativeBrowserChromeHost(options: {
     const [width = 0, height = 0] = window.getContentSize();
     return { width, height };
   };
+  const currentMetrics = (): Metrics => ({
+    ...dimensions(),
+    zoom: owner.getZoomFactor(),
+    epoch: metricsEpoch,
+    frame: owner.mainFrame,
+  });
   const settle = () => {
     for (const item of acknowledgements.values()) {
       clearTimeout(item.timer);
@@ -153,8 +174,9 @@ export function createNativeBrowserChromeHost(options: {
   const actionable = () =>
     !!binding?.viewport &&
     binding.geometryEpoch === geometryEpoch &&
-    !metricsBusy &&
-    !pendingMetrics &&
+    !inflightMetrics &&
+    sameMetrics(appliedMetrics, desiredMetrics) &&
+    sameMetrics(appliedMetrics, currentMetrics()) &&
     window.isVisible() &&
     !window.isMinimized() &&
     !!chrome?.getVisible() &&
@@ -177,14 +199,31 @@ export function createNativeBrowserChromeHost(options: {
   const broadcast = () => {
     if (!alive()) return;
     const value = envelope();
-    owner.send(nativeBrowserChromeStateChannel, value);
-    if (chromeFrame && chromeContents && !chromeContents.isDestroyed())
-      chromeContents.send(nativeBrowserChromeStateChannel, value);
+    const key = value
+      ? JSON.stringify([
+          value.attachment,
+          value.pageToken,
+          value.snapshot.scope,
+          value.snapshot.revision,
+          value.hosted,
+          value.actionable,
+        ])
+      : 'null';
+    const send = (recipient: WebContents) => {
+      const frame = recipient.mainFrame,
+        previous = deliveries.get(recipient);
+      if (previous?.frame === frame && previous.snapshot === snapshot && previous.key === key)
+        return;
+      recipient.send(nativeBrowserChromeStateChannel, value);
+      deliveries.set(recipient, { frame, snapshot, key });
+    };
+    send(owner);
+    if (chromeFrame && chromeContents && !chromeContents.isDestroyed()) send(chromeContents);
   };
   const restore = () => {
     if (!alive() || !root) return;
     setNativeRootBounds(window);
-    chrome?.setVisible(false);
+    if (chrome?.getVisible()) chrome.setVisible(false);
   };
   const release = (id?: string) => {
     if (id && binding?.id !== id) return;
@@ -201,7 +240,8 @@ export function createNativeBrowserChromeHost(options: {
     const id = binding?.id;
     failed = true;
     metricsEpoch++;
-    pendingMetrics = undefined;
+    desiredMetrics = undefined;
+    appliedMetrics = undefined;
     if (debuggerOwned && !owner.isDestroyed()) {
       debuggerOwned = false;
       try {
@@ -213,44 +253,76 @@ export function createNativeBrowserChromeHost(options: {
     release();
     if (id) options.onSuspend(id);
   };
-  function requestMetrics() {
-    if (!alive() || !debuggerOwned || failed) return;
-    pendingMetrics = dimensions();
-    if (metricsBusy) return;
-    metricsBusy = true;
-    const epoch = metricsEpoch;
+  const metricsReady = (notify: boolean) => {
+    if (
+      !alive() ||
+      failed ||
+      !debuggerOwned ||
+      inflightMetrics ||
+      !sameMetrics(appliedMetrics, desiredMetrics) ||
+      !sameMetrics(appliedMetrics, currentMetrics()) ||
+      !binding ||
+      !chromeFrame ||
+      !pageCurrent()
+    )
+      return;
+    const newlyPrepared = !binding.prepared;
+    binding.prepared = true;
+    if (notify || newlyPrepared) update();
+  };
+  function pumpMetrics() {
+    if (!alive() || !debuggerOwned || failed || inflightMetrics) return;
+    const next = desiredMetrics;
+    if (!next || sameMetrics(next, appliedMetrics)) {
+      metricsReady(false);
+      return;
+    }
+    inflightMetrics = next;
     void (async () => {
       try {
-        while (pendingMetrics && alive() && debuggerOwned && !failed && epoch === metricsEpoch) {
-          const next = pendingMetrics;
-          pendingMetrics = undefined;
-          if (!owner.debugger.isAttached()) throw Error('browser_root_metrics_detached');
-          await owner.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
-            ...next,
-            deviceScaleFactor: 0,
-            mobile: false,
-            dontSetVisibleSize: true,
-          });
-        }
+        if (!owner.debugger.isAttached()) throw Error('browser_root_metrics_detached');
+        await owner.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
+          width: next.width,
+          height: next.height,
+          deviceScaleFactor: 0,
+          mobile: false,
+          dontSetVisibleSize: true,
+        });
+        // This is command completion for this exact Root environment, not a
+        // compositor/pixel acknowledgement. An old completion grants nothing.
+        if (
+          alive() &&
+          debuggerOwned &&
+          !failed &&
+          next.epoch === metricsEpoch &&
+          next.frame === owner.mainFrame
+        )
+          appliedMetrics = next;
       } catch {
-        fail();
+        // The obsolete document's rejection cannot fail its replacement. The
+        // current desire is still pumped below and must pass its own checks.
+        if (
+          alive() &&
+          debuggerOwned &&
+          !failed &&
+          next.epoch === metricsEpoch &&
+          next.frame === owner.mainFrame
+        )
+          fail();
       } finally {
-        metricsBusy = false;
-        if (pendingMetrics && epoch !== metricsEpoch && alive() && !failed) requestMetrics();
+        if (inflightMetrics === next) inflightMetrics = undefined;
       }
-      if (
-        alive() &&
-        !failed &&
-        epoch === metricsEpoch &&
-        !metricsBusy &&
-        binding &&
-        chromeFrame &&
-        pageCurrent()
-      ) {
-        binding.prepared = true;
-        update();
-      }
+      if (!alive() || failed || !debuggerOwned) return;
+      // If A was applied before B went in flight, a new desire for A must
+      // restore A after B; comparing only against the earlier applied A loses it.
+      if (desiredMetrics && !sameMetrics(desiredMetrics, appliedMetrics)) pumpMetrics();
+      else metricsReady(true);
     })();
+  }
+  function requestMetrics() {
+    if (!alive() || !debuggerOwned || failed) return;
+    desiredMetrics = currentMetrics();
+    pumpMetrics();
   }
   const ownRoot = () => {
     if (root) return;
@@ -324,25 +396,19 @@ export function createNativeBrowserChromeHost(options: {
     debuggerOwned = false;
     fail();
   };
-  const resizeLayout = () => {
-    if (!alive()) return;
-    if (!binding?.viewport) restore();
-    requestMetrics();
-  };
-  const resize = () => {
+  const invalidateGeometry = () => {
     geometryEpoch++;
     if (!alive()) return;
-    // Retire input in the native callback, then join the manager's physical
-    // layout after that callback has returned. The stable task reads the latest
-    // dimensions; it never extrapolates an older Renderer anchor.
+    // The controller invalidates old coordinates before its shared apply.
     broadcast();
-    queueNativeWindowLayout(window, resizeLayout);
   };
   const rootNavigation = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
     if (!mainFrame || inPlace) return;
     const id = binding?.id;
     metricsEpoch++;
-    pendingMetrics = undefined;
+    desiredMetrics = undefined;
+    appliedMetrics = undefined;
+    deliveries.delete(owner);
     release();
     revisions.clear();
     if (id) options.onSuspend(id);
@@ -536,12 +602,13 @@ export function createNativeBrowserChromeHost(options: {
     }
   };
   ipcMain.on(nativeBrowserChromeAckChannel, ack);
-  window.on('resize', resize);
   owner.on('did-start-navigation', rootNavigation);
   return {
     readyFor,
     update,
     release,
+    invalidateGeometry,
+    syncViewport: requestMetrics,
     layout(id: string, viewportDip: Bounds, scope?: NativeBrowserRestoreScope) {
       if (!readyFor(id, scope) || !chrome || !root || !binding) return false;
       const { width, height } = dimensions(),
@@ -568,7 +635,6 @@ export function createNativeBrowserChromeHost(options: {
         viewportDip.width,
         viewportDip.height,
       ]);
-      const changed = binding.geometry !== geometry;
       if (binding.geometry && binding.geometry !== geometry) {
         settle();
         binding.attachment = randomUUID();
@@ -576,26 +642,24 @@ export function createNativeBrowserChromeHost(options: {
       }
       binding.geometry = geometry;
       if (!setNativeRootBounds(window, { x: 0, y: 0, width: left, height })) return false;
-      chromeContents!.setZoomFactor(owner.getZoomFactor());
-      chrome.setBounds({ x: left, y: 0, width: width - left, height: top });
+      if (chromeContents!.getZoomFactor() !== owner.getZoomFactor())
+        chromeContents!.setZoomFactor(owner.getZoomFactor());
+      const chromeBounds = { x: left, y: 0, width: width - left, height: top };
+      if (!sameBounds(chrome.getBounds(), chromeBounds)) chrome.setBounds(chromeBounds);
       binding.viewport = { ...viewportDip };
       binding.geometryEpoch = geometryEpoch;
-      chrome.setVisible(window.isVisible() && !window.isMinimized());
-      if (changed) requestMetrics();
-      broadcast();
-      queueMicrotask(() => {
-        if (alive()) broadcast();
-      });
+      const visible = window.isVisible() && !window.isMinimized();
+      if (chrome.getVisible() !== visible) chrome.setVisible(visible);
       return true;
     },
     dispose() {
       if (disposed) return;
-      cancelNativeWindowLayout(window, resizeLayout);
+      failed = true; // Restore physical Root without starting another metrics command.
       release();
       disposed = true;
       metricsEpoch++;
-      pendingMetrics = undefined;
-      window.off('resize', resize);
+      desiredMetrics = undefined;
+      appliedMetrics = undefined;
       owner.off('did-start-navigation', rootNavigation);
       owner.debugger.off('detach', detached);
       ipcMain.removeHandler(nativeBrowserChromeRootChannel);
