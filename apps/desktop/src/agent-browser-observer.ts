@@ -8,7 +8,14 @@ import type { NativeExtensionScope, NativeExtensionSubmission } from './extensio
 import type { NativeBridge, NativeCallerMetadata } from './native-bridge';
 import { readNativeExtensionBody } from './native-extension-read';
 
-export type AgentBrowserAction = 'handoff' | 'resume' | 'input' | 'select' | 'close';
+export type AgentBrowserAction =
+  | 'capture'
+  | 'handoff'
+  | 'resume'
+  | 'input'
+  | 'select'
+  | 'close'
+  | 'respond_human';
 export type AgentBrowserObservation = {
   view?: AgentBrowserView;
   fresh: boolean;
@@ -104,6 +111,7 @@ export class AgentBrowserObserver {
     else this.release();
   }
   stop() {
+    if (!this.active) return;
     this.active = false;
     this.visible = false;
     this.epoch++;
@@ -288,8 +296,9 @@ export class AgentBrowserObserver {
     )
       return false;
     if (
-      (['input', 'select', 'resume'].includes(action) && view.state !== 'human') ||
-      (action === 'handoff' && view.state !== 'agent') ||
+      (['input', 'select', 'resume', 'respond_human'].includes(action) && view.state !== 'human') ||
+      (action === 'handoff' && !['starting', 'agent'].includes(view.state)) ||
+      (action === 'capture' && !['agent', 'human'].includes(view.state)) ||
       (action === 'close' &&
         !['starting', 'agent', 'human', 'outcome_unknown'].includes(view.state))
     )

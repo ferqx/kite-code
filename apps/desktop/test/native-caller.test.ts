@@ -15,7 +15,7 @@ import type {
 import { ClientError, canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
-import { NativeCaller } from '../electron/native-caller';
+import { createNativeCallerGenerationOwner, NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { inspectNativeQuitWork } from '../electron/quit-settlement';
 import type {
@@ -1775,6 +1775,180 @@ test('main-private drafts require exact selection/revision; detached or late gen
       await caller.invoke({ method: 'draft.read', generation: next.generation, sessionId: 's' }),
     ).toMatchObject({ content: 'private body', revision: 1 });
     await caller.disposeNetwork();
+    expect(port.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
+for (const detach of [false, true])
+  test(`Renderer reattachment rebuilds the original selection with fresh reads (${detach ? 'document reload' : 'effect restart'})`, async () => {
+    const port = client(),
+      caller = new NativeCaller(port, () => {}),
+      originalRead = port.getView.bind(port);
+    let reads = 0,
+      release!: () => void,
+      entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+      reading = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+    port.getView = async (...args) => {
+      reads++;
+      if (reads === 2) {
+        entered();
+        await gate;
+      }
+      return originalRead(...args);
+    };
+    try {
+      const first = (await caller.invoke({ method: 'attach' })) as NativeState;
+      await caller.invoke({ method: 'select', generation: first.generation, sessionId: 's' });
+      expect(reads).toBe(1);
+      if (detach) caller.detach();
+      const attaching = caller.invoke({ method: 'attach' });
+      await reading;
+      expect(caller.state().generation).toBeGreaterThan(first.generation);
+      expect(caller.state().selection).toBeUndefined();
+      expect(await code(caller.invoke({ method: 'state', generation: first.generation }))).toBe(
+        'native_generation_changed',
+      );
+      release();
+      const next = (await attaching) as NativeState;
+      expect(next.selection?.session.id).toBe('s');
+      expect(next.selection?.permissionUnavailable).toBe(false);
+      expect(reads).toBe(2);
+      expect(port.writes).toBe(0);
+    } finally {
+      release();
+      await caller.close();
+    }
+  });
+
+test('replacement Callers sharing one Main cannot reuse an old Renderer generation', async () => {
+  const nextGeneration = createNativeCallerGenerationOwner(),
+    first = new NativeCaller(
+      client(),
+      () => {},
+      undefined,
+      [],
+      undefined,
+      undefined,
+      nextGeneration,
+    ),
+    second = new NativeCaller(
+      client(),
+      () => {},
+      undefined,
+      [],
+      undefined,
+      undefined,
+      nextGeneration,
+    );
+  try {
+    const old = (await first.invoke({ method: 'attach' })) as NativeState;
+    first.detach();
+    const fresh = (await second.invoke({ method: 'attach' })) as NativeState;
+    expect(fresh.generation).toBeGreaterThan(first.state().generation);
+    expect(fresh.generation).toBeGreaterThan(old.generation);
+    expect(await code(second.invoke({ method: 'state', generation: old.generation }))).toBe(
+      'native_generation_changed',
+    );
+    expect(await code(second.invoke({ method: 'detach', generation: old.generation }))).toBe(
+      'native_generation_changed',
+    );
+    expect(second.state().generation).toBe(fresh.generation);
+    expect(await second.invoke({ method: 'state', generation: fresh.generation })).toMatchObject({
+      generation: fresh.generation,
+    });
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test('reattachment drops a confirmed missing conversation and keeps other fresh-read failures unavailable', async () => {
+  for (const failure of ['session_not_found', 'controlled_view_unavailable']) {
+    const port = client(),
+      caller = new NativeCaller(port, () => {});
+    try {
+      const first = (await caller.invoke({ method: 'attach' })) as NativeState;
+      await caller.invoke({ method: 'select', generation: first.generation, sessionId: 's' });
+      caller.detach();
+      port.getView = async () => {
+        throw new ClientError(failure);
+      };
+      if (failure === 'session_not_found') {
+        const next = (await caller.invoke({ method: 'attach' })) as NativeState;
+        expect(next.selection).toBeUndefined();
+        // The absent candidate is not retried indefinitely on later attachments.
+        expect((await caller.invoke({ method: 'attach' })) as NativeState).toMatchObject({
+          selection: undefined,
+        });
+      } else {
+        expect(await code(caller.invoke({ method: 'attach' }))).toBe(failure);
+        expect(caller.state().selection).toBeUndefined();
+      }
+      expect(port.writes).toBe(0);
+    } finally {
+      await caller.close();
+    }
+  }
+});
+
+test('a replacement Caller accepts a display hint only after matching the fresh Store identity', async () => {
+  for (const storeId of ['store', 'foreign-store']) {
+    const port = client();
+    let reads = 0;
+    const getView = port.getView.bind(port);
+    port.getView = async (...args) => {
+      reads++;
+      return getView(...args);
+    };
+    const caller = new NativeCaller(
+      port,
+      () => {},
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      { storeId, sessionId: 's' },
+    );
+    try {
+      const attached = (await caller.invoke({ method: 'attach' })) as NativeState;
+      expect(attached.selection?.session.id).toBe(storeId === 'store' ? 's' : undefined);
+      expect(reads).toBe(storeId === 'store' ? 1 : 0);
+      expect(port.writes).toBe(0);
+    } finally {
+      await caller.close();
+    }
+  }
+});
+
+test('a detached selection cannot bind to the same session ID after the Store changes', async () => {
+  const port = client(),
+    caller = new NativeCaller(port, () => {});
+  try {
+    const first = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation: first.generation, sessionId: 's' });
+    caller.detach();
+    await caller.disposeNetwork();
+    port.connect = async () => {
+      port.serverInfo!.storeId = 'replacement-store';
+      return port.serverInfo!;
+    };
+    let reads = 0;
+    port.getView = async () => {
+      reads++;
+      throw Error('old_selection_must_not_be_read_in_replacement_store');
+    };
+    expect((await caller.invoke({ method: 'attach' })) as NativeState).toMatchObject({
+      selection: undefined,
+    });
+    expect(reads).toBe(0);
     expect(port.writes).toBe(0);
   } finally {
     await caller.close();

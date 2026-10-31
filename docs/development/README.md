@@ -32,6 +32,7 @@
 | 取消后仍运行、未知结果或冷恢复 | [取消与恢复](../handbook/features/recovery.md) | [新执行边界](../active/unified-agent-boundary.md)、Agent/Service owner；核实际资源、取消域、原申请与零重放 |
 | Context 压缩、Fork 或 Files 三范围恢复 | [模型与配置](../handbook/features/models-and-configuration.md)、[会话](../handbook/features/sessions.md)、[恢复](../handbook/features/recovery.md) | [Agent](../../packages/agent/README.md)、[Files](../../packages/agent/src/business/file-checkpoints/README.md)、[CLI/TUI](../../apps/cli/README.md)；受理与实际 publication/Job 完成分开 |
 | MCP、Skills 或 Workflow | [扩展](../handbook/features/extensions.md) | [Agent](../../packages/agent/README.md)、[Service](../../apps/service/README.md)；目录、授权、实际装配及平台支持分别核对 |
+| 自然语言操控 Native 浏览器、授权/接管、统一执行与截图 | [桌面浏览器](../handbook/clients/desktop/README.md#agent-浏览器) | [实施方案](../plans/2026-10-28-browser-computer-use.md)为已确认设计；[Desktop](../../apps/desktop/README.md)、[Browser](../../packages/agent/src/tools/browser/README.md)、[Service](../../apps/service/README.md)记录实际；全局内置技能与统一入口候选已实现，修后完整实机验收仍在进行 |
 | Web 内容或敏感正文读取异常 | [Web](../handbook/clients/web/README.md) | [Web owner](../../apps/web/README.md)、[Client](../../packages/client/README.md)、[Service gateway](../../apps/service/src/development-web.ts)；只读不授予控制权限 |
 | 制品启动、安装登记、SQLite 或宿主退出 | [服务生命周期](../handbook/server/lifecycle.md)、[Desktop](../handbook/clients/desktop/README.md) | [发布边界](../active/release-control.md)、Terminal/Native owner；核完整闭包、实际引擎与所属 lease |
 

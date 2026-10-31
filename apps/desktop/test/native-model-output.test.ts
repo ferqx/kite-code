@@ -36,7 +36,11 @@ async function errorCode(promise: Promise<unknown>) {
     return (error as { code?: string }).code ?? (error as Error).message;
   }
 }
-function fixture(value: ModelOutputSnapshot, beforeRead?: () => Promise<void>) {
+function fixture(
+  value: ModelOutputSnapshot,
+  beforeRead?: () => Promise<void>,
+  source?: Parameters<NativeModelOutputReads['open']>[1],
+) {
   let scope: ModelOutputViewScope | undefined = {
     generation: 1,
     selection: 1,
@@ -46,6 +50,15 @@ function fixture(value: ModelOutputSnapshot, beforeRead?: () => Promise<void>) {
   let reads = 0;
   const port = {
     serverInfo: { storeId: 'store', capabilities: ['model_outputs'] },
+    async getExecution() {
+      return {
+        id: 'e',
+        kind: 'model',
+        sessionId: 's',
+        runId: 'r',
+        originStoreId: source?.originStoreId,
+      };
+    },
     async getModelOutput(
       sessionId: string,
       executionId: string,
@@ -62,7 +75,7 @@ function fixture(value: ModelOutputSnapshot, beforeRead?: () => Promise<void>) {
     watch: () => () => {},
     async request(request: NativeRequest) {
       decodeNativeRequest(request);
-      if (request.method === 'modelOutput.open') return main.open(request);
+      if (request.method === 'modelOutput.open') return main.open(request, source);
       if (request.method === 'modelOutput.read') return main.read(request);
       if (request.method === 'modelOutput.close') {
         main.close(request.readId);
@@ -111,6 +124,105 @@ function readBarrier() {
     },
   };
 }
+test('a live original body may append or finish while its deferred full-body GET is in flight', async () => {
+  for (const kind of ['content', 'reasoning', 'complete', 'tool_calls'] as const) {
+    const prefix = kind === 'tool_calls' ? '' : '原回复🙂',
+      value = snapshot(kind === 'content' ? `${prefix}追加内容` : prefix);
+    if (kind === 'content' || kind === 'reasoning') {
+      value.status = 'running';
+      value.output.complete = false;
+    }
+    if (kind === 'reasoning') {
+      value.output.reasoning = '新增思考';
+      value.reasoningBytes = String(Buffer.byteLength(value.output.reasoning));
+    }
+    if (kind === 'tool_calls')
+      value.output.toolCalls = [{ arguments: '{"path":"file"}', id: 'call', name: 'read' }];
+    const body = JSON.stringify(value.output);
+    value.bodyHash = createHash('sha256').update(body).digest('hex');
+    value.bodyBytes = String(Buffer.byteLength(body));
+    const barrier = readBarrier(),
+      f = fixture(value, () => barrier.wait(), {
+        sessionId: 's',
+        runId: 'r',
+        livePreview: prefix,
+        body: {
+          kind: 'model_output',
+          executionId: 'e',
+          complete: false,
+          contentBytes: String(Buffer.byteLength(prefix)),
+          reasoningBytes: '0',
+          toolCallCount: 0,
+        },
+      });
+    const reading = readNativeModelOutput(readInput(f.bridge));
+    await barrier.entered;
+    barrier.release();
+    const result = await reading;
+    expect(result.output).toEqual(value.output);
+    expect(result.bodyHash).toBe(value.bodyHash);
+    expect(f.reads).toBe(1);
+  }
+});
+test('body advancement keeps original scope, frozen summaries and complete transport verification', async () => {
+  const original = snapshot('原回复'),
+    live = {
+      sessionId: 's',
+      runId: 'r',
+      livePreview: '原',
+      body: {
+        kind: 'model_output' as const,
+        executionId: 'e',
+        complete: false,
+        contentBytes: '3',
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    };
+  const cases = [
+    { value: { ...original, sessionId: 'foreign' }, source: live },
+    { value: { ...original, runId: 'foreign' }, source: live },
+    { value: { ...original, executionId: 'foreign' }, source: live },
+    { value: snapshot('改写回复'), source: live },
+    { value: snapshot(''), source: live },
+    { value: original, source: { ...live, livePreview: undefined } },
+    { value: original, source: { ...live, originStoreId: 'original-store' } },
+    { value: original, source: { ...live, body: { ...live.body, toolCallCount: 1 } } },
+    { value: original, source: { ...live, body: { ...live.body, complete: true } } },
+    {
+      value: {
+        ...original,
+        output: {
+          ...original.output,
+          toolCalls: [{ id: 'unexpected', name: 'read', arguments: '{}' }],
+        },
+      },
+      source: {
+        ...live,
+        body: { ...live.body, complete: true, contentBytes: original.contentBytes },
+      },
+    },
+    {
+      value: original,
+      source: { ...live, body: { ...live.body, reasoningBytes: '1' } },
+    },
+  ];
+  for (const { value, source } of cases) {
+    const f = fixture(value, undefined, source);
+    expect(await errorCode(readNativeModelOutput(readInput(f.bridge)))).toBe(
+      'model_output_identity_mismatch',
+    );
+  }
+  for (const value of [
+    { ...original, bodyHash: '0'.repeat(64) },
+    { ...original, contentBytes: '100' },
+  ]) {
+    const f = fixture(value, undefined, live);
+    expect(await errorCode(readNativeModelOutput(readInput(f.bridge)))).toBe(
+      'model_output_hash_mismatch',
+    );
+  }
+});
 test('concurrent full replies share the finite Main lease and all finish with verified content', async () => {
   const value = snapshot('complete shared reply λ'),
     barrier = readBarrier(),

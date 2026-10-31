@@ -4,7 +4,7 @@ import {
   canonicalCallerCommandRequest,
   validateRequest,
 } from '@kite-ai/client';
-import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { composeBrowserDraft, readBrowserAnnotations } from '../src/browser-annotation-content';
 import type { DesktopEditor } from '../src/file-changes-bridge';
 import { inputImageCount } from '../src/input-images-bridge';
@@ -27,6 +27,7 @@ import {
 import { promptTextForSend } from '../src/prompt-text';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
+import type { NativeRootWindow as BrowserWindow } from './native-root-window';
 import { parseScheduledTaskInput } from './scheduled-tasks';
 import { saveStartupDiagnosticReport } from './startup-report';
 

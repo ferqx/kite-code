@@ -17,6 +17,7 @@ export function ordinaryHostConfigurationDefaults(
   shellAvailable: boolean,
   taskAvailable: boolean,
   browserAllowed = true,
+  unifiedBrowser = false,
 ) {
   return {
     ...defaultConfiguration,
@@ -32,7 +33,11 @@ export function ordinaryHostConfigurationDefaults(
         'files.search',
         ...(shellAvailable ? shellToolIds : []),
         'web_fetch',
-        ...(browserAllowed ? browserToolIds : []),
+        ...(browserAllowed
+          ? unifiedBrowser
+            ? ['browser.execute', 'skills.load', 'skills.resource']
+            : browserToolIds
+          : []),
         ...(taskAvailable
           ? [
               'task.spawn',

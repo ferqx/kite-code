@@ -142,6 +142,78 @@ test('private loopback control rejects unauthenticated peers and carries reloads
   }
 });
 
+test('an acknowledged failed reload waits for a new save before the actual parent control sends the next version', async () => {
+  const control = await startDesktopControl(),
+    peer = connect({ host: '127.0.0.1', port: control.configuration.port });
+  peer.on('error', () => {});
+  const calls: string[] = [],
+    failures: unknown[] = [];
+  let firstFailed!: () => void,
+    secondApplied!: () => void,
+    stoppedRejected!: () => void,
+    finish!: (value: number) => void;
+  const failed = new Promise<void>((resolve) => {
+      firstFailed = resolve;
+    }),
+    applied = new Promise<void>((resolve) => {
+      secondApplied = resolve;
+    }),
+    stopped = new Promise<void>((resolve) => {
+      stoppedRejected = resolve;
+    }),
+    exited = new Promise<number>((resolve) => {
+      finish = resolve;
+    });
+  const stopReload = serveDevelopmentReload({
+    stream: peer,
+    reply: (line) => peer.write(line),
+    async reload(request) {
+      calls.push(request.id);
+      if (calls.length === 1) throw Error('fixture_original_reload_failed');
+    },
+  });
+  peer.write(`${JSON.stringify({ kind: 'desktop.ready', token: control.configuration.token })}\n`);
+  const channel = await control.attach(exited);
+  let version = 0;
+  const queue = createDesktopReloadQueue({
+    debounceMs: 0,
+    async reload() {
+      const id = String(++version).repeat(32);
+      await channel.reload({ id, sha256: 'b'.repeat(64) });
+      secondApplied();
+    },
+    failed(error) {
+      failures.push(error);
+      if (failures.length === 1) firstFailed();
+      else stoppedRejected();
+    },
+  });
+  try {
+    queue.changed();
+    await failed;
+    expect(failures[0]).toMatchObject({ message: 'development_service_reload_failed' });
+    await Bun.sleep(5);
+    expect(calls).toEqual(['1'.repeat(32)]);
+    queue.changed();
+    const next = await Promise.race([applied.then(() => 'applied'), stopped.then(() => 'failed')]);
+    expect(next).toBe('applied');
+    expect(calls).toEqual(['1'.repeat(32), '2'.repeat(32)]);
+    expect(failures).toHaveLength(1);
+    control.stop();
+    queue.changed();
+    await stopped;
+    expect(failures[1]).toMatchObject({ message: 'development_desktop_stopping' });
+    expect(calls).toHaveLength(2);
+  } finally {
+    await queue.close();
+    stopReload();
+    finish(0);
+    peer.destroy();
+    await control.close();
+    await channel.read;
+  }
+});
+
 test('stop before authentication remains latched for the original authenticated Desktop and fences reloads', async () => {
   for (const phase of ['before-connect', 'during-handshake', 'before-attach'] as const) {
     const control = await startDesktopControl();

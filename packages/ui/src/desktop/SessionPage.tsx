@@ -30,6 +30,7 @@ import {
 } from './ScheduledTasks';
 import {
   type SessionBrowserPageProps,
+  type SessionBrowserRestorePage,
   type SessionChildPageProps,
   type SessionChildTabRequest,
   type SessionChildTarget,
@@ -38,7 +39,12 @@ import {
   useSessionTabs,
 } from './SessionTabs';
 import { type PageActions, Sidebar } from './Sidebar';
-import type { Message, TurnActivity, WorkspaceSummary } from './types';
+import type {
+  Message,
+  SessionTabsChromePresentation,
+  TurnActivity,
+  WorkspaceSummary,
+} from './types';
 import { Button } from './ui';
 import { Workbench } from './Workbench';
 
@@ -176,6 +182,8 @@ export interface SessionPageProps {
   selected?: string;
   sessionLabel: string;
   readingKey: string;
+  /** Stable conversation identity for tab display; fresh reads keep their own readingKey. */
+  tabsScopeKey?: string;
   /** Optional bounded retention; hosts still own fresh read and operation admission. */
   conversationCache?: ConversationCacheScope;
   messages: readonly Message[];
@@ -210,6 +218,15 @@ export interface SessionPageProps {
   beforeConversation?: ReactNode;
   environmentInformation?: ReactNode;
   detailPanel?: { label: string; content: ReactNode; onClose: () => void };
+  /** A host-owned workspace tab uses the existing tab strip and bounded tab model. */
+  workspaceTab?: {
+    label: string;
+    requestId: number;
+    render: (visible: boolean) => ReactNode;
+    onClose: () => void;
+  };
+  /** Reveal the ordinary browser, using a verified retained page when present. */
+  browserTabRequest?: { requestId: number; createIfMissing: boolean };
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
   historyError?: { title: string; detail: string; retry: () => void };
@@ -221,6 +238,13 @@ export interface SessionPageProps {
   fileChangesContent?: ReactNode;
   renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
   closeBrowser?: (id: string) => void;
+  restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>;
+  browserRestoreKey?: string;
+  browserPending?: boolean;
+  /** Optional same-Root display port; all tab mutations still use the original model. */
+  onTabsChromePresentation?: (presentation: SessionTabsChromePresentation | null) => void;
+  /** Suppress only duplicate header interaction, without changing panel measurement. */
+  tabsChromeHosted?: boolean;
   childTabRequest?: SessionChildTabRequest;
   renderChildSession?: (props: SessionChildPageProps) => ReactNode;
   onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
@@ -237,11 +261,18 @@ export function SessionPage(props: SessionPageProps) {
   const hasTabs =
     !props.workbench &&
     !props.scheduledTasks &&
-    (props.renderBrowser !== undefined ||
+    (props.workspaceTab !== undefined ||
+      props.renderBrowser !== undefined ||
       props.fileChanges !== undefined ||
       props.fileChangesContent !== undefined ||
       props.renderChildSession !== undefined);
-  const tabModel = useSessionTabs(hasTabs ? props.readingKey : 'inactive', props.closeBrowser);
+  const tabModel = useSessionTabs(
+    hasTabs ? (props.tabsScopeKey ?? props.readingKey) : 'inactive',
+    props.closeBrowser,
+    hasTabs ? props.restoreBrowser : undefined,
+    props.browserRestoreKey,
+    props.browserPending,
+  );
   return <SessionPageContent {...props} hasTabs={hasTabs} tabModel={tabModel} />;
 }
 
@@ -275,11 +306,12 @@ function SessionPageContent({
   const panelAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
+  const tabsScopeKey = props.tabsScopeKey ?? props.readingKey;
   const tabsIntent = useRef<{ scope?: string; key?: string }>({});
   const retireTabsPanel = useRef(false);
-  if (tabsIntent.current.scope !== props.readingKey) {
+  if (tabsIntent.current.scope !== tabsScopeKey) {
     retireTabsPanel.current = tabsIntent.current.key !== undefined;
-    tabsIntent.current = { scope: props.readingKey };
+    tabsIntent.current = { scope: tabsScopeKey };
   }
   const [, tabsChanged] = useState(0);
   const setTabsKey = useCallback((key: string | undefined) => {
@@ -293,7 +325,7 @@ function SessionPageContent({
   const childTabOpener = useRef(tabModel.openChild);
   childTabOpener.current = tabModel.openChild;
   const [tabLimitKey, setTabLimitKey] = useState<string>();
-  const tabsOpen = tabsKey === props.readingKey && hasTabs;
+  const tabsOpen = tabsKey === tabsScopeKey && hasTabs;
   const scheduledEditorGeneration = useRef(0);
   const [scheduledEditor, setScheduledEditor] = useState<{
     generation: number;
@@ -336,17 +368,43 @@ function SessionPageContent({
   }, [hostDetailsOpen, setTabsKey]);
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
+  const workspaceDetails = !!props.workspaceTab;
+  // Native child views use the same actual Panel constraints during window resize.
+  const navigationSizing = {
+    minSize: sidebarOpen ? `${NAVIGATION_MIN_WIDTH}px` : '0px',
+    maxSize: sidebarOpen ? `${NAVIGATION_MAX_WIDTH}px` : '0px',
+    groupResizeBehavior: 'preserve-pixel-size' as const,
+    collapsible: false,
+  };
+  const workspaceSizing = {
+    minSize: '200px',
+    maxSize: '100%',
+    groupResizeBehavior: 'preserve-relative-size' as const,
+    collapsible: false,
+  };
+  const contentSizing = {
+    minSize: '360px',
+    maxSize: '100%',
+    groupResizeBehavior: 'preserve-relative-size' as const,
+    collapsible: false,
+  };
+  const detailsSizing = {
+    minSize: workspaceDetails ? '240px' : '300px',
+    maxSize: workspaceDetails ? '85%' : '640px',
+    groupResizeBehavior: 'preserve-relative-size' as const,
+    collapsible: true,
+  };
   const rightSidebarOpen =
     hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
   const tabsVisible = tabsOpen && detailsCollapsed !== true;
   const tabsPresent =
     tabsVisible ||
-    (!rightSidebarOpen && panelsAnimating && presentedTabsKey.current === props.readingKey);
+    (!rightSidebarOpen && panelsAnimating && presentedTabsKey.current === tabsScopeKey);
   useLayoutEffect(() => {
-    if (tabsVisible) presentedTabsKey.current = props.readingKey;
+    if (tabsVisible) presentedTabsKey.current = tabsScopeKey;
     else if (!panelsAnimating || hostDetailsOpen || props.covered)
       presentedTabsKey.current = undefined;
-  }, [tabsVisible, panelsAnimating, hostDetailsOpen, props.covered, props.readingKey]);
+  }, [tabsVisible, panelsAnimating, hostDetailsOpen, props.covered, tabsScopeKey]);
   const tabsToggle = useRef<HTMLButtonElement>(null);
   const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
@@ -425,18 +483,136 @@ function SessionPageContent({
     () => schedulePanelChange(detailsPanelFrame, detailsPanel, false),
     [schedulePanelChange],
   );
+  const dismissedBrowserReveals = useRef(new Set<string>());
   const changeTabsOpen = useCallback(
     (open: boolean) => {
       // Closing a host panel can replace its pending layout frame, not this intent.
-      setTabsKey(open ? props.readingKey : undefined);
+      if (!open) dismissedBrowserReveals.current.add(tabsScopeKey);
+      setTabsKey(open ? tabsScopeKey : undefined);
       schedulePanelChange(detailsPanelFrame, detailsPanel, open);
     },
-    [schedulePanelChange, props.readingKey, setTabsKey],
+    [schedulePanelChange, tabsScopeKey, setTabsKey],
   );
+  const handledBrowserReveals = useRef(new Set<string>());
+  useEffect(() => {
+    const id = tabModel.revealBrowserId;
+    if (
+      !id ||
+      !hasTabs ||
+      props.loading ||
+      props.covered ||
+      hostDetailsOpen ||
+      dismissedBrowserReveals.current.has(tabsScopeKey) ||
+      tabModel.restoring ||
+      tabModel.restoreIssue ||
+      !tabModel.tabs.some((tab) => tab.kind === 'browser' && tab.id === id)
+    )
+      return;
+    const key = JSON.stringify([tabsScopeKey, id]);
+    if (handledBrowserReveals.current.has(key)) return;
+    handledBrowserReveals.current.add(key);
+    tabModel.select(id);
+    changeTabsOpen(true);
+  }, [
+    tabModel.revealBrowserId,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+    tabModel.select,
+    tabModel.tabs,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    props.covered,
+    hostDetailsOpen,
+    changeTabsOpen,
+  ]);
+  const workspaceOperations = useRef(tabModel);
+  workspaceOperations.current = tabModel;
+  const workspaceRequest = useRef<string | undefined>(undefined);
+  const workspaceContent = useRef(props.workspaceTab);
+  workspaceContent.current = props.workspaceTab;
+  const workspaceRequestId = props.workspaceTab?.requestId;
+  const browserRequest = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const request = props.browserTabRequest;
+    if (
+      !request ||
+      !hasTabs ||
+      !tabsScopeKey ||
+      props.loading ||
+      tabModel.restoring ||
+      tabModel.restoreIssue
+    )
+      return;
+    const key = JSON.stringify([tabsScopeKey, request.requestId]);
+    if (browserRequest.current === key) return;
+    const page =
+      tabModel.tabs.find(
+        (tab) => tab.kind === 'browser' && tab.id === tabModel.restoredBrowserId,
+      ) ?? tabModel.tabs.find((tab) => tab.kind === 'browser');
+    if (!page && !request.createIfMissing) return;
+    browserRequest.current = key;
+    if (page) tabModel.select(page.id);
+    else tabModel.addBrowser();
+    detailClose.current?.();
+    changeTabsOpen(true);
+  }, [
+    props.browserTabRequest,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+    tabModel.tabs,
+    tabModel.restoredBrowserId,
+    changeTabsOpen,
+    tabModel.select,
+    tabModel.addBrowser,
+  ]);
+  useEffect(() => {
+    const request = workspaceContent.current;
+    if (!request) {
+      workspaceRequest.current = undefined;
+      if (workspaceOperations.current.tabs.some((tab) => tab.kind === 'workspace'))
+        workspaceOperations.current.closeTab('workspace');
+      return;
+    }
+    if (!hasTabs || !tabsScopeKey || props.loading || tabModel.restoring || tabModel.restoreIssue)
+      return;
+    const key = JSON.stringify([tabsScopeKey, workspaceRequestId]);
+    if (workspaceRequest.current === key) return;
+    workspaceRequest.current = key;
+    const opened = workspaceOperations.current.openWorkspace(request.label);
+    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    if (!opened) {
+      request.onClose();
+      return;
+    }
+    detailClose.current?.();
+    changeTabsOpen(true);
+    const frame = requestAnimationFrame(() => detailsPanel.current?.resize('62%'));
+    return () => cancelAnimationFrame(frame);
+  }, [
+    workspaceRequestId,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    changeTabsOpen,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+  ]);
   const handledChildRequest = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     const request = props.childTabRequest;
-    if (!hasTabs || !request || !props.readingKey || props.loading) return;
+    if (
+      !hasTabs ||
+      !request ||
+      !tabsScopeKey ||
+      props.loading ||
+      tabModel.restoring ||
+      tabModel.restoreIssue
+    )
+      return;
     // A retained request is one navigation intent. Temporary selection scopes
     // and returning to its parent must not reopen it or close the current panel.
     const key = request.requestId;
@@ -447,10 +623,18 @@ function SessionPageContent({
       request.childAgentIdentity,
     );
     handledChildRequest.current = key;
-    setTabLimitKey(opened ? undefined : props.readingKey);
+    setTabLimitKey(opened ? undefined : tabsScopeKey);
     detailClose.current?.();
     changeTabsOpen(true);
-  }, [props.childTabRequest, hasTabs, props.readingKey, props.loading, changeTabsOpen]);
+  }, [
+    props.childTabRequest,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    changeTabsOpen,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+  ]);
   const closeScheduledEditor = useCallback(
     (generation: number) => {
       if (scheduledEditorGeneration.current !== generation) return;
@@ -482,11 +666,11 @@ function SessionPageContent({
     if (environmentAnimationKey !== undefined) setEnvironmentAnimationKey(undefined);
   }, [props.readingKey, environmentAnimationKey]);
   useLayoutEffect(() => {
-    if (retireTabsPanel.current && tabsIntent.current.scope === props.readingKey) {
+    if (retireTabsPanel.current && tabsIntent.current.scope === tabsScopeKey) {
       retireTabsPanel.current = false;
       if (!hostDetailsOpen) collapseDetails();
     }
-  }, [props.readingKey, hostDetailsOpen, collapseDetails]);
+  }, [tabsScopeKey, hostDetailsOpen, collapseDetails]);
   useEffect(() => {
     if (!props.scheduledTasks) {
       collapseDetails();
@@ -800,9 +984,8 @@ function SessionPageContent({
           style={{ overflow: 'hidden' }}
           panelRef={navigationPanel}
           defaultSize={`${navigationWidth.current}px`}
-          groupResizeBehavior="preserve-pixel-size"
-          minSize={sidebarOpen ? `${NAVIGATION_MIN_WIDTH}px` : '0px'}
-          maxSize={sidebarOpen ? `${NAVIGATION_MAX_WIDTH}px` : '0px'}
+          {...navigationSizing}
+          data-native-browser-layout={JSON.stringify(navigationSizing)}
         >
           <div
             className="collapsible-sidebar-content"
@@ -836,7 +1019,12 @@ function SessionPageContent({
             <HugeiconsIcon icon={sidebarOpen ? PanelLeftCloseIcon : PanelLeftOpenIcon} />
           </Button>
         </div>
-        <ResizablePanel id="workspace" minSize="200px" style={{ overflow: 'visible' }}>
+        <ResizablePanel
+          id="workspace"
+          {...workspaceSizing}
+          data-native-browser-layout={JSON.stringify(workspaceSizing)}
+          style={{ overflow: 'visible' }}
+        >
           <div className="client-content-frame">
             <ResizablePanelGroup
               id="content-layout"
@@ -856,7 +1044,12 @@ function SessionPageContent({
                   closeRightSidebar();
               }}
             >
-              <ResizablePanel id="content" minSize="360px" style={{ overflow: 'hidden' }}>
+              <ResizablePanel
+                id="content"
+                {...contentSizing}
+                data-native-browser-layout={JSON.stringify(contentSizing)}
+                style={{ overflow: 'hidden' }}
+              >
                 <div className="client-main-panel" data-header-overlay={headerOverlay || undefined}>
                   {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
                   <header
@@ -933,7 +1126,7 @@ function SessionPageContent({
                     }
                   >
                     {props.notices}
-                    {tabLimitKey === props.readingKey && tabModel.tabs.length >= 8 && (
+                    {tabLimitKey === tabsScopeKey && tabModel.tabs.length >= 8 && (
                       <p role="status">标签页已满，请关闭一个标签页后重试。</p>
                     )}
                     <div className="session-body">
@@ -1051,22 +1244,32 @@ function SessionPageContent({
                 style={{ overflow: 'hidden' }}
                 panelRef={detailsPanel}
                 disabled={!rightSidebarOpen}
-                collapsible
+                {...detailsSizing}
+                data-native-browser-layout={JSON.stringify(detailsSizing)}
                 collapsedSize="0px"
                 defaultSize="0px"
-                minSize="300px"
-                maxSize="640px"
               >
                 <div
                   className="collapsible-sidebar-content"
-                  style={{ minWidth: '300px' }}
+                  style={{ minWidth: workspaceDetails ? '240px' : '300px' }}
                   aria-hidden={!rightSidebarOpen}
                   inert={!rightSidebarOpen}
                 >
                   {hasTabs && (
                     <SessionTabs
-                      key={props.readingKey}
+                      key={tabsScopeKey}
+                      scopeKey={tabsScopeKey}
                       model={tabModel}
+                      chromeHosted={props.tabsChromeHosted}
+                      onChromePresentation={props.onTabsChromePresentation}
+                      workspace={
+                        props.workspaceTab
+                          ? {
+                              render: props.workspaceTab.render,
+                              onClose: props.workspaceTab.onClose,
+                            }
+                          : undefined
+                      }
                       visible={tabsVisible && !props.covered && !props.detailPanel}
                       present={tabsPresent && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}

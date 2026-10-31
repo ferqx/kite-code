@@ -52,7 +52,7 @@ afterAll(() => {
   }
 });
 
-test('tab scope reconciliation does not repeat the retained page render or replace its shell and closes the original browser once', async () => {
+test('tab scope reconciliation preserves the page shell without closing native browser pages', async () => {
   const host = document.getElementById('root')!;
   const root = createRoot(host);
   let directoryEvaluations = 0;
@@ -113,27 +113,25 @@ test('tab scope reconciliation does not repeat the retained page render or repla
     expect(host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded')).toBe('true');
     const header = host.querySelector('.session-header');
     const sidebar = host.querySelector('.sidebar');
-    const originalBrowser = [...browsers][0]!;
     directoryEvaluations = 0;
     await show('b');
     expect(directoryEvaluations).toBe(1);
     expect(host.querySelector('.session-header')).toBe(header);
     expect(host.querySelector('.sidebar')).toBe(sidebar);
-    expect(closed).toEqual([originalBrowser]);
+    expect(closed).toEqual([]);
     await openBrowser();
     expect(browsers.size).toBe(2);
-    const secondBrowser = [...browsers][1]!;
     directoryEvaluations = 0;
     await show('c');
     expect(directoryEvaluations).toBe(1);
     expect(host.querySelector('.session-header')).toBe(header);
     expect(host.querySelector('.sidebar')).toBe(sidebar);
-    expect(closed).toEqual([originalBrowser, secondBrowser]);
+    expect(closed).toEqual([]);
     await openBrowser();
     expect(browsers.size).toBe(3);
     await act(async () => root.unmount());
     unmounted = true;
-    expect(closed).toEqual([...browsers]);
+    expect(closed).toEqual([]);
   } finally {
     if (!unmounted) await act(async () => root.unmount());
   }
@@ -189,5 +187,158 @@ test('a consumed child navigation never reopens on selection handoff, while a fr
     expect(closes).toBe(2);
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+test('tab presentation survives fresh reading identities while actual conversation scope changes retire it', async () => {
+  const host = document.getElementById('root')!,
+    root = createRoot(host);
+  const closed: string[] = [],
+    restored: string[] = [];
+  const show = (
+    readingKey: string,
+    tabsScopeKey: string,
+    generation: number,
+    loading = false,
+    requestId?: number,
+  ) =>
+    act(async () =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="Session"
+          readingKey={readingKey}
+          tabsScopeKey={tabsScopeKey}
+          messages={[]}
+          connected
+          connectionLabel=""
+          loading={loading}
+          actions={{}}
+          renderBrowser={({ id, visible }) => <div data-browser={id} data-visible={visible} />}
+          closeBrowser={(id) => closed.push(id)}
+          restoreBrowser={async () => {
+            restored.push(`${tabsScopeKey}/${generation}`);
+            return { id: `page-${tabsScopeKey}`, title: `Page ${tabsScopeKey}` };
+          }}
+          browserRestoreKey={`${tabsScopeKey}/${generation}`}
+          browserPending={loading}
+          browserTabRequest={
+            requestId === undefined ? undefined : { requestId, createIfMissing: false }
+          }
+        />,
+      ),
+    );
+  const expanded = () => host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded');
+  try {
+    await show('reading-a/1', 'store/a', 1, false, 1);
+    expect(expanded()).toBe('true');
+    const page = host.querySelector('[data-browser="page-store/a"]'),
+      tabs = host.querySelector('.session-tabs');
+    expect(page).not.toBeNull();
+    await show('reading-unavailable', 'store/a', 2, true, 1);
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-browser="page-store/a"]')).toBe(page);
+    expect(host.querySelector('.session-tabs')).toBe(tabs);
+    await show('reading-a/2', 'store/a', 2, false, 1);
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-browser="page-store/a"]')).toBe(page);
+    expect(host.querySelector('.session-tabs')).toBe(tabs);
+    expect(restored).toEqual(['store/a/1', 'store/a/2']);
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    expect(expanded()).toBe('false');
+    await show('reading-a/3', 'store/a', 3, false, 1);
+    expect(expanded()).toBe('false');
+    await show('reading-b/3', 'store/b', 3);
+    expect(expanded()).toBe('false');
+    expect(host.querySelector('[data-browser="page-store/a"]')).toBeNull();
+    await show('reading-other-store/3', 'other-store/b', 3);
+    expect(host.querySelector('[data-browser="page-store/b"]')).toBeNull();
+    expect(closed).toEqual([]);
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+test('only a fresh host reveal restores the exact visible page once, without overriding later user closure or another panel', async () => {
+  const host = document.getElementById('root')!,
+    root = createRoot(host);
+  let release!: () => void,
+    detailCloses = 0;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const show = (key: string, reveal: boolean, wait = false, details = false, scope = 'store/a') =>
+    act(async () =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="Session"
+          readingKey={scope}
+          messages={[]}
+          connected
+          connectionLabel=""
+          loading={false}
+          actions={{}}
+          renderBrowser={({ id, visible }) => <div data-browser={id} data-visible={visible} />}
+          restoreBrowser={async () => {
+            if (wait) await pending;
+            return {
+              id: 'page-one',
+              title: 'Page one',
+              pages: [
+                { id: 'page-one', title: 'Page one' },
+                { id: 'page-two', title: 'Page two' },
+              ],
+              activeId: 'page-two',
+              ...(reveal ? { reveal: true as const } : {}),
+            };
+          }}
+          browserRestoreKey={key}
+          detailPanel={
+            details
+              ? {
+                  label: 'Current task',
+                  content: <div>Current task details</div>,
+                  onClose: () => {
+                    detailCloses++;
+                  },
+                }
+              : undefined
+          }
+        />,
+      ),
+    );
+  const expanded = () => host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded');
+  try {
+    await show('initial', false);
+    expect(expanded()).toBe('false');
+    await show('fresh-replacement', true, true, true);
+    expect(expanded()).toBe('false');
+    await act(async () => {
+      release();
+      await Bun.sleep(0);
+    });
+    expect(expanded()).toBe('false');
+    expect(detailCloses).toBe(0);
+    await show('fresh-replacement', true);
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-browser="page-two"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    );
+    expect(host.querySelector('[data-browser="page-one"]')?.getAttribute('data-visible')).toBe(
+      'false',
+    );
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    expect(expanded()).toBe('false');
+    await show('same-pending-reveal-again', true);
+    expect(expanded()).toBe('false');
+    await show('other-conversation', false, false, false, 'store/b');
+    expect(expanded()).toBe('false');
+    await show('original-conversation-again', true);
+    expect(expanded()).toBe('false');
+    expect(detailCloses).toBe(0);
+  } finally {
+    release();
+    await act(() => root.unmount());
   }
 });

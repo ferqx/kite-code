@@ -1,5 +1,13 @@
 # Store 边界
 
+## 回复完成与原工具未知
+
+[finishRun](sqlite/operations.ts)允许准确Run中已保存的Tool `outcome_unknown` 随解释性回复完成；它不改原Execution、结果、修订或效果状态。准确Run中仍planned／dispatching／running的执行，以及Model／Job unknown，仍阻止completed。独立nested Job按原run_id、资源owner及监督合同归属，不能把其他Run或已结束的业务unknown当成新全局fence，也不能因回复完成释放仍活Job的permit／binding。
+
+原Tool终态与配对消息必须先提交，无法持久保存时不向下一模型制造结果。[Loop／SQLite回归](../../test/isolated/execution/loop-tool-results.test.ts)核异常、拒绝、未知的准确配对和解释完成、未知后继零效果、真实存储终态拒绝及用户取消；当前执行和恢复的完整边界归[Agent owner](../../README.md#同一-step-的并行工具批次)。没有新增表或格式版本。
+
+`setRunResultWait`复用原waiting_results_json：nested Job沿有界实际Tool父链核原Run／Store／Session／root work、原command namespace、selection及已登记不可变记录revision。自定义完成条件可以等待已终态receipt的正式接纳，不能把Job终态当作已消费；相同等待目标不产生重复事件，取消／变化沿原检查点处理。此接缝不依赖业务kind获得权限，也不改变Task的operation_result自动消费。受控[结果要求回归](../../test/isolated/storage/result-requirements.test.ts)核准确终态等待及错误父链／work／selection／revision零事件；Browser的实际相关通知与不可重放范围归[Browser owner](../tools/browser/README.md#异步人工交接候选未发布)。
+
 ## 有界视图中的首次 Run
 
 `getView` 在同一只读事务返回该 Session 最早 Run、最近200项 Run 与活动 Run 的去重并集，按原 rowid 排序。首项因此保持实际首次运行，不能以时间戳、最近记录或当前配置替代；超过200轮后仍可据其封存配置核会话协议。没有新表、写入或累计历史物化，当前 Run、旧活动 Execution 与原消息读取范围保持。[公开 Service／Client／Desktop 回归](../../../../tests/isolated/unified-agent/active-view.test.ts)覆盖205轮后的首 Run、活动 Run、旧 Job、准确原 Command、去重和读取零变更。

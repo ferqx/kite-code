@@ -84,7 +84,7 @@ async function buildNativeApp(
       .update(await readFile(join(outdir, 'profile-access.js')))
       .digest('hex'),
   };
-  for (const entry of ['main', 'preload']) {
+  for (const entry of ['main', 'preload', 'browser-chrome-preload']) {
     const result = await Bun.build({
       entrypoints: [join(root, 'electron', `${entry}.ts`)],
       target: 'node',

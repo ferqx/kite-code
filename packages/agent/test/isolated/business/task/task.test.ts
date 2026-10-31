@@ -643,8 +643,10 @@ test('foreground Task cancellation waits for its exact attached child carrier te
   }
 }, 10000);
 
-test('foreground Task propagates a real child human denial to the original root batch without a parent Model replay', async () => {
+test('a real child human denial preserves zero effects and reaches child and parent final explanations', async () => {
   let effects = 0;
+  const childExplanation = 'The child effect was denied and was not executed.';
+  const parentExplanation = 'The child reported the denied effect without performing it.';
   const tool: ToolDefinition = {
     id: 'fixture.external',
     version: '1',
@@ -655,10 +657,16 @@ test('foreground Task propagates a real child human denial to the original root 
       return { outcome: 'succeeded', content: 'actual fixture effect' };
     },
   };
-  const child = createFixedModel([call(tool.id, {}), [finish]]);
+  const child = createFixedModel([
+    call(tool.id, {}),
+    [{ type: 'text_delta', text: childExplanation }, finish],
+  ]);
   const f = await fixture(
     extension(),
-    [call('task.execute', { key: 'deny', role: 'reader', input: { content: 'effect' } }), [finish]],
+    [
+      call('task.execute', { key: 'deny', role: 'reader', input: { content: 'effect' } }),
+      [{ type: 'text_delta', text: parentExplanation }, finish],
+    ],
     false,
     child,
     tool,
@@ -702,24 +710,35 @@ test('foreground Task propagates a real child human denial to the original root 
     });
     await running;
     expect(effects).toBe(0);
-    if (f.parent.requests.length !== 1)
-      console.log(
-        'actual human child denial facts',
-        JSON.stringify({
-          executions: await f.store.listExecutions('s'),
-          rootRuns: (await f.store.getView('s')).runs,
-          parentContinuation: f.parent.requests[1]!.messages.at(-1),
-        }),
-      );
-    expect(f.parent.requests).toHaveLength(1);
-    expect(child.requests).toHaveLength(1);
+    expect(f.parent.requests).toHaveLength(2);
+    expect(child.requests).toHaveLength(2);
     const foreground = (await f.store.listExecutions('s')).find(
       (execution) => execution.definitionId === 'task.execute',
     )!;
-    expect(foreground.status).toBe('failed');
-    expect((foreground.result as { content: string }).content).toBe('approval_denied');
+    const denied = (await f.store.getExecution(card!.executionId))!;
+    expect(denied).toMatchObject({
+      status: 'failed',
+      authorization: { dispatched: false },
+      result: { content: 'approval_denied', details: { adapterAttempted: false } },
+    });
+    expect(child.requests[1]!.messages.find((message) => message.role === 'tool')).toMatchObject({
+      toolCallId: denied.callId,
+      sourceIds: [denied.id],
+      content: 'approval_denied',
+    });
+    expect(foreground.status).toBe('succeeded');
+    expect((foreground.result as { content: string }).content).toBe(childExplanation);
+    const paired = f.parent.requests[1]!.messages.find((message) => message.role === 'tool')!;
+    expect(paired).toMatchObject({ toolCallId: foreground.callId, sourceIds: [foreground.id] });
+    expect(paired.content).toContain(childExplanation);
+    expect((await f.store.getView(denied.sessionId)).runs[0]!.status).toBe('completed');
     expect((await f.store.getView('s')).runs[0]!.isActive).toBe(false);
-    expect((await f.store.getView('s')).runs[0]!.status).toBe('failed');
+    expect((await f.store.getView('s')).runs[0]!.status).toBe('completed');
+    expect(
+      (await f.store.listMessages('s')).some(
+        (message) => message.role === 'assistant' && message.content === parentExplanation,
+      ),
+    ).toBe(true);
   } finally {
     await f.close();
   }

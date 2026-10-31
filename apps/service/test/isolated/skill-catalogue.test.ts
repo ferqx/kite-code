@@ -183,8 +183,18 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       all.push(...page.entries);
     }
     timing('paging_complete', { entries: all.length });
-    expect(all).toHaveLength(skills.length);
-    expect(new Set(all.map((e) => e.id)).size).toBe(skills.length);
+    expect(all).toHaveLength(skills.length + 1);
+    expect(all.filter((entry) => entry.id !== 'computer-use')).toHaveLength(skills.length);
+    expect(all.find((entry) => entry.id === 'computer-use')).toMatchObject({
+      name: 'computer-use',
+      source: null,
+      enabled: true,
+      state: 'unavailable',
+      reason: 'skill_capability_missing',
+      requiredCapabilities: ['browser.execute'],
+      missingCapabilities: ['browser.execute'],
+    });
+    expect(new Set(all.map((e) => e.id)).size).toBe(skills.length + 1);
     expect(all.every((entry) => Object.hasOwn(entry, 'source'))).toBe(true);
     expect(all.find((entry) => entry.id === 'skill-000')?.source).toEqual({
       scope: 'project',

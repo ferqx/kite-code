@@ -209,7 +209,7 @@ const wrapped = new Proxy(store, {
             ex?.kind === 'model' &&
             (ex.decisionSource as Record<string, unknown>)?.compressionId) ||
           (['tool_result', 'large'].includes(mode) && ex?.kind === 'tool') ||
-          (mode === 'repeat_failure' && ex?.kind === 'tool' && ++settledTools === 4)
+          (mode === 'repeat_failure' && ex?.kind === 'tool' && ++settledTools === 7)
         )
           await stop(input.executionId);
         return result;

@@ -74,7 +74,11 @@ import type {
   NativeResult,
   NativeState,
 } from './native-bridge';
-import { closeNativeBrowserTab, renderNativeBrowser } from './native-browser-pane';
+import type { NativeBrowserBridge } from './native-browser-bridge';
+import { useNativeBrowserChromeRoot } from './native-browser-chrome-root';
+import { NativeBrowserLeaseControls } from './native-browser-lease-controls';
+import { NativeBrowserPane } from './native-browser-pane';
+import { closeNativeBrowserTab, restoreNativeBrowserTab } from './native-browser-session';
 import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
 import { NativeChildDetail } from './native-child-detail';
@@ -226,7 +230,9 @@ function NativeDesktopContent({
   bridge,
   nativeWindow,
 }: {
-  bridge: NativeBridge & Partial<import('./native-bridge').NativeStartupBridge>;
+  bridge: NativeBridge &
+    Partial<import('./native-bridge').NativeStartupBridge> &
+    Partial<NativeBrowserBridge>;
   nativeWindow: boolean;
 }) {
   const diagnostics = useNativeDiagnostics();
@@ -247,6 +253,8 @@ function NativeDesktopContent({
   const settingsEditorControl = useRef<{ close: () => void } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
+  const [agentBrowserRequest, setAgentBrowserRequest] = useState(0);
+  const [browserLeaseRestore, setBrowserLeaseRestore] = useState(0);
   const agentBrowserPresentation = useRef(new AgentBrowserPresentation());
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -960,6 +968,9 @@ function NativeDesktopContent({
     });
     void (async () => {
       const page = pageIntent.current;
+      const keepPreparation = startupPhase.current === 'ready' && preparing;
+      const previousSelection =
+        selected.current === state?.selection?.session.id ? state?.selection : undefined;
       const value = await bridge.request({ method: 'attach' });
       if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
       if (
@@ -971,19 +982,55 @@ function NativeDesktopContent({
         throw Error('native_initialization_unavailable');
       generation.current = value.generation;
       apply(value);
-      if (!value.selection) setPreparing(true);
+      let restoredSelection =
+        !keepPreparation && !!value.selection && !value.selection.session.deletedAt;
+      if (restoredSelection && value.selection) {
+        // A new Root/Caller generation has no usable history or model facts.
+        // Rebuild those reads through the normal selection path before enabling
+        // the restored conversation and its retained browser presentation.
+        await select(value.selection.session.id, false);
+        if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
+      } else {
+        bridge.cancelBrowserDisplay?.();
+        setPreparing(true);
+      }
       const initialDirectory = await readDirectory();
       if (
         alive &&
         startupEpoch === readLifecycle.current.epoch &&
         pageIntent.current === page &&
+        !keepPreparation &&
         !value.selection &&
+        previousSelection &&
+        initialDirectory?.storeId === previousSelection.storeId &&
+        !initialDirectory.unavailable &&
+        initialDirectory.sessions.some(
+          (session) =>
+            session.id === previousSelection.session.id &&
+            !session.deletedAt &&
+            !session.parentSessionId,
+        )
+      ) {
+        await select(previousSelection.session.id, false);
+        restoredSelection = true;
+      }
+      if (
+        alive &&
+        startupEpoch === readLifecycle.current.epoch &&
+        pageIntent.current === page &&
+        !restoredSelection &&
         !initialDirectory?.unavailable &&
         initialDirectory?.workspaces[0]
       )
-        await chooseWorkspace(initialDirectory.workspaces[0].id, initialDirectory);
+        await chooseWorkspace(
+          keepPreparation && initialDirectory.workspaces.some((row) => row.id === newWorkspace)
+            ? newWorkspace
+            : initialDirectory.workspaces[0].id,
+          initialDirectory,
+        );
     })().catch(async (cause) => {
       if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
+      bridge.cancelBrowserDisplay?.();
       const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
       if (startupPhase.current === 'ready') {
         setError(/^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '目录状态待核实。');
@@ -1038,10 +1085,29 @@ function NativeDesktopContent({
     if (preparing || scheduledTasksView || settingsOpen) return;
     const keys = agentBrowserPresentationKeys(selection, selected.current);
     if (agentBrowserPresentation.current.observe(keys)) {
+      setAgentBrowserRequest((value) => value + 1);
       setToolsOpen(false);
       setAgentBrowserOpen(true);
     }
   }, [selection, preparing, scheduledTasksView, settingsOpen]);
+  useEffect(() => {
+    const seen = new Map<string, string>();
+    return bridge.watchBrowser?.((page) => {
+      const control = page.control;
+      if (
+        control?.sessionId !== selected.current ||
+        !control?.browserId ||
+        !['acquiring', 'agent'].includes(control.phase) ||
+        seen.get(page.id) === control.browserId
+      )
+        return;
+      if (!seen.has(page.id) && seen.size >= 8) seen.delete(seen.keys().next().value!);
+      seen.set(page.id, control.browserId);
+      // The Job can be observed before Main acquires its page. Recheck only
+      // after a real new lease appears; this read never opens the observation.
+      setBrowserLeaseRestore((value) => value + 1);
+    });
+  }, [bridge]);
   // Selection counters govern IO, not the identity of an already observed display label.
   const selectionHandoff =
     !!selectionRead.current && selected.current !== state?.selection?.session.id;
@@ -1058,6 +1124,62 @@ function NativeDesktopContent({
     pendingSession && directory
       ? { storeId: directory.storeId, sessionId: pendingSession.id }
       : undefined;
+  const verifiedBrowserRestore = useRef('');
+  const freshBrowserRestore = useRef('');
+  const browserRestoreCandidate =
+    state &&
+    !state.callerUnavailable &&
+    !state.backgroundUnavailable &&
+    selection &&
+    !selection.session.parentSessionId &&
+    !selectionHandoff &&
+    !preparing &&
+    !scheduledTasksView
+      ? {
+          storeId: selection.storeId,
+          sessionId: selection.session.id,
+          generation: state.generation,
+          viewSelection: selection.viewSelection ?? selection.viewGeneration,
+        }
+      : undefined;
+  const browserRestoreCandidateKey = browserRestoreCandidate
+    ? JSON.stringify([browserRestoreCandidate, agentBrowserRequest, browserLeaseRestore])
+    : '';
+  const browserRestoreFresh =
+    !!browserRestoreCandidate && !selection?.viewLoading && !selection?.permissionUnavailable;
+  freshBrowserRestore.current = browserRestoreFresh ? browserRestoreCandidateKey : '';
+  if (
+    verifiedBrowserRestore.current !== browserRestoreCandidateKey ||
+    (!selection?.viewLoading && !browserRestoreFresh)
+  )
+    verifiedBrowserRestore.current = '';
+  // Only retain the identity of an already verified read during a background
+  // refresh. Fresh selection and permission checks still govern all writes.
+  const browserRestoreScope =
+    browserRestoreFresh ||
+    (selection?.viewLoading && verifiedBrowserRestore.current === browserRestoreCandidateKey)
+      ? browserRestoreCandidate
+      : undefined;
+  const browserChrome = useNativeBrowserChromeRoot(browserRestoreScope, {
+    interactive: browserRestoreFresh,
+    covered: settingsOpen || scheduledTasksView,
+  });
+  useLayoutEffect(() => {
+    const display = bridge.browserDisplayIntent?.();
+    if (!display) return;
+    if (
+      startup === 'failed' ||
+      state?.callerUnavailable ||
+      state?.backgroundUnavailable ||
+      settingsOpen ||
+      scheduledTasksView ||
+      (selection &&
+        (selection.storeId !== display.storeId ||
+          selection.session.id !== display.sessionId ||
+          (selection.permissionUnavailable && !selection.viewLoading)))
+    )
+      bridge.cancelBrowserDisplay?.();
+  }, [bridge, startup, state, selection, settingsOpen, scheduledTasksView]);
   const sessionLoading =
     selectionHandoff ||
     (!state?.callerUnavailable &&
@@ -3992,6 +4114,8 @@ function NativeDesktopContent({
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
       covered={settingsOpen}
+      tabsChromeHosted={browserChrome.tabsHosted}
+      onTabsChromePresentation={browserChrome.tabs}
       writeClipboardText={window.kiteNative?.writeClipboardText}
       onHeaderMouseDown={(clickCount) => {
         if (clickCount === 2)
@@ -4036,6 +4160,16 @@ function NativeDesktopContent({
                 pendingReading?.storeId ?? selection?.storeId,
                 pendingReading?.sessionId ?? selection?.session.id,
               ])
+      }
+      tabsScopeKey={
+        firstVisible && !firstSaved
+          ? JSON.stringify([
+              firstSubmission.creation.expectedStoreId,
+              firstSubmission.creation.sessionId,
+            ])
+          : preparing
+            ? JSON.stringify([directory?.storeId, 'new-conversation'])
+            : JSON.stringify([directory?.storeId, selected.current])
       }
       conversationCache={{
         interactive: !!selection && selected.current === selection.session.id,
@@ -4137,8 +4271,120 @@ function NativeDesktopContent({
           (selectionHandoff && !messages.length) ||
           (!!selection && historyState.phase === 'loading' && !messages.length))
       }
-      renderBrowser={renderNativeBrowser}
+      renderBrowser={(props) =>
+        bridge.browserDisplayIntent?.() && !props.visible ? null : (
+          <NativeBrowserPane
+            {...props}
+            scope={browserRestoreScope}
+            chromeHosted={browserChrome.hosted(props.id)}
+            onChromePresentation={browserChrome.toolbar(props.id)}
+            annotate={
+              state && selection
+                ? (page, noteVisible, annotationToolbarHost) => (
+                    <AgentBrowserPanel
+                      key={JSON.stringify([
+                        state.generation,
+                        selection.storeId,
+                        selection.session.id,
+                        page.id,
+                      ])}
+                      annotationOnly
+                      annotationToolbarHost={annotationToolbarHost}
+                      expectedBrowserId={page.control?.browserId}
+                      bridge={bridge}
+                      scope={{
+                        generation: state.generation,
+                        viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                        historyEpoch: state.historyEpoch ?? 0,
+                        storeId: selection.storeId,
+                        sessionId: selection.session.id,
+                        workspaceId: selection.session.workspaceId,
+                        contextSelectionId: selection.session.contextSelectionId,
+                      }}
+                      visible={noteVisible && !settingsOpen}
+                      canRead={selection.canReadExtensions === true}
+                      canInvoke={selection.canInvokeExtensions === true}
+                      submissions={state.callerSubmissions}
+                      onAnnotate={(capture) => {
+                        if (
+                          generation.current !== state.generation ||
+                          selected.current !== selection.session.id ||
+                          capture.source.browserId !== page.control?.browserId
+                        )
+                          return;
+                        const key = imageScope(selection.storeId, selection.session.id);
+                        if (draftOwner.current !== key) return;
+                        if (!noteDraftStates.current.has(key))
+                          throw Error('browser_draft_not_loaded');
+                        browserNotes.add(key, capture);
+                      }}
+                    />
+                  )
+                : undefined
+            }
+            controlTools={(page) =>
+              state && selection ? (
+                <NativeBrowserLeaseControls
+                  bridge={bridge}
+                  scope={{
+                    generation: state.generation,
+                    viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                    historyEpoch: state.historyEpoch ?? 0,
+                    storeId: selection.storeId,
+                    sessionId: selection.session.id,
+                    workspaceId: selection.session.workspaceId,
+                    contextSelectionId: selection.session.contextSelectionId,
+                  }}
+                  page={page}
+                  chromeHosted={browserChrome.hosted(page.id)}
+                  onChromePresentation={browserChrome.control(page.id)}
+                  visible={props.visible && !settingsOpen}
+                  canRead={selection.canReadExtensions === true}
+                  canInvoke={selection.canInvokeExtensions === true}
+                  submissions={state.callerSubmissions}
+                />
+              ) : null
+            }
+          />
+        )
+      }
       closeBrowser={closeNativeBrowserTab}
+      restoreBrowser={
+        browserRestoreScope && window.kiteNative?.restoreBrowser
+          ? async () => {
+              const key = JSON.stringify([
+                browserRestoreScope,
+                agentBrowserRequest,
+                browserLeaseRestore,
+              ]);
+              try {
+                const page = await restoreNativeBrowserTab(browserRestoreScope);
+                const display = bridge.browserDisplayIntent?.();
+                if (display && (!page || (page.activeId ?? page.id) !== display.id))
+                  bridge.cancelBrowserDisplay?.();
+                if (freshBrowserRestore.current === key) verifiedBrowserRestore.current = key;
+                return page;
+              } catch (error) {
+                bridge.cancelBrowserDisplay?.();
+                if (verifiedBrowserRestore.current === key) verifiedBrowserRestore.current = '';
+                throw error;
+              }
+            }
+          : undefined
+      }
+      browserRestoreKey={
+        browserRestoreScope
+          ? JSON.stringify([browserRestoreScope, agentBrowserRequest, browserLeaseRestore])
+          : undefined
+      }
+      browserPending={
+        !!pendingReading ||
+        (!!selected.current &&
+          !selection?.session.parentSessionId &&
+          !browserRestoreScope &&
+          !preparing &&
+          !scheduledTasksView)
+      }
       childTabRequest={
         !preparing && !scheduledTasksView && childTabRequest?.parent === childParent
           ? childTabRequest
@@ -4307,21 +4553,6 @@ function NativeDesktopContent({
               </DesktopButton>
             </NativeDiagnostic>
           )}
-          {!scheduledTasksView &&
-            !preparing &&
-            selection?.canReadExtensions &&
-            !selection.session.parentSessionId && (
-              <DesktopButton
-                variant="ghost"
-                aria-expanded={agentBrowserOpen}
-                onClick={() => {
-                  setToolsOpen(false);
-                  setAgentBrowserOpen(!agentBrowserOpen);
-                }}
-              >
-                Agent 浏览器
-              </DesktopButton>
-            )}
           <NativeDiagnostic>
             <DesktopButton variant="ghost" onClick={() => setSettingsOpen(true)}>
               设置
@@ -4734,85 +4965,51 @@ function NativeDesktopContent({
             : undefined
       }
       readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
-      detailPanel={
-        agentBrowserOpen && selection && state && !preparing && !scheduledTasksView
+      browserTabRequest={
+        agentBrowserOpen && selection && !preparing && !scheduledTasksView
           ? {
-              label: 'Agent 浏览器',
-              content: (
-                <AgentBrowserPanel
-                  key={JSON.stringify([
-                    state.generation,
-                    selection.viewSelection,
-                    state.historyEpoch,
-                    selection.storeId,
-                    selection.session.id,
-                    selection.session.contextSelectionId,
-                  ])}
-                  bridge={bridge}
-                  scope={{
-                    generation: state.generation,
-                    viewSelection: selection.viewSelection ?? selection.viewGeneration,
-                    historyEpoch: state.historyEpoch ?? 0,
-                    storeId: selection.storeId,
-                    sessionId: selection.session.id,
-                    workspaceId: selection.session.workspaceId,
-                    contextSelectionId: selection.session.contextSelectionId,
-                  }}
-                  canRead={selection.canReadExtensions === true}
-                  canInvoke={selection.canInvokeExtensions === true}
-                  visible={!settingsOpen}
-                  submissions={state.callerSubmissions}
-                  onAnnotate={(capture) => {
-                    if (
-                      generation.current !== state.generation ||
-                      selected.current !== selection.session.id
-                    )
-                      return;
-                    const key = imageScope(selection.storeId, selection.session.id);
-                    if (draftOwner.current !== key) return;
-                    if (!noteDraftStates.current.has(key)) throw Error('browser_draft_not_loaded');
-                    browserNotes.add(key, capture);
-                  }}
-                />
-              ),
-              onClose: () => setAgentBrowserOpen(false),
+              requestId: agentBrowserRequest,
+              createIfMissing: false,
             }
-          : diagnostics && toolsOpen
-            ? {
-                label: '会话与任务',
-                content: (
-                  <>
-                    {renderSessionTools()}
-                    {selection && state && (
-                      <NativeExtensions
-                        key={JSON.stringify([
-                          state.generation,
-                          selection.viewSelection,
-                          state.historyEpoch,
-                          selection.storeId,
-                          selection.session.id,
-                          selection.session.contextSelectionId,
-                        ])}
-                        bridge={bridge}
-                        scope={{
-                          generation: state.generation,
-                          viewSelection: selection.viewSelection ?? selection.viewGeneration,
-                          historyEpoch: state.historyEpoch ?? 0,
-                          storeId: selection.storeId,
-                          sessionId: selection.session.id,
-                          workspaceId: selection.session.workspaceId,
-                          contextSelectionId: selection.session.contextSelectionId,
-                        }}
-                        submissions={state.callerSubmissions}
-                        canRead={selection.canReadExtensions === true}
-                        canInvoke={selection.canInvokeExtensions === true}
-                      />
-                    )}
-                  </>
-                ),
-                onClose: () => setToolsOpen(false),
-              }
-            : undefined
+          : undefined
+      }
+      detailPanel={
+        diagnostics && toolsOpen
+          ? {
+              label: '会话与任务',
+              content: (
+                <>
+                  {renderSessionTools()}
+                  {selection && state && (
+                    <NativeExtensions
+                      key={JSON.stringify([
+                        state.generation,
+                        selection.viewSelection,
+                        state.historyEpoch,
+                        selection.storeId,
+                        selection.session.id,
+                        selection.session.contextSelectionId,
+                      ])}
+                      bridge={bridge}
+                      scope={{
+                        generation: state.generation,
+                        viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                        historyEpoch: state.historyEpoch ?? 0,
+                        storeId: selection.storeId,
+                        sessionId: selection.session.id,
+                        workspaceId: selection.session.workspaceId,
+                        contextSelectionId: selection.session.contextSelectionId,
+                      }}
+                      submissions={state.callerSubmissions}
+                      canRead={selection.canReadExtensions === true}
+                      canInvoke={selection.canInvokeExtensions === true}
+                    />
+                  )}
+                </>
+              ),
+              onClose: () => setToolsOpen(false),
+            }
+          : undefined
       }
       overlays={
         <>

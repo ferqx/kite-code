@@ -27,6 +27,9 @@ const versions: Readonly<Record<string, readonly string[]>> = {
   'planning.update': ['1'],
   activate_skill: ['1'],
   read_skill_reference: ['1'],
+  'skills.load': ['1'],
+  'skills.resource': ['1'],
+  'browser.execute': ['1'],
 };
 
 /** Keep request text bounded without splitting Unicode code points. */
@@ -64,6 +67,16 @@ export function nativeToolRequestTarget(
   const join = (...parts: (string | undefined)[]) =>
     bounded(parts.filter((part): part is string => part !== undefined).join(' · ')) || undefined;
   switch (definitionId) {
+    case 'skills.load':
+      return text('id');
+    case 'skills.resource':
+      return join(text('id'), text('path'));
+    case 'browser.execute': {
+      const description = request.description;
+      return typeof description === 'string' && [...description].length <= 10
+        ? description.replace(/\s+/gu, ' ').trim() || undefined
+        : undefined;
+    }
     case 'files.read':
     case 'files.read_path':
     case 'files.write':

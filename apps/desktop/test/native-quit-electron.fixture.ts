@@ -124,6 +124,7 @@ try {
     const owned = children.find((child) => child.pid === pid);
     if (!owned) throw Error('owned_paired_child_unavailable');
     owned.once('close', () => record('service-closed'));
+    BrowserWindow.getAllWindows()[0]!.once('hide', () => record('window-hidden'));
     BrowserWindow.getAllWindows()[0]!.once('closed', () => record('window-closed'));
     Reflect.set(globalThis, 'ownedRecordQuitEvent', record);
     Reflect.set(globalThis, 'ownedQuitPromptCount', 0);
@@ -164,11 +165,15 @@ try {
   });
   const committedAt = Date.now();
   await until(
-    () => app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length === 0),
+    () =>
+      app!.evaluate(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        return windows.length === 1 && windows.every((window) => !window.isVisible());
+      }),
     1000,
-    'confirmed quit did not immediately destroy the application window',
+    'confirmed quit did not immediately hide the application window',
   );
-  await until(async () => page.isClosed(), 1000, 'confirmed quit did not close its renderer');
+  assert.equal(page.isClosed(), false, 'original renderer must remain alive for lease release');
   assert.ok(Date.now() - committedAt < 1000, 'confirmed quit kept UI visible for one second');
   assert.equal(await app.evaluate(({ app }) => app.dock?.isVisible() ?? false), false);
   process.kill(quitProcess.pid!, 0);
@@ -179,10 +184,14 @@ try {
     app.emit('activate');
     app.quit();
   });
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  assert.equal(
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    false,
+  );
   assert.equal(await app.evaluate(() => Reflect.get(globalThis, 'ownedQuitPromptCount')), 1);
   // Cross the former 20-second force deadline with the real Service still stopped.
-  // Main must own the leases in the background while every application window is gone.
+  // Main must own the original page and leases while every application window stays hidden.
   const resumeAfter = committedAt + 20500;
   while (Date.now() < resumeAfter) {
     assert.equal(quitProcess.exitCode, null, 'background cleanup force-exited at its old deadline');
@@ -195,7 +204,11 @@ try {
     app.emit('activate');
     app.quit();
   });
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 0);
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  assert.equal(
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    false,
+  );
   assert.equal(await app.evaluate(() => Reflect.get(globalThis, 'ownedQuitPromptCount')), 1);
   await app.evaluate(() => {
     (Reflect.get(globalThis, 'ownedRecordQuitEvent') as (event: string) => void)(
@@ -218,14 +231,14 @@ try {
     );
   assert.deepEqual(
     events.map(({ event }) => event),
-    ['prompt', 'confirmed', 'window-closed', 'service-resuming', 'service-closed'],
+    ['prompt', 'confirmed', 'window-hidden', 'service-resuming', 'service-closed', 'window-closed'],
   );
   assert.deepEqual(events[0]!.options!.buttons, ['保留服务', '退出']);
   assert.equal(events[0]!.options!.defaultId, 0);
   assert.equal(events[0]!.options!.cancelId, 0);
   assert.ok(
     events[2]!.at - events[1]!.at < 1000,
-    'window did not close immediately after confirmation',
+    'window did not hide immediately after confirmation',
   );
   assert.ok(
     events[3]!.at - events[1]!.at >= 20500,
@@ -243,7 +256,7 @@ try {
   );
   assert.equal(await (await fetch(`${control}/count`)).text(), count);
   console.log(
-    'native_quit_stage: confirmed window closes immediately, one prompt despite repeats/activate, stopped Service owned beyond 20 seconds, natural background exit=0, both leases free and zero Model replay',
+    'native_quit_stage: confirmed window hides immediately and is destroyed only after original Service exit, one prompt despite repeats/activate, stopped Service owned beyond 20 seconds, natural background exit=0, both leases free and zero Model replay',
   );
   app = await _electron.launch({
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),

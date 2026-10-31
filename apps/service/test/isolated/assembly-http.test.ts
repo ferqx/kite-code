@@ -293,8 +293,17 @@ test('paired default assembly binds real files/source freshness and never dispat
 
 test('paired Skills load/resource are ordinary Tools and knowledge/source IDs never execute linked scripts', async () => {
   const provider = endpoint([
-    { name: 'load_skill', input: { skill_id: 'guide' } },
-    { name: 'read_skill_resource', input: { skill_id: 'guide', path: 'scripts/helper.sh' } },
+    {
+      name: 'load_skill',
+      input: { skill_id: 'guide' },
+    },
+    {
+      name: 'read_skill_resource',
+      input: {
+        skill_id: 'guide',
+        path: 'scripts/helper.sh',
+      },
+    },
   ]);
   const f = await setup(provider, ['skills.load', 'skills.resource'], []);
   try {
@@ -373,6 +382,87 @@ test('Skill dependency claims do not grant a host capability and unknown selecte
     );
     expect(provider.requests).toHaveLength(2);
     expect((await f.handle.client.getView('session')).runs).toHaveLength(1);
+  } finally {
+    await f.close();
+    provider.close();
+  }
+});
+
+test('Skill tools reject removed description arguments, continue with selectors and preserve original historical calls', async () => {
+  const oldLoad = { skill_id: 'guide', description: '读取任务技能' },
+    oldResource = { skill_id: 'guide', path: 'reference.md', description: '阅读任务参考' };
+  const provider = endpoint([
+    { name: 'load_skill', input: oldLoad },
+    { name: 'load_skill', input: { skill_id: 'guide' } },
+    { name: 'read_skill_resource', input: oldResource },
+    {
+      name: 'read_skill_resource',
+      input: { skill_id: 'guide', path: 'reference.md' },
+    },
+  ]);
+  const f = await setup(provider, ['skills.load', 'skills.resource'], []);
+  try {
+    const skill = join(f.workspace, 'skill');
+    mkdirSync(skill);
+    writeFileSync(join(skill, 'SKILL.md'), 'Skill body. [reference](reference.md)\n');
+    writeFileSync(join(skill, 'reference.md'), 'Declared reference body.\n');
+    const file = join(f.profile.profilePath, 'config.jsonc');
+    const config = JSON.parse(readFileSync(file, 'utf8'));
+    config.skills = [{ id: 'guide', path: 'skill' }];
+    writeFileSync(file, JSON.stringify(config));
+    await run(f);
+    await finished(f);
+    expect(provider.requests).toHaveLength(5);
+    const declarations = provider.requests[0]!.tools as {
+      function: {
+        name: string;
+        parameters: {
+          required: string[];
+          properties: Record<string, unknown>;
+          additionalProperties: boolean;
+        };
+      };
+    }[];
+    for (const name of ['load_skill', 'read_skill_resource']) {
+      const schema = declarations.find((tool) => tool.function.name === name)!.function.parameters;
+      expect(schema.required).toEqual(name === 'load_skill' ? ['skill_id'] : ['skill_id', 'path']);
+      expect(schema.properties).not.toHaveProperty('description');
+      expect(schema.additionalProperties).toBe(false);
+    }
+    const executions = (await f.store.listExecutions('session')).filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(executions.map((execution) => execution.status)).toEqual([
+      'failed',
+      'succeeded',
+      'failed',
+      'succeeded',
+    ]);
+    for (const index of [0, 2]) {
+      expect(executions[index]).toMatchObject({ authorization: { dispatched: false } });
+      expect(JSON.stringify(executions[index]!.result)).toContain('invalid_tool_arguments');
+    }
+    expect(executions[1]!.input).toEqual({ id: 'guide' });
+    expect(executions[3]!.input).toEqual({
+      id: 'guide',
+      path: 'reference.md',
+    });
+    const history = (
+      provider.requests[4]!.messages as {
+        tool_calls?: { id: string; function: { arguments: string } }[];
+      }[]
+    ).flatMap((message) => message.tool_calls ?? []);
+    expect(JSON.parse(history.find((call) => call.id === 'call-1')!.function.arguments)).toEqual(
+      oldLoad,
+    );
+    expect(JSON.parse(history.find((call) => call.id === 'call-3')!.function.arguments)).toEqual(
+      oldResource,
+    );
+    // Reading durable rejected calls must not normalize them to today's valid schema.
+    expect((await f.store.getExecution(executions[0]!.id))!.input).toEqual(oldLoad);
+    expect((await f.store.getExecution(executions[2]!.id))!.input).toEqual(oldResource);
+    expect((await f.handle.client.getExecution(executions[0]!.id)).toolInput).toEqual(oldLoad);
+    expect((await f.handle.client.getExecution(executions[2]!.id)).toolInput).toEqual(oldResource);
   } finally {
     await f.close();
     provider.close();

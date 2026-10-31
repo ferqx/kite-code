@@ -22,6 +22,31 @@ const finish: ModelEvent = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
+
+test('resource capacity is a frozen total and remains unchanged while permits are held or queued', async () => {
+  const resources = new ExecutionResources(3, 2);
+  const scope = { sessionId: 'capacity', workspaceId: 'capacity' };
+  const signal = new AbortController().signal;
+  const first = await resources.acquire({ slot: 'process' }, scope, signal);
+  const second = await resources.acquire({ slot: 'process' }, scope, signal);
+  const waiting = new AbortController();
+  const queued = resources
+    .acquire({ slot: 'process' }, scope, waiting.signal)
+    .catch((error: unknown) => error);
+  try {
+    expect(resources.capacity).toEqual({ model: 3, process: 2 });
+    expect(Object.isFrozen(resources.capacity)).toBe(true);
+    expect(Reflect.set(resources.capacity, 'process', 99)).toBe(false);
+    expect(resources.capacity.process).toBe(2);
+    waiting.abort(Error('cancel capacity fixture waiter'));
+    expect(await queued).toBe(waiting.signal.reason);
+    expect(resources.capacity).toEqual({ model: 3, process: 2 });
+  } finally {
+    waiting.abort();
+    first();
+    second();
+  }
+});
 const call: ModelEvent[] = [
   { type: 'tool_call', id: 'serial-call', name: 'fixture.serial', arguments: '{}' },
   { ...finish, reason: 'tool_calls' },
@@ -65,6 +90,9 @@ test('ordinary serial Tool completion and cancellation preserve original cold re
               inputSchema: { type: 'object', additionalProperties: false },
               resources: { serial: { scope: 'session', key: 'ordinary' }, slot: 'process' },
               async execute(_input, context) {
+                expect(context.resourceCapacity).toBe(resources.capacity);
+                expect(context.resourceCapacity).toEqual({ model: 4, process: 4 });
+                expect(Object.isFrozen(context.resourceCapacity)).toBe(true);
                 toolCalls++;
                 if (toolCalls === 2) {
                   entered.release();

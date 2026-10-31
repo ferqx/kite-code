@@ -1,7 +1,7 @@
 import { SessionPage } from '@kite-ai/ui/desktop';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { closeNativeBrowserTab, renderNativeBrowser } from '../src/native-browser-pane';
+import { closeNativeBrowserTab, renderNativeBrowser } from '../src/native-browser-session';
 import '../src/native-tailwind.css';
 import '@kite-ai/ui/desktop/style.css';
 

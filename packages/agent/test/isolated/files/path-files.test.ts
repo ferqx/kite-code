@@ -337,7 +337,17 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
         },
         { ...finish, reason: 'tool_calls' },
       ],
-      [finish],
+      [
+        ...(decision === 'deny'
+          ? [
+              {
+                type: 'text_delta' as const,
+                text: 'The original file write was denied and did not run.',
+              },
+            ]
+          : []),
+        finish,
+      ],
       [
         {
           type: 'tool_call',
@@ -483,7 +493,22 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
           )!;
           expect(denied.status).toBe('failed');
           expect(denied.result).toMatchObject({ content: 'approval_denied' });
-          expect(model.requests).toHaveLength(1);
+          expect(model.requests).toHaveLength(2);
+          expect(
+            model.requests[1]!.messages.find((message) => message.role === 'tool'),
+          ).toMatchObject({
+            toolCallId: 'write',
+            sourceIds: [denied.id],
+            content: 'approval_denied',
+          });
+          expect((await store.getRun(denied.runId!))?.status).toBe('completed');
+          expect(
+            (await store.listMessages('s')).some(
+              (message) =>
+                message.role === 'assistant' &&
+                message.content === 'The original file write was denied and did not run.',
+            ),
+          ).toBe(true);
           return;
         }
       }

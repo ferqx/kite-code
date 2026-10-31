@@ -7,11 +7,21 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type { AgentClient } from '@kite-ai/client';
+import type { NativeBrowserTransport } from '@kite-ai/agent/browser';
+import type { AgentClient, SessionView } from '@kite-ai/client';
+import type { BrowserGrantScope, NativeBrowserPageHost } from '../../electron/browser-page-host';
 import type { DevelopmentServiceReload } from '../../electron/development';
+import { createNativeCallerGenerationOwner, NativeCaller } from '../../electron/native-caller';
 import type { ScheduledTaskClock, ScheduledTaskRunner } from '../../electron/scheduled-task-runner';
 import { createScheduledTaskData } from '../../electron/scheduled-tasks';
-import type { NativeCreation } from '../../src/native-bridge';
+import type { NativeCreation, NativeState } from '../../src/native-bridge';
+import { memoryPrivateData } from '../private-data.fixture';
+
+type BrowserRegistration = {
+  automation?: NativeBrowserPageHost;
+  selectedScope?: () => BrowserGrantScope | undefined;
+  grantScope?: () => BrowserGrantScope | undefined;
+};
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -45,6 +55,7 @@ async function mainFixture(
   holdRendererLoad = false,
   barrierService = 1,
   holdAppReady = false,
+  rendererBarrierService = 0,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-main-scheduling-'));
   const mainPath = fileURLToPath(new URL('../../electron/main.ts', import.meta.url));
@@ -65,11 +76,16 @@ async function mainFixture(
   const menuEntered = deferred(),
     menuResult = deferred<{ response: number; checkboxChecked: boolean }>();
   const rendererEntered = deferred(),
-    rendererLoad = deferred();
+    rendererLoad = deferred(),
+    rendererHeld = deferred();
   const appReady = deferred();
   const trace: string[] = [],
     errors: unknown[] = [];
   const dialogs: unknown[][] = [];
+  const browserRegistrations: BrowserRegistration[] = [];
+  let callerState = (): NativeState => ({ generation: 1 }) as NativeState;
+  const browserStartups: { desktopBrowser?: { endpoint: string; token: string } }[] = [];
+  let beforeServiceClose: (() => Promise<void>) | undefined;
   let windowDestroyed = false;
   let windowVisible = false;
   let windowMinimized = false;
@@ -126,6 +142,7 @@ async function mainFixture(
     },
     exit(code: number) {
       exitCodes.push(code);
+      for (const closing of windows) if (!closing.isDestroyed()) closing.destroy();
       app.emit('will-quit');
       exited.resolve(code);
     },
@@ -162,6 +179,7 @@ async function mainFixture(
     }
     hide() {
       windowVisible = false;
+      trace.push('window:hide');
     }
     isMinimized() {
       return windowMinimized;
@@ -177,6 +195,7 @@ async function mainFixture(
     destroy() {
       if (windowDestroyed) return;
       windowDestroyed = true;
+      windowVisible = false;
       trace.push('window:destroy');
       this.emit('closed');
       app.emit('window-all-closed');
@@ -188,7 +207,13 @@ async function mainFixture(
     setTitleBarOverlay() {}
     async loadURL() {
       rendererEntered.resolve();
-      if (holdRendererLoad) await rendererLoad.promise;
+      if (
+        holdRendererLoad &&
+        (rendererBarrierService === 0 || services.length === rendererBarrierService)
+      ) {
+        rendererHeld.resolve();
+        await rendererLoad.promise;
+      }
     }
   }
   class FixtureTray extends EventEmitter {
@@ -229,7 +254,7 @@ async function mainFixture(
         },
       },
       ipcMain: {},
-      Menu: { buildFromTemplate: (template: unknown) => template },
+      Menu: { buildFromTemplate: (template: unknown) => template, setApplicationMenu() {} },
       nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }),
       Tray: FixtureTray,
     },
@@ -245,6 +270,10 @@ async function mainFixture(
       registered.resolve();
     },
     register: () => {},
+    registerNativeBrowserIpc: (options: BrowserRegistration) => {
+      browserRegistrations.push(options);
+      return () => {};
+    },
     parseDesktopDevelopment: (value: unknown) => value,
     desktopContentSecurityPolicy: () => "default-src 'none'",
     serveDevelopmentReload: (options: { reload: typeof reload }) => {
@@ -262,8 +291,10 @@ async function mainFixture(
         },
       };
     },
-    async launchPairedService() {
+    async launchPairedService(options: { desktopBrowser?: { endpoint: string; token: string } }) {
+      browserStartups.push({ desktopBrowser: options.desktopBrowser });
       const id = services.length + 1;
+      trace.push(`${id}:service:launch`);
       const service: Service = {
         id,
         closed: false,
@@ -291,6 +322,7 @@ async function mainFixture(
           trace.push(`${id}:service:closing`);
           serviceClosing.resolve();
           if (holdServiceClose) await releaseServiceClose.promise;
+          await beforeServiceClose?.();
           if (rejectServiceClose) throw Error('fixture_service_close_failed');
           service.closed = true;
           trace.push(`${id}:service:close`);
@@ -367,12 +399,16 @@ async function mainFixture(
     },
     clockFor: (client: AgentClient) => clocks.get(client)!.clock,
     registerRunner: (runner: ScheduledTaskRunner) => runners.push(runner),
+    createNativeCallerGenerationOwner,
     NativeCaller: class {
       private readonly client: AgentClient;
       constructor(client: AgentClient) {
         this.client = client;
       }
       setScheduledTasks() {}
+      state() {
+        return callerState();
+      }
       hasActiveWork() {
         return holdMenu;
       }
@@ -404,8 +440,11 @@ async function mainFixture(
       'desktopContentSecurityPolicy',
       'serveDevelopmentReload',
     ]),
-    './native-caller': exports(['NativeCaller']),
-    './native-browser': `${prefix}export const registerNativeBrowserIpc = () => f.register;`,
+    './native-caller': exports(['NativeCaller', 'createNativeCallerGenerationOwner']),
+    './native-browser': exports(['registerNativeBrowserIpc']),
+    './native-root-window':
+      prefix +
+      'export const createNativeRootWindow = (...args) => new f.electron.BrowserWindow(...args); export const onNativeRootReady = (window, receive) => { window.once("ready-to-show", receive); return () => window.off("ready-to-show", receive); }; export const nativeRootWindowMenu = () => [];',
     './private-data': exports(['openPrivateData']),
     './profile-access': exports(['acquireDesktopProfileAccess']),
     './protected-path': exports(['canonicalProtectedPath']),
@@ -502,6 +541,56 @@ async function mainFixture(
   return {
     open,
     reload,
+    beforeServiceClose(read: () => Promise<void>) {
+      beforeServiceClose = read;
+    },
+    async browserTransport() {
+      const source = fileURLToPath(
+        new URL('../../../service/src/desktop-browser.ts', import.meta.url),
+      );
+      // Only the native CLI process is finite here; Desktop transport and Main
+      // page-host RPC/lease ownership are their original production modules.
+      const build = await Bun.build({
+        entrypoints: [source],
+        target: 'bun',
+        outdir: join(root, 'transport'),
+        plugins: [
+          {
+            name: 'finite-native-cli',
+            setup(builder) {
+              builder.onResolve({ filter: /^@kite-ai\/agent\/browser$/ }, () => ({
+                path: 'native-cli',
+                namespace: 'finite-native-cli',
+              }));
+              builder.onLoad({ filter: /.*/, namespace: 'finite-native-cli' }, () => ({
+                loader: 'js',
+                contents: `
+            export class BrowserTransportError extends Error {}
+            export function createNativeBrowserTransport() {
+              let end;
+              const completion = new Promise(resolve => { end = resolve });
+              return { ready: Promise.resolve(), completion,
+                async request(input) { return input.action === 'stream_status'
+                  ? { success: true, data: { enabled: false } } : { success: true, data: {} }; },
+                async close() { end({ confirmed: true }); return { confirmed: true }; }, async dispose() {} };
+            }`,
+              }));
+            },
+          },
+        ],
+      });
+      if (!build.success) throw new AggregateError(build.logs, 'fixture_transport_build_failed');
+      const { createDesktopBrowserTransport } = await import(
+        pathToFileURL(build.outputs[0]!.path).href
+      );
+      const endpoint = browserStartups[0]!.desktopBrowser!;
+      return createDesktopBrowserTransport(
+        { executable: '/fixture/not-spawned', browserPath: '/fixture/not-spawned' },
+        endpoint,
+        { sessionId: 'a', executionId: 'browser-job', signal: new AbortController().signal },
+        { browserId: 'browser', storeId: async () => 'store' },
+      ) as NativeBrowserTransport;
+    },
     entered: entered.promise,
     release: () => release.resolve(),
     services,
@@ -512,6 +601,11 @@ async function mainFixture(
     trace,
     errors,
     dialogs,
+    browserRegistrations,
+    setCallerState(read: () => NativeState) {
+      callerState = read;
+    },
+    browserStartups,
     destroyWindow: () => {
       windows.at(-1)?.destroy();
     },
@@ -537,6 +631,7 @@ async function mainFixture(
     confirmQuit: () => menuResult.resolve({ response: 1, checkboxChecked: false }),
     rejectMenu: () => menuResult.reject(Error('fixture_cancelled_dialog')),
     rendererEntered: rendererEntered.promise,
+    rendererHeld: rendererHeld.promise,
     releaseAppReady: () => appReady.resolve(),
     rejectRendererLoad: () => rendererLoad.reject(Error('fixture_renderer_load_failed')),
     connection: await mainConnection.promise,
@@ -575,6 +670,223 @@ async function mainFixture(
 }
 
 const replacement = { id: 'a'.repeat(32), sha256: 'b'.repeat(64) };
+
+test('Main grant identity survives a real same-selection Caller refresh while renderer writes remain fenced', async () => {
+  const data = memoryPrivateData();
+  const observed = deferred<Parameters<AgentClient['observe']>[0]>();
+  let readGate: ReturnType<typeof deferred<void>> | undefined;
+  let readEntered = deferred();
+  let publication = () => {};
+  const client = {
+    serverInfo: { storeId: 'store', subjectId: 'local-user', capabilities: [] },
+    connect: async () => ({}),
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observed.resolve(options);
+      if (options.signal?.aborted) return;
+      await new Promise<void>((resolve) =>
+        options.signal?.addEventListener('abort', () => resolve()),
+      );
+    },
+    async getView(id: string) {
+      if (readGate) {
+        readEntered.resolve();
+        await readGate.promise;
+      }
+      return {
+        storeId: 'store',
+        snapshotCursor: '0',
+        session: {
+          id,
+          workspaceId: 'workspace',
+          rootSessionId: id,
+          parentSessionId: null,
+          title: id,
+          nextSeq: '0',
+          contextSelectionId: `context-${id}`,
+          controlRevision: '0',
+          deletedAt: null,
+        },
+        runs: [],
+        executions: [],
+        messages: [],
+      } as unknown as SessionView;
+    },
+    listWorkspaces: async () => [],
+    listAllWorkspaces: async () => [],
+    listAllSessions: async () => [],
+    listSessions: async () => [],
+    disposeNetwork() {},
+  } as unknown as AgentClient;
+  const caller = new NativeCaller(client, () => publication(), data);
+  const f = await mainFixture('none');
+  let removePage = () => {},
+    unconfigure = () => {};
+  try {
+    const attached = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const generation = attached.generation;
+    await caller.invoke({ method: 'select', generation, sessionId: 'a', activationId: 1 });
+    const observer = await observed.promise;
+    await f.open();
+    f.setCallerState(() => caller.state());
+    const registration = f.browserRegistrations[0]!;
+    const grantScope = registration.grantScope ?? registration.selectedScope!;
+    const identity = grantScope();
+    expect(identity).toMatchObject({ storeId: 'store', sessionId: 'a', generation });
+    const host = registration.automation!;
+    removePage = host.add({
+      id: 'page',
+      scope: { storeId: 'store', sessionId: 'a' },
+      alive: () => true,
+      attach() {},
+      detach: () => true,
+      send: async () => ({}),
+      typingCursor: async () => null,
+      onEvent: () => () => {},
+      decorate() {},
+      changed() {},
+      capture: async () => ({}),
+      captureMeta: () => ({}),
+    });
+    host.present('page', true);
+    unconfigure = host.configureGrantContext({
+      selectedScope: grantScope,
+      describe: () => ({ title: 'Existing page', url: 'https://example.test/' }),
+      create() {
+        throw Error('unexpected_new_page');
+      },
+      close() {},
+    });
+    const prepare = () =>
+      host.request({
+        op: 'prepareGrant',
+        requestId: crypto.randomUUID(),
+        storeId: 'store',
+        sessionId: 'a',
+        executionId: 'tool',
+        browserId: 'open',
+        url: 'https://example.test/',
+      }) as Promise<{ requestId: string; state: string }>;
+    const commit = (requestId: string) =>
+      host.request({
+        op: 'commitGrant',
+        requestId,
+        interactionId: 'question',
+        decisionRevision: '1',
+      }) as Promise<{ state: string }>;
+    const change = () =>
+      observer.onChange({
+        type: 'execution.updated',
+        sessionId: 'a',
+        objectId: 'tool',
+        cursor: '1',
+        revision: '1',
+        payload: {},
+      });
+    const proposal = await prepare();
+    expect(proposal.state).toBe('question');
+    readGate = deferred();
+    await change();
+    await readEntered.promise;
+    const loading = caller.state();
+    expect(loading.selection).toMatchObject({
+      permissionUnavailable: true,
+      viewLoading: true,
+      viewSelection: identity!.viewSelection,
+    });
+    expect(loading.backgroundUnavailable).toBe(false);
+    expect(registration.selectedScope!()).toBeUndefined();
+    expect(grantScope()).toEqual(identity);
+    expect((await commit(proposal.requestId)).state).toBe('committed');
+    const refreshed = deferred();
+    publication = () => {
+      if (!caller.state().selection?.viewLoading) refreshed.resolve();
+    };
+    readGate.resolve();
+    await refreshed.promise;
+    readGate = undefined;
+    expect(grantScope()).toEqual(identity);
+    expect(
+      (
+        (await host.request({ op: 'inspectGrant', requestId: proposal.requestId })) as {
+          state: string;
+        }
+      ).state,
+    ).toBe('committed');
+    await host.request({ op: 'cancelGrant', requestId: proposal.requestId });
+
+    const stale = await prepare();
+    await caller.invoke({ method: 'select', generation, sessionId: 'b', activationId: 2 });
+    await caller.invoke({ method: 'select', generation, sessionId: 'a', activationId: 3 });
+    expect(grantScope()?.viewSelection).not.toBe(identity!.viewSelection);
+    expect((await commit(stale.requestId)).state).toBe('expired');
+
+    // A completed failed read is permission loss, not the permitted loading projection.
+    readGate = deferred();
+    readEntered = deferred();
+    const failed = deferred();
+    publication = () => {
+      const view = caller.state().selection;
+      if (view?.permissionUnavailable && !view.viewLoading) failed.resolve();
+    };
+    await change();
+    await readEntered.promise;
+    readGate.reject(Error('fixture_permission_read_failed'));
+    await failed.promise;
+    readGate = undefined;
+    expect(grantScope()).toBeUndefined();
+    expect(registration.selectedScope!()).toBeUndefined();
+    const good = loading;
+    for (const state of [
+      { ...good, backgroundUnavailable: true },
+      { ...good, selection: undefined },
+      {
+        ...good,
+        selection: {
+          ...good.selection!,
+          session: { ...good.selection!.session, parentSessionId: 'parent' },
+        },
+      },
+      {
+        ...good,
+        selection: { ...good.selection!, session: { ...good.selection!.session, deletedAt: 1 } },
+      },
+    ]) {
+      f.setCallerState(() => state);
+      expect(grantScope()).toBeUndefined();
+    }
+  } finally {
+    readGate?.resolve();
+    unconfigure();
+    removePage();
+    await caller.close();
+    data.close();
+    await f.close();
+  }
+});
+
+test('Main registers its page host before renderer attachment starts the private Service channel', async () => {
+  const f = await mainFixture('none', false, false, false, true);
+  try {
+    await f.rendererEntered;
+    expect(f.services).toHaveLength(0);
+    expect(f.browserRegistrations).toHaveLength(1);
+    const host = f.browserRegistrations[0]!.automation;
+    if (process.platform === 'win32') expect(host).toBeUndefined();
+    else expect(host).toBeDefined();
+    await f.open();
+    expect(f.services).toHaveLength(1);
+    expect(f.browserRegistrations[0]!.automation).toBe(host);
+    if (process.platform === 'win32') expect(f.browserStartups[0]?.desktopBrowser).toBeUndefined();
+    else {
+      expect(f.browserStartups[0]?.desktopBrowser?.endpoint).toMatch(
+        /^http:\/\/127\.0\.0\.1:\d+\/kite-page$/,
+      );
+      expect(f.browserStartups[0]?.desktopBrowser?.token.length).toBeGreaterThan(0);
+    }
+  } finally {
+    await f.close();
+  }
+});
 
 for (const barrier of ['launch', 'profile'] as const) {
   test(`Main reload fences an opening caller held at ${barrier} before creating its scheduler`, async () => {
@@ -635,6 +947,87 @@ test('Main reload drains the original scheduler creation before closing its data
     expect(f.posts.some((post) => post.afterClose)).toBe(false);
     expect(f.errors).toEqual([]);
   } finally {
+    await f.close();
+  }
+}, 15000);
+
+test('Main failed replacement renderer load releases only its settled reload latch for a later exact reload', async () => {
+  const f = await mainFixture('none', false, false, false, true, 1, false, 2);
+  let pending: Promise<unknown> | undefined;
+  try {
+    await f.open();
+    pending = f.reload(replacement).catch((error: unknown) => error);
+    await f.rendererHeld;
+    expect(f.services).toHaveLength(2);
+    expect(f.services[0]!.closed).toBe(true);
+    expect(f.services[1]!.closed).toBe(false);
+    f.rejectRendererLoad();
+    expect(await pending).toMatchObject({ message: 'fixture_renderer_load_failed' });
+    await f.reload(replacement);
+    expect(f.services).toHaveLength(3);
+    expect(f.services[1]!.closed).toBe(true);
+    expect(f.services[2]!.closed).toBe(false);
+    expect(f.trace.indexOf('2:service:close')).toBeLessThan(f.trace.indexOf('3:service:launch'));
+    expect(f.exitCodes).toEqual([]);
+    expect(f.errors).toEqual([]);
+  } finally {
+    await pending;
+    await f.close();
+  }
+}, 15000);
+
+test('Main settled reload failure retains the original cleanup unknown and cannot launch a replacement', async () => {
+  const f = await mainFixture('none', false, false, true);
+  try {
+    await f.open();
+    await expect(f.reload(replacement)).rejects.toThrow('fixture_service_close_failed');
+    await expect(f.reload(replacement)).rejects.toThrow('fixture_service_close_failed');
+    await expect(f.open()).rejects.toThrow('native_draining');
+    expect(f.services).toHaveLength(1);
+    expect(f.services[0]!.closed).toBe(false);
+    expect(f.trace.filter((value) => value === '1:service:closing')).toHaveLength(1);
+    expect(f.trace).not.toContain('1:service:close');
+    process.emit('SIGTERM');
+    expect(await f.exited).toBe(1);
+    await expect(f.reload(replacement)).rejects.toThrow('native_draining');
+    expect(f.services).toHaveLength(1);
+  } finally {
+    await f.close(1);
+  }
+}, 15000);
+
+test('Main SIGTERM during failed replacement presentation still waits for the exact live Service and cannot revive reload', async () => {
+  const f = await mainFixture('none', false, false, false, true, 1, false, 2),
+    closing = deferred(),
+    release = deferred();
+  let pending: Promise<unknown> | undefined;
+  try {
+    await f.open();
+    pending = f.reload(replacement).catch((error: unknown) => error);
+    await f.rendererHeld;
+    f.beforeServiceClose(async () => {
+      closing.resolve();
+      await release.promise;
+    });
+    process.emit('SIGTERM');
+    await Promise.resolve();
+    expect(f.exitCodes).toEqual([]);
+    expect(f.services[1]!.closed).toBe(false);
+    f.rejectRendererLoad();
+    expect(await pending).toMatchObject({ message: 'fixture_renderer_load_failed' });
+    await closing.promise;
+    expect(f.exitCodes).toEqual([]);
+    expect(f.services[1]!.closed).toBe(false);
+    await expect(f.reload(replacement)).rejects.toThrow('native_draining');
+    expect(f.services).toHaveLength(2);
+    release.resolve();
+    expect(await f.exited).toBe(0);
+    expect(f.services[1]!.closed).toBe(true);
+    expect(f.trace.filter((value) => value === '2:service:closing')).toHaveLength(1);
+  } finally {
+    release.resolve();
+    f.rejectRendererLoad();
+    await pending;
     await f.close();
   }
 }, 15000);
@@ -745,8 +1138,9 @@ for (const rejectServiceClose of [false, true]) {
       expect(f.trace).not.toContain('1:service:closing');
       f.confirmQuit();
       await f.serviceClosing;
-      expect(f.windowCount()).toBe(0);
-      expect(f.trace.indexOf('window:destroy')).toBeLessThan(f.trace.indexOf('1:service:closing'));
+      expect(f.windowCount()).toBe(1);
+      expect(f.windowVisible()).toBe(false);
+      expect(f.trace).not.toContain('window:destroy');
       f.quit();
       expect(f.dialogs).toHaveLength(1);
       expect(f.exitCodes).toEqual([]);
@@ -754,6 +1148,8 @@ for (const rejectServiceClose of [false, true]) {
       f.releaseServiceClose();
       expect(await f.exited).toBe(exitCode);
       expect(f.exitCodes).toEqual([exitCode]);
+      if (!rejectServiceClose)
+        expect(f.trace.indexOf('1:service:close')).toBeLessThan(f.trace.indexOf('window:destroy'));
       expect(f.dialogs).toHaveLength(1);
       expect(f.errors).toEqual([]);
     } finally {
@@ -788,7 +1184,8 @@ test.skipIf(process.platform !== 'win32')(
       await f.serviceClosing;
       expect(f.dialogs).toEqual([]);
       expect(tray.destroyed).toBe(true);
-      expect(f.windowCount()).toBe(0);
+      expect(f.windowCount()).toBe(1);
+      expect(f.windowVisible()).toBe(false);
       const presentation = [...f.trace];
       tray.emit('double-click');
       expect(f.trace).toEqual(presentation);
@@ -881,7 +1278,7 @@ for (const rejectConfirmation of [false, true]) {
 }
 
 for (const blocked of ['opening', 'reload'] as const) {
-  test(`Main confirmed quit closes the window while held ${blocked} cleans up in background`, async () => {
+  test(`Main confirmed quit hides the window while held ${blocked} cleans up in background`, async () => {
     const f = await mainFixture(
       blocked === 'opening' ? 'launch' : 'none',
       blocked === 'reload',
@@ -904,8 +1301,9 @@ for (const blocked of ['opening', 'reload'] as const) {
       expect(f.windowCount()).toBe(1);
       f.confirmQuit();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      expect(f.windowCount()).toBe(0);
-      expect(f.trace.filter((item) => item === 'window:destroy')).toHaveLength(1);
+      expect(f.windowCount()).toBe(1);
+      expect(f.trace.filter((item) => item === 'window:destroy')).toHaveLength(0);
+      expect(f.windowVisible()).toBe(false);
       if (process.platform === 'darwin') {
         expect(f.appHides()).toBe(1);
         expect(f.dockHides()).toBe(1);
@@ -918,7 +1316,7 @@ for (const blocked of ['opening', 'reload'] as const) {
       f.readyToShow();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       expect(f.trace.filter((item) => item.startsWith('window:'))).toEqual(presentation);
-      expect(f.windowCount()).toBe(0);
+      expect(f.windowCount()).toBe(1);
       expect(f.exitCodes).toEqual([]);
       expect(f.dialogs).toHaveLength(1);
       expect(f.errors).toEqual([]);
@@ -1111,3 +1509,77 @@ test('Main late app readiness cannot create a client window after committed quit
     await f.close();
   }
 }, 15000);
+
+for (const mode of ['agent', 'human', 'destroyed'] as const) {
+  test(`Main shutdown retains the exact ${mode} page lease until real Desktop transport release`, async () => {
+    const f = await mainFixture('none', false, true);
+    let transport: NativeBrowserTransport | undefined;
+    let removePage: (() => void) | undefined;
+    let closeResult: { confirmed: boolean } | undefined;
+    const expectedExit = mode === 'destroyed' ? 1 : 0;
+    try {
+      await f.open();
+      const host = f.browserRegistrations[0]!.automation!;
+      let attached = false;
+      removePage = host.add({
+        id: 'page',
+        scope: { storeId: 'store', sessionId: 'a' },
+        alive: () => f.windowCount() !== 0,
+        attach() {
+          attached = true;
+        },
+        detach() {
+          attached = false;
+          return true;
+        },
+        send: async () => ({}),
+        typingCursor: async () => null,
+        onEvent: () => () => {},
+        decorate() {},
+        changed() {},
+        capture: async () => ({}),
+        captureMeta: () => null,
+      });
+      host.arm('page', { storeId: 'store', sessionId: 'a' });
+      transport = await f.browserTransport();
+      await transport.ready;
+      await transport.request({ action: 'launch' }, new AbortController().signal);
+      expect(host.state('page')?.phase).toBe('agent');
+      expect(attached).toBe(true);
+      if (mode !== 'agent') {
+        await transport.handoff!(new AbortController().signal);
+        expect(host.state('page')?.phase).toBe('human');
+        expect(host.retained('page')).toBe(true);
+        expect(attached).toBe(false);
+      }
+      f.beforeServiceClose(async () => {
+        expect(f.windowVisible()).toBe(false);
+        closeResult = await transport!.close();
+        f.trace.push(`browser:release:${closeResult.confirmed}`);
+        if (!closeResult.confirmed) throw Error('fixture_original_page_cleanup_unknown');
+        expect(host.retained('page')).toBe(false);
+        await transport!.dispose();
+      });
+      f.quit();
+      await f.menuEntered;
+      if (mode === 'destroyed') f.destroyWindow();
+      f.confirmQuit();
+      expect(await f.exited).toBe(expectedExit);
+      expect(closeResult).toEqual({ confirmed: mode !== 'destroyed' });
+      if (mode !== 'destroyed') {
+        expect(f.trace.indexOf('browser:release:true')).toBeLessThan(
+          f.trace.indexOf('window:destroy'),
+        );
+        expect(f.windowCount()).toBe(0);
+        expect(f.services[0]!.closed).toBe(true);
+      } else {
+        expect(f.trace).not.toContain('browser:release:true');
+        expect(f.services[0]!.closed).toBe(false);
+      }
+    } finally {
+      await transport?.close();
+      removePage?.();
+      await f.close(expectedExit);
+    }
+  }, 15000);
+}

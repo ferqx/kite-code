@@ -26,6 +26,8 @@ export interface DarwinBrowserOwner {
   readonly ready: Promise<void>;
   readonly completion: Promise<{ confirmed: boolean }>;
   cancel(): Promise<{ confirmed: boolean }>;
+  /** Bounded private input to this exact owned program. */
+  write(content: string): Promise<void>;
   readProcessEvidence(): DarwinBrowserEvidence;
 }
 const retained = new Set<object>();
@@ -43,6 +45,8 @@ export function startDarwinBrowserOwner(input: {
   guardianPath: string;
   bunExecutable: string;
   executable: string;
+  /** Trusted fixed program arguments; never exposed as a browser operation. */
+  argv?: readonly string[];
   cwd: string;
   env: Record<string, string>;
   nonce: string;
@@ -280,7 +284,7 @@ export function startDarwinBrowserOwner(input: {
       type: 'start',
       nonce: input.nonce,
       command: input.executable,
-      args: [],
+      args: [...(input.argv ?? [])],
       cwd: input.cwd,
       env: input.env,
       controlBase: input.cwd,
@@ -296,6 +300,18 @@ export function startDarwinBrowserOwner(input: {
     ready,
     completion,
     cancel,
+    async write(content) {
+      await ready;
+      if (closing || finished || Buffer.byteLength(content) > 131072)
+        throw Error('browser_darwin_input_unavailable');
+      await new Promise<void>((resolve, reject) => {
+        child.stdin.write(
+          JSON.stringify({ type: 'rpc', nonce: input.nonce, content }) + '\n',
+          (error) => (error ? reject(error) : resolve()),
+        );
+      });
+      if (closing || finished) throw Error('browser_darwin_input_unavailable');
+    },
     readProcessEvidence: () => structuredClone(evidence),
   };
 }

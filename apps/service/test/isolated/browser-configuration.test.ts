@@ -9,6 +9,7 @@ import {
   type NativeBrowserTransportOptions,
   nativeBrowserUnavailableReason,
 } from '@kite-ai/agent/browser';
+import { browserExecutorWorkerAsset } from '@kite-ai/agent/browser/executor';
 import { createTemporaryCredentialBackend, type JsonObject } from '@kite-ai/agent/config';
 import type { ReadContext } from '@kite-ai/agent/extensions';
 import { createPermissionPolicy } from '@kite-ai/agent/permissions';
@@ -110,13 +111,28 @@ test('host factory and repeated Query are inert; missing assets produce a finite
       configuration: options,
       privateDirectory: options.runtimeDirectory!,
     });
-    expect(browser.runtimeAssets).toEqual([realpathSync(process.execPath)]);
+    const expectedAssets = [realpathSync(process.execPath)];
+    try {
+      expectedAssets.push(browserExecutorWorkerAsset());
+    } catch {
+      // Source-only checkouts accurately omit this separately built runtime asset.
+    }
+    expect(browser.runtimeAssets).toEqual([...new Set(expectedAssets)]);
     const reason = nativeBrowserUnavailableReason();
     expect(browser.available).toBe(reason === undefined);
     expect(browser.snapshot.unavailableReason).toBe(reason);
     expect(
-      browser.capabilities.every((capability) => capability.hardAllowed === (reason === undefined)),
+      browser.capabilities
+        .filter(
+          (capability) =>
+            !['browser.execute', 'browser.code_session'].includes(capability.definitionId),
+        )
+        .every((capability) => capability.hardAllowed === (reason === undefined)),
     ).toBe(true);
+    expect(
+      browser.capabilities.find((capability) => capability.definitionId === 'browser.execute')
+        ?.hardAllowed,
+    ).toBe(browser.executionAvailable);
     expect(JSON.stringify(browser.snapshot)).not.toContain(root);
     for (let index = 0; index < 3; index++)
       expectInertView(
@@ -345,9 +361,34 @@ test('default Service exposes one global Browser extension and selected native t
         snapshot: {
           browser: unknown;
           actualCapabilities: { tools: { id: string; extensionId: string }[] };
+          skillWorkflow: {
+            capabilities: {
+              kind: 'tool' | 'job';
+              definitionId: string;
+              capability: {
+                effectiveEffects: { network: string; externalState: string };
+                policy: { minimumApproval: string };
+              };
+            }[];
+          };
         };
       }
     ).snapshot;
+    const browserWorkflow = snapshot.skillWorkflow.capabilities.filter(
+      (capability) =>
+        capability.definitionId.startsWith('browser.') ||
+        capability.definitionId.startsWith('builtin.browser/'),
+    );
+    expect(browserWorkflow.length).toBeGreaterThan(0);
+    expect(
+      browserWorkflow.every(
+        (capability) => capability.capability.policy.minimumApproval === 'none',
+      ),
+    ).toBe(true);
+    expect(
+      browserWorkflow.find((capability) => capability.definitionId === 'browser.session')
+        ?.capability.effectiveEffects,
+    ).toMatchObject({ network: 'unknown', externalState: 'unknown' });
     if (selectedBrowserIds.length)
       expect(snapshot.browser).toMatchObject({
         enabled: true,

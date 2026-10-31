@@ -219,3 +219,5 @@ export function createSkillSource(options: SkillSourceOptions) {
     dispose: () => scope.dispose(),
   };
 }
+
+export { builtinComputerUseSkillId, createBuiltinComputerUseSkillSource } from './builtin';

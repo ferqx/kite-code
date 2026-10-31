@@ -86,7 +86,18 @@ test('user settings HTTP works in an empty Store and never reads project configu
     const before = await runtime.getChanges({ after: '0' });
     const skill = await client.listUserSkills({ storeId });
     expect(skill.scope).toBe('user');
-    expect(skill.entries.map((entry) => entry.name)).toEqual(['User skill']);
+    expect(skill.entries.map((entry) => entry.name)).toEqual(['computer-use', 'User skill']);
+    expect(skill.entries.find((entry) => entry.id === 'computer-use')).toMatchObject({
+      source: null,
+      enabled: true,
+      state: 'unavailable',
+      reason: 'skill_capability_missing',
+      requiredCapabilities: ['browser.execute'],
+      missingCapabilities: ['browser.execute'],
+    });
+    expect(
+      skill.entries.filter((entry) => entry.id !== 'computer-use').map((entry) => entry.name),
+    ).toEqual(['User skill']);
     expect(JSON.stringify(skill)).not.toContain('PRIVATE_BODY');
     expect(JSON.stringify(skill)).not.toContain(root);
     const mcp = await client.getUserMcpSettings({ storeId });

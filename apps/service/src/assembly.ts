@@ -365,7 +365,11 @@ export async function createWorkspaceAssembly(options: {
           tools: createFileTools(files),
         }),
       );
-    if (configured.length || options.toolIds.some((id) => skillIds.includes(id)))
+    if (
+      configured.length ||
+      selectedEntries.length ||
+      options.toolIds.some((id) => skillIds.includes(id))
+    )
       extensions.push(defineExtension({ id: 'builtin.skills', version: '1', apiMajor: 1, tools }));
     const actualTools = new Map([
       ...(externalFiles ?? []).map((tool) => [tool.id, tool] as const),

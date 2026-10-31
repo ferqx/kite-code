@@ -84,6 +84,7 @@ function fixture() {
           runId: null,
           executionId: id,
           signal: context.signal,
+          resourceCapacity: Object.freeze({ model: 1, process: 2 }),
           reportProgress() {},
           async requestInput() {
             throw new Error('fixture_does_not_request_input');

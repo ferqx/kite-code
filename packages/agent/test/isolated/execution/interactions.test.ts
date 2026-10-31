@@ -209,8 +209,9 @@ test('waiting approval holds neither shared Model nor process permit; saved answ
   }
 }, 10000);
 
-test('refusing one exact approval ends its original round before any adapter or later Model call', async () => {
+test('refusing one exact approval preserves zero effects and returns its original result for a final explanation', async () => {
   let effects = 0;
+  const explanation = 'The requested effect was denied and was not executed.';
   const f = await fixture(
     [
       {
@@ -221,7 +222,7 @@ test('refusing one exact approval ends its original round before any adapter or 
         },
       },
     ],
-    [call(), [finish]],
+    [call(), [{ type: 'text_delta', text: explanation }, finish]],
   );
   try {
     await f.submit();
@@ -229,19 +230,29 @@ test('refusing one exact approval ends its original round before any adapter or 
     await f.answer(record, { kind: 'approval', decision: 'deny' });
     await f.runtime.waitForCommand('work');
     expect(effects).toBe(0);
-    expect(f.model.requests).toHaveLength(1);
+    expect(f.model.requests).toHaveLength(2);
     const execution = await f.store.getExecution(record.executionId);
     expect(execution?.status).toBe('failed');
     expect(execution?.result).toMatchObject({
       content: 'approval_denied',
       details: { adapterAttempted: false },
     });
-    expect((await f.store.getRun(record.runId!))?.status).toBe('cancelled');
-    expect((await f.runtime.getCommand('work'))?.cancelRequestedAt).not.toBeNull();
+    expect((await f.store.getRun(record.runId!))?.status).toBe('completed');
+    expect((await f.runtime.getCommand('work'))?.cancelRequestedAt).toBeNull();
+    expect(f.model.requests[1]!.messages.find((message) => message.role === 'tool')).toMatchObject({
+      toolCallId: execution!.callId,
+      sourceIds: [execution!.id],
+      content: 'approval_denied',
+    });
+    expect(
+      (await f.store.listMessages('s')).some(
+        (message) => message.role === 'assistant' && message.content === explanation,
+      ),
+    ).toBe(true);
     expect((await f.read(record))?.answer).toEqual({ kind: 'approval', decision: 'deny' });
     await f.submit();
     expect(effects).toBe(0);
-    expect(f.model.requests).toHaveLength(1);
+    expect(f.model.requests).toHaveLength(2);
   } finally {
     await f.close();
   }

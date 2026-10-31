@@ -199,8 +199,15 @@ test('manual Workflow HTTP projection is same-source, independently unavailable,
       expect(page.status).toBe(200);
       entries.push(...page.body.entries);
     }
-    expect(entries).toHaveLength(277);
-    expect(new Set(entries.map((row) => row.id)).size).toBe(277);
+    expect(entries).toHaveLength(278);
+    expect(entries.filter((row) => row.id !== 'computer-use')).toHaveLength(277);
+    expect(entries.find((row) => row.id === 'computer-use')).toMatchObject({
+      name: 'computer-use',
+      state: 'unavailable',
+      reason: 'skill_capability_missing',
+      workflow: { state: 'unavailable', reason: 'skill_unavailable', manualAllowed: false },
+    });
+    expect(new Set(entries.map((row) => row.id)).size).toBe(278);
     expect(entries.find((row) => row.id === 'good-269')!.workflow).toMatchObject({
       state: 'available',
       skillId: 'skill:good-269',

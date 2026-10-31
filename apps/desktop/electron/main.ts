@@ -12,10 +12,22 @@ import {
   PairedServiceError,
   type ServiceStartupDiagnostic,
 } from '@kite-ai/service/paired';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, Tray } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  type BrowserWindowConstructorOptions,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  Tray,
+} from 'electron';
 import { type NativeWindowAppearance, nativeEventChannel } from '../src/native-bridge';
 import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
+import { listenBrowserPageHost } from './browser-page-channel';
+import { NativeBrowserPageHost } from './browser-page-host';
 import {
   type DevelopmentServiceReload,
   desktopContentSecurityPolicy,
@@ -24,13 +36,19 @@ import {
 } from './development';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { registerNativeBrowserIpc } from './native-browser';
-import { NativeCaller } from './native-caller';
+import { createNativeCallerGenerationOwner, NativeCaller } from './native-caller';
 import {
   registerNativeIpc,
   registerNativeStartupIpc,
   registerNativeThemeIpc,
   registerNativeWindowIpc,
 } from './native-ipc';
+import {
+  createNativeRootWindow,
+  type NativeRootWindow,
+  nativeRootWindowMenu,
+  onNativeRootReady,
+} from './native-root-window';
 import {
   nativeWindowMenuShortcut,
   nativeWindowMenuTemplate,
@@ -77,6 +95,8 @@ const development = parseDesktopDevelopment(
   !candidate && assets.kind === 'development',
 );
 let activeAssets = assets;
+const nextCallerGeneration = createNativeCallerGenerationOwner();
+let callerSelectionHint: Readonly<{ storeId: string; sessionId: string }> | undefined;
 const windowsAsset =
   formalAssets?.windowsAsset ??
   (__KITE_DESKTOP_WINDOWS_ACCESS__
@@ -93,11 +113,13 @@ const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
   : process.platform === 'darwin'
     ? 'vibrancy'
     : 'none';
-let window: BrowserWindow | undefined, caller: NativeCaller | undefined;
+let window: NativeRootWindow | undefined, caller: NativeCaller | undefined;
 let tray: Tray | undefined;
 let opening: Promise<NativeCaller> | undefined;
 let closingNativeResources: Promise<void> | undefined;
 let stoppingNativeProcess: Promise<void> | undefined;
+const browserPages = new NativeBrowserPageHost();
+let browserPageChannel: Awaited<ReturnType<typeof listenBrowserPageHost>> | undefined;
 let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
@@ -216,7 +238,10 @@ async function openCaller(): Promise<NativeCaller> {
       });
     // Windows Main holds its own native Profile SH before the independent Service starts.
     if (process.platform === 'win32') privateAccess = await acquirePrivateAccess();
+    if (process.platform !== 'win32')
+      browserPageChannel ??= await listenBrowserPageHost(browserPages);
     paired = await launchPairedService({
+      desktopBrowser: browserPageChannel?.startup,
       profile,
       entrypoint: activeAssets.serviceEntrypoint,
       executable: activeAssets.bunExecutable,
@@ -274,6 +299,9 @@ async function openCaller(): Promise<NativeCaller> {
           return available && paired === admittedService && !quitting;
         },
       },
+      undefined,
+      nextCallerGeneration,
+      callerSelectionHint,
     );
     scheduledTasks = new ScheduledTaskRunner(paired.client, privateData);
     caller.setScheduledTasks(scheduledTasks);
@@ -285,6 +313,8 @@ async function openCaller(): Promise<NativeCaller> {
       privateData?.close();
       privateAccess?.close();
       await paired?.close();
+      await browserPageChannel?.close();
+      browserPageChannel = undefined;
       for (const lease of artifactAccess.reverse()) lease.close();
     } catch (cleanup) {
       // Keep the rejected opening and every original owner. A cleanup error
@@ -304,11 +334,16 @@ function closeNativeResources(): Promise<void> {
     await opening?.catch(() => {});
     await scheduledTasks?.stop();
     scheduledTasks = undefined;
+    const selected = caller?.state().selection;
+    if (selected && !selected.session.deletedAt)
+      callerSelectionHint = { storeId: selected.storeId, sessionId: selected.session.id };
     await caller?.close();
     privateData?.close();
     privateAccess?.close();
     await paired?.close();
     if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
+    await browserPageChannel?.close();
+    browserPageChannel = undefined;
     for (const lease of artifactAccess.reverse()) lease.close();
     artifactAccess = [];
     windowsArtifactAccess = undefined;
@@ -334,13 +369,13 @@ function stopNativeProcess(code = 0): void {
   finishQuitDecision();
   stoppingNativeProcess = Promise.resolve()
     .then(async () => {
-      // Commit the stop owner before destroying the last window. Its close
-      // events must not quit Main while it still owns the background drain.
+      // Close visible UI immediately, but retain the original page/lease owner
+      // until Service can revoke, detach and confirm its actual resource drain.
       const closingWindow = window;
       window = undefined;
       tray?.destroy();
       tray = undefined;
-      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.destroy();
+      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.hide();
       if (process.platform === 'darwin') {
         app.hide();
         app.dock?.hide();
@@ -355,6 +390,7 @@ function stopNativeProcess(code = 0): void {
         forceExit();
         return;
       }
+      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.destroy();
       exitAllowed = true;
       app.exit(code);
     })
@@ -378,7 +414,7 @@ async function reloadDevelopmentService(request: DevelopmentServiceReload) {
   verifyNativeAsset(next.serviceEntrypoint, next.serviceSha256);
   switchingService = true;
   sendLifecycle(true);
-  developmentReload = (async () => {
+  const reloading = (async () => {
     await closeNativeResources();
     if (quitDecision) await quitDecision;
     if (quitting) throw Error('native_draining');
@@ -388,8 +424,15 @@ async function reloadDevelopmentService(request: DevelopmentServiceReload) {
     if (!window || window.isDestroyed()) throw Error('native_window_unavailable');
     await window.loadURL(development.rendererUrl);
   })();
-  await developmentReload;
-  developmentReload = undefined;
+  developmentReload = reloading;
+  try {
+    await reloading;
+  } finally {
+    // The latch describes this in-flight reload, not its settled outcome.
+    // Failed cleanup remains sticky in closeNativeResources; a later save
+    // still has to confirm that original drain before opening another Caller.
+    if (developmentReload === reloading) developmentReload = undefined;
+  }
 }
 let reportDevelopmentStartup: (error?: unknown) => void = () => {};
 if (development) {
@@ -436,7 +479,7 @@ void app
     if (stoppingNativeProcess || exitAllowed) return;
     const rendererPath = join(app.getAppPath(), 'index.html'),
       rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
-    window = new BrowserWindow({
+    const windowOptions: BrowserWindowConstructorOptions = {
       title: 'Kite',
       ...(process.platform === 'win32' ? { icon: join(app.getAppPath(), 'app-icon.ico') } : {}),
       width: 1100,
@@ -470,7 +513,12 @@ void app
         sandbox: true,
         webSecurity: true,
       },
-    });
+    };
+    const classicWindow =
+      process.platform === 'darwin' ? undefined : new BrowserWindow(windowOptions);
+    window = classicWindow ?? createNativeRootWindow(windowOptions);
+    if (process.platform === 'darwin')
+      Menu.setApplicationMenu(Menu.buildFromTemplate(nativeRootWindowMenu(window)));
     if (process.platform === 'win32') {
       tray = new Tray(join(app.getAppPath(), 'app-icon.ico'));
       tray.setToolTip('Kite');
@@ -568,7 +616,51 @@ void app
         },
       }),
     );
-    registerNativeBrowserIpc({ ipcMain, window, rendererUrl });
+    registerNativeBrowserIpc({
+      ipcMain,
+      window,
+      rendererUrl,
+      ...(process.platform === 'darwin'
+        ? { chrome: { preloadPath: join(app.getAppPath(), 'browser-chrome-preload.cjs') } }
+        : {}),
+      // Renderer attachment opens the paired Service/channel lazily, after this
+      // registration. Bind the existing Main owner rather than its future listener.
+      automation: process.platform !== 'win32' ? browserPages : undefined,
+      grantScope() {
+        const state = caller?.state();
+        const view = state?.selection;
+        // Caller retains readonly facts only for this exact Main selection epoch
+        // during refresh. That loading projection preserves identity, not write
+        // readiness; completed permission failures and observation loss still deny.
+        return state &&
+          !state.backgroundUnavailable &&
+          view &&
+          !view.session.parentSessionId &&
+          view.session.deletedAt === null &&
+          (!view.permissionUnavailable || view.viewLoading === true)
+          ? {
+              storeId: view.storeId,
+              sessionId: view.session.id,
+              generation: state.generation,
+              viewSelection: view.viewSelection ?? view.viewGeneration,
+            }
+          : undefined;
+      },
+      selectedScope() {
+        const view = caller?.state().selection;
+        return view &&
+          !view.permissionUnavailable &&
+          !view.viewLoading &&
+          !view.session.parentSessionId
+          ? {
+              storeId: view.storeId,
+              sessionId: view.session.id,
+              generation: caller!.state().generation,
+              viewSelection: view.viewSelection ?? view.viewGeneration,
+            }
+          : undefined;
+      },
+    });
     registerNativeThemeIpc({
       ipcMain,
       window: () => window,
@@ -642,9 +734,11 @@ void app
         window?.hide();
       }
     });
-    window.once('ready-to-show', () => {
+    const showReadyWindow = () => {
       if (!stoppingNativeProcess && !exitAllowed && window && !window.isDestroyed()) window.show();
-    });
+    };
+    if (classicWindow) classicWindow.once('ready-to-show', showReadyWindow);
+    else onNativeRootReady(window, showReadyWindow);
     if (development) {
       await window.loadURL(rendererUrl);
       try {

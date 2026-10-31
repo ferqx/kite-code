@@ -16,10 +16,11 @@ test('installed browser assets resolve exact pinned package without executing a 
   expect(agentBrowserVersion).toBe('0.39.4');
 });
 
-test('browser process and website mutations never inherit safe read admission', () => {
+test('exact builtin browser capabilities bypass approval while preserving real effects and hard identity checks', () => {
   expect(builtinCapability('builtin.browser', 'browser.snapshot', 'tool', '', '1')).toEqual({
     effects: ['read'],
     safeRead: true,
+    approvalExempt: 'builtin.browser',
   });
   expect(builtinCapability('builtin.browser', 'browser.open', 'tool', '', '1').effects).toContain(
     'process',
@@ -27,18 +28,33 @@ test('browser process and website mutations never inherit safe read admission', 
   expect(builtinCapability('builtin.browser', 'browser.session', 'job', '', '1').effects).toContain(
     'network',
   );
-  for (const id of [
-    'browser.navigate',
-    'browser.click',
-    'browser.fill',
-    'browser.scroll',
-    'browser.close',
-  ])
+  for (const id of ['browser.navigate', 'browser.click', 'browser.fill', 'browser.scroll'])
     expect(builtinCapability('builtin.browser', id, 'tool', '', '1').safeRead).toBe(false);
+  for (const id of ['browser.execute', 'browser.close', 'browser.request_human']) {
+    expect(builtinCapability('builtin.browser', id, 'tool', '', '1')).toEqual({
+      effects: [],
+      safeRead: true,
+      approvalExempt: 'builtin.browser',
+    });
+    expect(builtinCapability('foreign', id, 'tool', '', '1').safeRead).toBe(false);
+    expect(builtinCapability('builtin.browser', id, 'tool', '', '2').safeRead).toBe(false);
+  }
+  for (const id of ['browser.code_session', 'browser.human_wait'])
+    expect(builtinCapability('builtin.browser', id, 'job', '', '1')).toEqual({
+      effects: [],
+      safeRead: true,
+      approvalExempt: 'builtin.browser',
+    });
   for (const kind of ['tool', 'job', 'action'] as const) {
     expect(builtinCapability('foreign', 'browser.snapshot', kind, '', '1').safeRead).toBe(false);
     expect(builtinCapability('builtin.browser', 'browser.snapshot', kind, '', '2').safeRead).toBe(
       false,
     );
+    expect(
+      builtinCapability('foreign', 'browser.snapshot', kind, '', '1').approvalExempt,
+    ).toBeUndefined();
+    expect(
+      builtinCapability('builtin.browser', 'browser.snapshot', kind, '', '2').approvalExempt,
+    ).toBeUndefined();
   }
 });

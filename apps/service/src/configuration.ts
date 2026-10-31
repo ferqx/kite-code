@@ -97,6 +97,7 @@ import {
 } from './compression-configuration';
 import { defaultConfiguration, ordinaryHostConfigurationDefaults } from './configuration-defaults';
 import { createConfigurationManagement } from './configuration-management';
+import type { DesktopBrowserEndpoint } from './desktop-browser';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
 import { createDefaultHostStatusSource } from './host-status';
 import { createMcpConfiguration } from './mcp-configuration';
@@ -259,6 +260,7 @@ export function createDefaultProcessConfiguration(options: {
   webFetch?: WebFetchConfigurationOptions;
   /** Trusted browser assets and host ceiling; JSONC may only select existing Tool IDs. */
   browser?: BrowserConfigurationOptions | false;
+  desktopBrowser?: DesktopBrowserEndpoint;
   knownToolIds?: readonly string[];
   allowedToolCapabilities?: readonly string[];
 }): ProcessHostConfiguration {
@@ -287,7 +289,19 @@ export function createDefaultProcessConfiguration(options: {
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
   const describeDefaultTask = createDefaultTaskRequestClassifier(options.child ? [] : childRoles);
   const browser = createBrowserConfiguration({
+    runtime: () => {
+      if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+      return policyRuntime;
+    },
     configuration: options.browser,
+    desktopBrowser: options.desktopBrowser,
+    resolveDesktopStoreId: async (context) => {
+      if (!policyRuntime) throw Error('desktop_browser_store_unbound');
+      const execution = await policyRuntime.getExecution(context.executionId);
+      if (!execution || execution.sessionId !== context.sessionId || !execution.originStoreId)
+        throw Error('desktop_browser_store_unbound');
+      return execution.originStoreId;
+    },
     privateDirectory: join(
       process.platform === 'win32'
         ? tmpdir()
@@ -388,6 +402,7 @@ export function createDefaultProcessConfiguration(options: {
         options.shell !== undefined,
         task.extension !== undefined,
         browser.available,
+        options.desktopBrowser !== undefined,
       )
     : defaultConfiguration;
   const planning = createPlanningValidation(
@@ -775,13 +790,17 @@ export function createDefaultProcessConfiguration(options: {
           definitionVersion,
         })),
       ),
-    describeCapability: (request) =>
-      globalCapabilities.get(
+    describeCapability: async (request) => {
+      const description = globalCapabilities.get(
         JSON.stringify([request.kind, request.definitionId, request.definitionVersion]),
-      ) ??
-      mcp.describe(request) ??
-      mcpSources.describe(request) ??
-      mcpManagement.describe(request),
+      );
+      return (
+        description ??
+        mcp.describe(request) ??
+        mcpSources.describe(request) ??
+        mcpManagement.describe(request)
+      );
+    },
   });
   const globalPermissions = withInjectedCeiling(globalDefaultPolicy);
   const titles = createSessionTitleExtension({
@@ -836,6 +855,7 @@ export function createDefaultProcessConfiguration(options: {
       modelId: string;
       modelOnly?: boolean;
       toolIds?: readonly string[];
+      inheritedModelHiddenToolIds?: readonly string[];
       skillSelection?: SkillSelection;
       workflowFence?: Awaited<ReturnType<typeof workflowForkFence>>;
       workflowCarrier?: {
@@ -893,8 +913,35 @@ export function createDefaultProcessConfiguration(options: {
       const request = command.request as { modelId?: string; reasoningEffort?: ReasoningEffort };
       if (selection) current.modelId = selection.modelId;
       else if (request.modelId !== undefined) current.modelId = request.modelId;
+      const explicitBrowser = [user, project, current]
+        .flatMap((layer) => (Array.isArray(layer.tools) ? layer.tools : []))
+        .filter((tool) => tool && typeof tool === 'object' && !Array.isArray(tool)) as JsonObject[];
+      const legacyBrowser =
+        explicitBrowser.some(
+          (tool) =>
+            typeof tool.id === 'string' &&
+            browser.toolIds.includes(tool.id) &&
+            tool.id !== 'browser.execute' &&
+            tool.enabled !== false,
+        ) &&
+        !explicitBrowser.some((tool) => tool.id === 'browser.execute' && tool.enabled !== false);
+      const legacyRecovery =
+        recovery &&
+        recovery.browserSnapshot &&
+        typeof recovery.browserSnapshot === 'object' &&
+        !Array.isArray(recovery.browserSnapshot) &&
+        recovery.browserSnapshot.execution === undefined;
+      const runDefaults =
+        options.ordinaryHostTools && options.desktopBrowser && (legacyBrowser || legacyRecovery)
+          ? ordinaryHostConfigurationDefaults(
+              options.shell !== undefined,
+              task.extension !== undefined,
+              browser.available,
+              false,
+            )
+          : configurationDefaults;
       const effective = resolveConfiguration({
-        defaults: configurationDefaults,
+        defaults: runDefaults,
         user,
         workspace: withoutProjectModels(project),
         explicit: current,
@@ -1040,6 +1087,23 @@ export function createDefaultProcessConfiguration(options: {
           if (!toolIds.includes(id)) toolIds.push(id);
         }
       }
+      const unifiedBrowser = toolIds.includes('browser.execute');
+      const browserRunSnapshot = unifiedBrowser
+        ? { ...browser.snapshot, execution: 'isolated-browser-code-1' }
+        : browser.snapshot;
+      const browserInternalTools = browser.toolIds.filter((id) => id !== 'browser.execute');
+      const modelHiddenToolIds = unifiedBrowser
+        ? browserInternalTools.filter(
+            (id) => !toolIds.includes(id) || selection?.inheritedModelHiddenToolIds?.includes(id),
+          )
+        : [];
+      if (unifiedBrowser) {
+        for (const id of browserInternalTools) {
+          if (effective.tools?.some((tool) => tool.id === id && tool.enabled === false))
+            throw new AgentError('browser_dependency_disabled');
+          if (!toolIds.includes(id)) toolIds.push(id);
+        }
+      }
       task.validateSelection(toolIds);
       const sourceSelection = {
         present: [user, project, current].some((layer) => Object.hasOwn(layer, 'mcp')),
@@ -1111,7 +1175,10 @@ export function createDefaultProcessConfiguration(options: {
           selectedSources.directoryToolId,
           ...(workflowFlags.skillActivation && workflowFlags.skillWorkflow ? workflowToolIds : []),
         ],
-        allowedCapabilities: options.allowedToolCapabilities,
+        allowedCapabilities: [
+          ...(options.allowedToolCapabilities ?? []),
+          ...(unifiedBrowser && browser.executionAvailable ? ['browser.execute'] : []),
+        ],
       });
       let webBinding: ReturnType<typeof web.bind> | undefined;
       let runWeb = web;
@@ -1124,6 +1191,7 @@ export function createDefaultProcessConfiguration(options: {
             await assembly.dispose();
           }),
           Promise.resolve().then(() => webBinding?.dispose()),
+          Promise.resolve().then(() => browser.disposeCommand(session.id, command.id)),
         ]).then((results) => {
           const failures = results.flatMap((result) =>
             result.status === 'rejected' ? [result.reason] : [],
@@ -1258,7 +1326,7 @@ export function createDefaultProcessConfiguration(options: {
             ) !== planningSnapshotDigest(recovery.webSnapshot) ||
             planningSnapshotDigest(
               (assembly.toolIds.some((id) => browserTools.has(id))
-                ? browser.snapshot
+                ? browserRunSnapshot
                 : null) as Json,
             ) !== planningSnapshotDigest(recovery.browserSnapshot) ||
             workflowSnapshotDigest(workflow.snapshot as unknown as Json) !==
@@ -1691,6 +1759,7 @@ export function createDefaultProcessConfiguration(options: {
           model,
           modelId: selected.id,
           toolIds: assembly.toolIds,
+          modelHiddenToolIds,
           extensions: assembly.extensions,
           readStepCapabilities: async (
             input: Parameters<NonNullable<RunConfiguration['readStepCapabilities']>>[0],
@@ -1778,11 +1847,14 @@ export function createDefaultProcessConfiguration(options: {
               resolvedIds: assembly.snapshotFacts.skills.map((entry) => entry.id),
             },
             actualCapabilities: assembly.snapshotFacts,
+            ...(modelHiddenToolIds.length ? { modelHiddenToolIds } : {}),
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
             pathFiles: pathFiles.snapshot,
             web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null,
-            browser: assembly.toolIds.some((id) => browserTools.has(id)) ? browser.snapshot : null,
+            browser: assembly.toolIds.some((id) => browserTools.has(id))
+              ? browserRunSnapshot
+              : null,
             task: {
               ...task.snapshot,
               tools: task.snapshot.tools.filter((tool) => assembly.toolIds.includes(tool.id)),
@@ -1872,20 +1944,21 @@ export function createDefaultProcessConfiguration(options: {
       (extension.tools ?? [])
         .filter((tool) => assembly.toolIds.includes(tool.id))
         .map((tool) => {
-          const effects = builtinCapability(
+          const capability = builtinCapability(
             extension.id,
             tool.id,
             'tool',
             planning.extension.id,
             tool.version,
-          ).effects;
+          );
           return workflowCapabilityDescription({
             kind: 'tool',
             definitionId: tool.id,
             definitionVersion: tool.version,
             revision: `${extension.id}:${extension.version}:${tool.version}`,
             extensionId: extension.id,
-            effects,
+            effects: capability.effects,
+            ...(capability.approvalExempt ? { approvalExempt: capability.approvalExempt } : {}),
           });
         }),
     );
@@ -1909,15 +1982,27 @@ export function createDefaultProcessConfiguration(options: {
       })),
     );
     workflowCapabilities.push(
-      ...registeredJobs.map((job) =>
-        workflowCapabilityDescription({
+      ...registeredJobs.map((job) => {
+        const browserCapability = browser.capabilities.find(
+          (capability) =>
+            capability.kind === 'job' &&
+            capability.definitionId === job.id &&
+            capability.definitionVersion === job.version,
+        );
+        return workflowCapabilityDescription({
           kind: 'job',
           definitionId: job.id,
           definitionVersion: job.version,
           revision: job.revision,
           effects: ['unknown'],
-        }),
-      ),
+          ...(browserCapability?.approvalExempt
+            ? {
+                extensionId: browser.extension.id,
+                approvalExempt: browserCapability.approvalExempt,
+              }
+            : {}),
+        });
+      }),
     );
     return workflowCapabilities;
   }
@@ -2028,6 +2113,26 @@ export function createDefaultProcessConfiguration(options: {
                 }
               : undefined,
             parentTools: input.parentTools,
+            inheritedModelHiddenToolIds: (() => {
+              if (!selection.role.toolPolicy) return undefined;
+              const original = input.parentRun?.configuration;
+              if (!original || typeof original !== 'object' || Array.isArray(original))
+                return undefined;
+              const snapshot = original.snapshot;
+              if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot))
+                return undefined;
+              const hidden = snapshot.modelHiddenToolIds;
+              if (hidden === undefined) return undefined;
+              if (
+                !Array.isArray(hidden) ||
+                hidden.some(
+                  (id) =>
+                    typeof id !== 'string' || !input.parentTools.some((tool) => tool.id === id),
+                )
+              )
+                throw new AgentError('child_tool_source_unavailable');
+              return hidden as string[];
+            })(),
             inheritDynamicMcp: selection.inheritDynamicMcp,
             mcpParent: {
               parentExecution: input.parentExecution,

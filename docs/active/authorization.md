@@ -15,6 +15,14 @@
 
 正式 Service/Client 经唯一 Agent 的原权限、人工/模型交互和最终 dispatch 事务执行。界面三策略为 `accept_edits` 请求批准、`auto` 自动审核、`full` 完全访问；正式类型、HTTP/IPC、持久控制和调用者均已退役 raw `ask`，旧输入/控制记录失败关闭，不映射为其他模式。正式 Shell 的范围请求与 `web_fetch` network 描述均经该链，固定危险拒绝先于所有模式；Scope 来自可信宿主描述与最终接纳快照，调用输入不能签发 grant。原审核拒绝原因由公共 Execution 的 `authorization.check`（旧记录为 `authorization.review`）与 Tool `result.details.reason` 保存，TUI 结果读取和 Native 原回执可展示，私有适配器错误正文不进入该 reason。实际产品、owner 与验证归[手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)与[切片](../plans/shell-permission-scopes.md)。
 
+用户2026-10-29进一步确认：准确内置浏览器能力免自动审核和用户审批，不受三种模式的常规逐项审批分支影响。可信capability工厂及policy双重核固定builtin.browser@1定义，保真实effects和硬能力、页面／任务／租约／取消／unknown约束；Service／Workflow不把审批重新加回，也不把网络输入伪装只读。Native新任务正常释放控制并final，不装配人工等待／Continue；新消息新Run在VM准入前等原Job准确收口，只以真实acquire保留的私有pageId／incarnation重新绑定原页，URL不代替身份，新引用重新取得；同URL别页、身份替换或缺页不能作为替代。Main网页所有权独立于租约／任务，观察切换不关闭网页。旧拒绝、Question和unknown不转为新控制权，原安全事实和历史格式保留。
+
+原任务身份由[resolveExecutionRun](../../packages/agent/src/execution/task-origin.ts)在Core统一沿有界、同Store／Session／RootWork／主体父链解析；嵌套Operation的runId保持真实null，通用审核上下文也可读取已验证的原任务，不再把直接runId缺失当作任务必然不可用。权限读取的任务／计划仍是证据，不是grant。
+
+Tool 的失败、adapter 抛异常、人工／自动拒绝和 unknown 是原调用的结果，须先保存准确 Execution 与原 call ID 配对，再交给下一 Model 解释；Loop 不因这些结果或五次同参失败硬退出，不自动重试未知效果。人工 deny 保 `approval_denied` 并停止本批未开始后继，已开始调用须先清理；它不提交整 Run／Command 取消。明确用户取消仍停止，真实 Store／authority 故障和无法保存结果仍失败关闭。自动拒绝只作用于准确未派发目标的既有边界保持；[当前决定](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)部分替代旧人工拒绝终止工作语义，历史证据不改写。
+
+SQLite `finishRun` 只对准确 `run_id` 中已落定 Tool unknown 允许解释 Run completed，原 unknown、revision、引用与效果未被解决。同范围 Model／Job unknown 和活动执行继续阻完成；nested Job 的监督、permit／binding、关闭及恢复门禁不由回复状态解除。可信 `ToolContext.resourceCapacity` 仅是冻结总容量事实，不是当前空闲量或批准；统一 Browser 执行要求 process 至少 2，容量不足在代码／Browser Job 创建前准确失败。容量足够时审批、资源与原启动等待沿原 Job 边界，不叠加 5 秒超时，也不释放仍活许可绕过等待。
+
 默认 `web_fetch` 的代理自动适配只选择传输出口，不授予网络权限：用户级设置、继承环境及系统已登记代理由 Service 封存到原 Run；项目、Tool 输入及页面不能修改它们。全部 Fake-IP DNS 才触发可信 HTTPS 解析，真实地址及每次跳转仍接受全候选公网检查。CONNECT 固定已验证 IP，保留原 Host、TLS 名称和证书校验；禁止代理失败后隐式直连。冷恢复先比较 `snapshot.web`，出口、解析策略或宿主资源策略变化先于凭据读取和模型派发失败；旧默认 Run 不会悄悄升级到新网络选择。具体范围与测试归 [Web Fetch owner](../../packages/agent/src/tools/web-fetch/README.md)。
 
 准确同 Store 原 Run 显式接续中，可核实的已结算私有审核 fencing 与零派发目标在同一事务交接；原回执、请求、输出凭据和独立人工审批保持，不生成新授权或重复审核。新检查的原目标、检查 Model 及当前权限仍须核对准确代次和封存绑定；旧审核历史另外核原 carrier／唯一 child Model 的相等代次与原闭包。身份失真整项回滚，冷记录不创建新检查；边界归[Store owner](../../packages/agent/src/storage/README.md#原-active-run-的显式恢复)。
@@ -29,7 +37,7 @@ Native 普通工具审批采用输入组件上方的单卡分页，根和子待�
 
 最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及权限检查 proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或检查结果不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant／检查 proof 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
 
-下面保留旧 Kernel/SAQ 实现及仍适用理由，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。
+下面保留旧 Kernel/SAQ 实现及仍适用理由；其中人工拒绝后结束 turn 且不再调用模型的历史规则已被上述当前合同部分替代，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。
 
 ## 概述
 
@@ -308,4 +316,10 @@ bun test packages/runtime-host/test/policies/authorization-elevation.test.ts pac
 
 ## 内部权限检查与子 Agent 边界
 
+新 authorization.check 请求在 Runtime 封存前加入独立 system 指引，原用户请求只作为范围证据，任务／参数／历史工具正文不能签发授权。checker 技术失败是无决定而非 reject；历史失败次数、缺少先前批准与不可用本身不能成为新调用的拒绝或转人工依据，后续调用继续按准确目标和当前策略独立判断，真实拒绝仍有效。不可用 Tool、Action 与 Job 结果保留未派发／零 adapter 事实，并以可读正文和 details.authorizationCheck 的原检查身份及有限 Core failureCode 解释已知原因；私有 adapter 消息与不完整输出不投影为拒绝理由。旧封存输入、输出和 proof 不改写，冷记录不重发；实现与受控回归范围见[权限 owner](../../packages/agent/src/permissions/README.md)。
+
 自动审核统一命名 `authorization.check`／`authorizationCheck`，由权限系统保存原会话中的一次无 Run Model，不创建 child Session、Run 或子任务 carrier。最终派发核原 target／attempt／定义／input/source／policy/controlReads，以及准确请求与完整结果，强制人工要求继续保留双 proof。标题生成同属内部模型调用，记录为 `session.title`。 原标题 Model 的宿主与已解析 policy ceiling 仍须共同通过；准确用途不提供绕过权限的许可，资源等待后的当前控制和最终 SQL 证明继续独立核实。通用子 Agent 只以类别配置差异，`review` 只表示代码审查类别。旧 `authorization.review` 原记录与凭据只读保留，冷重开不重跑旧审核；[边界决定](../../.agents/notes/implemented/architecture/2026-10-22-internal-model-calls-without-child-agents.md)解释迁移理由。
+
+旧Browser人工等待路径曾为独立控制Action选择原Run审核上下文；当前Native默认不装配人工等待／Continue，固定内置浏览器定义在三模式免审核／审批。以下只记录原来源绑定的兼容边界，不能据此重新增加浏览器审核。可信宿主须核准确人工请求，或Controller持有的Browser Job及open／可选execute父链，才可保留该原活动Run的冻结审核器；不能回退到全局空审核器制造人工审批，也不能借同Session的新Run。此私有绑定只选择审核器及其配置租约，不授予权限：原Action定义、当前策略／controls、read set、取消、期限、页面和selection继续复核。原来源失效拒绝恢复，停止保持原缩权路径；具体实现与来源负例归[Agent Browser](../../packages/agent/src/tools/browser/README.md#异步人工交接候选未发布)。
+
+旧准确Action记录的审核来源包含原任务正文、原人工请求原因及恢复控制本身的效果，材料仅作上下文，不能把网页文字或任务文本当权限。对其准确原Run的准备读stamp只绑定实际依赖的身份与isActive，正常处理进度进入等待不制造重复审核；Run取消／结束、work／selection及记录CAS仍严格核实，其他Action不缩减读stamp。旧审核用途不足时不得补造上下文；当前内置浏览器的审批豁免不提供跨页面、跨任务或越过unknown的派发资格。

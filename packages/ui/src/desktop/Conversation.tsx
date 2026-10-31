@@ -1128,6 +1128,10 @@ export function Conversation({
           ? isLiveTurn(activity)
           : !turnActivity &&
             entry.groups.some((group) => group.some((message) => !message.settled)));
+      // A model/tool receipt does not end its owning Turn. A temporarily
+      // unavailable activity still retains its last known unfinished lifecycle.
+      const ongoing =
+        !terminalStatus && failureGroups.length === 0 && (isOngoingTurn(activity) || active);
       const failed =
         activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
       const cancelled =
@@ -1143,7 +1147,9 @@ export function Conversation({
         !failed &&
         !cancelled &&
         !aborted &&
-        (!!finalGroup || terminalStatus === 'completed' || activity?.status === 'completed');
+        ((!!finalGroup && !ongoing) ||
+          terminalStatus === 'completed' ||
+          activity?.status === 'completed');
       // The Run owns response activity across model/tool/approval phases. A
       // temporary observation failure is not a terminal fact. Only the last
       // entry for an exact Turn carries its indicator, outside process collapse.
@@ -1195,13 +1201,13 @@ export function Conversation({
       // confirmed. Its process closes once, then the reader's choice persists.
       const settled =
         !!terminalStatus ||
-        !!finalGroup ||
         failureGroups.length > 0 ||
-        ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '');
+        ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '') ||
+        (!!finalGroup && !ongoing);
       // Settlement regroups the final reply outside the process. Start a new
       // container so the old process cannot repaint during its exit animation.
       const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
-      const open = expanded[turnKey] ?? !settled;
+      const open = !settled || (expanded[turnKey] ?? false);
       if (showProcess && open) openTurns.push(turnKey);
       // Cold history and restored readings start at their full height. Replaying
       // the default-open process moves the transcript for the entire animation.
@@ -1248,28 +1254,35 @@ export function Conversation({
               key={turnKey}
               asChild
               open={open}
-              onOpenChange={(next) => onToggle(turnKey, next)}
+              disabled={!settled}
+              onOpenChange={settled ? (next) => onToggle(turnKey, next) : undefined}
             >
               <div
                 className="agent-turn-process"
                 data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
               >
                 <div className="agent-turn-summary-row">
-                  <CollapsibleTrigger asChild>
-                    <Button
-                      className="agent-turn-summary"
-                      variant="ghost"
-                      aria-label={`${finishedDuration === undefined ? label : `用时 ${formatTurnElapsed(finishedDuration)}`}，${open ? '收起' : '展开'}本轮处理过程`}
-                    >
+                  {settled ? (
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        className="agent-turn-summary"
+                        variant="ghost"
+                        aria-label={`${finishedDuration === undefined ? label : `用时 ${formatTurnElapsed(finishedDuration)}`}，${open ? '收起' : '展开'}本轮处理过程`}
+                      >
+                        {statusContent}
+                        <HugeiconsIcon
+                          className="agent-turn-chevron"
+                          icon={ArrowDown01Icon}
+                          aria-hidden="true"
+                          data-icon="inline-end"
+                        />
+                      </Button>
+                    </CollapsibleTrigger>
+                  ) : (
+                    <div className="agent-turn-summary agent-turn-summary-static" role="status">
                       {statusContent}
-                      <HugeiconsIcon
-                        className="agent-turn-chevron"
-                        icon={ArrowDown01Icon}
-                        aria-hidden="true"
-                        data-icon="inline-end"
-                      />
-                    </Button>
-                  </CollapsibleTrigger>
+                    </div>
+                  )}
                 </div>
                 <DeferredProcessContent
                   open={open}

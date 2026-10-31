@@ -30,3 +30,7 @@ Status: implemented
 ## Verification
 
 [自动审核回归](../../../../packages/agent/test/isolated/execution/authorization-check.test.ts)核原因交回、零I/O、独立后续审核、准入顺序、重复拒绝上限与同原Command零重放；[默认Service权限回归](../../../../apps/service/test/isolated/permission-configuration.test.ts)以真实默认装配、compatible SDK、SQLite和Files核占位写入被拒后继续读取并交付答复。当前结果与平台限制归[权限owner](../../../../packages/agent/src/permissions/README.md)和[Service owner](../../../../apps/service/README.md)。
+
+## Current relationship
+
+2026-10-29 的[工具结果与 Loop 决定](../architecture/2026-10-29-tool-results-preserve-agent-loop.md)部分替代本记录中人工 deny 终止原工作、Tool unknown 导致 Loop 硬退及五次同参失败硬上限的结论。人工拒绝仍保存准确 approval_denied 并停止同批后继效果，但原结果结算后由下一 Model 解释，不等同用户取消。自动拒绝只作用于准确未派发目标、反馈原原因、后续权限独立核实和禁止绕过的决定保持；明确用户取消、真实保存／authority 故障、未知效果与资源／恢复门禁保持。本文原决策和运行证据保留为当时事实，当前实现以新决定和负责文档为准。

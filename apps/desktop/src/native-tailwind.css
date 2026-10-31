@@ -1104,41 +1104,197 @@ html[data-native-window][data-platform="macos"]
 }
 
 .native-browser-page {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  container: native-browser / inline-size;
+}
+/* The independent Chrome owns only the header/toolbar strip, not an app viewport. */
+html[data-browser-chrome],
+html[data-browser-chrome] body,
+html[data-browser-chrome] #root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+}
+html[data-browser-chrome] .kite-client {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: transparent;
+}
+html[data-browser-chrome] .session-tabs {
+  container: native-browser / inline-size;
+}
+html[data-browser-chrome] .session-tabs-root {
+  flex: 0 0 auto;
+}
+.native-browser-annotations {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--background);
+  border-top: 1px solid var(--border);
+}
+.native-browser-annotations[hidden] {
+  display: none;
+}
+.native-browser-annotations > .agent-browser-panel {
+  flex: 1;
+  height: auto;
 }
 .native-browser-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 28px 28px 28px minmax(0, 1fr) max-content;
   flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
   align-items: center;
   gap: 3px;
   padding: 6px 8px;
 }
-.kite-client .native-browser-toolbar > .button {
+.kite-client .native-browser-toolbar .button[data-size="icon-sm"] {
   flex: none;
   width: 28px;
   height: 30px;
   min-height: 30px;
   padding: 5px;
 }
-.kite-client .native-browser-toolbar .native-browser-address {
-  flex: 1;
+.native-browser-tools,
+.native-browser-annotation-tools {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   min-width: 0;
+  flex: none;
+  white-space: nowrap;
+}
+.native-browser-annotation-tools[hidden] {
+  display: none;
+}
+.kite-client .native-browser-control-trigger {
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
+  height: 30px;
+  padding-inline: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.native-browser-tools-popover,
+.agent-browser-annotation-tools {
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  outline: none;
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+  font: 400 13px / 20px var(--font-ui);
+}
+.native-browser-tools-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(288px, calc(100vw - 24px));
+  max-height: var(--radix-popover-content-available-height);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.native-browser-tools-popover :where(p) {
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--muted-foreground);
+  font: inherit;
+}
+.native-browser-tools-popover .button {
+  box-sizing: border-box;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+}
+.agent-browser-annotation-tools .button {
+  color: inherit;
+}
+.native-browser-tools-popover .button:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+.native-browser-tools-popover .button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.native-browser-page-options {
+  width: min(220px, calc(100vw - 24px));
+  padding: 4px;
+  gap: 2px;
+}
+.native-browser-navigation-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.native-browser-toolbar [data-status="error"] {
+  color: var(--destructive);
+}
+@container native-browser (max-width: 359px) {
+  .native-browser-toolbar {
+    grid-template-columns: 28px minmax(0, 1fr) max-content;
+  }
+  .kite-client .native-browser-toolbar .native-browser-nav-history {
+    display: none;
+  }
+}
+@container native-browser (max-width: 279px) {
+  .native-browser-toolbar {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+  .kite-client .native-browser-toolbar .native-browser-nav-reload {
+    display: none;
+  }
+}
+.kite-client .native-browser-toolbar .native-browser-address {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   height: 32px;
   padding: 4px 10px;
   border: 1px solid transparent;
-  border-radius: var(--input-radius);
+  border-radius: 8px;
   background: var(--control-hover);
   color: var(--foreground);
   font: inherit;
-  font-size: var(--ui-text-size);
+  font-size: 13px;
 }
 .kite-client .native-browser-toolbar .native-browser-address::placeholder {
   color: var(--muted-foreground);
-  text-align: center;
 }
 .kite-client
   .native-browser-toolbar
@@ -1147,28 +1303,32 @@ html[data-native-window][data-platform="macos"]
   border-color: var(--input);
 }
 .native-browser-surface {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
   padding: 0 1px 1px;
+}
+.native-browser-start {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  padding: 24px 20px;
 }
 .native-browser-viewport {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
   overflow: hidden;
   border-radius: var(--radius);
   background: var(--page-background);
 }
 html[data-platform="macos"] .native-browser-viewport {
   border-radius: 0;
-}
-.native-browser-error {
-  width: 100%;
-  padding: 24px 20px;
-  color: var(--muted-foreground);
-  font-size: var(--ui-text-size);
-}
-.native-browser-error-message {
-  margin: 0 0 12px;
 }

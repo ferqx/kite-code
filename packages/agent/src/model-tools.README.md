@@ -24,6 +24,8 @@
 
 上下文估算和压缩同样使用公开名称、schema 与历史；原实测 token 基线和新增消息必须采用同一种表示，私有 `ToolCall.model` 不计入实际模型输入。持久取舍见[模型工具表面决定](../../../.agents/notes/implemented/architecture/2026-10-18-model-tool-presentation.md)。
 
+可信 `RunConfiguration.modelHiddenToolIds` 只收窄该 Run 的模型目录：Runtime 冻结工具副本并设置模型隐藏，内部原定义、版本和每次派发权限保持。Service 在新 Native 统一浏览器配置中用它隐藏原子依赖，同时公开 `browser_execute`；子任务继承与恢复依据原冻结配置，不从今天的默认目录改写旧 Run。调用者的普通 Tool 参数不能声明这个宿主配置。回归见[浏览器配置](../../../apps/service/test/isolated/browser-execution-configuration.test.ts)。
+
 ## 字段转换规则
 
 `snakeCase:true` 只转换 JSON Schema 明确声明的 `properties`，并同步该节点的 `required`；组合分支按本次实际实参选择，仅保留激活且存在的字段规则。`parameterNames` 使用内部字段点路径指定公开 key，例如 `offset → start_line`、`limit → max_lines`，数组元素配置路径用 `*`，实际调用记录具体元素索引，避免改变 opaque 兄弟元素。记录的路径是输入字段位置，不是对象内容的搜索替换。
@@ -51,11 +53,14 @@
 | `task.events/list` | `wait_agent_events`、`list_agents` | 事件使用 `after_seq/wait_ms`；列表使用 `agent_ids/after_seq/upper_seq/limit`；旧 Task 工具仅保内部注册，对模型隐藏 |
 | `planning.read/write/review/update` | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 只改模型名称和声明字段，原计划批准与版本 CAS 保持 |
 | `validation.define/check/rebind/request_waiver/auto_check` | `define_validation_checks`、`run_validation_checks`、`rebind_validation_checks`、`request_validation_waiver`、`check_file_changes` | 原实际执行、期待值、验证和 waiver 资格保持 |
-| `skills.load/resource` | `load_skill`、`read_skill_resource` | `id → skill_id` |
+| `browser.execute` | `browser_execute` | `code` 与简短动作 `description`；页面句柄、引用和操作 key 由 [Browser owner](tools/browser/README.md)核实，原子依赖在新 Native 默认目录中隐藏 |
+| `skills.load/resource` | `load_skill`、`read_skill_resource` | `id → skill_id`，可选 `version`；资源读取另含 `path`，不接受 `description` |
 | Workflow 六工具 | `activate_skill`、`read_skill_reference`、`complete_skill`、`verify_skill`、`repair_skill`、`decide_skill_verification` | 现有名称保持，业务 JSON 不改名 |
 | MCP 来源／连接／刷新／搜索 | `list_mcp_sources`、`connect_mcp_server`、`refresh_mcp_catalogue`、`search_mcp_tools` | 内置声明字段转 snake_case；来源目录与当前选中工具搜索分开 |
 | MCP 资源／提示 | `list_mcp_resources`、`read_mcp_resource`、`list_mcp_prompts`、`get_mcp_prompt` | 绑定字段转 snake_case，远端 `arguments` 保持 |
 | 动态 MCP Tool | `mcp_<server>_<remote>_<hash8>` | 来源和远端名称清理、转小写并限制片段长度，摘要绑定完整原身份；原远端 schema 与 RPC 名称/参数完全保留 |
+
+只有浏览器执行入口声明动作 `description`，沿既有 `model.requiredParameters` 对新模型调用必填，内部 schema 可选；长度为1–10个Unicode字符且不能全为空白，说明本次动作目的，不宣称成功。原输入与公开历史保留该字段，旧记录不补造，页面业务代码不消费它。两个 Skill 读取入口不再声明或要求执行描述；旧历史与封存请求保持原文。该字段不向 MCP／自定义工具注入或改写其业务参数，不升级 Tool／Protocol 版本。
 
 文件、Shell、Task 和 MCP 的完整参数、输出与生命周期分别归各 leaf README；本表不是另一份执行 schema。`search_content` 仍是字面文本搜索，公开名称不把它变成正则工具；MCP 搜索范围也不因改名扩大。
 

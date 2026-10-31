@@ -102,7 +102,10 @@ mock.module(${JSON.stringify(owned)}, () => ({
     assert.deepEqual(options.argv, []);
     assert.equal(options.env.AGENT_BROWSER_DAEMON, '1');
     assert.equal(options.env.AGENT_BROWSER_CDP, undefined);
-    assert.equal(options.env.AGENT_BROWSER_PLUGINS, undefined);
+    if(scenario.attachment){
+      const plugins=JSON.parse(options.env.AGENT_BROWSER_PLUGINS);assert.equal(plugins.length,1);assert.equal(plugins[0].name,'kite-native-page');assert.equal(plugins[0].args[0],'--eval');assert.ok(plugins[0].args[1].includes('directPage:true'));assert.ok(!plugins[0].args[1].includes('ws://'));assert.equal(options.env.AGENT_BROWSER_PROVIDER,'kite-native-page');
+      assert.equal(options.env.KITE_PAGE_CDP_URL,'ws://127.0.0.1:1234/kite-native/00000000-0000-0000-0000-00000000000100000000-0000-0000-0000-000000000002');
+    }else assert.equal(options.env.AGENT_BROWSER_PLUGINS, undefined);
     assert.equal(options.env.AWS_SECRET_ACCESS_KEY, undefined);
     assert.equal(options.env.AGENT_BROWSER_NO_WEBMCP, '1');
     assert.equal(statSync(options.cwd).mode & 511, 448);
@@ -133,6 +136,7 @@ mock.module(${JSON.stringify(owned)}, () => ({
         if(command.action==='url')return send({url:mode.navigationChanged&&requests.filter(x=>x.action==='url').length>1?'https://changed.example/':'https://example.test/'});
         if(command.action==='title')return send({title:'Example'});
         if(command.action==='fill')return send({value:command.value});
+        if(command.action==='launch'&&mode.attachment)return send({launched:true});
         if(command.action==='launch'){
           assert.equal(command.profile,join(options.cwd,'profile'));
           assert.equal(command.downloadPath,join(options.cwd,'downloads'));
@@ -258,6 +262,36 @@ await assert.rejects(transport.request({action:'fill',value:'not sent'},already.
 assert.equal(current.requests.filter(x=>x.value==='not sent').length,0);
 assert.deepEqual(await transport.close(),{confirmed:true});await transport.dispose();
 assert.equal(existsSync(current.directory),false);
+scenario={attachment:true};
+transport=createNativeBrowserTransport({...options,browserPath:'/must-not-launch-or-read-Chrome',attachment:{cdpUrl:'ws://127.0.0.1:1234/kite-native/00000000-0000-0000-0000-00000000000100000000-0000-0000-0000-000000000002'}},context());
+await transport.ready;await transport.request({action:'launch',headless:true,engine:'chrome',webmcp:false},signal());
+const launch=current.requests.find(value=>value.action==='launch');assert.equal(launch.provider,'kite-native-page');assert.equal(launch.profile,undefined);assert.equal(launch.args,undefined);assert.ok(launch.executablePath.endsWith('/standalone-browser-disabled'));await transport.dispose();
+const cdpUrl='ws://127.0.0.1:1234/kite-native/00000000-0000-0000-0000-00000000000100000000-0000-0000-0000-000000000002';
+scenario={attachment:true};let metadataReads=0;
+transport=createNativeBrowserTransport({...options,attachment:{cdpUrl,readPageState:async observedSignal=>{assert.equal(observedSignal.aborted,false);metadataReads++;return{url:'https://owned.test/current',title:'Main actual title'};}}},context());
+await transport.ready;await transport.request({action:'launch',headless:true,engine:'chrome',webmcp:false},signal());
+const ownedFrame=await transport.capture(signal());
+assert.equal(metadataReads,2,'one atomic Main state before and after capture');
+assert.equal(ownedFrame.url,'https://owned.test/current');assert.equal(ownedFrame.title,'Main actual title');
+assert.equal(current.requests.filter(x=>['url','title'].includes(x.action)).length,0,'capture never asks the daemon to evaluate page metadata');
+assert.equal(current.requests.filter(x=>x.action==='screenshot').length,1);
+assert.ok(!JSON.stringify(current.requests).includes('readPageState'),'the trusted callback is never serialized');
+await transport.dispose();
+scenario={attachment:true};metadataReads=0;
+transport=createNativeBrowserTransport({...options,attachment:{cdpUrl,readPageState:async()=>({url:++metadataReads===1?'https://owned.test/before':'https://owned.test/after',title:'Current'})}},context());
+await transport.ready;await assert.rejects(transport.capture(signal()),/capture_navigation_changed/);
+assert.equal(current.requests.filter(x=>['url','title'].includes(x.action)).length,0);await transport.dispose();
+scenario={attachment:true};let finishOwnedRead;
+transport=createNativeBrowserTransport({...options,attachment:{cdpUrl,readPageState:()=>new Promise(resolve=>{finishOwnedRead=resolve;})}},context());
+await transport.ready;const ownedReadAbort=new AbortController(),ownedPending=transport.capture(ownedReadAbort.signal);
+await new Promise(resolve=>queueMicrotask(resolve));assert.equal(typeof finishOwnedRead,'function');
+ownedReadAbort.abort();finishOwnedRead({url:'https://owned.test/late',title:'Late'});
+await assert.rejects(ownedPending);assert.equal(current.requests.filter(x=>x.action==='screenshot').length,0,'a cancelled late Main read cannot start a screenshot');await transport.dispose();
+scenario={attachment:true};
+transport=createNativeBrowserTransport({...options,attachment:{cdpUrl,readPageState:async()=>({url:'https://owned.test/',title:'Title',foreign:true})}},context());
+await transport.ready;await assert.rejects(transport.capture(signal()),/metadata_invalid/);assert.equal(current.requests.filter(x=>x.action==='screenshot').length,0);await transport.dispose();
+const beforeInvalidAttachment=starts;
+assert.throws(()=>createNativeBrowserTransport({...options,attachment:{cdpUrl:'ws://outside.invalid/foreign-target'}},context()),/attachment_invalid/);assert.equal(starts,beforeInvalidAttachment);
 for(const action of ['lost','invalid','mismatch','large','invalid_utf','invalid_envelope','trailing']){
   transport=await start();
   await assert.rejects(transport.request({action},signal()),e=>e instanceof BrowserTransportError&&e.dispatched);

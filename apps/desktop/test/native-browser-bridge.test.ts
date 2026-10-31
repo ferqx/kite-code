@@ -1,9 +1,85 @@
 import { expect, test } from 'bun:test';
 import {
   browserAddress,
+  isNativeBrowserFrozenFrame,
+  isNativeBrowserLayoutFrameAck,
+  isNativeBrowserPresentationFrame,
+  isNativeBrowserRestoreResult,
   isNativeBrowserState,
+  type NativeBrowserLayout,
+  parseNativeBrowserMenuRequest,
   parseNativeBrowserRequest,
+  projectNativeBrowserBounds,
 } from '../src/native-browser-bridge';
+
+test('Root draw witnesses and asynchronous frozen pixels stay finite and bound to a presentation', () => {
+  const scope = { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 2 };
+  const witness = { key: '00112233445566778899aabb', step: 1 as const };
+  const panel = (size: number) => ({
+    size,
+    min: 0,
+    minUnit: 'px' as const,
+    max: 100,
+    maxUnit: '%' as const,
+    preserve: 'relative' as const,
+    collapsible: false,
+  });
+  const request = {
+    action: 'present' as const,
+    id: 'page',
+    scope,
+    presentationRevision: 1,
+    witness,
+    bounds: { x: 201, y: 100, width: 599, height: 500, radius: 0 },
+    layout: {
+      windowWidth: 800,
+      windowHeight: 600,
+      insetLeft: 0,
+      insetRight: 0,
+      groups: [
+        {
+          left: 0,
+          right: 0,
+          gap: 1,
+          panels: [panel(200), panel(599)] as const,
+        },
+      ],
+    },
+  };
+  expect(parseNativeBrowserRequest(request)).toEqual(request);
+  for (const value of [
+    { ...request, witness: { ...witness, step: 0 } },
+    { ...request, witness: { ...witness, key: 'not-a-paint' } },
+    { ...request, witness: { ...witness, target: 'other' } },
+    { ...request, layout: undefined },
+    { ...request, bounds: null },
+    { ...request, scope: undefined },
+    { ...request, frozen: '/private/page.png' },
+  ])
+    expect(() => parseNativeBrowserRequest(value)).toThrow();
+  const frozen = {
+    key: '00112233445566778899aabbccddeeff',
+    mimeType: 'image/png',
+    data: 'iVBORw0KGgo=',
+    width: 1,
+    height: 1,
+    cssWidth: 320,
+    cssHeight: 500,
+    rootZoom: 1.25,
+  };
+  const ack = { id: 'page', scope, presentationRevision: 1, key: witness.key, step: 0, frozen };
+  expect(isNativeBrowserLayoutFrameAck(ack)).toBe(true);
+  for (const value of [
+    { ...ack, step: 3 },
+    { ...ack, scope: { ...scope, generation: 0 } },
+    { ...ack, witness: true },
+    { ...ack, key: 'old' },
+    { ...ack, frozen: { ...frozen, data: 'file:///secret' } },
+  ])
+    expect(isNativeBrowserLayoutFrameAck(value)).toBe(false);
+  expect(isNativeBrowserFrozenFrame({ ...frozen, width: 20000 })).toBe(false);
+  expect(isNativeBrowserFrozenFrame({ ...frozen, data: 'x'.repeat(5600001) })).toBe(false);
+});
 
 test('browser addresses accept normal websites and local development URLs; plain text becomes an explicit search', () => {
   expect(browserAddress(' example.com/docs ')).toBe('https://example.com/docs');
@@ -33,6 +109,11 @@ test('local files, external handlers, credentials and malformed addresses cannot
     expect(() => browserAddress(value)).toThrow();
 });
 test('browser requests are closed and finite before allocating any native view', () => {
+  const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 2 };
+  expect(parseNativeBrowserRequest({ action: 'restore', scope })).toEqual({
+    action: 'restore',
+    scope,
+  });
   expect(
     parseNativeBrowserRequest({
       action: 'navigate',
@@ -61,6 +142,11 @@ test('browser requests are closed and finite before allocating any native view',
     { action: 'present', id: 'b', bounds: { ...bounds, width: -1 } },
     { action: 'present', id: 'b', bounds: { ...bounds, secret: true } },
     { action: 'executeJavaScript', id: 'b' },
+    { action: 'restore', id: 'b' },
+    { action: 'restore' },
+    { action: 'restore', scope: { ...scope, sessionId: '' } },
+    { action: 'restore', scope: { ...scope, generation: 0 } },
+    { action: 'restore', sessionId: 'foreign' },
   ])
     expect(() => parseNativeBrowserRequest(value)).toThrow();
 });
@@ -83,4 +169,202 @@ test('only bounded display metadata crosses the browser event channel', () => {
     { ...state, id: '' },
   ])
     expect(isNativeBrowserState(value)).toBe(false);
+});
+
+test('scoped multi-page restore remains compatible with the original single-page result and rejects invalid inventories', () => {
+  const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 2 };
+  const page = {
+    id: 'original',
+    url: 'https://example.test/',
+    title: 'Original',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  };
+  const other = { ...page, id: 'other', title: 'Other' };
+  expect(isNativeBrowserRestoreResult({ scope, page })).toBe(true);
+  expect(isNativeBrowserRestoreResult({ scope, page: null })).toBe(true);
+  expect(
+    isNativeBrowserRestoreResult({ scope, page, pages: [page, other], activeId: page.id }),
+  ).toBe(true);
+  expect(
+    isNativeBrowserRestoreResult({ scope, page, pages: [page, other], activeId: other.id }),
+  ).toBe(true);
+  expect(
+    isNativeBrowserRestoreResult({
+      scope,
+      page,
+      pages: [page, other],
+      activeId: other.id,
+      reveal: true,
+    }),
+  ).toBe(true);
+  expect(isNativeBrowserRestoreResult({ scope, page: null, pages: [] })).toBe(true);
+  for (const value of [
+    { scope, page, pages: [other] },
+    { scope, page, pages: [page, page] },
+    {
+      scope,
+      page,
+      pages: Array.from({ length: 9 }, (_, index) => ({ ...page, id: `page-${index}` })),
+    },
+    { scope, page, activeId: other.id },
+    { scope, page: null, pages: [page] },
+    { scope, page, pages: [page], permission: true },
+    { scope, page, reveal: true },
+    { scope, page: null, activeId: page.id, reveal: true },
+    { scope, page, activeId: page.id, reveal: false },
+  ])
+    expect(isNativeBrowserRestoreResult(value)).toBe(false);
+});
+
+test('presentation layout accepts only the current bounded two-panel contract', () => {
+  const panel = {
+    size: 400,
+    min: 240,
+    minUnit: 'px' as const,
+    max: 85,
+    maxUnit: '%' as const,
+    preserve: 'relative' as const,
+    collapsible: true,
+  };
+  const layout: NativeBrowserLayout = {
+    windowWidth: 1000,
+    windowHeight: 800,
+    insetLeft: 1,
+    insetRight: 1,
+    groups: [
+      {
+        left: 0,
+        right: 0,
+        gap: 1,
+        panels: [{ ...panel, size: 599, min: 360, max: 100, collapsible: false }, panel],
+      },
+    ],
+  };
+  const bounds = { x: 601, y: 92, width: 398, height: 650, radius: 8 };
+  const request = { action: 'present' as const, id: 'browser', bounds, layout };
+  expect(parseNativeBrowserRequest(request)).toEqual(request);
+  for (const bad of [
+    { ...layout, secret: true },
+    { ...layout, windowWidth: Number.NaN },
+    { ...layout, windowHeight: 0 },
+    { ...layout, insetLeft: -1 },
+    { ...layout, insetRight: 32769 },
+    { ...layout, groups: [] },
+    { ...layout, groups: Array(1) },
+    { ...layout, groups: [{ ...layout.groups[0], panels: Object.assign(Array(2), { 1: panel }) }] },
+    { ...layout, groups: Array(3).fill(layout.groups[0]) },
+    { ...layout, groups: [{ ...layout.groups[0], orientation: 'vertical' }] },
+    { ...layout, groups: [{ ...layout.groups[0], gap: Number.POSITIVE_INFINITY }] },
+    ...[
+      { ...panel, size: -1 },
+      { ...panel, minUnit: 'rem' },
+      { ...panel, max: 101 },
+      { ...panel, preserve: 'guessed' },
+      { ...panel, collapsible: 1 },
+      { ...panel, extra: true },
+    ].map((badPanel) => ({
+      ...layout,
+      groups: [{ ...layout.groups[0], panels: [panel, badPanel] }],
+    })),
+    { ...layout, groups: [{ ...layout.groups[0], panels: [panel] }] },
+  ])
+    expect(() => parseNativeBrowserRequest({ ...request, layout: bad })).toThrow();
+  expect(() => parseNativeBrowserRequest({ ...request, bounds: null })).toThrow();
+  expect(projectNativeBrowserBounds(bounds, layout, Number.NaN, 800)).toBeUndefined();
+  expect(projectNativeBrowserBounds(bounds, layout, 1, 800)).toBeUndefined();
+});
+
+test('private presentation capture accepts no scope/script input and only bounded PNG display replies', () => {
+  expect(parseNativeBrowserRequest({ action: 'capturePresentation', id: 'page' })).toEqual({
+    action: 'capturePresentation',
+    id: 'page',
+  });
+  for (const extra of [{ scope: {} }, { script: '1' }, { proof: 'model-image' }])
+    expect(() =>
+      parseNativeBrowserRequest({ action: 'capturePresentation', id: 'page', ...extra }),
+    ).toThrow();
+  const request = {
+    action: 'present' as const,
+    id: 'page',
+    bounds: null,
+    presentationKey: 'opaque-key',
+  };
+  expect(parseNativeBrowserRequest(request)).toEqual(request);
+  expect(() =>
+    parseNativeBrowserRequest({
+      ...request,
+      bounds: { x: 0, y: 0, width: 2, height: 2, radius: 0 },
+    }),
+  ).toThrow();
+  const value = {
+    id: 'page',
+    key: 'opaque-key',
+    scope: { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 },
+    cssX: 0,
+    cssY: 0,
+    cssWidth: 800,
+    cssHeight: 600,
+    frame: { mimeType: 'image/png', data: 'AA==', width: 1600, height: 1200 },
+  };
+  expect(isNativeBrowserPresentationFrame(value)).toBe(true);
+  for (const bad of [
+    { ...value, proof: 'imageRef' },
+    { ...value, scope: { ...value.scope, generation: 0 } },
+    { ...value, cssWidth: 0 },
+    { ...value, frame: { ...value.frame, mimeType: 'image/svg+xml' } },
+    { ...value, frame: { ...value.frame, data: 'https://remote/image' } },
+    { ...value, frame: { ...value.frame, width: 99999 } },
+  ])
+    expect(isNativeBrowserPresentationFrame(bad)).toBe(false);
+});
+
+test('native popup accepts only a bounded finite menu on one exact selection', () => {
+  const value = {
+    requestId: 'menu-1',
+    id: 'page',
+    scope: { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 },
+    incarnation: 'inc',
+    navigation: 0,
+    x: 20,
+    y: 80,
+    items: [
+      { action: 'handoff', enabled: true },
+      { action: 'close', enabled: false },
+    ],
+    details: ['Original reason'],
+  } as const;
+  expect(parseNativeBrowserMenuRequest(value)).toEqual(value);
+  for (const invalid of [
+    { ...value, script: 'run()' },
+    { ...value, scope: { ...value.scope, viewSelection: -1 } },
+    { ...value, items: [{ action: 'resume', enabled: true }] },
+    { ...value, items: [{ action: 'close', enabled: 'yes' }] },
+    {
+      ...value,
+      items: [
+        { action: 'close', enabled: true },
+        { action: 'close', enabled: true },
+      ],
+    },
+    { ...value, details: ['x'.repeat(16385)] },
+    { ...value, x: Number.NaN },
+  ])
+    expect(() => parseNativeBrowserMenuRequest(invalid)).toThrow('invalid_browser_request');
+});
+
+test('internal layout revisions are positive finite integers and cannot bypass strict request fields', () => {
+  const value = { action: 'present', id: 'page', bounds: null, presentationRevision: 2 } as const;
+  expect(parseNativeBrowserRequest(value)).toEqual(value);
+  for (const presentationRevision of [0, -1, 1.5, Infinity, '2'])
+    expect(() => parseNativeBrowserRequest({ ...value, presentationRevision })).toThrow(
+      'invalid_browser_request',
+    );
+  expect(() =>
+    parseNativeBrowserRequest({
+      ...value,
+      scope: { storeId: 'store', sessionId: 'session', generation: 0, viewSelection: 1 },
+    }),
+  ).toThrow('invalid_browser_request');
 });

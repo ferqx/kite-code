@@ -34,6 +34,13 @@ export type AgentBrowserView = {
   annotations: AgentBrowserAnnotation[];
   selectedAnnotation: AgentBrowserAnnotation | null;
   error?: string;
+  humanRequest?: string;
+  humanPending?: {
+    requestId: string;
+    revision: string;
+    state: 'starting' | 'pending' | 'responding' | 'resolved' | 'unknown' | 'expired' | 'finished';
+    expiresAt: number;
+  };
 };
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -45,6 +52,24 @@ const revision = (value: unknown): value is string =>
   typeof value === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(value);
 const finite = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
+function humanPending(value: unknown) {
+  const item = object(value);
+  return (
+    !!item &&
+    Object.keys(item).every((key) =>
+      ['requestId', 'revision', 'state', 'expiresAt'].includes(key),
+    ) &&
+    typeof item.requestId === 'string' &&
+    /^[A-Za-z0-9_.-]{1,128}$/.test(item.requestId) &&
+    revision(item.revision) &&
+    typeof item.state === 'string' &&
+    ['starting', 'pending', 'responding', 'resolved', 'unknown', 'expired', 'finished'].includes(
+      item.state,
+    ) &&
+    integer(item.expiresAt) &&
+    Number(item.expiresAt) > 0
+  );
+}
 function annotation(value: unknown): value is AgentBrowserAnnotation {
   const item = object(value),
     box = object(item?.box);
@@ -92,6 +117,12 @@ export function readAgentBrowserView(view: PublicView): AgentBrowserView {
     typeof value.url !== 'string' ||
     typeof value.title !== 'string' ||
     (value.error !== undefined && typeof value.error !== 'string') ||
+    (value.humanRequest !== undefined &&
+      (typeof value.humanRequest !== 'string' ||
+        !value.humanRequest.trim() ||
+        value.humanRequest.length > 1000 ||
+        value.humanRequest.includes('\0'))) ||
+    (value.humanPending !== undefined && !humanPending(value.humanPending)) ||
     !Array.isArray(value.annotations) ||
     value.annotations.length > 1000 ||
     !value.annotations.every(annotation) ||

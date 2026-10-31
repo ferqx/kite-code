@@ -251,3 +251,117 @@ test('unknown diagnostic is status-only, idempotent, not acceptance; wrong Store
     await f.close();
   }
 });
+
+test('a custom exact receipt may wait after terminal settlement; foreign facts and changed revisions never bind it', async () => {
+  for (const damage of ['none', 'parent', 'work', 'selection', 'revision'] as const) {
+    const f = await fixture();
+    try {
+      const ref = await f.store.ensureOperation({
+        ...f.ensure,
+        resultRequirement: undefined,
+        resultRequirementSchema: undefined,
+      });
+      const execution = (await f.store.getExecution(ref.executionId!))!;
+      const recordKey = `run/${f.run.id}/custom-receipt`;
+      const record = await f.store.writeExtensionRecord({
+        ...f.write,
+        sessionId: 's',
+        extensionId: 'fixture',
+        originCommandId: 'work',
+        originExecutionId: 'parent',
+        write: {
+          key: recordKey,
+          expectedRevision: null,
+          contentType: 'fixture/custom-receipt',
+          contentVersion: 1,
+          executable: true,
+          value: {
+            kind: 'custom_receipt',
+            executionId: execution.id,
+            sessionId: 's',
+            runId: f.run.id,
+            parentExecutionId: damage === 'parent' ? 'foreign-parent' : execution.parentExecutionId,
+            originStoreId: f.write.expectedStoreId,
+            originCommandId: execution.originCommandId,
+            rootWorkCommandId: damage === 'work' ? 'foreign-work' : execution.rootWorkCommandId,
+            rootWorkSeq: execution.rootWorkSeq,
+            contextSelectionId:
+              damage === 'selection'
+                ? 'foreign-selection'
+                : (await f.store.getSession('s'))!.contextSelectionId,
+          },
+        },
+      });
+      await f.store.registerRunRequirements({
+        ...f.write,
+        runId: f.run.id,
+        requirements: [
+          {
+            extensionId: 'fixture',
+            definitionVersion: '1',
+            requirementId: 'custom-receipt',
+            recordKey,
+            revision: record.revision,
+            phase: 'completion',
+            sessionId: 's',
+            runId: f.run.id,
+          },
+        ],
+      });
+      if (damage === 'revision')
+        await f.store.writeExtensionRecord({
+          ...f.write,
+          sessionId: 's',
+          extensionId: 'fixture',
+          originCommandId: 'work',
+          originExecutionId: 'parent',
+          write: {
+            key: recordKey,
+            expectedRevision: record.revision,
+            contentType: record.contentType,
+            contentVersion: 1,
+            executable: true,
+            value: record.value,
+          },
+        });
+      await f.store.markDispatching({
+        ...f.write,
+        executionId: execution.id,
+        authorization: {
+          allowed: true,
+          revision: '1',
+          definitionVersion: '1',
+          inputDigest: await semanticDigest(execution.input),
+        },
+        requirements: [],
+        freshness: { checked: true, source: { kind: 'model_decision', modelExecutionId: 'fixed' } },
+      });
+      await f.store.finishExecution({
+        ...f.write,
+        executionId: execution.id,
+        status: 'succeeded',
+        result: { outcome: 'succeeded', content: 'Original receipt; not yet included' },
+        requirements: [],
+      });
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      const waiting = f.store.setRunResultWait({
+        ...f.write,
+        runId: f.run.id,
+        executionIds: [execution.id],
+      });
+      if (damage === 'none') {
+        expect(await waiting).toMatchObject({
+          status: 'waiting_execution',
+          isActive: true,
+          waitingForResults: [execution.id],
+        });
+        expect((await f.store.getExecution(execution.id))!.resultAcceptance).toBeNull();
+      } else {
+        await rejects(waiting, 'required_result_unverifiable');
+        expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      }
+    } finally {
+      await f.close();
+    }
+  }
+});

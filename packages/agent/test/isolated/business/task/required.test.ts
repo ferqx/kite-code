@@ -1328,7 +1328,7 @@ for (const domain of ['attached_tool', 'independent_job'] as const)
         true,
       );
       expect(carrier.status).toBe(domain === 'attached_tool' ? 'outcome_unknown' : 'succeeded');
-      expect(childView.runs[0]?.status).toBe(domain === 'attached_tool' ? 'failed' : 'completed');
+      expect(childView.runs[0]?.status).toBe('completed');
       expect(view.runs[0]?.status).toBe(domain === 'attached_tool' ? 'failed' : 'completed');
       const selected = await store.getSelectedContext({ expectedStoreId, sessionId: 'root' });
       expect(selected.resultSources).toHaveLength(1);
@@ -1342,8 +1342,8 @@ for (const domain of ['attached_tool', 'independent_job'] as const)
       if (domain === 'attached_tool') {
         expect(carrier.resultAcceptance).toBeNull();
         expect((carrier.result as Record<string, Json>).details).toMatchObject({
-          status: 'failed',
-          originalOutcome: 'failed',
+          status: 'completed',
+          originalOutcome: 'succeeded',
           childSettlement: 'attached_effect_unknown',
         });
         expect((selected.resultSources[0]!.result as Record<string, Json>).outcome).toBe(

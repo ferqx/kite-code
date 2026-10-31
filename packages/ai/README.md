@@ -8,6 +8,8 @@
 
 2026-10-24，Windows x64／Bun1.4.3、主仓库 `60a2d984c` 加当前改动，`bun test packages/ai/test/input-images.test.ts` 整文件10项100断言通过。Chat Completions／Responses 的受控 HTTP 400 视觉拒绝响应，核实际 SDK 请求保留准确工具调用、结果和页图配对，只发送一次请求，返回 `model_transport_failed` 且不泄漏供应商错误正文；没有成功事件、纯文本降级或协议重试。此负例验证本地错误合同，不冒充真实外部供应商拒绝资格。
 
+[浏览器工具图像回归](test/browser-tool-images.test.ts)通过真实 Agent Runtime 取得两个并行工具各自的 PNG Artifact，再捕获 Responses 与 Chat Completions 的完整请求，核准确调用配对、字节及非人类批准标记；视觉拒绝只发一次请求、不降级。浏览器复用既有 `ToolResult.modelImages` 合同，本次未升级协议或转换版本；真实外部模型是否看到及理解页面另按 [Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)验收。
+
 构建使用 Bun splitting 内联[明确声明的 SDK 普通 JS 依赖](bundled-dependencies.ts)，中立入口与 SDK 入口仍独立导出。Terminal 打包扫描全部生成模块，拒绝声明已内联的残余 bare import，并保存安装声明图的原 package manifest 摘要与许可全文；不改变实际 Provider 尝试、取消或用量合同。跨包打包取舍归[Windows 闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
 
 `@kite-ai/ai` 负责可移植的模型请求、流事件、用量和取消类型，不负责 Session、Run、执行权限、持久化或 HTTP。导入这个包不打开资源。完整模型响应是否可以派发工具由 Agent Loop 决定；不完整响应不能作为执行授权。

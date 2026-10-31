@@ -95,7 +95,12 @@ function history(tool: Execution): { model: Message; receipt: Message; saved: Ex
 async function fixture(
   verify: (surface: {
     host: HTMLElement;
-    render: (message: DesktopMessage | readonly DesktopMessage[] | undefined) => Promise<void>;
+    readerCalls: readonly string[];
+    render: (
+      message: DesktopMessage | readonly DesktopMessage[] | undefined,
+      grouped?: boolean,
+      expanded?: boolean,
+    ) => Promise<void>;
   }) => Promise<void>,
 ) {
   const dom = new JSDOM('<div id="root"/>', { pretendToBeVisual: true });
@@ -109,10 +114,12 @@ async function fixture(
   });
   const host = dom.window.document.getElementById('root')!;
   const root = createRoot(host);
+  const readerCalls: string[] = [];
   try {
     await verify({
       host,
-      render: async (message) => {
+      readerCalls,
+      render: async (message, grouped = false, expanded = grouped) => {
         const messages = !message
           ? []
           : Array.isArray(message)
@@ -120,13 +127,16 @@ async function fixture(
             : [message as DesktopMessage];
         await act(async () =>
           root.render(
-            messages.map((message) => (
+            (grouped ? [messages] : messages.map((message) => [message])).map((group) => (
               <ToolActivity
-                key={message.presentationKey ?? message.id}
-                messages={[message]}
-                expanded={false}
+                key={group[0]?.presentationKey ?? group[0]?.id}
+                messages={group}
+                expanded={expanded}
                 onToggle={() => {}}
-                renderChildren={() => null}
+                renderChildren={(id) => {
+                  readerCalls.push(id);
+                  return null;
+                }}
               />
             )),
           ),
@@ -155,6 +165,217 @@ function live(tool: Execution, projected = false) {
     [history(tool).model],
   ).find((entry) => nativeLiveToolPresentationReady(entry, []))?.message;
 }
+
+test('expanded tool groups show exact Skill identities and browser purposes in their original rows', async () => {
+  await fixture(async ({ host, render }) => {
+    const purposes = ['加载浏览器技能', '读取浏览器指南', '打开天气网页', '读取北京天气'];
+    const ids = ['skills.load', 'skills.resource', 'browser.execute', 'browser.execute'];
+    const messages = purposes.map((description, index) => {
+      const tool = {
+        ...execution(ids[index]!, '1', {
+          description,
+          ...(index < 2 ? { id: 'computer-use' } : { code: 'PRIVATE CODE' }),
+          ...(index === 1 ? { path: 'references/browser-api.md' } : {}),
+        }),
+        id: `group-tool-${index}`,
+        toolCallId: `group-call-${index}`,
+      };
+      const { model, receipt, saved } = history(tool);
+      const fact = nativeToolMessageFact({
+        execution: saved,
+        message: receipt,
+        messages: [model, receipt],
+        sessionId: 'child',
+      })!;
+      return desktopToolMessage(fact, `group-row-${index}`, receipt.content);
+    });
+    await render(messages, true);
+    expect([...host.querySelectorAll('.tool-step-target')].map((node) => node.textContent)).toEqual(
+      ['computer-use', 'computer-use · references/browser-api.md', ...purposes.slice(2)],
+    );
+    expect(
+      [...host.querySelectorAll('.tool-activity-title')].map((node) => node.textContent),
+    ).toEqual(['使用工具', '加载技能', '读取技能资料', '浏览器操作', '浏览器操作']);
+    expect(host.querySelectorAll('.file-link')).toHaveLength(0);
+  });
+});
+
+test('browser rows hide ordinary execution data even with restored expanded state and retain original errors', async () => {
+  await fixture(async ({ host, render, readerCalls }) => {
+    const base: DesktopMessage = {
+      id: 'tool:browser',
+      role: 'tool',
+      toolName: 'browser_execute',
+      title: '浏览器操作',
+      target: '读取北京天气',
+      text: '{"value":null,"output":"PRIVATE AX TREE [ref=e1]"}',
+      settled: false,
+    };
+    for (const status of ['queued', 'running', 'completed', 'cancelled'] as const) {
+      await render(
+        { ...base, status, settled: status !== 'queued' && status !== 'running' },
+        false,
+        true,
+      );
+      expect(host.querySelector('.tool-activity-chevron')).toBeNull();
+      expect(host.querySelector('.tool-detail')).toBeNull();
+      expect(host.querySelector('button[aria-expanded]')).toBeNull();
+      expect(host.textContent).toContain('读取北京天气');
+      expect(host.textContent).not.toContain('PRIVATE AX TREE');
+    }
+    expect(readerCalls).toEqual([]);
+    for (const status of ['failed', 'unknown'] as const) {
+      const error = `Original ${status}: the page was closed. Observe a new page; do not replay unknown actions.`;
+      await render({ ...base, status, text: error, settled: true }, false, true);
+      expect(host.querySelector('button[aria-expanded="true"]')).not.toBeNull();
+      expect(host.querySelector('.tool-detail')?.textContent).toBe(error);
+      expect(host.textContent).toContain(status === 'unknown' ? '结果未知' : '失败');
+    }
+    await render({ ...base, status: 'completed', settled: true }, false, true);
+    expect(host.querySelector('.tool-detail')).toBeNull();
+    expect(host.textContent).not.toContain('Original unknown');
+    expect(host.textContent).not.toContain('PRIVATE AX TREE');
+  });
+});
+
+test('generic Skill arguments retain identity and resource path without the call purpose', async () => {
+  await fixture(async ({ host, render }) => {
+    for (const [toolName, path, target] of [
+      ['load_skill', undefined, 'computer-use'],
+      [
+        'read_skill_resource',
+        'references/browser-api.md',
+        'computer-use · references/browser-api.md',
+      ],
+    ] as const) {
+      await render({
+        id: `tool:${toolName}`,
+        role: 'tool',
+        toolName,
+        arguments: { skill_id: 'computer-use', ...(path ? { path } : {}), description: '查看天气' },
+        text: '',
+        status: 'running',
+        settled: false,
+      });
+      expect(host.querySelector('.tool-step-target')?.textContent).toBe(target);
+      expect(host.querySelector('.tool-step-target')?.getAttribute('title')).toBe(target);
+    }
+  });
+});
+
+test.each([
+  [
+    'browser.execute',
+    { code: 'PRIVATE CODE', description: '读取北京天气' },
+    '浏览器操作',
+    '读取北京天气',
+  ],
+  [
+    'skills.load',
+    { id: 'computer-use', description: '加载浏览器技能' },
+    '加载技能',
+    'computer-use',
+  ],
+  [
+    'skills.resource',
+    { id: 'computer-use', path: 'references/browser-api.md', description: '读取浏览器指南' },
+    '读取技能资料',
+    'computer-use · references/browser-api.md',
+  ],
+] as const)('%s target stays readable through live, readonly child and saved receipt handoff', async (id, input, label, purpose) => {
+  await fixture(async ({ host, render }) => {
+    const tool = execution(id, '1', input);
+    for (const projected of [false, true])
+      for (const status of ['planned', 'running'] as const) {
+        await render(live({ ...tool, status }, projected));
+        expect(host.querySelector('.tool-activity-title')?.textContent).toBe(label);
+        expect(host.querySelector('.tool-step-target')?.textContent).toBe(purpose);
+        expect(host.querySelector('.tool-step-target')?.getAttribute('title')).toBe(purpose);
+        expect(host.textContent).not.toContain('PRIVATE CODE');
+        expect(host.querySelector('.file-link')).toBeNull();
+      }
+    const { model, receipt, saved } = history(tool);
+    const fact = nativeToolMessageFact({
+      execution: saved,
+      message: receipt,
+      messages: [model, receipt],
+      sessionId: 'child',
+    })!;
+    await render(desktopToolMessage(fact, receipt.id, receipt.content));
+    expect(host.querySelector('.tool-activity-title')?.textContent).toBe(label);
+    expect(host.querySelector('.tool-step-target')?.textContent).toBe(purpose);
+
+    const unknown = {
+      ...saved,
+      status: 'outcome_unknown' as const,
+      result: { outcome: 'outcome_unknown' as const, content: receipt.content },
+    };
+    const unknownFact = nativeToolMessageFact({
+      execution: unknown,
+      message: receipt,
+      messages: [model, receipt],
+      sessionId: 'child',
+    })!;
+    await render(desktopToolMessage(unknownFact, receipt.id, receipt.content));
+    expect(host.textContent).toContain('结果未知');
+    expect(host.querySelector('.tool-step-target')?.textContent).toBe(purpose);
+
+    model.toolCalls = [
+      {
+        id: tool.toolCallId!,
+        name: id,
+        arguments: JSON.stringify({
+          ...input,
+          description: '另外一个目的',
+          ...(id === 'skills.load' ? { id: 'other-skill' } : {}),
+          ...(id === 'skills.resource' ? { path: 'references/other.md' } : {}),
+        }),
+      },
+    ];
+    const conflict = nativeToolMessageFact({
+      execution: saved,
+      message: receipt,
+      messages: [model, receipt],
+      sessionId: 'child',
+    })!;
+    expect(conflict.target).toBeUndefined();
+    await render(
+      completeNativeToolMessages(
+        [desktopToolMessage(conflict, receipt.id, receipt.content)],
+        [conflict],
+      ),
+    );
+    expect(host.querySelector('.tool-activity')).toBeNull();
+  });
+});
+
+test('legacy browser and Skill rows keep readable names without inventing a purpose or exposing code', async () => {
+  await fixture(async ({ host, render }) => {
+    for (const [id, input, label, target] of [
+      ['browser.execute', { code: 'PRIVATE CODE' }, '浏览器操作', undefined],
+      ['skills.load', { id: 'computer-use' }, '加载技能', 'computer-use'],
+      [
+        'skills.resource',
+        { id: 'computer-use', path: 'references/browser-api.md' },
+        '读取技能资料',
+        'computer-use · references/browser-api.md',
+      ],
+    ] as const) {
+      const tool = execution(id, '1', input),
+        { model, receipt, saved } = history(tool);
+      const fact = nativeToolMessageFact({
+        execution: saved,
+        message: receipt,
+        messages: [model, receipt],
+        sessionId: 'child',
+      })!;
+      await render(desktopToolMessage(fact, receipt.id, receipt.content));
+      expect(host.querySelector('.tool-activity-title')?.textContent).toBe(label);
+      expect(host.querySelector('.tool-step-target')?.textContent).toBe(target);
+      expect(host.textContent).not.toContain('PRIVATE CODE');
+    }
+  });
+});
 
 test('file target remains visible from planned to running and ModelOutput receipt in parent and child projections', async () => {
   await fixture(async ({ host, render }) => {

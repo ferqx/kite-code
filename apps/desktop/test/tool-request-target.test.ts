@@ -2,6 +2,24 @@ import { expect, test } from 'bun:test';
 import { nativeToolRequestTarget } from '../src/tool-request-target';
 
 test.each([
+  ['browser.execute', '1', { code: 'PRIVATE CODE', description: '读取北京天气' }, '读取北京天气'],
+  ['skills.load', '1', { id: 'computer-use', description: '查看天气' }, 'computer-use'],
+  [
+    'skills.resource',
+    '1',
+    { id: 'computer-use', path: 'references/browser-api.md', description: '读取浏览器指南' },
+    'computer-use · references/browser-api.md',
+  ],
+  ['skills.load', '1', { id: 'computer-use' }, 'computer-use'],
+  ['skills.load', '1', { description: '查看天气' }, undefined],
+  ['skills.resource', '1', { description: '查看天气' }, undefined],
+  ['skills.load', '1', { id: 'computer-use', description: '读'.repeat(11) }, 'computer-use'],
+  [
+    'skills.resource',
+    '1',
+    { id: 'computer-use', path: 'references/browser-api.md' },
+    'computer-use · references/browser-api.md',
+  ],
   ['files.read', '5', { path: 'src/中文🙂.ts', offset: 2 }, 'src/中文🙂.ts'],
   ['files.read_path', '2', { path: '/Users/example/private.txt' }, '/Users/example/private.txt'],
   ['files.write', '3', { path: 'out/report.md', content: 'PRIVATE BODY' }, 'out/report.md'],
@@ -55,6 +73,25 @@ test.each([
   ],
 ] as const)('%s@%s extracts only its known display target', (id, version, input, expected) => {
   expect(nativeToolRequestTarget(input, id, version)).toBe(expected);
+});
+
+test('short purposes are single-line and bounded without exposing code or unknown arguments', () => {
+  const code = 'PRIVATE CODE';
+  for (const description of ['读'.repeat(10), '🙂'.repeat(10)])
+    expect(nativeToolRequestTarget({ code, description }, 'browser.execute', '1')).toBe(
+      description,
+    );
+  expect(nativeToolRequestTarget({ code, description: '读取\n天气' }, 'browser.execute', '1')).toBe(
+    '读取 天气',
+  );
+  for (const description of [undefined, '', '   ', '读'.repeat(11), '🙂'.repeat(11), 1, {}])
+    expect(nativeToolRequestTarget({ code, description }, 'browser.execute', '1')).toBeUndefined();
+  expect(
+    nativeToolRequestTarget({ code, description: '读取天气' }, 'browser.execute', 'future'),
+  ).toBeUndefined();
+  expect(
+    nativeToolRequestTarget({ description: '读取天气' }, 'custom.execute', '1'),
+  ).toBeUndefined();
 });
 
 test('supported saved file versions retain target display', () => {

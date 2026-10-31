@@ -42,7 +42,9 @@ export function browserView(): AgentBrowserView {
     selectedAnnotation: null,
   };
 }
-export function browserFixture() {
+export function browserFixture(
+  options: { beforeAction?: (request: ExtensionCommandRequest) => Promise<void> } = {},
+) {
   let currentScope: NativeExtensionScope | undefined = { ...browserScope };
   let view = browserView();
   let queryGate: Promise<void> | undefined;
@@ -62,7 +64,7 @@ export function browserFixture() {
     {
       extensionId: 'builtin.browser',
       version: '1',
-      actions: ['handoff', 'resume', 'input', 'select', 'close'].map((action) => ({
+      actions: ['handoff', 'resume', 'input', 'select', 'close', 'respond_human'].map((action) => ({
         id: `browser.${action}`,
         version: '1',
         description: action,
@@ -133,6 +135,7 @@ export function browserFixture() {
       const row = records.find((row) => row.intent.request.commandId === commandId)!;
       const request = row.intent.request as ExtensionCommandRequest;
       submitted.push(request);
+      await options.beforeAction?.(request);
       const input = request.input as Record<string, unknown>;
       if (request.actionId === 'browser.handoff') {
         view.state = 'human';
@@ -142,6 +145,11 @@ export function browserFixture() {
         view.state = 'agent';
         view.generation = `resumed-generation${++resumes === 1 ? '' : `-${resumes}`}`;
         view.selectedAnnotation = null;
+      }
+      if (request.actionId === 'browser.respond_human') {
+        view.state = input.choice === 'stop' ? 'closed' : 'agent';
+        view.generation = 'human-response-generation';
+        if (view.humanPending) view.humanPending.state = 'resolved';
       }
       if (request.actionId === 'browser.select')
         view.selectedAnnotation = view.annotations.find((item) => item.ref === input.ref) ?? null;

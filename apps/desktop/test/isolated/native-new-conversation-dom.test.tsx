@@ -2188,7 +2188,9 @@ for (const receiptSource of ['lookup', 'submit'] as const)
           receiptSource === 'lookup' ? 1 : 0,
         );
         if (failedRead === 'select') {
-          const reads = f.calls.filter((call) => call.method === 'select');
+          const reads = f.calls.filter(
+            (call) => call.method === 'select' && call.sessionId === original.creation.sessionId,
+          );
           expect(reads).toHaveLength(2);
           expect(reads[1]).toEqual(reads[0]);
         }

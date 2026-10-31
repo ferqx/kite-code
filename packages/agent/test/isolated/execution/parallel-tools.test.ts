@@ -307,7 +307,7 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
   }
 });
 
-test('denying a parallel sibling waits for attempted Tool cleanup before releasing its Run binding', async () => {
+test('denying a parallel sibling waits for cleanup and delivers both results before the final explanation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-parallel-denial-'));
   let release!: () => void;
   const cleanup = new Promise<void>((resolve) => {
@@ -329,7 +329,13 @@ test('denying a parallel sibling waits for attempted Tool cleanup before releasi
       { type: 'tool_call', id: 'denied', name: 'fixture.denial.ask', arguments: '{}' },
       { ...finish, reason: 'tool_calls' },
     ],
-    [finish],
+    [
+      {
+        type: 'text_delta',
+        text: 'The denied call did not execute; the attempted effect is unknown.',
+      },
+      finish,
+    ],
   ]);
   const extension = defineExtension({
     id: 'fixture.denial',
@@ -453,8 +459,8 @@ test('denying a parallel sibling waits for attempted Tool cleanup before releasi
     release();
     const command = await runtime.waitForCommand('work', { timeoutMs: 2000 });
     const run = await store.getRun(interaction.runId!);
-    expect(run).toMatchObject({ status: 'cancelled', isActive: false });
-    expect(command.cancelRequestedAt).not.toBeNull();
+    expect(run).toMatchObject({ status: 'completed', isActive: false });
+    expect(command.cancelRequestedAt).toBeNull();
     const executions = await store.listExecutions('s');
     expect(executions.find((row) => row.callId === 'denied')).toMatchObject({
       status: 'failed',
@@ -467,7 +473,16 @@ test('denying a parallel sibling waits for attempted Tool cleanup before releasi
     await until(async () => (disposed === 1 ? true : undefined));
     expect(disposed).toBe(1);
     expect(deniedCalls).toBe(0);
-    expect(model.requests).toHaveLength(1);
+    expect(model.requests).toHaveLength(2);
+    expect(
+      model.requests[1]!.messages.filter((row) => row.role === 'tool').map((row) => [
+        row.toolCallId,
+        row.content,
+      ]),
+    ).toEqual([
+      ['attempted', 'Attempted external effect remains unknown'],
+      ['denied', 'approval_denied'],
+    ]);
     expect(effects).toEqual(['attempted', 'cleanup completed']);
     const messages = await store.listMessages('s');
     const cursor = (await store.getMetadata()).lastChangeCursor;
@@ -485,7 +500,7 @@ test('denying a parallel sibling waits for attempted Tool cleanup before releasi
     expect((await reader.getMetadata()).lastChangeCursor).toBe(cursor);
     expect(disposed).toBe(1);
     expect(deniedCalls).toBe(0);
-    expect(model.requests).toHaveLength(1);
+    expect(model.requests).toHaveLength(2);
     expect(effects).toEqual(['attempted', 'cleanup completed']);
   } finally {
     release();

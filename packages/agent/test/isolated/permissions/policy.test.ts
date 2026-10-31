@@ -486,6 +486,260 @@ test('Web network effects require the exact registered builtin Tool identity and
   }
 });
 
+test('only the exact new controlled Browser orchestration definitions have no external effects', () => {
+  for (const [definitionId, kind] of [
+    ['browser.execute', 'tool'],
+    ['browser.code_session', 'job'],
+  ] as const) {
+    expect(builtinCapability('builtin.browser', definitionId, kind, '', '1')).toEqual({
+      effects: [],
+      safeRead: true,
+      approvalExempt: 'builtin.browser',
+    });
+    for (const [extensionId, version] of [
+      ['untrusted.namesake', '1'],
+      ['builtin.browser', '2'],
+    ] as const)
+      expect(builtinCapability(extensionId, definitionId, kind, '', version).safeRead).toBe(false);
+  }
+  expect(builtinCapability('builtin.browser', 'browser.session', 'job', '', '1')).toEqual({
+    effects: ['process', 'network', 'unknown'],
+    safeRead: false,
+    approvalExempt: 'builtin.browser',
+  });
+  expect(builtinCapability('builtin.browser', 'browser.open', 'tool', '', '1')).toEqual({
+    effects: ['process', 'network', 'unknown', 'record_write'],
+    safeRead: false,
+    approvalExempt: 'builtin.browser',
+  });
+  expect(builtinCapability('builtin.shell', 'shell.execute', 'tool', '', '1')).toEqual({
+    effects: ['process', 'unknown', 'record_write'],
+    safeRead: false,
+  });
+});
+
+test('exact Browser release, human handoff and its response receipt do not grant new control', () => {
+  for (const [definitionId, kind] of [
+    ['browser.close', 'tool'],
+    ['browser.request_human', 'tool'],
+    ['browser.human_wait', 'job'],
+  ] as const) {
+    expect(builtinCapability('builtin.browser', definitionId, kind, '', '1')).toEqual({
+      effects: [],
+      safeRead: true,
+      approvalExempt: 'builtin.browser',
+    });
+    for (const [extensionId, version] of [
+      ['untrusted.namesake', '1'],
+      ['builtin.browser', '2'],
+    ] as const)
+      expect(builtinCapability(extensionId, definitionId, kind, '', version).safeRead).toBe(false);
+  }
+  for (const [definitionId, kind] of [
+    ['browser.resume', 'action'],
+    ['browser.respond_human', 'action'],
+    ['browser.fill', 'tool'],
+    ['browser.click', 'tool'],
+    ['browser.navigate', 'tool'],
+  ] as const) {
+    const capability = builtinCapability('builtin.browser', definitionId, kind, '', '1');
+    expect(capability.safeRead).toBe(false);
+    expect(capability.effects.length).toBeGreaterThan(0);
+  }
+});
+
+test('Browser control reduction still requires the exact selected and hard-allowed capability', async () => {
+  for (const [definitionId, kind] of [
+    ['browser.close', 'tool'],
+    ['browser.request_human', 'tool'],
+    ['browser.human_wait', 'job'],
+  ] as const) {
+    const identity = { kind, definitionId, definitionVersion: '1' };
+    for (const missing of ['selection', 'hard-cap'] as const) {
+      const policy = createPermissionPolicy({
+        readPolicy: () => ({
+          mode: 'auto',
+          workspaceTrust: true,
+          revision: 'exact-current-policy',
+          allowed: missing === 'selection' ? [] : [identity],
+        }),
+        describeCapability: () => ({
+          ...identity,
+          ...builtinCapability('builtin.browser', definitionId, kind, '', '1'),
+          hardAllowed: missing !== 'hard-cap',
+          revision: 'actual-builtin',
+        }),
+      });
+      const decision = await policy.authorize({
+        ...identity,
+        sessionId: 's',
+        runId: 'r',
+        executionId: 'e',
+        input: {},
+        signal: new AbortController().signal,
+      });
+      expect(decision.allowed).toBe(false);
+      expect(decision.reason).toBe(
+        missing === 'selection' ? 'capability_not_allowed' : 'capability_unavailable',
+      );
+      expect(decision.check).toBeUndefined();
+      expect(decision.approval).toBeUndefined();
+    }
+  }
+});
+
+test('registered builtin browser operations retain their effects and never request review or approval in any mode', async () => {
+  const definitions = [
+    ...[
+      'execute',
+      'open',
+      'navigate',
+      'snapshot',
+      'image',
+      'click',
+      'fill',
+      'scroll',
+      'close',
+      'request_human',
+      'control',
+    ].map((name) => ['tool', `browser.${name}`] as const),
+    ...['code_session', 'session', 'human_wait'].map((name) => ['job', `browser.${name}`] as const),
+    ...['capture', 'handoff', 'resume', 'close', 'select', 'input', 'respond_human'].map(
+      (name) => ['action', `browser.${name}`] as const,
+    ),
+  ];
+  let reviews = 0;
+  for (const [kind, id] of definitions) {
+    const facts = builtinCapability('builtin.browser', id, kind, '', '1');
+    expect(facts.approvalExempt).toBe('builtin.browser');
+    const identity = {
+      kind: kind === 'action' ? ('job' as const) : kind,
+      definitionId: kind === 'action' ? `builtin.browser/${id}` : id,
+      definitionVersion: '1',
+    };
+    const capability: CapabilityDescription = {
+      ...identity,
+      ...facts,
+      revision: 'registered-browser',
+      hardAllowed: true,
+    };
+    const workflow = workflowCapabilityDescription({
+      ...capability,
+      kind: identity.kind,
+      extensionId: 'builtin.browser',
+    });
+    expect(workflow.capability.policy.minimumApproval).toBe('none');
+    if (
+      [
+        'browser.open',
+        'browser.session',
+        'browser.fill',
+        'browser.click',
+        'browser.navigate',
+      ].includes(id)
+    ) {
+      expect(facts.effects.length).toBeGreaterThan(0);
+      expect(facts.safeRead).toBe(false);
+      expect(workflow.capability.effectiveEffects.externalState).toBe('unknown');
+    }
+    for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+      const policy = createPermissionPolicy({
+        readPolicy: () => ({
+          mode,
+          workspaceTrust: true,
+          revision: 'current',
+          allowed: [identity],
+        }),
+        describeCapability: () => capability,
+        readCheckContext() {
+          reviews++;
+          return { task: null, plan: null, rejectionReasons: [] };
+        },
+      });
+      const decision = await policy.authorize({
+        ...identity,
+        sessionId: 's',
+        runId: 'r',
+        executionId: 'e',
+        input: {},
+        signal: new AbortController().signal,
+      });
+      expect(decision.allowed).toBe(true);
+      expect(decision.check).toBeUndefined();
+      expect(decision.approval).toBeUndefined();
+      expect(decision.snapshot).toMatchObject({
+        data: { capability: { effects: facts.effects, approvalExempt: 'builtin.browser' } },
+      });
+    }
+  }
+  expect(reviews).toBe(0);
+});
+
+test('browser exemption cannot grant a namesake extension, future definition, version or missing host authority', async () => {
+  for (const [extensionId, id, kind, version] of [
+    ['untrusted.namesake', 'browser.fill', 'tool', '1'],
+    ['builtin.browser', 'browser.future', 'tool', '1'],
+    ['builtin.browser', 'browser.fill', 'tool', '2'],
+    ['builtin.browser', 'browser.fill', 'job', '1'],
+  ] as const)
+    expect(builtinCapability(extensionId, id, kind, '', version).approvalExempt).toBeUndefined();
+  const identity = { kind: 'tool' as const, definitionId: 'browser.fill', definitionVersion: '1' };
+  for (const missing of ['selection', 'hard-cap', 'workspace-trust'] as const) {
+    const policy = createPermissionPolicy({
+      readPolicy: () => ({
+        mode: 'auto',
+        workspaceTrust: missing !== 'workspace-trust',
+        revision: 'current',
+        allowed: missing === 'selection' ? [] : [identity],
+      }),
+      describeCapability: () => ({
+        ...identity,
+        ...builtinCapability('builtin.browser', 'browser.fill', 'tool', '', '1'),
+        revision: 'registered',
+        hardAllowed: missing !== 'hard-cap',
+      }),
+    });
+    const decision = await policy.authorize({
+      ...identity,
+      sessionId: 's',
+      runId: 'r',
+      executionId: 'e',
+      input: {},
+      signal: new AbortController().signal,
+    });
+    expect(decision.allowed).toBe(false);
+    expect(decision.check).toBeUndefined();
+    expect(decision.approval).toBeUndefined();
+  }
+  const forged = { kind: 'tool' as const, definitionId: 'browser.future', definitionVersion: '1' };
+  const policy = createPermissionPolicy({
+    readPolicy: () => ({
+      mode: 'full',
+      workspaceTrust: true,
+      revision: 'current',
+      allowed: [forged],
+    }),
+    describeCapability: () => ({
+      ...forged,
+      effects: ['network'],
+      safeRead: false,
+      approvalExempt: 'builtin.browser',
+      revision: 'forged',
+      hardAllowed: true,
+    }),
+  });
+  expect(
+    await policy.authorize({
+      ...forged,
+      sessionId: 's',
+      runId: 'r',
+      executionId: 'e',
+      input: {},
+      signal: new AbortController().signal,
+    }),
+  ).toMatchObject({ allowed: false, reason: 'capability_metadata_invalid' });
+});
+
 test('explicit trusted internal record-only facts bypass approval in three modes without changing generic record-write behavior', async () => {
   for (const mode of ['accept_edits', 'auto', 'full'] as const) {
     const f = await fixture(mode);

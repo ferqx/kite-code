@@ -65,7 +65,7 @@ const cases: { shape: Shape; fault?: Fault }[] = [
   })),
 ];
 for (const { shape, fault } of cases)
-  test(`guarded complete ${shape} check ${fault ?? 'original'} retains original proof and independent Ask`, async () => {
+  test(`guarded complete ${shape} check ${fault ?? 'original'} retains original output and enforces exact authorization`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-review-complete-output-')));
     const evidenceRoot = realpathSync(
       mkdtempSync(join(tmpdir(), `kite-review-${shape}-evidence-`)),
@@ -202,7 +202,7 @@ for (const { shape, fault } of cases)
         kind: 'model',
         runId: null,
         childSessionId: null,
-        status: 'succeeded',
+        status: shape === 'invalid_decision' || shape === 'extra_field' ? 'failed' : 'succeeded',
         definitionId: 'check-model',
         parentExecutionId: target.id,
       });
@@ -214,7 +214,8 @@ for (const { shape, fault } of cases)
       };
       const snapshot = await store.getModelOutputSnapshot(scope);
       const full = await runtime.readModelOutput(scope);
-      expect(full.output.complete).toBe(true);
+      const invalid = shape === 'invalid_decision' || shape === 'extra_field';
+      expect(full.output.complete).toBe(!invalid);
       expect(full.output.content).toBe(answer);
       expect(full.output.reasoning).toBe(reasoning);
       expect(JSON.parse(full.output.content).reason.length).toBe(reason.length);
@@ -269,9 +270,34 @@ for (const { shape, fault } of cases)
         expect(snapshot.content.length).toBeLessThan(answer.length);
         expect(Buffer.byteLength(full.output.reasoning)).toBeGreaterThan(64 * 1024);
       } else expect(snapshot.output).toBeNull();
-      const invalid = shape === 'invalid_decision' || shape === 'extra_field';
-      if (invalid) expect(proof.decision).not.toBe('approve_once');
-      else {
+      if (invalid) {
+        expect(proof.decision).toBe('unavailable');
+        await runtime.waitForCommand('guarded');
+        const failed = (await store.getExecution(target.id))!;
+        const content = (failed.result as { content: string }).content;
+        expect(content).toContain('No approval or rejection decision was made');
+        expect(content).toContain('returned an invalid decision');
+        expect(failed).toMatchObject({
+          status: 'failed',
+          result: {
+            details: {
+              adapterAttempted: false,
+              code: 'authorization_check_unavailable',
+              authorizationCheck: {
+                decision: 'unavailable',
+                executionId: carrier.id,
+                failureCode: 'authorization_check_output_invalid',
+              },
+            },
+          },
+        });
+        expect(
+          (await runtime.listInteractions({ expectedStoreId, sessionId: 's' })).interactions,
+        ).toEqual([]);
+        expect(effects).toBe(0);
+        expect(reviews).toBe(1);
+        return;
+      } else {
         expect(proof.decision).toBe('approve_once');
         const before = (await store.getMetadata()).lastChangeCursor;
         const cold = await openSqliteStore({ ...profile, mode: 'readonly' });

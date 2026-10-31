@@ -105,6 +105,8 @@ export {
 } from './ScheduledTasks';
 export { SessionPage, type SessionPageProps } from './SessionPage';
 export {
+  BrowserAnnotationIcon,
+  BrowserOptionsIcon,
   type SessionBrowserPageProps,
   SessionBrowserToolbar,
   type SessionBrowserToolbarProps,
@@ -112,6 +114,7 @@ export {
   type SessionChildTabRequest,
   type SessionChildTarget,
   SessionTabs,
+  SessionTabsChrome,
   type SessionTabsModel,
   useSessionTabs,
 } from './SessionTabs';
@@ -119,5 +122,13 @@ export { SettingsNavigationIcon } from './SettingsNavigationIcon';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';
 export { ToolActivity, ToolRow } from './ToolActivity';
-export type { Message, TurnActivity, WorkspaceSummary } from './types';
+export type {
+  Message,
+  SessionTabsChromeAction,
+  SessionTabsChromeData,
+  SessionTabsChromePresentation,
+  SessionTabsChromeTab,
+  TurnActivity,
+  WorkspaceSummary,
+} from './types';
 export { Button } from './ui';

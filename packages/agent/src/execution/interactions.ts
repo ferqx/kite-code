@@ -15,6 +15,7 @@ import {
   type RequirementEvaluation,
   type RequirementRef,
 } from '../storage/types';
+import { AuthorizationCheckUnavailableError } from './authorization-check-feedback';
 import {
   type AuthorizationChangeWait,
   AuthorizationRefreshRequired,
@@ -366,6 +367,17 @@ export class InteractionGate {
           throw new AgentError('authorization_check_binding_changed');
         }
         const checked = await this.store.getAuthorizationCheck(reference);
+        // A configured checker that failed technically supplied no human decision.
+        // Settle the undispatched operation so its caller can continue the Agent Loop.
+        if (checked.decision === 'unavailable') {
+          const check = await this.store.getExecution(checked.checkExecutionId);
+          if (!check) throw new AgentError('authorization_check_unverifiable');
+          throw new AuthorizationCheckUnavailableError(
+            checked.checkExecutionId,
+            checked.reason,
+            check.result,
+          );
+        }
         if (checked.decision === 'approve_once' && !decision.check.requireApproval)
           return {
             allowed: true,
@@ -484,18 +496,8 @@ export class InteractionGate {
       }
     } else interaction = await this.wait(scope, interaction, true);
     if (interaction.answer?.kind === 'approval' && interaction.answer.decision === 'deny') {
-      const command = await this.store.getCommand(execution.originCommandId);
-      if (!command || command.originStoreId !== scope.expectedStoreId)
-        throw new AgentError('operation_unverifiable');
-      // A refusal ends the original work, even if its source became stale while waiting.
-      // Cancellation never grants dispatch and is tied to the saved command, not a later Run.
-      await this.store.cancelCommand({
-        expectedStoreId: scope.expectedStoreId,
-        commandId: `decline-${interaction.id}`,
-        sessionId: command.sessionId,
-        targetCommandId: command.id,
-        subjectId: command.subjectId,
-      });
+      // Denying this exact invocation is a Tool result, not cancellation of
+      // the user's task. Explicit task cancellation uses its own command.
       throw new AgentError('approval_denied');
     }
     if (waited) decision = await this.permissions.authorize(request);

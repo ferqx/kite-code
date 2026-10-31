@@ -2306,14 +2306,40 @@ export class SqliteOperations {
             const parent =
               execution?.parent_execution_id &&
               this.row('SELECT * FROM execution WHERE id=?', execution.parent_execution_id);
+            let ancestor = parent;
+            const seen = new Set<string>();
+            while (ancestor && ancestor.run_id === null) {
+              if (seen.has(String(ancestor.id)) || seen.size >= 32)
+                throw new AgentError('required_result_unverifiable');
+              seen.add(String(ancestor.id));
+              if (
+                ancestor.kind !== 'tool' ||
+                ancestor.origin_store_id !== input.expectedStoreId ||
+                ancestor.session_id !== run.session_id ||
+                ancestor.cancel_requested ||
+                ancestor.root_work_command_id !== run.root_work_command_id ||
+                String(ancestor.root_work_seq) !== String(run.root_work_seq)
+              )
+                throw new AgentError('required_result_unverifiable');
+              ancestor =
+                ancestor.parent_execution_id &&
+                this.row('SELECT * FROM execution WHERE id=?', ancestor.parent_execution_id);
+            }
             if (
               execution?.kind !== 'job' ||
               !parent ||
-              parent.run_id !== run.id ||
+              !ancestor ||
+              ancestor.run_id !== run.id ||
+              ancestor.kind !== 'tool' ||
+              ancestor.origin_store_id !== input.expectedStoreId ||
+              ancestor.session_id !== run.session_id ||
+              ancestor.cancel_requested ||
+              ancestor.origin_command_id !== run.origin_command_id ||
+              ancestor.root_work_command_id !== run.root_work_command_id ||
+              String(ancestor.root_work_seq) !== String(run.root_work_seq) ||
               execution.origin_store_id !== input.expectedStoreId ||
               execution.root_work_command_id !== run.root_work_command_id ||
-              String(execution.root_work_seq) !== String(run.root_work_seq) ||
-              !['planned', 'dispatching', 'running'].includes(String(execution.state))
+              String(execution.root_work_seq) !== String(run.root_work_seq)
             )
               throw new AgentError('result_wait_changed');
             const session = this.row(
@@ -2343,7 +2369,6 @@ export class SqliteOperations {
                 return false;
               const value = parse(record.json) as Record<string, Json>;
               return (
-                value.kind === 'operation_result' &&
                 value.executionId === id &&
                 value.runId === run.id &&
                 value.sessionId === run.session_id &&
@@ -2449,9 +2474,12 @@ export class SqliteOperations {
         : undefined;
       assertInputBoundary(this, String(input.runId), handoffInputId);
       this.active(input.owner, String(run.origin_command_id), input.runId);
+      // A recorded Tool outcome_unknown can be explained by a completed reply.
+      // It remains unknown in the original Execution; completion never resolves
+      // its external effect or releases resources still owned by a Job.
       if (
         this.row(
-          "SELECT id FROM execution WHERE run_id=? AND state IN ('planned','dispatching','running','outcome_unknown')",
+          "SELECT id FROM execution WHERE run_id=? AND (state IN ('planned','dispatching','running') OR (state='outcome_unknown' AND kind!='tool'))",
           input.runId,
         )
       )

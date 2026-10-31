@@ -224,3 +224,39 @@ export interface WorkspaceSummary {
   readonly sessionCount: number;
   readonly state: 'idle' | 'loading' | 'loaded' | 'unavailable';
 }
+
+export type SessionTabsChromeTab =
+  | {
+      readonly id: string;
+      readonly kind: 'browser' | 'changes' | 'workspace';
+      readonly title: string;
+    }
+  | {
+      readonly id: string;
+      readonly kind: 'child';
+      readonly title: string;
+      readonly sessionId: string;
+      readonly executionId?: string;
+      readonly childAgentIdentity?: string;
+    };
+
+/** Display facts only; the original SessionPage retains tab ownership and readers. */
+export interface SessionTabsChromeData {
+  readonly scopeKey: string;
+  readonly tabs: readonly SessionTabsChromeTab[];
+  readonly active: string;
+  readonly visible: boolean;
+  readonly present: boolean;
+  readonly restoring: boolean;
+  readonly restoreIssue: boolean;
+}
+
+export type SessionTabsChromeAction =
+  | { readonly type: 'select' | 'close'; readonly id: string }
+  | { readonly type: 'add' | 'collapse' | 'retryRestore' | 'openChanges' };
+
+/** In-Root presentation port, not a transport or a second tab model. */
+export interface SessionTabsChromePresentation {
+  readonly data: SessionTabsChromeData;
+  readonly dispatch: (action: SessionTabsChromeAction) => void;
+}

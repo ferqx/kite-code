@@ -184,6 +184,7 @@ export async function assembleProcessService(
           profile: selected,
           observerSubjectId: subjectId,
           hostConfiguration: startup.hostConfiguration,
+          desktopBrowser: startup.desktopBrowser,
           mcpSources: { ...packagedMcpSourceAssets(), ...options.mcpSources },
           ...(options.credentialBackend ? { credentialBackend: options.credentialBackend } : {}),
           runtimeAssets,

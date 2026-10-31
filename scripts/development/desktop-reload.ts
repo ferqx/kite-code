@@ -232,8 +232,8 @@ export async function buildDevelopmentService(
   privateDirectory(directory);
   const browserConfiguration = join(root, 'apps/service/src/browser-configuration.ts');
   if (existsSync(browserConfiguration)) {
-    // The locator is compiled into this exact Service entry. Its sibling guardian
-    // must be built from the same current sources, including after a source reload.
+    // Both locators are compiled into this exact Service entry. Its guardian and
+    // executor worker must share the same current sources on first load and reload.
     try {
       const assets = await Bun.build({
         entrypoints: [
@@ -245,6 +245,15 @@ export async function buildDevelopmentService(
         naming: '[name].js',
       });
       if (!assets.success) throw new AggregateError(assets.logs);
+      // Same build contract as tools/browser/executor/build-assets.ts, scoped to
+      // this immutable Service version rather than the checkout's earlier dist.
+      const executor = await Bun.build({
+        entrypoints: [join(root, 'packages/agent/src/tools/browser/executor/worker.ts')],
+        target: 'bun',
+        outdir: join(directory, 'tools/browser/executor'),
+        naming: 'worker.js',
+      });
+      if (!executor.success) throw new AggregateError(executor.logs);
     } catch (error) {
       throw new AggregateError([error], 'development_browser_assets_build_failed');
     }
@@ -265,6 +274,13 @@ export async function buildDevelopmentService(
               // Only Browser's locator is bundled. Other MCP users retain source
               // imports; no source locator is permitted to impersonate a JS asset.
               return { path: join(root, 'packages/agent/src/mcp/stdio-port.ts'), external: false };
+            });
+            build.onResolve({ filter: /^@kite-ai\/agent\/browser\/executor$/ }, (args) => {
+              if (args.importer !== browserConfiguration) return;
+              return {
+                path: join(root, 'packages/agent/src/tools/browser/executor/index.ts'),
+                external: false,
+              };
             });
             // The packaged locator must keep its original module URL next to built assets.
             // Other workspace imports continue using current sources during development.
@@ -369,8 +385,8 @@ export function createDesktopReloadChannel(
   },
   timeoutMs = 45000,
 ) {
-  let pending: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined,
-    failure: Error | undefined;
+  type PendingReload = { id: string; resolve: () => void; reject: (error: Error) => void };
+  let pending: PendingReload | undefined, failure: Error | undefined;
   const fail = (error: Error) => {
     failure ??= error;
     pending?.reject(failure);
@@ -406,17 +422,20 @@ export function createDesktopReloadChannel(
             !('kind' in value) ||
             value.kind !== 'service.reloaded' ||
             !('id' in value) ||
-            value.id !== pending?.id ||
+            !pending ||
+            value.id !== pending.id ||
             !('ok' in value) ||
             typeof value.ok !== 'boolean' ||
             Object.keys(value).length !== 3
           )
             continue;
-          if (!value.ok) fail(Error('development_service_reload_failed'));
-          else {
-            pending?.resolve();
-            pending = undefined;
-          }
+          const original = pending;
+          pending = undefined;
+          // A matching negative acknowledgement settles this exact attempt.
+          // A new save may ask Main to verify its original cleanup again;
+          // transport loss and missing acknowledgements still fence the channel.
+          if (!value.ok) original.reject(Error('development_service_reload_failed'));
+          else original.resolve();
         }
       }
     } catch {
@@ -433,8 +452,10 @@ export function createDesktopReloadChannel(
       if (failure) throw failure;
       if (pending) throw Error('development_service_reload_busy');
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let original: PendingReload | undefined;
       const acknowledged = new Promise<void>((resolve, reject) => {
-        pending = { id: request.id, resolve, reject };
+        original = { id: request.id, resolve, reject };
+        pending = original;
         timer = setTimeout(() => fail(Error('development_service_reload_unconfirmed')), timeoutMs);
       });
       void acknowledged.catch(() => {});
@@ -443,7 +464,7 @@ export function createDesktopReloadChannel(
         await child.stdin.flush();
         await acknowledged;
       } catch (error) {
-        if (pending) fail(Error('development_service_reload_unconfirmed'));
+        if (pending && pending === original) fail(Error('development_service_reload_unconfirmed'));
         throw error;
       } finally {
         clearTimeout(timer);

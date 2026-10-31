@@ -333,6 +333,144 @@ test('ordinary reply automatically loads the verified >17MiB body once without p
   }
 });
 
+test('a deferred automatic body read admits a later original prefix or completion without a false failure', async () => {
+  const f = await domFixture();
+  try {
+    for (const kind of ['content', 'reasoning', 'complete', 'tool_calls'] as const) {
+      const prefix = kind === 'tool_calls' ? '' : '原回复🙂',
+        before = outputFixture(prefix, false),
+        after = outputFixture(kind === 'content' ? `${prefix}追加内容` : prefix);
+      before.message = { ...before.message, id: kind, content: prefix };
+      if (kind === 'content' || kind === 'reasoning') {
+        after.snapshot.status = 'running';
+        after.snapshot.output.complete = false;
+      }
+      if (kind === 'reasoning') {
+        after.snapshot.output.reasoning = '新增思考';
+        after.snapshot.reasoningBytes = String(
+          new TextEncoder().encode(after.snapshot.output.reasoning).byteLength,
+        );
+      }
+      if (kind === 'tool_calls')
+        after.snapshot.output.toolCalls = [
+          { id: 'call', name: 'read', arguments: '{"path":"file"}' },
+        ];
+      let release!: (value: ModelOutputSnapshot) => void;
+      const published: (string | undefined)[] = [];
+      await f.render({
+        message: before.message,
+        storeId: 'store',
+        autoRead: true,
+        onRead: () => new Promise((resolve) => (release = resolve)),
+        onContent: (text) => published.push(text),
+      });
+      expect(f.host.querySelector('.message-markdown')!.textContent).toBe(prefix);
+      expect(published.at(-1)).toBeUndefined();
+      await act(async () => release(after.snapshot));
+      expect(f.host.querySelector('[role=alert]')).toBeNull();
+      expect(f.host.textContent).not.toContain('回复未完成');
+      expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+        after.snapshot.output.content,
+      );
+      expect(published.at(-1)).toBe(after.snapshot.output.content);
+      expect(f.host.querySelector('details')).toBeNull();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('a later body still rejects changed origins, rewritten or shorter content and frozen summaries', async () => {
+  const f = await domFixture(),
+    before = outputFixture('原', false),
+    after = outputFixture('原回复');
+  before.message.content = '原';
+  const cases = [
+    { message: before.message, snapshot: { ...after.snapshot, storeId: 'foreign' } },
+    { message: before.message, snapshot: { ...after.snapshot, sessionId: 'foreign' } },
+    { message: before.message, snapshot: { ...after.snapshot, runId: 'foreign' } },
+    { message: before.message, snapshot: { ...after.snapshot, executionId: 'foreign' } },
+    { message: before.message, snapshot: outputFixture('改写回复').snapshot },
+    { message: before.message, snapshot: outputFixture('').snapshot },
+    {
+      message: before.message,
+      snapshot: { ...after.snapshot, contentBytes: '100' },
+    },
+    {
+      message: {
+        ...before.message,
+        outputBody: { ...before.message.outputBody!, reasoningBytes: '1' },
+      },
+      snapshot: after.snapshot,
+    },
+    {
+      message: { ...before.message, status: 'complete' as const },
+      snapshot: after.snapshot,
+    },
+    {
+      message: {
+        ...before.message,
+        toolCalls: [{ id: 'already-recorded', name: 'read', arguments: '{}' }],
+      },
+      snapshot: after.snapshot,
+    },
+    {
+      message: {
+        ...before.message,
+        originMessage: {
+          storeId: 'store',
+          sessionId: 'a',
+          runId: 'run-a',
+          messageId: 'sealed',
+        },
+      },
+      snapshot: after.snapshot,
+    },
+    {
+      message: { ...after.message, content: '原' },
+      snapshot: {
+        ...after.snapshot,
+        output: {
+          ...after.snapshot.output,
+          toolCalls: [{ id: 'unexpected', name: 'read', arguments: '{}' }],
+        },
+      },
+    },
+    {
+      message: {
+        ...before.message,
+        outputBody: { ...before.message.outputBody!, complete: true },
+      },
+      snapshot: after.snapshot,
+    },
+    {
+      message: before.message,
+      snapshot: {
+        ...after.snapshot,
+        output: { ...after.snapshot.output, complete: false },
+      },
+    },
+  ];
+  cases.at(-1)!.snapshot.output.toolCalls = [{ id: 'unsealed', name: 'read', arguments: '{}' }];
+  try {
+    for (const [index, data] of cases.entries()) {
+      const published: (string | undefined)[] = [];
+      await f.render({
+        message: { ...data.message, id: `mismatch-${index}` },
+        storeId: 'store',
+        autoRead: true,
+        onRead: async () => data.snapshot,
+        onContent: (text) => published.push(text),
+      });
+      expect(f.host.querySelector('.message-markdown')!.textContent).toBe('原');
+      expect(f.host.querySelector('[role=alert]')!.textContent).toBe('完整回复读取失败。');
+      expect(published.at(-1)).toBeUndefined();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('ordinary automatic body aborts paused reads, isolates late replies and resumes only the current identity', async () => {
   const f = await domFixture(),
     data = outputFixture('旧会话秘密尾部'),

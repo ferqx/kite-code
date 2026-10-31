@@ -1,6 +1,6 @@
 # 本地开发与验证
 
-Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当前 guardian 资产；源码 locator 的拒绝规则保持，具体接线和验证范围见 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。锁定 CLI 运行组件及系统 Chrome／Chromium 仍须先准备；开发构建不自动下载浏览器、不导入现有 Profile，只读观察也不会启动 Browser Job。
+Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当前 guardian 与隔离代码 worker 资产；源码 locator 的拒绝规则保持，具体接线和验证范围见 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。锁定 CLI 运行组件及系统 Chrome／Chromium 仍须先准备；开发构建不自动下载浏览器、不导入现有 Profile，只读观察也不会启动 Browser Job。
 
 仓库使用 Bun；Linux/macOS CI 与正式 qualification 保持 Bun 1.4.2，Windows CI 固定 Bun 1.4.3，以采用固定 tsconfig 的上游修复。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
 
@@ -47,7 +47,7 @@ npm run desktop:dev
 
 开发 Service 的 Shell 资产定位器使用当前 checkout 已构建的 Agent 入口，主 Agent 和默认通用／code 子 Agent 因而能够在宿主资产可用时取得 Shell；其余工作区代码继续使用源码。修改开发构建脚本或更新 Shell 资产后，退出并重新运行 `desktop:dev`；资产未准备时先执行 `npm run build`。该选择不改变工作区信任和审批要求，具体装配与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
-Vite 以 middleware 模式接入宿主拥有的 loopback HTTP／WebSocket 服务，不另接管 SIGTERM 或 stdin EOF。退出由开发宿主统一收尾，信号处理器保留到清理完成，等待所属 Electron 退出后再删除该次应用目录。Service 编译／加载检查失败时旧服务继续运行，修正代码再保存即可重试。启动、收尾或回执无法确认时终端报告失败，停止该实例的后续自动切换；请完全退出并重新运行开发命令后检查结果。Main／preload、原生模块、workspace Worker 资产或依赖清单变更仍需退出后重新启动；需要更新包资产时先执行 `npm run build`，依赖清单变更先安装依赖。UI／Service 热更新只属于显式开发入口，正式 Native 仍加载固定制品。实现与验证归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+Vite 以 middleware 模式接入宿主拥有的 loopback HTTP／WebSocket 服务，不另接管 SIGTERM 或 stdin EOF。退出由开发宿主统一收尾，信号处理器保留到清理完成，等待所属 Electron 退出后再删除该次应用目录。Service 编译／加载检查失败时旧服务继续运行，修正代码再保存即可重试。启动、收尾或回执无法确认时终端报告失败，停止该实例的后续自动切换；请完全退出并重新运行开发命令后检查结果。Main／preload（包括由其导入打包的 `src` 共享 helper）、原生模块、构建脚本或依赖清单变更仍需退出后重新启动；Browser 隔离代码 worker 由当前开发 builder 随 Service 版本重建，其他 workspace Worker 沿所属资产要求重建。需要更新包资产时先执行 `npm run build`，依赖清单变更先安装依赖。UI／Service 热更新只属于显式开发入口，正式 Native 仍加载固定制品。实现与验证归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
 切换分支或 workspace 清单变更后，先重新执行 `bun install --frozen-lockfile`，确保 `node_modules/@kite-ai/*` 链接当前八个 workspace；缺少这些链接会在启动前报 `Cannot find module '@kite-ai/cli/host'`。
 

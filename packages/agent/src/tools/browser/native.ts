@@ -29,7 +29,12 @@ import {
   type DarwinBrowserOwner,
   startDarwinBrowserOwner,
 } from './darwin-owner';
-import type { BrowserAnnotation, BrowserFrame } from './types';
+import type {
+  BrowserAnnotation,
+  BrowserFrame,
+  BrowserReleasedPage,
+  BrowserSharedPageIdentity,
+} from './types';
 
 /** Pinned internal daemon protocol; never mix this owner with CLI auto-start. */
 export const agentBrowserVersion = '0.39.4';
@@ -44,10 +49,25 @@ export interface NativeBrowserTransportOptions {
   graceMs?: number;
   maximumRequestBytes?: number;
   maximumResponseBytes?: number;
+  /** Trusted paired Native host only; never public Tool/configuration input. */
+  attachment?: {
+    cdpUrl: string;
+    /** Paired Main facts only. Never serialized to the daemon, provider or model. */
+    readPageState?: (signal: AbortSignal) => Promise<{ url: string; title: string }>;
+  };
+  /** Trusted unified Native API only; dialogs require a current host-issued identity. */
+  manualDialogs?: true;
 }
 export interface NativeBrowserTransport {
   /** Trusted host diagnostics only; never part of the browser view or Tool result. */
   readProcessEvidence?(): LinuxOwnedProgramEvidence | DarwinBrowserEvidence;
+  readonly sharedPage?: true;
+  /** Exact identity from the paired Main acquire response; no page/Tool projection. */
+  sharedPageIdentity?(): Readonly<BrowserSharedPageIdentity> | null;
+  /** Passive exact Main release metadata, available only after confirmed close and dispose. */
+  releasedSharedPage?(): Readonly<BrowserReleasedPage> | null;
+  handoff?(signal: AbortSignal): Promise<void>;
+  resume?(signal: AbortSignal): Promise<void>;
   readonly ready: Promise<void>;
   readonly completion: Promise<{ confirmed: boolean }>;
   /** Full response envelope, including success/code and confirmation-required data. */
@@ -58,6 +78,31 @@ export interface NativeBrowserTransport {
     url?: string;
     title?: string;
   }>;
+  /** Formal model observation, independent of annotated UI preview. */
+  capturePng?(signal: AbortSignal): Promise<{
+    data: string;
+    width: number;
+    height: number;
+    imageRef?: string;
+    viewport?: { width: number; height: number };
+    navigation?: number;
+  }>;
+  pointer?(
+    input: {
+      imageRef: string;
+      kind: 'click' | 'drag';
+      from: { x: number; y: number };
+      to?: { x: number; y: number };
+    },
+    signal: AbortSignal,
+  ): Promise<void>;
+  dialogs?(
+    signal: AbortSignal,
+  ): Promise<{ dialogRef: string; type: 'alert' | 'confirm' | 'prompt' | 'beforeunload' }[]>;
+  dialog?(
+    input: { dialogRef: string; response: 'accept' | 'dismiss' },
+    signal: AbortSignal,
+  ): Promise<void>;
   close(): Promise<{ confirmed: boolean }>;
   dispose(): Promise<void>;
 }
@@ -280,6 +325,11 @@ export function createNativeBrowserTransport(
   context: JobContext,
 ): NativeBrowserTransport {
   if (context.signal.aborted) throw failure('browser_native_aborted');
+  if (
+    options.attachment?.readPageState !== undefined &&
+    typeof options.attachment.readPageState !== 'function'
+  )
+    throw failure('browser_attachment_invalid');
   const unavailable = nativeBrowserUnavailableReason();
   if (unavailable) throw failure(unavailable);
   if (admitted.size >= MAXIMUM_SESSIONS) throw failure('browser_native_session_limit');
@@ -289,7 +339,7 @@ export function createNativeBrowserTransport(
   const maximumResponse = limit(options.maximumResponseBytes, 512 * 1024, 2 * 1024 * 1024);
   const grace = limit(options.graceMs, 1000, 5000);
   const executable = executablePath(options.executable),
-    browser = executablePath(options.browserPath);
+    browser = options.attachment ? '' : executablePath(options.browserPath);
   const linux = process.platform === 'linux' ? options.linux : undefined;
   const darwin = process.platform === 'darwin' ? options.darwin : undefined;
   if ((process.platform === 'linux' && !linux) || (process.platform === 'darwin' && !darwin))
@@ -316,7 +366,7 @@ export function createNativeBrowserTransport(
     if (Buffer.byteLength(socketPath) > 103) throw failure('browser_native_socket_path_limit');
     for (const child of ['home', 'tmp', 'downloads', 'profile', 'cache', 'config', 'data'])
       mkdirSync(join(directory, child), { mode: 0o700 });
-    const env = {
+    const env: Record<string, string> = {
       PATH: '/usr/bin:/bin',
       HOME: join(directory, 'home'),
       TMPDIR: join(directory, 'tmp'),
@@ -327,12 +377,39 @@ export function createNativeBrowserTransport(
       AGENT_BROWSER_SESSION: session,
       AGENT_BROWSER_SOCKET_DIR: directory,
       AGENT_BROWSER_ENGINE: 'chrome',
-      AGENT_BROWSER_EXECUTABLE_PATH: browser,
+      AGENT_BROWSER_EXECUTABLE_PATH: options.attachment
+        ? join(directory, 'standalone-browser-disabled')
+        : browser,
       AGENT_BROWSER_NO_WEBMCP: '1',
+      ...(options.manualDialogs ? { AGENT_BROWSER_NO_AUTO_DIALOG: '1' } : {}),
       AGENT_BROWSER_IDLE_TIMEOUT_MS: '300000',
       AGENT_BROWSER_DEFAULT_TIMEOUT: '25000',
       AGENT_BROWSER_DOWNLOAD_PATH: join(directory, 'downloads'),
     };
+    if (options.attachment) {
+      const endpoint = new URL(options.attachment.cdpUrl);
+      if (
+        endpoint.protocol !== 'ws:' ||
+        endpoint.hostname !== '127.0.0.1' ||
+        endpoint.username ||
+        endpoint.password ||
+        endpoint.search ||
+        endpoint.hash ||
+        !/^\/kite-native\/[a-f0-9-]{72}$/.test(endpoint.pathname)
+      )
+        throw failure('browser_attachment_invalid');
+      const providerSource = `const input=JSON.parse(await Bun.stdin.text());if(input.protocol!=='agent-browser.plugin.v1'||input.type!=='browser.launch'||input.capability!=='browser.provider'||input.request.provider!=='kite-native-page'||!process.env.KITE_PAGE_CDP_URL)process.exit(2);process.stdout.write(JSON.stringify({protocol:'agent-browser.plugin.v1',success:true,browser:{cdpUrl:process.env.KITE_PAGE_CDP_URL,directPage:true}}));`;
+      env.AGENT_BROWSER_PROVIDER = 'kite-native-page';
+      env.AGENT_BROWSER_PLUGINS = JSON.stringify([
+        {
+          name: 'kite-native-page',
+          command: darwin ? bunExecutable : process.execPath,
+          args: ['--eval', providerSource],
+          capabilities: ['browser.provider'],
+        },
+      ]);
+      env.KITE_PAGE_CDP_URL = endpoint.href;
+    }
     owner = darwin
       ? startDarwinBrowserOwner({
           guardianPath,
@@ -763,6 +840,15 @@ export function createNativeBrowserTransport(
         command.webmcp !== false
       )
         throw failure('browser_native_launch_invalid');
+      if (options.attachment)
+        return wire(
+          {
+            ...command,
+            provider: 'kite-native-page',
+            executablePath: join(directory, 'standalone-browser-disabled'),
+          },
+          signal,
+        );
       command = {
         ...command,
         executablePath: browser,
@@ -776,9 +862,34 @@ export function createNativeBrowserTransport(
   async function capture(
     signal: AbortSignal,
   ): Promise<Awaited<ReturnType<NativeBrowserTransport['capture']>>> {
+    const readOwned = options.attachment?.readPageState;
+    const metadata = async () => {
+      const current = AbortSignal.any([
+        signal,
+        lifetime.signal,
+        AbortSignal.timeout(requestTimeout),
+      ]);
+      current.throwIfAborted();
+      if (closing) throw failure('browser_native_closed');
+      const state = await readOwned!(current);
+      current.throwIfAborted();
+      if (
+        closing ||
+        !state ||
+        Object.keys(state).sort().join(',') !== 'title,url' ||
+        typeof state.url !== 'string' ||
+        state.url.length > 8192 ||
+        typeof state.title !== 'string' ||
+        state.title.length > 128
+      )
+        throw failure('browser_native_metadata_invalid', true);
+      return { url: state.url, title: state.title };
+    };
     const path = join(directory, `capture-${randomUUID()}.jpg`);
     try {
-      const before = await request({ action: 'url' }, signal);
+      const before = readOwned
+        ? { success: true, data: await metadata() }
+        : await request({ action: 'url' }, signal);
       if (
         !object(before) ||
         before.success !== true ||
@@ -804,8 +915,13 @@ export function createNativeBrowserTransport(
         reply.data.path !== path
       )
         throw failure('browser_capture_failed');
-      const title = await request({ action: 'title' }, signal);
-      const after = await request({ action: 'url' }, signal);
+      const observed = readOwned ? await metadata() : undefined;
+      const title = observed
+        ? { success: true, data: { title: observed.title } }
+        : await request({ action: 'title' }, signal);
+      const after = observed
+        ? { success: true, data: { url: observed.url } }
+        : await request({ action: 'url' }, signal);
       if (
         !object(after) ||
         after.success !== true ||
@@ -869,6 +985,61 @@ export function createNativeBrowserTransport(
     completion,
     request,
     close,
+    async capturePng(signal) {
+      const path = join(directory, `model-${randomUUID()}.png`);
+      try {
+        const reply = await request(
+          { action: 'screenshot', path, format: 'png', annotate: false, fullPage: false },
+          signal,
+        );
+        if (
+          !object(reply) ||
+          reply.success !== true ||
+          !object(reply.data) ||
+          reply.data.path !== path
+        )
+          throw failure('browser_capture_failed');
+        const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        let result: { data: string; width: number; height: number } | undefined;
+        let readCause: unknown;
+        try {
+          const stat = await file.stat();
+          if (!stat.isFile() || stat.nlink !== 1 || stat.size < 24 || stat.size > 4 * 1024 * 1024)
+            throw failure('browser_capture_limit');
+          const bytes = await file.readFile();
+          if (
+            bytes.length !== stat.size ||
+            (await file.stat()).size !== stat.size ||
+            bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a'
+          )
+            throw failure('browser_capture_invalid');
+          result = {
+            data: bytes.toString('base64'),
+            width: bytes.readUInt32BE(16),
+            height: bytes.readUInt32BE(20),
+          };
+        } catch (error) {
+          readCause = error;
+        }
+        try {
+          await file.close();
+        } catch (error) {
+          localCleanupUnknown = true;
+          retained.add({ file, owner, directory });
+          throw new AggregateError(
+            readCause ? [readCause, error] : [error],
+            'browser_capture_close_unknown',
+          );
+        }
+        if (readCause) throw readCause;
+        if (!result) throw failure('browser_capture_invalid');
+        return result;
+      } finally {
+        await unlink(path).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error;
+        });
+      }
+    },
     capture(signal) {
       if (captures.size) return Promise.reject(failure('browser_native_capture_busy'));
       const pending = capture(signal);

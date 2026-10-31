@@ -349,6 +349,10 @@ test('default Auto uses the selected actual SDK route and one tool-free durable 
     expect(f.checks[0]!.body.model).toBe('remote-a');
     expect(f.checks[0]!.body.temperature).toBe(0.25);
     expect(f.checks[0]!.body.tools ?? []).toEqual([]);
+    expect(f.checks[0]!.body.messages).toContainEqual({
+      role: 'system',
+      content: expect.stringContaining('Assess this operation independently'),
+    });
     expect(JSON.stringify(f.checks[0]!.payload)).toContain(task);
     expect(f.checks[0]!.payload.target).toMatchObject({
       definitionId: 'files.write',
@@ -417,39 +421,85 @@ test('default Auto uses the selected actual SDK route and one tool-free durable 
   }
 }, 20000);
 
-test('default Auto ask, invalid closed output and Provider failure require the actual original human card without rerunning permission check', async () => {
-  for (const decision of ['ask_user', 'invalid', 'failure'] as const) {
+test('default Auto ask_user requires the actual original human card without rerunning permission check', async () => {
+  const f = await fixture('ask_user');
+  try {
+    await f.run();
+    const card = await f.pending();
+    expect(existsSync(join(f.workspace, 'work.txt'))).toBe(false);
+    expect(card.request).toMatchObject({
+      definitionId: 'files.write',
+      input: { path: 'work.txt', base: null },
+    });
+    expect(f.checks).toHaveLength(1);
+    const executions = await f.store.listExecutions('s');
+    expect(executions.every((execution) => execution.childSessionId === null)).toBe(true);
+    expect(
+      executions.filter((execution) => execution.kind === 'model' && execution.runId === null),
+    ).toHaveLength(1);
+    await f.approve(card);
+    await f.done();
+    expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
+    expect(f.checks).toHaveLength(1);
+    expect(
+      (await f.runtime.getInteraction({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+        interactionId: card.id,
+      }))!.acceptedDecisionRevision,
+    ).not.toBeNull();
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
+for (const decision of ['invalid', 'failure'] as const)
+  test(`default Auto ${decision} is a readable technical failure returned to the next Model without a human card or effects`, async () => {
     const f = await fixture(decision);
     try {
       await f.run();
-      const card = await f.pending();
+      await f.done();
       expect(existsSync(join(f.workspace, 'work.txt'))).toBe(false);
-      expect(card.request).toMatchObject({
-        definitionId: 'files.write',
-        input: { path: 'work.txt', base: null },
-      });
       expect(f.checks).toHaveLength(1);
+      expect(f.normalRequests).toHaveLength(2);
+      expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
       const executions = await f.store.listExecutions('s');
       expect(executions.every((execution) => execution.childSessionId === null)).toBe(true);
+      const check = executions.find(
+        (execution) => execution.kind === 'model' && execution.runId === null,
+      )!;
+      expect(check.status).toBe('failed');
+      const tool = executions.find((execution) => execution.kind === 'tool')!;
+      const content = (tool.result as { content: string }).content;
+      expect(content).toContain('No approval or rejection decision was made');
+      expect(content).toContain('This tool was not executed');
+      expect(content).not.toContain('Do not bypass this refusal');
+      expect(tool).toMatchObject({
+        status: 'failed',
+        authorization: { dispatched: false, check: { decision: 'unavailable' } },
+        result: {
+          details: {
+            code: 'authorization_check_unavailable',
+            dispatchCommitted: false,
+            adapterAttempted: false,
+            authorizationCheck: {
+              decision: 'unavailable',
+              executionId: check.id,
+              failureCode:
+                decision === 'invalid' ? 'authorization_check_output_invalid' : 'model_failed',
+            },
+          },
+        },
+      });
+      const messages = f.normalRequests[1]!.body.messages as { role: string; content: string }[];
+      expect(messages.find((message) => message.role === 'tool')?.content).toBe(content);
       expect(
-        executions.filter((execution) => execution.kind === 'model' && execution.runId === null),
-      ).toHaveLength(1);
-      await f.approve(card);
-      await f.done();
-      expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
-      expect(f.checks).toHaveLength(1);
-      expect(
-        (await f.runtime.getInteraction({
-          expectedStoreId: f.expectedStoreId,
-          sessionId: 's',
-          interactionId: card.id,
-        }))!.acceptedDecisionRevision,
-      ).not.toBeNull();
+        (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
+      ).toEqual([]);
     } finally {
       await f.close();
     }
-  }
-}, 30000);
+  }, 20000);
 
 test('default Auto cannot check past untrusted, missing allowlist, policy revocation or original cancellation', async () => {
   for (const change of ['untrusted', 'allowlist', 'revoke', 'cancel'] as const) {

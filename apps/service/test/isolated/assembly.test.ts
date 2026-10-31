@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Json, ToolContext } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { agentContractSource } from '@kite-ai/agent/sources';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
+import * as skillSources from '../../src/skill-source';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kite-assembly-'));
@@ -28,6 +30,68 @@ const request = {
   definitionId: 'model',
   input: null,
 };
+test('Skill tools expose only knowledge selectors and original internal inputs remain valid', async () => {
+  const f = fixture();
+  let assembly: Awaited<ReturnType<typeof createWorkspaceAssembly>> | undefined;
+  const loads: unknown[] = [],
+    resources: unknown[] = [];
+  const originalSource = skillSources.createConfiguredSkillSource;
+  const factory = spyOn(skillSources, 'createConfiguredSkillSource').mockImplementation(
+    (options) => {
+      const source = originalSource(options);
+      return {
+        ...source,
+        load(input) {
+          loads.push(structuredClone(input));
+          return source.load(input);
+        },
+        readResource(input) {
+          resources.push(structuredClone(input));
+          return source.readResource(input);
+        },
+      };
+    },
+  );
+  try {
+    const skill = join(f.workspace, 'skill');
+    mkdirSync(skill);
+    writeFileSync(join(skill, 'SKILL.md'), 'Original body. [reference](reference.md)\n');
+    writeFileSync(join(skill, 'reference.md'), 'Original reference.\n');
+    assembly = await createWorkspaceAssembly({
+      workspaceRoot: f.workspace,
+      profile: f.profile,
+      toolIds: ['skills.load', 'skills.resource'],
+      skills: [{ id: 'guide', path: 'skill' }],
+    });
+    const tools = assembly.extensions.flatMap((extension) => extension.tools ?? []);
+    const context = { signal: new AbortController().signal } as ToolContext;
+    for (const [id, input] of [
+      ['skills.load', { id: 'guide' }],
+      ['skills.resource', { id: 'guide', path: 'reference.md' }],
+    ] as const) {
+      const tool = tools.find((tool) => tool.id === id)!;
+      expect(tool.inputSchema.required).not.toContain('description');
+      expect(tool.inputSchema.properties).not.toHaveProperty('description');
+      expect(tool.model?.requiredParameters ?? []).not.toContain('description');
+      expect((await tool.execute(input as Json, context)).outcome).toBe('succeeded');
+    }
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(loads).toHaveLength(2);
+    expect(resources).toHaveLength(1);
+    for (const input of [...loads, ...resources]) expect(input).not.toHaveProperty('description');
+    expect(loads[0]).toMatchObject({ id: expect.any(String), version: expect.any(String) });
+    expect(resources[0]).toMatchObject({
+      skillId: expect.any(String),
+      path: 'reference.md',
+      version: expect.any(String),
+    });
+  } finally {
+    factory.mockRestore();
+    await assembly?.dispose();
+    f.close();
+  }
+});
+
 test('per-Run host assembly discovers summaries only, binds actual versions and never executes Skill resources', async () => {
   const f = fixture();
   let assembly: Awaited<ReturnType<typeof createWorkspaceAssembly>> | undefined;

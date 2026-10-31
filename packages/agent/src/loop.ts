@@ -44,7 +44,8 @@ export function recordToolOutcome(
     parameters = call.arguments;
   }
   const signature = JSON.stringify([call.name, parameters]);
-  streak.count = streak.signature === signature ? streak.count + 1 : 1;
+  streak.count =
+    streak.signature === signature ? Math.min(Number.MAX_SAFE_INTEGER, streak.count + 1) : 1;
   streak.signature = signature;
 }
 
@@ -95,7 +96,6 @@ export function outputLengthContinuation(executionId: string): ModelMessage {
 export async function defaultLoop(context: LoopContext): Promise<void> {
   context.toolFailureStreak ??= { signature: null, count: 0 };
   const streak = context.toolFailureStreak;
-  if (streak.count >= 5) throw new AgentError('repeated_tool_failure');
   let checkpoint = context.checkpoint;
   let continuation: string | undefined;
   context.checkpoint = undefined;
@@ -142,12 +142,12 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
     let outcomes: PromiseSettledResult<void>[] = [];
     const results = new Map<string, ToolExecutionResult>();
     try {
-      // Every started call reaches its durable boundary before the next Model, Run terminal or
-      // binding release. A batch error stops siblings without rewriting the Run as user-cancelled.
+      // executeTool returns only after the original result and message are durable.
+      // Denied/unknown results stop this batch's successors, not the next Model.
+      // A rejection is a Core/Store failure whose missing result cannot be fabricated here.
       outcomes = await Promise.allSettled(
         response.toolCalls.map(async (call) => {
           try {
-            batch.signal.throwIfAborted();
             const settled =
               initial?.kind === 'response'
                 ? initial.settledCalls.find((candidate) => candidate.callId === call.id)
@@ -158,12 +158,12 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
             const { result } = outcome;
             results.set(call.id, outcome);
             if (settled) await context.restoreToolCall?.(call);
-            if (result.content === 'approval_denied' && result.outcome === 'failed')
-              throw new AgentError('approval_denied');
-            if (result.outcome === 'outcome_unknown')
-              throw new Error('Execution outcome requires reconciliation.');
             if (settled) admission?.settled(call.id, result, settled.dispatched);
-            if (admission) batch.signal.throwIfAborted();
+            if (
+              result.outcome === 'outcome_unknown' ||
+              (result.outcome === 'failed' && result.content === 'approval_denied')
+            )
+              batch.abort(new AgentError('tool_batch_stopped'));
           } catch (error) {
             if (!failed) {
               failed = true;
@@ -188,12 +188,12 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
         throw new AggregateError(failures, 'tool_batch_failed', { cause: failure });
       throw failure;
     }
-    // Physical completion order can differ from the Model's call order. All started
-    // calls have settled before enforcing the limit or releasing the Run binding.
+    context.signal.throwIfAborted();
+    // Physical completion order can differ from the Model's call order. Keep the
+    // original failure facts without making a Tool failure a Run stop condition.
     for (const call of response.toolCalls) {
       const outcome = results.get(call.id)!;
       recordToolOutcome(streak, call, outcome.result, outcome.dispatched);
-      if (streak.count >= 5) throw new AgentError('repeated_tool_failure');
     }
   }
 }

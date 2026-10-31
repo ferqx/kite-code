@@ -92,6 +92,46 @@ export function shellToolCapability(id: string): {
   return { effects: ['process', 'unknown'], safeRead: false };
 }
 
+const browserTools = new Set([
+  'browser.execute',
+  'browser.open',
+  'browser.navigate',
+  'browser.snapshot',
+  'browser.image',
+  'browser.click',
+  'browser.fill',
+  'browser.scroll',
+  'browser.close',
+  'browser.request_human',
+  'browser.control',
+]);
+const browserJobs = new Set(['browser.code_session', 'browser.session', 'browser.human_wait']);
+const browserActions = new Set([
+  'browser.capture',
+  'browser.handoff',
+  'browser.resume',
+  'browser.close',
+  'browser.select',
+  'browser.input',
+  'browser.respond_human',
+]);
+/** Exact registered builtin identities only; no prefix or future-version exemption. */
+export function isBuiltinBrowserApprovalExempt(
+  definitionId: string,
+  kind: 'tool' | 'job' | 'action' | 'model',
+  definitionVersion?: string,
+) {
+  if (definitionVersion !== '1') return false;
+  if (kind === 'tool') return browserTools.has(definitionId);
+  if (kind === 'action') return browserActions.has(definitionId);
+  return (
+    kind === 'job' &&
+    (browserJobs.has(definitionId) ||
+      (definitionId.startsWith('builtin.browser/') &&
+        browserActions.has(definitionId.slice('builtin.browser/'.length))))
+  );
+}
+
 /** Classify the actual registered Tool, Job or Action; an Action dispatches as a Job. */
 export function builtinCapability(
   extensionId: string,
@@ -99,17 +139,46 @@ export function builtinCapability(
   kind: 'tool' | 'job' | 'action',
   planningId: string,
   definitionVersion?: string,
-): { effects: readonly CapabilityEffect[]; safeRead: boolean; internalRecordOnly?: true } {
+): {
+  effects: readonly CapabilityEffect[];
+  safeRead: boolean;
+  internalRecordOnly?: true;
+  approvalExempt?: 'builtin.browser';
+} {
   if (extensionId === 'builtin.browser' && definitionVersion === '1') {
-    if (kind === 'tool' && definitionId === 'browser.snapshot')
-      return { effects: ['read'], safeRead: true };
-    if (kind === 'tool' && definitionId === 'browser.open')
-      return { effects: ['process', 'network', 'unknown', 'record_write'], safeRead: false };
-    if (kind === 'job' && definitionId === 'browser.session')
-      return { effects: ['process', 'network', 'unknown'], safeRead: false };
-    if (kind === 'action' && definitionId === 'browser.select')
-      return { effects: ['record_write'], safeRead: false };
-    return { effects: ['network', 'unknown'], safeRead: false };
+    const capability = ((): { effects: readonly CapabilityEffect[]; safeRead: boolean } => {
+      if (kind === 'action' && definitionId === 'browser.capture')
+        return { effects: ['read'], safeRead: true };
+      if (kind === 'tool' && ['browser.snapshot', 'browser.image'].includes(definitionId))
+        return { effects: ['read'], safeRead: true };
+      if (kind === 'tool' && definitionId === 'browser.execute')
+        // This exact builtin only orchestrates the sandboxed interpreter. Each
+        // Browser API dispatch owns its actual external effects and permission.
+        return { effects: [], safeRead: true };
+      if (kind === 'tool' && definitionId === 'browser.open')
+        return { effects: ['process', 'network', 'unknown', 'record_write'], safeRead: false };
+      if (kind === 'tool' && ['browser.close', 'browser.request_human'].includes(definitionId))
+        // Exact-target release/handoff only reduces existing control. Later
+        // control or webpage operations retain their independent hard checks.
+        return { effects: [], safeRead: true };
+      if (kind === 'job' && definitionId === 'browser.session')
+        return { effects: ['process', 'network', 'unknown'], safeRead: false };
+      if (kind === 'job' && definitionId === 'browser.code_session')
+        return { effects: [], safeRead: true };
+      if (kind === 'job' && definitionId === 'browser.human_wait')
+        return { effects: [], safeRead: true };
+      if (kind === 'action' && definitionId === 'browser.respond_human')
+        return { effects: ['process', 'network', 'unknown', 'record_write'], safeRead: false };
+      if (kind === 'action' && definitionId === 'browser.select')
+        return { effects: ['record_write'], safeRead: false };
+      return { effects: ['network', 'unknown'] as readonly CapabilityEffect[], safeRead: false };
+    })();
+    return {
+      ...capability,
+      ...(isBuiltinBrowserApprovalExempt(definitionId, kind, definitionVersion)
+        ? { approvalExempt: 'builtin.browser' as const }
+        : {}),
+    };
   }
   if (kind === 'action' && extensionId === planningId)
     return { effects: [planningEffect(definitionId)], safeRead: false };
@@ -149,7 +218,7 @@ export function builtinCapability(
 export function workflowCapabilityDescription(
   description: Pick<
     CapabilityDescription,
-    'definitionId' | 'definitionVersion' | 'revision' | 'effects'
+    'definitionId' | 'definitionVersion' | 'revision' | 'effects' | 'approvalExempt'
   > & { kind: 'tool' | 'job'; extensionId?: string },
 ): {
   kind: 'tool' | 'job';
@@ -194,7 +263,12 @@ export function workflowCapabilityDescription(
       },
       policy: {
         minimumApproval:
-          kind === 'tool' && effects.every((effect) => effect === 'read') ? 'none' : 'user',
+          (description.extensionId === 'builtin.browser' &&
+            description.approvalExempt === 'builtin.browser' &&
+            isBuiltinBrowserApprovalExempt(definitionId, kind, definitionVersion)) ||
+          (kind === 'tool' && effects.every((effect) => effect === 'read'))
+            ? 'none'
+            : 'user',
       },
     },
   };

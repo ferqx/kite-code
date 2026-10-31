@@ -18,7 +18,7 @@
 
 [观察负例](test/isolated/context/tool-observations.test.ts)和[子结果取证](test/isolated/business/task/child-tool-evidence.test.ts)覆盖准确范围、同子会话后续轮、原文片段以及累计超过 19 MiB 原观察的正常结算。真实模型的当前／历史实现干扰、错误子报告采纳与收束证据归[任务质量 owner](../../tests/e2e/live/model/README.md#工具反馈与任务质量)；固定模型验证不保证任意模型的语义判断。
 
-[Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护单文件/目录搜索、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、精确重复失败保护和 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
+[Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护单文件/目录搜索、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、失败与未知结果记录及 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
 
 设计原因、备选与代价保存在[工具反馈与任务质量决定](../../.agents/notes/implemented/architecture/2026-10-23-agent-feedback-and-task-quality.md)。模型指导已实施，真实样本中仍有冗长和超出证据的表述；机械执行断言与全文质量分别说明，不能据工具全部成功宣称模型结论全部正确。
 
@@ -51,7 +51,7 @@
 - [根入口](src/index.ts)：`createRuntime`，import 不打开资源。Runtime 的短命令受理与异步运行分开；模型和工具等待不占控制入口。
 - [扩展入口](src/extensions/index.ts)：具版本 Tool/Action/Query、JSON schema、公开内容 envelope 与有限操作。扩展只获得当前 Session、自有 namespace 的记录 CAS、公开 Run/Execution 和受控子工具；不取得 SQL、owner 或完整运行状态。
 - [权限策略与 Shell 授权](src/permissions/README.md)：独立 `@kite-ai/agent/permissions` 与 `/permissions/shell`，统一三策略、权限约束、Shell AST/危险拒绝、摘要和最终 scope；Service 只注入宿主事实，Loop 保持通用授权接口。
-- [Agent Browser](src/tools/browser/README.md)：`@kite-ai/agent/browser` 的普通 Tool／Job／Query／Action，固定上游原生协议、整树监督、最新帧及人工接管；Linux与macOS适配已实现，macOS已有有限真实Runtime／Chrome证据、Linux原生待验证，Windows unavailable，普通填写不适用于凭据。
+- [Agent Browser](src/tools/browser/README.md)：普通 Tool／Job／Query／Action、统一 `browser.execute` 与受 Job 监督的隔离持续环境；Native 新默认单入口按每次 API 沿原 Operations 权限执行，正式 PNG 复用工具图片合同。全局内置 `computer-use` 由 [Skills](src/skills/README.md)提供；固定后端、Linux／macOS 监督和旧显式配置保留，执行器当前仅 macOS 合格宿主可用，普通填写不适用于凭据。真实客户端资格归 Desktop owner。
 - [普通问题入口](src/tools/ask-user/README.md)：`@kite-ai/agent/ask-user` 的纯工厂通过原 `requestInput` 提供 1–3 题、原选项和自由回答，并将原答案解释为模型与历史文案；默认选择及 child 禁用归 Service。
 - [计划与 receipt 验证入口](src/business/planning/README.md)：显式业务工厂、真实用户计划审阅、来源绑定的步骤回执、required 判定和准确 waiver；共享扩展端口与唯一 Loop。完整文件/Artifact/命令/MCP 验证及自动修复继续按该 owner 范围实施。
 - [Store 端口](src/storage/port.ts)：宿主使用的具名查询和事务；[记录](src/storage/types.ts)保存业务事实，非完整内存 State。
@@ -61,6 +61,7 @@
 - [Profile 使用权入口](src/platform/README.md)：`@kite-ai/agent/profile-access` 供 Bun 宿主显式取得共享使用权，可信一次性 helper 可取得继承 fd 的同一锁；纯 Node 身份入口不引入 FFI 或 acquire。
 - [制品使用权入口](src/artifact-access.ts)：显式候选 shared/exclusive OS 使用锁，import 不 acquire，不授予 Profile/Store/执行权限；终端安装器与运行中的宿主共享此协议。
 - [资源入口](src/resources.ts)：`createWorkspaceSerialLocks(profile)` 显式建立同 profile/Workspace 的共享 OS 串行键后端，宿主注入 Runtime；import 不打开资源，普通扩展不取得锁对象。
+- [执行资源](src/execution/resources.ts)发布冻结总容量，经 `ToolContext.resourceCapacity` 可信注入；它不是当前空闲量或授权。统一 Browser 入口须 process 总容量至少 2，不足时在代码／Browser Job 创建前准确返回 `browser_resource_capacity_unavailable`；有容量时仍受原审批、资源与取消边界约束。
 - [进程只读观察入口](src/process-observation.ts)：可信宿主在实际启动后显式读取原 PID 的 PPID、微秒出生和 kernel 状态；import 不加载 native 库，冷 decoder 不观察当前进程。观察不授予 spawn、信号、后代枚举或所有权，具体交接由 Shell／MCP／Service OAuth owner 保存。
 - [SQLite 入口](src/sqlite.ts)：显式打开新 profile、一个专用 Worker；macOS 的解析／Store 原 Worker 收尾通过[平台 owner](src/platform/README.md)等待原 Mach 权终态和准确释放，再交接原锁。具体字段和事务由[基线迁移](src/storage/migrations/0001-baseline.sql)、[具名操作](src/storage/sqlite/operations.ts)维护；三端与完整资源门禁仍按进度保留。
 - [Store 目录](src/storage/README.md)：原 Store 与实际 root 创建主体的有限 keyset 分页；Workspace 保持认证 profile 范围，空 Workspace 不依赖 Session 才可见。
@@ -167,11 +168,11 @@ Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终
 
 child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 的 `deadlineAt=null`。Runtime 计时器与 SQL 最后派发使用同一固定期限，到期按真实 Run 提交取消并停止 attached 域；已激活独立 child 与 detached Job 保持自己的适用域。迟到 partial、终态或 unknown 可以保存，不能启动新工作。没有公开短期限或累计 token/Tool/attempt 额度。期限 owner 与真实持续等待证据见[child README](test/isolated/child/README.md)。
 
-审批与问题的权威事实由[Interaction 事务](src/storage/sqlite/interactions/README.md)保存。宿主权限判断可返回 `approval`，Core 在获取 Tool/Job 资源前登记准确参数、定义版本、policy revision、来源和必要 refs；等待不持有该执行资源。超过有限卡预算的完整人工请求由可信 sealer 发布到准确原 Execution scope Artifact，有限卡复用 `policy.review` 完整附件协议；接受及最终授权均核原内容与当前准确 policy/input，卡预算不扩大，正文不截断。根入口回答保存同一请求的答案，实际 owner 复核当前权限和新鲜度后接纳，`markDispatching` 还要求准确决定引用。子请求从真实 ancestry 派生根展示投影，公开 child 入口不能直接回答。人工明确拒绝只取消该请求的原工作身份；批准、接纳和执行是不同事实。`ToolContext.requestInput` 登记当前已派发 attempt 的有界问题，使用实际每 Run permission binding 与 control-read stamp，schema 校验和接纳后返回信息，不获得其他执行权限；等待期间 stamp 漂移拒绝接受，迟到答案保留历史而不复活取消的工作。
+审批与问题的权威事实由[Interaction 事务](src/storage/sqlite/interactions/README.md)保存。宿主权限判断可返回 `approval`，Core 在获取 Tool/Job 资源前登记准确参数、定义版本、policy revision、来源和必要 refs；等待不持有该执行资源。超过有限卡预算的完整人工请求由可信 sealer 发布到准确原 Execution scope Artifact，有限卡复用 `policy.review` 完整附件协议；接受及最终授权均核原内容与当前准确 policy/input，卡预算不扩大，正文不截断。根入口回答保存同一请求的答案，实际 owner 复核当前权限和新鲜度后接纳，`markDispatching` 还要求准确决定引用。子请求从真实 ancestry 派生根展示投影，公开 child 入口不能直接回答。人工明确拒绝只拒绝该准确调用，不提交整 Run／Command 取消；原失败交给后续模型，批准、接纳和执行是不同事实。`ToolContext.requestInput` 登记当前已派发 attempt 的有界问题，使用实际每 Run permission binding 与 control-read stamp，schema 校验和接纳后返回信息，不获得其他执行权限；等待期间 stamp 漂移拒绝接受，迟到答案保留历史而不复活取消的工作。
 
 纯 [ask_user](src/tools/ask-user/index.ts) 区分准确执行取消与整 Run 取消：只认相同本执行 signal.reason 的已定义取消代码，或 [InteractionGate](src/execution/interactions.ts) 从已保存、准确同 Scope 的 cancelled Question 生成的类型化证据。该叶返回真实取消信息并让同 Run 继续；空答案取消和整 Run Ctrl+C 保原行为，foreign／错误 kind／未确认的 abort 不借此变成成功。Core 通用已尝试适配器的 unknown 分类不变，不能将无副作用问答的有限证据推广到文件、Shell 或网络效果。
 
-自动审核属于权限系统，宿主注入 `authorizationCheck: {id, version, modelId, model}`，纯分类只返回 `check: {request, requireApproval?}`。Core 保存 `authorization.check` Command 与原 Session 内唯一的无 Run Model Execution，复用共享 Model 槽及原执行取消域；不创建 child Session、Run、Job carrier 或聊天 Message，不进入子 Agent 目录、配额、类别和生命周期。输入从真实原命令、根工作、目标及同组成功 Model 请求派生，排除 Provider 私有 continuation；实际准备请求和完成结果各自封存独立 digest，最终 SQL 继续核 Store／主体／owner／root work、attempt、定义、input/source、当前 policy/control revision、空工具、完整输入输出与有限决定。强制人工 ceiling 与批准检查构成双 proof；有效 ask_user、失败或不可用沿原人工回退，明确拒绝保留原 reason。完整大正文继续经[Model 正文交接](src/model-body/README.md)验证。检查从准备前即登记并 retain 原配置，策略／取消竞争结束等待也不提前释放真实调用；Provider 前重新核取消，drain 等实际调用与配置释放后再关闭资源。旧 `authorization.review` child 历史只读保留原 proof、Inspector 与附件，原生产入口关闭，命中旧冷记录不重跑。`review` 只表示通用子 Agent 的代码审查类别。[主回归](test/isolated/execution/authorization-check.test.ts)、[完整输出](test/isolated/execution/authorization-check-complete-output.test.ts)、[旧历史](test/isolated/execution/authorization-history-compatibility.test.ts)与[默认 SDK](../../apps/service/test/isolated/auto-configuration.test.ts)分别核对应边界。
+自动审核属于权限系统，宿主注入 `authorizationCheck: {id, version, modelId, model}`，纯分类只返回 `check: {request, requireApproval?}`。Core 保存 `authorization.check` Command 与原 Session 内唯一的无 Run Model Execution，复用共享 Model 槽及原执行取消域；不创建 child Session、Run、Job carrier 或聊天 Message，不进入子 Agent 目录、配额、类别和生命周期。输入从真实原命令、根工作、目标及同组成功 Model 请求派生，排除 Provider 私有 continuation；实际准备请求和完成结果各自封存独立 digest，最终 SQL 继续核 Store／主体／owner／root work、attempt、定义、input/source、当前 policy/control revision、空工具、完整输入输出与有限决定。强制人工 ceiling 与批准检查构成双 proof；有效 ask_user 或未配置审核器时沿原人工回退，已配置审核器的技术失败作为未派发 Tool 结果交回下一 Model，明确拒绝保留原 reason。新请求含独立 system 指引，禁止将历史审核技术失败误当拒绝；可读错误、有限诊断与旧记录兼容归[权限 owner](src/permissions/README.md)。完整大正文继续经[Model 正文交接](src/model-body/README.md)验证。检查从准备前即登记并 retain 原配置，策略／取消竞争结束等待也不提前释放真实调用；Provider 前重新核取消，drain 等实际调用与配置释放后再关闭资源。旧 `authorization.review` child 历史只读保留原 proof、Inspector 与附件，原生产入口关闭，命中旧冷记录不重跑。`review` 只表示通用子 Agent 的代码审查类别。[主回归](test/isolated/execution/authorization-check.test.ts)、[完整输出](test/isolated/execution/authorization-check-complete-output.test.ts)、[旧历史](test/isolated/execution/authorization-history-compatibility.test.ts)与[默认 SDK](../../apps/service/test/isolated/auto-configuration.test.ts)分别核对应边界。
 
 [输入事务](src/storage/sqlite/inputs/README.md)区分准确活动 Run 的 `input.steer` 与独立 `input.follow_up`。Core 在安全检查点按持久顺序应用 steer，尚未派发的旧模型、工具和审批保存 `superseded_by_user_input` 与准确的工具响应配对；已派发调用保留原参数、来源和真实结果。最终派发与 Run 完成事务复查 pending 输入，完成附近到达的 steer 仍继续同一个 Run。follow-up 保留自己的命令和原 afterRun 关系，不因后来工作或原 Run 取消而换目标；单独取消未应用输入不会生成消息。公开 child 输入目前仍限制在宿主受控路径，完整业务追加消息继续按方案实施。
 
@@ -187,11 +188,15 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 主 Run 的来源请求按定义及完整输入语义摘要保留，`ContextSources.captureBatch` 在检查点接收全部原请求；未提供时仍逐项调用 `capture`。Core 与 Extension 不设来源数量额度，仍核格式、namespace、同 ID 摘要一致与准确 Session。默认项目来源完整读取全部适用指令，不设目标／目录／字节额度；nofollow、原文件实体、范围和 UTF-8 校验保持。批量理由见[完整来源捕获 Note](../../.agents/notes/implemented/architecture/2026-10-10-complete-checkpoint-source-capture.md)，当前长期执行取舍见[持续执行决定](../../.agents/notes/implemented/architecture/2026-10-15-long-running-agent-continuation.md)。
 
+扩展completion条件可等待准确Job的结果接纳；Job本身终态不等于原Run已收到该结果。nested Tool登记要求时沿可信实际父链定位原Run，Runtime与Store在等待事务重核同Store／Session／root work、namespace、记录revision与selection；不能拿当前active Run补绑。自定义业务记录不自动进入Task的operation_result消费，等待沿原change cursor／取消／期限，不新增Loop或公共字段。当前[Browser人工receipt](src/tools/browser/README.md#异步人工交接候选未发布)按此保持原任务直到实际相关回应接纳；Task默认自动结果行为保持，116项必要关联回归及三包类型通过，真实Native范围另核。
+
 唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败不设尝试次数上限，按原失败 Execution 血缘退避且响应取消；公开重试 `maxAttempts=null`。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
 
 长度续写请求遇到可重试 Provider 失败时，Runtime 仍从当前持久历史、真实人类补充、权限、工具和 Host Sources 重新准备，只恢复 Loop 的准确临时续写尾项。该尾项须绑定同 Store/Session/Run/工作/原 Command 的成功纯文本 length Execution；完整原输出与新历史中的唯一原 assistant 正文一致才允许追加。若当前已发布压缩已准确覆盖该原 assistant，则验证同 selection 的覆盖上界、原正文或完整 descriptor 及当前真实摘要后退役旧尾项，沿新摘要继续，不把旧正文灌回窗口。无效证明拒绝继续，普通重试不增加尾项，也不把失败尝试的部分文本加入上下文。[长度后重试回归](test/isolated/execution/model-length-retry.test.ts)核超过64KiB原 Artifact、真实 Tool、人类补充及 Source/权限刷新和错工作反例。
 
-模型顺序中的同 Tool／相同 JSON 参数连续五次 `failed` 触发 `repeated_tool_failure`，经原 `run.cancel` 域停止当前 Run 与 attached 后代。Core 确认未派发的 `context_refresh_required/capability_refresh_required` 是中性准备失效，不增加也不清空计数；其他调用换工具、参数或返回非失败结果时重置。唯一 Loop 从 [UnifiedExecution](src/execution/index.ts) 的内部 `ToolExecutionResult` 接收真实 dispatch 标记，和扩展可自报的 `ToolResult.details` 分开；原 `tool()` 调用者仍取得同一业务结果，不增加逐 Tool SQL 查询。并行批次先保存所有已启动结果，再按原调用顺序计算。计数跨完成检查保存，显式原 Run 接续从原 Model/Tool ledger 重建；历史扫描和最后 checkpoint 都将 Store 的 `authorization.dispatched` 交给同一分类函数，缺少证据时保守计数，不能通过压缩、重启或伪造扩展详情重置。[长任务回归](test/isolated/execution/long-running.test.ts)核5／128个新目录指令退回、前四次真实失败保留和伪造详情；[重试](test/isolated/execution/model-attempt.test.ts)和[真实强杀接续](test/isolated/recovery/run-resume-runtime.test.ts)分别核模型和两种 Tool 恢复边界。定向通过不代表实际连续数周或完整平台资格。
+Tool 的 `failed`、人工／自动拒绝、adapter 抛异常与 `outcome_unknown` 必须先结算原 Execution 和配对消息，再作为原 call 的准确结果交给下一 Model；不以 Tool 异常或同参连续五次失败结束 Loop，也不新增自动重试。已调用 adapter 后抛异常仍保守保存 unknown，不宣称没有效果。[执行边界](src/execution/index.ts)在adapter catch内建立一次独立纯JSON快照，拒绝循环、BigInt、非有限值、accessor和可执行toJSON，且不运行getter／toJSON；非法返回以 `outcome_unknown / invalid_tool_result` 配对交回，后续校验、status、content与持久结果只用该快照。原失败序列按实际 dispatch 标记记录，来源／能力准备失效不冒充已派发失败；该记录不再是 Run 取消条件。明确用户取消仍停止，无法保存原终态或 authority／Store 损坏仍失败关闭，Loop 不编造结果。[Loop 真实回归](test/isolated/execution/loop-tool-results.test.ts)、[长任务回归](test/isolated/execution/long-running.test.ts)与[原 Run 接续](test/isolated/recovery/run-resume-runtime.test.ts)核原配对、五次以后正常解释、零自动重放及持久边界；决定与历史替代范围见[工具结果与 Loop](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)。
+
+非法返回增量先在真实Runtime／SQLite得到7类红例，修后完整Loop结果16项133断言通过，保留原Store终态trigger失败与用户cancel语义。合法inline／artifact模型呈现3项77断言、正式PNG到下一Model1项9断言通过；formatter原仅一组调用的旧预期因Loop继续第三Model而失效，现精确核两组成功历史，失败结果仍不进入formatter。受影响的并行、派发、长任务、授权、Browser执行／页面／人工、Files与Task共10文件独立进程复验为146通过、0失败、1项Windows专用跳过、1678断言，Agent类型通过；固定模型与受控adapter不代证付费模型或Native客户端资格。
 
 普通来源发现与旧依据变化分别处理。[文件工具工厂](src/tools/files-tools.ts)仅为 read/list/glob/search 提供可信 `ToolDefinition.contextDiscovery=read_only`；Core 冻结原 Model 的 source requests，各 Tool 用原请求集加本次准确输入复核，不混入同批兄弟刚引入的目标。只有宿主捕获的低权限项目指令新增、原模型全部来源仍不变时，合格只读调用可以继续；下一 Model 同时取得新指令与真实结果，不追溯改写旧 Model。未知工具、扩展自报同 kind 和不透明来源没有该资格。[混合批次回归](test/isolated/context/tool-batch-freshness.test.ts)验证正常四项各一次及旧来源改写／删除保守拒绝；[真实 SIGKILL 恢复](test/isolated/recovery/source-discovery-resume.test.ts)核原 response 和下一 Model planned 两个边界，四个读取不重放。
 
@@ -274,11 +279,13 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 Runtime 公开 `listMessages/getView` 对已接收普通邮件只读验证原 Command、发送 Tool、接收 Run／selection 与 Artifact，沿 system 消息交付 `agentMessage` 来源和完整正文。物理占位及原模型低信任输入不改写；来源或正文损坏明确不可读。Native 在原接收轮次的处理过程中展示发送者与正文，不把内部占位当用户消息，也不新增分段或独立邮件气泡。实际证明和冷读回归由上述 Store owner 维护。
 
+已落定 Tool unknown 与解释 Run 的完成分别判断：SQLite `finishRun` 只对准确 `run_id` 内已落定的 Tool unknown 允许解释 Run 正常完成，不改原结果、revision、引用或未知效果；同范围仍活动的执行及 Model／Job unknown 继续阻挡完成。nested Job 的实际监督、permit、binding 与冷恢复门禁仍归原 Job owner，不从回复 completed 推导资源已停止或原效果已解决。
+
 ## 同一 Step 的并行工具批次
 
 默认产品权限使用可信 `toolDispatchOrder: model`：同一 Model 批次按声明顺序完成准入，前项等待人工决定时后项不派发；实际准入后各 Tool 的执行仍并发，人工明确拒绝终止未准入兄弟而不伪造其效果。策略进入原冻结 Run 配置并参与恢复核对，Model 输入不能选择该标记。自定义 Permissions 未声明它时保持下述独立并行行为与已开始调用的清理约束；真实乱序、接续及 T048 能力不由 TUI 推造。
 
-[唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行；没有新增工具数量或累计预算。人工明确拒绝或未知结果停止该批，已启动的调用全部结束后才允许 Run 终结和 binding release。自动审核拒绝保为目标工具未派发的权限失败，不取消原任务；原拒绝原因随配对结果交回模型，后续工具继续各自核权限，不能绕过拒绝。独立的后发持久化失败保留真实错误，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
+[唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行。人工明确拒绝或未知结果停止本批后继效果，已启动调用全部达到原持久结算边界后，下一 Model 接收完整原 call/result 配对并继续解释；局部 batch abort 不成为整 Run 的取消。自动审核拒绝保为目标工具未派发的权限失败，原因随原结果交回，后续调用仍独立核权限，不能绕过拒绝。真正的后发持久化／authority 失败仍终止推进，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
 
 Message 和 Execution 保留实际保存顺序。modelMessages 排除未完成 Model 消息，只在同一 assistant 的结果位置按原 call ID 配对完整 Tool 结果。恢复保 planned A 与 settled B 的混合边界；B 不重放，A 保原身份与审批。提前封存的可信 continuation 可接回仍在监督的内部操作；普通有副作用 Tool、外部 Job 和 unknown 不能由此自动重试。
 
@@ -300,7 +307,7 @@ Operation 等待共享持久变化水位，最多 64 个活动 wake registration
 
 [独立未见 label-station](../../tests/isolated/unified-agent/evolution-unseen-sample.test.ts)以公开 `extensions`、Runtime、SQLite/Store 入口注册普通 Tool/Action/Query，自有 resource 和 namespace CAS 回执，不修改 Loop/Session/schema/router。源码外真实通用 UI 点击、HTTP、受控 Tool 两次效果、读回与再次操作1项67断言通过，Action/Tool 拒绝均零效果、Model/Run为零；12个列明核心/公开基线 hash 保持原值。独立包声明依赖，测试使用已安装 npm 模块而非新 npm 安装；本机有限 E01/E02/E03/E14 的 Evolution Record、原 ID 和未验证范围归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-04mcp-冷原申请备份-v8-与未见扩展样本)，不把它作为全部演进或发行资格。
 
-[自动拒绝分流决定](../../.agents/notes/implemented/bug-fix/2026-10-25-automatic-rejection-preserves-authorized-work.md)说明自动审核与人工拒绝的不同边界。`agentContractSource`另要求只读分析不制造项目占位或报告，拒绝不授权更换工具／路径重试同一效果；该指引不授派发权限，也不保证模型永不误调用。
+[自动拒绝分流决定](../../.agents/notes/implemented/bug-fix/2026-10-25-automatic-rejection-preserves-authorized-work.md)保留自动拒绝只作用于准确未派发目标及原因交回的取舍；其中人工 deny 结束原工作与五次同参失败硬退出部分由[2026-10-29 决定](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)部分替代。人工 deny 仍停止同批未开始兄弟，但不是 `cancelRun/cancelCommand`。`agentContractSource` 要求只读分析不制造项目占位或报告，拒绝不授权更换工具／路径重试同一效果；该指引不授派发权限，也不保证模型永不误调用。
 
 [授权审查回归](test/isolated/execution/authorization-check.test.ts)使用真实 SQLite 与固定模型核实单次批准、无效输出/失败人工回退、策略及来源变化零效果、精准取消、资源内禁止等待、单子 Agent 槽位内审查和冷 planned 事实只读；冷读取证明不自动派发，不代替真实进程强杀恢复资格。
 
@@ -342,3 +349,5 @@ Store 的锁与事务见[存储 owner](src/storage/README.md)。[Runtime 实测]
 [执行器](src/execution/index.ts)在原 100ms／32KiB 前缀保存节奏同时保存 small reasoning 和 content；失败保留实际前缀，未完整 Tool 参数仍不派发。optional reasoning 使用原 JSON message bytes，不改 DDL／format／备份合同，完整 reader 仍核原 scope／hash。Runtime 仅对实际压缩 Session 临时保存 preparing／summarizing／validating，公开 View 按原 active Run／Store投影，finally 清除；冷状态不造阶段。[真实 reasoning](test/isolated/model-output/live-reasoning.test.ts)及[压缩进度](test/isolated/context/compression-progress.test.ts)覆盖这两项来源。
 
 上下文的累计实际用量、最近请求实际输入与下一请求预算分别核对；Core 基线、完整累计 SQL、只读预测 API 与压缩交接归[上下文统计与预算](src/context-estimate.README.md)。
+
+活动Run的有限可信控制Action与只读work资格候选见[生命周期](src/lifecycle.README.md#活动run的有限控制响应候选)。它保留原owner和正常鉴权，禁止新工作，普通Action仍串行；不是新的Browser业务内核或通用并发入口。异步人工请求的耐久记录/响应Job/result.include来源和失效政策归[Browser owner](src/tools/browser/README.md#异步人工交接候选未发布)。

@@ -181,7 +181,7 @@ test('restored undispatched retirement releases the original sibling admission',
   }
 });
 
-test('default policy holds an actual planned sibling behind approval and denial records cancellation without effects', async () => {
+test('denial cancels the planned batch successor without effects and both results reach the next Model', async () => {
   const effects: string[] = [];
   const f = await fixture(
     ['external', 'read'].map((name) =>
@@ -237,7 +237,13 @@ test('default policy holds an actual planned sibling behind approval and denial 
       result: { details: { dispatchCommitted: false, adapterAttempted: false } },
     });
     expect(effects).toEqual([]);
-    expect(f.model.requests).toHaveLength(1);
+    expect(f.model.requests).toHaveLength(2);
+    expect(
+      f.model.requests[1]!.messages.filter((row) => row.role === 'tool').map(
+        (row) => row.toolCallId,
+      ),
+    ).toEqual(['call-0', 'call-1']);
+    expect(await f.store.getRun(pendingTool!.runId!)).toMatchObject({ status: 'completed' });
   } finally {
     await f.close();
   }
