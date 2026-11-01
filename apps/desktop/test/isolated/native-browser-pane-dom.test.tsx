@@ -7,9 +7,11 @@ import { createBrowserDisplayBootstrap } from '../../electron/browser-display-bo
 import {
   type NativeBrowserLayoutFrameAck,
   type NativeBrowserRequest,
+  type NativeBrowserRestoreScope,
   type NativeBrowserState,
   nativeBrowserWitnessColors,
   projectNativeBrowserBounds,
+  projectNativeBrowserLayout,
 } from '../../src/native-browser-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
@@ -216,19 +218,15 @@ test('native geometry retries a rejected ACK only on a new layout event and foll
         (request): request is Extract<NativeBrowserRequest, { action: 'present' }> =>
           request.action === 'present',
       );
-    expect(afterScopeChange[0]).toMatchObject({
-      action: 'present',
-      bounds: null,
-      scope,
-      presentationRevision:
-        previousRevision.action === 'present' ? previousRevision.presentationRevision : undefined,
-    });
+    // The previous visible owner already hid when render(false) committed.
+    // Reactivating an inactive Pane must not revoke its new scope first.
+    expect(afterScopeChange).toHaveLength(1);
     expect(afterScopeChange.at(-1)).toMatchObject({
       scope: nextScope,
       bounds: { x: 100, y: 100, width: 200, height: 450, radius: 0 },
     });
     expect(afterScopeChange.at(-1)!.presentationRevision!).toBeGreaterThan(
-      afterScopeChange[0]!.presentationRevision!,
+      previousRevision.action === 'present' ? previousRevision.presentationRevision! : 0,
     );
   } finally {
     releaseHeld?.();
@@ -605,6 +603,42 @@ test('measured Native layout follows the production Panel resize policy and refu
     separatorWidth = 1;
     previous = await measure();
 
+    // A native resize can cross a min-size constraint before Root supplies a
+    // new accepted measurement. The actual Panel library keeps that changed
+    // relative allocation when expanding again; one old anchor cannot replay it.
+    await act(async () => detailsRef.current!.resize('240px'));
+    const nativeAnchor = await measure();
+    width = 820;
+    const narrowActual = await measure();
+    expect(Math.abs(narrowActual.bounds!.width - 240)).toBeLessThan(1.5);
+    const narrowPrediction = projectNativeBrowserLayout(
+      nativeAnchor.bounds!,
+      nativeAnchor.layout!,
+      width,
+      height,
+    )!;
+    expect(Math.abs(narrowActual.bounds!.x - narrowPrediction.bounds.x)).toBeLessThan(1.5);
+    width = 1800;
+    const expandedActual = await measure();
+    const withoutHistory = projectNativeBrowserBounds(
+      nativeAnchor.bounds!,
+      nativeAnchor.layout!,
+      width,
+      height,
+    )!;
+    expect(Math.abs(expandedActual.bounds!.x - withoutHistory.x)).toBeGreaterThan(200);
+    const expandedPrediction = projectNativeBrowserLayout(
+      narrowPrediction.bounds,
+      narrowPrediction.layout,
+      width,
+      height,
+    )!;
+    expect(Math.abs(expandedActual.bounds!.x - expandedPrediction.bounds.x)).toBeLessThan(1.5);
+    expect(Math.abs(expandedActual.bounds!.width - expandedPrediction.bounds.width)).toBeLessThan(
+      1.5,
+    );
+    previous = expandedActual;
+
     for (const nextWidth of [1100, 800, 1800, 1400]) {
       const predicted = projectNativeBrowserBounds(
         previous.bounds!,
@@ -764,7 +798,7 @@ type LayoutReply =
   | import('../../src/native-browser-bridge').NativeBrowserLayoutReceipt
   | null;
 
-function measuredLayoutPortFixture(asyncPort = true) {
+function measuredLayoutPortFixture(asyncPort = true, initialBlank = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -820,14 +854,23 @@ function measuredLayoutPortFixture(asyncPort = true) {
   }
   Object.assign(window, { ResizeObserver: LayoutObserver });
   Object.assign(globalThis, { ResizeObserver: LayoutObserver });
-  const state: NativeBrowserState = {
+  let state: NativeBrowserState = {
     id: 'browser',
-    url: 'https://example.test/original',
+    url: initialBlank ? '' : 'https://example.test/original',
     title: 'Original page',
     loading: false,
     canGoBack: false,
     canGoForward: false,
   };
+  let notify: ((page: NativeBrowserState) => void) | undefined;
+  let frameAck: ((ack: NativeBrowserLayoutFrameAck) => void) | undefined;
+  let waiting = true;
+  const requests: NativeBrowserRequest[] = [];
+  if (initialBlank)
+    dom.window.HTMLCanvasElement.prototype.getContext = (() => ({
+      fillStyle: '',
+      fillRect() {},
+    })) as unknown as typeof dom.window.HTMLCanvasElement.prototype.getContext;
   const events: { port: 'sync' | 'async' | 'legacy'; input: MeasuredPresent }[] = [];
   const pending: {
     input: MeasuredPresent;
@@ -838,7 +881,7 @@ function measuredLayoutPortFixture(asyncPort = true) {
     kiteNative: {
       presentBrowserLayout(input: MeasuredPresent) {
         events.push({ port: 'sync', input });
-        return null;
+        return initialBlank ? { state, waiting } : null;
       },
       ...(asyncPort
         ? {
@@ -855,12 +898,36 @@ function measuredLayoutPortFixture(asyncPort = true) {
           }
         : {}),
       async browserRequest(input: NativeBrowserRequest) {
+        requests.push(input);
         if (input.action === 'present') events.push({ port: 'legacy', input });
+        if (input.action === 'navigate') {
+          state = { ...state, url: input.input, loading: true, error: undefined };
+          notify?.(state);
+          return state;
+        }
+        if (input.action === 'stop') {
+          state = { ...state, loading: false };
+          notify?.(state);
+          return state;
+        }
         return input.action === 'state' ? state : null;
       },
-      watchBrowser() {
-        return () => {};
+      watchBrowser(receive: (page: NativeBrowserState) => void) {
+        notify = receive;
+        return () => {
+          notify = undefined;
+        };
       },
+      ...(initialBlank
+        ? {
+            watchBrowserLayoutFrame(receive: (ack: NativeBrowserLayoutFrameAck) => void) {
+              frameAck = receive;
+              return () => {
+                frameAck = undefined;
+              };
+            },
+          }
+        : {}),
     },
   });
   const root = createRoot(document.getElementById('root')!);
@@ -884,12 +951,64 @@ function measuredLayoutPortFixture(asyncPort = true) {
   return {
     events,
     pending,
+    requests,
+    document: dom.window.document,
     scope,
     flush,
+    set waiting(value: boolean) {
+      waiting = value;
+    },
+    get frameAck() {
+      return frameAck!;
+    },
+    updatePage(patch: Partial<NativeBrowserState>) {
+      return flush(() => {
+        state = { ...state, ...patch };
+        notify?.(state);
+      });
+    },
+    navigate(url: string) {
+      return flush(() => {
+        const address = document.querySelector<HTMLInputElement>('.native-browser-address')!;
+        address.focus();
+        Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
+          address,
+          url,
+        );
+        address.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+        address
+          .closest('form')!
+          .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      });
+    },
+    stop() {
+      return flush(() =>
+        document.querySelector<HTMLButtonElement>('[aria-label="停止加载"]')!.click(),
+      );
+    },
+    ack(input: MeasuredPresent, patch: Partial<NativeBrowserLayoutFrameAck> = {}) {
+      return flush(() =>
+        frameAck?.({
+          id: input.id,
+          scope: input.scope!,
+          ...(input.draft ? { draft: input.draft } : {}),
+          presentationRevision: input.presentationRevision!,
+          key: input.witness!.key,
+          step: 2,
+          ...patch,
+        }),
+      );
+    },
     positive(port: 'sync' | 'async' | 'legacy') {
       return events.filter((event) => event.port === port && event.input.bounds);
     },
-    render(chromeHosted = true, currentScope = scope) {
+    render(
+      chromeHosted = true,
+      currentScope: NativeBrowserRestoreScope | null = scope,
+      draft?: string,
+      visible = true,
+      initialHint?: NativeBrowserState,
+    ) {
       return flush(() =>
         root.render(
           <div
@@ -903,10 +1022,12 @@ function measuredLayoutPortFixture(asyncPort = true) {
             <div id="port-details" data-panel data-native-browser-layout={policy}>
               <NativeBrowserPane
                 id="browser"
-                visible
+                visible={visible}
                 chromeHosted={chromeHosted}
                 tools={null}
-                scope={currentScope}
+                scope={currentScope ?? undefined}
+                draft={draft}
+                initialHint={initialHint}
                 onTitleChange={() => {}}
               />
             </div>
@@ -942,6 +1063,306 @@ function measuredLayoutPortFixture(asyncPort = true) {
     },
   };
 }
+
+test('a retained page uses accurate restoration metadata without showing new-tab tools or bypassing adoption', async () => {
+  const f = measuredLayoutPortFixture(false, true),
+    draft = '00112233445566778899aabbccddeeff',
+    hint: NativeBrowserState = {
+      id: 'browser',
+      title: 'Retained',
+      url: 'https://example.test/retained',
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+    };
+  try {
+    await f.updatePage(hint);
+    await f.render(false, null, draft, true, hint);
+    const viewport = f.document.querySelector('.native-browser-viewport'),
+      first = f.positive('sync').at(-1)!.input;
+    expect(f.document.querySelector('.native-browser-start')?.textContent).toBe('正在显示原网页…');
+    expect(f.document.querySelector<HTMLInputElement>('.native-browser-address')!.value).toBe(
+      hint.url,
+    );
+    expect(
+      f.requests.some((request) => request.action === 'navigate' || request.action === 'grant'),
+    ).toBe(false);
+    await f.ack(first, { step: 1 });
+    const second = f.positive('sync').at(-1)!.input;
+    await f.ack(second, { presented: false });
+    expect(!!f.document.querySelector('.native-browser-start')).toBe(true);
+    await f.ack(second, { presented: true });
+    expect(f.document.querySelector('.native-browser-start')).toBeNull();
+    expect(f.document.querySelector('.native-browser-viewport') === viewport).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a new draft page navigates without Session scope and adopts only its current draft proof before async resize', async () => {
+  const f = measuredLayoutPortFixture(true, true),
+    draft = '00112233445566778899aabbccddeeff';
+  try {
+    await f.render(false, null, draft);
+    await f.navigate('https://www.baidu.com/');
+    expect(f.requests.find((request) => request.action === 'navigate')).toMatchObject({ draft });
+    expect(
+      f.requests.every(
+        (request) => !('scope' in request) && 'draft' in request && request.draft === draft,
+      ),
+    ).toBe(true);
+    const first = f.positive('sync').at(-1)!.input,
+      source = f.document.querySelector('.native-browser-start');
+    expect(first.draft).toBe(draft);
+    expect(first.scope).toBeUndefined();
+    await f.ack(first, { draft: 'ffeeddccbbaa99887766554433221100', presented: true });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    await f.ack(first);
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    await f.ack(first, { step: 1 });
+    const second = f.positive('sync').at(-1)!.input;
+    await f.ack(second, { presented: false });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    await f.ack(second, { presented: true });
+    expect(f.document.querySelector('.native-browser-start')).toBeNull();
+    expect(
+      f.document.querySelector<HTMLElement>('.native-browser-toolbar')?.style.visibility,
+    ).not.toBe('hidden');
+    const syncCount = f.positive('sync').length;
+    await f.resize(1200);
+    expect(f.positive('sync')).toHaveLength(syncCount);
+    expect(f.positive('async')).toHaveLength(1);
+    expect(f.pending[0]!.input.draft).toBe(draft);
+    expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+    expect(f.requests.some((request) => request.action === 'grant')).toBe(false);
+    await f.unmount();
+    expect(
+      f.requests.some(
+        (request) => request.action === 'present' && !request.bounds && request.draft === draft,
+      ),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a draft display revision survives a new document counter and rejects the old confirmation', async () => {
+  const f = measuredLayoutPortFixture(false, true),
+    draft = '00112233445566778899aabbccddeeff';
+  try {
+    await f.render(false, null, draft);
+    await f.navigate('https://www.baidu.com/');
+    const old = f.positive('sync').at(-1)!.input;
+    await f.render(false, null, draft, false);
+    Reflect.deleteProperty(f.document, Symbol.for('kite.native.browser.presentationRevision'));
+    await f.render(false, null, draft);
+    const current = f.positive('sync').at(-1)!.input;
+    expect(current.presentationRevision! > old.presentationRevision!).toBe(true);
+    expect(window.sessionStorage.getItem(`kite.browserDraftRevision:${draft}`)).toBe(
+      String(current.presentationRevision),
+    );
+    await f.ack(old, { presented: true });
+    expect(!!f.document.querySelector('.native-browser-start')).toBe(true);
+    await f.ack(current, { presented: true });
+    expect(f.document.querySelector('.native-browser-start')).toBeNull();
+    expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a late navigation reply from an old draft cannot overwrite the replacement address', async () => {
+  const f = measuredLayoutPortFixture(false, true),
+    draft = '00112233445566778899aabbccddeeff',
+    replacement = 'ffeeddccbbaa99887766554433221100',
+    host = window.kiteNative!,
+    original = host.browserRequest!;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  Object.defineProperty(host, 'browserRequest', {
+    value: async (input: NativeBrowserRequest) => {
+      const result = await original(input);
+      if (input.action === 'navigate') await gate;
+      return result;
+    },
+  });
+  try {
+    await f.render(false, null, draft);
+    await f.navigate('https://www.baidu.com/');
+    await f.render(false, null, replacement);
+    await f.updatePage({ url: 'https://example.test/replacement', title: 'Replacement page' });
+    await f.flush(() => release());
+    expect(f.document.querySelector<HTMLInputElement>('.native-browser-address')!.value).toBe(
+      'https://example.test/replacement',
+    );
+    expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+  } finally {
+    release();
+    await f.close();
+  }
+});
+
+test('draft replacement retires the old display owner and its late confirmation cannot clear the new source', async () => {
+  const f = measuredLayoutPortFixture(false, true),
+    draft = '00112233445566778899aabbccddeeff',
+    replacement = 'ffeeddccbbaa99887766554433221100';
+  try {
+    await f.render(false, null, draft);
+    await f.navigate('https://www.baidu.com/');
+    const old = f.positive('sync').at(-1)!.input,
+      oldCallback = f.frameAck;
+    await f.render(false, null, replacement);
+    const current = f.positive('sync').at(-1)!.input;
+    expect(current.draft).toBe(replacement);
+    expect(current.presentationRevision! > old.presentationRevision!).toBe(true);
+    await f.flush(() =>
+      oldCallback({
+        id: old.id,
+        draft,
+        presentationRevision: old.presentationRevision!,
+        key: old.witness!.key,
+        step: 2,
+        presented: true,
+      }),
+    );
+    await f.ack(old, { presented: true });
+    expect(!!f.document.querySelector('.native-browser-start')).toBe(true);
+    expect(
+      f.requests.some(
+        (request) => request.action === 'present' && !request.bounds && request.draft === draft,
+      ),
+    ).toBe(true);
+    await f.ack(current, { presented: true });
+    expect(f.document.querySelector('.native-browser-start')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('first navigation keeps the original Root source until its exact native presentation completes', async () => {
+  const f = measuredLayoutPortFixture(false, true);
+  try {
+    await f.render(false);
+    const source = f.document.querySelector('.native-browser-start')!;
+    const viewport = f.document.querySelector('.native-browser-viewport');
+    expect(source).not.toBeNull();
+    await f.navigate('https://example.test/first');
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    expect(f.document.querySelector('.native-browser-viewport') === viewport).toBe(true);
+    const first = f.positive('sync').at(-1)!.input;
+    await f.render(true);
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    await f.ack(first, { step: 1 });
+    const second = f.positive('sync').at(-1)!.input;
+    expect(second.witness!.step).toBe(2);
+    await f.ack(second, { presented: false });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+    await f.ack(second, { presented: true });
+    expect(f.document.querySelector('.native-browser-start')).toBeNull();
+    expect(f.document.querySelector('.native-browser-viewport') === viewport).toBe(true);
+    expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+    expect(f.requests.some((request) => ['grant', 'reload'].includes(request.action))).toBe(false);
+    await f.navigate('https://example.test/later-navigation');
+    expect(f.document.querySelector('.native-browser-start')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('first navigation ignores wrong identity, superseded navigation, stop and scope proofs', async () => {
+  const f = measuredLayoutPortFixture(false, true);
+  try {
+    await f.render(false);
+    const source = f.document.querySelector('.native-browser-start');
+    await f.navigate('https://example.test/first');
+    const first = f.positive('sync').at(-1)!.input;
+    for (const patch of [
+      { key: 'retired-key' },
+      { presentationRevision: first.presentationRevision! + 1 },
+      { scope: { ...f.scope, generation: 2 } },
+    ]) {
+      await f.ack(first, { presented: true, ...patch });
+      expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    }
+    await f.navigate('https://example.test/second');
+    const second = f.positive('sync').at(-1)!.input;
+    expect(second.presentationRevision!).toBeGreaterThan(first.presentationRevision!);
+    await f.ack(first, { presented: true });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    await f.stop();
+    const stopped = f.positive('sync').at(-1)!.input;
+    expect(stopped.presentationRevision!).toBeGreaterThan(second.presentationRevision!);
+    await f.ack(second, { presented: true });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    await f.render(false, { ...f.scope, generation: 2 });
+    await f.ack(stopped, { presented: true });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    const receive = f.frameAck;
+    await f.unmount();
+    const events = f.events.length;
+    await f.flush(() =>
+      receive({
+        id: stopped.id,
+        scope: stopped.scope!,
+        presentationRevision: stopped.presentationRevision!,
+        key: stopped.witness!.key,
+        step: 2,
+        presented: true,
+      }),
+    );
+    expect(f.events).toHaveLength(events);
+    expect(f.document.querySelector('.native-browser-start')).toBeNull();
+    expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(2);
+    expect(f.requests.filter((request) => request.action === 'stop')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('initial presentation errors retain the source and expose a readable failure without retrying navigation', async () => {
+  const f = measuredLayoutPortFixture(false, true);
+  try {
+    await f.render(false);
+    const source = f.document.querySelector('.native-browser-start');
+    await f.navigate('https://example.test/first');
+    const first = f.positive('sync').at(-1)!.input;
+    await f.ack(first, { presented: false, error: 'browser_presentation_unavailable' });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    expect(
+      f.document.querySelector('[aria-label="页面状态与选项"]')?.getAttribute('title'),
+    ).toContain('网页显示尚未确认');
+    await f.ack(first, { presented: true });
+    expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+    expect(f.requests.some((request) => ['grant', 'reload'].includes(request.action))).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const completion of ['legacy-ack', 'receipt'] as const)
+  test(`first navigation accepts a current ${completion} completion without manufacturing a page grant`, async () => {
+    const f = measuredLayoutPortFixture(false, true);
+    try {
+      await f.render(false);
+      await f.navigate('https://example.test/first');
+      const first = f.positive('sync').at(-1)!.input;
+      if (completion === 'legacy-ack') await f.ack(first);
+      else {
+        f.waiting = false;
+        await f.split(0.58);
+      }
+      expect(f.document.querySelector('.native-browser-start')).toBeNull();
+      expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+      expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+      expect(f.requests.some((request) => request.action === 'grant')).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
 
 test('stable hosted measurements including same-window splitter changes use one asynchronous port and remeasure the latest layout', async () => {
   const f = measuredLayoutPortFixture();

@@ -33,15 +33,37 @@ import type {
 import { useNativeBrowserPopup } from './native-browser-menu';
 
 const presentationRevisionKey = Symbol.for('kite.native.browser.presentationRevision');
-function nextPresentationRevision() {
+function nextPresentationRevision(draft?: string) {
   // Fast Refresh can reevaluate this module while Main still owns the same
   // Root document and Caller generation. Keep ordering with that document;
   // a real document replacement obtains a new Caller generation in Main.
   const previous: unknown = Reflect.get(document, presentationRevisionKey) ?? 0;
   if (!Number.isSafeInteger(previous) || Number(previous) < 0)
     throw Error('browser_presentation_unavailable');
-  const next = Number(previous) + 1;
+  let floor = Number(previous);
+  const savedKey = draft && `kite.browserDraftRevision:${draft}`;
+  if (savedKey) {
+    try {
+      const saved = window.sessionStorage.getItem(savedKey);
+      if (saved !== null) {
+        const revision = Number(saved);
+        if (!Number.isSafeInteger(revision) || revision < 0 || String(revision) !== saved)
+          throw Error('browser_presentation_unavailable');
+        floor = Math.max(floor, revision);
+      }
+    } catch {
+      throw Error('browser_presentation_unavailable');
+    }
+  }
+  const next = floor + 1;
   if (!Number.isSafeInteger(next)) throw Error('browser_presentation_unavailable');
+  if (savedKey) {
+    try {
+      window.sessionStorage.setItem(savedKey, String(next));
+    } catch {
+      throw Error('browser_presentation_unavailable');
+    }
+  }
   Object.defineProperty(document, presentationRevisionKey, { value: next, configurable: true });
   return next;
 }
@@ -232,6 +254,8 @@ function requestError(cause: unknown): string {
   if (code === 'browser_page_grant_denied' || code === 'browser_session_page_already_bound')
     return '已有页面正在接管或保留控制，请先核对原任务。';
   if (code === 'browser_tab_limit') return '最多打开8个浏览标签页，请先关闭一些标签。';
+  if (code === 'browser_presentation_unavailable')
+    return '网页显示尚未确认。请检查当前页面状态；你可以停止加载或重新输入地址。';
   return '浏览器暂不可用，请完全退出并重新启动应用后重试。';
 }
 
@@ -242,11 +266,15 @@ export function NativeBrowserPane({
   onTitleChange,
   controlTools,
   annotate,
+  initialHint,
   scope,
+  draft,
   chromeHosted = false,
   onChromePresentation,
 }: SessionBrowserPageProps & {
   scope?: NativeBrowserRestoreScope;
+  draft?: string;
+  initialHint?: NativeBrowserState;
   chromeHosted?: boolean;
   onChromePresentation?: (presentation: NativeBrowserToolbarPort | undefined) => void;
   controlTools?: (state: NativeBrowserState) => ReactNode;
@@ -259,14 +287,18 @@ export function NativeBrowserPane({
   const [notesOpen, setNotesOpen] = useState(false);
   const [annotationToolbarHost, setAnnotationToolbarHost] = useState<HTMLSpanElement | null>(null);
   const host = typeof window === 'undefined' ? undefined : window.kiteNative;
-  const [state, setState] = useState<NativeBrowserState>({
-    id,
-    url: '',
-    title: '新标签页',
-    loading: false,
-    canGoBack: false,
-    canGoForward: false,
-  });
+  const [state, setState] = useState<NativeBrowserState>(
+    initialHint?.id === id
+      ? initialHint
+      : {
+          id,
+          url: '',
+          title: '新标签页',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        },
+  );
   const [address, setAddress] = useState('');
   const [issue, setIssue] = useState<string>();
   const [menuIssue, setMenuIssue] = useState<string>();
@@ -286,12 +318,35 @@ export function NativeBrowserPane({
     frozenViewport.current.removeAttribute('src');
   }, [chromeHosted]);
   const scopeKey = JSON.stringify(scope);
+  const chromeOwnerKey = JSON.stringify([scope, draft]);
+  const hasChromeOwner = !!scope || !!draft;
   const presentationScope = useMemo(
     () => (scopeKey ? (JSON.parse(scopeKey) as NativeBrowserRestoreScope) : undefined),
     [scopeKey],
   );
+  const displayIdentity = useRef({ id, host, scopeKey, draft, token: {} });
+  if (
+    displayIdentity.current.id !== id ||
+    displayIdentity.current.host !== host ||
+    displayIdentity.current.scopeKey !== scopeKey ||
+    displayIdentity.current.draft !== draft
+  )
+    displayIdentity.current = { id, host, scopeKey, draft, token: {} };
+  const displayOwner = displayIdentity.current.token;
+  const [presentedOwner, setPresentedOwner] = useState<object>();
+  const awaitingPresentation = presentedOwner !== displayOwner;
+  const awaitingPresentationRef = useRef(awaitingPresentation);
+  awaitingPresentationRef.current = awaitingPresentation;
+  const startupEpoch = useRef(0);
+  const [presentationEpoch, setPresentationEpoch] = useState(0);
+  const observedNavigation = useRef('');
+  const invalidateInitialPresentation = useCallback(() => {
+    if (!awaitingPresentationRef.current) return;
+    setPresentationEpoch(++startupEpoch.current);
+  }, []);
   const identity = JSON.stringify([
     scope,
+    draft,
     id,
     state.url,
     state.control?.incarnation,
@@ -300,54 +355,87 @@ export function NativeBrowserPane({
   ]);
   const apply = useCallback(
     (next: NativeBrowserState | null) => {
-      if (mounted.current && next?.id === id) setState(next);
+      if (!mounted.current || displayIdentity.current.token !== displayOwner || next?.id !== id)
+        return;
+      if (!next.url) {
+        awaitingPresentationRef.current = true;
+        setPresentedOwner(undefined);
+      }
+      const navigation = JSON.stringify([
+        next.url,
+        next.control?.incarnation,
+        next.control?.navigation,
+        next.error,
+      ]);
+      if (navigation !== observedNavigation.current) {
+        observedNavigation.current = navigation;
+        invalidateInitialPresentation();
+      }
+      setState(next);
     },
-    [id],
+    [id, invalidateInitialPresentation, displayOwner],
   );
   useEffect(() => {
     mounted.current = true;
     const unwatch = host?.watchBrowser?.(apply);
     void host
-      ?.browserRequest?.({ action: 'state', id })
+      ?.browserRequest?.({ action: 'state', id, ...(draft ? { draft } : {}) })
       .then((next) => {
+        if (!mounted.current || displayIdentity.current.token !== displayOwner) return;
         apply(next);
         if (!next && host.browserDisplayIntent?.()?.id === id) host.cancelBrowserDisplay?.();
       })
       .catch(() => {
+        if (!mounted.current || displayIdentity.current.token !== displayOwner) return;
         if (host?.browserDisplayIntent?.()?.id === id) host.cancelBrowserDisplay?.();
       });
     return () => {
       mounted.current = false;
       unwatch?.();
     };
-  }, [id, host, apply]);
+  }, [id, host, apply, draft, displayOwner]);
   useEffect(() => {
     title.current(state.title || '新标签页');
   }, [state.title]);
   useEffect(() => {
     if (!focused.current) setAddress(state.url);
   }, [state.url]);
-  const request = async (input: NativeBrowserRequest) => {
+  const request = async (
+    input: Exclude<NativeBrowserRequest, { action: 'grant' | 'capturePresentation' | 'restore' }>,
+  ) => {
     setIssue(undefined);
+    if (input.action === 'navigate' || input.action === 'stop') invalidateInitialPresentation();
     if (!host?.browserRequest) {
       setIssue(requestError(null));
       return;
     }
     try {
-      const next = await host.browserRequest(input);
+      const next = await host.browserRequest(draft ? { ...input, draft } : input);
+      if (!mounted.current || displayIdentity.current.token !== displayOwner) return;
       apply(next);
       if (mounted.current && input.action === 'navigate' && next) setAddress(next.url);
     } catch (cause) {
-      if (mounted.current) setIssue(requestError(cause));
+      if (mounted.current && displayIdentity.current.token === displayOwner)
+        setIssue(requestError(cause));
     }
   };
   const external = !!state.url;
   const blocked = !!state.error || !!issue;
-  const presentationIdentity = useRef({ id, host, visible, external, blocked, presentationScope });
-  presentationIdentity.current = { id, host, visible, external, blocked, presentationScope };
+  const presentationIdentity = useRef({
+    id,
+    host,
+    visible,
+    external,
+    blocked,
+    presentationScope,
+    draft,
+  });
+  presentationIdentity.current = { id, host, visible, external, blocked, presentationScope, draft };
   const previousRevision = useRef<number>(undefined);
   useEffect(() => {
-    if (!host?.browserRequest) return;
+    // Only a visible owner creates a presentation. An inactive retained Pane
+    // must not revoke its next selection from an effect that never showed it.
+    if (!host?.browserRequest || !visible) return;
     const hide = (revision: number | undefined) => {
       if (revision === undefined) return;
       try {
@@ -357,12 +445,13 @@ export function NativeBrowserPane({
           bounds: null,
           presentationRevision: revision,
           ...(presentationScope ? { scope: presentationScope } : {}),
+          ...(draft ? { draft } : {}),
         }).catch(() => {});
       } catch {}
     };
     let revision: number;
     try {
-      revision = nextPresentationRevision();
+      revision = nextPresentationRevision(draft);
     } catch (cause) {
       hide(previousRevision.current);
       throw cause;
@@ -417,8 +506,15 @@ export function NativeBrowserPane({
         frozenFrames.delete(old);
       }
     };
-    const freeze = (value: unknown) => {
+    const freeze = (
+      value: unknown,
+      input?: Extract<NativeBrowserRequest, { action: 'present' }>,
+    ) => {
       const image = frozenViewport.current;
+      if (value && typeof value === 'object' && 'waiting' in value) {
+        const receipt = value as import('./native-browser-bridge').NativeBrowserLayoutReceipt;
+        if (!receipt.waiting && receipt.state?.id === id) completePresentation(input);
+      }
       if (chromeHostedRef.current) {
         if (image) {
           image.hidden = true;
@@ -477,10 +573,14 @@ export function NativeBrowserPane({
         !input.witness ||
         ack.id !== id ||
         ack.presentationRevision !== revision ||
-        !presentationScope ||
-        !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-          (key) => ack.scope[key] === presentationScope[key],
-        )
+        (draft
+          ? ack.draft !== draft || ack.scope !== undefined
+          : !presentationScope ||
+            ack.draft !== undefined ||
+            !ack.scope ||
+            !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
+              (key) => ack.scope![key] === presentationScope[key],
+            ))
       )
         return;
       if (ack.step === 0) {
@@ -493,6 +593,16 @@ export function NativeBrowserPane({
       }
       if (input.witness.key !== ack.key) return;
       if (ack.step === 2) {
+        if (layoutWitness.current) layoutWitness.current.hidden = true;
+        if (ack.error) {
+          if (presentationCurrent(input)) {
+            drawn = undefined;
+            setIssue(requestError(Error(ack.error)));
+          }
+          return;
+        }
+        if (ack.presented === true || (!draft && ack.presented === undefined))
+          completePresentation(input);
         freeze({ waiting: false });
         return;
       }
@@ -514,7 +624,7 @@ export function NativeBrowserPane({
       try {
         if (ack.frozen) cache(ack.frozen);
         draw(next);
-        freeze(host.presentBrowserLayout?.(next));
+        freeze(host.presentBrowserLayout?.(next), next);
       } catch {
         last = '';
       }
@@ -579,8 +689,47 @@ export function NativeBrowserPane({
       )
         bounds = null;
       const layout = bounds && measurement?.kind === 'measured' ? measurement.layout : undefined;
-      const key = JSON.stringify([bounds, layout, presentationScope]);
+      const key = JSON.stringify([bounds, layout, presentationScope, draft]);
       return { bounds, layout, key };
+    };
+    const presentationCurrent = (
+      input: Extract<NativeBrowserRequest, { action: 'present' }> | undefined,
+    ) => {
+      const current = presentationIdentity.current;
+      if (
+        stopped ||
+        startupEpoch.current !== presentationEpoch ||
+        !input?.bounds ||
+        input.presentationRevision !== revision ||
+        !visible ||
+        !external ||
+        blocked ||
+        !current.visible ||
+        !current.external ||
+        current.blocked ||
+        current.id !== id ||
+        current.host !== host ||
+        originalNode !== viewport.current ||
+        !originalNode?.isConnected ||
+        originalNode.ownerDocument !== originalDocument ||
+        JSON.stringify(current.presentationScope) !== JSON.stringify(presentationScope) ||
+        current.draft !== draft
+      )
+        return false;
+      const measured = measure();
+      return (
+        !!measured?.bounds &&
+        JSON.stringify([input.bounds, input.layout, input.scope, input.draft]) ===
+          JSON.stringify([measured.bounds, measured.layout, presentationScope, draft])
+      );
+    };
+    const completePresentation = (
+      input: Extract<NativeBrowserRequest, { action: 'present' }> | undefined,
+    ) => {
+      if (!presentationCurrent(input)) return;
+      if (layoutWitness.current) layoutWitness.current.hidden = true;
+      awaitingPresentationRef.current = false;
+      setPresentedOwner(displayOwner);
     };
     const publish = () => {
       frame = undefined;
@@ -618,7 +767,7 @@ export function NativeBrowserPane({
       const asyncCalibration =
         bounds &&
         layout &&
-        chromeHostedRef.current &&
+        (chromeHostedRef.current || (draft && !awaitingPresentationRef.current)) &&
         host.presentBrowserLayoutAsync &&
         committedLayout;
       const sent = ++sequence;
@@ -630,6 +779,7 @@ export function NativeBrowserPane({
         presentationRevision: revision,
         ...(layout ? { layout } : {}),
         ...(presentationScope ? { scope: presentationScope } : {}),
+        ...(draft ? { draft } : {}),
         ...(bounds &&
         layout &&
         host.watchBrowserLayoutFrame &&
@@ -680,7 +830,7 @@ export function NativeBrowserPane({
       // a previous size or changing a splitter must not re-enter sendSync while
       // Main may still be inside a native resize/compositor transaction.
       if (asyncCalibration) {
-        if (!presentationScope) {
+        if (!presentationScope && !draft) {
           rejected();
           return;
         }
@@ -690,7 +840,7 @@ export function NativeBrowserPane({
           void host.presentBrowserLayoutAsync!(input)
             .then((value) => {
               if (stopped || sent !== sequence) return;
-              freeze(value);
+              freeze(value, input);
               committed();
             }, rejected)
             .catch(rejected)
@@ -706,18 +856,22 @@ export function NativeBrowserPane({
           rejected();
         }
       } else if (bounds && layout && host.presentBrowserLayout) {
-        if (!presentationScope) {
+        if (!presentationScope && !draft) {
           rejected();
           return;
         }
         try {
           if (input.witness) draw(input);
-          freeze(host.presentBrowserLayout(input));
+          freeze(host.presentBrowserLayout(input), input);
           committed();
         } catch {
           rejected();
         }
-      } else void host.browserRequest!(input).then(committed, rejected);
+      } else
+        void host.browserRequest!(input).then((value) => {
+          if (value?.id === id && input.bounds) completePresentation(input);
+          committed();
+        }, rejected);
     };
     const schedule = () => {
       if (stopped) return;
@@ -750,7 +904,8 @@ export function NativeBrowserPane({
           current.visible === visible &&
           current.external === external &&
           current.blocked === blocked &&
-          JSON.stringify(current.presentationScope) === JSON.stringify(presentationScope)
+          JSON.stringify(current.presentationScope) === JSON.stringify(presentationScope) &&
+          current.draft === draft
             ? measure()
             : undefined;
         qualified = !!measured?.bounds && !pending && measured.key === last;
@@ -770,6 +925,7 @@ export function NativeBrowserPane({
           current.visible &&
           !current.blocked &&
           JSON.stringify(current.presentationScope) === JSON.stringify(presentationScope) &&
+          current.draft === draft &&
           display.storeId === presentationScope?.storeId &&
           display.sessionId === presentationScope.sessionId
         )
@@ -849,7 +1005,17 @@ export function NativeBrowserPane({
       throw cause;
     }
     return () => cleanup(true);
-  }, [id, host, visible, external, blocked, presentationScope]);
+  }, [
+    id,
+    host,
+    visible,
+    external,
+    blocked,
+    presentationScope,
+    draft,
+    displayOwner,
+    presentationEpoch,
+  ]);
   const error =
     issue ||
     menuIssue ||
@@ -862,6 +1028,7 @@ export function NativeBrowserPane({
     hostKey: chromeHosted ? 'chrome' : 'root',
     visible,
     scope,
+    draft,
     page: state,
     items: state.url
       ? [
@@ -946,31 +1113,43 @@ export function NativeBrowserPane({
         }
     }
   };
-  const chrome = useRef({ id, scopeKey, visible, chromeHosted, handleToolbarAction });
-  chrome.current = { id, scopeKey, visible, chromeHosted, handleToolbarAction };
+  const chrome = useRef({
+    id,
+    scopeKey: chromeOwnerKey,
+    visible,
+    chromeHosted,
+    handleToolbarAction,
+  });
+  chrome.current = { id, scopeKey: chromeOwnerKey, visible, chromeHosted, handleToolbarAction };
   const dispatch = useCallback(
     (action: NativeBrowserToolbarAction) => {
       const current = chrome.current;
       if (
         mounted.current &&
         current.id === id &&
-        current.scopeKey === scopeKey &&
-        scopeKey &&
+        current.scopeKey === chromeOwnerKey &&
+        hasChromeOwner &&
         current.visible &&
         current.chromeHosted
       )
         current.handleToolbarAction(action);
     },
-    [id, scopeKey],
+    [id, chromeOwnerKey, hasChromeOwner],
   );
   const port = useMemo(() => ({ data, dispatch }), [data, dispatch]);
+  useLayoutEffect(() => {
+    // SessionTabs retains inactive pages. Keep their ports available so its
+    // next committed selection can offer that exact page before passive hides.
+    onChromePresentation?.(hasChromeOwner ? port : undefined);
+  }, [onChromePresentation, port, hasChromeOwner]);
+  useLayoutEffect(() => {
+    if (hasChromeOwner && chromeOwnerKey) return () => onChromePresentation?.(undefined);
+    return undefined;
+  }, [onChromePresentation, hasChromeOwner, chromeOwnerKey]);
+  const previousChrome = useRef({ scopeKey, draft, chromeHosted });
   useEffect(() => {
-    onChromePresentation?.(visible && scopeKey ? port : undefined);
-  }, [onChromePresentation, port, visible, scopeKey]);
-  useEffect(() => () => onChromePresentation?.(undefined), [onChromePresentation]);
-  const previousChrome = useRef({ scopeKey, chromeHosted });
-  useEffect(() => {
-    const scopeChanged = previousChrome.current.scopeKey !== scopeKey;
+    const scopeChanged =
+      previousChrome.current.scopeKey !== scopeKey || previousChrome.current.draft !== draft;
     if (scopeChanged) {
       focused.current = false;
       setAddress(state.url);
@@ -980,8 +1159,8 @@ export function NativeBrowserPane({
       const active = document.activeElement;
       if (active instanceof HTMLElement && toolbar.current?.contains(active)) active.blur();
     }
-    previousChrome.current = { scopeKey, chromeHosted };
-  }, [chromeHosted, scopeKey, visible, state.url]);
+    previousChrome.current = { scopeKey, draft, chromeHosted };
+  }, [chromeHosted, scopeKey, draft, visible, state.url]);
   return (
     <section className="native-browser-page" aria-label="浏览器">
       <div
@@ -1007,9 +1186,13 @@ export function NativeBrowserPane({
         />
       </div>
       <div className="native-browser-surface">
-        {!state.url && (
-          <section className="native-browser-start" aria-label="浏览器起始页">
-            {tools}
+        {(!state.url || awaitingPresentation) && (
+          <section
+            className="native-browser-start"
+            aria-label="浏览器起始页"
+            inert={!!state.url || undefined}
+          >
+            {initialHint?.url ? <p role="status">正在显示原网页…</p> : tools}
           </section>
         )}
         {annotate && state.control?.browserId && (
@@ -1047,7 +1230,13 @@ export function NativeBrowserPane({
             hidden
             tabIndex={-1}
             aria-hidden="true"
-            style={{ position: 'absolute', pointerEvents: 'none', width: 120, height: 3 }}
+            style={{
+              position: 'absolute',
+              pointerEvents: 'none',
+              width: 120,
+              height: 3,
+              zIndex: 2,
+            }}
           />
         </section>
       </div>

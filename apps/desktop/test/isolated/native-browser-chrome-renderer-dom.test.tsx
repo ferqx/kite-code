@@ -82,6 +82,12 @@ async function fixture() {
   let result: (event: NativeBrowserChromeEvent) => Promise<NativeBrowserChromeResult> = async () =>
     'forwarded';
   const events: NativeBrowserChromeEvent[] = [];
+  const rendered: {
+    proof: { attachment: string; pageToken: string; revision: number };
+    theme?: string;
+    address?: string;
+    tabs: string[];
+  }[] = [];
   const bridge: NativeBrowserChromeBridge = {
     read: async () => current,
     watch(listener) {
@@ -94,6 +100,14 @@ async function fixture() {
     async send(event) {
       events.push(event);
       return result(event);
+    },
+    async rendered(proof) {
+      rendered.push({
+        proof,
+        theme: document.documentElement.dataset.theme,
+        address: document.querySelector<HTMLInputElement>('.native-browser-address')?.value,
+        tabs: [...document.querySelectorAll('[role="tab"]')].map((node) => node.textContent ?? ''),
+      });
     },
   };
   Object.defineProperty(dom.window, 'kiteNative', {
@@ -113,6 +127,7 @@ async function fixture() {
   const address = () => document.querySelector<HTMLInputElement>('.native-browser-address')!;
   const input = (value: string) =>
     flush(() => {
+      address().focus();
       Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
         address(),
         value,
@@ -143,6 +158,7 @@ async function fixture() {
     dom,
     bridge,
     events,
+    rendered,
     render,
     input,
     submit,
@@ -173,6 +189,212 @@ async function fixture() {
 }
 const navigations = (events: readonly NativeBrowserChromeEvent[]) =>
   events.filter((event) => event.part === 'toolbar' && event.action.type === 'navigate');
+
+test('a cleared Chrome intent removes old controls and status while retaining an opaque themed strip', async () => {
+  const f = await fixture();
+  try {
+    await f.render();
+    f.result = async () => 'stale';
+    await f.click('刷新网页');
+    expect(document.body.textContent).toContain('Original page');
+    expect(document.body.textContent).toContain('页面已变化');
+    expect(f.address().value).toBe('https://example.com/original');
+    const events = f.events.length,
+      rendered = f.rendered.length;
+    await f.null();
+    const empty = document.querySelector<HTMLElement>('.native-browser-chrome-empty');
+    expect(empty).not.toBeNull();
+    expect(document.body.textContent).toBe('');
+    expect(document.querySelector('button,input,[role="status"]')).toBeNull();
+    expect(empty?.style.background).toBe('var(--background)');
+    expect(empty?.style.position).toBe('fixed');
+    expect(empty?.style.inset).toBe('0px');
+    expect(empty?.style.pointerEvents).toBe('none');
+    expect(empty?.hasAttribute('inert')).toBe(true);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(f.events).toHaveLength(events);
+    expect(f.rendered).toHaveLength(rendered);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Chrome reports its current rendered identity after DOM and theme commit without sending an action', async () => {
+  const f = await fixture();
+  try {
+    await f.render();
+    expect(f.rendered.length).toBeGreaterThan(0);
+    expect(f.rendered.at(-1)).toMatchObject({
+      proof: { attachment: 'geometry-one', pageToken: 'page-token-one', revision: 1 },
+      theme: 'dark',
+      address: 'https://example.com/original',
+    });
+    await f.update(
+      {
+        theme: 'light',
+        hosted: false,
+        tabs: {
+          ...f.current.snapshot.tabs,
+          tabs: [{ id: 'second', kind: 'browser', title: 'Second page' }],
+          active: 'second',
+        },
+        toolbar: {
+          ...f.current.snapshot.toolbar,
+          id: 'second',
+          address: 'https://example.com/second',
+          readonlyURL: 'https://example.com/second',
+        },
+      },
+      { attachment: 'second-attachment', pageToken: 'second-token', actionable: false },
+    );
+    expect(f.rendered.at(-1)).toEqual({
+      proof: { attachment: 'second-attachment', pageToken: 'second-token', revision: 2 },
+      theme: 'light',
+      address: 'https://example.com/second',
+      tabs: ['Second page'],
+    });
+    expect(f.events).toEqual([]);
+    const count = f.rendered.length;
+    await f.null();
+    expect(f.rendered).toHaveLength(count);
+    delete f.bridge.rendered;
+  } finally {
+    await f.close();
+  }
+});
+
+test('page switches retain the toolbar DOM and page appearance while fresh input remains blocked', async () => {
+  const f = await fixture();
+  try {
+    await f.render();
+    const original = {
+      header: document.querySelector('.session-tabs-heading'),
+      form: document.querySelector('.native-browser-toolbar'),
+      input: f.address(),
+      reload: document.querySelector<HTMLButtonElement>('.native-browser-nav-reload')!,
+      back: document.querySelector<HTMLButtonElement>('[aria-label="后退"]')!,
+    };
+    const glyph = original.reload.innerHTML;
+    const tabs = [
+      ...f.current.snapshot.tabs.tabs,
+      { id: 'second', kind: 'browser' as const, title: 'Second page' },
+    ];
+    await f.update(
+      {
+        hosted: false,
+        tabs: { ...f.current.snapshot.tabs, tabs, active: 'second' },
+        toolbar: {
+          ...f.current.snapshot.toolbar,
+          id: 'second',
+          address: 'https://example.com/second',
+          readonlyURL: 'https://example.com/second',
+        },
+      },
+      { attachment: 'second-binding', pageToken: 'second-token', actionable: false },
+    );
+    expect(document.querySelector('.session-tabs-heading') === original.header).toBe(true);
+    expect(document.querySelector('.native-browser-toolbar') === original.form).toBe(true);
+    expect(f.address() === original.input).toBe(true);
+    expect(document.querySelector('.native-browser-nav-reload') === original.reload).toBe(true);
+    expect(original.input.value).toBe('https://example.com/second');
+    expect(original.input.readOnly).toBe(true);
+    expect(original.reload.disabled).toBe(true);
+    expect(original.reload.style.opacity).toBe('1');
+    expect(original.back.disabled).toBe(true);
+    expect(original.back.style.opacity).toBe('1');
+    expect(original.reload.innerHTML).toBe(glyph);
+    const count = f.events.length;
+    await f.submit();
+    await f.click('刷新网页');
+    expect(f.events).toHaveLength(count);
+    await f.update({ hosted: true }, { actionable: true });
+    expect(f.address() === original.input).toBe(true);
+    expect(original.reload.disabled).toBe(false);
+    expect(original.reload.innerHTML).toBe(glyph);
+    await f.update({ toolbar: { ...f.current.snapshot.toolbar, canNavigate: false } });
+    expect(original.reload.disabled).toBe(true);
+    expect(original.reload.style.opacity).toBe('');
+    expect(original.input.readOnly).toBe(true);
+    await f.update({
+      toolbar: { ...f.current.snapshot.toolbar, canNavigate: true, loading: true },
+    });
+    expect(document.querySelector('.native-browser-nav-reload') === original.reload).toBe(true);
+    expect(original.reload.innerHTML === glyph).toBe(false);
+    expect(original.reload.disabled).toBe(false);
+    await f.update({ toolbar: { ...f.current.snapshot.toolbar, hasPage: false } });
+    expect(original.reload.disabled).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a different page retires its old editor, IME and pending navigation without replacing the address node', async () => {
+  const f = await fixture();
+  try {
+    await f.render();
+    await f.flush(() => f.address().focus());
+    await f.input('https://example.com/old-draft');
+    let finish!: (result: NativeBrowserChromeResult) => void;
+    f.result = (event) =>
+      event.part === 'toolbar' && event.action.type === 'address-change'
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve('forwarded');
+    await f.input('https://example.com/old-pending');
+    await f.submit();
+    const address = f.address();
+    await f.flush(() =>
+      address.dispatchEvent(
+        new f.dom.window.CompositionEvent('compositionstart', { bubbles: true }),
+      ),
+    );
+    await f.update(
+      {
+        tabs: {
+          ...f.current.snapshot.tabs,
+          tabs: [
+            ...f.current.snapshot.tabs.tabs,
+            { id: 'second', kind: 'browser', title: 'Second' },
+          ],
+          active: 'second',
+        },
+        toolbar: {
+          ...f.current.snapshot.toolbar,
+          id: 'second',
+          address: 'https://example.com/second',
+          readonlyURL: 'https://example.com/second',
+        },
+      },
+      { attachment: 'second-binding', pageToken: 'second-token' },
+    );
+    expect(f.address() === address).toBe(true);
+    expect(address.value).toBe('https://example.com/second');
+    expect(document.activeElement === address).toBe(false);
+    const count = f.events.length;
+    await f.flush(() => finish('unconfirmed'));
+    await f.flush(() =>
+      address.dispatchEvent(
+        new f.dom.window.CompositionEvent('compositionend', { bubbles: true, data: 'old text' }),
+      ),
+    );
+    await f.flush(() => {
+      Object.getOwnPropertyDescriptor(f.dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
+        address,
+        'old IME tail',
+      );
+      address.dispatchEvent(
+        new f.dom.window.InputEvent('input', { bubbles: true, inputType: 'insertFromComposition' }),
+      );
+    });
+    expect(f.events).toHaveLength(count);
+    expect(navigations(f.events)).toHaveLength(0);
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(address.value).toBe('https://example.com/second');
+  } finally {
+    await f.close();
+  }
+});
 
 test('Chrome uses only its restricted bridge and renders eight mixed tabs, menus and appearance', async () => {
   const f = await fixture();

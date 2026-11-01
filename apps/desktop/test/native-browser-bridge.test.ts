@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 import {
   browserAddress,
+  isNativeBrowserClosePreparation,
+  isNativeBrowserDraftRestoreResult,
   isNativeBrowserFrozenFrame,
   isNativeBrowserLayoutFrameAck,
   isNativeBrowserPresentationFrame,
@@ -10,7 +12,130 @@ import {
   parseNativeBrowserMenuRequest,
   parseNativeBrowserRequest,
   projectNativeBrowserBounds,
+  projectNativeBrowserLayout,
 } from '../src/native-browser-bridge';
+
+test('native layout projection returns independent constrained allocations for the next resize', () => {
+  const panel = (size: number, min: number) => ({
+    size,
+    min,
+    minUnit: 'px' as const,
+    max: 100,
+    maxUnit: '%' as const,
+    preserve: 'relative' as const,
+    collapsible: false,
+  });
+  const layout: NativeBrowserLayout = {
+    windowWidth: 1601,
+    windowHeight: 1200,
+    insetLeft: 0,
+    insetRight: 0,
+    groups: [{ left: 0, right: 0, gap: 1, panels: [panel(1300, 360), panel(300, 300)] }],
+  };
+  const bounds = { x: 1301, y: 100, width: 300, height: 600, radius: 8 };
+  const source = structuredClone({ bounds, layout });
+  const narrow = projectNativeBrowserLayout(bounds, layout, 1001, 1100)!;
+  expect(narrow.bounds).toEqual({ ...bounds, x: 701, width: 300, height: 500 });
+  expect(narrow.layout.windowWidth).toBe(1001);
+  expect(narrow.layout.windowHeight).toBe(1100);
+  expect(narrow.layout.groups[0]!.panels.map((p) => p.size)).toEqual([700, 300]);
+  expect(projectNativeBrowserBounds(bounds, layout, 1001, 1100)).toEqual(narrow.bounds);
+  const expanded = projectNativeBrowserLayout(narrow.bounds, narrow.layout, 1601, 1200)!;
+  expect(expanded.bounds).toEqual({ ...bounds, x: 1121, width: 480 });
+  expect(expanded.layout.groups[0]!.panels.map((p) => p.size)).toEqual([1120, 480]);
+  expect({ bounds, layout }).toEqual(source);
+  expect(narrow.layout).not.toBe(layout);
+  expect(narrow.layout.groups[0]).not.toBe(layout.groups[0]);
+  expect(narrow.layout.groups[0]!.panels[0]).not.toBe(layout.groups[0]!.panels[0]);
+  expect(projectNativeBrowserLayout(bounds, layout, Number.NaN, 1200)).toBeUndefined();
+  expect(projectNativeBrowserLayout(bounds, layout, 1, 1200)).toBeUndefined();
+});
+
+test('a draft owner is confined to manual browser requests and cannot mix session or Agent presentation authority', () => {
+  const draft = 'a'.repeat(32),
+    id = 'draft-page';
+  const scope = { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 2 };
+  const navigate = { action: 'navigate' as const, id, draft, input: 'https://www.baidu.com/' };
+  expect(parseNativeBrowserRequest(navigate)).toEqual(navigate);
+  for (const action of ['state', 'back', 'forward', 'reload', 'stop', 'close'] as const)
+    expect(parseNativeBrowserRequest({ action, id, draft })).toEqual({ action, id, draft });
+  expect(parseNativeBrowserRequest({ action: 'restoreDraft', draft })).toEqual({
+    action: 'restoreDraft',
+    draft,
+  });
+  for (const value of [
+    { ...navigate, draft: '' },
+    { ...navigate, draft: 'A'.repeat(32) },
+    { ...navigate, draft: 'a'.repeat(31) },
+    { ...navigate, scope },
+    { action: 'grant', id, draft },
+    { action: 'capturePresentation', id, draft },
+    { action: 'restore', scope, draft },
+    { action: 'restoreDraft', draft, scope },
+    { action: 'restoreDraft', draft, id },
+    { action: 'restoreDraft', draft, grant: true },
+    { action: 'present', id, draft, scope, bounds: null, presentationRevision: 1 },
+    {
+      action: 'present',
+      id,
+      draft,
+      bounds: null,
+      presentationKey: 'proof',
+      presentationRevision: 1,
+    },
+  ])
+    expect(() => parseNativeBrowserRequest(value)).toThrow('invalid_browser_request');
+});
+
+test('Root close preparation and confirmation transport only one bounded marker receipt and an exact private key', () => {
+  const draft = 'a'.repeat(32),
+    id = 'page',
+    key = 'b'.repeat(32);
+  for (const request of [
+    { action: 'prepareClose', id },
+    { action: 'prepareClose', id, draft },
+    ...(['confirmClose', 'finishClose', 'cancelClose'] as const).map((action) => ({ action, key })),
+  ] as const)
+    expect(parseNativeBrowserRequest(request)).toEqual(request);
+  for (const request of [
+    { action: 'prepareClose', id, scope: {} },
+    { action: 'prepareClose', id, draft: 'invalid' },
+    { action: 'prepareClose', id, lease: 'secret' },
+    { action: 'confirmClose', key: 'bad' },
+    { action: 'finishClose', key, id },
+    { action: 'cancelClose', key, draft },
+  ])
+    expect(() => parseNativeBrowserRequest(request)).toThrow('invalid_browser_request');
+  const receipt = {
+    key,
+    witness: 'c'.repeat(24),
+    bounds: { x: 600, y: 0, width: 400, height: 96, radius: 0 },
+    width: 1000,
+    height: 700,
+  };
+  expect(isNativeBrowserClosePreparation(receipt)).toBe(true);
+  expect(
+    isNativeBrowserClosePreparation({
+      ...receipt,
+      bounds: { ...receipt.bounds, x: 600 / 1.2, width: 400 / 1.2, height: 96 / 1.2 },
+      width: 1000 / 1.2,
+      height: 700 / 1.2,
+    }),
+  ).toBe(true);
+  for (const bad of [
+    null,
+    [],
+    { ...receipt, key: 'wrong' },
+    { ...receipt, witness: 'd'.repeat(32) },
+    { ...receipt, scope: {} },
+    { ...receipt, frame: { data: 'private' } },
+    { ...receipt, width: NaN },
+    { ...receipt, bounds: { ...receipt.bounds, width: 401 } },
+    { ...receipt, bounds: { ...receipt.bounds, height: 0 } },
+    { ...receipt, bounds: { ...receipt.bounds, secret: true } },
+  ])
+    expect(isNativeBrowserClosePreparation(bad)).toBe(false);
+});
 
 test('Root draw witnesses and asynchronous frozen pixels stay finite and bound to a presentation', () => {
   const scope = { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 2 };
@@ -47,6 +172,13 @@ test('Root draw witnesses and asynchronous frozen pixels stay finite and bound t
     },
   };
   expect(parseNativeBrowserRequest(request)).toEqual(request);
+  const draft = 'a'.repeat(32),
+    draftRequest = { ...request, scope: undefined, draft };
+  expect(parseNativeBrowserRequest(draftRequest)).toEqual(draftRequest);
+  expect(() =>
+    parseNativeBrowserRequest({ ...draftRequest, presentationRevision: undefined }),
+  ).toThrow();
+  expect(() => parseNativeBrowserRequest({ ...draftRequest, scope })).toThrow();
   for (const value of [
     { ...request, witness: { ...witness, step: 0 } },
     { ...request, witness: { ...witness, key: 'not-a-paint' } },
@@ -69,6 +201,28 @@ test('Root draw witnesses and asynchronous frozen pixels stay finite and bound t
   };
   const ack = { id: 'page', scope, presentationRevision: 1, key: witness.key, step: 0, frozen };
   expect(isNativeBrowserLayoutFrameAck(ack)).toBe(true);
+  expect(isNativeBrowserLayoutFrameAck({ ...ack, scope: undefined, draft })).toBe(true);
+  for (const value of [
+    { ...ack, draft },
+    { ...ack, scope: undefined },
+    { ...ack, scope: undefined, draft: 'A'.repeat(32) },
+  ])
+    expect(isNativeBrowserLayoutFrameAck(value)).toBe(false);
+  const presented = { ...ack, step: 2, frozen: undefined };
+  for (const value of [
+    { ...presented, presented: false },
+    { ...presented, presented: true },
+    { ...presented, presented: false, error: 'browser_presentation_unavailable' },
+  ])
+    expect(isNativeBrowserLayoutFrameAck(value)).toBe(true);
+  for (const value of [
+    { ...ack, presented: true },
+    { ...presented, presented: 'yes' },
+    { ...presented, error: 'browser_presentation_unavailable' },
+    { ...presented, presented: true, error: 'browser_presentation_unavailable' },
+    { ...presented, presented: false, error: 'arbitrary_error' },
+  ])
+    expect(isNativeBrowserLayoutFrameAck(value)).toBe(false);
   for (const value of [
     { ...ack, step: 3 },
     { ...ack, scope: { ...scope, generation: 0 } },
@@ -218,6 +372,43 @@ test('scoped multi-page restore remains compatible with the original single-page
     expect(isNativeBrowserRestoreResult(value)).toBe(false);
 });
 
+test('draft restore returns only its bounded manual page inventory without a Core session or control grant', () => {
+  const page = {
+    id: 'draft-page',
+    url: 'https://www.baidu.com/',
+    title: 'Baidu',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  };
+  for (const value of [{ pages: [] }, { pages: [page] }, { pages: [page], activeId: page.id }])
+    expect(isNativeBrowserDraftRestoreResult(value)).toBe(true);
+  const control = {
+    phase: 'human',
+    incarnation: 'incarnation',
+    navigation: 0,
+    sessionId: 'session',
+  };
+  expect(isNativeBrowserState({ ...page, control })).toBe(true);
+  for (const value of [
+    null,
+    [],
+    {},
+    { pages: null },
+    { pages: [page, page] },
+    { pages: Array.from({ length: 9 }, (_, i) => ({ ...page, id: `p${i}` })) },
+    { pages: [], activeId: page.id },
+    { pages: [page], activeId: 'other' },
+    { pages: [page], scope: { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 1 } },
+    { pages: [page], draft: 'a'.repeat(32) },
+    { pages: [page], lease: 'not-authority' },
+    { pages: [page], page },
+    { pages: [{ ...page, control }] },
+    { pages: [{ ...page, script: 'unsafe' }] },
+  ])
+    expect(isNativeBrowserDraftRestoreResult(value)).toBe(false);
+});
+
 test('presentation layout accepts only the current bounded two-panel contract', () => {
   const panel = {
     size: 400,
@@ -336,6 +527,19 @@ test('native popup accepts only a bounded finite menu on one exact selection', (
     details: ['Original reason'],
   } as const;
   expect(parseNativeBrowserMenuRequest(value)).toEqual(value);
+  const draft = 'a'.repeat(32);
+  expect(parseNativeBrowserMenuRequest({ ...value, scope: undefined, draft })).toEqual({
+    ...value,
+    scope: undefined,
+    draft,
+  });
+  for (const invalid of [
+    { ...value, draft },
+    { ...value, scope: undefined },
+    { ...value, scope: undefined, draft: 'invalid' },
+    { ...value, scope: undefined, draft, items: [{ action: 'execute', enabled: true }] },
+  ])
+    expect(() => parseNativeBrowserMenuRequest(invalid)).toThrow('invalid_browser_request');
   for (const invalid of [
     { ...value, script: 'run()' },
     { ...value, scope: { ...value.scope, viewSelection: -1 } },

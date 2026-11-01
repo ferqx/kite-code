@@ -21,6 +21,320 @@ const { createRoot } = await import('react-dom/client');
 const { NativeDesktop } = await import('../../src/native');
 bootstrap.window.close();
 
+test('prepared Native close confirms the committed Root marker then removes it before finish without replay', async () => {
+  const dom = new JSDOM('<!doctype html><main id="target">Committed target</main>', {
+      url: 'http://localhost/',
+      pretendToBeVisual: true,
+    }),
+    restoreDom = prepareDesktopDom(dom),
+    events: string[] = [];
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+  });
+  dom.window.HTMLCanvasElement.prototype.getContext = (() => ({
+    fillStyle: '',
+    fillRect() {},
+  })) as unknown as typeof dom.window.HTMLCanvasElement.prototype.getContext;
+  let confirm!: () => void, finish!: () => void;
+  const confirmed = new Promise<void>((resolve) => {
+      confirm = resolve;
+    }),
+    finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+  Object.assign(window, {
+    kiteNative: {
+      async prepareBrowserClose() {
+        events.push('prepare');
+        return {
+          key: '00112233445566778899aabbccddeeff',
+          witness: '00112233445566778899aabb',
+          bounds: { x: 600, y: 0, width: 400, height: 74, radius: 0 },
+          width: 1000,
+          height: 800,
+        };
+      },
+      async confirmBrowserClose() {
+        events.push('confirm');
+        expect(document.querySelector('[data-native-browser-close-witness]')).not.toBeNull();
+        expect(document.getElementById('target')?.textContent).toBe('Committed target');
+        await confirmed;
+      },
+      async finishBrowserClose() {
+        events.push('finish');
+        expect(document.querySelector('[data-native-browser-close-witness]')).toBeNull();
+        await finished;
+      },
+      async cancelBrowserClose() {
+        events.push('cancel');
+      },
+      async browserRequest() {
+        events.push('ordinary-request');
+        return null;
+      },
+    },
+  });
+  const session = await import('../../src/native-browser-session');
+  try {
+    await session.prepareNativeBrowserClose('page', '00112233445566778899aabbccddeeff');
+    const closing = session.closeNativeBrowserTab('page', '00112233445566778899aabbccddeeff');
+    await Promise.resolve();
+    expect(events).toEqual(['prepare', 'confirm']);
+    confirm();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(events).toEqual(['prepare', 'confirm', 'finish']);
+    finish();
+    await closing;
+    expect(document.querySelector('[data-native-browser-close-witness]')).toBeNull();
+  } finally {
+    confirm();
+    finish();
+    session.cancelNativeBrowserCloses();
+    restoreDom();
+    dom.window.close();
+  }
+});
+
+test('a refused prepared close reads its original state once, refreshes retained hints and never repeats close', async () => {
+  const dom = new JSDOM('<!doctype html><main>Current Root</main>', {
+      url: 'http://localhost/',
+      pretendToBeVisual: true,
+    }),
+    restoreDom = prepareDesktopDom(dom),
+    draft = '00112233445566778899aabbccddeeff',
+    requests: NativeBrowserRequest[] = [],
+    page: NativeBrowserState = {
+      id: 'cached-page',
+      title: 'Preserved page',
+      url: 'https://example.test/current',
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+    };
+  let confirmations = 0,
+    finishes = 0,
+    cancellations = 0;
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+  });
+  dom.window.HTMLCanvasElement.prototype.getContext = (() => ({
+    fillStyle: '',
+    fillRect() {},
+  })) as unknown as typeof dom.window.HTMLCanvasElement.prototype.getContext;
+  Object.assign(window, {
+    kiteNative: {
+      async restoreBrowserDraft() {
+        return { pages: [{ ...page, title: 'Earlier title' }], activeId: page.id };
+      },
+      async prepareBrowserClose() {
+        return {
+          key: '00112233445566778899aabbccddeeff',
+          witness: '00112233445566778899aabb',
+          bounds: { x: 600, y: 0, width: 400, height: 74, radius: 0 },
+          width: 1000,
+          height: 800,
+        };
+      },
+      async confirmBrowserClose() {
+        confirmations++;
+        throw Error('private Root proof rejected');
+      },
+      async finishBrowserClose() {
+        finishes++;
+      },
+      async cancelBrowserClose() {
+        cancellations++;
+      },
+      async browserRequest(input: NativeBrowserRequest) {
+        requests.push(input);
+        return page;
+      },
+    },
+  });
+  const session = await import('../../src/native-browser-session');
+  try {
+    await session.restoreNativeBrowserDraft(draft);
+    await session.prepareNativeBrowserClose(page.id, draft);
+    await expect(session.closeNativeBrowserTab(page.id, draft)).rejects.toThrow(
+      '未能确认网页已关闭',
+    );
+    expect(confirmations).toBe(1);
+    expect(finishes).toBe(0);
+    expect(cancellations).toBe(1);
+    expect(requests).toEqual([{ action: 'state', id: page.id, draft }]);
+    expect(session.nativeBrowserDisplayHint(page.id, undefined, draft)).toEqual(page);
+    expect(document.querySelector('[data-native-browser-close-witness]')).toBeNull();
+  } finally {
+    session.cancelNativeBrowserCloses();
+    restoreDom();
+    dom.window.close();
+  }
+});
+
+test('real NativeDesktop keeps manual draft pages separate and restores the same draft after Session changes or a Root remount', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+      url: 'http://localhost/',
+      pretendToBeVisual: true,
+    }),
+    restoreDom = prepareDesktopDom(dom);
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const control = sessionSwitchBridge({ active: false }),
+    requests: NativeBrowserRequest[] = [],
+    methods: string[] = [],
+    drafts: string[] = [],
+    inventory = new Map<string, NativeBrowserState[]>(),
+    listeners = new Set<(page: NativeBrowserState) => void>();
+  dom.window.sessionStorage.setItem(
+    'kite.browserDraft:"foreign-store"',
+    'ffeeddccbbaa99887766554433221100',
+  );
+  dom.window.sessionStorage.setItem('kite.browserDraft:"store"', 'invalid-token');
+  const bridge = {
+    ...control.bridge,
+    async request(input: Parameters<NativeBridge['request']>[0]) {
+      methods.push(input.method);
+      return control.bridge.request(input);
+    },
+    async restoreBrowser(scope: NativeBrowserRestoreScope) {
+      return { scope, page: null };
+    },
+    async restoreBrowserDraft(draft: string) {
+      drafts.push(draft);
+      const pages = inventory.get(draft) ?? [];
+      return { pages, ...(pages[0] ? { activeId: pages[0].id } : {}) };
+    },
+    async browserRequest(input: NativeBrowserRequest) {
+      requests.push(input);
+      if (!('draft' in input) || !input.draft) return null;
+      const pages = inventory.get(input.draft) ?? [];
+      let page = 'id' in input ? pages.find((page) => page.id === input.id) : undefined;
+      if (input.action === 'navigate') {
+        page = {
+          id: input.id,
+          title: '草稿百度',
+          url: input.input,
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        };
+        inventory.set(input.draft, [...pages.filter((page) => page.id !== input.id), page]);
+        for (const listener of listeners) listener(page);
+      }
+      if (input.action === 'close')
+        inventory.set(
+          input.draft,
+          pages.filter((page) => page.id !== input.id),
+        );
+      return page ?? null;
+    },
+    watchBrowser(listener: (page: NativeBrowserState) => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  Object.defineProperty(dom.window, 'kiteNative', { value: bridge, writable: true });
+  const host = document.getElementById('root')!;
+  let root = createRoot(host);
+  const flush = (action: () => void = () => {}) =>
+    act(async () => {
+      action();
+      await Bun.sleep(35);
+    });
+  const until = async (check: () => boolean) => {
+    const end = Date.now() + 2500;
+    while (!check()) {
+      if (Date.now() > end) throw Error('draft_root_transition_timeout');
+      await flush();
+    }
+  };
+  const button = (label: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent === label,
+    )!;
+  try {
+    await flush(() => root.render(<NativeDesktop />));
+    await until(() => !!button('新对话'));
+    await flush(() => button('新对话').click());
+    await until(() => drafts.length > 0);
+    const draft = drafts[0]!;
+    expect(draft).toMatch(/^[a-f0-9]{32}$/);
+    expect(draft).not.toBe('ffeeddccbbaa99887766554433221100');
+    await flush(() =>
+      host.querySelector<HTMLButtonElement>('button[aria-label="标签页"]')!.click(),
+    );
+    await until(() => !!host.querySelector('.native-browser-address'));
+    await flush(() => {
+      const address = host.querySelector<HTMLInputElement>('.native-browser-address')!;
+      address.focus();
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
+        address,
+        'https://www.baidu.com/',
+      );
+      address.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      address
+        .closest('form')!
+        .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await until(() => host.textContent?.includes('草稿百度') === true);
+    const navigation = requests.find((request) => request.action === 'navigate')!;
+    expect(navigation).toMatchObject({ draft, input: 'https://www.baidu.com/' });
+    expect('scope' in navigation).toBe(false);
+    expect(inventory.get(draft)?.[0]?.control).toBeUndefined();
+    await flush(() => button('Session A').click());
+    await until(() => !host.querySelector('.new-conversation-welcome'));
+    expect(
+      requests.some(
+        (request) =>
+          request.action === 'present' && request.bounds === null && request.draft === draft,
+      ),
+    ).toBe(true);
+    expect(host.textContent).not.toContain('草稿百度');
+    await flush(() => button('新对话').click());
+    await until(() => host.textContent?.includes('草稿百度') === true);
+    expect(new Set(drafts).size).toBe(1);
+    expect(requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+    expect(methods).not.toContain('conversation.send');
+    expect(methods).not.toContain('session.create');
+    expect(requests.some((request) => request.action === 'grant')).toBe(false);
+    expect(dom.window.sessionStorage.getItem('kite.browserDraft:"store"')).toBe(draft);
+    await act(() => root.unmount());
+    root = createRoot(host);
+    await flush(() => root.render(<NativeDesktop />));
+    await until(() => !!button('新对话'));
+    await flush(() => button('新对话').click());
+    await until(() => host.textContent?.includes('草稿百度') === true);
+    expect(new Set(drafts).size).toBe(1);
+    expect(requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+    expect(methods).not.toContain('conversation.send');
+    await flush(() =>
+      host.querySelector<HTMLButtonElement>('button[aria-label="关闭标签页：草稿百度"]')!.click(),
+    );
+    expect(requests.filter((request) => request.action === 'close')).toEqual([
+      {
+        action: 'close',
+        id: inventory.get(draft)?.[0]?.id ?? ('id' in navigation ? navigation.id : ''),
+        draft,
+      },
+    ]);
+    expect(inventory.get(draft)).toHaveLength(0);
+  } finally {
+    await act(() => root.unmount());
+    restoreDom();
+    dom.window.close();
+  }
+});
+
 test('real NativeDesktop never restores A into the immediately presented B tree before Main select B is confirmed', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {
     url: 'http://localhost/',

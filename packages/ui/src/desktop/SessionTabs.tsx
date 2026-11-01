@@ -39,6 +39,10 @@ export interface SessionBrowserRestorePage {
   readonly reveal?: true;
 }
 
+export interface SessionBrowserPreparation {
+  cancel(): void;
+}
+
 export interface SessionChildTarget {
   readonly sessionId: string;
   readonly executionId?: string;
@@ -67,7 +71,7 @@ export interface SessionTabsProps {
     readonly render: (visible: boolean) => ReactNode;
     readonly onClose: () => void;
   };
-  readonly onClose: () => void;
+  readonly onClose: (reason?: 'last-tab') => void;
   readonly scopeKey?: string;
   /** Keep the original header's geometry while another host paints its controls. */
   readonly chromeHosted?: boolean;
@@ -80,6 +84,8 @@ export interface SessionTabsModel {
   readonly revealBrowserId?: string;
   readonly restoring?: boolean;
   readonly restoreIssue?: boolean;
+  readonly closeIssue?: string;
+  readonly closeReveal?: number;
   readonly retryRestore?: () => void;
   readonly tabs: readonly SessionTab[];
   readonly active: string;
@@ -93,7 +99,7 @@ export interface SessionTabsModel {
     childAgentIdentity?: string,
   ) => boolean;
   readonly openWorkspace: (title: string) => boolean;
-  readonly closeTab: (id: string) => void;
+  readonly closeTab: (id: string, committed?: () => void) => void;
 }
 const maxTabs = 8;
 let nextTab = 0;
@@ -113,6 +119,8 @@ export interface SessionBrowserToolbarProps {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly canNavigate?: boolean;
+  readonly interactionPending?: boolean;
+  readonly addressReadOnly?: boolean;
   readonly onAddressChange: (value: string) => void;
   readonly onAddressFocus: (focused: boolean) => void;
   readonly onNavigate: () => void;
@@ -127,6 +135,12 @@ export function BrowserOptionsIcon() {
   return <HugeiconsIcon icon={MoreHorizontalIcon} />;
 }
 export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
+  // A fresh binding can pause input without changing the page's capabilities.
+  // Keep that brief pause from animating an otherwise available button's opacity.
+  const pendingAppearance = (available: boolean) =>
+    props.interactionPending && available && props.canNavigate !== false
+      ? { opacity: 1 }
+      : undefined;
   return (
     <form
       className="native-browser-toolbar"
@@ -134,7 +148,7 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
       onSubmit={(event) => {
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
-        if (props.canNavigate !== false) props.onNavigate();
+        if (props.canNavigate !== false && !props.interactionPending) props.onNavigate();
       }}
     >
       <Button
@@ -143,7 +157,8 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         size="icon-sm"
         aria-label="后退"
         title="后退"
-        disabled={!props.canGoBack || props.canNavigate === false}
+        disabled={!props.canGoBack || props.canNavigate === false || props.interactionPending}
+        style={pendingAppearance(props.canGoBack)}
         onClick={props.onBack}
       >
         <HugeiconsIcon icon={ArrowLeft01Icon} />
@@ -154,7 +169,8 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         size="icon-sm"
         aria-label="前进"
         title="前进"
-        disabled={!props.canGoForward || props.canNavigate === false}
+        disabled={!props.canGoForward || props.canNavigate === false || props.interactionPending}
+        style={pendingAppearance(props.canGoForward)}
         onClick={props.onForward}
       >
         <HugeiconsIcon icon={ArrowRight01Icon} />
@@ -165,7 +181,8 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         size="icon-sm"
         aria-label={props.loading ? '停止加载' : '刷新网页'}
         title={props.loading ? '停止加载' : '刷新网页'}
-        disabled={!props.hasPage || props.canNavigate === false}
+        disabled={!props.hasPage || props.canNavigate === false || props.interactionPending}
+        style={pendingAppearance(props.hasPage)}
         onClick={props.onReload}
       >
         <HugeiconsIcon icon={props.loading ? Cancel01Icon : RefreshIcon} />
@@ -175,7 +192,7 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         aria-label="搜索或输入网址"
         placeholder="搜索或输入网址"
         value={props.address}
-        readOnly={props.canNavigate === false}
+        readOnly={props.canNavigate === false || props.addressReadOnly}
         spellCheck={false}
         autoCapitalize="off"
         autoComplete="off"
@@ -199,6 +216,8 @@ function initialTabs(scope: string, restoring = false) {
     selected: '',
     restoring,
     restoreIssue: false,
+    closeIssue: undefined as string | undefined,
+    closeReveal: 0,
     restoredBrowserId: undefined as string | undefined,
     revealBrowserId: undefined as string | undefined,
   };
@@ -206,10 +225,12 @@ function initialTabs(scope: string, restoring = false) {
 /** Lives above the responsive panel Group so resizing cannot discard tabs or browsing history. */
 export function useSessionTabs(
   scope: string,
-  closeBrowser?: (id: string) => void,
+  closeBrowser?: ((id: string) => void) | ((id: string) => Promise<void>),
   restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>,
   restoreKey?: string,
   browserPending = false,
+  prepareBrowser?: (fromId: string, targetId: string) => Promise<SessionBrowserPreparation | null>,
+  prepareCloseBrowser?: (id: string) => Promise<SessionBrowserPreparation | null>,
 ): SessionTabsModel {
   const [state, setState] = useState(() => initialTabs(scope, !!restoreBrowser));
   const [restoreAttempt, setRestoreAttempt] = useState(0);
@@ -232,6 +253,17 @@ export function useSessionTabs(
   latest.current = current;
   const close = useRef(closeBrowser);
   close.current = closeBrowser;
+  const closePrepare = useRef(prepareCloseBrowser);
+  closePrepare.current = prepareCloseBrowser;
+  const closePreparation = useRef<
+    | {
+        id: string;
+        receipt?: SessionBrowserPreparation;
+        timer?: ReturnType<typeof setTimeout>;
+      }
+    | undefined
+  >(undefined);
+  const intent = useRef(0);
   const restore = useRef(restoreBrowser);
   restore.current = restoreBrowser;
   useEffect(() => {
@@ -318,6 +350,144 @@ export function useSessionTabs(
     latest.current = next;
     setState(next);
   };
+  const owner = useRef<{ admission: string; provider: typeof prepareBrowser }>(undefined);
+  const prepare = useRef(prepareBrowser);
+  prepare.current = prepareBrowser;
+  const admission = JSON.stringify([scope, restoreKey]);
+  const preparationAdmission = useRef(admission);
+  preparationAdmission.current = admission;
+  const preparing = useRef<{
+    admission: string;
+    from: string;
+    target: string;
+    timer?: ReturnType<typeof setTimeout>;
+    receipt?: SessionBrowserPreparation | null;
+    committing?: boolean;
+  }>(undefined);
+  const closing = useRef<
+    {
+      id: string;
+      admission: string;
+      close: (id: string) => void | Promise<void>;
+      before: typeof current;
+      intent: number;
+    }[]
+  >([]);
+  const cancelPreparation = useCallback(() => {
+    intent.current++;
+    const closing = closePreparation.current;
+    closePreparation.current = undefined;
+    if (closing) {
+      clearTimeout(closing.timer);
+      closing.receipt?.cancel();
+    }
+    const previous = preparing.current;
+    preparing.current = undefined;
+    if (!previous) return;
+    clearTimeout(previous.timer);
+    try {
+      previous.receipt?.cancel();
+    } catch {}
+  }, []);
+  useLayoutEffect(() => {
+    const currentOwner = { admission, provider: prepareBrowser };
+    owner.current = currentOwner;
+    return () => {
+      if (owner.current !== currentOwner) return;
+      owner.current = undefined;
+      cancelPreparation();
+      closing.current = [];
+    };
+  }, [admission, prepareBrowser, cancelPreparation]);
+  useLayoutEffect(() => {
+    if (preparing.current?.committing) preparing.current = undefined;
+    const committed = closing.current.filter(
+      (item) => item.admission === admission && !current.tabs.some((tab) => tab.id === item.id),
+    );
+    closing.current = closing.current.filter((item) => !committed.includes(item));
+    // Child SessionTabs publishes the successor in its layout effect first.
+    // Dispatch in this same commit, before an ancestor can change the scope.
+    for (const item of committed) {
+      try {
+        void Promise.resolve(item.close(item.id)).catch(() => {
+          if (
+            !owner.current ||
+            preparationAdmission.current !== item.admission ||
+            intent.current !== item.intent
+          )
+            return;
+          const next = {
+            ...item.before,
+            closeIssue: '未能确认网页已关闭，原页面已保留，请核对页面状态。',
+            closeReveal: latest.current.closeReveal + 1,
+          };
+          latest.current = next;
+          setState(next);
+        });
+      } catch {
+        if (preparationAdmission.current === item.admission && intent.current === item.intent) {
+          const next = {
+            ...item.before,
+            closeIssue: '未能确认网页已关闭，原页面已保留，请核对页面状态。',
+            closeReveal: latest.current.closeReveal + 1,
+          };
+          latest.current = next;
+          setState(next);
+        }
+      }
+    }
+  });
+  const transition = (target: string, commit: () => void) => {
+    cancelPreparation();
+    const value = latest.current;
+    const from = value.tabs.find((tab) => tab.id === value.selected) ?? value.tabs[0];
+    const destination = value.tabs.find((tab) => tab.id === target);
+    const provider = prepare.current;
+    if (
+      !provider ||
+      from?.kind !== 'browser' ||
+      destination?.kind !== 'browser' ||
+      from.id === target
+    ) {
+      commit();
+      return;
+    }
+    const operation = { admission, from: from.id, target } as NonNullable<typeof preparing.current>;
+    preparing.current = operation;
+    let settled = false;
+    const finish = (receipt: SessionBrowserPreparation | null) => {
+      if (
+        settled ||
+        !owner.current ||
+        preparing.current !== operation ||
+        preparationAdmission.current !== operation.admission ||
+        prepare.current !== provider ||
+        (
+          latest.current.tabs.find((tab) => tab.id === latest.current.selected) ??
+          latest.current.tabs[0]
+        )?.id !== operation.from ||
+        !latest.current.tabs.some((tab) => tab.id === target && tab.kind === 'browser')
+      ) {
+        try {
+          receipt?.cancel();
+        } catch {}
+        return;
+      }
+      settled = true;
+      clearTimeout(operation.timer);
+      operation.receipt = receipt;
+      operation.committing = true;
+      commit();
+    };
+    operation.timer = setTimeout(() => finish(null), 250);
+    void Promise.resolve()
+      .then(() =>
+        preparing.current === operation && preparationAdmission.current === operation.admission
+          ? provider(operation.from, target)
+          : null,
+      )
+      .then(finish, () => finish(null));
+  };
   const title = (id: string, value: string) => {
     const name = value.trim().slice(0, 80) || '新标签页';
     update((value) => {
@@ -332,12 +502,14 @@ export function useSessionTabs(
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return;
     const tabs = latest.current.tabs;
     if (tabs.length >= maxTabs) return;
+    cancelPreparation();
     const tab = newBrowserTab();
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
   };
   const openChanges = () => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return;
     const tabs = latest.current.tabs;
+    cancelPreparation();
     const existing = tabs.find((tab) => tab.kind === 'changes');
     if (existing) {
       update((value) => ({ ...value, selected: existing.id }));
@@ -353,6 +525,7 @@ export function useSessionTabs(
     const id = `child-${JSON.stringify([target.sessionId, target.executionId ?? null])}`;
     const existing = tabs.find((tab) => tab.id === id);
     if (!tabs.some((tab) => tab.id === id) && tabs.length >= maxTabs) return false;
+    cancelPreparation();
     const tab: SessionTab = {
       ...target,
       id,
@@ -375,6 +548,7 @@ export function useSessionTabs(
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
     const tabs = latest.current.tabs;
     if (!tabs.some((tab) => tab.kind === 'workspace') && tabs.length >= maxTabs) return false;
+    cancelPreparation();
     update((value) => ({
       ...value,
       tabs: value.tabs.some((tab) => tab.kind === 'workspace')
@@ -384,26 +558,84 @@ export function useSessionTabs(
     }));
     return true;
   };
-  const closeTab = (id: string) => {
+  const closeTab = (id: string, committed?: () => void) => {
     const { tabs, selected } = latest.current;
     const active = tabs.some((tab) => tab.id === selected) ? selected : (tabs[0]?.id ?? '');
     const index = tabs.findIndex((tab) => tab.id === id);
-    if (tabs[index]?.kind === 'browser') close.current?.(id);
+    if (index < 0) return;
     const remaining = tabs.filter((tab) => tab.id !== id);
-    update((value) => ({
-      ...value,
-      tabs: remaining,
-      selected:
-        active === id ? (remaining[Math.min(index, remaining.length - 1)]?.id ?? '') : active,
-    }));
+    const successor = active === id ? remaining[Math.min(index, remaining.length - 1)] : undefined;
+    const deferred =
+      !!prepare.current && tabs[index]?.kind === 'browser' && successor?.kind === 'browser';
+    const commit = () => {
+      const value = latest.current;
+      if (!value.tabs.some((tab) => tab.id === id)) return;
+      if (tabs[index]?.kind === 'browser' && close.current) {
+        closing.current.push({
+          id,
+          admission,
+          close: close.current,
+          before: value,
+          intent: intent.current,
+        });
+      }
+      update((value) => ({
+        ...value,
+        tabs: value.tabs.filter((tab) => tab.id !== id),
+        selected: active === id ? (successor?.id ?? '') : value.selected,
+      }));
+      committed?.();
+    };
+    if (deferred) transition(successor.id, commit);
+    else {
+      cancelPreparation();
+      const provider = closePrepare.current;
+      if (
+        active === id &&
+        tabs[index]?.kind === 'browser' &&
+        successor?.kind !== 'browser' &&
+        provider
+      ) {
+        const operation = { id } as NonNullable<typeof closePreparation.current>;
+        closePreparation.current = operation;
+        let settled = false;
+        const finish = (receipt: SessionBrowserPreparation | null) => {
+          if (
+            settled ||
+            closePreparation.current !== operation ||
+            preparationAdmission.current !== admission ||
+            closePrepare.current !== provider ||
+            (
+              latest.current.tabs.find((tab) => tab.id === latest.current.selected) ??
+              latest.current.tabs[0]
+            )?.id !== id
+          ) {
+            receipt?.cancel();
+            return;
+          }
+          settled = true;
+          clearTimeout(operation.timer);
+          operation.receipt = receipt ?? undefined;
+          closePreparation.current = undefined;
+          commit();
+        };
+        operation.timer = setTimeout(() => finish(null), 1500);
+        void Promise.resolve()
+          .then(() => (closePreparation.current === operation ? provider(id) : null))
+          .then(finish, () => finish(null));
+      } else commit();
+    }
   };
   return {
     restoredBrowserId: current.restoredBrowserId,
     revealBrowserId: current.revealBrowserId,
     restoring: current.restoring || browserPending || restorePending,
     restoreIssue: current.restoreIssue,
+    closeIssue: current.closeIssue,
+    closeReveal: current.closeReveal,
     retryRestore: () => {
       if (!restore.current || latest.current.restoring) return;
+      cancelPreparation();
       const next = { ...latest.current, restoring: true, restoreIssue: false };
       latest.current = next;
       setState(next);
@@ -417,7 +649,10 @@ export function useSessionTabs(
     openChild,
     openWorkspace,
     closeTab,
-    select: (id) => update((value) => ({ ...value, selected: id })),
+    select: (id) => {
+      if (!latest.current.tabs.some((tab) => tab.id === id)) return;
+      transition(id, () => update((value) => ({ ...value, selected: id })));
+    },
   };
 }
 
@@ -435,6 +670,7 @@ function SessionTabsHeader({
       className="right-sidebar-heading session-tabs-heading"
       inert={hosted || undefined}
       aria-hidden={hosted || undefined}
+      style={hosted ? { visibility: 'hidden', pointerEvents: 'none' } : undefined}
     >
       <TabsList aria-label="右侧栏标签页" className="session-tabs-list">
         {data.tabs.map((tab) => (
@@ -525,9 +761,10 @@ function dispatchTabsAction(
     case 'close': {
       const tab = owner.model.tabs.find((tab) => tab.id === action.id);
       if (!tab) return;
-      owner.model.closeTab(tab.id);
-      if (tab.kind === 'workspace') owner.workspace?.onClose();
-      if (owner.model.tabs.length === 1) owner.onClose();
+      owner.model.closeTab(tab.id, () => {
+        if (tab.kind === 'workspace') owner.workspace?.onClose();
+        if (owner.model.tabs.length === 1) owner.onClose('last-tab');
+      });
       break;
     }
     case 'add':

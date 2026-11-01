@@ -331,9 +331,20 @@ test('scope and host changes revoke old dispatches, cancel menus and release loc
     });
     expect(f.requests.some((request) => request.action === 'navigate')).toBe(false);
     expect(f.menus).toHaveLength(1);
+    const retainedToolbar = f.toolbar!;
     await f.render({ visible: false });
-    expect(f.toolbar).toBeUndefined();
+    // Inactive page facts stay registered for the next exact selection;
+    // retaining the port must not retain its action admission.
+    expect(f.toolbar?.data.id).toBe(retainedToolbar.data.id);
     expect(f.control).toBeUndefined();
+    const requests = f.requests.length;
+    await f.flush(() => {
+      retainedToolbar.dispatch({ type: 'navigate' });
+      retainedToolbar.dispatch({ type: 'reload' });
+      retainedToolbar.dispatch({ type: 'show-options', anchor });
+    });
+    expect(f.requests).toHaveLength(requests);
+    expect(f.menus).toHaveLength(1);
   } finally {
     await f.close();
   }

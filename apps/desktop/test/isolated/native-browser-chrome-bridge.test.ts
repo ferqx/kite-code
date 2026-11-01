@@ -2,8 +2,12 @@ import { expect, test } from 'bun:test';
 import {
   isNativeBrowserChromeEnvelope,
   isNativeBrowserChromeEvent,
+  isNativeBrowserChromeOwner,
+  isNativeBrowserChromeRendered,
   isNativeBrowserChromeSnapshot,
   type NativeBrowserChromeSnapshot,
+  nativeBrowserChromeOwnerKey,
+  sameNativeBrowserChromeOwner,
 } from '../../src/native-browser-chrome-bridge';
 
 function snapshot(): NativeBrowserChromeSnapshot {
@@ -48,6 +52,66 @@ const event = () => ({
   revision: 1,
   part: 'toolbar',
   action: { type: 'navigate' },
+});
+
+test('Chrome draft owners are disjoint from Session authority and cannot carry Agent control or notes', () => {
+  const value = snapshot(),
+    draft = { draft: 'a'.repeat(32) };
+  expect(isNativeBrowserChromeOwner(value.scope)).toBe(true);
+  expect(isNativeBrowserChromeOwner(draft)).toBe(true);
+  expect(nativeBrowserChromeOwnerKey(draft)).not.toBe(nativeBrowserChromeOwnerKey(value.scope));
+  expect(sameNativeBrowserChromeOwner(draft, { ...draft })).toBe(true);
+  expect(sameNativeBrowserChromeOwner(draft, value.scope)).toBe(false);
+  for (const owner of [
+    null,
+    {},
+    { draft: 'invalid' },
+    { ...value.scope, ...draft },
+    { ...draft, generation: 1 },
+  ])
+    expect(isNativeBrowserChromeOwner(owner)).toBe(false);
+  const manual = {
+    ...value,
+    scope: draft,
+    toolbar: { ...value.toolbar, notesAvailable: false, notesOpen: false },
+  };
+  expect(isNativeBrowserChromeSnapshot(manual)).toBe(true);
+  for (const invalid of [
+    { ...manual, toolbar: { ...manual.toolbar, notesAvailable: true } },
+    { ...manual, toolbar: { ...manual.toolbar, notesOpen: true } },
+    {
+      ...manual,
+      control: {
+        id: 'browser',
+        label: 'Agent',
+        detail: 'x',
+        handoffAvailable: true,
+        closeAvailable: true,
+        pending: false,
+        details: [],
+      },
+    },
+  ])
+    expect(isNativeBrowserChromeSnapshot(invalid)).toBe(false);
+});
+
+test('readonly Chrome render receipt contains only bounded current-wire identity and revision', () => {
+  const value = { attachment: 'attachment', pageToken: 'page', revision: 1 };
+  expect(isNativeBrowserChromeRendered(value)).toBe(true);
+  for (const input of [
+    null,
+    [],
+    {},
+    { ...value, revision: 0 },
+    { ...value, revision: Infinity },
+    { ...value, revision: 1.5 },
+    { ...value, attachment: '' },
+    { ...value, pageToken: 'x\0y' },
+    { ...value, attachment: 'x'.repeat(129) },
+    { ...value, action: 'execute' },
+    Object.assign(Object.create(value), { a: 1, b: 2, c: 3 }),
+  ])
+    expect(isNativeBrowserChromeRendered(input)).toBe(false);
 });
 
 test('Chrome transports only bounded display data and rejects callbacks, unknown fields and oversized Unicode payloads', () => {

@@ -78,7 +78,15 @@ import type { NativeBrowserBridge } from './native-browser-bridge';
 import { useNativeBrowserChromeRoot } from './native-browser-chrome-root';
 import { NativeBrowserLeaseControls } from './native-browser-lease-controls';
 import { NativeBrowserPane } from './native-browser-pane';
-import { closeNativeBrowserTab, restoreNativeBrowserTab } from './native-browser-session';
+import {
+  cancelNativeBrowserCloses,
+  closeNativeBrowserTab,
+  nativeBrowserDisplayHint,
+  prepareNativeBrowserClose,
+  prepareNativeBrowserPresentation,
+  restoreNativeBrowserDraft,
+  restoreNativeBrowserTab,
+} from './native-browser-session';
 import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
 import { NativeChildDetail } from './native-child-detail';
@@ -255,6 +263,7 @@ function NativeDesktopContent({
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
   const [agentBrowserRequest, setAgentBrowserRequest] = useState(0);
   const [browserLeaseRestore, setBrowserLeaseRestore] = useState(0);
+  const browserDrafts = useRef(new Map<string, string>());
   const agentBrowserPresentation = useRef(new AgentBrowserPresentation());
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -1160,10 +1169,41 @@ function NativeDesktopContent({
     (selection?.viewLoading && verifiedBrowserRestore.current === browserRestoreCandidateKey)
       ? browserRestoreCandidate
       : undefined;
-  const browserChrome = useNativeBrowserChromeRoot(browserRestoreScope, {
-    interactive: browserRestoreFresh,
-    covered: settingsOpen || scheduledTasksView,
-  });
+  let browserDraft: string | undefined;
+  if (preparing && !scheduledTasksView && directory?.storeId && !directory.unavailable) {
+    browserDraft = browserDrafts.current.get(directory.storeId);
+    if (!browserDraft) {
+      const key = `kite.browserDraft:${JSON.stringify(directory.storeId)}`;
+      try {
+        const saved = window.sessionStorage.getItem(key);
+        if (saved && /^[a-f0-9]{32}$/.test(saved)) browserDraft = saved;
+      } catch {}
+      browserDraft ??= crypto.randomUUID().replaceAll('-', '');
+      browserDrafts.current.set(directory.storeId, browserDraft);
+      try {
+        window.sessionStorage.setItem(key, browserDraft);
+      } catch {}
+    }
+  }
+  const browserOwnerKey = JSON.stringify([browserRestoreScope, browserDraft]);
+  const browserHandlers = useMemo(
+    () => ({
+      close: (id: string) => closeNativeBrowserTab(id, browserDraft),
+      prepareClose: (id: string) => prepareNativeBrowserClose(id, browserDraft),
+    }),
+    [browserDraft],
+  );
+  useEffect(() => {
+    if (!browserOwnerKey) return undefined;
+    return () => cancelNativeBrowserCloses();
+  }, [browserOwnerKey]);
+  const browserChrome = useNativeBrowserChromeRoot(
+    browserDraft ? { draft: browserDraft } : browserRestoreScope,
+    {
+      interactive: !!browserDraft || browserRestoreFresh,
+      covered: settingsOpen || scheduledTasksView,
+    },
+  );
   useLayoutEffect(() => {
     const display = bridge.browserDisplayIntent?.();
     if (!display) return;
@@ -4276,10 +4316,12 @@ function NativeDesktopContent({
           <NativeBrowserPane
             {...props}
             scope={browserRestoreScope}
+            draft={browserDraft}
+            initialHint={nativeBrowserDisplayHint(props.id, browserRestoreScope, browserDraft)}
             chromeHosted={browserChrome.hosted(props.id)}
             onChromePresentation={browserChrome.toolbar(props.id)}
             annotate={
-              state && selection
+              !browserDraft && state && selection
                 ? (page, noteVisible, annotationToolbarHost) => (
                     <AgentBrowserPanel
                       key={JSON.stringify([
@@ -4323,7 +4365,7 @@ function NativeDesktopContent({
                 : undefined
             }
             controlTools={(page) =>
-              state && selection ? (
+              !browserDraft && state && selection ? (
                 <NativeBrowserLeaseControls
                   bridge={bridge}
                   scope={{
@@ -4348,34 +4390,40 @@ function NativeDesktopContent({
           />
         )
       }
-      closeBrowser={closeNativeBrowserTab}
+      closeBrowser={browserHandlers.close}
+      prepareCloseBrowser={browserHandlers.prepareClose}
+      prepareBrowser={prepareNativeBrowserPresentation}
       restoreBrowser={
-        browserRestoreScope && window.kiteNative?.restoreBrowser
-          ? async () => {
-              const key = JSON.stringify([
-                browserRestoreScope,
-                agentBrowserRequest,
-                browserLeaseRestore,
-              ]);
-              try {
-                const page = await restoreNativeBrowserTab(browserRestoreScope);
-                const display = bridge.browserDisplayIntent?.();
-                if (display && (!page || (page.activeId ?? page.id) !== display.id))
+        browserDraft && window.kiteNative?.restoreBrowserDraft
+          ? () => restoreNativeBrowserDraft(browserDraft)
+          : browserRestoreScope && window.kiteNative?.restoreBrowser
+            ? async () => {
+                const key = JSON.stringify([
+                  browserRestoreScope,
+                  agentBrowserRequest,
+                  browserLeaseRestore,
+                ]);
+                try {
+                  const page = await restoreNativeBrowserTab(browserRestoreScope);
+                  const display = bridge.browserDisplayIntent?.();
+                  if (display && (!page || (page.activeId ?? page.id) !== display.id))
+                    bridge.cancelBrowserDisplay?.();
+                  if (freshBrowserRestore.current === key) verifiedBrowserRestore.current = key;
+                  return page;
+                } catch (error) {
                   bridge.cancelBrowserDisplay?.();
-                if (freshBrowserRestore.current === key) verifiedBrowserRestore.current = key;
-                return page;
-              } catch (error) {
-                bridge.cancelBrowserDisplay?.();
-                if (verifiedBrowserRestore.current === key) verifiedBrowserRestore.current = '';
-                throw error;
+                  if (verifiedBrowserRestore.current === key) verifiedBrowserRestore.current = '';
+                  throw error;
+                }
               }
-            }
-          : undefined
+            : undefined
       }
       browserRestoreKey={
-        browserRestoreScope
-          ? JSON.stringify([browserRestoreScope, agentBrowserRequest, browserLeaseRestore])
-          : undefined
+        browserDraft
+          ? JSON.stringify(['draft', browserDraft])
+          : browserRestoreScope
+            ? JSON.stringify([browserRestoreScope, agentBrowserRequest, browserLeaseRestore])
+            : undefined
       }
       browserPending={
         !!pendingReading ||

@@ -13,6 +13,7 @@ import {
   type NativeBrowserChromeBridge,
   type NativeBrowserChromeEnvelope,
   type NativeBrowserChromeResult,
+  nativeBrowserChromeOwnerKey,
 } from './native-browser-chrome-bridge';
 import {
   NativeBrowserChromeControl,
@@ -21,16 +22,14 @@ import {
 import type { NativeBrowserToolbarAction } from './native-browser-chrome-types';
 import { applyTheme } from './native-theme';
 
-function ownerKey(value: NativeBrowserChromeEnvelope) {
-  const { storeId, sessionId, generation, viewSelection } = value.snapshot.scope;
+function scopeKey(value: NativeBrowserChromeEnvelope) {
   return JSON.stringify([
-    storeId,
-    sessionId,
-    generation,
-    viewSelection,
+    nativeBrowserChromeOwnerKey(value.snapshot.scope),
     value.snapshot.tabs.scopeKey,
-    value.snapshot.toolbar.id,
   ]);
+}
+function ownerKey(value: NativeBrowserChromeEnvelope) {
+  return JSON.stringify([scopeKey(value), value.snapshot.toolbar.id]);
 }
 function bindingKey(value: NativeBrowserChromeEnvelope) {
   return JSON.stringify([ownerKey(value), value.attachment, value.pageToken]);
@@ -70,6 +69,8 @@ function Chrome({
   const host = useRef<HTMLDivElement>(null);
   const live = useRef(envelope);
   const binding = useRef(bindingKey(envelope));
+  const page = useRef(ownerKey(envelope));
+  const changingPage = page.current !== ownerKey(envelope);
   const mounted = useRef(true);
   const editing = useRef(false);
   const composing = useRef(false);
@@ -93,6 +94,21 @@ function Chrome({
   useLayoutEffect(() => {
     live.current = envelope;
     const next = bindingKey(envelope);
+    const nextPage = ownerKey(envelope);
+    if (page.current !== nextPage) {
+      editing.current = false;
+      composing.current = false;
+      edit.current = undefined;
+      const focused = document.activeElement;
+      if (
+        focused instanceof HTMLElement &&
+        focused.matches('.native-browser-address') &&
+        host.current?.contains(focused)
+      )
+        focused.blur();
+      page.current = nextPage;
+      setDraft(envelope.snapshot.toolbar.address);
+    }
     if (binding.current !== next) {
       binding.current = next;
       edit.current = undefined;
@@ -140,6 +156,14 @@ function Chrome({
     return result;
   }
   function changeAddress(value: string, restoring = false) {
+    // A retained input can receive the old page's final IME event after blur.
+    // Only the current focused editor owns user input; explicit restoration
+    // still uses the separately fenced action path below.
+    if (
+      !restoring &&
+      document.activeElement !== host.current?.querySelector('.native-browser-address')
+    )
+      return;
     setDraft(value);
     const admitted =
       actionable(live.current) && !uncertain.current && live.current.snapshot.toolbar.canNavigate;
@@ -275,10 +299,11 @@ function Chrome({
       void emit({ part: 'focus-root' });
     }
   }
-  const canAct = actionable(envelope) && !uncertain.current;
+  const canAct = actionable(envelope) && (changingPage || !uncertain.current);
   // Preserve an in-progress editor/IME across a geometry attachment handshake.
   // Local echo grants no action: every dispatch is separately admitted above.
   const localEditing =
+    !changingPage &&
     (editing.current || composing.current) &&
     envelope.snapshot.toolbar.canNavigate &&
     !envelope.snapshot.covered &&
@@ -286,13 +311,15 @@ function Chrome({
   const toolbar = {
     ...envelope.snapshot.toolbar,
     address: envelope.snapshot.toolbar.canNavigate
-      ? address
+      ? changingPage
+        ? envelope.snapshot.toolbar.address
+        : address
       : envelope.snapshot.toolbar.readonlyURL,
-    canNavigate: !busy && (canAct || localEditing) && envelope.snapshot.toolbar.canNavigate,
-    canGoBack: canAct && envelope.snapshot.toolbar.canGoBack,
-    canGoForward: canAct && envelope.snapshot.toolbar.canGoForward,
-    hasPage: canAct && envelope.snapshot.toolbar.hasPage,
+    canNavigate:
+      (changingPage || (!busy && !uncertain.current)) && envelope.snapshot.toolbar.canNavigate,
   };
+  const visibleBusy = !changingPage && busy;
+  const visibleIssue = changingPage ? '' : issue;
   return (
     <div
       className="kite-client"
@@ -306,7 +333,7 @@ function Chrome({
         if (editing.current) changeAddress(draft.current);
       }}
     >
-      <section className="session-tabs" aria-label="浏览器界面" aria-busy={!canAct || busy}>
+      <section className="session-tabs" aria-label="浏览器界面" aria-busy={!canAct || visibleBusy}>
         <SessionTabsChrome
           data={envelope.snapshot.tabs}
           dispatch={(action) => {
@@ -324,16 +351,22 @@ function Chrome({
         />
         <NativeBrowserChromeToolbar
           data={toolbar}
+          interactionPending={!canAct}
+          addressReadOnly={!canAct && !localEditing}
           dispatch={toolbarAction}
           tools={
             <>
-              {(issue || (busy && echoWait.current)) && (
+              {(visibleIssue || (visibleBusy && echoWait.current)) && (
                 <span
                   role="status"
-                  title={issue || '正在核对地址，确认后仅发送一次前往操作。'}
+                  title={visibleIssue || '正在核对地址，确认后仅发送一次前往操作。'}
                   className="hint"
                 >
-                  {issue ? (uncertain.current ? '操作未确认' : '页面已变化') : '正在核对地址'}
+                  {visibleIssue
+                    ? uncertain.current
+                      ? '操作未确认'
+                      : '页面已变化'
+                    : '正在核对地址'}
                 </span>
               )}
               {envelope.snapshot.control && (
@@ -409,7 +442,17 @@ export function NativeBrowserChromeRenderer({
     if (!state) return;
     applyTheme(state.envelope.snapshot.theme);
     document.documentElement.dataset.windowMaterial = state.envelope.snapshot.material ?? 'none';
-  }, [state]);
+    if (current.current !== state.envelope || !bridge?.rendered) return;
+    try {
+      void bridge
+        .rendered({
+          attachment: state.envelope.attachment,
+          pageToken: state.envelope.pageToken,
+          revision: state.envelope.snapshot.revision,
+        })
+        .catch(() => {});
+    } catch {}
+  }, [bridge, state]);
   const send = useCallback<Send>(
     async (binding, action) => {
       const value = current.current;
@@ -441,6 +484,21 @@ export function NativeBrowserChromeRenderer({
     },
     [bridge],
   );
-  if (!state) return unavailable ? <p role="status">浏览器界面尚未核实，请返回主界面。</p> : null;
-  return <Chrome key={ownerKey(state.envelope)} {...state} send={send} />;
+  if (!state)
+    return unavailable ? (
+      <p role="status">浏览器界面尚未核实，请返回主界面。</p>
+    ) : (
+      <div
+        className="native-browser-chrome-empty"
+        aria-hidden
+        inert
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'var(--background)',
+          pointerEvents: 'none',
+        }}
+      />
+    );
+  return <Chrome key={scopeKey(state.envelope)} {...state} send={send} />;
 }

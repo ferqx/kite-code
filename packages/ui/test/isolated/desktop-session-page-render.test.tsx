@@ -1,7 +1,8 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, expect, mock, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, type ComponentProps } from 'react';
 import type { SessionPageProps } from '../../src/desktop/SessionPage';
+import type { SessionTabsChromePresentation } from '../../src/desktop/types';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', {
   url: 'http://localhost',
@@ -43,6 +44,18 @@ for (const [key, value] of Object.entries(globals)) {
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 }
 const { createRoot } = await import('react-dom/client');
+const actualResizable = await import('../../src/desktop/components/ui/resizable');
+const OriginalPanelGroup = actualResizable.ResizablePanelGroup;
+const resizableExports = { ...actualResizable };
+let captureContentLayout = false;
+let contentLayoutProps: ComponentProps<typeof OriginalPanelGroup> | undefined;
+mock.module('../../src/desktop/components/ui/resizable', () => ({
+  ...resizableExports,
+  ResizablePanelGroup(props: ComponentProps<typeof OriginalPanelGroup>) {
+    if (captureContentLayout && props.id === 'content-layout') contentLayoutProps = props;
+    return <OriginalPanelGroup {...props} />;
+  },
+}));
 const { SessionPage } = await import('../../src/desktop/SessionPage');
 afterAll(() => {
   dom.window.close();
@@ -340,5 +353,177 @@ test('only a fresh host reveal restores the exact visible page once, without ove
   } finally {
     release();
     await act(() => root.unmount());
+  }
+});
+
+/** Real Group/Panel rendering with controlled notifications, not a pointer-drag simulation. */
+function collapseNotificationFixture() {
+  const host = document.getElementById('root')!;
+  const root = createRoot(host);
+  let groupWidth = 0;
+  let groupReads = 0;
+  let chrome: SessionTabsChromePresentation | null = null;
+  const closed: string[] = [];
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  const originalOffset = Object.getOwnPropertyDescriptor(
+    dom.window.HTMLElement.prototype,
+    'offsetWidth',
+  )!;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.id === 'content-layout') {
+      groupReads++;
+      return new dom.window.DOMRect(0, 0, groupWidth, 600);
+    }
+    return originalRect.call(this);
+  };
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get() {
+      return this.id === 'content-layout' ? groupWidth : originalOffset.get!.call(this);
+    },
+  });
+  captureContentLayout = true;
+  contentLayoutProps = undefined;
+  const flush = (action: () => void = () => {}) =>
+    act(async () => {
+      action();
+      await Bun.sleep(30);
+    });
+  const layout = (collapsed: boolean) => ({
+    content: collapsed ? 100 : 50,
+    details: collapsed ? 0 : 50,
+  });
+  return {
+    host,
+    closed,
+    async open() {
+      await flush(() =>
+        root.render(
+          <SessionPage
+            workspaces={[]}
+            readingKey="controlled-collapse"
+            sessionLabel="Controlled collapse"
+            messages={[]}
+            connected
+            connectionLabel=""
+            loading={false}
+            actions={{}}
+            tabsChromeHosted
+            onTabsChromePresentation={(value) => {
+              chrome = value;
+            }}
+            renderBrowser={({ id, visible }) => (
+              <div data-collapse-browser={id} data-visible={visible} />
+            )}
+            closeBrowser={(id) => closed.push(id)}
+          />,
+        ),
+      );
+      await flush(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    },
+    setWidth(width: number) {
+      groupWidth = width;
+    },
+    reads() {
+      return groupReads;
+    },
+    resetReads() {
+      groupReads = 0;
+    },
+    notify(collapsed: boolean, count = 1) {
+      return flush(() => {
+        const callback = contentLayoutProps?.onLayoutChange;
+        expect(typeof callback).toBe('function');
+        for (let index = 0; index < count; index++) callback!(layout(collapsed));
+      });
+    },
+    complete(collapsed: boolean, isUserInteraction: boolean) {
+      return flush(() =>
+        contentLayoutProps?.onLayoutChanged?.(layout(collapsed), { isUserInteraction }),
+      );
+    },
+    browser() {
+      return host.querySelector<HTMLElement>('[data-collapse-browser]')!;
+    },
+    expanded() {
+      return host.querySelector('[aria-label="标签页"]')!.getAttribute('aria-expanded');
+    },
+    presentation() {
+      return chrome?.data;
+    },
+    flush,
+    async close() {
+      await flush(() => root.unmount());
+      captureContentLayout = false;
+      contentLayoutProps = undefined;
+      dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', originalOffset);
+    },
+  };
+}
+
+test('live collapsed Group notification withdraws hosted browser presentation before a user resize completes', async () => {
+  const f = collapseNotificationFixture();
+  try {
+    await f.open();
+    f.setWidth(1000);
+    await f.notify(false);
+    const browser = f.browser();
+    const id = browser.dataset.collapseBrowser;
+    expect(browser.dataset.visible).toBe('true');
+    expect(f.presentation()).toMatchObject({ visible: true, present: true });
+    await f.notify(true); // no final pointer-release/onLayoutChanged notification yet
+    expect(f.expanded()).toBe('true'); // visibility and user intent are separate
+    expect(f.browser()).toBe(browser);
+    expect(browser.dataset.visible).toBe('false');
+    expect(f.presentation()).toMatchObject({ visible: false, present: false });
+    expect(f.closed).toEqual([]);
+    await f.complete(true, true);
+    expect(f.expanded()).toBe('false');
+    f.setWidth(1400);
+    await f.notify(false);
+    expect(f.expanded()).toBe('false');
+    expect(browser.dataset.visible).toBe('false');
+    await f.flush(() => f.host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    await f.notify(false);
+    expect(f.browser()).toBe(browser);
+    expect(f.browser().dataset.collapseBrowser).toBe(id);
+    expect(f.browser().dataset.visible).toBe('true');
+    expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('automatic collapse preserves open intent and repeated positive Group notices do not reread geometry', async () => {
+  const f = collapseNotificationFixture();
+  try {
+    await f.open();
+    const browser = f.browser();
+    expect(browser.dataset.visible).toBe('true');
+    await f.notify(true); // zero-width hidden Group cannot replace the initial unknown state
+    expect(browser.dataset.visible).toBe('true');
+    f.setWidth(1000);
+    await f.notify(false);
+    expect(browser.dataset.visible).toBe('true');
+    f.resetReads();
+    await f.notify(false, 25);
+    expect(f.reads()).toBe(0);
+    await f.notify(true);
+    await f.complete(true, false); // window constraints, not an explicit user dismissal
+    expect(f.expanded()).toBe('true');
+    expect(browser.dataset.visible).toBe('false');
+    expect(f.presentation()).toMatchObject({ visible: false, present: false });
+    await f.notify(false);
+    expect(f.expanded()).toBe('true');
+    expect(f.browser()).toBe(browser);
+    expect(browser.dataset.visible).toBe('true');
+    expect(f.presentation()).toMatchObject({ visible: true, present: true });
+    f.setWidth(0);
+    await f.notify(true);
+    expect(browser.dataset.visible).toBe('true'); // invalid hidden Group retains last valid result
+    expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
   }
 });

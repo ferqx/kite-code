@@ -84,6 +84,7 @@ async function mainFixture(
   const dialogs: unknown[][] = [];
   const browserRegistrations: BrowserRegistration[] = [];
   let callerState = (): NativeState => ({ generation: 1 }) as NativeState;
+  let browserScope: NativeCaller['browserScope'] = () => undefined;
   const browserStartups: { desktopBrowser?: { endpoint: string; token: string } }[] = [];
   let beforeServiceClose: (() => Promise<void>) | undefined;
   let windowDestroyed = false;
@@ -409,6 +410,9 @@ async function mainFixture(
       state() {
         return callerState();
       }
+      browserScope(kind: Parameters<NativeCaller['browserScope']>[0]) {
+        return browserScope(kind);
+      }
       hasActiveWork() {
         return holdMenu;
       }
@@ -605,6 +609,9 @@ async function mainFixture(
     setCallerState(read: () => NativeState) {
       callerState = read;
     },
+    setBrowserScope(read: NativeCaller['browserScope']) {
+      browserScope = read;
+    },
     browserStartups,
     destroyWindow: () => {
       windows.at(-1)?.destroy();
@@ -727,7 +734,12 @@ test('Main grant identity survives a real same-selection Caller refresh while re
     await caller.invoke({ method: 'select', generation, sessionId: 'a', activationId: 1 });
     const observer = await observed.promise;
     await f.open();
-    f.setCallerState(() => caller.state());
+    let fullStateReads = 0;
+    f.setCallerState(() => {
+      fullStateReads++;
+      return caller.state();
+    });
+    f.setBrowserScope((kind) => caller.browserScope(kind));
     const registration = f.browserRegistrations[0]!;
     const grantScope = registration.grantScope ?? registration.selectedScope!;
     const identity = grantScope();
@@ -835,25 +847,9 @@ test('Main grant identity survives a real same-selection Caller refresh while re
     readGate = undefined;
     expect(grantScope()).toBeUndefined();
     expect(registration.selectedScope!()).toBeUndefined();
-    const good = loading;
-    for (const state of [
-      { ...good, backgroundUnavailable: true },
-      { ...good, selection: undefined },
-      {
-        ...good,
-        selection: {
-          ...good.selection!,
-          session: { ...good.selection!.session, parentSessionId: 'parent' },
-        },
-      },
-      {
-        ...good,
-        selection: { ...good.selection!, session: { ...good.selection!.session, deletedAt: 1 } },
-      },
-    ]) {
-      f.setCallerState(() => state);
-      expect(grantScope()).toBeUndefined();
-    }
+    // NativeCaller owns selection/permission predicates. Main must use that
+    // narrow projection without assembling unrelated durable UI submissions.
+    expect(fullStateReads).toBe(0);
   } finally {
     readGate?.resolve();
     unconfigure();

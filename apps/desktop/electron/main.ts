@@ -627,38 +627,10 @@ void app
       // registration. Bind the existing Main owner rather than its future listener.
       automation: process.platform !== 'win32' ? browserPages : undefined,
       grantScope() {
-        const state = caller?.state();
-        const view = state?.selection;
-        // Caller retains readonly facts only for this exact Main selection epoch
-        // during refresh. That loading projection preserves identity, not write
-        // readiness; completed permission failures and observation loss still deny.
-        return state &&
-          !state.backgroundUnavailable &&
-          view &&
-          !view.session.parentSessionId &&
-          view.session.deletedAt === null &&
-          (!view.permissionUnavailable || view.viewLoading === true)
-          ? {
-              storeId: view.storeId,
-              sessionId: view.session.id,
-              generation: state.generation,
-              viewSelection: view.viewSelection ?? view.viewGeneration,
-            }
-          : undefined;
+        return caller?.browserScope('presentation');
       },
       selectedScope() {
-        const view = caller?.state().selection;
-        return view &&
-          !view.permissionUnavailable &&
-          !view.viewLoading &&
-          !view.session.parentSessionId
-          ? {
-              storeId: view.storeId,
-              sessionId: view.session.id,
-              generation: caller!.state().generation,
-              viewSelection: view.viewSelection ?? view.viewGeneration,
-            }
-          : undefined;
+        return caller?.browserScope('input');
       },
     });
     registerNativeThemeIpc({

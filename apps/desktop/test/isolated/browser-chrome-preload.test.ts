@@ -25,7 +25,7 @@ mock.module('electron', () => ({
   },
 }));
 
-test('Chrome preload exposes only validated read/watch/typed-send without Root or automation authority', async () => {
+test('Chrome preload exposes only validated read/watch/render-ack/typed-send without Root or automation authority', async () => {
   const previous = process.isMainFrame;
   Object.defineProperty(process, 'isMainFrame', { configurable: true, value: true });
   try {
@@ -35,8 +35,9 @@ test('Chrome preload exposes only validated read/watch/typed-send without Root o
       read(): Promise<unknown>;
       watch(receive: (value: unknown) => void): () => void;
       send(value: unknown): Promise<unknown>;
+      rendered(value: unknown): Promise<void>;
     };
-    expect(Object.keys(bridge).sort()).toEqual(['read', 'send', 'watch']);
+    expect(Object.keys(bridge).sort()).toEqual(['read', 'rendered', 'send', 'watch']);
     expect(Object.isFrozen(bridge)).toBe(true);
     expect(await bridge.read()).toBeNull();
     expect(calls.at(-1)).toEqual([nativeBrowserChromeChannel, { action: 'read' }]);
@@ -65,6 +66,26 @@ test('Chrome preload exposes only validated read/watch/typed-send without Root o
     reply = 'forwarded';
     expect(await bridge.send(event)).toBe('forwarded');
     expect(calls.at(-1)).toEqual([nativeBrowserChromeChannel, { action: 'send', event }]);
+    const rendered = { attachment: 'attachment', pageToken: 'token', revision: 1 };
+    const before = calls.length;
+    for (const value of [
+      null,
+      {},
+      { ...rendered, revision: 0 },
+      { ...rendered, revision: 1.5 },
+      { ...rendered, pageToken: '' },
+      { ...rendered, attachment: 'x'.repeat(129) },
+      { ...rendered, action: 'reload' },
+      { ...rendered, code: 'unsafe' },
+    ]) {
+      await expect(bridge.rendered(value)).rejects.toThrow('invalid_browser_chrome_rendered');
+    }
+    expect(calls).toHaveLength(before);
+    reply = undefined;
+    await bridge.rendered(rendered);
+    expect(calls.at(-1)).toEqual([nativeBrowserChromeChannel, { action: 'rendered', ...rendered }]);
+    reply = 'forwarded';
+    await expect(bridge.rendered(rendered)).rejects.toThrow('invalid_browser_chrome_rendered');
   } finally {
     Object.defineProperty(process, 'isMainFrame', { configurable: true, value: previous });
   }

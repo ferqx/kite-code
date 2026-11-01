@@ -14,6 +14,7 @@ export function useNativeBrowserPopup(options: {
   hostKey?: string;
   visible: boolean;
   scope?: NativeBrowserRestoreScope;
+  draft?: string;
   page: { id: string; control?: { incarnation: string; navigation: number } };
   items: NativeBrowserMenuRequest['items'];
   details: readonly string[];
@@ -22,7 +23,7 @@ export function useNativeBrowserPopup(options: {
 }) {
   const current = useRef(options);
   current.current = options;
-  const scopeKey = JSON.stringify(options.scope);
+  const scopeKey = JSON.stringify([options.scope, options.draft]);
   const pending = useRef<
     { id: string; identity: string; scopeKey?: string; hostKey?: string } | undefined
   >(undefined);
@@ -34,13 +35,21 @@ export function useNativeBrowserPopup(options: {
   useEffect(() => {
     if (
       !options.visible ||
-      !options.scope ||
+      (!options.scope && !options.draft) ||
       pending.current?.identity !== options.identity ||
       pending.current?.scopeKey !== scopeKey ||
       pending.current?.hostKey !== options.hostKey
     )
       cancel();
-  }, [options.identity, options.visible, options.hostKey, options.scope, scopeKey, cancel]);
+  }, [
+    options.identity,
+    options.visible,
+    options.hostKey,
+    options.scope,
+    options.draft,
+    scopeKey,
+    cancel,
+  ]);
   useEffect(() => {
     let escapeHeld = false;
     const consumeEscape = (event: KeyboardEvent) => {
@@ -72,7 +81,14 @@ export function useNativeBrowserPopup(options: {
   return useCallback((anchor: HTMLElement | NativeBrowserChromeRect) => {
     const start = current.current,
       host = window.kiteNative;
-    if (!start.visible || !start.scope || pending.current || !host?.showBrowserMenu) return;
+    if (
+      !start.visible ||
+      (!start.scope && !start.draft) ||
+      (start.scope && start.draft) ||
+      pending.current ||
+      !host?.showBrowserMenu
+    )
+      return;
     const rect = 'getBoundingClientRect' in anchor ? anchor.getBoundingClientRect() : anchor;
     if (
       ![rect.x, rect.y, rect.width, rect.height, rect.x + rect.width, rect.y + rect.height].every(
@@ -87,7 +103,7 @@ export function useNativeBrowserPopup(options: {
     const request = {
       id: `browser-menu-${++menuSequence}`,
       identity: start.identity,
-      scopeKey: JSON.stringify(start.scope),
+      scopeKey: JSON.stringify([start.scope, start.draft]),
       hostKey: start.hostKey,
     };
     pending.current = request;
@@ -95,8 +111,9 @@ export function useNativeBrowserPopup(options: {
       .showBrowserMenu({
         requestId: request.id,
         id: start.page.id,
-        scope: start.scope,
-        ...(start.page.control
+        ...(start.scope ? { scope: start.scope } : {}),
+        ...(start.draft ? { draft: start.draft } : {}),
+        ...(start.page.control && !start.draft
           ? {
               incarnation: start.page.control.incarnation,
               navigation: start.page.control.navigation,
@@ -117,7 +134,7 @@ export function useNativeBrowserPopup(options: {
             !now.visible ||
             now.identity !== request.identity ||
             now.hostKey !== request.hostKey ||
-            JSON.stringify(now.scope) !== request.scopeKey
+            JSON.stringify([now.scope, now.draft]) !== request.scopeKey
           )
             return;
           if (now.items.some((item) => item.action === action && item.enabled))
@@ -130,7 +147,7 @@ export function useNativeBrowserPopup(options: {
           if (
             current.current.identity === request.identity &&
             current.current.hostKey === request.hostKey &&
-            JSON.stringify(current.current.scope) === request.scopeKey
+            JSON.stringify([current.current.scope, current.current.draft]) === request.scopeKey
           )
             current.current.onError?.(error);
         },

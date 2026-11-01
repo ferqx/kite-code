@@ -5,6 +5,24 @@ export const nativeBrowserLayoutFrameChannel = 'kite:native:browser-layout-frame
 export const nativeBrowserMenuChannel = 'kite:native:browser-menu';
 export const nativeBrowserMenuCancelChannel = 'kite:native:browser-menu-cancel';
 export const nativeBrowserDisplayChannel = 'kite:native:browser-display';
+export const nativeBrowserPreparationChannel = 'kite:native:browser-preparation';
+export const nativeBrowserPreparationCancelChannel = 'kite:native:browser-preparation-cancel';
+
+export interface NativeBrowserPreparation {
+  readonly fromId: string;
+  readonly targetId: string;
+}
+export function isNativeBrowserPreparation(value: unknown): value is NativeBrowserPreparation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    Object.keys(v).length === 2 &&
+    [v.fromId, v.targetId].every(
+      (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id),
+    ) &&
+    v.fromId !== v.targetId
+  );
+}
 
 /** Read-only geometry of an existing Main surface; never a page/control capability. */
 export interface NativeBrowserDisplayIntent {
@@ -80,13 +98,55 @@ export interface NativeBrowserBounds {
   readonly height: number;
   readonly radius: number;
 }
+export interface NativeBrowserClosePreparation {
+  readonly key: string;
+  readonly witness: string;
+  readonly bounds: NativeBrowserBounds;
+  readonly width: number;
+  readonly height: number;
+}
+export function isNativeBrowserClosePreparation(
+  value: unknown,
+): value is NativeBrowserClosePreparation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>,
+    b = v.bounds as Record<string, unknown> | undefined;
+  return (
+    Object.keys(v).length === 5 &&
+    Object.keys(v).every((key) => ['key', 'witness', 'bounds', 'width', 'height'].includes(key)) &&
+    typeof v.key === 'string' &&
+    /^[a-f0-9]{32}$/.test(v.key) &&
+    typeof v.witness === 'string' &&
+    /^[a-f0-9]{24}$/.test(v.witness) &&
+    [v.width, v.height].every(
+      (n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 32768,
+    ) &&
+    !!b &&
+    !Array.isArray(b) &&
+    Object.keys(b).length === 5 &&
+    ['x', 'y', 'width', 'height', 'radius'].every(
+      (key) =>
+        typeof b[key] === 'number' &&
+        Number.isFinite(b[key]) &&
+        Number(b[key]) >= 0 &&
+        Number(b[key]) <= (key === 'radius' ? 64 : 32768),
+    ) &&
+    Number(b.width) > 0 &&
+    Number(b.height) > 0 &&
+    Number(b.x) + Number(b.width) <= Number(v.width) + 0.000001 &&
+    Number(b.y) + Number(b.height) <= Number(v.height) + 0.000001
+  );
+}
 export interface NativeBrowserLayoutWitness {
   readonly key: string;
   readonly step: 1 | 2;
 }
 export interface NativeBrowserLayoutFrameAck {
+  readonly presented?: boolean;
+  readonly error?: 'browser_presentation_unavailable';
   readonly id: string;
-  readonly scope: NativeBrowserRestoreScope;
+  readonly scope?: NativeBrowserRestoreScope;
+  readonly draft?: string;
   readonly presentationRevision: number;
   readonly key: string;
   readonly step: 0 | 1 | 2;
@@ -206,6 +266,11 @@ export interface NativeBrowserRestoreResult {
   /** Restore the page presentation that was visible before this Root replacement. */
   readonly reveal?: true;
 }
+/** Manual Root-local pages, without any Core session or Agent control grant. */
+export interface NativeBrowserDraftRestoreResult {
+  readonly pages: readonly NativeBrowserState[];
+  readonly activeId?: string;
+}
 export interface NativeBrowserPresentationFrame {
   readonly id: string;
   readonly key: string;
@@ -222,21 +287,29 @@ export interface NativeBrowserPresentationFrame {
   };
 }
 export type NativeBrowserRequest =
-  | { readonly action: 'navigate'; readonly id: string; readonly input: string }
+  | {
+      readonly action: 'navigate';
+      readonly id: string;
+      readonly input: string;
+      readonly draft?: string;
+    }
   | {
       readonly action: 'present';
       readonly id: string;
       readonly bounds: NativeBrowserBounds | null;
       readonly layout?: NativeBrowserLayout;
       readonly scope?: NativeBrowserRestoreScope;
+      readonly draft?: string;
       readonly presentationRevision?: number;
       readonly presentationKey?: string;
       readonly witness?: NativeBrowserLayoutWitness;
     }
   | {
-      readonly action: 'state' | 'back' | 'forward' | 'reload' | 'stop' | 'close' | 'grant';
+      readonly action: 'state' | 'back' | 'forward' | 'reload' | 'stop' | 'close';
       readonly id: string;
-    };
+      readonly draft?: string;
+    }
+  | { readonly action: 'grant'; readonly id: string; readonly draft?: never };
 export type NativeBrowserMenuAction =
   | 'back'
   | 'forward'
@@ -247,7 +320,8 @@ export type NativeBrowserMenuAction =
   | 'checkOriginal';
 export interface NativeBrowserMenuRequest {
   readonly requestId: string;
-  readonly scope: NativeBrowserRestoreScope;
+  readonly scope?: NativeBrowserRestoreScope;
+  readonly draft?: string;
   readonly id: string;
   readonly incarnation?: string;
   readonly navigation?: number;
@@ -273,6 +347,7 @@ export function parseNativeBrowserMenuRequest(value: unknown): NativeBrowserMenu
         ![
           'requestId',
           'scope',
+          'draft',
           'id',
           'incarnation',
           'navigation',
@@ -282,7 +357,7 @@ export function parseNativeBrowserMenuRequest(value: unknown): NativeBrowserMenu
           'details',
         ].includes(key),
     ) ||
-    !isNativeBrowserRestoreScope(input.scope) ||
+    !isNativeBrowserPresentationOwner(input) ||
     ![input.requestId, input.id].every(
       (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(v),
     ) ||
@@ -314,6 +389,16 @@ export function parseNativeBrowserMenuRequest(value: unknown): NativeBrowserMenu
 }
 
 export interface NativeBrowserBridge {
+  prepareBrowserClose?(input: {
+    readonly id: string;
+    readonly draft?: string;
+  }): Promise<NativeBrowserClosePreparation | null>;
+  confirmBrowserClose?(key: string): Promise<void>;
+  finishBrowserClose?(key: string): Promise<void>;
+  cancelBrowserClose?(key: string): Promise<void>;
+  /** Prepare one existing target's native surface; conveys no page/control authority. */
+  prepareBrowserPresentation?(input: NativeBrowserPreparation): Promise<{ key: string } | null>;
+  cancelBrowserPreparation?(key: string): Promise<void>;
   browserDisplayIntent?(): NativeBrowserDisplayIntent | null;
   claimBrowserDisplay?(request: Extract<NativeBrowserRequest, { action: 'present' }>): boolean;
   cancelBrowserDisplay?(): void;
@@ -330,6 +415,7 @@ export interface NativeBrowserBridge {
   showBrowserMenu?(request: NativeBrowserMenuRequest): Promise<NativeBrowserMenuAction | null>;
   cancelBrowserMenu?(requestId: string): void;
   restoreBrowser(scope: NativeBrowserRestoreScope): Promise<NativeBrowserRestoreResult>;
+  restoreBrowserDraft?(draft: string): Promise<NativeBrowserDraftRestoreResult>;
   captureBrowserPresentation?(id: string): Promise<NativeBrowserPresentationFrame>;
   watchBrowser(listener: (state: NativeBrowserState) => void): () => void;
 }
@@ -339,6 +425,8 @@ export type NativeBrowserReply =
       readonly value:
         | NativeBrowserState
         | NativeBrowserRestoreResult
+        | NativeBrowserDraftRestoreResult
+        | NativeBrowserClosePreparation
         | NativeBrowserPresentationFrame
         | null;
     }
@@ -393,6 +481,32 @@ export function isNativeBrowserRestoreScope(value: unknown): value is NativeBrow
     Number(scope.viewSelection) >= 0
   );
 }
+export function isNativeBrowserDraft(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
+}
+function isNativeBrowserPresentationOwner(value: Record<string, unknown>): boolean {
+  return (
+    (value.draft === undefined && isNativeBrowserRestoreScope(value.scope)) ||
+    (value.scope === undefined && isNativeBrowserDraft(value.draft))
+  );
+}
+export function isNativeBrowserDraftRestoreResult(
+  value: unknown,
+): value is NativeBrowserDraftRestoreResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return (
+    Object.keys(result).every((key) => ['pages', 'activeId'].includes(key)) &&
+    Object.hasOwn(result, 'pages') &&
+    Array.isArray(result.pages) &&
+    result.pages.length <= 8 &&
+    result.pages.every((page) => isNativeBrowserState(page) && page.control === undefined) &&
+    new Set(result.pages.map((page) => page.id)).size === result.pages.length &&
+    (result.activeId === undefined ||
+      (typeof result.activeId === 'string' &&
+        result.pages.some((page) => page.id === result.activeId)))
+  );
+}
 export function isNativeBrowserLayoutFrameAck(
   value: unknown,
 ): value is NativeBrowserLayoutFrameAck {
@@ -400,16 +514,29 @@ export function isNativeBrowserLayoutFrameAck(
   const v = value as Record<string, unknown>;
   return (
     Object.keys(v).every((key) =>
-      ['id', 'scope', 'presentationRevision', 'key', 'step', 'frozen'].includes(key),
+      [
+        'id',
+        'scope',
+        'draft',
+        'presentationRevision',
+        'key',
+        'step',
+        'frozen',
+        'presented',
+        'error',
+      ].includes(key),
     ) &&
     typeof v.id === 'string' &&
     /^[A-Za-z0-9_-]{1,64}$/.test(v.id) &&
-    isNativeBrowserRestoreScope(v.scope) &&
+    isNativeBrowserPresentationOwner(v) &&
     Number.isSafeInteger(v.presentationRevision) &&
     Number(v.presentationRevision) > 0 &&
     typeof v.key === 'string' &&
     /^[a-f0-9]{24}$/.test(v.key) &&
     (v.step === 0 || v.step === 1 || v.step === 2) &&
+    (v.presented === undefined || (v.step === 2 && typeof v.presented === 'boolean')) &&
+    (v.error === undefined ||
+      (v.step === 2 && v.presented === false && v.error === 'browser_presentation_unavailable')) &&
     (v.frozen === undefined || isNativeBrowserFrozenFrame(v.frozen))
   );
 }
@@ -474,8 +601,38 @@ export function parseNativeBrowserRequest(
 ):
   | NativeBrowserRequest
   | { readonly action: 'capturePresentation'; readonly id: string }
+  | { readonly action: 'restoreDraft'; readonly draft: string }
+  | { readonly action: 'prepareClose'; readonly id: string; readonly draft?: string }
+  | { readonly action: 'confirmClose' | 'finishClose' | 'cancelClose'; readonly key: string }
   | { readonly action: 'restore'; readonly scope: NativeBrowserRestoreScope } {
   const input = record(value);
+  if (['confirmClose', 'finishClose', 'cancelClose'].includes(String(input.action))) {
+    if (
+      Object.keys(input).length !== 2 ||
+      typeof input.key !== 'string' ||
+      !/^[a-f0-9]{32}$/.test(input.key)
+    )
+      throw Error('invalid_browser_request');
+    return {
+      action: input.action as 'confirmClose' | 'finishClose' | 'cancelClose',
+      key: input.key,
+    };
+  }
+  if (input.action === 'prepareClose') {
+    if (
+      Object.keys(input).some((key) => !['action', 'id', 'draft'].includes(key)) ||
+      typeof input.id !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,64}$/.test(input.id) ||
+      (input.draft !== undefined && !isNativeBrowserDraft(input.draft))
+    )
+      throw Error('invalid_browser_request');
+    return structuredClone(input) as { action: 'prepareClose'; id: string; draft?: string };
+  }
+  if (input.action === 'restoreDraft') {
+    if (Object.keys(input).length !== 2 || !isNativeBrowserDraft(input.draft))
+      throw Error('invalid_browser_request');
+    return { action: 'restoreDraft', draft: input.draft };
+  }
   if (input.action === 'restore') {
     if (Object.keys(input).length !== 2 || !isNativeBrowserRestoreScope(input.scope))
       throw Error('invalid_browser_request');
@@ -485,7 +642,7 @@ export function parseNativeBrowserRequest(
     throw Error('invalid_browser_request');
   const fields =
     input.action === 'navigate'
-      ? ['action', 'id', 'input']
+      ? ['action', 'id', 'input', 'draft']
       : input.action === 'present'
         ? [
             'action',
@@ -493,12 +650,22 @@ export function parseNativeBrowserRequest(
             'bounds',
             'layout',
             'scope',
+            'draft',
             'presentationRevision',
             'presentationKey',
             'witness',
           ]
-        : ['action', 'id'];
+        : input.action === 'grant' || input.action === 'capturePresentation'
+          ? ['action', 'id']
+          : ['action', 'id', 'draft'];
   if (Object.keys(input).some((key) => !fields.includes(key)))
+    throw Error('invalid_browser_request');
+  if (
+    input.draft !== undefined &&
+    (!isNativeBrowserDraft(input.draft) ||
+      input.scope !== undefined ||
+      input.presentationKey !== undefined)
+  )
     throw Error('invalid_browser_request');
   if (input.action === 'navigate') {
     if (typeof input.input !== 'string') throw Error('invalid_browser_request');
@@ -514,7 +681,7 @@ export function parseNativeBrowserRequest(
         typeof witness.step !== 'number' ||
         input.bounds === null ||
         !input.layout ||
-        !input.scope ||
+        !isNativeBrowserPresentationOwner(input) ||
         !input.presentationRevision
       )
         throw Error('invalid_browser_request');
@@ -615,6 +782,17 @@ export function projectNativeBrowserBounds(
   width: number,
   height: number,
 ): NativeBrowserBounds | undefined {
+  return projectNativeBrowserLayout(bounds, layout, width, height)?.bounds;
+}
+
+/** Native prediction only: retain constrained allocations for the next resize,
+ * without turning them into Renderer-observed layout or image proof. */
+export function projectNativeBrowserLayout(
+  bounds: NativeBrowserBounds,
+  layout: NativeBrowserLayout,
+  width: number,
+  height: number,
+): { bounds: NativeBrowserBounds; layout: NativeBrowserLayout } | undefined {
   if (
     !isNativeBrowserLayout(layout) ||
     !Number.isFinite(width) ||
@@ -625,6 +803,7 @@ export function projectNativeBrowserBounds(
     return undefined;
   let parentLeft = 0,
     parentWidth = width;
+  const groups: NativeBrowserGroupLayout[] = [];
   const round = (value: number) => Math.round(value * 1000) / 1000;
   for (const group of layout.groups) {
     const available = parentWidth - group.left - group.right - group.gap;
@@ -664,18 +843,29 @@ export function projectNativeBrowserBounds(
     const sum = sizes[0]! + sizes[1]!;
     if (sum <= 0 || sizes[1]! <= 0) return undefined;
     const leftWidth = (available * sizes[0]!) / sum;
+    const rightWidth = (available * sizes[1]!) / sum;
+    groups.push({
+      ...group,
+      panels: [
+        { ...panels[0], size: leftWidth },
+        { ...panels[1], size: rightWidth },
+      ],
+    });
     parentLeft += group.left + leftWidth + group.gap;
-    parentWidth = (available * sizes[1]!) / sum;
+    parentWidth = rightWidth;
   }
   const projectedWidth = parentWidth - layout.insetLeft - layout.insetRight;
   const bottom = layout.windowHeight - bounds.y - bounds.height;
   const projectedHeight = height - bounds.y - bottom;
   if (projectedWidth <= 0 || projectedHeight <= 0) return undefined;
   return {
-    ...bounds,
-    x: parentLeft + layout.insetLeft,
-    width: projectedWidth,
-    height: projectedHeight,
+    bounds: {
+      ...bounds,
+      x: parentLeft + layout.insetLeft,
+      width: projectedWidth,
+      height: projectedHeight,
+    },
+    layout: { ...layout, windowWidth: width, windowHeight: height, groups },
   };
 }
 

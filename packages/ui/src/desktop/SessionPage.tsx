@@ -30,6 +30,7 @@ import {
 } from './ScheduledTasks';
 import {
   type SessionBrowserPageProps,
+  type SessionBrowserPreparation,
   type SessionBrowserRestorePage,
   type SessionChildPageProps,
   type SessionChildTabRequest,
@@ -237,7 +238,9 @@ export interface SessionPageProps {
   /** Host receipt reader rendered within the retained FileChanges sidebar. */
   fileChangesContent?: ReactNode;
   renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
-  closeBrowser?: (id: string) => void;
+  closeBrowser?: ((id: string) => void) | ((id: string) => Promise<void>);
+  prepareCloseBrowser?: (id: string) => Promise<SessionBrowserPreparation | null>;
+  prepareBrowser?: (fromId: string, targetId: string) => Promise<SessionBrowserPreparation | null>;
   restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>;
   browserRestoreKey?: string;
   browserPending?: boolean;
@@ -272,6 +275,8 @@ export function SessionPage(props: SessionPageProps) {
     hasTabs ? props.restoreBrowser : undefined,
     props.browserRestoreKey,
     props.browserPending,
+    props.prepareBrowser,
+    props.prepareCloseBrowser,
   );
   return <SessionPageContent {...props} hasTabs={hasTabs} tabModel={tabModel} />;
 }
@@ -305,6 +310,7 @@ function SessionPageContent({
   const navigationPanelFrame = useRef<number | undefined>(undefined);
   const panelAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
+  const directDetails = useRef(false);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
   const tabsScopeKey = props.tabsScopeKey ?? props.readingKey;
   const tabsIntent = useRef<{ scope?: string; key?: string }>({});
@@ -485,11 +491,22 @@ function SessionPageContent({
   );
   const dismissedBrowserReveals = useRef(new Set<string>());
   const changeTabsOpen = useCallback(
-    (open: boolean) => {
+    (open: boolean, animate = true) => {
       // Closing a host panel can replace its pending layout frame, not this intent.
       if (!open) dismissedBrowserReveals.current.add(tabsScopeKey);
       setTabsKey(open ? tabsScopeKey : undefined);
-      schedulePanelChange(detailsPanelFrame, detailsPanel, open);
+      if (animate) schedulePanelChange(detailsPanelFrame, detailsPanel, open);
+      else {
+        directDetails.current = true;
+        if (detailsPanelFrame.current !== undefined)
+          cancelAnimationFrame(detailsPanelFrame.current);
+        detailsPanelFrame.current = undefined;
+        if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
+        panelAnimationTimer.current = undefined;
+        setPanelsAnimating(false);
+        if (open) detailsPanel.current?.expand();
+        else detailsPanel.current?.collapse();
+      }
     },
     [schedulePanelChange, tabsScopeKey, setTabsKey],
   );
@@ -512,7 +529,7 @@ function SessionPageContent({
     if (handledBrowserReveals.current.has(key)) return;
     handledBrowserReveals.current.add(key);
     tabModel.select(id);
-    changeTabsOpen(true);
+    changeTabsOpen(true, false);
   }, [
     tabModel.revealBrowserId,
     tabModel.restoring,
@@ -526,6 +543,9 @@ function SessionPageContent({
     hostDetailsOpen,
     changeTabsOpen,
   ]);
+  useEffect(() => {
+    if (tabModel.closeReveal) changeTabsOpen(true, false);
+  }, [tabModel.closeReveal, changeTabsOpen]);
   const workspaceOperations = useRef(tabModel);
   workspaceOperations.current = tabModel;
   const workspaceRequest = useRef<string | undefined>(undefined);
@@ -679,6 +699,10 @@ function SessionPageContent({
     }
   }, [props.scheduledTasks, collapseDetails]);
   useEffect(() => {
+    if (directDetails.current) {
+      directDetails.current = false;
+      return;
+    }
     if (!rightSidebarOpen) {
       collapseDetails();
       return;
@@ -847,12 +871,12 @@ function SessionPageContent({
       </aside>
     </div>
   );
-  const closeRightSidebar = () => {
+  const closeRightSidebar = (reason?: 'last-tab') => {
     if (props.detailPanel) {
       collapseDetails();
       props.detailPanel.onClose();
     } else if (tabsOpen) {
-      changeTabsOpen(false);
+      changeTabsOpen(false, reason !== 'last-tab');
       focusControlAfterCommit(tabsToggle);
     } else if (scheduledEditor && props.scheduledTasks) {
       closeScheduledEditor(scheduledEditor.generation);
@@ -1032,15 +1056,15 @@ function SessionPageContent({
               elementRef={contentGroupElement}
               className="client-content-panels"
               data-animate-width={panelsAnimating ? 'true' : undefined}
-              onLayoutChanged={(layout, meta) => {
+              onLayoutChange={(layout) => {
+                const collapsed = (layout.details ?? 0) === 0;
+                if (collapsed === detailsCollapsed) return;
                 const group = contentGroupElement.current;
                 if (group && group.offsetWidth > 0 && group.getBoundingClientRect().width > 0)
-                  setDetailsCollapsed((layout.details ?? 0) === 0);
-                if (
-                  meta.isUserInteraction &&
-                  rightSidebarOpen &&
-                  detailsPanel.current?.isCollapsed()
-                )
+                  setDetailsCollapsed(collapsed);
+              }}
+              onLayoutChanged={(layout, meta) => {
+                if (meta.isUserInteraction && rightSidebarOpen && (layout.details ?? 0) === 0)
                   closeRightSidebar();
               }}
             >
@@ -1126,6 +1150,11 @@ function SessionPageContent({
                     }
                   >
                     {props.notices}
+                    {tabModel.closeIssue && (
+                      <p role="alert" className="notice error">
+                        {tabModel.closeIssue}
+                      </p>
+                    )}
                     {tabLimitKey === tabsScopeKey && tabModel.tabs.length >= 8 && (
                       <p role="status">标签页已满，请关闭一个标签页后重试。</p>
                     )}

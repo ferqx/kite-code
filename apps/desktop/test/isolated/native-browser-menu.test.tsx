@@ -35,6 +35,7 @@ function Harness({
   visible = true,
   enabled = true,
   scoped = true,
+  draft,
   hostKey,
   generation = 1,
   anchor,
@@ -43,6 +44,7 @@ function Harness({
   visible?: boolean;
   enabled?: boolean;
   scoped?: boolean;
+  draft?: string;
   hostKey?: string;
   generation?: number;
   anchor?: NativeBrowserChromeRect;
@@ -52,8 +54,9 @@ function Harness({
     hostKey,
     visible,
     scope: scoped ? { ...scope, generation } : undefined,
+    draft,
     page: { id: 'page', control: { incarnation: 'inc', navigation: 2 } },
-    items: [{ action: 'close', enabled }],
+    items: [{ action: draft ? 'reload' : 'close', enabled }],
     details: ['Original reason and error'],
     onAction: (action) => actions.push(action),
     onError: (cause) => errors.push(cause),
@@ -179,6 +182,21 @@ test('late failures from an obsolete identity do not appear in the selected page
   expect(errors).toHaveLength(0);
   expect(actions).toHaveLength(0);
 });
+test('a draft popup uses only its draft owner and cancels the old menu when that owner changes', async () => {
+  const draft = '00112233445566778899aabbccddeeff';
+  await render({ scoped: false, draft });
+  await open();
+  expect(requests[0]!.draft).toBe(draft);
+  expect(requests[0]!.scope).toBeUndefined();
+  expect(requests[0]!.incarnation).toBeUndefined();
+  expect(requests[0]!.navigation).toBeUndefined();
+  const finish = resolve;
+  await render({ scoped: false, draft: 'ffeeddccbbaa99887766554433221100' });
+  expect(cancels).toEqual([requests[0]!.requestId]);
+  await flush(() => finish('reload'));
+  expect(actions).toHaveLength(0);
+});
+
 test('an unverified scope opens no native popup', async () => {
   await render({ scoped: false });
   await open();

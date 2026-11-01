@@ -7,8 +7,14 @@ import {
   type NativeBrowserBridge,
   type NativeBrowserDisplayIntent,
   type NativeBrowserRequest,
+  nativeBrowserChannel,
   nativeBrowserLayoutChannel,
+  nativeBrowserLayoutFrameChannel,
 } from '../../src/native-browser-bridge';
+import {
+  type NativeBrowserChromeRootBridge,
+  nativeBrowserChromeRootChannel,
+} from '../../src/native-browser-chrome-bridge';
 
 const intent: NativeBrowserDisplayIntent = {
   token: 'a'.repeat(32),
@@ -308,6 +314,7 @@ test('built preload uses invoke for hosted calibration and shares exact sync lay
   expect(built.success).toBe(true);
   let bridge!: NativeBrowserBridge, reply: unknown;
   const calls: { transport: string; channel: string; input: unknown }[] = [];
+  const listeners = new Map<string, (_event: unknown, value: unknown) => void>();
   runInNewContext(await built.outputs[0]!.text(), {
     document: { defaultView: null },
     exports: {},
@@ -330,8 +337,12 @@ test('built preload uses invoke for hosted calibration and shares exact sync lay
             calls.push({ transport: 'async', channel, input });
             return reply;
           },
-          on() {},
-          removeListener() {},
+          on(channel: string, receive: (_event: unknown, value: unknown) => void) {
+            listeners.set(channel, receive);
+          },
+          removeListener(channel: string) {
+            listeners.delete(channel);
+          },
         },
         webFrame: {},
         webUtils: {},
@@ -393,6 +404,341 @@ test('built preload uses invoke for hosted calibration and shares exact sync lay
       frozenHeight: 200,
     });
   }
+  const received: unknown[] = [];
+  const stop = bridge.watchBrowserLayoutFrame!((value) => received.push(value));
+  const ack = {
+    id: 'page',
+    scope: { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 2 },
+    presentationRevision: 1,
+    key: 'a'.repeat(24),
+    step: 2,
+  };
+  const valid = [
+    { ...ack, presented: false },
+    { ...ack, presented: true },
+    { ...ack, presented: false, error: 'browser_presentation_unavailable' },
+    { ...ack, scope: undefined, draft: 'a'.repeat(32), presented: true },
+  ];
+  for (const value of [
+    ...valid,
+    { ...ack, step: 1, presented: true },
+    { ...ack, presented: 'yes' },
+    { ...ack, error: 'browser_presentation_unavailable' },
+    { ...ack, presented: true, error: 'browser_presentation_unavailable' },
+    { ...ack, presented: false, error: 'arbitrary' },
+    { ...ack, draft: 'a'.repeat(32) },
+    { ...ack, scope: undefined },
+    { ...ack, scope: undefined, draft: 'A'.repeat(32) },
+  ])
+    listeners.get(nativeBrowserLayoutFrameChannel)!(null, value);
+  expect(received).toEqual(valid);
+  stop();
+  expect(listeners.has(nativeBrowserLayoutFrameChannel)).toBe(false);
+});
+
+test('built Root preload restores only bounded draft pages and never accepts their inventory as an ordinary page reply', async () => {
+  const built = await Bun.build({
+    entrypoints: [resolve(import.meta.dir, '../../electron/preload.ts')],
+    target: 'node',
+    format: 'cjs',
+    packages: 'bundle',
+    external: ['electron'],
+  });
+  expect(built.success).toBe(true);
+  let bridge!: NativeBrowserBridge, reply: unknown;
+  const calls: unknown[][] = [];
+  runInNewContext(await built.outputs[0]!.text(), {
+    document: { defaultView: null },
+    exports: {},
+    module: { exports: {} },
+    require() {
+      return {
+        contextBridge: {
+          exposeInMainWorld(_name: string, value: NativeBrowserBridge) {
+            bridge = value;
+          },
+        },
+        ipcRenderer: {
+          sendSync() {
+            return null;
+          },
+          async invoke(...args: unknown[]) {
+            calls.push(args);
+            return reply;
+          },
+          on() {},
+          removeListener() {},
+        },
+        webFrame: {},
+        webUtils: {},
+      };
+    },
+  });
+  expect(typeof bridge.restoreBrowserDraft).toBe('function');
+  const draft = 'a'.repeat(32),
+    page = {
+      id: 'draft-page',
+      url: 'https://www.baidu.com/',
+      title: 'Baidu',
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+    };
+  reply = { ok: true, value: { pages: [page], activeId: page.id } };
+  expect(await bridge.restoreBrowserDraft!(draft)).toEqual({ pages: [page], activeId: page.id });
+  expect(calls.at(-1)).toEqual([nativeBrowserChannel, { action: 'restoreDraft', draft }]);
+  await expect(bridge.browserRequest({ action: 'state', id: page.id, draft })).rejects.toThrow(
+    'invalid_browser_state',
+  );
+  await expect(
+    bridge.restoreBrowser({ storeId: 's', sessionId: 'e', generation: 1, viewSelection: 1 }),
+  ).rejects.toThrow('invalid_browser_restore');
+  const count = calls.length;
+  for (const invalid of ['', 'A'.repeat(32), 'a'.repeat(31), 'a'.repeat(33), null, { draft }])
+    await expect(bridge.restoreBrowserDraft!(invalid as string)).rejects.toThrow(
+      'invalid_browser_request',
+    );
+  expect(calls).toHaveLength(count);
+  for (const value of [
+    null,
+    [],
+    {},
+    { pages: [page, page] },
+    { pages: [], activeId: page.id },
+    { pages: Array.from({ length: 9 }, (_, i) => ({ ...page, id: `p${i}` })) },
+    { pages: [page], draft },
+    { pages: [page], scope: { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 1 } },
+    {
+      pages: [
+        {
+          ...page,
+          control: {
+            phase: 'human',
+            incarnation: 'incarnation',
+            navigation: 0,
+            sessionId: 'session',
+          },
+        },
+      ],
+    },
+    { pages: [page], lease: 'not-authority' },
+    page,
+  ]) {
+    reply = { ok: true, value };
+    await expect(bridge.restoreBrowserDraft!(draft)).rejects.toThrow('invalid_browser_restore');
+  }
+  reply = { ok: true, value: { pages: [] } };
+  expect(await bridge.restoreBrowserDraft!(draft)).toEqual({ pages: [] });
+  reply = { ok: false, code: 'browser_draft_scope_denied' };
+  await expect(bridge.restoreBrowserDraft!(draft)).rejects.toThrow('browser_draft_scope_denied');
+});
+
+test('built Root preload keeps Chrome context and Root-close markers private, bounded and distinct from page replies', async () => {
+  const built = await Bun.build({
+    entrypoints: [resolve(import.meta.dir, '../../electron/preload.ts')],
+    target: 'node',
+    format: 'cjs',
+    packages: 'bundle',
+    external: ['electron'],
+  });
+  expect(built.success).toBe(true);
+  let bridge!: NativeBrowserBridge & NativeBrowserChromeRootBridge, reply: unknown;
+  const calls: unknown[][] = [];
+  runInNewContext(await built.outputs[0]!.text(), {
+    structuredClone,
+    document: { defaultView: null },
+    exports: {},
+    module: { exports: {} },
+    require() {
+      return {
+        contextBridge: {
+          exposeInMainWorld(_name: string, value: typeof bridge) {
+            bridge = value;
+          },
+        },
+        ipcRenderer: {
+          sendSync() {
+            return null;
+          },
+          async invoke(...args: unknown[]) {
+            calls.push(args);
+            return reply;
+          },
+          on() {},
+          removeListener() {},
+        },
+        webFrame: {},
+        webUtils: {},
+      };
+    },
+  });
+  const draft = 'a'.repeat(32),
+    owner = { draft };
+  reply = undefined;
+  await bridge.setBrowserPresentationContext!({ revision: 1, owner });
+  expect(calls.at(-1)).toEqual([
+    nativeBrowserChromeRootChannel,
+    { action: 'context', revision: 1, owner },
+  ]);
+  await bridge.publishBrowserChrome(null, 1);
+  expect(calls.at(-1)).toEqual([
+    nativeBrowserChromeRootChannel,
+    { action: 'publish', snapshot: null, context: 1 },
+  ]);
+  let count = calls.length;
+  for (const invalid of [
+    { revision: 0, owner },
+    { revision: 1, owner: { draft: 'bad' } },
+    { revision: 1, owner, extra: true },
+    {},
+  ])
+    await expect(bridge.setBrowserPresentationContext!(invalid as never)).rejects.toThrow(
+      'browser_chrome_context_invalid',
+    );
+  await expect(bridge.publishBrowserChrome(null, 0)).rejects.toThrow(
+    'browser_chrome_context_invalid',
+  );
+  expect(calls).toHaveLength(count);
+  reply = { ok: true };
+  await expect(bridge.setBrowserPresentationContext!({ revision: 2, owner: null })).rejects.toThrow(
+    'browser_chrome_context_invalid',
+  );
+  const receipt = {
+    key: 'b'.repeat(32),
+    witness: 'c'.repeat(24),
+    bounds: { x: 600, y: 0, width: 400, height: 96, radius: 0 },
+    width: 1000,
+    height: 700,
+  };
+  reply = { ok: true, value: receipt };
+  expect(await bridge.prepareBrowserClose!({ id: 'page', draft })).toEqual(receipt);
+  expect(calls.at(-1)).toEqual([
+    nativeBrowserChannel,
+    { action: 'prepareClose', id: 'page', draft },
+  ]);
+  await expect(bridge.browserRequest({ action: 'state', id: 'page', draft })).rejects.toThrow(
+    'invalid_browser_state',
+  );
+  for (const value of [
+    { ...receipt, key: 'bad' },
+    { ...receipt, witness: 'bad' },
+    { ...receipt, bounds: { ...receipt.bounds, width: 401 } },
+    { ...receipt, control: {} },
+  ]) {
+    reply = { ok: true, value };
+    await expect(bridge.prepareBrowserClose!({ id: 'page' })).rejects.toThrow(
+      'invalid_browser_close',
+    );
+  }
+  count = calls.length;
+  for (const invalid of [
+    { id: '../bad' },
+    { id: 'page', draft: 'bad' },
+    { id: 'page', scope: {} },
+    { id: 'page', action: 'grant' },
+  ])
+    await expect(bridge.prepareBrowserClose!(invalid as never)).rejects.toThrow(
+      'invalid_browser_request',
+    );
+  expect(calls).toHaveLength(count);
+  for (const [method, action] of [
+    [bridge.confirmBrowserClose!, 'confirmClose'],
+    [bridge.finishBrowserClose!, 'finishClose'],
+    [bridge.cancelBrowserClose!, 'cancelClose'],
+  ] as const) {
+    reply = { ok: true, value: null };
+    expect(await method(receipt.key)).toBeUndefined();
+    expect(calls.at(-1)).toEqual([nativeBrowserChannel, { action, key: receipt.key }]);
+    reply = { ok: true, value: receipt };
+    await expect(method(receipt.key)).rejects.toThrow('invalid_browser_close');
+    count = calls.length;
+    await expect(method('bad')).rejects.toThrow('invalid_browser_request');
+    expect(calls).toHaveLength(count);
+    reply = { ok: false, code: 'browser_close_preparation_stale' };
+    await expect(method(receipt.key)).rejects.toThrow('browser_close_preparation_stale');
+  }
+});
+
+test('built Root preload validates bounded presentation preparation inputs and receipts without exposing it to pages', async () => {
+  const built = await Bun.build({
+    entrypoints: [resolve(import.meta.dir, '../../electron/preload.ts')],
+    target: 'node',
+    format: 'cjs',
+    packages: 'bundle',
+    external: ['electron'],
+  });
+  expect(built.success).toBe(true);
+  let bridge!: NativeBrowserBridge, reply: unknown;
+  const calls: unknown[][] = [];
+  runInNewContext(await built.outputs[0]!.text(), {
+    document: { defaultView: null },
+    exports: {},
+    module: { exports: {} },
+    require() {
+      return {
+        contextBridge: {
+          exposeInMainWorld(_name: string, value: NativeBrowserBridge) {
+            bridge = value;
+          },
+        },
+        ipcRenderer: {
+          sendSync() {
+            return null;
+          },
+          async invoke(...args: unknown[]) {
+            calls.push(args);
+            return reply;
+          },
+          on() {},
+          removeListener() {},
+        },
+        webFrame: {},
+        webUtils: {},
+      };
+    },
+  });
+  expect(typeof bridge.prepareBrowserPresentation).toBe('function');
+  expect(typeof bridge.cancelBrowserPreparation).toBe('function');
+  const input = { fromId: 'original', targetId: 'retained' };
+  reply = null;
+  expect(await bridge.prepareBrowserPresentation!(input)).toBeNull();
+  expect(calls.at(-1)).toEqual(['kite:native:browser-preparation', input]);
+  reply = { key: 'a'.repeat(32) };
+  expect(await bridge.prepareBrowserPresentation!(input)).toEqual({ key: 'a'.repeat(32) });
+  for (const invalid of [
+    true,
+    { key: 'invalid' },
+    { key: 'a'.repeat(32), authority: true },
+    { key: 'A'.repeat(32) },
+  ]) {
+    reply = invalid;
+    await expect(bridge.prepareBrowserPresentation!(input)).rejects.toThrow(
+      'invalid_browser_preparation',
+    );
+  }
+  for (const input of [
+    { fromId: 'same', targetId: 'same' },
+    { fromId: 'x', targetId: '../bad' },
+    { fromId: 'x', targetId: 'y', url: 'https://example.com' },
+  ]) {
+    const count = calls.length;
+    await expect(bridge.prepareBrowserPresentation!(input)).rejects.toThrow(
+      'invalid_browser_preparation',
+    );
+    expect(calls).toHaveLength(count);
+  }
+  reply = undefined;
+  await bridge.cancelBrowserPreparation!('a'.repeat(32));
+  expect(calls.at(-1)).toEqual(['kite:native:browser-preparation-cancel', 'a'.repeat(32)]);
+  reply = { ok: true };
+  await expect(bridge.cancelBrowserPreparation!('a'.repeat(32))).rejects.toThrow(
+    'invalid_browser_preparation',
+  );
+  const count = calls.length;
+  await expect(bridge.cancelBrowserPreparation!('unknown')).rejects.toThrow(
+    'invalid_browser_preparation',
+  );
+  expect(calls).toHaveLength(count);
 });
 
 test('ineffective stylesheet removal cancels the live handoff without falsely clearing pending or accessibility state', () => {

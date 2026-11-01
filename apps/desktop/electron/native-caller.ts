@@ -25,6 +25,7 @@ import type {
   NativeResult,
   NativeState,
 } from '../src/native-bridge';
+import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
 import { NativeAnswerJournal } from './answer-journal';
 import { NativeBackground } from './background';
 import {
@@ -1066,7 +1067,7 @@ export class NativeCaller {
       return { callerSubmissions: [], callerUnavailable: true };
     }
   }
-  state(): NativeState {
+  private observedSelection() {
     const fresh = this.controller.snapshot;
     if (fresh && fresh.sessionId === this.selected)
       this.lastView = { selection: this.selection, snapshot: fresh };
@@ -1082,6 +1083,31 @@ export class NativeCaller {
       this.permissionUnavailable ||
       !fresh ||
       fresh.sessionId !== this.selected;
+    return { snapshot, unavailable, viewLoading: !fresh && !this.permissionUnavailable };
+  }
+  /** Main-only presentation/input identity; never projects unrelated durable submissions. */
+  browserScope(kind: 'presentation' | 'input'): NativeBrowserRestoreScope | undefined {
+    const { snapshot, unavailable, viewLoading } = this.observedSelection();
+    if (
+      !snapshot ||
+      snapshot.sessionId !== this.selected ||
+      snapshot.view.session.parentSessionId ||
+      (kind === 'presentation'
+        ? this.observationUnavailable ||
+          snapshot.view.session.deletedAt !== null ||
+          (unavailable && !viewLoading)
+        : unavailable || viewLoading)
+    )
+      return undefined;
+    return {
+      storeId: snapshot.view.storeId,
+      sessionId: snapshot.view.session.id,
+      generation: this.generation,
+      viewSelection: this.selection,
+    };
+  }
+  state(): NativeState {
+    const { snapshot, unavailable, viewLoading } = this.observedSelection();
     const selection =
       snapshot && this.selected === snapshot.sessionId
         ? {
@@ -1138,7 +1164,7 @@ export class NativeCaller {
             interactionsAfterId: snapshot.interactionsAfterId,
             permissions: unavailable ? undefined : snapshot.permissions,
             permissionUnavailable: unavailable,
-            viewLoading: !fresh && !this.permissionUnavailable,
+            viewLoading,
           }
         : undefined;
     return {

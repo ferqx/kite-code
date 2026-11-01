@@ -1,14 +1,15 @@
 import type { SessionTabsChromePresentation } from '@kite-ai/ui/desktop';
 import { useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { NativeBrowserRestoreScope } from './native-browser-bridge';
 import {
   isNativeBrowserChromeEnvelope,
   isNativeBrowserChromeEvent,
   isNativeBrowserChromeSnapshot,
   type NativeBrowserChromeEnvelope,
   type NativeBrowserChromeEvent,
+  type NativeBrowserChromeOwner,
   type NativeBrowserChromeRootBridge,
   type NativeBrowserChromeSnapshot,
+  nativeBrowserChromeOwnerKey,
 } from './native-browser-chrome-bridge';
 import type {
   NativeBrowserControlPort,
@@ -18,10 +19,22 @@ import type {
 const revisionKey = Symbol.for('kite.native.browser.chromeRevision');
 const recentRevisionLimit = 128;
 const recentBindingLimit = 64;
-const scopeKey = (scope: NativeBrowserRestoreScope | undefined) =>
-  scope
-    ? JSON.stringify([scope.storeId, scope.sessionId, scope.generation, scope.viewSelection])
-    : '';
+const scopeKey = nativeBrowserChromeOwnerKey;
+function nextContextRevision() {
+  const key = 'kite.browserPresentationContextRevision';
+  const saved = window.sessionStorage.getItem(key);
+  const previous = saved === null ? 0 : Number(saved);
+  const next = previous + 1;
+  if (
+    !Number.isSafeInteger(previous) ||
+    previous < 0 ||
+    (saved !== null && String(previous) !== saved) ||
+    !Number.isSafeInteger(next)
+  )
+    throw Error('browser_chrome_revision_unavailable');
+  window.sessionStorage.setItem(key, String(next));
+  return next;
+}
 const overlays =
   '[data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"], [data-slot="popover-content"], [role="menu"], [role="dialog"], dialog[open], [data-native-browser-overlay]';
 function visibleBox(node: HTMLElement) {
@@ -123,13 +136,26 @@ class BrowserChromeRoot {
   private stopState?: () => void;
   private stopActions?: () => void;
   private mutations?: MutationObserver;
+  private withdrawalQueued = false;
 
   private readonly bridge: NativeBrowserChromeRootBridge | undefined;
-  private readonly scope: NativeBrowserRestoreScope | undefined;
+  private readonly scope: NativeBrowserChromeOwner | undefined;
+  private contextRevision?: number;
+  private contextReady: Promise<void> = Promise.resolve();
+  private contextApplied = false;
+  private publish(snapshot: NativeBrowserChromeSnapshot | null) {
+    const revision = this.contextRevision;
+    if (!this.bridge?.setBrowserPresentationContext || this.contextApplied)
+      return this.bridge?.publishBrowserChrome(snapshot, revision) ?? Promise.resolve();
+    return this.contextReady.then(() => {
+      if (snapshot !== null && this.snapshot !== snapshot) return;
+      return this.bridge?.publishBrowserChrome(snapshot, revision);
+    });
+  }
   private readonly current: () => RootContext;
   constructor(
     bridge: NativeBrowserChromeRootBridge | undefined,
-    scope: NativeBrowserRestoreScope | undefined,
+    scope: NativeBrowserChromeOwner | undefined,
     current: () => RootContext,
   ) {
     this.bridge = bridge;
@@ -205,13 +231,28 @@ class BrowserChromeRoot {
     this.change++;
     for (const receive of this.listeners) receive();
   }
+  private withdraw() {
+    if (this.withdrawalQueued) return;
+    this.withdrawalQueued = true;
+    queueMicrotask(() => {
+      this.withdrawalQueued = false;
+      // A child's layout cleanup precedes the parent's new active-tab port.
+      // The maps already reject old actions; publish the complete commit only.
+      if (this.live()) this.refresh();
+    });
+  }
   readonly toolbar = (id: string) => {
     let callback = this.toolbarCallbacks.get(id);
     if (!callback) {
       callback = (port) => {
-        if (port?.data.id === id) this.toolbars.set(id, port);
-        else this.toolbars.delete(id);
-        this.refresh();
+        if (port?.data.id === id) {
+          this.toolbars.set(id, port);
+          if (this.selected()) this.refresh();
+          else this.withdraw();
+        } else {
+          this.toolbars.delete(id);
+          this.withdraw();
+        }
       };
       this.toolbarCallbacks.set(id, callback);
     }
@@ -221,9 +262,14 @@ class BrowserChromeRoot {
     let callback = this.controlCallbacks.get(id);
     if (!callback) {
       callback = (port) => {
-        if (port?.data.id === id) this.controls.set(id, port);
-        else this.controls.delete(id);
-        this.refresh();
+        if (port?.data.id === id) {
+          this.controls.set(id, port);
+          if (this.selected()) this.refresh();
+          else this.withdraw();
+        } else {
+          this.controls.delete(id);
+          this.withdraw();
+        }
       };
       this.controlCallbacks.set(id, callback);
     }
@@ -237,6 +283,19 @@ class BrowserChromeRoot {
     this.active = true;
     if (!this.bridge) return;
     try {
+      if (this.bridge.setBrowserPresentationContext) {
+        this.contextApplied = false;
+        this.contextRevision = nextContextRevision();
+        const revision = this.contextRevision;
+        this.contextReady = this.bridge
+          .setBrowserPresentationContext({
+            revision: this.contextRevision,
+            owner: this.scope ?? null,
+          })
+          .then(() => {
+            if (this.contextRevision === revision) this.contextApplied = true;
+          });
+      }
       this.stopState = this.bridge.watchBrowserChromeState((value) => this.receive(value));
       this.stopActions = this.bridge.watchBrowserChromeAction((event) => {
         try {
@@ -277,7 +336,17 @@ class BrowserChromeRoot {
     this.stopState?.();
     this.stopActions?.();
     this.mutations?.disconnect();
-    if (this.bridge) void this.bridge.publishBrowserChrome(null).catch(() => {});
+    if (this.bridge?.setBrowserPresentationContext && this.contextRevision !== undefined) {
+      const revision = this.contextRevision;
+      void this.contextReady
+        .then(() =>
+          this.bridge!.setBrowserPresentationContext!({
+            revision,
+            owner: null,
+          }),
+        )
+        .catch(() => {});
+    } else if (this.bridge) void this.bridge.publishBrowserChrome(null).catch(() => {});
   }
   private fail() {
     if (this.failed || !this.active || this.current().key !== scopeKey(this.scope)) return;
@@ -288,7 +357,7 @@ class BrowserChromeRoot {
     this.forcePublication = false;
     this.lastPayload = 'null';
     this.changed();
-    if (this.bridge) void this.bridge.publishBrowserChrome(null).catch(() => {});
+    if (this.bridge) void this.publish(null).catch(() => {});
   }
   refresh(force = false) {
     this.changed();
@@ -336,7 +405,7 @@ class BrowserChromeRoot {
       this.snapshot = snapshot ?? undefined;
       if (snapshot) this.rememberRevision(snapshot.revision);
       if (echo) this.echo = undefined;
-      void this.bridge.publishBrowserChrome(snapshot).catch(() => this.fail());
+      void this.publish(snapshot).catch(() => this.fail());
     } catch {
       this.fail();
     }
@@ -455,7 +524,7 @@ class BrowserChromeRoot {
 
 /** Optional presentation transport. Unsupported preloads retain the complete original Root UI. */
 export function useNativeBrowserChromeRoot(
-  scope: NativeBrowserRestoreScope | undefined,
+  scope: NativeBrowserChromeOwner | undefined,
   options: { interactive: boolean; covered: boolean },
 ) {
   const candidate = window.kiteNative as
@@ -470,13 +539,10 @@ export function useNativeBrowserChromeRoot(
   const key = scopeKey(scope);
   const ownedScope = useMemo(() => {
     if (!key) return;
-    const [storeId, sessionId, generation, viewSelection] = JSON.parse(key) as [
-      string,
-      string,
-      number,
-      number,
-    ];
-    return { storeId, sessionId, generation, viewSelection };
+    const [kind, first, sessionId, generation, viewSelection] = JSON.parse(key);
+    return kind === 'draft'
+      ? { draft: first }
+      : { storeId: first, sessionId, generation, viewSelection };
   }, [key]);
   const current = useRef<RootContext>({ key, ...options });
   current.current = { key, ...options };

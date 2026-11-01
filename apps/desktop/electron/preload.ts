@@ -20,8 +20,12 @@ import {
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 import {
+  isNativeBrowserClosePreparation,
+  isNativeBrowserDraft,
+  isNativeBrowserDraftRestoreResult,
   isNativeBrowserLayoutFrameAck,
   isNativeBrowserMenuAction,
+  isNativeBrowserPreparation,
   isNativeBrowserPresentationFrame,
   isNativeBrowserRestoreResult,
   isNativeBrowserState,
@@ -34,10 +38,14 @@ import {
   nativeBrowserLayoutFrameChannel,
   nativeBrowserMenuCancelChannel,
   nativeBrowserMenuChannel,
+  nativeBrowserPreparationCancelChannel,
+  nativeBrowserPreparationChannel,
+  parseNativeBrowserRequest,
 } from '../src/native-browser-bridge';
 import {
   isNativeBrowserChromeEnvelope,
   isNativeBrowserChromeEvent,
+  isNativeBrowserChromeOwner,
   isNativeBrowserChromeSnapshot,
   type NativeBrowserChromeRootBridge,
   nativeBrowserChromeAckChannel,
@@ -98,10 +106,36 @@ const bridge: NativeBridge &
   NativeWindowMenuBridge &
   NativeStartupBridge &
   NativeBrowserChromeRootBridge = {
-  async publishBrowserChrome(snapshot) {
+  async setBrowserPresentationContext(input) {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      Object.keys(input).length !== 2 ||
+      !Object.keys(input).every((key) => ['revision', 'owner'].includes(key)) ||
+      !Number.isSafeInteger(input.revision) ||
+      input.revision <= 0 ||
+      (input.owner !== null && !isNativeBrowserChromeOwner(input.owner))
+    )
+      throw Error('browser_chrome_context_invalid');
+    if (
+      (await ipcRenderer.invoke(nativeBrowserChromeRootChannel, {
+        action: 'context',
+        ...input,
+      })) !== undefined
+    )
+      throw Error('browser_chrome_context_invalid');
+  },
+  async publishBrowserChrome(snapshot, context) {
     if (snapshot !== null && !isNativeBrowserChromeSnapshot(snapshot))
       throw Error('browser_chrome_snapshot_invalid');
-    await ipcRenderer.invoke(nativeBrowserChromeRootChannel, snapshot);
+    if (context !== undefined && (!Number.isSafeInteger(context) || context <= 0))
+      throw Error('browser_chrome_context_invalid');
+    if (snapshot && 'draft' in snapshot.scope && context === undefined)
+      throw Error('browser_chrome_context_required');
+    await ipcRenderer.invoke(
+      nativeBrowserChromeRootChannel,
+      context === undefined ? snapshot : { action: 'publish', snapshot, context },
+    );
   },
   watchBrowserChromeState(receive) {
     const listener = (_event: unknown, value: unknown) => {
@@ -149,6 +183,61 @@ const bridge: NativeBridge &
       throw Error('invalid_browser_state');
     return reply.value;
   },
+  async prepareBrowserClose(input) {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      Array.isArray(input) ||
+      Object.keys(input).some((key) => !['id', 'draft'].includes(key))
+    )
+      throw Error('invalid_browser_request');
+    const request = parseNativeBrowserRequest({ ...input, action: 'prepareClose' });
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, request)) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (reply.value !== null && !isNativeBrowserClosePreparation(reply.value))
+      throw Error('invalid_browser_close');
+    return reply.value;
+  },
+  async confirmBrowserClose(key) {
+    const request = parseNativeBrowserRequest({ action: 'confirmClose', key });
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, request)) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (reply.value !== null) throw Error('invalid_browser_close');
+  },
+  async finishBrowserClose(key) {
+    const request = parseNativeBrowserRequest({ action: 'finishClose', key });
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, request)) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (reply.value !== null) throw Error('invalid_browser_close');
+  },
+  async cancelBrowserClose(key) {
+    const request = parseNativeBrowserRequest({ action: 'cancelClose', key });
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, request)) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (reply.value !== null) throw Error('invalid_browser_close');
+  },
+  async prepareBrowserPresentation(input) {
+    if (!isNativeBrowserPreparation(input)) throw Error('invalid_browser_preparation');
+    const result: unknown = await ipcRenderer.invoke(nativeBrowserPreparationChannel, input);
+    if (result === null) return null;
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      Array.isArray(result) ||
+      Object.keys(result).length !== 1 ||
+      !('key' in result) ||
+      typeof result.key !== 'string' ||
+      !/^[a-f0-9]{32}$/.test(result.key)
+    )
+      throw Error('invalid_browser_preparation');
+    return { key: result.key };
+  },
+  async cancelBrowserPreparation(key) {
+    if (typeof key !== 'string' || !/^[a-f0-9]{32}$/.test(key))
+      throw Error('invalid_browser_preparation');
+    if ((await ipcRenderer.invoke(nativeBrowserPreparationCancelChannel, key)) !== undefined)
+      throw Error('invalid_browser_preparation');
+  },
   presentBrowserLayout(input) {
     return readBrowserLayoutReply(
       input,
@@ -192,6 +281,16 @@ const bridge: NativeBridge &
     })) as NativeBrowserReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
     if (!isNativeBrowserRestoreResult(reply.value)) throw Error('invalid_browser_restore');
+    return reply.value;
+  },
+  async restoreBrowserDraft(draft) {
+    if (!isNativeBrowserDraft(draft)) throw Error('invalid_browser_request');
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, {
+      action: 'restoreDraft',
+      draft,
+    })) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (!isNativeBrowserDraftRestoreResult(reply.value)) throw Error('invalid_browser_restore');
     return reply.value;
   },
   watchBrowser(listener) {

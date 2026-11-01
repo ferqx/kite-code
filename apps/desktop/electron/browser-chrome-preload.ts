@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   isNativeBrowserChromeEnvelope,
   isNativeBrowserChromeEvent,
+  isNativeBrowserChromeRendered,
   type NativeBrowserChromeBridge,
   type NativeBrowserChromeResult,
   nativeBrowserChromeChannel,
@@ -10,6 +11,14 @@ import {
 
 /** This isolated renderer has no Kite caller, Service access or browser automation bridge. */
 const bridge: NativeBrowserChromeBridge = {
+  async rendered(input) {
+    if (!isNativeBrowserChromeRendered(input)) throw Error('invalid_browser_chrome_rendered');
+    if (
+      (await ipcRenderer.invoke(nativeBrowserChromeChannel, { action: 'rendered', ...input })) !==
+      undefined
+    )
+      throw Error('invalid_browser_chrome_rendered');
+  },
   async read() {
     const value: unknown = await ipcRenderer.invoke(nativeBrowserChromeChannel, { action: 'read' });
     if (value !== null && !isNativeBrowserChromeEnvelope(value))

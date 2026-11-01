@@ -1,11 +1,16 @@
 import { expect, test } from 'bun:test';
-import type { SessionTabsChromePresentation } from '@kite-ai/ui/desktop';
+import type { SessionTabsChromePresentation, SessionTabsModel } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act, StrictMode, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import type { NativeBrowserRestoreScope } from '../../src/native-browser-bridge';
+import type {
+  NativeBrowserRequest,
+  NativeBrowserRestoreScope,
+  NativeBrowserState,
+} from '../../src/native-browser-bridge';
 import type {
   NativeBrowserChromeEnvelope,
   NativeBrowserChromeEvent,
+  NativeBrowserChromeOwner,
   NativeBrowserChromeRootBridge,
   NativeBrowserChromeSnapshot,
 } from '../../src/native-browser-chrome-bridge';
@@ -19,8 +24,17 @@ import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 };
 const ids = Array.from({ length: 8 }, (_, index) => `page-${index}`);
-async function fixture(supported = true, strict = false) {
-  const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
+async function fixture(
+  supported = true,
+  strict = false,
+  realPages = false,
+  realModel = false,
+  modernOwner?: NativeBrowserChromeOwner,
+) {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
+    url: 'http://localhost/',
+    pretendToBeVisual: true,
+  });
   const prior = {
     window: globalThis.window,
     document: globalThis.document,
@@ -35,12 +49,38 @@ async function fixture(supported = true, strict = false) {
     KeyboardEvent: dom.window.KeyboardEvent,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+  const viewportObservers = new Set<ResizeObserver>();
+  if (realPages) {
+    const Observer = globalThis.ResizeObserver;
+    class PaneResizeObserver extends Observer {
+      override observe(target: Element, options?: ResizeObserverOptions) {
+        super.observe(target, options);
+        if (target.classList.contains('native-browser-viewport')) viewportObservers.add(this);
+      }
+      override disconnect() {
+        viewportObservers.delete(this);
+        super.disconnect();
+      }
+    }
+    Object.assign(dom.window, { ResizeObserver: PaneResizeObserver });
+    Object.assign(globalThis, { ResizeObserver: PaneResizeObserver });
+  }
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (realPages && this.classList.contains('native-browser-viewport'))
+      return new dom.window.DOMRect(600, 74, 400, 650);
     const box = JSON.parse(this.dataset.box ?? '[0,0,0,0]') as [number, number, number, number];
     return new dom.window.DOMRect(...box);
   };
   const { createRoot } = await import('react-dom/client');
   const { useNativeBrowserChromeRoot } = await import('../../src/native-browser-chrome-root');
+  const production = realPages
+    ? {
+        Tabs: (await import('../../../../packages/ui/src/desktop/SessionTabs')).SessionTabs,
+        useTabs: (await import('../../../../packages/ui/src/desktop/SessionTabs')).useSessionTabs,
+        Pane: (await import('../../src/native-browser-pane')).NativeBrowserPane,
+        session: await import('../../src/native-browser-session'),
+      }
+    : undefined;
   const root = createRoot(document.getElementById('root')!);
   const publications: (NativeBrowserChromeSnapshot | null)[] = [],
     commits: { snapshot: NativeBrowserChromeSnapshot; hostedDOM: string | undefined }[] = [],
@@ -48,14 +88,55 @@ async function fixture(supported = true, strict = false) {
     tabsActions: Parameters<SessionTabsChromePresentation['dispatch']>[0][] = [],
     stateListeners: ((value: NativeBrowserChromeEnvelope | null) => void)[] = [],
     actionListeners: ((event: NativeBrowserChromeEvent) => boolean)[] = [];
+  const contexts: { revision: number; owner: NativeBrowserChromeOwner | null }[] = [],
+    publicationContexts: (number | undefined)[] = [];
+  const timeline: (
+    | { kind: 'snapshot'; value: NativeBrowserChromeSnapshot | null }
+    | { kind: 'request'; value: NativeBrowserRequest }
+    | { kind: 'prepare'; value: { fromId: string; targetId: string } }
+    | { kind: 'cancel'; value: string }
+  )[] = [];
+  const pages = new Map<string, NativeBrowserState>([
+    [
+      ids[0]!,
+      {
+        id: ids[0]!,
+        url: 'https://example.com/original',
+        title: 'Original',
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+      },
+    ],
+  ]);
+  const pageListeners = new Set<(page: NativeBrowserState) => void>();
+  const preparations: {
+    fromId: string;
+    targetId: string;
+    resolve(value: { key: string } | null): void;
+  }[] = [];
+  let liveModel: SessionTabsModel | undefined;
+  const ports = new Map<string, NativeBrowserToolbarPort>();
   let watches = 0,
     unwatches = 0,
     rejectPublish = false,
     holdNextPublication = false;
   let rejectHeld!: (cause: Error) => void;
   const rootBridge: NativeBrowserChromeRootBridge = {
-    async publishBrowserChrome(snapshot) {
+    ...(modernOwner
+      ? {
+          async setBrowserPresentationContext(context: {
+            revision: number;
+            owner: NativeBrowserChromeOwner | null;
+          }) {
+            contexts.push(context);
+          },
+        }
+      : {}),
+    async publishBrowserChrome(snapshot, context) {
+      publicationContexts.push(context);
       publications.push(snapshot);
+      timeline.push({ kind: 'snapshot', value: snapshot });
       if (snapshot)
         commits.push({
           snapshot,
@@ -80,7 +161,109 @@ async function fixture(supported = true, strict = false) {
       return () => unwatches++;
     },
   };
-  Object.assign(window, { kiteNative: supported ? rootBridge : {} });
+  Object.assign(window, {
+    kiteNative: supported
+      ? {
+          ...rootBridge,
+          ...(realPages
+            ? {
+                async browserRequest(
+                  request: NativeBrowserRequest,
+                ): Promise<NativeBrowserState | null> {
+                  timeline.push({ kind: 'request', value: request });
+                  if (realModel) {
+                    if (request.action === 'navigate') {
+                      const page = {
+                        id: request.id,
+                        url: request.input,
+                        title: 'Navigating',
+                        loading: true,
+                        canGoBack: false,
+                        canGoForward: false,
+                      };
+                      pages.set(request.id, page);
+                      for (const receive of pageListeners) receive(page);
+                    }
+                    if (request.action === 'close') pages.delete(request.id);
+                    return pages.get(request.id) ?? null;
+                  }
+                  return {
+                    id: request.id,
+                    url: `https://example.com/${request.id}`,
+                    title: request.id,
+                    loading: false,
+                    canGoBack: false,
+                    canGoForward: false,
+                  };
+                },
+                watchBrowser: (receive: (page: NativeBrowserState) => void) => {
+                  pageListeners.add(receive);
+                  return () => pageListeners.delete(receive);
+                },
+                prepareBrowserPresentation(value: { fromId: string; targetId: string }) {
+                  timeline.push({ kind: 'prepare', value });
+                  return new Promise<{ key: string } | null>((resolve) =>
+                    preparations.push({ ...value, resolve }),
+                  );
+                },
+                async cancelBrowserPreparation(key: string) {
+                  timeline.push({ kind: 'cancel', value: key });
+                },
+              }
+            : {}),
+        }
+      : {},
+  });
+  const observed = new Map<
+    string,
+    {
+      register: (port: NativeBrowserToolbarPort | undefined) => void;
+      callback: (port: NativeBrowserToolbarPort | undefined) => void;
+    }
+  >();
+  const restoreRetained = async () => ({ id: ids[0]!, title: 'Original' });
+  function RetainedTabs({
+    chrome,
+    currentScope,
+    covered,
+    toolbar,
+  }: {
+    chrome: ReturnType<typeof useNativeBrowserChromeRoot>;
+    currentScope: NativeBrowserRestoreScope;
+    covered: boolean;
+    toolbar(id: string): (port: NativeBrowserToolbarPort | undefined) => void;
+  }) {
+    if (!production) throw Error('production_components_missing');
+    const model = production.useTabs(
+      JSON.stringify([currentScope.storeId, currentScope.sessionId]),
+      production.session.closeNativeBrowserTab,
+      restoreRetained,
+      JSON.stringify(currentScope),
+      false,
+      production.session.prepareNativeBrowserPresentation,
+    );
+    liveModel = model;
+    return (
+      <production.Tabs
+        model={model}
+        visible={!covered}
+        present
+        changes={null}
+        onClose={() => {}}
+        scopeKey={JSON.stringify(currentScope)}
+        chromeHosted={chrome.tabsHosted}
+        onChromePresentation={chrome.tabs}
+        renderBrowser={(props) => (
+          <production.Pane
+            {...props}
+            scope={currentScope}
+            chromeHosted={chrome.hosted(props.id)}
+            onChromePresentation={toolbar(props.id)}
+          />
+        )}
+      />
+    );
+  }
   const callbacks = new Map<string, ((port: NativeBrowserToolbarPort | undefined) => void)[]>();
   function Page({
     id,
@@ -109,8 +292,8 @@ async function fixture(supported = true, strict = false) {
           canGoBack: false,
           canGoForward: false,
           canNavigate: true,
-          notesAvailable: true,
-          notesOpen,
+          notesAvailable: !modernOwner || !('draft' in modernOwner),
+          notesOpen: modernOwner && 'draft' in modernOwner ? false : notesOpen,
           optionsAvailable: true,
         },
         dispatch(action) {
@@ -140,7 +323,10 @@ async function fixture(supported = true, strict = false) {
       callbacks.set(id, [...previous, registerToolbar]);
       registerToolbar(toolbar);
     }, [id, registerToolbar, toolbar]);
-    useEffect(() => registerControl(control), [control, registerControl]);
+    useEffect(
+      () => registerControl(modernOwner && 'draft' in modernOwner ? undefined : control),
+      [control, registerControl],
+    );
     useEffect(() => () => registerToolbar(undefined), [registerToolbar]);
     useEffect(() => () => registerControl(undefined), [registerControl]);
     return <div data-page={id} data-hosted={hosted} />;
@@ -153,6 +339,7 @@ async function fixture(supported = true, strict = false) {
     notesOpen = false,
     title = 'Page',
     nonbrowser = false,
+    presentationOwner = modernOwner,
   }: {
     currentScope?: NativeBrowserRestoreScope;
     interactive?: boolean;
@@ -161,8 +348,12 @@ async function fixture(supported = true, strict = false) {
     notesOpen?: boolean;
     title?: string;
     nonbrowser?: boolean;
+    presentationOwner?: NativeBrowserChromeOwner;
   }) {
-    const chrome = useNativeBrowserChromeRoot(currentScope, { interactive, covered });
+    const chrome = useNativeBrowserChromeRoot(presentationOwner ?? currentScope, {
+      interactive,
+      covered,
+    });
     const tabs = useMemo<SessionTabsChromePresentation>(
       () => ({
         data: {
@@ -182,9 +373,77 @@ async function fixture(supported = true, strict = false) {
       }),
       [currentScope.storeId, currentScope.sessionId, active, nonbrowser, title],
     );
-    useLayoutEffect(() => chrome.tabs(tabs), [chrome.tabs, tabs]);
-    useLayoutEffect(() => () => chrome.tabs(null), [chrome.tabs]);
-    const toolbar = useCallback((id: string) => chrome.toolbar(id), [chrome.toolbar]);
+    useLayoutEffect(() => {
+      if (!production) chrome.tabs(tabs);
+    }, [chrome.tabs, tabs]);
+    useLayoutEffect(
+      () => () => {
+        if (!production) chrome.tabs(null);
+      },
+      [chrome.tabs],
+    );
+    const toolbar = useCallback(
+      (id: string) => {
+        const register = chrome.toolbar(id);
+        if (!production) return register;
+        const previous = observed.get(id);
+        if (previous?.register === register) return previous.callback;
+        let ownPort: NativeBrowserToolbarPort | undefined;
+        const callback = (port: NativeBrowserToolbarPort | undefined) => {
+          if (port) ports.set(id, port);
+          else if (ports.get(id) === ownPort) ports.delete(id);
+          ownPort = port;
+          register(port);
+        };
+        observed.set(id, { register, callback });
+        return callback;
+      },
+      [chrome.toolbar],
+    );
+    const model = useMemo<SessionTabsModel>(
+      () => ({
+        tabs: tabs.data.tabs,
+        active,
+        select: (id) => tabsActions.push({ type: 'select', id }),
+        title() {},
+        addBrowser() {},
+        openChanges() {},
+        openChild: () => false,
+        openWorkspace: () => false,
+        closeTab() {},
+      }),
+      [active, tabs.data.tabs],
+    );
+    if (production && realModel)
+      return (
+        <RetainedTabs
+          chrome={chrome}
+          currentScope={currentScope}
+          covered={covered}
+          toolbar={toolbar}
+        />
+      );
+    if (production)
+      return (
+        <production.Tabs
+          model={model}
+          visible={!covered}
+          present
+          changes={null}
+          onClose={() => {}}
+          scopeKey={JSON.stringify([currentScope.storeId, currentScope.sessionId])}
+          chromeHosted={chrome.tabsHosted}
+          onChromePresentation={chrome.tabs}
+          renderBrowser={(props) => (
+            <production.Pane
+              {...props}
+              scope={currentScope}
+              chromeHosted={chrome.hosted(props.id)}
+              onChromePresentation={toolbar(props.id)}
+            />
+          )}
+        />
+      );
     return (
       <>
         <div id="headers" data-hosted={chrome.tabsHosted} />
@@ -231,6 +490,22 @@ async function fixture(supported = true, strict = false) {
     sequence = 0;
   return {
     publications,
+    contexts,
+    publicationContexts,
+    timeline,
+    ports,
+    preparations,
+    get model() {
+      return liveModel!;
+    },
+    updatePage(id: string, patch: Partial<NativeBrowserState>) {
+      return flush(() => {
+        const page = { ...pages.get(id)!, ...patch };
+        pages.set(id, page);
+        for (const receive of pageListeners) receive(page);
+      });
+    },
+    viewportObservers,
     commits,
     actions,
     tabsActions,
@@ -302,6 +577,245 @@ async function fixture(supported = true, strict = false) {
     },
   };
 }
+
+test('repeated Root effects clear only their own context revision while the replacement remains active', async () => {
+  const f = await fixture(true, true, false, false, { draft: '00112233445566778899aabbccddeeff' });
+  try {
+    await f.render();
+    const active = f.contexts.filter((value) => value.owner !== null);
+    expect(active.length).toBeGreaterThanOrEqual(2);
+    expect(
+      f.contexts
+        .filter((value) => value.owner === null)
+        .every((value) => value.revision < active.at(-1)!.revision),
+    ).toBe(true);
+    expect(f.publicationContexts.at(-1)).toBe(active.at(-1)!.revision);
+  } finally {
+    await f.close();
+  }
+});
+
+test('draft Chrome uses an explicit increasing presentation context and old cleanup cannot clear its replacement', async () => {
+  const first = { draft: '00112233445566778899aabbccddeeff' },
+    second = { draft: 'ffeeddccbbaa99887766554433221100' },
+    f = await fixture(true, false, false, false, first);
+  try {
+    await f.render();
+    const context = f.contexts.find((value) => value.owner !== null)!;
+    expect(context.owner).toEqual(first);
+    expect(f.latest().scope).toEqual(first);
+    expect(f.latest().control).toBeUndefined();
+    expect(f.latest().toolbar.notesAvailable).toBe(false);
+    expect(f.publicationContexts.at(-1)).toBe(context.revision);
+    const previous = f.latest(),
+      oldReceive = f.stateListeners[0]!;
+    await f.render({ presentationOwner: second });
+    const replacement = f.contexts.filter((value) => value.owner !== null).at(-1)!;
+    expect(replacement.owner).toEqual(second);
+    expect(replacement.revision > context.revision).toBe(true);
+    expect(
+      f.contexts.some((value) => value.revision === context.revision && value.owner === null),
+    ).toBe(true);
+    await f.flush(() =>
+      oldReceive({
+        attachment: 'old-attachment',
+        pageToken: 'old-page',
+        hosted: true,
+        actionable: true,
+        snapshot: previous,
+      }),
+    );
+    expect(f.latest().scope).toEqual(second);
+    expect(f.publicationContexts.at(-1)).toBe(replacement.revision);
+  } finally {
+    await f.close();
+  }
+});
+
+test('the real tab model prepares return from a newly navigated page and publishes the successor before closing the current page', async () => {
+  const f = await fixture(true, false, true, true);
+  try {
+    await f.render();
+    const first = f.model.active;
+    await f.host();
+    const original = document.querySelector('.native-browser-page');
+    await f.flush(() => f.model.addBrowser());
+    const second = f.model.active;
+    expect(second).not.toBe(first);
+    expect(f.latest().toolbar).toMatchObject({ id: second, hasPage: false });
+    await f.flush(() => {
+      void window.kiteNative!.browserRequest!({
+        action: 'navigate',
+        id: second,
+        input: 'https://example.com/new-page',
+      });
+    });
+    expect(f.latest().toolbar).toMatchObject({ id: second, loading: true, hasPage: true });
+    await f.host(true, 'new-page-binding');
+    for (const loading of [true, false]) {
+      await f.updatePage(second, { loading });
+      const boundary = f.timeline.length;
+      await f.flush(() => f.model.select(first));
+      expect(f.model.active).toBe(second);
+      expect(f.preparations.at(-1)).toMatchObject({ fromId: second, targetId: first });
+      await f.flush(() => f.preparations.at(-1)!.resolve({ key: `return-${loading}` }));
+      expect(f.model.active).toBe(first);
+      expect(
+        f.timeline
+          .slice(boundary)
+          .filter((event) => event.kind === 'snapshot')
+          .every((event) => event.value !== null),
+      ).toBe(true);
+      expect(document.querySelector('.native-browser-page')).toBe(original);
+      await f.host(true, `original-${loading}`);
+      await f.flush(() => f.model.select(second));
+      await f.flush(() => f.preparations.at(-1)!.resolve({ key: `back-${loading}` }));
+      await f.host(true, `new-${loading}`);
+    }
+    const boundary = f.timeline.length;
+    await f.flush(() => f.model.closeTab(second));
+    expect(f.model.active).toBe(second);
+    expect(
+      f.timeline
+        .slice(boundary)
+        .some((event) => event.kind === 'request' && event.value.action === 'close'),
+    ).toBe(false);
+    await f.flush(() => f.preparations.at(-1)!.resolve({ key: 'close-current' }));
+    expect(f.model.active).toBe(first);
+    expect(f.model.tabs.map((tab) => tab.id)).toEqual([first]);
+    const events = f.timeline.slice(boundary);
+    const offered = events.findIndex(
+      (event) => event.kind === 'snapshot' && event.value?.toolbar.id === first,
+    );
+    const closed = events.findIndex(
+      (event) =>
+        event.kind === 'request' && event.value.action === 'close' && event.value.id === second,
+    );
+    expect(offered).toBeGreaterThanOrEqual(0);
+    expect(closed).toBeGreaterThan(offered);
+    expect(events.some((event) => event.kind === 'snapshot' && event.value === null)).toBe(false);
+    expect(
+      events.filter((event) => event.kind === 'request' && event.value.action === 'close'),
+    ).toHaveLength(1);
+    expect(f.ports.has(second)).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('retained real panes switch A-B-A without null Chrome snapshots and offer the new page before hiding the old one', async () => {
+  const f = await fixture(true, false, true);
+  try {
+    await f.render();
+    await f.host();
+    const panes = [...document.querySelectorAll('.native-browser-page')];
+    expect(panes).toHaveLength(ids.length);
+    const original = f.ports.get(ids[0]!)!;
+    const initialStates = f.timeline.filter(
+      (event) => event.kind === 'request' && event.value.action === 'state',
+    ).length;
+    expect(initialStates).toBe(ids.length);
+    expect(f.viewportObservers.size).toBe(1);
+    expect(
+      f.timeline.every(
+        (event) =>
+          event.kind !== 'request' || event.value.action !== 'present' || event.value.id === ids[0],
+      ),
+    ).toBe(true);
+    for (const [previous, next] of [
+      [ids[0]!, ids[1]!],
+      [ids[1]!, ids[0]!],
+    ] as const) {
+      const boundary = f.timeline.length;
+      const retired = f.ports.get(previous)!;
+      await f.render({ active: next });
+      const switching = f.timeline.slice(boundary);
+      const snapshots = switching.filter((event) => event.kind === 'snapshot');
+      expect(snapshots.length).toBeGreaterThan(0);
+      expect(snapshots.some((event) => event.value === null)).toBe(false);
+      expect(snapshots.every((event) => event.value?.toolbar.id === next)).toBe(true);
+      const offered = switching.findIndex(
+        (event) => event.kind === 'snapshot' && event.value?.toolbar.id === next,
+      );
+      const hidden = switching.findIndex(
+        (event) =>
+          event.kind === 'request' &&
+          event.value.action === 'present' &&
+          event.value.id === previous &&
+          event.value.bounds === null,
+      );
+      const hiddenPages = switching.flatMap((event) =>
+        event.kind === 'request' && event.value.action === 'present' && event.value.bounds === null
+          ? [event.value.id]
+          : [],
+      );
+      expect(offered).toBeGreaterThanOrEqual(0);
+      expect(hidden).toBeGreaterThan(offered);
+      expect(hiddenPages).toEqual([previous]);
+      expect(f.ports.size).toBe(ids.length);
+      expect(f.viewportObservers.size).toBe(1);
+      [...document.querySelectorAll('.native-browser-page')].forEach((node, index) => {
+        expect(node).toBe(panes[index]!);
+      });
+      await f.host(true, `attachment-${next}`);
+      const requests = f.timeline.filter((event) => event.kind === 'request').length;
+      await f.flush(() => retired.dispatch({ type: 'reload' }));
+      expect(f.timeline.filter((event) => event.kind === 'request')).toHaveLength(requests);
+      expect(await f.event({ part: 'toolbar', action: { type: 'reload' } })).toBe(true);
+      expect(f.timeline.at(-1)).toMatchObject({
+        kind: 'request',
+        value: { action: 'reload', id: next },
+      });
+    }
+    expect(
+      f.timeline.filter((event) => event.kind === 'request' && event.value.action === 'state'),
+    ).toHaveLength(initialStates);
+    expect(f.ports.get(ids[0]!)!.data.id).toBe(original.data.id);
+    const revision = Reflect.get(document, Symbol.for('kite.native.browser.presentationRevision'));
+    const hiddenBoundary = f.timeline.length;
+    await f.render({ covered: true });
+    expect(f.viewportObservers.size).toBe(0);
+    expect(Reflect.get(document, Symbol.for('kite.native.browser.presentationRevision'))).toBe(
+      revision,
+    );
+    expect(
+      f.timeline
+        .slice(hiddenBoundary)
+        .flatMap((event) =>
+          event.kind === 'request' && event.value.action === 'present'
+            ? [{ id: event.value.id, bounds: event.value.bounds }]
+            : [],
+        ),
+    ).toEqual([{ id: ids[0]!, bounds: null }]);
+    const inactiveBoundary = f.timeline.length;
+    await f.render({ covered: true, title: 'Background title' });
+    await f.flush(() => window.dispatchEvent(new Event('resize')));
+    expect(
+      f.timeline
+        .slice(inactiveBoundary)
+        .some((event) => event.kind === 'request' && event.value.action === 'present'),
+    ).toBe(false);
+    expect(Reflect.get(document, Symbol.for('kite.native.browser.presentationRevision'))).toBe(
+      revision,
+    );
+    await f.render();
+    expect(f.viewportObservers.size).toBe(1);
+    expect(
+      Number(Reflect.get(document, Symbol.for('kite.native.browser.presentationRevision'))),
+    ).toBeGreaterThan(Number(revision));
+    const retiredScope = f.ports.get(ids[0]!)!;
+    await f.render({ currentScope: { ...scope, generation: 2 } });
+    expect((f.latest().scope as NativeBrowserRestoreScope).generation).toBe(2);
+    expect(f.ports.size).toBe(ids.length);
+    const requests = f.timeline.filter((event) => event.kind === 'request').length;
+    await f.flush(() => retiredScope.dispatch({ type: 'reload' }));
+    expect(f.timeline.filter((event) => event.kind === 'request')).toHaveLength(requests);
+  } finally {
+    await f.close();
+    expect(f.ports.size).toBe(0);
+    expect(f.viewportObservers.size).toBe(0);
+  }
+});
 
 test('eight mounted page ports publish only the active browser and acknowledge hosted after the Root commit', async () => {
   const f = await fixture();
@@ -444,7 +958,7 @@ test('scope, attachment, sequence and exact revision reject late callbacks witho
     expect(await f.event({ part: 'toolbar', action: { type: 'reload' } })).toBe(true);
     const count = f.actions.length;
     await f.render({ currentScope: { ...scope, generation: 2 } });
-    expect(f.latest().scope.generation).toBe(2);
+    expect((f.latest().scope as NativeBrowserRestoreScope).generation).toBe(2);
     expect(
       oldAction({
         attachment: 'attachment-2',
@@ -605,7 +1119,7 @@ test('a late failed publication from the old scope cannot withdraw the newly att
     const count = f.publications.length;
     await f.rejectHeld();
     expect(f.publications).toHaveLength(count);
-    expect(f.publications.at(-1)?.scope.generation).toBe(2);
+    expect((f.publications.at(-1)?.scope as NativeBrowserRestoreScope).generation).toBe(2);
     await f.host(true, 'fresh-scope-attachment');
     expect(await f.event({ part: 'toolbar', action: { type: 'reload' } })).toBe(true);
   } finally {

@@ -22,7 +22,14 @@ export function NativeBrowserChromeToolbar({
   dispatch,
   tools,
   annotationTools,
-}: NativeBrowserToolbarPort & { tools?: ReactNode; annotationTools?: ReactNode }) {
+  interactionPending,
+  addressReadOnly,
+}: NativeBrowserToolbarPort & {
+  tools?: ReactNode;
+  annotationTools?: ReactNode;
+  interactionPending?: boolean;
+  addressReadOnly?: boolean;
+}) {
   return (
     <SessionBrowserToolbar
       tools={
@@ -65,6 +72,8 @@ export function NativeBrowserChromeToolbar({
       canGoBack={data.canGoBack}
       canGoForward={data.canGoForward}
       canNavigate={data.canNavigate}
+      interactionPending={interactionPending}
+      addressReadOnly={addressReadOnly}
       onAddressChange={(value) => dispatch({ type: 'address-change', value })}
       onAddressFocus={(focused) => dispatch({ type: 'address-focus', focused })}
       onNavigate={() => dispatch({ type: 'navigate' })}

@@ -1,5 +1,6 @@
 import type { SessionTabsChromeAction, SessionTabsChromeData } from '@kite-ai/ui/desktop';
 import {
+  isNativeBrowserDraft,
   isNativeBrowserRestoreScope,
   type NativeBrowserRestoreScope,
 } from './native-browser-bridge';
@@ -16,9 +17,42 @@ export const nativeBrowserChromeStateChannel = 'kite:native:browser-chrome-state
 export const nativeBrowserChromeActionChannel = 'kite:native:browser-chrome-action';
 export const nativeBrowserChromeAckChannel = 'kite:native:browser-chrome-ack';
 
+export type NativeBrowserChromeOwner = NativeBrowserRestoreScope | { readonly draft: string };
+export function isNativeBrowserChromeOwner(value: unknown): value is NativeBrowserChromeOwner {
+  return (
+    isNativeBrowserRestoreScope(value) ||
+    (!!value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 1 &&
+      'draft' in value &&
+      isNativeBrowserDraft(value.draft))
+  );
+}
+export function nativeBrowserChromeOwnerKey(
+  owner: NativeBrowserChromeOwner | undefined | null,
+): string {
+  if (!owner) return '';
+  return 'draft' in owner
+    ? JSON.stringify(['draft', owner.draft])
+    : JSON.stringify([
+        'session',
+        owner.storeId,
+        owner.sessionId,
+        owner.generation,
+        owner.viewSelection,
+      ]);
+}
+export function sameNativeBrowserChromeOwner(
+  a: NativeBrowserChromeOwner | undefined | null,
+  b: NativeBrowserChromeOwner | undefined | null,
+): boolean {
+  return !!a && !!b && nativeBrowserChromeOwnerKey(a) === nativeBrowserChromeOwnerKey(b);
+}
+
 /** Display data only. No Service caller, callbacks, task authority or executable content. */
 export interface NativeBrowserChromeSnapshot {
-  readonly scope: NativeBrowserRestoreScope;
+  readonly scope: NativeBrowserChromeOwner;
   readonly revision: number;
   readonly theme: 'light' | 'dark';
   readonly material?: string;
@@ -53,12 +87,41 @@ export type NativeBrowserChromeEvent = NativeBrowserChromeAction & {
 export type NativeBrowserChromeResult = 'forwarded' | 'stale' | 'unconfirmed';
 
 export interface NativeBrowserChromeBridge {
+  rendered?(input: NativeBrowserChromeRendered): Promise<void>;
   read(): Promise<NativeBrowserChromeEnvelope | null>;
   watch(receive: (value: NativeBrowserChromeEnvelope | null) => void): () => void;
   send(event: NativeBrowserChromeEvent): Promise<NativeBrowserChromeResult>;
 }
+export interface NativeBrowserChromeRendered {
+  readonly attachment: string;
+  readonly pageToken: string;
+  readonly revision: number;
+}
+export function isNativeBrowserChromeRendered(
+  value: unknown,
+): value is NativeBrowserChromeRendered {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    Object.keys(v).length === 3 &&
+    Object.keys(v).every((key) => ['attachment', 'pageToken', 'revision'].includes(key)) &&
+    [v.attachment, v.pageToken].every(
+      (part) =>
+        typeof part === 'string' && part.length > 0 && part.length <= 128 && !part.includes('\0'),
+    ) &&
+    Number.isSafeInteger(v.revision) &&
+    Number(v.revision) > 0
+  );
+}
 export interface NativeBrowserChromeRootBridge {
-  publishBrowserChrome(snapshot: NativeBrowserChromeSnapshot | null): Promise<void>;
+  setBrowserPresentationContext?(input: {
+    readonly revision: number;
+    readonly owner: NativeBrowserChromeOwner | null;
+  }): Promise<void>;
+  publishBrowserChrome(
+    snapshot: NativeBrowserChromeSnapshot | null,
+    context?: number,
+  ): Promise<void>;
   watchBrowserChromeState(receive: (value: NativeBrowserChromeEnvelope | null) => void): () => void;
   watchBrowserChromeAction(receive: (event: NativeBrowserChromeEvent) => boolean): () => void;
 }
@@ -98,7 +161,7 @@ export function isNativeBrowserChromeSnapshot(
       'toolbar',
       'control',
     ]) ||
-    !isNativeBrowserRestoreScope(value.scope) ||
+    !isNativeBrowserChromeOwner(value.scope) ||
     !positive(value.revision) ||
     !['light', 'dark'].includes(String(value.theme)) ||
     !optionalText(value.material, 32) ||
@@ -108,6 +171,14 @@ export function isNativeBrowserChromeSnapshot(
   const tabs = value.tabs,
     toolbar = value.toolbar,
     control = value.control;
+  if (
+    'draft' in value.scope &&
+    (control !== undefined ||
+      !object(toolbar) ||
+      toolbar.notesAvailable !== false ||
+      toolbar.notesOpen !== false)
+  )
+    return false;
   if (
     !object(tabs) ||
     !keys(tabs, [
