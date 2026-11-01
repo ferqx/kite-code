@@ -211,6 +211,91 @@ test('scheduler uses host time for writes, listing and clock changes without rew
   }
 });
 
+test('a host clock change during observation is applied before claiming another task', async () => {
+  const f = fixture(),
+    c = fakeClient(f);
+  let zone = 'UTC';
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
+  f.data.saveScheduledTask({ ...input, id: 'blocker', enabled: false }, f.clock.now());
+  f.data.claimScheduledTask('blocker', f.clock.now(), { manual: true, storeId: 'store' });
+  const getCommand = c.client.getCommand.bind(c.client);
+  c.client.getCommand = async (...args) => {
+    await gate;
+    return getCommand(...args);
+  };
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => zone,
+  });
+  try {
+    runner.start();
+    f.advance(60000);
+    zone = 'America/New_York';
+    release();
+    await runner.tick();
+    expect(c.posts).toEqual([]);
+    const task = f.data.scheduledTasks().find((item) => item.id === 'task')!;
+    expect(task.schedule.timeZone).toBe(zone);
+    expect(task.nextRunAt).toBe(Date.UTC(2026, 9, 15, 13));
+  } finally {
+    release();
+    await runner.stop();
+    f.db.close();
+  }
+});
+
+test('a host clock change during one launch prevents later tasks from using the old clock', async () => {
+  const f = fixture(),
+    c = fakeClient(f);
+  let zone = 'UTC';
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
+  f.data.saveScheduledTask({ ...input, id: 'later' }, f.clock.now());
+  let entered!: () => void;
+  const creating = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const create = c.client.createSession.bind(c.client);
+  c.client.createSession = async (...args) => {
+    entered();
+    await gate;
+    return create(...args);
+  };
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => zone,
+  });
+  try {
+    f.advance(60000);
+    runner.start();
+    await creating;
+    expect(f.data.scheduledTaskRuns()).toHaveLength(1);
+    const first = f.data.scheduledTaskRuns()[0]!;
+    expect(first.task.schedule.timeZone).toBe('UTC');
+    zone = 'America/New_York';
+    release();
+    await runner.tick();
+    expect(c.posts).toEqual(['create', 'start']);
+    expect(f.data.scheduledTaskRuns()).toHaveLength(1);
+    expect(f.data.scheduledTaskRuns()[0]!.task).toEqual(first.task);
+    expect(f.data.scheduledTasks().every((task) => task.schedule.timeZone === zone)).toBe(true);
+    expect(
+      f.data.scheduledTasks().every((task) => task.nextRunAt === Date.UTC(2026, 9, 15, 13)),
+    ).toBe(true);
+  } finally {
+    release();
+    await runner.stop();
+    f.db.close();
+  }
+});
+
 test('saved effort is frozen into each scheduled request and later edits do not change its digest', async () => {
   const f = fixture(),
     c = fakeClient(f),
