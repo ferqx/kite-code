@@ -16,6 +16,7 @@ import {
 import {
   isNativeBrowserChromeEvent,
   isNativeBrowserChromeOwner,
+  isNativeBrowserChromePreparingAction,
   isNativeBrowserChromeRendered,
   isNativeBrowserChromeSnapshot,
   type NativeBrowserChromeEnvelope,
@@ -85,6 +86,11 @@ export function createNativeBrowserChromeHost(options: {
   currentScope(forInput: boolean): NativeBrowserRestoreScope | undefined;
   getPage(id: string): Page | undefined;
   onContextChanged?(): void;
+  onLoadingFailed?(id: string): void;
+  onDisplayCancelled?(id: string, signal: AbortSignal): void;
+  canProtectLivePage?(): boolean;
+  protectLivePage?(view: WebContentsView): boolean;
+  onStateChanged?(): void;
   onRootReturnCancelled?(id: string): void;
   onReady(id: string): void;
   onSuspend(id: string): void;
@@ -167,6 +173,10 @@ export function createNativeBrowserChromeHost(options: {
         viewport: Bounds;
         metrics: Metrics;
         offered: boolean;
+        loadingCover?: boolean;
+        covered?: boolean;
+        warm?: boolean;
+        preflight?: AbortController;
         readyRevision?: number;
         surfaceReady?: boolean;
         signal: AbortSignal;
@@ -175,6 +185,18 @@ export function createNativeBrowserChromeHost(options: {
         timer?: ReturnType<typeof setTimeout>;
       }
     | undefined;
+  // Retained resources are never an input or observation grant.
+  let resume:
+    | {
+        page: Page;
+        frame: WebFrameMain;
+        url: string;
+        viewport: Bounds;
+        metrics: Metrics;
+        scope: NativeBrowserChromeOwner;
+      }
+    | undefined;
+  let loadingFailure: { binding: Binding; metrics: Metrics; viewport: Bounds } | undefined;
   let displayRead:
     | {
         display: NonNullable<typeof display>;
@@ -306,11 +328,13 @@ export function createNativeBrowserChromeHost(options: {
               binding.displayOffered) ||
             !!preparedTarget(),
           actionable: actionable(),
+          ...(display?.loadingCover ? { preparing: true, loadingBody: !display.warm } : {}),
           snapshot,
         }
       : null;
   const broadcast = () => {
     if (!alive()) return;
+    options.onStateChanged?.();
     const value = envelope();
     const key = value
       ? JSON.stringify([
@@ -320,6 +344,8 @@ export function createNativeBrowserChromeHost(options: {
           value.snapshot.revision,
           value.hosted,
           value.actionable,
+          value.preparing,
+          value.loadingBody,
         ])
       : 'null';
     const send = (recipient: WebContents) => {
@@ -482,11 +508,13 @@ export function createNativeBrowserChromeHost(options: {
       actual = root.getBounds();
     return actual.x === 0 && actual.y === 0 && actual.width === width && actual.height === height;
   }
-  function finishDisplay(ready: boolean) {
+  function finishDisplay(ready: boolean, reportFailure = false) {
     const d = display;
     if (!d) return;
     stopDisplayRead();
     display = undefined;
+    if (!ready && reportFailure && d.loadingCover && d.preflight)
+      loadingFailure = { binding: d.binding, metrics: d.metrics, viewport: d.viewport };
     clearTimeout(d.timer);
     d.signal.removeEventListener('abort', d.abort);
     if (!ready && binding === d.binding && !shell) {
@@ -496,6 +524,14 @@ export function createNativeBrowserChromeHost(options: {
     for (const receive of d.waiting) receive(ready);
     d.waiting.clear();
     if (!ready && !shell && chrome?.getVisible()) chrome.setVisible(false);
+    if (!ready && d.loadingCover && !shell) {
+      const page = pageCurrent(d.binding);
+      if (page?.view.getVisible()) page.view.setVisible(false);
+    }
+    if (d.loadingCover) broadcast();
+    if (!ready && d.loadingCover && !d.preflight)
+      options.onDisplayCancelled?.(d.binding.id, d.signal);
+    if (reportFailure && d.loadingCover && d.preflight) options.onLoadingFailed?.(d.binding.id);
   }
   function stopDisplayRead() {
     const previous = displayRead;
@@ -513,11 +549,16 @@ export function createNativeBrowserChromeHost(options: {
     if (!d || !root || !chrome || !chromeContents || chromeContents.isDestroyed()) return;
     const [width = 0] = window.getContentSize(),
       { x, y } = d.viewport;
-    const bounds = { x, y: 0, width: width - x, height: y };
+    const bounds = {
+      x,
+      y: 0,
+      width: width - x,
+      height: d.loadingCover && !d.warm ? d.metrics.height : y,
+    };
     if (!sameBounds(chrome.getBounds(), bounds)) chrome.setBounds(bounds);
     if (chromeContents.getZoomFactor() !== owner.getZoomFactor())
       chromeContents.setZoomFactor(owner.getZoomFactor());
-    if (!d.offered) {
+    if (!d.offered && !d.covered) {
       const children = window.contentView.children,
         source = children.indexOf(root),
         target = children.indexOf(chrome);
@@ -531,7 +572,7 @@ export function createNativeBrowserChromeHost(options: {
     if (displayRead && (displayRead.display !== d || displayRead.revision !== revision))
       stopDisplayRead();
     if (
-      !d?.waiting.size ||
+      !(d?.waiting.size || (d?.loadingCover && !d.covered)) ||
       !displayCurrent() ||
       !binding?.prepared ||
       !snapshot ||
@@ -579,10 +620,35 @@ export function createNativeBrowserChromeHost(options: {
       stopDisplayRead();
       d.surfaceReady = true;
       d.readyRevision = revision;
+      if (d.loadingCover && !d.covered) {
+        const page = pageCurrent(d.binding);
+        if (d.warm && (!page || !options.protectLivePage?.(page.view))) {
+          finishDisplay(false, true);
+          return false;
+        }
+        const children = window.contentView.children;
+        let rootIndex = children.indexOf(root!);
+        if (d.warm && page) {
+          window.contentView.addChildView(page.view, rootIndex + 1);
+          page.view.setVisible(true);
+          if (!options.protectLivePage?.(page.view)) {
+            page.view.setVisible(false);
+            finishDisplay(false, true);
+            return false;
+          }
+        }
+        rootIndex = window.contentView.children.indexOf(root!);
+        window.contentView.addChildView(chrome!, rootIndex + (d.warm ? 2 : 1));
+        d.covered = true;
+        broadcast();
+      }
       clearTimeout(d.timer);
-      d.timer = setTimeout(() => {
-        if (display === d) finishDisplay(false);
-      }, 1500);
+      d.timer = setTimeout(
+        () => {
+          if (display === d) finishDisplay(false, true);
+        },
+        d.loadingCover && !d.preflight && !d.offered ? 12000 : 1500,
+      );
       for (const resolve of d.waiting) resolve(true);
       d.waiting.clear();
       return true;
@@ -598,10 +664,10 @@ export function createNativeBrowserChromeHost(options: {
         })
         .then((image) => {
           if (image && !receive(image) && display === d && snapshot?.revision === revision)
-            finishDisplay(false);
+            finishDisplay(false, true);
         })
         .catch(() => {
-          if (display === d) finishDisplay(false);
+          if (display === d) finishDisplay(false, true);
         })
         .finally(() => {
           if (displayRead === read) displayRead = undefined;
@@ -617,11 +683,11 @@ export function createNativeBrowserChromeHost(options: {
         try {
           receive(image);
         } catch {
-          if (display === d) finishDisplay(false);
+          if (display === d) finishDisplay(false, true);
         }
       });
     } catch {
-      if (display === d) finishDisplay(false);
+      if (display === d) finishDisplay(false, true);
     }
   }
 
@@ -757,15 +823,22 @@ export function createNativeBrowserChromeHost(options: {
     binding.prepared = true;
     if (notify || newlyPrepared) update();
   };
-  function pumpMetrics() {
-    if (!alive() || !debuggerOwned || failed || inflightMetrics) return;
+  function pumpMetrics(nativeResize = false) {
+    if (!alive() || !debuggerOwned || failed) return;
     const next = desiredMetrics;
-    if (!next || sameMetrics(next, appliedMetrics)) {
+    if (!next) return;
+    if (inflightMetrics) {
+      // A native resize can hold a Renderer ACK until its animation ends.
+      // Submit its current size through this same writer; a superseded
+      // completion cannot prepare, fail, or roll back the current environment.
+      if (!nativeResize || sameMetrics(next, inflightMetrics)) return;
+    } else if (sameMetrics(next, appliedMetrics)) {
       metricsReady(false);
       return;
     }
     inflightMetrics = next;
     void (async () => {
+      let currentCompletion = false;
       try {
         if (!owner.debugger.isAttached()) throw Error('browser_root_metrics_detached');
         await owner.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
@@ -778,6 +851,7 @@ export function createNativeBrowserChromeHost(options: {
         // This is command completion for this exact Root environment, not a
         // compositor/pixel acknowledgement. An old completion grants nothing.
         if (
+          inflightMetrics === next &&
           alive() &&
           debuggerOwned &&
           !failed &&
@@ -789,6 +863,7 @@ export function createNativeBrowserChromeHost(options: {
         // The obsolete document's rejection cannot fail its replacement. The
         // current desire is still pumped below and must pass its own checks.
         if (
+          inflightMetrics === next &&
           alive() &&
           debuggerOwned &&
           !failed &&
@@ -797,19 +872,20 @@ export function createNativeBrowserChromeHost(options: {
         )
           fail();
       } finally {
-        if (inflightMetrics === next) inflightMetrics = undefined;
+        currentCompletion = inflightMetrics === next;
+        if (currentCompletion) inflightMetrics = undefined;
       }
-      if (!alive() || failed || !debuggerOwned) return;
+      if (!currentCompletion || !alive() || failed || !debuggerOwned) return;
       // If A was applied before B went in flight, a new desire for A must
       // restore A after B; comparing only against the earlier applied A loses it.
       if (desiredMetrics && !sameMetrics(desiredMetrics, appliedMetrics)) pumpMetrics();
       else metricsReady(true);
     })();
   }
-  function requestMetrics() {
+  function requestMetrics(nativeResize = false) {
     if (!alive() || !debuggerOwned || failed) return;
     desiredMetrics = currentMetrics();
-    pumpMetrics();
+    pumpMetrics(nativeResize);
   }
   const ownRoot = () => {
     if (root) return;
@@ -960,11 +1036,21 @@ export function createNativeBrowserChromeHost(options: {
   };
   const input = (event: NativeBrowserChromeEvent) =>
     event.part === 'toolbar' && ['address-change', 'address-focus'].includes(event.action.type);
+  const preparingAction = (event: NativeBrowserChromeEvent) =>
+    !!display?.loadingCover &&
+    !!display.covered &&
+    displayCurrent() &&
+    !!snapshot?.interactive &&
+    window.isVisible() &&
+    !window.isMinimized() &&
+    !!chrome?.getVisible() &&
+    ownerCurrent(binding?.scope, true) &&
+    isNativeBrowserChromePreparingAction(event, snapshot);
   const forward = (event: NativeBrowserChromeEvent): Promise<NativeBrowserChromeResult> => {
     if (
       !binding ||
       !snapshot ||
-      !actionable() ||
+      (!actionable() && !preparingAction(event)) ||
       event.attachment !== binding.attachment ||
       event.pageToken !== binding.pageToken ||
       event.sequence <= binding.sequence ||
@@ -1233,16 +1319,18 @@ export function createNativeBrowserChromeHost(options: {
         pageToken: input.pageToken,
         revision: input.revision,
       };
+      if (Object.keys(input).length !== 4 || !isNativeBrowserChromeRendered(rendered))
+        throw Error('invalid_browser_chrome_request');
       if (
-        Object.keys(input).length !== 4 ||
-        !isNativeBrowserChromeRendered(rendered) ||
         !binding ||
         !snapshot ||
         rendered.attachment !== binding.attachment ||
         rendered.pageToken !== binding.pageToken ||
         rendered.revision !== snapshot.revision
       )
-        throw Error('browser_chrome_stale_rendered');
+        // A former DOM commit may arrive after a rebind, resize or a newer
+        // snapshot. It is an obsolete observation, never proof for this target.
+        return;
       binding.renderedRevision = rendered.revision;
       pumpDisplay();
       return;
@@ -1283,7 +1371,7 @@ export function createNativeBrowserChromeHost(options: {
       if (
         !pending ||
         !binding ||
-        !actionable() ||
+        (!actionable() && !preparingAction(pending.event)) ||
         reply.attachment !== binding.attachment ||
         reply.pageToken !== binding.pageToken ||
         pending.event.attachment !== reply.attachment ||
@@ -1302,6 +1390,35 @@ export function createNativeBrowserChromeHost(options: {
   return {
     readyFor,
     acceptsPresentation,
+    displayState() {
+      if (!alive() || failed || intent === undefined) return { kind: 'unknown' as const };
+      if (!intent || !qualified(intent)) return { kind: 'root' as const };
+      const page = options.getPage(intent.toolbar.id);
+      if (!page || !pageOwnerMatches(page, intent.scope) || !ownerCurrent(intent.scope))
+        return { kind: 'unknown' as const };
+      return {
+        kind: 'page' as const,
+        id: page.id,
+        scope: intent.scope,
+        token: page.token,
+        theme: intent.theme,
+        busy:
+          (!!display && !display.covered) ||
+          (!!loadingFailure &&
+            loadingFailure.binding === binding &&
+            sameMetrics(loadingFailure.metrics, currentMetrics())) ||
+          !!handoff ||
+          !!rootReturn ||
+          !!inflightMetrics ||
+          !chromeFrame,
+        presented:
+          readyFor(page.id, intent.scope) &&
+          shellCurrent(intent.scope) &&
+          page.view.getVisible() &&
+          !!binding?.viewport &&
+          sameBounds(page.view.getBounds(), binding.viewport),
+      };
+    },
     beginRootReturn(
       id: string,
       scope: NativeBrowserChromeOwner,
@@ -1367,6 +1484,107 @@ export function createNativeBrowserChromeHost(options: {
     release,
     invalidateGeometry,
     syncViewport: requestMetrics,
+    preparingPage() {
+      const d = display;
+      return d?.warm && d.covered && displayCurrent() ? pageCurrent(d.binding)?.view : undefined;
+    },
+    loadingReady(id: string, viewport: Bounds, scope: NativeBrowserChromeOwner): boolean {
+      update();
+      if (
+        !binding ||
+        binding.id !== id ||
+        !sameScope(binding.scope, scope) ||
+        !pageCurrent() ||
+        !snapshot ||
+        !qualified(snapshot)
+      )
+        return false;
+      // Cold preparation may cover only a full Root. An existing split or
+      // live handoff owns its bar/source until its fresh binding is confirmed.
+      const size = dimensions();
+      if (
+        shell ||
+        handoff ||
+        rootReturn ||
+        !root ||
+        !sameBounds(root.getBounds(), { x: 0, y: 0, ...size })
+      )
+        return false;
+      if (
+        display?.loadingCover &&
+        display.binding === binding &&
+        sameBounds(display.viewport, viewport)
+      )
+        return !!display.covered && displayCurrent();
+      if (display) finishDisplay(false);
+      const metrics = currentMetrics(),
+        page = pageCurrent()!,
+        contents = page.view.webContents;
+      if (
+        !window.isVisible() ||
+        window.isMinimized() ||
+        ![viewport.x, viewport.y, viewport.width, viewport.height].every(Number.isFinite) ||
+        viewport.x <= 0 ||
+        viewport.y <= 0 ||
+        viewport.width <= 0 ||
+        viewport.height <= 0 ||
+        viewport.x + viewport.width > metrics.width ||
+        viewport.y + viewport.height > metrics.height
+      )
+        return false;
+      if (
+        loadingFailure?.binding === binding &&
+        sameMetrics(loadingFailure.metrics, metrics) &&
+        sameBounds(loadingFailure.viewport, viewport)
+      )
+        return false;
+      loadingFailure = undefined;
+      const warm =
+        !!resume &&
+        resume.page.view === page.view &&
+        resume.page.token === page.token &&
+        sameScope(resume.scope, scope) &&
+        resume.frame === contents.mainFrame &&
+        resume.url === contents.getURL() &&
+        sameMetrics(resume.metrics, metrics) &&
+        sameBounds(resume.viewport, viewport) &&
+        sameBounds(page.view.getBounds(), viewport) &&
+        !contents.isLoadingMainFrame() &&
+        !!options.protectLivePage &&
+        options.canProtectLivePage?.() === true;
+      const controller = new AbortController();
+      const abort = () => {
+        if (display?.signal === controller.signal) finishDisplay(false);
+      };
+      // Changing full-pane/loading DOM requires its own wire receipt.
+      binding.attachment = randomUUID();
+      binding.sequence = 0;
+      binding.renderedRevision = undefined;
+      display = {
+        binding,
+        viewport: { ...viewport },
+        metrics,
+        offered: false,
+        loadingCover: true,
+        covered: false,
+        warm,
+        preflight: controller,
+        signal: controller.signal,
+        abort,
+        waiting: new Set(),
+      };
+      controller.signal.addEventListener('abort', abort, { once: true });
+      const d = display;
+      d.timer = setTimeout(() => {
+        if (display === d) finishDisplay(false, true);
+      }, 1500);
+      prepare();
+      placeDisplay();
+      requestMetrics();
+      broadcast();
+      pumpDisplay();
+      return false;
+    },
     prepareDisplay(
       id: string,
       viewport: Bounds,
@@ -1393,7 +1611,7 @@ export function createNativeBrowserChromeHost(options: {
       if (
         display &&
         (display.binding !== binding ||
-          display.signal !== signal ||
+          (display.signal !== signal && !display.preflight) ||
           !sameBounds(display.viewport, viewport))
       )
         finishDisplay(false);
@@ -1413,6 +1631,19 @@ export function createNativeBrowserChromeHost(options: {
         signal.addEventListener('abort', abort, { once: true });
       }
       const d = display;
+      if (d.preflight && d.signal !== signal) {
+        d.signal.removeEventListener('abort', d.abort);
+        d.preflight = undefined;
+        d.signal = signal;
+        d.abort = () => {
+          if (display === d) finishDisplay(false);
+        };
+        signal.addEventListener('abort', d.abort, { once: true });
+        clearTimeout(d.timer);
+        d.timer = setTimeout(() => {
+          if (display === d) finishDisplay(false);
+        }, 12000);
+      }
       if (d.readyRevision === snapshot?.revision && displayCurrent()) return Promise.resolve(true);
       return new Promise<boolean>((resolve) => {
         d.waiting.add(resolve);
@@ -1520,6 +1751,16 @@ export function createNativeBrowserChromeHost(options: {
       }
       binding.geometry = geometry;
       if (!setNativeRootBounds(window, { x: 0, y: 0, width: left, height })) return false;
+      // During first preparation Page covers Root's private palette. Once the
+      // physical Root is clipped, restore the stable Page-below-Root order;
+      // Root-return/closing can then expand over the retained live Page.
+      if (display?.binding === binding && display.loadingCover) {
+        const page = pageCurrent(),
+          children = window.contentView.children;
+        const rootIndex = children.indexOf(root);
+        if (page && children.indexOf(page.view) > rootIndex)
+          window.contentView.addChildView(page.view, rootIndex);
+      }
       if (chromeContents!.getZoomFactor() !== owner.getZoomFactor())
         chromeContents!.setZoomFactor(owner.getZoomFactor());
       const chromeBounds = { x: left, y: 0, width: width - left, height: top };
@@ -1533,6 +1774,16 @@ export function createNativeBrowserChromeHost(options: {
         root: root.getBounds(),
         chrome: chrome.getBounds(),
       };
+      const page = pageCurrent();
+      if (page)
+        resume = {
+          page,
+          frame: page.view.webContents.mainFrame,
+          url: page.view.webContents.getURL(),
+          viewport: { ...viewportDip },
+          metrics: currentMetrics(),
+          scope: binding.scope,
+        };
       finishDisplay(true);
       const visible = window.isVisible() && !window.isMinimized();
       if (chrome.getVisible() !== visible) chrome.setVisible(visible);

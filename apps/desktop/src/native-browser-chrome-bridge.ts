@@ -69,6 +69,8 @@ export interface NativeBrowserChromeEnvelope {
   readonly pageToken: string;
   readonly hosted: boolean;
   readonly actionable: boolean;
+  readonly preparing?: boolean;
+  readonly loadingBody?: boolean;
   readonly snapshot: NativeBrowserChromeSnapshot;
 }
 
@@ -77,6 +79,16 @@ export type NativeBrowserChromeAction =
   | { readonly part: 'toolbar'; readonly action: NativeBrowserToolbarAction }
   | { readonly part: 'control'; readonly action: NativeBrowserControlAction }
   | { readonly part: 'escape' | 'focus-root' };
+
+/** Classification only; callers still verify current owner, wire and revision. */
+export function isNativeBrowserChromePreparingAction(
+  action: NativeBrowserChromeAction,
+  snapshot: NativeBrowserChromeSnapshot,
+): boolean {
+  if (action.part === 'escape' || action.part === 'focus-root') return true;
+  if (action.part === 'tabs') return ['close', 'collapse'].includes(action.action.type);
+  return action.part === 'toolbar' && action.action.type === 'reload' && snapshot.toolbar.loading;
+}
 
 export type NativeBrowserChromeEvent = NativeBrowserChromeAction & {
   readonly attachment: string;
@@ -329,11 +341,22 @@ export function isNativeBrowserChromeEnvelope(
 ): value is NativeBrowserChromeEnvelope {
   return (
     object(value) &&
-    keys(value, ['attachment', 'pageToken', 'hosted', 'actionable', 'snapshot']) &&
+    keys(value, [
+      'attachment',
+      'pageToken',
+      'hosted',
+      'actionable',
+      'preparing',
+      'loadingBody',
+      'snapshot',
+    ]) &&
     text(value.attachment) &&
     !!value.attachment &&
     text(value.pageToken, 256) &&
     bools(value, ['hosted', 'actionable']) &&
+    (value.preparing === undefined || typeof value.preparing === 'boolean') &&
+    (value.loadingBody === undefined || typeof value.loadingBody === 'boolean') &&
+    !(value.preparing === true && value.actionable) &&
     isNativeBrowserChromeSnapshot(value.snapshot)
   );
 }

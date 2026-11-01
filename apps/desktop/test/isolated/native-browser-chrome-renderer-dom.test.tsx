@@ -190,6 +190,94 @@ async function fixture() {
 const navigations = (events: readonly NativeBrowserChromeEvent[]) =>
   events.filter((event) => event.part === 'toolbar' && event.action.type === 'navigate');
 
+test('native preparation shows only a Spinner body and permits current-wire cancellation without navigation', async () => {
+  const f = await fixture();
+  try {
+    await f.render();
+    const address = f.address();
+    await f.update(
+      { hosted: false, toolbar: { ...f.current.snapshot.toolbar, loading: true } },
+      { preparing: true, hosted: false, actionable: false, attachment: 'loading-attachment' },
+    );
+    expect(f.address()).toBe(address);
+    const body = document.querySelector('.native-browser-chrome-loading');
+    expect(body).not.toBeNull();
+    expect(body?.textContent).toBe('');
+    expect(body?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('正在加载网页');
+    expect(body?.querySelector('canvas,img,input,button')).toBeNull();
+    expect(document.querySelector('.native-browser-chrome-preparing')).not.toBeNull();
+    expect(f.address().readOnly).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="停止加载"]')?.disabled).toBe(
+      false,
+    );
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="后退"]')?.disabled).toBe(true);
+    await f.input('https://example.org/blocked');
+    await f.submit();
+    await f.click('后退');
+    expect(f.events).toEqual([]);
+    await f.click('停止加载');
+    expect(f.events.at(-1)).toMatchObject({
+      attachment: 'loading-attachment',
+      part: 'toolbar',
+      action: { type: 'reload' },
+    });
+    await f.flush(() => document.querySelector<HTMLButtonElement>('.session-tab-close')!.click());
+    expect(f.events.some((event) => event.part === 'tabs' && event.action.type === 'close')).toBe(
+      true,
+    );
+    await f.click('收起标签栏');
+    expect(
+      f.events.some((event) => event.part === 'tabs' && event.action.type === 'collapse'),
+    ).toBe(true);
+    expect(navigations(f.events)).toEqual([]);
+    await f.update({ hosted: true }, { hosted: true, actionable: false });
+    expect(document.querySelector('.native-browser-chrome-loading')).not.toBeNull();
+    await f.update(
+      { hosted: true, toolbar: { ...f.current.snapshot.toolbar, loading: false } },
+      { preparing: false, hosted: true, actionable: true },
+    );
+    expect(document.querySelector('.native-browser-chrome-loading')).toBeNull();
+    expect(document.querySelector('.native-browser-chrome-preparing')).toBeNull();
+    expect(f.address().readOnly).toBe(false);
+    await f.click('刷新网页');
+    expect(f.events.at(-1)).toMatchObject({ part: 'toolbar', action: { type: 'reload' } });
+  } finally {
+    await f.close();
+  }
+});
+
+test('warm native preparation keeps the same bar without a clipped loading body or extra action authority', async () => {
+  const f = await fixture();
+  try {
+    await f.render();
+    const address = f.address();
+    await f.update(
+      { hosted: false },
+      {
+        preparing: true,
+        loadingBody: false,
+        hosted: false,
+        actionable: false,
+        attachment: 'warm-attachment',
+      },
+    );
+    expect(f.address()).toBe(address);
+    expect(document.querySelector('.native-browser-chrome-loading')).toBeNull();
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(f.address().readOnly).toBe(true);
+    await f.submit();
+    await f.click('刷新网页');
+    expect(f.events).toEqual([]);
+    await f.click('收起标签栏');
+    expect(
+      f.events.some((event) => event.part === 'tabs' && event.action.type === 'collapse'),
+    ).toBe(true);
+    expect(f.events.at(-1)).toMatchObject({ part: 'focus-root' });
+  } finally {
+    await f.close();
+  }
+});
+
 test('a cleared Chrome intent removes old controls and status while retaining an opaque themed strip', async () => {
   const f = await fixture();
   try {

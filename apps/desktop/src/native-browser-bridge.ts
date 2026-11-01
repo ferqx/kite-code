@@ -2,6 +2,7 @@ export const nativeBrowserChannel = 'kite:native:browser';
 export const nativeBrowserEventChannel = 'kite:native:browser-state';
 export const nativeBrowserLayoutChannel = 'kite:native:browser-layout';
 export const nativeBrowserLayoutFrameChannel = 'kite:native:browser-layout-frame';
+export const nativeBrowserPresentationChannel = 'kite:native:browser-presentation';
 export const nativeBrowserMenuChannel = 'kite:native:browser-menu';
 export const nativeBrowserMenuCancelChannel = 'kite:native:browser-menu-cancel';
 export const nativeBrowserDisplayChannel = 'kite:native:browser-display';
@@ -140,6 +141,27 @@ export function isNativeBrowserClosePreparation(
 export interface NativeBrowserLayoutWitness {
   readonly key: string;
   readonly step: 1 | 2;
+}
+/** Main requests fresh UI geometry for the current target; carries no control authority. */
+export interface NativeBrowserPresentationRequest {
+  readonly id: string;
+  readonly key: string;
+  readonly scope?: NativeBrowserRestoreScope;
+  readonly draft?: string;
+}
+export function isNativeBrowserPresentationRequest(
+  value: unknown,
+): value is NativeBrowserPresentationRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    Object.keys(v).every((key) => ['id', 'key', 'scope', 'draft'].includes(key)) &&
+    typeof v.id === 'string' &&
+    /^[A-Za-z0-9_-]{1,64}$/.test(v.id) &&
+    typeof v.key === 'string' &&
+    /^[a-f0-9]{32}$/.test(v.key) &&
+    isNativeBrowserPresentationOwner(v)
+  );
 }
 export interface NativeBrowserLayoutFrameAck {
   readonly presented?: boolean;
@@ -412,6 +434,9 @@ export interface NativeBrowserBridge {
     request: Extract<NativeBrowserRequest, { action: 'present' }>,
   ): Promise<NativeBrowserState | NativeBrowserLayoutReceipt | null>;
   watchBrowserLayoutFrame?(listener: (ack: NativeBrowserLayoutFrameAck) => void): () => void;
+  watchBrowserPresentation?(
+    listener: (request: NativeBrowserPresentationRequest) => void,
+  ): () => void;
   showBrowserMenu?(request: NativeBrowserMenuRequest): Promise<NativeBrowserMenuAction | null>;
   cancelBrowserMenu?(requestId: string): void;
   restoreBrowser(scope: NativeBrowserRestoreScope): Promise<NativeBrowserRestoreResult>;

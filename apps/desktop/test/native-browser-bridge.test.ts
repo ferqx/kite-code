@@ -6,6 +6,7 @@ import {
   isNativeBrowserFrozenFrame,
   isNativeBrowserLayoutFrameAck,
   isNativeBrowserPresentationFrame,
+  isNativeBrowserPresentationRequest,
   isNativeBrowserRestoreResult,
   isNativeBrowserState,
   type NativeBrowserLayout,
@@ -85,6 +86,44 @@ test('a draft owner is confined to manual browser requests and cannot mix sessio
     },
   ])
     expect(() => parseNativeBrowserRequest(value)).toThrow('invalid_browser_request');
+});
+
+test('fresh presentation requests carry one exact Session or draft owner and no control or execution fields', () => {
+  const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 0 };
+  const request = { id: 'page_1-restore', key: 'a'.repeat(32), scope };
+  const draft = { id: request.id, key: 'b'.repeat(32), draft: 'c'.repeat(32) };
+  expect(isNativeBrowserPresentationRequest(request)).toBe(true);
+  expect(isNativeBrowserPresentationRequest(draft)).toBe(true);
+  for (const invalid of [
+    null,
+    [],
+    {},
+    { id: request.id, key: request.key },
+    { ...request, scope: undefined },
+    { ...request, draft: draft.draft },
+    { ...request, scope: { storeId: scope.storeId, sessionId: scope.sessionId } },
+    { ...request, scope: { ...scope, generation: 0 } },
+    { ...request, scope: { ...scope, viewSelection: -1 } },
+    { ...request, scope: { ...scope, viewSelection: 1.5 } },
+    { ...request, scope: { ...scope, extra: true } },
+    { ...draft, draft: '' },
+    { ...draft, draft: 'C'.repeat(32) },
+    { ...draft, draft: 'c'.repeat(31) },
+    { ...request, id: '' },
+    { ...request, id: 'page with spaces' },
+    { ...request, id: 'p'.repeat(65) },
+    { ...request, key: '' },
+    { ...request, key: 'A'.repeat(32) },
+    { ...request, key: 'a'.repeat(31) },
+    { ...request, key: 'a'.repeat(33) },
+    { ...request, key: 1 },
+    { ...request, url: 'https://example.com/' },
+    { ...request, bounds: { x: 0, y: 0, width: 100, height: 100 } },
+    { ...request, lease: 'private-control' },
+    { ...request, code: 'replay()' },
+    { ...request, action: 'navigate' },
+  ])
+    expect(isNativeBrowserPresentationRequest(invalid)).toBe(false);
 });
 
 test('Root close preparation and confirmation transport only one bounded marker receipt and an exact private key', () => {

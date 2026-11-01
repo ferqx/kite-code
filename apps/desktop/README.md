@@ -1953,7 +1953,49 @@ Root viewport沿原host的`syncViewport`按desired／inflight／applied及准确
 
 源码继续定位到`present(null)`在同一有效closing事实中仍提前hide原Page。现仅在准确capsule、原Map对象、shield可用且Page实际位于Root下时保留尚未销毁的真实live页，仍clear presentation/active并automation.present(false)；原Root两帧完成才hide/close，不重挂或保旧截图。取消时只撤准确旧对象且无新presentation的临时像素，并同步恢复shield，避免透明挡输入面残留。正式截图/旧坐标/旧异步布局仍拒绝，物理visible不新增Actor权限；通用后台CDP能力仍由原lease决定，不把输入盾当CDP权限栅栏。Main完整179项3050断言及两owner、18种取消边界通过；原首轮shield未收回失败日志保留，修正后不放宽断言。
 
-`hosted-close-live-source-024-final`仅针对023提前hide的新因果复核。Main14656/driver/两录像正常0、17源码drift为空、无verification-failed；Root全宽+4ms、小mask+18ms，原Page没有提前hide，到+54ms真实关闭时才与shield/Chrome一起撤下并destroy。process9/0.158333完整Page到10/0.175000完整Root+按钮，display8/0.183333到9/0.200000同样直接接替，未再采到023窄聊天/旧bar/缺正文过渡；顶部原像素无nonce/色条/白L，稳定尾无旧网页闪回。0–2秒及末0.4秒的process128样本（72直接看、56完整PNG相同复用）、display102全部观察，原片hash/bytes保持。此资格限普通缩放下本次关闭切口，不升级系统原子提交、低zoom回退、跨会话/resize、普通构建、跨平台或FPS；旧020/021/023失败均保持。最新Desktop类型及定向Biome通过，UI源码未变复用前轮结果。本轮未新增模型，账本仍209＋295＝504；检查点4137f24f6之后的修复保工作树，未再commit/push。
+`hosted-close-live-source-024-final`仅针对023提前hide的新因果复核。Main14656/driver/两录像正常0、17源码drift为空、无verification-failed；Root全宽+4ms、小mask+18ms，原Page没有提前hide，到+54ms真实关闭时才与shield/Chrome一起撤下并destroy。process9/0.158333完整Page到10/0.175000完整Root+按钮，display8/0.183333到9/0.200000同样直接接替，未再采到023窄聊天/旧bar/缺正文过渡；顶部原像素无nonce/色条/白L，稳定尾无旧网页闪回。0–2秒及末0.4秒的process128样本（72直接看、56完整PNG相同复用）、display102全部观察，原片hash/bytes保持。此资格限普通缩放下本次关闭切口，不升级系统原子提交、低zoom回退、跨会话/resize、普通构建、跨平台或FPS；旧020/021/023失败均保持。最新Desktop类型及定向Biome通过，UI源码未变复用前轮结果。本轮未新增模型，账本仍209＋295＝504；关闭修复随后本地提交为824966026，提交hook全部通过，未推送。
+
+关闭检查点后按用户要求只读定位020剩余灰带，未启动客户端或新增模型／实机测试。切会话与resize不能归为同一撤页问题：离开草稿后，020原trace在点击+11ms发布目标Session context，+12ms将Root从1175展到1472并隐藏原Chrome／Page；Page没有销毁，返回仍为原WebContents、timeOrigin和输入。共享[SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)同时在scope退休时调用排到下一rAF的collapseDetails，并开启宽度动画；CSS默认时长是180ms，240ms是动画标志清理时间。原生展宽／撤页和UI收栏启动时点确实分离，但trace没有Root compositor呈现回执，不能据此断言动画是process100灰列的唯一原因。
+
+scope退休的局部修复已按后续授权实施：layout阶段取消旧details待执行动作并直接定目标布局，未决restore／selection不作关闭推断；目标detailPanel／任务编辑器保持打开。导航与右栏分别管理动画标志／timer，旧scope的右栏动画不进入新scope；普通手动开合仍有动画。机械布局不调用changeTabsOpen(false,false)，不把目标scope写入dismissedBrowserReveals。自动reveal和已有页请求提前到layout阶段；reveal去重按本次scope激活，不再让之前已显示过的原页阻止返回展开，用户显式收起记忆仍保留。移除任务编辑器退休时额外排队的collapse，统一按当前右栏意图处理。024只证明同一owner准确closing中的live页保留，不能直接推广为在新Session显示旧Session页面；context的6→null→8仍受选择与Caller freshness约束，不以减少状态次数删除这些守卫。
+
+020的resize中Page与Chrome始终visible；恢复扩窗时Root实写为1025→1054→1025，同值bounds去重和唯一Main入口均已存在，不能把不同校准当作同值重复删除。嵌套Panel约束结算与Renderer量测交错起初只是推断，025后继新增完整layout输入和metrics起止，已定位中间值对应暂时放大的导航宽度，准确过程另列下文；尚无Root compositor提交证据，不能认定中间值从未呈现。导航栏保存宽度仍须保留：面板库在最小值钳制后只沿已受约束尺寸继续计算，不能独立恢复用户偏好。稳定正宽校准的合并也须先证明它们属于未呈现的中间布局；rAF先于ResizeObserver执行，单改成rAF或多等一帧不构成稳定证明。即使省掉1054，752→1025的首次真实surface展宽仍存在，不能宣称会消除灰带。当前仅修切会话调度，resize源码未改；后续范围和未采用候选继续归[原生布局Note](../../.agents/notes/proposed/architecture/2026-10-31-native-browser-native-layout.md)，灰带保持未解决。
+
+`hosted-scope-retirement-025-final`为本轮最新冻结开发制品，Main32408／driver／两路9秒录像正常0、17源码drift为空、无verification-failed；准确Main及Ea7J7g制品进程已退出，用户18842实例保持。普通UI新对话手动HTTPS百度、输入`kite draft retained`、切已有Session、返回同页，WebContents2／timeOrigin1793523187818.8／输入／scrollY=0保持，切走隐藏且未destroy。528条被动DOM记录中，离开会话后右栏animation均null，未再启动退休宽度动画。没有conversation.send／创建／grant派发，新模型为0，沿用账本209＋295＝504；driver四条browser_chrome_stale_rendered拒绝和退出后的target-closed metrics拒绝原样保留，不授零错误。此普通UI切口不替代新自然语言Run、普通构建、平台或FPS资格；原020／024记录保持。
+
+025同次只追加1050→1472一次resize诊断。相对resize-start，+12ms窄窗navigation200／workspace849／details300已结算，校准x752；+58ms扩窗Main先正确预测Root1025，1472 metrics仅一次于+66ms完成。+64ms DOM仍按旧19.066%给navigation280.4609／workspace1190.5391／details420.6875，+65ms已恢复200／1271／449.1172；中间x1053.3125却到+72ms才进入Main，+73ms把Root回写1054，+74ms最终x1024.8828使其恢复1025。因此该回摆已定位到嵌套Panel中间分配和异步迟到，可排除本次CDP ABA及宽度动画，不能再笼统归成浏览器绘制慢。公开Group.getLayout、Panel.getSize／onResize及onLayoutChanged均不提供整轮约束结算完成事实，直接按旧预测拒绝也可能丢合法splitter调整；本轮不做猜测过滤或固定帧延迟。被动采样混合MutationObserver／rAF且未标来源，没有compositor提交链，仍不能证明1054未曾呈现，更不能将去回摆等同消除首次surface展宽灰带。
+
+本轮UI两文件按isolated约定分别通过45项622断言，UI／Desktop类型、定向Biome、Core边界、测试归属及文档检查通过。新增回归核同帧直接布局、待决恢复、旧RAF取消、目标详情保持、返回原scope与显式关闭，以及navigation动画不被误停；Main／Host和工具协议未改，复用024适用的179／92项证据。连续像素结论另由025原片复核，功能或动画标志通过不替代逐帧结果；本轮后续修改尚未stage／commit／push。
+
+025逐帧仍保留呈现缺口：切走的process95/1.866667为完整原页，96/1.883333与97/1.900000已是目标Session但消息／header／输入仍窄，98/1.916667才全宽；display84/1.891667原页到85/1.908333、86/1.925000目标窄布局，再到87/1.941667全宽。两路均采到约33.3ms中间态，180ms动画退休已修，首个目标Root仍分步绘制，不授切会话完全无闪。返回process138/2.683333的可读“正在显示原网页…”到139/2.725000正文，display118/2.733333准备态中地址行临时缺画、119/2.750000恢复正文／bar；无持久页面丢失或旧网页复活。resize的process162/3.141667有宽灰列与右侧细页片，163/3.158333恢复；display134/3.175000实见Root／Page间约30DIP灰条，135/3.191667恢复，不能只归窗口录制源。复核完整两路约9秒：process462帧（188直接查看＋274完整PNG字节相同复用）、display367帧（253直接＋114相同复用），18张关键及邻帧另看原生全图；稳定尾无旧网页闪回或持续空白。原片1437710／1444829 bytes及SHA前后相同；完整覆盖与原片完整性归025/review/REVIEW.json，不将最终正确状态或动画flag结果覆盖上述失败。
+
+Cmd+W／Dock重开另有确定死锁：Main的hide显式隐藏Page并清active，Chrome binding／hosted及Pane的committedLayout仍保留；原visibilitychange只排rAF，隐藏时不执行，到重新可见才把正宽误作async校准，Main正确拒绝不可见／非active页。现visible回调立即令旧effect stopped，废旧presentedOwner并创建新presentationEpoch，新effect用新revision和现量测走bootstrap，旧ACK／async回执不能跨代接管；正常resize仍异步，准入不放宽。Main hide另增加sizeEpoch并删除presentationFrame，恢复相同尺寸也不复用旧截图key。原Page／document／lease不销毁、不导航；已实际显示过的同owner恢复不再复活Tools，而保原页准备态。
+
+026为未加Page原生帧门、仅含可见性恢复的冻结开发制品Main46215，普通UI三个新百度页、原生CG Cmd+W及准确Electron Dock图标AXPress，hidden／visible实际投递、重开新sync revision10，三WebContents2／5／6的timeOrigin、`kite window retained 0/1/2`与scrollY=0保持。Main／driver／两路14秒录像均0、17源码drift空，无verification-failed，原八条stale_rendered及退出target-closed拒绝保留。逐帧仍见display63/1.450000新空tab整栏灰、64/1.466667恢复Tools且短细条；第三URL display97/2.175000上半正文到、下半暗空，98/2.191667完整，产品自身完整副本不能覆盖该失败。Dock不再持续卡灰，但process173–174/3.433333–3.450000灰、175–178/3.491667–3.541667 Tools、179/3.575000原页；display146–147/3.466667–3.483333灰／show过渡、148–153/3.500000–3.583333 Tools、154/3.600000正文。完整两片process715帧（181直接＋534完整PNG同字节复用）、display526帧（408直接＋118复用）、25张原生关键图，原片2044612／3361298 bytes和SHA保持，范围归026/review/REVIEW.json。
+
+按026新反例，首URL的initialDisplay现在在DOM-ready完整副本之外，订阅准确Page的完整原生presentation帧并请求invalidate；保持原Root源、frame／token／URL／几何及单在途读取，成功即结束该订阅，再沿原Chrome自身帧／fresh Root ACK采用。取消／超时结束准确订阅，迟到或旧尺寸帧不能offer，不用非白像素判断、固定sleep或追加导航。此信号归[固定Electron帧订阅API](https://github.com/electron/electron/blob/v44.3.0/docs/api/web-contents.md#contentsbeginframesubscriptiononlydirty-callback)，仍不证明WindowServer各surface同帧。027冻结制品Main51000已实证三Page在副本后分别约4／9／4ms收到592×1406完整原生帧，未增加Page加载；同次真实Cmd+W／Dock返回保持三原文档、输入和位置。两路／Main／driver正常0、17源码drift空，无新模型，沿用209＋295＝504；九条stale_rendered及退出target-closed拒绝不删。像素资格归027/review/REVIEW.json，不以正常final状态或帧信号自授无灰。
+
+最终Main呈现整文件180项3068断言通过；Pane整文件32项384断言后，补恢复不返Tools断言的两项24断言再通过。最初新增Page帧门后的8项失败是旧夹具未发新帧，原日志保留；更新明确的fake frame投递并加手动控制的完整副本不足、残帧拒绝与hide取消回归后通过，不放宽生产帧门。Desktop类型、四文件Biome、Core边界与归属通过；首URL与窗口恢复属于本机开发范围，普通构建／跨平台／FPS、025切会话及resize灰带不升级，所有旧反例保留，未stage／commit／push。
+
+027两路完整14秒复核支持本次首URL采用切口：display51/1.183333、71/1.633333、93/2.066667三个首个正文样本均完整，process65/1.158333、88/1.625000、105/2.033333同样直接完整，未再采到026第三页下半暗空。新空tab的display59/1.408333、82/1.850000经原像素裁切确认有Tools，未采到026整栏灰；该反向路径源码未修，不据单轮未复现关闭其缺口。Dock仍有display143–144/3.308333–3.325000全窗灰／模糊，145/3.341667左Root已画但右栏灰无bar，146/3.358333原页准备态，152/3.466667恢复正文与原输入；首个准备帧另有短标题缺画及地址下细条纹。process167/3.291667全灰、169/3.325000准备态、176/3.466667原页。持续灰空与回Tools已修，短过渡不授无闪；稳定尾无错误页、旧页闪回或覆盖聊天。process726帧（191直接＋535完整PNG同字节复用）、display520帧（276直接＋244复用）、28张关键原生全图，原片2119664／3312654 bytes及SHA保持，准确覆盖和原图归027/review/REVIEW.json。Main51000及其7njVeR制品进程已确认退出，17生产源码当前hash仍匹配冻结BUILD，未追加第三次启动。
+
+用户随后确认同时处理自动恢复和自动组合测试，先统一现有显示controller。Main现以Host当前已验收context／intent为唯一目标，`displayState()`只读比较准确Page对象/token、owner、原生bounds和既有交接事实；未知／尚未发布context不推断目标，明确null才撤原页。窗口show／restore／focus、hide／minimize、当前布局、Host发布与菜单结束合并到单个microtask核对；稳定native resize仍同步走唯一几何入口，不改成排队恢复。准备、关闭、菜单与输入屏障持有期间不抢交接，没有轮询或第二Agent Loop。
+
+准确原页仍在而active／visible／presentation不一致时，Main先退休旧drawn证明、截图key与sizeEpoch、呈现anchor和输入资格，再沿私有`watchBrowserPresentation`通知Root。该有界通知只有id、owner与一次性key，无网址、代码、lease或业务命令；Pane核本次displayOwner／scope／draft／可见意图，立即停止旧effect，走同一restart入口，以新revision和当前量测bootstrap。隐藏文档只暂存本次通知，可见时消费；非native-hosted／其他平台保留必要DOM可见性兼容。同目标、Root、token与几何下只尝试一次；普通bootstrap也登记该尝试，失败不会自激循环，新的有效边界才可再核。旧ACK／校准／Host ready不得复活退休证明，不导航、刷新、新建页或重放业务动作。
+
+自动回归沿既有Main／Host／Pane夹具组合事件而非反复GUI：Main新增29项，含缺DOM事件、active／visible单独丢失、显隐与最小化、scope／token／同URL多页、菜单／resize／旧Root回执、关闭及同尺寸恢复后旧截图key失效；整文件209项3617断言通过。Host整文件98项1132断言、Pane40项450断言、Native bridge15项247断言、实际preload VM11项199断言分别独立通过，Desktop类型与定向Biome通过。组合先暴露菜单结束漏通知及旧截图key未退休，两者修后转绿；测试不把忙碌或失败改为ready，不将模型化事件断言授为真实灰帧检测。真实制品的新增恢复切口与剩余像素限制继续在本节记录。
+
+`unified-display-recovery-028-final`只核新恢复入口：冻结开发制品Main70307沿原隔离HOME／Profile从普通UI手动打开HTTPS百度，输入`kite unified recovery`。准确Page.visible私有故障后，Main约2ms发新观察通知、UI新sync revision4、约5ms恢复visible；34ms只读核同WebContents2、timeOrigin1793529046645.7、原输入及scrollY=0，DOM visibility计数始终0，证明没有依赖该事件。随后真实CG Cmd+W和唯一Electron Dock图标AXPress，focus／show触发第二次通知和新sync revision5；同原页／文档／输入／位置保持，没有第二次导航、会话发送或grant。Cmd+W记录到window.isVisible先变false、原生hide事件约267ms后才投递；事件到达时Page确实撤下，未将事件前的view.visible=true误计隐藏失败。Main／driver／双10秒录像正常0、17生产源码drift空，Main及fjebGc制品进程已确认退出。driver两条stale_rendered拒绝与系统sandbox_extension提示原样保留，不授零日志。无新增模型，账本209＋295＝504；本轮资格限本机开发制品，普通构建／跨平台／FPS及旧灰带不升级。
+
+028完整两路10秒复核仍保留像素缺口：首次URL采用前display44/1.008333工具栏正常，45/1.025000顶部约594×184px工具栏白块、Tools正文仍在，46/1.050000才恢复工具栏并采用完整百度正文。此时尚无新恢复通知，不能将它计为恢复入口消除或由最终正文正确覆盖。故障注入后的样本未回Tools／持续灰空／丢输入，但真实hide约4ms可能落采样间隔，不能自授零闪。Dock的display128/3.141667仍右灰无bar，129/3.158333原页准备态含细条纹，135/3.266667原页和输入恢复；稳定尾无错误页、旧页复活或回Tools。全片process523样本（174直接＋349完整PNG同字节复用）、display369（227＋142复用），零未覆盖，另看关键原生全图，原片1530704／2675466 bytes及SHA前后相同，准确观察归028/review/REVIEW.json。该反例说明本次自动核对能修可验证的显示身份／绑定不一致，不能仅凭metadata ready识别任意白／灰像素或保证WindowServer同帧；不为掩盖它们增加刷新、截图替代或业务重放。
+
+
+
+Cmd+W重开后resize出现的`browser_chrome_stale_rendered`另已定位并修复：合法DOM绘制回执可能晚于当前attachment、pageToken或snapshot revision更新；Renderer的Promise catch不能阻止Electron为Main handler异常打印堆栈。Host仍先核准确Chrome发送方／frame和封闭参数，畸形／额外字段报`invalid_browser_chrome_request`，仅合法但与当前绑定不符的观察无效果返回，不写renderedRevision、不pump新绘制。现有`rendered():Promise<void>`及公共工具／协议版本不变，没有过滤日志或吞真实sender／参数错误。Host整文件99项1172断言、受限preload1项23断言、Desktop类型与定向Biome通过；新增回归核rebind与resize后旧观察不变更展示、不能完成新准备，fresh回执仍须原生帧。修前准确失败保留在本机stale-rendered-before.log，028及更早stderr不改写。
+
+`chrome-render-receipt-029-final`冻结开发制品Main79979，沿原隔离HOME／Profile普通UI打开HTTPS百度并填写`kite receipt retained`，真实CG Cmd+W后调用本实例同一app.activate入口重开，随后发八步16ms间隔的1472到1000再到1472 resize请求。验收时用户开发实例共享Electron Dock图标，因此保留唯一图标保护，未点击Dock或操作用户实例；本轮不新增物理Dock资格。私有只读回执观测记录11次rendered，确有revision7晚于8、重开revision10晚于11两次合法过期观察，最新handler正常返回，driver无stale_rendered或其他handler异常，不仅凭没有复现判通过。原WebContents2／timeOrigin1793529990518.5／输入／scrollY=0保持，终态Page visible且Root裁剪与Page左界同为997，没有新增导航、业务或模型。Main／driver／双10秒录像正常0、17生产源码drift空；连续关键画面范围及仍有灰带归029/review/REVIEW.json，不以日志修复授无闪或FPS。模型账本仍209＋295＝504，普通构建／跨平台资格保持。
+
+029画面仅核两路连续0–4.5秒及末0.4秒，不扩成全片无闪。重开process136/2.500000、display101/2.533333为原页准备态，随后立即resize，视频没有独立采到resize前的正文恢复；trace的逻辑visible不代替该像素事实。process144/2.650000实见窗口内宽灰列，display108/2.708333亦有灰／半透明列，窗口外露出背景不计覆盖。process155/2.883333、display117/2.916667恢复完整原页与输入，尾部稳定；这支持旧回执未卡住新展示，不支持灰带、短空、工具栏条纹或FPS已解决。
 
 [Chrome host](electron/browser-chrome-host.ts)只接收 Root 的有界纯展示快照，向唯一 Root 业务处理器转发封闭 UI 事件。独立[受限 preload](electron/browser-chrome-preload.ts)没有 NativeBridge、Service caller、任意代码或 CDP 入口；它与普通网页使用不同 session。Root 保留唯一 tab model、observer、地址草稿及权限读取。scope、真实页对象、attachment、revision、序号与一次性确认核实后才转发，确认丢失不重发；实际导航与控制仍由原 owner 受理。混合 reader、注释或遮挡右栏的全局界面恢复 Root 完整展示并隐藏原生绘制，网页对象保留。
 
@@ -2238,3 +2280,59 @@ Main capture／grant36项383断言、Producer／menu／human／flow／async-root
 该次Model持久输入另证实外层Tool只收到job_stop_unconfirmed，浏览器已有停止原因在原Job.details.actualResult；技术code_session的cancelled文案也被模型解释成任务取消。当前[Browser说明](../../packages/agent/src/tools/browser/README.md#统一执行入口与隔离环境)已补精确宿主身份与Runtime wrapper解释、技术停止范围，70项877断言、Agent类型通过，原结果和通知生命周期保持。此后语义场景只进行未提交任务的界面准备；macOS实际报告screenLocked=true，焦点与OS截图未确认，没有新增Model，也不据BrowserWindow逻辑截图追认真实画面。007正常退出未确认，Main及其余登记样本absent、Service精确tail后absent，准确daemon注册／guardian／目录确认结束，三处旧unknown不变。当前无客户端运行；008只沿原两配置／必要重启许可离线准备，待桌面解锁继续剩余真实验收，不新增审批或清洗历史。
 
 008在用户确认解锁后仅启动011普通构建，18次真实模型使累计309；012仍只构建。后台观察中已完成B→A，随后在原延迟响应放行前出现新的B点击及新select，Main与renderer一致回到B；当前不能区分人工输入和夹具输入来源，不能据此改产品选择逻辑或计后台通过。守卫拒绝放行，原导航unknown保留。E场景普通Tab X实际销毁原页后，第二Run收到可读的existing_missing并正常final，零替代请求／业务效果；外部最终断言误把旧main-ipc-reply当实时页面而失败，原文件不改写，补充审查只核main-readonly-state，连续视觉资格仍待核。008正常退出未确认；Main absent、原Service按birth精确tail后absent，两项daemon注册／guardian／root／session均确认结束，旧三处unknown不变。原材料归本机restart-008，页面生命周期与精确跨Run身份的新修复仍须新制品验收。
+
+
+### 侧栏保活与原生加载宿主（2026-11-01）
+
+侧栏开合本来已保留 Page／Chrome WebContents，没有重新 loadURL；此前丢弃的是呈现绑定和准备事实，手动展开还经历中间宽度。现选中既有 browser tab 从 header 展开直接采用最终尺寸，普通详情／导航动画保持。Host 仅保存最后一次成功布局的资源描述（准确 view/token、owner、Page frame/URL、Root frame/metrics、viewport），不保存截图或输入证明。同原文档、同 owner／Root／尺寸且真实输入盾可用时，先呈现受盾保护的 live Page 与 Chrome bar，fresh wire、Root 双帧、Page 完整帧及新的 hosted ACK 后恢复输入；任一事实变化走完整准备。收起只隐藏并退休展示，不 detach／unregister 或释放 Agent lease，非零 viewport 与原文档保持；坐标依据仍按原观察规则失效。
+
+完整准备复用既有 Chrome display capsule：先在现有原生宿主绘制不透明整右栏 header＋普通 Spinner，其准确自身完整帧就绪后才准 Root 私有 nonce。目标 Page 临时放 Root 之上、该宿主之下等待真实文档和自身帧；采用时先裁剪 Root，再恢复稳定 Page＜Root＜Chrome 层序，最后将宿主缩回 bar。准备阶段仅允许精确 wire 的停止加载、关闭／收起、Escape／返回 Root，不能沿 preparing 取得导航、任意输入、Agent lease 或模型观察。preflight／已覆盖但无 fresh Root 都有有限超时及可读失败，失败不循环重新观察；冷／暖临时 Page 均撤，Main 只取消同 signal 的初始准备，旧 callback 不取消继任者。
+
+030 的最小矩形遮挡曾在实际过程泄露三帧 nonce，该候选已替换，原片保留。032 是新宿主的首次冻结集成失败：新观察通知触发旧 Pane cleanup 撤掉已准备宿主，128 次通知、Chrome revision 到266，首 Page 未采用。后继明确 Main reobserve 交接：只在同 node／document／owner／visible 且无 error／blocked 时跳旧 withdrawal，仍清旧证明；真实收起、卸载和换 owner 继续撤。失败原片、hash、零 source drift 与实际执行保留在 `.cache/browser-native-clip-probe-20261031/native-loading-resume-032-final`；本段不授该失败制品任何通过资格。最终定向及冻结制品结果续于本节，原 resize／Root 展宽灰带、普通构建与跨平台资格不升级，模型账本仍504，无新模型调用。
+
+
+033 已修复该循环并完成首开与原页开合，19个生产输入 hash 无漂移；Page2、timeOrigin1793536567962.9、原输入及scrollY=0保持，隐藏期受控 Page JS 写入后原页恢复，开合期间无导航事件。该受控 JS 不是新 Agent lease；已确认隐藏 lease 的 CDP 派发另由原 PageHost 回归核对。连续原图又准确发现 warm bar 底边半个 Spinner（P99/2.050000、D99/2.066667），故不授 warm 无残留资格；cold P33/0.641667无 nonce，但起始 header 左缘短裁到 P38归位，仍保留。后继仅补私有 loadingBody 显示事实：cold true、warm false，取消准入仍按 preparing／准确 wire 核对，Renderer 的 warm bar 不再创建 loading 正文；不用高度阈值隐藏或复用旧截图。033 原片与读图范围保留在同根 `native-loading-resume-033-final`，最新034只针对这处新缺口验证，不重做天气／缩放。
+
+
+034 最新冻结开发制品 Main26129 完成 HTTPS 百度首开、侧栏收起、隐藏期受控 Page JS 写入和原页展开。Page仍为 WebContents2、timeOrigin1793536976155.6，输入由`kite sidebar retained`变为隐藏期的`kite retained background`并在展开保留，scrollY仍0；开合期间没有新导航事件。19个生产输入构建／结束／当前 hash均无漂移，两源10秒录像退出0，driver无handler异常，原片与连续读图范围归`.cache/browser-native-clip-probe-20261031/native-loading-resume-034-final/review/REVIEW.json`。约束内的live Page复用路径实际采用，不借旧截图、Root ACK或输入权；两个180ms私有capture返还hold只暴露交接，不是自然时延或FPS证据。
+
+0–4.5秒及末0.4秒连续两源复核：冷loading所核原图无nonce条或恢复文字，原页出现后工具栏底部不再露033半个Spinner（P99/2.041667与D99/2.075000原尺寸确认）。仍保留展开前一个样本的完整普通Spinner（P98/2.025000、D98/2.058333），不能称warm全过程无loading；首开tab／address左缘短裁、收起时D87/1.775000整旧右栏灰列、P的窄Root布局过渡同样保留，未授整体无闪或已知缩放灰带修复。未覆盖录像中间稳定段、普通构建、跨平台与完整物理输入资格不升级，030／032／033失败原片不改写。
+
+最终定向回归：Main230项3904断言、Host109项1299断言、Pane56项570断言、Chrome Renderer15项147断言、私有桥5项82断言、Root18项202断言、SessionPage渲染10项143断言；Bootstrap11项199断言、原Chrome preload1项23断言、Native bridge15项247断言及隐藏已确认lease派发1项14断言也通过。Desktop／UI类型、Biome、文档／影响映射、Core边界及测试归属通过；没有新模型调用、提交或推送。此轮iteration_complete只覆盖已确认的普通loading、资源保活／原页快速恢复和准确取消边界，未扩大既有渲染／发行资格。
+
+
+### 窗口重开与已加载标签切换回归（2026-11-01）
+
+用户随后确认 Cmd+W 重开不能显示／刷新、已加载标签切换又闪烁，重新打开相关结论。上一轮新增的cold准入只检查`!readyFor`，但已有shell的新目标在fresh ACK前本来就未ready；`loadingReady`扩整高Chrome并改变层序后，破坏仍在使用的裁剪Root／bar和handoff，其准备又要求full Root而永远不能完成。另`finishDisplay(false)`将普通取消也封为loadingFailure，而Main.hide没有释放尚未转交Main的Host preflight，可能在隐藏时超时并以同binding／metrics永久busy；稳定原页的hide又留下Host cropped shell，出现依赖Renderer是否先withdraw的不同恢复路径。
+
+现Main仅在无准确当前presentationViewport的cold路径使用整页loading，既有shell／目标预备继续fresh绑定与交接；Host冷入口自身也拒绝任何shell／handoff／Root-return或非full Root，不得改已有bar／source。窗口hide／minimize明确释放Host展示与待交接准备，清本次loadingRequest，保准确Page和资源描述；show仍由已验收意图重新绑定，不借旧lease／截图／ACK。只有明确reportFailure的真实preflight失败才能写loadingFailure，正常取消不制造失败锁；真实超时继续一次报告和隔离，不增加重试或刷新循环。
+
+定向先取得Main六个红例与Host三个红例，分别复现误入cold、未取消Host准备及普通取消误封busy；该切口修后Main236项4046断言、Host112项1384断言全绿，真实timeout两项仍通过。旧测试不删，补了独立shell存在但binding未ready的事实，以及session／draft preflight／covered的hide→show→resize和旧callback隔离。原034只验draft首开／开合，不能代替这些生命周期组合。035真实制品因夹具误向隐藏的保留Chrome输入新空B地址，导航根本未派发；该失败和原片保留，不计产品失败或通过。仅修夹具的可见目标核实后，036从已有隔离Session完成HTTPS百度A／example.org B往返、真正关闭B回A、系统CG Cmd+W、准确本实例activate、有限resize及工具栏实际刷新。刷新前原A的WebContents、timeOrigin与输入保持，刷新后是有意创建的新文档且可读；不把正常final或退出0当作功能证据。
+
+036的两路15秒原片各完整导出活动0–6.5秒及稳定尾0.4秒，32张去重联系表和16张原尺寸帧支持上述有限过程：已加载切页和关闭回邻页未再采到额外整栏空白、错误页闪回或工具栏撤下；重开仍有process P161/3.358333全窗灰→P162普通Spinner→P163原页，display D158/3.408333 Spinner→D159原页。D184/3.933333在resize／主动刷新边界采到正文灰底且已有停止加载图标，不能单独归因resize。新空tab仍有短header交接，不授整体无闪、FPS或全部平台资格。完整原始失败、范围、PTS、hash及复核位于本机`.cache/browser-native-clip-probe-20261031/session-tabs-window-recovery-035-final`及`session-tabs-window-recovery-036-final/review/REVIEW.json`；无IPC handler／stale_rendered异常，原始系统sandbox_extension警告另保留。
+
+### 标题栏双击与Root逻辑尺寸（2026-11-01）
+
+用户实机截图的宽暗空和短条纹按独立因果排查。稳定托管校准原本生成Root nonce，但该异步路径Main不消费它；准确采用回执到达时若DOM尺寸又变，旧的完成函数先拒绝而未清画布。现只有初始同步Root两帧产生nonce；稳定async不生成、不回传绘制证明，Main同时退休旧drawnRequest／drawnPresentation。准确同调用、同id的完成回执只清自身画布，采用仍核当前DOM／owner／revision；错误id、旧scope及旧callback不能清继任或恢复旧坐标。截图仍依据当前真实Page bounds／sizeEpoch，不伪造Root帧。
+
+移除稳定nonce后，037冻结诊断仍复现约298px内部暗空及条纹：所有Host.layout成功、三份原生边界一致；阻塞点是首个Root `Emulation.setDeviceMetricsOverride` ACK约354ms／347ms才返回，旧单在途队列因此让Root逻辑viewport停在动画第一尺寸，Page及物理裁剪已继续移动。条纹未必是当时新画的nonce，不能只清画布就宣称根因解决。038候选在同步JS maximize／unmaximize调用期间提交新尺寸，Root样本边界偏差降至约12px，但真实macOS拖动标题栏双击在Chromium直接performZoom，不经过应用DOM／IPC或JS方法，因此该包装退役、四个原本clean文件无最终diff。037／038原片、准确采样和失败均保留，038不授系统鼠标路径资格；039只准备未执行。
+
+当前单一metrics writer由现有Main `applyNativeResize`明确传入原生来源，实际resize事件可在旧ACK未到时提交最新不同尺寸，覆盖系统标题栏双击及真实边框拖动；Renderer校准等其它来源继续单在途和最后尺寸合并，不靠定时器、isMaximized或will-resize猜动画起点。当前请求按对象、Root frame与metricsEpoch核完成，迟到旧完成／拒绝不回滚或失败继任，真正最新请求失败仍撤展示并恢复Root。A→B→A必须重发A，不能因A曾applied而省略已派发B后的恢复。该命令ACK仅表示逻辑环境完成，不授Page绘制、输入或旧观察；原fresh ACK、Page完整帧和取消门保留。Electron每条命令独立id，Chromium按收到的参数更新后等待Renderer回执，采用该边界而非串行等待首个动画ACK；[固定Electron实现](https://github.com/electron/electron/blob/v44.3.0/shell/browser/api/electron_api_debugger.cc)、[固定Chromium实现](https://github.com/chromium/chromium/blob/152.0.7977.78/content/browser/devtools/protocol/emulation_handler.cc)。系统双击分支见[原生窗口处理](https://github.com/chromium/chromium/blob/152.0.7977.78/components/remote_cocoa/app_shim/native_widget_mac_nswindow.mm#L523)。
+
+当前Main237项4084断言、Host118项1486断言、Pane60项617断言通过；新增Host六项先红后绿，覆盖显式native来源的A/B/C、ABA、重复去重、旧完成／拒绝、新Root及dispose；普通来源串行断言保留。Main原prepared／unprepared resize测试同时区分native与Renderer来源。上述为受控回归，系统CG双击及快速边框拖动的最终冻结制品资格续于本节，不以038应用调用路径代替。模型账本仍504，本轮无新增模型，不暂存、提交或推送。
+
+040冻结最新19份生产源码，运行前后hash零漂移，沿原隔离dev HOME/Profile仅启动一份验收客户端。系统CG输入限定Main71327、PPID71325、精确birth及CGWindow7097，真实header双击false→true→false，DOM click／maximize IPC计数均0，证实已覆盖此前包装遗漏的原生路线。放大／还原各38个真实resize和38个native来源布局，Host.layout均成功，Root逻辑宽在探针内分别推进34／36个值，Root DOM采样边界峰差约14.664／9.484px，不再冻在第一尺寸。每段900ms内各38条metrics全部完成，无同值相邻重复；不同输入路径的037约298px仅作既有失效机制对照，不当作同输入性能基准。
+
+同片追加一次真实系统右边框40步／每步约16.7ms拖动，宽1050→1440（+390）、高度不变，原A/B文档与百度输入均保持，四次终态geometry一致。该拖动的900ms诊断窗口只覆盖到宽1330，后段在完整录像与终态核对，不能将窗口内约1.523px峰差扩大为全拖动测量或FPS；画面复核必须覆盖实际drag结束之后。两路15秒录像均code0，完整launcher退出0，Main71327已absent，用户dev Main65207保留。原始driver有4条Window move completed without beginning及1条sandbox_extension系统警告，未伪作无日志异常；没有browser_chrome_stale_rendered或IPC handler异常。准确原片、探针、输入身份、源码与后续像素范围归本机`.cache/browser-native-clip-probe-20261031/header-maximize-040-native-resize-cg`。
+
+040离线诊断已冻结为同目录`analysis.json/md`：放大首／末metrics回执355／22ms、还原351／18ms，首条ACK仍晚但不再阻塞当前尺寸；拖动28条均完成，末条在900ms边界后约4ms返回，不是丢ACK。每段完整params重复0、失败0；旧ACK不构成迟到旧参数再应用，固定Chromium实现在browser侧先更新参数，再FallThrough等待Renderer回执。各surface在不同回调／合成帧提交的限制仍在，不能用以上逻辑环境测量证明系统同帧。
+
+040连续像素复核已冻结为`review/REVIEW.json`：两路活动0–6.791667秒及稳定尾约0.4秒共772个样本，35张完整PNG去重联系表覆盖544个唯一画面，另读18张列明原尺寸帧；其余选定重复样本仅按同源完整PNG SHA复用，未覆盖中间静止段不补资格。所看系统放大／还原／快速拖边未再复现037宽内部暗空、短条纹或旧宽聊天被裁切，原百度持续可见，未采到错误Example正文、Tools闪回、正文Spinner或双bar。仍明确失败：放大D36/0.683333灰缝26–28物理px；还原的窗口内右外灰带至少从D130/2.391667到D143/2.633333存在241.667ms，D138/2.533333所测224px不是全局峰值，D144/2.650000收敛且D145稳定。不得用这轮功能与边界改善升级整体无灰／无闪、非零阅读位置、FPS、普通构建或跨平台资格。
+
+本轮按`document-before-commit`完成限定的`iteration_complete`：415项Main／Host／Pane回归、Desktop类型、六文件Biome、Core边界、测试归属、文档结构／影响和diff空白检查通过；退役包装后的Root7项／Layout3项原测试保持。手册中原页保留、重开／切页及加载动画预期已核对，本轮未改变承诺，无新增展示文案或工具协议。当前25个已有任务dirty文件保留，暂存区为空、HEAD仍`824966026`，未提交／推送。该ready仅覆盖窗口恢复／既有切页回归和Root逻辑尺寸冻结切口；上列实录残余灰带继续按用户既定边界保留，不进入引擎补丁。用户现有dev的Main不会由Renderer HMR替换，需要完整重启才含本轮Main修复。
+
+### 右栏接管后的主题背景（2026-11-01）
+
+用户新增输入网址、网页呈现后整右栏变色。Root的`.right-sidebar`明确使用`--page-background`，但独立Chrome的html/body/root和`.kite-client`保持透明，稳定`.session-tabs`没有绘制自己的底色；准备阶段另铺`--background`，因此准备／稳定接管出现不同表面。主题值原已通过snapshot同步，该缺口是实际承载层漏背景，网页CSS不参与独立Chrome文档。现在只为该宿主的`.session-tabs`补与Root一致的`--page-background`；外层透明、物理几何／层序、准备与Page确认、输入和权限均保持，不借添加`.right-sidebar`类引入额外边框或材质inset。网页正文仍由站点自身配色，标签／地址栏跟随应用主题。
+
+本切口只改变CSS背景，手册中主题与网页保留承诺已核对，Agent／Main／工具协议和生命周期未改；原415项状态回归及类型结果按未变源码复用，不重做导航／resize矩阵，也不升级040的整体视觉资格。私有041以原生产Vite／Tailwind样式、独立最小DOM文档核深浅主题×修前修后，共4组／12个表面。修前Root／准备为主题实色，稳定宿主computed透明，PNG透出夹具灰色背衬；该灰色不是Electron默认canvas色。修后Root／准备／稳定三者的computed与真实PNG均一致：浅色RGB250／暗色RGB25且alpha255，前后几何逐字段相同、pageErrors为空，两份源hash不变。4张PNG已检查，具体值与原始失败／警告保留在本机`.cache/browser-native-clip-probe-20261031/chrome-surface-color-041/REVIEW.json`及`RESULT.json`；此证据只授CSS与shell配色，不代替真实Electron导航交接、resize或全程无闪。CSS Biome、diff空白及文档结构／影响检查通过，本小修复的限定iteration_complete为ready，未暂存／提交／推送。

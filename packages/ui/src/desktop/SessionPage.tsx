@@ -301,24 +301,26 @@ function SessionPageContent({
     else queueMicrotask(focus);
   }, []);
   const [sidebarOpen, setSidebarOpenIntent] = useState(true);
-  const [panelsAnimating, setPanelsAnimating] = useState(false);
+  const [navigationAnimating, setNavigationAnimating] = useState(false);
+  const [detailsAnimation, setDetailsAnimation] = useState<{ scope?: string }>();
   const navigationWidth = useRef(savedNavigationWidth());
   const navigationPanel = useRef<PanelImperativeHandle>(null);
   const detailsPanel = useRef<PanelImperativeHandle>(null);
   const panelGroupElement = useRef<HTMLDivElement>(null);
   const contentGroupElement = useRef<HTMLDivElement>(null);
   const navigationPanelFrame = useRef<number | undefined>(undefined);
-  const panelAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const navigationAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const detailsAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
   const directDetails = useRef(false);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
   const tabsScopeKey = props.tabsScopeKey ?? props.readingKey;
   const tabsIntent = useRef<{ scope?: string; key?: string }>({});
-  const retireTabsPanel = useRef(false);
+  const detailsScope = useRef({ scope: tabsScopeKey, settling: false });
   if (tabsIntent.current.scope !== tabsScopeKey) {
-    retireTabsPanel.current = tabsIntent.current.key !== undefined;
     tabsIntent.current = { scope: tabsScopeKey };
   }
+  const detailsAnimating = !!detailsAnimation && detailsAnimation.scope === tabsScopeKey;
   const [, tabsChanged] = useState(0);
   const setTabsKey = useCallback((key: string | undefined) => {
     if (tabsIntent.current.key === key) return;
@@ -402,15 +404,16 @@ function SessionPageContent({
   };
   const rightSidebarOpen =
     hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
+  const detailsPending = !!(props.loading || props.browserPending || tabModel.restoring);
   const tabsVisible = tabsOpen && detailsCollapsed !== true;
   const tabsPresent =
     tabsVisible ||
-    (!rightSidebarOpen && panelsAnimating && presentedTabsKey.current === tabsScopeKey);
+    (!rightSidebarOpen && detailsAnimating && presentedTabsKey.current === tabsScopeKey);
   useLayoutEffect(() => {
     if (tabsVisible) presentedTabsKey.current = tabsScopeKey;
-    else if (!panelsAnimating || hostDetailsOpen || props.covered)
+    else if (!detailsAnimating || hostDetailsOpen || props.covered)
       presentedTabsKey.current = undefined;
-  }, [tabsVisible, panelsAnimating, hostDetailsOpen, props.covered, tabsScopeKey]);
+  }, [tabsVisible, detailsAnimating, hostDetailsOpen, props.covered, tabsScopeKey]);
   const tabsToggle = useRef<HTMLButtonElement>(null);
   const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
@@ -436,25 +439,39 @@ function SessionPageContent({
         commit();
         return;
       }
-      frame.current = requestAnimationFrame(() => {
+      const scope = tabsIntent.current.scope;
+      const scheduled = requestAnimationFrame(() => {
+        if (frame.current !== scheduled) return;
         frame.current = undefined;
+        if (panel === detailsPanel && tabsIntent.current.scope !== scope) return;
         // The header affordance and the panel layout must start in one commit.
         commit?.();
         const group = groupElement.current;
         if (!group || group.offsetWidth <= 0 || group.getBoundingClientRect().width <= 0) return;
         const target = panel.current;
         if (!target || (panel !== navigationPanel && target.isCollapsed() !== open)) return;
-        setPanelsAnimating(true);
-        if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
-        panelAnimationTimer.current = setTimeout(() => {
-          panelAnimationTimer.current = undefined;
-          setPanelsAnimating(false);
-        }, 240);
         // Navigation uses explicit size constraints; only its button changes them.
-        if (panel === navigationPanel) return;
+        if (panel === navigationPanel) {
+          setNavigationAnimating(true);
+          if (navigationAnimationTimer.current !== undefined)
+            clearTimeout(navigationAnimationTimer.current);
+          navigationAnimationTimer.current = setTimeout(() => {
+            navigationAnimationTimer.current = undefined;
+            setNavigationAnimating(false);
+          }, 240);
+          return;
+        }
+        setDetailsAnimation({ scope });
+        if (detailsAnimationTimer.current !== undefined)
+          clearTimeout(detailsAnimationTimer.current);
+        detailsAnimationTimer.current = setTimeout(() => {
+          detailsAnimationTimer.current = undefined;
+          setDetailsAnimation(undefined);
+        }, 240);
         if (open) target.expand();
         else target.collapse();
       });
+      frame.current = scheduled;
     },
     [],
   );
@@ -477,9 +494,13 @@ function SessionPageContent({
       !event.target.closest('[data-slot="resizable-handle"]')
     )
       return;
-    if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
-    panelAnimationTimer.current = undefined;
-    setPanelsAnimating(false);
+    if (navigationAnimationTimer.current !== undefined)
+      clearTimeout(navigationAnimationTimer.current);
+    navigationAnimationTimer.current = undefined;
+    if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
+    detailsAnimationTimer.current = undefined;
+    setNavigationAnimating(false);
+    setDetailsAnimation(undefined);
   }, []);
   const expandDetails = useCallback(
     () => schedulePanelChange(detailsPanelFrame, detailsPanel, true),
@@ -490,28 +511,36 @@ function SessionPageContent({
     [schedulePanelChange],
   );
   const dismissedBrowserReveals = useRef(new Set<string>());
+  const stopDetailsAnimation = useCallback(() => {
+    if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
+    detailsPanelFrame.current = undefined;
+    if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
+    detailsAnimationTimer.current = undefined;
+    setDetailsAnimation(undefined);
+  }, []);
+  const settleDetails = useCallback(
+    (open: boolean) => {
+      directDetails.current = true;
+      stopDetailsAnimation();
+      if (open) detailsPanel.current?.expand();
+      else detailsPanel.current?.collapse();
+    },
+    [stopDetailsAnimation],
+  );
   const changeTabsOpen = useCallback(
     (open: boolean, animate = true) => {
       // Closing a host panel can replace its pending layout frame, not this intent.
       if (!open) dismissedBrowserReveals.current.add(tabsScopeKey);
       setTabsKey(open ? tabsScopeKey : undefined);
       if (animate) schedulePanelChange(detailsPanelFrame, detailsPanel, open);
-      else {
-        directDetails.current = true;
-        if (detailsPanelFrame.current !== undefined)
-          cancelAnimationFrame(detailsPanelFrame.current);
-        detailsPanelFrame.current = undefined;
-        if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
-        panelAnimationTimer.current = undefined;
-        setPanelsAnimating(false);
-        if (open) detailsPanel.current?.expand();
-        else detailsPanel.current?.collapse();
-      }
+      else settleDetails(open);
     },
-    [schedulePanelChange, tabsScopeKey, setTabsKey],
+    [schedulePanelChange, tabsScopeKey, setTabsKey, settleDetails],
   );
-  const handledBrowserReveals = useRef(new Set<string>());
-  useEffect(() => {
+  const handledBrowserReveals = useRef({ scope: tabsScopeKey, ids: new Set<string>() });
+  if (handledBrowserReveals.current.scope !== tabsScopeKey)
+    handledBrowserReveals.current = { scope: tabsScopeKey, ids: new Set<string>() };
+  useLayoutEffect(() => {
     const id = tabModel.revealBrowserId;
     if (
       !id ||
@@ -525,9 +554,8 @@ function SessionPageContent({
       !tabModel.tabs.some((tab) => tab.kind === 'browser' && tab.id === id)
     )
       return;
-    const key = JSON.stringify([tabsScopeKey, id]);
-    if (handledBrowserReveals.current.has(key)) return;
-    handledBrowserReveals.current.add(key);
+    if (handledBrowserReveals.current.ids.has(id)) return;
+    handledBrowserReveals.current.ids.add(id);
     tabModel.select(id);
     changeTabsOpen(true, false);
   }, [
@@ -553,7 +581,7 @@ function SessionPageContent({
   workspaceContent.current = props.workspaceTab;
   const workspaceRequestId = props.workspaceTab?.requestId;
   const browserRequest = useRef<string | undefined>(undefined);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const request = props.browserTabRequest;
     if (
       !request ||
@@ -575,7 +603,7 @@ function SessionPageContent({
     if (page) tabModel.select(page.id);
     else tabModel.addBrowser();
     detailClose.current?.();
-    changeTabsOpen(true);
+    changeTabsOpen(true, !page);
   }, [
     props.browserTabRequest,
     hasTabs,
@@ -670,7 +698,9 @@ function SessionPageContent({
       scheduledEditorGeneration.current++;
       if (navigationPanelFrame.current !== undefined)
         cancelAnimationFrame(navigationPanelFrame.current);
-      if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
+      if (navigationAnimationTimer.current !== undefined)
+        clearTimeout(navigationAnimationTimer.current);
+      if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
       if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
       if (environmentAnimationTimer.current !== undefined)
         clearTimeout(environmentAnimationTimer.current);
@@ -686,34 +716,50 @@ function SessionPageContent({
     if (environmentAnimationKey !== undefined) setEnvironmentAnimationKey(undefined);
   }, [props.readingKey, environmentAnimationKey]);
   useLayoutEffect(() => {
-    if (retireTabsPanel.current && tabsIntent.current.scope === tabsScopeKey) {
-      retireTabsPanel.current = false;
-      if (!hostDetailsOpen) collapseDetails();
+    if (detailsScope.current.scope !== tabsScopeKey) {
+      detailsScope.current = { scope: tabsScopeKey, settling: true };
+      stopDetailsAnimation();
     }
-  }, [tabsScopeKey, hostDetailsOpen, collapseDetails]);
+    if (!detailsScope.current.settling) return;
+    // The old owner's queued panel action must never run on the new owner.
+    // Pending selection/restore is not an empty target or a user-close intent.
+    const open = rightSidebarOpen || (tabsIntent.current.key === tabsScopeKey && hasTabs);
+    if (!open && detailsPending) return;
+    settleDetails(open);
+    detailsScope.current.settling = false;
+  }, [
+    tabsScopeKey,
+    rightSidebarOpen,
+    hasTabs,
+    detailsPending,
+    stopDetailsAnimation,
+    settleDetails,
+  ]);
   useEffect(() => {
     if (!props.scheduledTasks) {
-      collapseDetails();
       scheduledEditorGeneration.current++;
       setScheduledEditor(undefined);
     }
-  }, [props.scheduledTasks, collapseDetails]);
+  }, [props.scheduledTasks]);
   useEffect(() => {
-    if (directDetails.current) {
-      directDetails.current = false;
+    if (
+      detailsScope.current.scope !== tabsScopeKey ||
+      (detailsScope.current.settling && detailsPending)
+    )
       return;
-    }
+    const direct = directDetails.current;
+    directDetails.current = false;
     if (!rightSidebarOpen) {
-      collapseDetails();
+      if (!direct) collapseDetails();
       return;
     }
-    expandDetails();
+    if (!direct) expandDetails();
     const group = contentGroupElement.current;
     if (!group || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(expandDetails);
     observer.observe(group);
     return () => observer.disconnect();
-  }, [rightSidebarOpen, expandDetails, collapseDetails]);
+  }, [tabsScopeKey, rightSidebarOpen, detailsPending, expandDetails, collapseDetails]);
   useEffect(() => {
     const group = panelGroupElement.current;
     if (!sidebarOpen || !group || typeof ResizeObserver === 'undefined') return;
@@ -981,7 +1027,7 @@ function SessionPageContent({
         orientation="horizontal"
         elementRef={panelGroupElement}
         className="client-panels"
-        data-animate-width={panelsAnimating ? 'true' : undefined}
+        data-animate-width={navigationAnimating ? 'true' : undefined}
         onPointerDownCapture={stopPanelAnimationOnResize}
         onKeyDownCapture={stopPanelAnimationOnResize}
         aria-hidden={props.covered || undefined}
@@ -1055,7 +1101,7 @@ function SessionPageContent({
               orientation="horizontal"
               elementRef={contentGroupElement}
               className="client-content-panels"
-              data-animate-width={panelsAnimating ? 'true' : undefined}
+              data-animate-width={detailsAnimating ? 'true' : undefined}
               onLayoutChange={(layout) => {
                 const collapsed = (layout.details ?? 0) === 0;
                 if (collapsed === detailsCollapsed) return;
@@ -1131,7 +1177,11 @@ function SessionPageContent({
                             if (tabModel.tabs.length === 0) tabModel.addBrowser();
                             props.detailPanel?.onClose();
                           }
-                          changeTabsOpen(!tabsOpen);
+                          // Retained browser pages reopen at their final native viewport width.
+                          const retainedBrowser = tabModel.tabs.some(
+                            (tab) => tab.kind === 'browser' && tab.id === tabModel.active,
+                          );
+                          changeTabsOpen(!tabsOpen, tabsOpen || !retainedBrowser);
                         }}
                       >
                         <HugeiconsIcon icon={BrowserIcon} />

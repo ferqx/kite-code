@@ -8,6 +8,7 @@ import {
   type NativeBrowserLayout,
   type NativeBrowserMenuRequest,
   type NativeBrowserPresentationFrame,
+  type NativeBrowserPresentationRequest,
   type NativeBrowserRequest,
   type NativeBrowserRestoreResult,
   type NativeBrowserRestoreScope,
@@ -16,6 +17,7 @@ import {
   nativeBrowserLayoutFrameChannel,
   nativeBrowserMenuCancelChannel,
   nativeBrowserMenuChannel,
+  nativeBrowserPresentationChannel,
   nativeBrowserWitnessColors,
   nativeBrowserWitnessSamplePoints,
   projectNativeBrowserBounds,
@@ -113,8 +115,15 @@ class FakeContents extends EventEmitter {
     this.frame = undefined;
   }
   invalidations = 0;
+  autoPresentationFrame = false;
+  lastCaptureImage?: Electron.NativeImage;
   invalidate() {
     this.invalidations++;
+    if (this.autoPresentationFrame && this.lastCaptureImage) {
+      const frame = this.frame,
+        image = this.lastCaptureImage;
+      queueMicrotask(() => frame?.(image));
+    }
   }
   setWindowOpenHandler() {}
   getURL() {
@@ -146,7 +155,9 @@ class FakeContents extends EventEmitter {
   };
   async capturePage() {
     this.captureCalls++;
-    return this.captureVisible();
+    const image = await this.captureVisible();
+    this.lastCaptureImage = image as Electron.NativeImage;
+    return image;
   }
   async executeJavaScript() {
     return this.readMetrics();
@@ -161,18 +172,13 @@ class FakeContents extends EventEmitter {
     this.destroyed = true;
   }
 }
-class FakeView {
-  readonly webContents = new FakeContents();
+class FakePlainView {
   visible = false;
   readonly visibility: boolean[] = [];
   bounds = { x: 0, y: 0, width: 0, height: 0 };
   readonly boundsWrites: Electron.Rectangle[] = [];
   readonly radiusWrites: number[] = [];
-  readonly options: { webPreferences?: Record<string, unknown> };
-  constructor(options: { webPreferences?: Record<string, unknown> } = {}) {
-    this.options = options;
-    views.push(this);
-  }
+  readonly backgrounds: string[] = [];
   setVisible(value: boolean) {
     this.visible = value;
     this.visibility.push(value);
@@ -190,8 +196,20 @@ class FakeView {
   setBorderRadius(radius: number) {
     this.radiusWrites.push(radius);
   }
-  setBackgroundColor() {}
+  setBackgroundColor(color: string) {
+    this.backgrounds.push(color);
+  }
 }
+class FakeView extends FakePlainView {
+  readonly webContents = new FakeContents();
+  readonly options: { webPreferences?: Record<string, unknown> };
+  constructor(options: { webPreferences?: Record<string, unknown> } = {}) {
+    super();
+    this.options = options;
+    views.push(this);
+  }
+}
+let backingScale = 1;
 let popupTemplate: Electron.MenuItemConstructorOptions[] = [],
   popupOptions: Electron.PopupOptions | undefined;
 let popupCloses = 0;
@@ -219,6 +237,8 @@ mock.module('electron', () => ({
     },
   },
   WebContentsView: FakeView,
+  View: FakePlainView,
+  screen: { getDisplayMatching: () => ({ scaleFactor: backingScale }) },
   nativeImage: {
     createFromBuffer(bytes: Buffer) {
       const size = JSON.parse(bytes.toString());
@@ -246,6 +266,22 @@ type FakeDisplayPreparation = {
   scope: NativeBrowserChromeOwner;
   signal: AbortSignal;
 };
+type FakeLoadingCheck = {
+  id: string;
+  viewport: Electron.Rectangle;
+  scope: NativeBrowserChromeOwner;
+};
+type FakeChromeDisplayState =
+  | { kind: 'unknown' | 'root' }
+  | {
+      kind: 'page';
+      id: string;
+      scope: NativeBrowserChromeOwner;
+      token: string;
+      busy: boolean;
+      presented: boolean;
+      theme?: 'dark' | 'light';
+    };
 let nativeChrome:
   | {
       ready: boolean;
@@ -253,6 +289,7 @@ let nativeChrome:
       releases: (string | undefined)[];
       invalidations: number;
       viewportSyncs: number;
+      viewportSyncModes: boolean[];
       pageScope(id?: string): unknown;
       announceReady(id?: string): void;
       suspend(id?: string): void;
@@ -270,12 +307,25 @@ let nativeChrome:
       displayOffers: Omit<FakeDisplayPreparation, 'signal'>[];
       readDisplay(input: FakeDisplayPreparation): Promise<boolean>;
       offerSucceeds: boolean;
+      loadingChecks: FakeLoadingCheck[];
+      readLoading(input: FakeLoadingCheck): boolean;
+      retainedViewport: Electron.Rectangle | undefined;
+      loadingController: AbortController | undefined;
+      display: FakeChromeDisplayState;
+      setDisplay(display: FakeChromeDisplayState): void;
+      pageToken(id: string): string | undefined;
+      notifyDisplay(): void;
+      cancelDisplay(id: string, signal: AbortSignal): void;
+      canProtectLivePage(): boolean;
+      protectLivePage(view: FakeView): boolean;
     }
   | undefined;
 mock.module('../../electron/browser-chrome-host', () => ({
   createNativeBrowserChromeHost(options: {
     window: BrowserWindow;
-    getPage(id: string): { id: string; scope?: unknown; draft?: string } | undefined;
+    getPage(
+      id: string,
+    ): { id: string; scope?: unknown; draft?: string; token: string; view: FakeView } | undefined;
     currentScope(forInput: boolean): NativeBrowserRestoreScope | undefined;
     onReady(id: string): void;
     onSuspend(id: string): void;
@@ -283,6 +333,10 @@ mock.module('../../electron/browser-chrome-host', () => ({
     onShellReleased?(id?: string): void;
     onContextChanged?(): void;
     onRootReturnCancelled?(id: string): void;
+    onStateChanged?(): void;
+    onDisplayCancelled?(id: string, signal: AbortSignal): void;
+    canProtectLivePage?(): boolean;
+    protectLivePage?(view: Electron.WebContentsView): boolean;
     preparedPresentation?(): unknown;
   }) {
     const initialScope = options.currentScope(false);
@@ -299,12 +353,14 @@ mock.module('../../electron/browser-chrome-host', () => ({
     let returning:
       | { id: string; owner: NativeBrowserChromeOwner; previous: Electron.Rectangle | undefined }
       | undefined;
+    let loadingTarget: string | undefined;
     const state = {
       ready: false,
       layouts: [] as { id: string; bounds: Electron.Rectangle }[],
       releases: [] as (string | undefined)[],
       invalidations: 0,
       viewportSyncs: 0,
+      viewportSyncModes: [] as boolean[],
       pageScope: (id = 'page') => options.getPage(id)?.scope,
       announceReady: (id = 'page') => options.onReady(id),
       suspend: (id = 'page') => options.onSuspend(id),
@@ -314,6 +370,7 @@ mock.module('../../electron/browser-chrome-host', () => ({
         if (JSON.stringify(state.context) === JSON.stringify(owner)) return;
         state.context = owner;
         state.ready = false;
+        state.display = { kind: 'unknown' };
         options.onContextChanged?.();
       },
       autoReady: false,
@@ -326,6 +383,21 @@ mock.module('../../electron/browser-chrome-host', () => ({
       displayOffers: [] as Omit<FakeDisplayPreparation, 'signal'>[],
       readDisplay: async (_input: FakeDisplayPreparation) => false,
       offerSucceeds: true,
+      loadingChecks: [] as FakeLoadingCheck[],
+      readLoading: (_input: FakeLoadingCheck) => true,
+      retainedViewport: undefined as Electron.Rectangle | undefined,
+      loadingController: undefined as AbortController | undefined,
+      display: { kind: 'unknown' } as FakeChromeDisplayState,
+      setDisplay(display: FakeChromeDisplayState) {
+        state.display = structuredClone(display);
+        options.onStateChanged?.();
+      },
+      pageToken: (id: string) => options.getPage(id)?.token,
+      notifyDisplay: () => options.onStateChanged?.(),
+      cancelDisplay: (id: string, signal: AbortSignal) => options.onDisplayCancelled?.(id, signal),
+      canProtectLivePage: () => options.canProtectLivePage?.() ?? false,
+      protectLivePage: (view: FakeView) =>
+        options.protectLivePage?.(view as unknown as Electron.WebContentsView) ?? false,
       endHold(key?: string) {
         const held = state.hold;
         if (!held) return;
@@ -338,6 +410,8 @@ mock.module('../../electron/browser-chrome-host', () => ({
       const page = options.getPage(id),
         scope = context ?? state.context;
       return (
+        state.display.kind !== 'root' &&
+        (state.display.kind !== 'page' || state.display.id === id) &&
         page?.id === id &&
         !!scope &&
         JSON.stringify(scope) === JSON.stringify(state.context) &&
@@ -349,7 +423,21 @@ mock.module('../../electron/browser-chrome-host', () => ({
     const readyFor = (id: string, context?: NativeBrowserChromeOwner) =>
       state.ready && acceptsPresentation(id, context);
     return {
+      displayState() {
+        const display = structuredClone(state.display);
+        if (display.kind === 'page' && !options.getPage(display.id)?.view.getVisible())
+          display.presented = false;
+        return display;
+      },
       acceptsPresentation,
+      loadingReady(id: string, viewport: Electron.Rectangle, scope: NativeBrowserChromeOwner) {
+        const input = { id, viewport: { ...viewport }, scope: { ...scope } };
+        state.loadingChecks.push(input);
+        const ready = state.readLoading(input);
+        if (ready) loadingTarget = id;
+        return ready;
+      },
+      preparingPage: () => undefined,
       prepareDisplay(
         id: string,
         viewport: Electron.Rectangle,
@@ -429,18 +517,23 @@ mock.module('../../electron/browser-chrome-host', () => ({
       completePresentation(id: string) {
         if (state.hold?.target === id) state.endHold();
       },
-      syncViewport() {
+      syncViewport(nativeResize = false) {
         state.viewportSyncs++;
+        state.viewportSyncModes.push(nativeResize);
       },
       presentationViewport(scope: NativeBrowserChromeOwner) {
-        return state.ready && JSON.stringify(scope) === JSON.stringify(state.context)
-          ? state.layouts.at(-1)?.bounds
+        return JSON.stringify(scope) === JSON.stringify(state.context)
+          ? (state.retainedViewport ?? (state.ready ? state.layouts.at(-1)?.bounds : undefined))
           : undefined;
       },
-      update() {},
+      update() {
+        options.onStateChanged?.();
+      },
       layout(id: string, bounds: Electron.Rectangle) {
         if (returning) return false;
         state.layouts.push({ id, bounds });
+        if (state.ready && state.display.kind === 'page' && state.display.id === id)
+          state.display.presented = true;
         if (state.ready && root)
           root.setBounds({
             x: 0,
@@ -448,9 +541,26 @@ mock.module('../../electron/browser-chrome-host', () => ({
             width: bounds.x,
             height: options.window.getContentSize()[1]!,
           });
+        if (state.ready && root && loadingTarget === id) {
+          // Match Host's native-loading adoption: crop Root first, then put
+          // this exact live Page below it before the loading host becomes a bar.
+          const page = options.getPage(id)?.view,
+            children = options.window.contentView.children,
+            rootIndex = children.indexOf(root as unknown as Electron.View);
+          if (page && children.indexOf(page as unknown as Electron.View) > rootIndex)
+            options.window.contentView.addChildView(page as unknown as Electron.View, rootIndex);
+          loadingTarget = undefined;
+        }
         return state.ready;
       },
       release(id?: string) {
+        if (state.loadingController) {
+          state.loadingController.abort();
+          state.loadingController = undefined;
+          if (state.display.kind === 'page') state.display.busy = false;
+        }
+        state.retainedViewport = undefined;
+        if (!id || loadingTarget === id) loadingTarget = undefined;
         if (!id || state.hold?.target === id) state.endHold();
         state.releases.push(id);
         fullRoot();
@@ -468,15 +578,23 @@ function fixture(
   nativeOwned = false,
   generation = 1,
   withRoot = false,
-  config: { initialPage?: boolean; selectedScope?: boolean } = {},
+  config: {
+    initialPage?: boolean;
+    selectedScope?: boolean;
+    publishRootIntent?: boolean;
+    backingScale?: number;
+  } = {},
 ) {
   views.length = 0;
+  backingScale = config.backingScale ?? 1;
   let page!: BrowserPagePort;
   const presentation: boolean[] = [];
   const unregistered: string[] = [];
   const ports = new Map<string, BrowserPagePort>();
   const armed: string[] = [];
   let selected = config.selectedScope !== false;
+  let windowVisible = true,
+    windowMinimized = false;
   let repaintOnPresent = false;
   const state = {
     phase: 'human',
@@ -518,7 +636,7 @@ function fixture(
   } as unknown as NativeBrowserPageHost;
   const owner = new FakeContents();
   const contentSize = [1600, 1200];
-  const children: FakeView[] = [];
+  const children: FakePlainView[] = [];
   const root = withRoot ? new FakeView() : undefined;
   if (root) {
     Object.defineProperty(root, 'webContents', { value: owner });
@@ -529,21 +647,22 @@ function fixture(
   const window = Object.assign(new EventEmitter(), {
     webContents: owner,
     isDestroyed: () => false,
-    isVisible: () => true,
-    isMinimized: () => false,
+    isVisible: () => windowVisible,
+    isMinimized: () => windowMinimized,
     getContentSize: () => contentSize,
+    getBounds: () => ({ x: 0, y: 0, width: contentSize[0]!, height: contentSize[1]! }),
     contentView: {
       children,
-      addChildView(view: FakeView, index?: number) {
+      addChildView(view: FakePlainView, index?: number) {
         const old = children.indexOf(view);
         if (old >= 0) children.splice(old, 1);
         children.splice(index ?? children.length, 0, view);
-        windowOwners.set(view.webContents, window);
+        if (view instanceof FakeView) windowOwners.set(view.webContents, window);
       },
-      removeChildView(view: FakeView) {
+      removeChildView(view: FakePlainView) {
         const old = children.indexOf(view);
         if (old >= 0) children.splice(old, 1);
-        windowOwners.delete(view.webContents);
+        if (view instanceof FakeView) windowOwners.delete(view.webContents);
       },
     },
   }) as unknown as BrowserWindow;
@@ -614,10 +733,42 @@ function fixture(
       events.get('kite:native:browser-display')?.(event, input);
       return event.returnValue;
     },
-    sync: (input: unknown) => {
+    sync: (input: unknown, frame = owner.mainFrame, sender = owner) => {
+      // Root normally publishes its display intent before its layout effect.
+      // Model only that publication, never Chrome readiness. Cold tests disable it.
+      if (
+        root &&
+        nativeOwned &&
+        sender === owner &&
+        frame === owner.mainFrame &&
+        config.publishRootIntent !== false &&
+        nativeChrome?.display.kind === 'unknown' &&
+        input &&
+        typeof input === 'object'
+      ) {
+        const request = input as Partial<Extract<NativeBrowserRequest, { action: 'present' }>>;
+        const requestOwner = request.draft ? { draft: request.draft } : request.scope;
+        const token = request.id && nativeChrome.pageToken(request.id);
+        if (
+          request.action === 'present' &&
+          request.bounds &&
+          requestOwner &&
+          token &&
+          JSON.stringify(requestOwner) === JSON.stringify(nativeChrome.context)
+        )
+          nativeChrome.setDisplay({
+            kind: 'page',
+            id: request.id!,
+            scope: requestOwner,
+            token,
+            busy: true,
+            presented: false,
+            theme: 'dark',
+          });
+      }
       const event = {
-        sender: owner,
-        senderFrame: owner.mainFrame,
+        sender,
+        senderFrame: frame,
         returnValue: undefined,
       } as unknown as Electron.IpcMainEvent;
       events.get(nativeBrowserLayoutChannel)!(event, input);
@@ -651,6 +802,13 @@ function fixture(
     window,
     root,
     contentSize,
+    windowEvent(event: 'hide' | 'show' | 'minimize' | 'restore' | 'focus') {
+      if (event === 'hide' || event === 'minimize') windowVisible = false;
+      if (event === 'show' || event === 'restore') windowVisible = true;
+      if (event === 'minimize') windowMinimized = true;
+      if (event === 'restore') windowMinimized = false;
+      window.emit(event);
+    },
     owner,
     presentation,
     unregistered,
@@ -1639,6 +1797,12 @@ test('presentation capture is visible-only and guarded by exact Main scope, navi
     f.contents.readMetrics = async () => ({ ...metrics, y: 101 });
     expect(await commit(fourth.value!.key)).toMatchObject({ ok: false });
     expect(f.view.visible).toBe(true);
+    const beforeWindowHide = await capture();
+    f.window.emit('hide');
+    expect(f.view.visible).toBe(false);
+    f.present(bounds);
+    expect(await commit(beforeWindowHide.value!.key)).toMatchObject({ ok: false });
+    expect(f.view.visible).toBe(true);
     const final = await capture();
     expect(await commit(final.value!.key)).toMatchObject({ ok: true });
     expect(f.view.visible).toBe(false);
@@ -2105,6 +2269,785 @@ function rootDraw(
   } as unknown as Electron.NativeImage;
 }
 
+if (process.platform === 'darwin') {
+  for (const theme of ['dark', 'light'] as const)
+    test(`native loading admits the Root proof only after its current ${theme} surface is ready and keeps Page frame requirements`, async () => {
+      const f = fixture(true, 1, true),
+        chrome = nativeChrome!,
+        pageRead = deferred<FakeImage>();
+      let covered = false;
+      chrome.readLoading = () => covered;
+      try {
+        f.state.phase = 'human';
+        f.contents.captureVisible = () => pageRead.promise;
+        f.contents.autoPresentationFrame = false;
+        chrome.readDisplay = async () => true;
+        chrome.autoReady = true;
+        f.contents.emit('did-start-navigation', {}, f.contents.getURL(), false, true);
+        f.contents.emit('did-navigate', {}, f.contents.getURL());
+        const display = {
+          kind: 'page' as const,
+          id: 'page',
+          scope: f.scope,
+          token: chrome.pageToken('page')!,
+          theme,
+          busy: true,
+          presented: false,
+        };
+        chrome.setDisplay(display);
+        const first = drawRequest(f, 1600, 800, '00112233445566778899aabb');
+        expect(f.sync(first)).toMatchObject({ ok: false });
+        expect(f.owner.frame).toBeUndefined();
+        expect(f.owner.sent).toEqual([]);
+        expect(f.contents.captureCalls).toBe(0);
+        expect(f.presentation).not.toContain(true);
+        expect(chrome.loadingChecks).toEqual([
+          { id: 'page', viewport: { x: 801, y: 100, width: 799, height: 600 }, scope: f.scope },
+        ]);
+        // This is a Host fact representing its own current native loading frame,
+        // not a Root nonce, DOM-ready event, tool result or navigation retry.
+        covered = true;
+        chrome.setDisplay({ ...display, busy: false });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(
+          f.owner.sent.filter((entry) => entry.channel === nativeBrowserPresentationChannel),
+        ).toHaveLength(1);
+        const fresh = {
+          ...first,
+          presentationRevision: 2,
+          witness: { key: 'ffeeddccbbaa998877665544', step: 1 as const },
+        };
+        expect(f.sync(fresh)).toMatchObject({ ok: true, waiting: true });
+        expect(f.window.contentView.children.every((view) => view instanceof FakeView)).toBe(true);
+        expect(views).toHaveLength(2); // no tiny paint View or another Page is allocated by Main
+        f.owner.frame!(rootDraw(fresh));
+        expect(f.owner.sent.at(-1)?.value).toMatchObject({ key: fresh.witness.key, step: 1 });
+        const second = { ...fresh, witness: { ...fresh.witness, step: 2 as const } };
+        expect(f.sync(second)).toMatchObject({ ok: true, waiting: true });
+        f.owner.frame!(rootDraw(fresh));
+        expect(f.owner.sent.at(-1)?.value).toMatchObject({ step: 1 });
+        const late = f.owner.frame!;
+        late(rootDraw(second));
+        expect(f.owner.sent.at(-1)?.value).toMatchObject({ step: 2, presented: false });
+        expect(f.owner.frame).toBeUndefined();
+        expect(f.presentation).not.toContain(true);
+        expect(f.contents.captureCalls).toBe(0);
+        f.contents.emit('dom-ready');
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(f.contents.captureCalls).toBe(1);
+        pageRead.resolve(new FakeImage(1598, 1200));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(f.contents.frame).toBeFunction();
+        f.contents.frame!(new FakeImage(1598, 800) as unknown as Electron.NativeImage);
+        expect(f.presentation).not.toContain(true);
+        f.contents.frame!(new FakeImage(1598, 1200) as unknown as Electron.NativeImage);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(f.view.getVisible()).toBe(true);
+        expect(f.presentation.at(-1)).toBe(true);
+        expect(f.owner.sent.at(-1)?.value).toMatchObject({
+          key: fresh.witness.key,
+          step: 2,
+          presented: true,
+        });
+        const count = f.owner.sent.length;
+        late(rootDraw(second));
+        expect(f.owner.sent).toHaveLength(count);
+        expect(f.contents.loads).toBe(1);
+        expect(f.armed).toEqual([]);
+      } finally {
+        pageRead.resolve(new FakeImage(0, 0));
+        f.close();
+      }
+    });
+
+  test('native loading rejection does not arm Root feedback or consume the fresh observation after a real readiness change', async () => {
+    const f = fixture(true, 1, true, { publishRootIntent: false }),
+      chrome = nativeChrome!;
+    let covered = false;
+    chrome.readLoading = () => covered;
+    try {
+      f.state.phase = 'human';
+      const first = drawRequest(f, 1600, 800, '00112233445566778899aabb');
+      expect(f.sync(first)).toMatchObject({ ok: false });
+      expect(f.owner.frame).toBeUndefined();
+      const display = {
+        kind: 'page' as const,
+        id: 'page',
+        scope: f.scope,
+        token: chrome.pageToken('page')!,
+        theme: 'light' as const,
+        busy: true,
+        presented: false,
+      };
+      chrome.setDisplay(display);
+      for (let index = 0; index < 8; index++) chrome.notifyDisplay();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.owner.sent).toEqual([]);
+      expect(chrome.loadingChecks).toHaveLength(1);
+      covered = true;
+      chrome.setDisplay({ ...display, busy: false });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(
+        f.owner.sent.filter((entry) => entry.channel === nativeBrowserPresentationChannel),
+      ).toHaveLength(1);
+      const fresh = {
+        ...first,
+        presentationRevision: 2,
+        witness: { key: 'ffeeddccbbaa998877665544', step: 1 as const },
+      };
+      expect(f.sync(fresh)).toMatchObject({ ok: true, waiting: true });
+      expect(chrome.loadingChecks).toHaveLength(2);
+      expect(f.owner.frame).toBeFunction();
+      expect(f.contents.loads).toBe(1);
+      expect(f.armed).toEqual([]);
+    } finally {
+      f.close();
+    }
+  });
+
+  for (const { zoom, scale, width, left, expected } of [
+    {
+      zoom: 1.25,
+      scale: 2,
+      width: 1280,
+      left: 600,
+      expected: { x: 752, y: 125, width: 848, height: 750 },
+    },
+    {
+      zoom: 0.75,
+      scale: 1,
+      width: 1600 / 0.75,
+      left: 800,
+      expected: { x: 601, y: 75, width: 999, height: 450 },
+    },
+  ])
+    test(`native loading is requested for the exact full target viewport at zoom ${zoom} and backing scale ${scale}`, () => {
+      const f = fixture(true, 1, true, { backingScale: scale }),
+        chrome = nativeChrome!;
+      chrome.readLoading = () => false;
+      try {
+        f.owner.zoom = zoom;
+        const first = drawRequest(f, width, left, '00112233445566778899aabb');
+        first.layout.windowHeight = f.contentSize[1]! / zoom;
+        expect(f.sync(first)).toMatchObject({ ok: false });
+        expect(chrome.loadingChecks).toEqual([{ id: 'page', scope: f.scope, viewport: expected }]);
+        expect(f.owner.frame).toBeUndefined();
+        expect(f.presentation).not.toContain(true);
+        expect(views).toHaveLength(2);
+      } finally {
+        f.close();
+      }
+    });
+
+  for (const boundary of [
+    'hide',
+    'close',
+    'scope',
+    'root-navigation',
+    'resize',
+    'dispose',
+  ] as const)
+    test(`native loading cannot install a Root proof through an old request after ${boundary}`, async () => {
+      const f = fixture(true, 1, true),
+        chrome = nativeChrome!;
+      let covered = false;
+      chrome.readLoading = () => covered;
+      try {
+        f.state.phase = 'human';
+        const first = drawRequest(f, 1600, 800, '00112233445566778899aabb'),
+          oldFrame = f.owner.mainFrame;
+        expect(f.sync(first)).toMatchObject({ ok: false });
+        expect(chrome.loadingChecks).toHaveLength(1);
+        if (boundary === 'hide') f.windowEvent('hide');
+        if (boundary === 'close')
+          expect(f.invoke({ action: 'close', id: 'page' })).toMatchObject({ ok: true });
+        if (boundary === 'scope') {
+          f.selectScope(false);
+          chrome.setContext(undefined);
+        }
+        if (boundary === 'root-navigation') {
+          f.owner.mainFrame = { url: 'http://localhost/new-root' };
+          f.owner.emit('did-start-navigation', {}, 'http://localhost/new-root', false, true);
+          chrome.setContext(undefined);
+        }
+        if (boundary === 'resize') {
+          f.contentSize[0] = 1400;
+          f.window.emit('resize');
+        }
+        if (boundary === 'dispose') f.close();
+        covered = true; // a late old producer completion is not a new Root intent
+        chrome.notifyDisplay();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(f.owner.frame).toBeUndefined();
+        expect(f.presentation).not.toContain(true);
+        expect(
+          f.owner.sent.filter((entry) => entry.channel === nativeBrowserPresentationChannel),
+        ).toEqual([]);
+        if (
+          boundary === 'scope' ||
+          boundary === 'close' ||
+          boundary === 'root-navigation' ||
+          boundary === 'resize'
+        ) {
+          expect(f.sync(first, oldFrame)).toMatchObject({ ok: false });
+          expect(chrome.loadingChecks).toHaveLength(1);
+        }
+        expect(f.contents.captureCalls).toBe(0);
+        expect(f.armed).toEqual([]);
+      } finally {
+        f.close();
+      }
+    });
+
+  test('native loading target selection does not borrow another same-URL page or pollute Page screenshots', async () => {
+    const f = fixture(true, 1, true),
+      chrome = nativeChrome!;
+    try {
+      const first = drawRequest(f, 1600, 800, '00112233445566778899aabb');
+      chrome.readLoading = ({ id }) => id === 'page';
+      expect(f.sync(first)).toMatchObject({ ok: true, waiting: true });
+      const late = f.owner.frame!;
+      const capture = (await f.page.send('Page.captureScreenshot', {})) as { data: string };
+      expect(JSON.parse(Buffer.from(capture.data, 'base64').toString())).toMatchObject({
+        width: 800,
+        height: 600,
+      });
+      expect(f.contents.captureCalls).toBe(0);
+      expect(f.owner.captureCalls).toBe(0);
+      f.state.phase = 'human';
+      expect(
+        f.invoke({ action: 'navigate', id: 'same-url-other', input: f.contents.getURL() }),
+      ).toMatchObject({ ok: true });
+      const other = views.at(-1)!;
+      chrome.setDisplay({
+        kind: 'page',
+        id: 'same-url-other',
+        scope: f.scope,
+        token: chrome.pageToken('same-url-other')!,
+        theme: 'dark',
+        busy: true,
+        presented: false,
+      });
+      const fresh = {
+        ...first,
+        id: 'same-url-other',
+        presentationRevision: 2,
+        witness: { key: 'ffeeddccbbaa998877665544', step: 1 as const },
+      };
+      expect(f.sync(fresh)).toMatchObject({ ok: false });
+      expect(chrome.loadingChecks.at(-1)?.id).toBe('same-url-other');
+      expect(other.getVisible()).toBe(false);
+      expect(f.view.getVisible()).toBe(false);
+      expect(other.webContents.getURL()).toBe(f.contents.getURL());
+      expect(other.webContents).not.toBe(f.contents);
+      late(rootDraw(first));
+      expect(f.presentation).not.toContain(true);
+      expect(f.armed).toEqual([]);
+    } finally {
+      f.close();
+    }
+  });
+}
+
+function recoveryFixture(kind: 'session' | 'draft') {
+  const f = fixture(true, 1, true, {
+    initialPage: kind === 'session',
+    selectedScope: kind === 'session',
+  });
+  const id = kind === 'draft' ? 'draft-page' : 'page',
+    draft = kind === 'draft' ? '0123456789abcdef0123456789abcdef' : undefined,
+    chrome = nativeChrome!;
+  if (draft)
+    expect(
+      f.invoke({ action: 'navigate', id, draft, input: 'http://localhost/page' }),
+    ).toMatchObject({ ok: true });
+  const view = kind === 'draft' ? views.at(-1)! : f.view,
+    contents = view.webContents,
+    displayOwner: NativeBrowserChromeOwner = draft ? { draft } : { ...f.scope };
+  chrome.setContext(displayOwner);
+  chrome.ready = true;
+  f.state.phase = 'human';
+  contents.document.value = `${kind}: original form`;
+  let serial = 0;
+  const request = (revision: number, target = id, left = 800) => {
+    const { scope: _scope, ...base } = drawRequest(
+      f,
+      f.contentSize[0]!,
+      left,
+      (++serial).toString(16).padStart(24, '0'),
+    );
+    return {
+      ...base,
+      id: target,
+      presentationRevision: revision,
+      ...(draft ? { draft } : { scope: { ...f.scope } }),
+    };
+  };
+  const initial = request(1);
+  expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+  const display = (
+    target = id,
+    patch: Partial<Extract<FakeChromeDisplayState, { kind: 'page' }>> = {},
+  ) => {
+    const token = chrome.pageToken(target);
+    expect(typeof token).toBe('string');
+    chrome.setDisplay({
+      kind: 'page',
+      id: target,
+      scope: displayOwner,
+      token: token!,
+      busy: false,
+      presented: true,
+      theme: 'dark',
+      ...patch,
+    });
+  };
+  display();
+  const messages = () =>
+    f.owner.sent
+      .filter((entry) => entry.channel === nativeBrowserPresentationChannel)
+      .map((entry) => entry.value as NativeBrowserPresentationRequest);
+  const loads = contents.loads,
+    document = contents.document;
+  const unchanged = () => {
+    expect(view.webContents).toBe(contents);
+    expect(contents.document).toBe(document);
+    expect(document.value).toBe(`${kind}: original form`);
+    expect(contents.loads).toBe(loads);
+    expect(contents.stops).toBe(0);
+    expect(contents.document.clicks).toBe(0);
+    expect(f.armed).toEqual([]);
+  };
+  return {
+    ...f,
+    id,
+    draft,
+    chrome,
+    view,
+    contents,
+    displayOwner,
+    initial,
+    request,
+    display,
+    messages,
+    unchanged,
+  };
+}
+const recoveryTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+if (process.platform === 'darwin') {
+  for (const operation of ['select-loaded', 'close-current'] as const)
+    test(`native lifecycle preserves the current shell during ${operation} fresh binding acknowledgement`, async () => {
+      const f = fixture(true, 1, true),
+        chrome = nativeChrome!;
+      f.state.phase = 'human';
+      chrome.ready = true;
+      const initial = drawRequest(f, 1600, 800, '100000000000000000000001');
+      try {
+        expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+        expect(
+          f.invoke({ action: 'navigate', id: 'other', input: 'http://localhost/page' }),
+        ).toMatchObject({ ok: true });
+        const other = views.at(-1)!,
+          target = operation === 'select-loaded' ? 'other' : 'page';
+        other.webContents.emit('did-stop-loading');
+        if (operation === 'close-current') {
+          chrome.setDisplay({
+            kind: 'page',
+            id: 'other',
+            scope: f.scope,
+            token: chrome.pageToken('other')!,
+            busy: true,
+            presented: false,
+          });
+          expect(f.sync({ ...initial, id: 'other' })).toMatchObject({ ok: true, waiting: false });
+        }
+        chrome.setDisplay({
+          kind: 'page',
+          id: target,
+          scope: f.scope,
+          token: chrome.pageToken(target)!,
+          busy: true,
+          presented: false,
+        });
+        chrome.retainedViewport = { ...chrome.layouts.at(-1)!.bounds };
+        chrome.ready = false; // The shell is current; the new wire is not acknowledged.
+        chrome.loadingChecks.length = 0;
+        chrome.readLoading = () => false;
+        const next = {
+          ...initial,
+          id: target,
+          presentationRevision: 2,
+          witness: { key: '200000000000000000000002', step: 1 as const },
+        };
+        expect(f.sync(next)).toMatchObject({ ok: true, waiting: true });
+        expect(chrome.loadingChecks).toEqual([]);
+        expect(chrome.displayPreparations).toEqual([]);
+        expect(f.owner.frame).toBeFunction(); // Existing witness/fresh wire path remains active.
+        if (operation === 'close-current') {
+          expect(f.invoke({ action: 'close', id: 'other' })).toMatchObject({ ok: true });
+          expect(other.webContents.isDestroyed()).toBe(true);
+          expect(other.webContents.closes).toBe(1);
+        }
+        chrome.ready = true;
+        chrome.announceReady(target);
+        expect((target === 'page' ? f.view : other).getVisible()).toBe(true);
+        expect(f.contents.isDestroyed()).toBe(false);
+        expect(f.contents.loads).toBe(1);
+        expect(other.webContents.loads).toBe(1);
+        expect(f.armed).toEqual([]);
+        expect(chrome.loadingChecks).toEqual([]);
+      } finally {
+        f.close();
+      }
+    });
+
+  for (const kind of ['session', 'draft'] as const)
+    for (const covered of [false, true])
+      test(`native lifecycle hide retires ${kind} Host ${covered ? 'covered' : 'preflight'} loading before a fresh show`, async () => {
+        const f = recoveryFixture(kind),
+          controller = new AbortController();
+        try {
+          await recoveryTurn();
+          f.chrome.ready = false;
+          f.chrome.loadingController = controller;
+          f.display(f.id, { busy: !covered, presented: false });
+          const releases = f.chrome.releases.length;
+          f.windowEvent('hide');
+          expect(f.chrome.releases.slice(releases)).toHaveLength(1);
+          expect(f.chrome.releases.slice(releases)).toEqual([undefined]);
+          expect(controller.signal.aborted).toBe(true);
+          expect(f.chrome.loadingController).toBeUndefined();
+          expect(f.view.getVisible()).toBe(false);
+          await recoveryTurn();
+          expect(f.messages()).toEqual([]);
+          f.windowEvent('show');
+          await recoveryTurn();
+          expect(f.messages()).toHaveLength(1);
+          expect(f.messages()[0]).toMatchObject({
+            id: f.id,
+            ...(f.draft ? { draft: f.draft } : { scope: f.scope }),
+          });
+          const messages = f.owner.sent.length;
+          f.chrome.cancelDisplay(f.id, controller.signal); // Retired Host callback owns no successor.
+          expect(f.owner.sent).toHaveLength(messages);
+          expect(f.view.getVisible()).toBe(false);
+          f.chrome.ready = true;
+          expect(f.sync(f.request(2))).toMatchObject({ ok: true, waiting: false });
+          expect(f.view.getVisible()).toBe(true);
+          f.window.emit('resize');
+          await recoveryTurn();
+          expect(f.view.getVisible()).toBe(true);
+          expect(f.messages()).toHaveLength(1);
+          expect(f.contents.closes).toBe(0);
+          expect(f.contents.isDestroyed()).toBe(false);
+          expect(f.unregistered).toEqual([]);
+          f.unchanged();
+        } finally {
+          f.close();
+        }
+      });
+
+  for (const kind of ['session', 'draft'] as const) {
+    test(`program presentation recovery handles ${kind} native hide/show without DOM visibility events and repeated notifications`, async () => {
+      const f = recoveryFixture(kind);
+      try {
+        await recoveryTurn();
+        expect(f.messages()).toEqual([]);
+        f.windowEvent('hide');
+        f.chrome.notifyDisplay();
+        await recoveryTurn();
+        expect(f.view.getVisible()).toBe(false);
+        expect(f.messages()).toEqual([]);
+        expect(await f.asyncLayout(f.initial)).toMatchObject({ ok: false });
+        f.windowEvent('show');
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        const first = f.messages()[0]!;
+        expect(first).toMatchObject({
+          id: f.id,
+          ...(f.draft ? { draft: f.draft } : { scope: f.scope }),
+        });
+        expect(first.key).toMatch(/^[a-f0-9]{32}$/);
+        expect(first).not.toHaveProperty(f.draft ? 'scope' : 'draft');
+        expect(f.view.getVisible()).toBe(false); // notification itself grants no display
+        for (let index = 0; index < 8; index++) {
+          f.windowEvent('show');
+          f.windowEvent('focus');
+          f.chrome.notifyDisplay();
+          f.window.emit('resize');
+        }
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        expect(f.sync(f.request(2))).toMatchObject({ ok: true, waiting: false });
+        expect(f.view.getVisible()).toBe(true);
+        await recoveryTurn();
+        f.view.setVisible(false); // a new physical loss after successful adoption
+        f.chrome.notifyDisplay();
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(2);
+        expect(f.messages()[1]!.key).not.toBe(first.key);
+        f.unchanged();
+      } finally {
+        f.close();
+      }
+    });
+
+    for (const loss of ['visible', 'active'] as const)
+      test(`program presentation recovery separately detects lost ${loss} for the exact ${kind} page`, async () => {
+        const f = recoveryFixture(kind);
+        try {
+          await recoveryTurn();
+          if (loss === 'active') {
+            f.windowEvent('hide');
+            f.view.setVisible(true); // active was retired; native visibility alone is insufficient
+            f.windowEvent('restore');
+          } else f.view.setVisible(false);
+          f.chrome.notifyDisplay();
+          await recoveryTurn();
+          expect(f.messages()).toHaveLength(1);
+          expect(f.messages()[0]!.id).toBe(f.id);
+          expect(f.sync(f.request(2))).toMatchObject({ ok: true, waiting: false });
+          expect(await f.asyncLayout(f.request(2))).toMatchObject({ ok: true, waiting: false });
+          expect(f.view.getVisible()).toBe(true);
+          f.unchanged();
+        } finally {
+          f.close();
+        }
+      });
+
+    test(`program presentation recovery does not loop an unfinished ${kind} bootstrap and retries only after a new availability boundary`, async () => {
+      const f = recoveryFixture(kind);
+      try {
+        await recoveryTurn();
+        f.windowEvent('hide');
+        f.windowEvent('show');
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        f.chrome.ready = false;
+        expect(f.sync(f.request(2))).toMatchObject({ ok: true, waiting: true });
+        for (let index = 0; index < 8; index++) {
+          f.chrome.notifyDisplay();
+          f.windowEvent('focus');
+        }
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        f.windowEvent('hide');
+        f.windowEvent('show');
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(2);
+        expect(f.messages()[0]!.key).not.toBe(f.messages()[1]!.key);
+        f.unchanged();
+      } finally {
+        f.close();
+      }
+    });
+
+    test(`program presentation recovery waits while ${kind} is minimized and deduplicates restore events`, async () => {
+      const f = recoveryFixture(kind);
+      try {
+        await recoveryTurn();
+        f.windowEvent('minimize');
+        f.view.setVisible(false);
+        f.chrome.notifyDisplay();
+        await recoveryTurn();
+        expect(f.messages()).toEqual([]);
+        f.windowEvent('show'); // showing a still-minimized window does not make it available
+        await recoveryTurn();
+        expect(f.messages()).toEqual([]);
+        f.windowEvent('restore');
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        for (let index = 0; index < 8; index++) {
+          f.windowEvent('restore');
+          f.chrome.notifyDisplay();
+        }
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        expect(f.sync(f.request(2))).toMatchObject({ ok: true, waiting: false });
+        expect(f.view.getVisible()).toBe(true);
+        f.unchanged();
+      } finally {
+        f.close();
+      }
+    });
+
+    for (const boundary of ['scope', 'token', 'busy', 'unknown', 'root', 'closed'] as const)
+      test(`program presentation recovery does not revive a ${kind} target after ${boundary} while hidden`, async () => {
+        const f = recoveryFixture(kind);
+        try {
+          await recoveryTurn();
+          f.windowEvent('hide');
+          if (boundary === 'scope') {
+            f.selectScope(false);
+            if (f.draft) f.chrome.setContext(undefined);
+          } else if (boundary === 'closed')
+            expect(
+              f.invoke({ action: 'close', id: f.id, ...(f.draft ? { draft: f.draft } : {}) }),
+            ).toMatchObject({ ok: true });
+          else if (boundary === 'token') f.display(f.id, { token: 'retired-page-token' });
+          else if (boundary === 'busy') f.display(f.id, { busy: true });
+          else f.chrome.setDisplay({ kind: boundary });
+          f.windowEvent('show');
+          f.windowEvent('focus');
+          f.chrome.notifyDisplay();
+          await recoveryTurn();
+          expect(f.messages()).toEqual([]);
+          expect(f.view.getVisible()).toBe(false);
+          expect(await f.asyncLayout(f.initial)).toMatchObject({ ok: false });
+          expect(f.contents.destroyed).toBe(boundary === 'closed');
+          expect(f.contents.closes).toBe(boundary === 'closed' ? 1 : 0);
+          if (boundary === 'closed' && kind === 'session')
+            expect(f.unregistered.filter((id) => id === f.id)).toHaveLength(1);
+          if (boundary === 'busy') {
+            f.display(f.id, { busy: false });
+            await recoveryTurn();
+            expect(f.messages()).toHaveLength(1);
+            expect(f.view.getVisible()).toBe(false);
+          }
+          f.unchanged();
+        } finally {
+          f.close();
+        }
+      });
+
+    test(`program presentation recovery distinguishes two ${kind} pages with the same URL and rejects the old target proof`, async () => {
+      const f = recoveryFixture(kind);
+      try {
+        await recoveryTurn();
+        expect(
+          f.invoke({
+            action: 'navigate',
+            id: 'same-url-other',
+            input: f.contents.getURL(),
+            ...(f.draft ? { draft: f.draft } : {}),
+          }),
+        ).toMatchObject({ ok: true });
+        const other = views.at(-1)!,
+          otherContents = other.webContents,
+          otherLoads = otherContents.loads;
+        otherContents.document.value = 'other original form';
+        expect(otherContents.getURL()).toBe(f.contents.getURL());
+        expect(otherContents).not.toBe(f.contents);
+        f.windowEvent('hide');
+        f.display('same-url-other', { presented: false });
+        f.windowEvent('show');
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        expect(f.messages()[0]!.id).toBe('same-url-other');
+        expect(await f.asyncLayout(f.initial)).toMatchObject({ ok: false });
+        expect(f.sync(f.request(2, 'same-url-other'))).toMatchObject({ ok: true, waiting: false });
+        expect(other.getVisible()).toBe(true);
+        expect(f.view.getVisible()).toBe(false);
+        expect(otherContents.document.value).toBe('other original form');
+        expect(otherContents.loads).toBe(otherLoads);
+        expect(otherContents.closes).toBe(0);
+        f.unchanged();
+      } finally {
+        f.close();
+      }
+    });
+
+    test(`program presentation recovery fences ${kind} menu, resize and late old-geometry work without replaying actions`, async () => {
+      const f = recoveryFixture(kind);
+      let response: ReturnType<typeof f.menu> | undefined;
+      const rootFrame = f.owner.mainFrame;
+      try {
+        expect(rootFrame).toBeDefined();
+        expect(rootFrame).not.toBe(f.contents.mainFrame);
+        expect(f.root!.webContents).toBe(f.owner);
+        await recoveryTurn();
+        deferPopupClose = true;
+        response = f.menu({
+          requestId: `recovery-${kind}`,
+          id: f.id,
+          ...(f.draft
+            ? { draft: f.draft }
+            : { scope: { ...f.scope }, incarnation: 'incarnation', navigation: 0 }),
+          x: 850,
+          y: 110,
+          items: [{ action: 'reload', enabled: true }],
+          details: [],
+        });
+        const menuCallback = popupOptions!.callback!;
+        f.view.setVisible(false);
+        f.chrome.notifyDisplay();
+        await recoveryTurn();
+        expect(f.messages()).toEqual([]); // a pending native menu owns its UI transaction
+        f.windowEvent('hide');
+        f.contentSize[0] = 1400;
+        f.window.emit('resize');
+        f.windowEvent('show');
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(0); // cancellation waits for the native popup to close
+        const writes = f.view.boundsWrites.length;
+        expect(await f.asyncLayout(f.initial, rootFrame)).toMatchObject({ ok: false });
+        expect(f.view.boundsWrites).toHaveLength(writes);
+        menuCallback();
+        for (const callback of pendingPopupCloses.splice(0)) callback();
+        expect(await response).toBeNull();
+        response = undefined;
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        expect(f.sync(f.request(2, f.id, 700))).toMatchObject({ ok: true, waiting: false });
+        expect(f.view.getVisible()).toBe(true);
+        expect(f.view.getBounds()).toEqual({ x: 702, y: 100, width: 698, height: 600 });
+        f.chrome.notifyDisplay();
+        await recoveryTurn();
+        expect(f.messages()).toHaveLength(1);
+        f.unchanged();
+      } finally {
+        deferPopupClose = false;
+        for (const callback of pendingPopupCloses.splice(0)) callback();
+        f.close();
+        if (response) await response;
+      }
+    });
+  }
+
+  test('program presentation recovery retires the old screenshot key before requesting fresh geometry and cannot revive it on adoption', async () => {
+    const f = recoveryFixture('session');
+    try {
+      await recoveryTurn();
+      f.state.phase = 'agent';
+      f.contents.readMetrics = async () => ({ ...metrics, ...f.view.getBounds() });
+      f.contents.screenshot = async () => {
+        const bounds = f.view.getBounds();
+        return {
+          data: Buffer.from(
+            JSON.stringify({ width: bounds.width * 2, height: bounds.height * 2 }),
+          ).toString('base64'),
+        };
+      };
+      await f.page.send('Page.captureScreenshot', {});
+      const old = f.page.captureMeta() as { metadata: { captureId: string } };
+      expect(await f.page.validateCapture!(old.metadata.captureId)).toBe(true);
+      const presentationCount = f.presentation.length;
+      f.view.setVisible(false); // physical loss has no hide event to retire the old proof
+      f.chrome.notifyDisplay();
+      await recoveryTurn();
+      expect(f.messages()).toHaveLength(1);
+      expect(f.view.getVisible()).toBe(false);
+      expect(f.page.captureMeta()).toMatchObject({ metadata: null });
+      expect(await f.page.validateCapture!(old.metadata.captureId)).toBe(false);
+      expect(f.presentation.slice(presentationCount)).not.toContain(true);
+      expect(f.presentation.at(-1)).toBe(false);
+      expect(f.sync(f.request(2))).toMatchObject({ ok: true, waiting: false });
+      expect(f.view.getVisible()).toBe(true);
+      expect(f.page.captureMeta()).toMatchObject({ metadata: null });
+      expect(await f.page.validateCapture!(old.metadata.captureId)).toBe(false);
+      await f.page.send('Page.captureScreenshot', {});
+      const current = f.page.captureMeta() as { metadata: { captureId: string } };
+      expect(current.metadata.captureId).not.toBe(old.metadata.captureId);
+      expect(await f.page.validateCapture!(current.metadata.captureId)).toBe(true);
+      expect(await f.page.validateCapture!(old.metadata.captureId)).toBe(false);
+      f.unchanged();
+    } finally {
+      f.close();
+    }
+  });
+}
+
 function draftRootFixture(selectedScope = false) {
   const f = fixture(true, 1, true, { initialPage: false, selectedScope }),
     draft = '0123456789abcdef0123456789abcdef',
@@ -2120,6 +3063,7 @@ function draftRootFixture(selectedScope = false) {
   contents.getURL = () => 'https://www.baidu.com/';
   contents.mainFrame.url = contents.getURL();
   contents.captureVisible = () => pageRead.promise;
+  contents.autoPresentationFrame = true;
   contents.emit('did-start-navigation', {}, contents.getURL(), false, true);
   contents.emit('did-navigate', {}, contents.getURL());
   const { scope: _scope, ...request } = drawRequest(f, 1600, 800, '00112233445566778899aabb'),
@@ -2135,7 +3079,7 @@ function draftRootFixture(selectedScope = false) {
 }
 
 if (process.platform === 'darwin') {
-  test('draft first page needs its document, Page and Chrome frames and fresh native acceptance without reparenting', async () => {
+  test('draft first page stays above Root behind prepared native loading until its document, Page and Chrome frames and fresh acceptance', async () => {
     const f = draftRootFixture(),
       chromeRead = deferred<boolean>(),
       pageView = f.view as unknown as Electron.View,
@@ -2147,7 +3091,7 @@ if (process.platform === 'darwin') {
     f.chrome.readDisplay = () => chromeRead.promise;
     f.contents.captureVisible = () => {
       expect(f.view.getBounds()).toEqual(prepared);
-      expect(ownLayerOrder()).toEqual([pageView, rootView]);
+      expect(ownLayerOrder()).toEqual([rootView, pageView]);
       return f.pageRead.promise;
     };
     try {
@@ -2159,9 +3103,14 @@ if (process.platform === 'darwin') {
       expect(f.view.getBounds().x + f.view.getBounds().width).toBeLessThanOrEqual(
         f.contentSize[0]!,
       );
-      expect(ownLayerOrder()).toEqual([pageView, rootView]);
+      expect(ownLayerOrder()).toEqual([rootView, pageView]);
       expect(f.contents.captureCalls).toBe(0);
-      expect(f.chrome.displayPreparations).toHaveLength(0);
+      expect(f.chrome.displayPreparations).toHaveLength(1);
+      expect(f.chrome.loadingChecks[0]).toMatchObject({
+        id: 'draft-page',
+        scope: { draft: f.draft },
+        viewport: prepared,
+      });
       expect(f.root!.getBounds()).toEqual({ x: 0, y: 0, width: 1600, height: 1200 });
       expect(f.owner.sent.at(-1)?.value).toMatchObject({
         id: 'draft-page',
@@ -2712,9 +3661,14 @@ if (process.platform === 'darwin')
       expect(f.root!.getBounds()).toEqual({ x: 0, y: 0, width: 1600, height: 1200 });
       expect(
         f.window.contentView.children.indexOf(f.view as unknown as Electron.View),
-      ).toBeLessThan(f.window.contentView.children.indexOf(f.root! as unknown as Electron.View));
+      ).toBeGreaterThan(f.window.contentView.children.indexOf(f.root! as unknown as Electron.View));
       expect(f.contents.captureCalls).toBe(0);
-      expect(chrome.displayPreparations).toHaveLength(0);
+      expect(chrome.displayPreparations).toHaveLength(1);
+      expect(chrome.loadingChecks[0]).toMatchObject({
+        id: 'page',
+        scope: f.scope,
+        viewport: { x: 801, y: 100, width: 799, height: 600 },
+      });
       f.contents.emit('dom-ready');
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(f.contents.captureCalls).toBe(1);
@@ -2729,6 +3683,10 @@ if (process.platform === 'darwin')
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(chrome.displayOffers).toHaveLength(0);
       expect(f.presentation).not.toContain(true);
+      expect(f.contents.frame).toBeFunction();
+      f.contents.frame!(new FakeImage(1598, 800) as unknown as Electron.NativeImage);
+      expect(chrome.displayOffers).toHaveLength(0);
+      f.contents.frame!(new FakeImage(1598, 1200) as unknown as Electron.NativeImage);
       chromeRead.resolve(true);
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(chrome.displayOffers).toEqual([
@@ -2768,6 +3726,7 @@ function initialRootFixture() {
     chromeRead = deferred<boolean>();
   f.state.phase = 'human';
   f.contents.captureVisible = () => pageRead.promise;
+  f.contents.autoPresentationFrame = true;
   chrome.readDisplay = () => chromeRead.promise;
   const first = drawRequest(f, 1600, 800, '00112233445566778899aabb'),
     second = { ...first, witness: { ...first.witness, step: 2 as const } };
@@ -2781,6 +3740,316 @@ function initialRootFixture() {
   };
   return { ...f, chrome, pageRead, chromeRead, first, second, draw };
 }
+
+if (process.platform === 'darwin') {
+  for (const kind of ['session', 'draft'] as const) {
+    for (const phase of ['document', 'native-page-frame'] as const)
+      test(`native loading exact-signal cancellation retires the ${kind} ${phase} stage and ignores its late work`, async () => {
+        const f = kind === 'draft' ? draftRootFixture() : initialRootFixture(),
+          chromeRead = deferred<boolean>();
+        f.chrome.readDisplay = () => chromeRead.promise;
+        f.contents.autoPresentationFrame = false;
+        try {
+          f.draw();
+          const signal = f.chrome.displayPreparations[0]!.signal;
+          let late: typeof f.contents.frame;
+          if (phase === 'native-page-frame') {
+            f.contents.emit('dom-ready');
+            chromeRead.resolve(true);
+            f.pageRead.resolve(new FakeImage(1598, 1200));
+            await recoveryTurn();
+            late = f.contents.frame;
+            expect(late).toBeFunction();
+          }
+          f.chrome.cancelDisplay(f.first.id, signal);
+          expect(signal.aborted).toBe(true);
+          expect(f.contents.frame).toBeUndefined();
+          expect(f.view.getVisible()).toBe(false);
+          expect(f.owner.sent.at(-1)?.value).toMatchObject({
+            id: f.first.id,
+            key: f.first.witness.key,
+            presentationRevision: f.first.presentationRevision,
+            ...('draft' in f ? { draft: f.draft } : { scope: f.scope }),
+            step: 2,
+            presented: false,
+            error: 'browser_presentation_unavailable',
+          });
+          const messages = f.owner.sent.length;
+          f.chrome.cancelDisplay(f.first.id, signal);
+          f.contents.emit('dom-ready');
+          f.pageRead.resolve(new FakeImage(1598, 1200));
+          chromeRead.resolve(true);
+          late?.(new FakeImage(1598, 1200) as unknown as Electron.NativeImage);
+          await recoveryTurn();
+          expect(f.owner.sent).toHaveLength(messages);
+          expect(f.chrome.displayOffers).toHaveLength(0);
+          expect(f.chrome.layouts).toHaveLength(0);
+          expect(f.presentation).not.toContain(true);
+          expect(f.contents.captureCalls).toBe(phase === 'document' ? 0 : 1);
+          expect(f.contents.loads).toBe(1);
+          expect(f.contents.closes).toBe(0);
+          expect(f.armed).toEqual([]);
+        } finally {
+          f.pageRead.resolve(new FakeImage(0, 0));
+          chromeRead.resolve(false);
+          f.close();
+        }
+      });
+
+    test(`native loading ignores an old ${kind} signal or wrong id while the new exact signal owns cancellation`, async () => {
+      const f = kind === 'draft' ? draftRootFixture() : initialRootFixture(),
+        chromeRead = deferred<boolean>();
+      f.chrome.readDisplay = () => chromeRead.promise;
+      try {
+        f.draw();
+        const old = f.chrome.displayPreparations[0]!.signal;
+        const first = {
+          ...f.first,
+          presentationRevision: 2,
+          witness: { key: 'ffeeddccbbaa998877665544', step: 1 as const },
+        };
+        expect(f.sync(first)).toMatchObject({ ok: true, waiting: true });
+        f.owner.frame!(rootDraw(first));
+        const second = { ...first, witness: { ...first.witness, step: 2 as const } };
+        expect(f.sync(second)).toMatchObject({ ok: true, waiting: true });
+        f.owner.frame!(rootDraw(second));
+        const current = f.chrome.displayPreparations.at(-1)!.signal;
+        expect(old.aborted).toBe(true);
+        expect(current).not.toBe(old);
+        expect(current.aborted).toBe(false);
+        const messages = f.owner.sent.length;
+        f.chrome.cancelDisplay(f.first.id, old);
+        f.chrome.cancelDisplay('another-page', current);
+        f.chrome.cancelDisplay(f.first.id, new AbortController().signal);
+        expect(current.aborted).toBe(false);
+        expect(f.owner.sent).toHaveLength(messages);
+        expect(f.view.getVisible()).toBe(true); // preparation, with no presentation grant
+        expect(f.presentation).not.toContain(true);
+        f.chrome.cancelDisplay(f.first.id, current);
+        expect(current.aborted).toBe(true);
+        expect(f.view.getVisible()).toBe(false);
+        expect(f.owner.sent.at(-1)?.value).toMatchObject({
+          id: first.id,
+          key: first.witness.key,
+          presentationRevision: 2,
+          presented: false,
+          error: 'browser_presentation_unavailable',
+        });
+        f.contents.emit('dom-ready');
+        f.pageRead.resolve(new FakeImage(1598, 1200));
+        chromeRead.resolve(true);
+        await recoveryTurn();
+        expect(f.contents.captureCalls).toBe(0);
+        expect(f.chrome.displayOffers).toHaveLength(0);
+        expect(f.contents.loads).toBe(1);
+        expect(f.armed).toEqual([]);
+      } finally {
+        f.pageRead.resolve(new FakeImage(0, 0));
+        chromeRead.resolve(false);
+        f.close();
+      }
+    });
+  }
+
+  test('native loading read failure cancels its exact awaiting-document Main stage with one readable ACK and no Page read', async () => {
+    const f = initialRootFixture();
+    f.chrome.readDisplay = (input) =>
+      Promise.reject(Error('private native Chrome copy failure')).catch(() => {
+        f.chrome.cancelDisplay(input.id, input.signal);
+        return false;
+      });
+    try {
+      f.draw();
+      const signal = f.chrome.displayPreparations[0]!.signal;
+      await recoveryTurn();
+      expect(signal.aborted).toBe(true);
+      expect(f.view.getVisible()).toBe(false);
+      const failures = f.owner.sent.filter(
+        (entry) =>
+          entry.channel === nativeBrowserLayoutFrameChannel &&
+          (entry.value as { error?: string }).error,
+      );
+      expect(failures).toHaveLength(1);
+      expect(failures[0]!.value).toMatchObject({
+        id: 'page',
+        scope: f.scope,
+        key: f.first.witness.key,
+        presented: false,
+        error: 'browser_presentation_unavailable',
+      });
+      expect(JSON.stringify(f.owner.sent)).not.toContain('private');
+      f.contents.emit('dom-ready');
+      f.pageRead.resolve(new FakeImage(1598, 1200));
+      await recoveryTurn();
+      expect(f.contents.captureCalls).toBe(0);
+      expect(f.chrome.displayOffers).toHaveLength(0);
+      expect(f.presentation).not.toContain(true);
+      expect(f.contents.loads).toBe(1);
+    } finally {
+      f.pageRead.resolve(new FakeImage(0, 0));
+      f.chromeRead.resolve(false);
+      f.close();
+    }
+  });
+
+  for (const failure of ['stuck-focus', 'destroy-during-sync'] as const)
+    test(`native loading warm protection returns false when its input shield fails by ${failure} during sync`, async () => {
+      const f = fixture(true),
+        chrome = nativeChrome!;
+      try {
+        f.state.phase = 'human';
+        expect(chrome.canProtectLivePage()).toBe(false);
+        expect(chrome.protectLivePage(f.view)).toBe(false);
+        chrome.ready = true;
+        expect(f.sync(drawRequest(f, 1600, 800, '00112233445566778899aabb'))).toMatchObject({
+          ok: true,
+          waiting: false,
+        });
+        await recoveryTurn();
+        expect(chrome.canProtectLivePage()).toBe(true);
+        const shield = views.find((view) =>
+          String(view.options.webPreferences?.partition).startsWith('kite-browser-input-shield-'),
+        )!;
+        expect(shield).not.toBe(f.view);
+        if (failure === 'stuck-focus') f.contents.isFocused = () => true;
+        else {
+          const setBounds = shield.setBounds.bind(shield);
+          shield.setBounds = (bounds) => {
+            setBounds(bounds);
+            shield.webContents.destroyed = true;
+          };
+        }
+        expect(chrome.protectLivePage(f.view)).toBe(false);
+        expect(chrome.canProtectLivePage()).toBe(false);
+        if (failure === 'stuck-focus') expect(f.owner.focusCalls).toBeGreaterThan(0);
+        else expect(shield.webContents.isDestroyed()).toBe(true);
+        expect(f.contents.loads).toBe(1);
+        expect(f.contents.closes).toBe(0);
+        expect(f.armed).toEqual([]);
+      } finally {
+        f.close();
+      }
+    });
+}
+
+if (process.platform === 'darwin')
+  for (const kind of ['session', 'draft'] as const)
+    test(`program presentation recovery fences ${kind} late Root proofs and Page frames across a second bootstrap`, async () => {
+      const f = kind === 'draft' ? draftRootFixture() : initialRootFixture(),
+        draft = 'draft' in f ? f.draft : undefined,
+        owner: NativeBrowserChromeOwner = draft ? { draft } : { ...f.scope };
+      f.contents.autoPresentationFrame = false;
+      f.chrome.readDisplay = async () => true;
+      f.chrome.autoReady = true;
+      const desired = (busy: boolean) =>
+        f.chrome.setDisplay({
+          kind: 'page',
+          id: f.first.id,
+          scope: owner,
+          token: f.chrome.pageToken(f.first.id)!,
+          busy,
+          presented: false,
+          theme: 'dark',
+        });
+      try {
+        desired(true);
+        f.draw();
+        const oldRootFrame = f.owner.frameCallbacks.at(-1)!;
+        f.contents.emit('dom-ready');
+        f.pageRead.resolve(new FakeImage(1598, 1200));
+        await recoveryTurn();
+        expect(f.contents.frame).toBeFunction();
+        const oldPageFrame = f.contents.frame!;
+        f.windowEvent('hide');
+        expect(f.contents.frame).toBeUndefined();
+        desired(false);
+        f.windowEvent('show');
+        await recoveryTurn();
+        const requests = f.owner.sent.filter(
+          (entry) => entry.channel === nativeBrowserPresentationChannel,
+        );
+        expect(requests).toHaveLength(1);
+        expect(requests[0]!.value).toMatchObject({ id: f.first.id });
+        const fresh = {
+          ...f.first,
+          presentationRevision: 2,
+          witness: { key: 'ffeeddccbbaa998877665544', step: 1 as const },
+        };
+        expect(f.sync(fresh)).toMatchObject({ ok: true, waiting: true });
+        oldRootFrame(rootDraw(f.first));
+        expect(f.owner.sent.at(-1)?.value).not.toMatchObject({
+          presentationRevision: 2,
+          step: 1,
+        });
+        f.owner.frame!(rootDraw(fresh));
+        const second = { ...fresh, witness: { ...fresh.witness, step: 2 as const } };
+        expect(f.sync(second)).toMatchObject({ ok: true, waiting: true });
+        f.owner.frame!(rootDraw(second));
+        await recoveryTurn();
+        const newPageFrame = f.contents.frame!;
+        expect(newPageFrame).toBeFunction();
+        expect(newPageFrame).not.toBe(oldPageFrame);
+        const offers = f.chrome.displayOffers.length;
+        oldPageFrame(new FakeImage(1598, 1200) as unknown as Electron.NativeImage);
+        await recoveryTurn();
+        expect(f.contents.frame).toBe(newPageFrame);
+        expect(f.chrome.displayOffers).toHaveLength(offers);
+        expect(f.root!.getBounds().width).toBe(1600);
+        newPageFrame(new FakeImage(1598, 1200) as unknown as Electron.NativeImage);
+        await recoveryTurn();
+        expect(f.contents.frame).toBeUndefined();
+        expect(f.view.getVisible()).toBe(true);
+        expect(f.root!.getBounds().width).toBe(801);
+        expect(f.owner.sent.at(-1)?.value).toMatchObject({
+          id: f.first.id,
+          presentationRevision: 2,
+          key: fresh.witness.key,
+          presented: true,
+        });
+        const messages = f.owner.sent.length;
+        oldPageFrame(new FakeImage(1598, 1200) as unknown as Electron.NativeImage);
+        oldRootFrame(rootDraw(f.first));
+        await recoveryTurn();
+        expect(f.owner.sent).toHaveLength(messages);
+        expect(f.contents.captureCalls).toBe(2);
+        expect(f.contents.loads).toBe(1);
+        expect(f.contents.closes).toBe(0);
+        expect(f.armed).toEqual([]);
+      } finally {
+        f.pageRead.resolve(new FakeImage(0, 0));
+        f.close();
+      }
+    });
+
+test('first-page copy cannot replace its native frame, and hiding cancels the original frame subscription', async () => {
+  const f = draftRootFixture();
+  f.contents.autoPresentationFrame = false;
+  try {
+    f.draw();
+    f.contents.emit('dom-ready');
+    f.pageRead.resolve(new FakeImage(1598, 1200));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.contents.captureCalls).toBe(1);
+    expect(f.contents.frame).toBeFunction();
+    expect(f.chrome.displayOffers).toHaveLength(0);
+    expect(f.root!.getBounds().width).toBe(1600);
+    const late = f.contents.frame!;
+    late(new FakeImage(0, 0) as unknown as Electron.NativeImage);
+    late(new FakeImage(1598, 800) as unknown as Electron.NativeImage);
+    expect(f.chrome.displayOffers).toHaveLength(0);
+    f.window.emit('hide');
+    expect(f.contents.frame).toBeUndefined();
+    late(new FakeImage(1598, 1200) as unknown as Electron.NativeImage);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(f.chrome.displayOffers).toHaveLength(0);
+    expect(f.contents.captureCalls).toBe(1);
+    expect(f.view.getVisible()).toBe(false);
+    expect(f.contents.loads).toBe(1);
+  } finally {
+    f.pageRead.resolve(new FakeImage(0, 0));
+    f.close();
+  }
+});
 
 function rootReturnDraw(
   receipt: NativeBrowserClosePreparation,
@@ -3175,7 +4444,8 @@ if (process.platform === 'darwin') {
       f.contents.emit('dom-ready');
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(f.contents.captureCalls).toBe(0);
-      expect(f.chrome.displayPreparations).toHaveLength(0);
+      expect(f.chrome.displayPreparations).toHaveLength(1);
+      expect(f.chrome.displayPreparations[0]!.signal.aborted).toBe(true);
       expect(f.chrome.displayOffers).toHaveLength(0);
       expect(f.chrome.layouts).toHaveLength(0);
       expect(f.presentation).not.toContain(true);
@@ -4390,6 +5660,85 @@ if (process.platform === 'darwin') {
       }
     });
 
+  test('an admitted hosted calibration without a witness retires old proof without subscribing Root or replaying the page', async () => {
+    const f = initialRootFixture();
+    f.chrome.autoReady = true;
+    f.contents.document.value = 'retained form';
+    const contents = f.contents,
+      document = contents.document;
+    try {
+      f.draw();
+      expect(f.owner.frameCallbacks).toHaveLength(1);
+      expect(
+        f.owner.sent
+          .filter((entry) => entry.channel === nativeBrowserLayoutFrameChannel)
+          .map((entry) => (entry.value as { step: number }).step),
+      ).toEqual([1, 2]);
+      f.contents.emit('dom-ready');
+      f.pageRead.resolve(new FakeImage(1598, 1200));
+      f.chromeRead.resolve(true);
+      await recoveryTurn();
+      expect(f.view.getVisible()).toBe(true);
+      expect(f.presentation).toContain(true);
+      expect(f.owner.frame).toBeUndefined();
+      f.state.phase = 'agent';
+      const initial = f.view.getBounds();
+      f.contents.readMetrics = async () => ({ ...metrics, ...initial });
+      f.contents.screenshot = async () => ({
+        data: Buffer.from(
+          JSON.stringify({ width: initial.width * 2, height: initial.height * 2 }),
+        ).toString('base64'),
+      });
+      await f.page.send('Page.captureScreenshot', {});
+      const proof = f.page.captureMeta() as { metadata: { captureId: string } };
+      expect(await f.page.validateCapture!(proof.metadata.captureId)).toBe(true);
+      const { witness: _witness, ...calibration } = drawRequest(
+        f,
+        1600,
+        900,
+        '99887766554433221100aabb',
+      );
+      const subscriptions = f.owner.frameCallbacks.length,
+        acknowledgements = f.owner.sent.filter(
+          (entry) => entry.channel === nativeBrowserLayoutFrameChannel,
+        ).length,
+        reads = f.contents.captureCalls;
+      expect(calibration).not.toHaveProperty('witness');
+      expect(await f.asyncLayout(calibration)).toMatchObject({ ok: true, value: { id: 'page' } });
+      expect(f.view.getBounds()).toEqual({ x: 901, y: 100, width: 699, height: 600 });
+      expect(f.chrome.layouts.at(-1)).toEqual({ id: 'page', bounds: f.view.getBounds() });
+      expect(f.owner.frameCallbacks).toHaveLength(subscriptions);
+      expect(f.owner.frame).toBeUndefined();
+      expect(
+        f.owner.sent.filter((entry) => entry.channel === nativeBrowserLayoutFrameChannel),
+      ).toHaveLength(acknowledgements);
+      expect(f.contents.captureCalls).toBe(reads);
+      expect(f.page.captureMeta()).toMatchObject({ metadata: null });
+      expect(await f.page.validateCapture!(proof.metadata.captureId)).toBe(false);
+      const writes = f.view.boundsWrites.length;
+      f.chrome.announceReady('page'); // No predecessor Root draw survives this geometry-only commit.
+      expect(f.view.boundsWrites).toHaveLength(writes);
+      expect(f.view.getVisible()).toBe(true);
+      const delayed = Promise.resolve().then(() => f.asyncLayout(calibration));
+      f.windowEvent('hide');
+      expect(await delayed).toMatchObject({ ok: false });
+      expect(f.view.getVisible()).toBe(false);
+      expect(f.view.boundsWrites).toHaveLength(writes);
+      expect(f.owner.frameCallbacks).toHaveLength(subscriptions);
+      expect(f.view.webContents).toBe(contents);
+      expect(contents.document).toBe(document);
+      expect(document.value).toBe('retained form');
+      expect(contents.loads).toBe(1);
+      expect(contents.closes).toBe(0);
+      expect(f.unregistered).toEqual([]);
+      expect(f.armed).toEqual([]);
+    } finally {
+      f.pageRead.resolve(new FakeImage(0, 0));
+      f.chromeRead.resolve(false);
+      f.close();
+    }
+  });
+
   test('disposing removes the async layout handler and a previously queued callback cannot restore its page', async () => {
     const f = fixture(true);
     const chrome = nativeChrome!;
@@ -4420,6 +5769,7 @@ if (process.platform === 'darwin') {
       const initial = drawRequest(f, 1601, 800, '00112233445566778899aabb');
       initial.bounds.radius = 8;
       expect(f.sync(initial)).toMatchObject({ ok: true, waiting: false });
+      expect(chrome.viewportSyncModes.at(-1)).toBe(false);
       await new Promise<void>((resolve) => setImmediate(resolve));
       for (const view of [f.view, shield]) {
         view.boundsWrites.length = 0;
@@ -4441,6 +5791,7 @@ if (process.platform === 'darwin') {
       // rather than leave a second layout behind in the next event-loop turn.
       chrome.ready = true;
       f.window.emit('resize');
+      expect(chrome.viewportSyncModes.at(-1)).toBe(true);
       expect(f.view.getBounds()).toEqual({ x: 601, y: 100, width: 600, height: 600 });
       expect(shield.getBounds()).toEqual(f.view.getBounds());
       const measured = drawRequest(f, 1201, 600, 'ffeeddccbbaa998877665544');
@@ -4448,6 +5799,7 @@ if (process.platform === 'darwin') {
       // The same effect revision can calibrate more than one size.
       expect(measured.presentationRevision).toBe(initial.presentationRevision);
       expect(f.sync(measured)).toMatchObject({ ok: true, waiting: false });
+      expect(chrome.viewportSyncModes.at(-1)).toBe(false);
       expect(f.view.getBounds()).toEqual({ x: 601, y: 100, width: 600, height: 600 });
       expect(shield.getBounds()).toEqual(f.view.getBounds());
       expect(writes()).toEqual([
@@ -4521,6 +5873,7 @@ if (process.platform === 'darwin') {
       expect(chrome.viewportSyncs).toBe(viewportSyncs);
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(chrome.viewportSyncs).toBe(viewportSyncs + 1);
+      expect(chrome.viewportSyncModes.at(-1)).toBe(true);
       expect(f.view.getBounds()).toEqual(bounds);
       expect(f.view.getVisible()).toBe(true);
       expect(shield.getVisible()).toBe(false);

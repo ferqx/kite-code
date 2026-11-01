@@ -1136,9 +1136,29 @@ html[data-browser-chrome] .kite-client {
 }
 html[data-browser-chrome] .session-tabs {
   container: native-browser / inline-size;
+  /* Match Root's right rail when the independent strip takes over. */
+  background: var(--page-background);
 }
 html[data-browser-chrome] .session-tabs-root {
   flex: 0 0 auto;
+}
+html[data-browser-chrome] .native-browser-chrome-preparing,
+html[data-browser-chrome] .native-browser-chrome-preparing > .session-tabs {
+  background: var(--background);
+}
+html[data-browser-chrome] .native-browser-chrome-preparing > .session-tabs {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+html[data-browser-chrome] .native-browser-chrome-loading {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  background: var(--background);
 }
 .native-browser-annotations {
   position: absolute;
@@ -1319,6 +1339,11 @@ html[data-browser-chrome] .session-tabs-root {
   z-index: 1;
   overflow: auto;
   padding: 24px 20px;
+}
+.native-browser-loading {
+  display: grid;
+  height: 100%;
+  place-items: center;
 }
 .native-browser-viewport {
   flex: 1;

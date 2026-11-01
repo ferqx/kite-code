@@ -164,3 +164,66 @@ Host先核准确原geometry，再更新Root-return保存的Chrome bounds；重�
 可见surface预留候选已由唯一实际命令明确否定：私有Root API bounds仍700×760，实际帧从1400×1520扩大到2400×1520，WindowServer两源均见Root洋红覆盖原橙/青Chrome与Page。字体/文档/输入/阅读位置保持也不能授裁剪正确。原001基线夹具因同步helper阻塞后过早读点击停止、候选0次；002仅修异步真实点击事件确认，基线两个trusted点击成功后才调用一次setVisibleSize，见越界即结束，没有参数搜索或产品接入。此反例对应固定[EmulationHandler](https://github.com/chromium/chromium/blob/152.0.7977.78/content/browser/devtools/protocol/emulation_handler.cc#L808)经WebContents到[mac RenderWidgetHostView SetSize/SetBounds](https://github.com/chromium/chromium/blob/152.0.7977.78/content/browser/renderer_host/render_widget_host_view_mac.mm#L616)改变真实内容视图的路径。不能靠完整Root帧/外层getBounds推断独立预分配surface，不放宽输入/呈现边界，也不据此进入引擎补丁。Root展宽灰列与原resize缺口继续保留。
 
 024冻结开发制品的两路关闭切口已观察完整原Page直接到完整Root与按钮，未采到023正文先撤的过渡，也未见nonce/色条/白L/旧正文闪回；Source最终确认前未hide，到真实close与shield/Chrome一起撤。此结果只支持同一owner准确closing事实中的物理live页寿命与Root目标帧交接；不推广为跨scope旧页面显示，也不替代Actor lease或Root compositor原子保证。Main/Host回归和准确PTS/原片完整性沿Desktop owner，切Session/resize灰列与整篇proposed资格保持。
+
+## 剩余灰带的代码定位（2026-11-01，只读分析，候选未实施）
+
+关闭修复已本地提交824966026，未推送。后续复核020原trace和当前源码，切scope时Main先撤原Page／Chrome并展宽Root，共享SessionPage却将退休收栏排到下一rAF且开启宽度动画（CSS默认180ms，240ms为标志timer）。这是明确的时点分离，尚无compositor回执证明它是灰列唯一原因。最小候选是在scope退休时取消旧details动作，按目标已确认意图直接布局；不能复用用户主动关闭写入dismissedBrowserReveals，不能将selection／restore未决的空清单当关闭，也不能收掉目标reader／任务编辑器。共用动画timer的归属须先约束，手动开合仍保原动画。024的同owner closing事实不授权跨scope保旧页；不为视觉优化删Caller／context freshness守卫。
+
+resize时020的Page／Chrome始终visible，Root的1025→1054→1025为不同尺寸写入，现有唯一几何入口、同值去重及CDP单在途已在，不能按重复命令删除。嵌套Panel结算与量测交错仍是推断：原trace不含每次layout完整输入／CDP完成，不能认定1054未曾呈现。正宽校准若要合并，须证明哪些是同轮未呈现中间量并保最终splitter校准；rAF先于ResizeObserver，不以一／两帧等待自称稳定。保存导航宽度的恢复仍有面板库钳制后丢失用户偏好的独立必要性，不直接删除。省掉往返也不解决首次surface展宽；不能将单一写入者等同系统同帧绘制。
+
+本阶段仅归位调查，未改呈现源码或重复实机，灰带保持未解决。完整原始时序、候选验证缺口与实际资格归Desktop owner；整篇继续proposed，不由本节扩大引擎补丁或已有发行资格。
+
+## 会话退休布局调度（2026-11-01，本节已实施）
+
+用户后续明确要求先修上述时点分离并保留原页／侧栏恢复。SessionPage现于layout阶段取消旧details RAF／timer，按目标已确认意图直接expand／collapse；选择或restore未决时保留未决，不从空tabs推断用户关闭。独立navigation与details动画状态／timer，details标志绑定准确scope；手动开合仍动画，退休不误停navigation。待执行callback核原frame与scope，不能在新owner上继续旧动作。
+
+只抽机械布局，不借changeTabsOpen(false)登记新scope的dismissal；自动reveal／已有页请求在layout阶段采用。reveal去重限制在本次scope激活，离开后返回可接纳原页新reveal，显式用户收起记忆仍保留。任务编辑器退休不再额外排无目标collapse，统一服从当前reader／editor／tabs意图。Main页面、context／Caller freshness、控制与坐标边界均不改，不扩024的同owner live页保留为跨scope显示。
+
+真实Group／Panel和受控RAF回归支持旧动作取消、未决恢复、目标详情、显式收起和独立navigation；025最新冻结开发制品只验这条普通UI切走／返回并在同次记录一次resize完整校准，未重做模型／天气／关闭场景。连续像素结果和新校准事实归Desktop owner；取消180ms动画不等于Root首次展宽已同帧绘制，整篇proposed与灰带未解决资格保持。
+
+## 首URL绘制与窗口重新显示（2026-11-01，本节代码已实施，像素范围由owner限定）
+
+Cmd+W实际hide并未销毁Page，但Main清active后Renderer仍保hosted／committed校准状态，且隐藏期rAF暂停，旧visibility处理可在show时误发仅准入active页的async量测。现visible事件立即退休旧effect并建立新展示epoch，以新revision／当前量测bootstrap；不放宽异步准入，不恢复旧drawnRequest或借focus代替可见。Main hide推进sizeEpoch并清截图key，恢复同尺寸也不能沿旧坐标。曾呈现原页的恢复不再返新tab Tools。026真实Cmd+W／Dock证明此功能恢复，但灰／Tools中间态仍保留。
+
+026还录到第三URL采用上半正文先出、下半暗空，产品capture副本却完整。完整copy和DOM-ready均不能代替Page自己的presentation事件。首个initialDisplay故增加同一准确Page的完整原生帧订阅／invalidate门，持有原Root源，完整副本＋native frame＋Chrome自身帧＋fresh ACK后才采用。读取单在途；准确frame／token／URL／尺寸、取消和超时保原守卫，结束订阅，不保存／展示截图或授模型能力。考虑过只验非白像素／固定等待／重放导航，均不能证明正确网页绘制或会改变业务，未采用；不将原生帧当作整个系统原子合成保证。027一次冻结制品的三页真实完整帧与原页重开支持此局部边界，连续原图、旧反例和最终范围归Desktop owner。
+
+‘已加载Page到新空tab Root’是另一条未实施候选。026有独立灰帧，027即使没采到也不能据未变源码宣称修好；若复用024，必须先准备再提交blank目标、明确Root承担空页、完成后仅hide而不close旧Page，且保owner/context／token／最新意图与有序nonce/clear护栏。不能只把close改hide、对任意目标保旧页，或扩到跨scope／引擎。原resize及整篇proposed资格保持。
+
+## 统一显示恢复与自动组合（2026-11-01，本节代码已实施）
+
+用户明确同时要求程序恢复及自动测试，先统一现有controller。此前仅靠各Pane的visibilitychange和局部补丁不能覆盖Main已撤页而DOM未投递的情况；将新目标从旧active或URL猜回也会混淆相同网址多页与新scope。现Host暴露其已验收context／intent及实际呈现事实，Main把窗口生命周期、Host／布局／菜单事实变化合并为单个事件驱动核对；稳定native resize仍同步计算，不另建几何写入者。
+
+准确当前原Page存在而呈现不一致时，先撤旧drawn／截图／anchor，再发只有id、owner、key的私有Root观察通知。Pane统一退休旧effect并以新revision量测；隐藏时只留本次待消费通知，非hosted保DOM兼容。新的量测不是租约／模型观察，不恢复旧截图、不导航／重开或重放。现有初始／切页／关闭capsule及菜单持有期间不抢占；同对象、owner、token、Root与几何下尝试一次，普通bootstrap同样记账，失败保留原结果，不增加计时重试。
+
+真实考虑的替代是保留各事件局部恢复、固定间隔轮询／刷新、或把所有resize排入恢复队列。第一项继续重复决策且漏Main事实，第二项不能证明目标并可能重复副作用，第三项回退已有同步resize性能，均未采用。当前统一的是显示目标与修复触发，原有安全必要的有序绘制证明与短期交接事实保留，不能把状态少当目标。
+
+沿既有Main／Host／Pane夹具自动组合显隐、最小化、晚回执、scope、同URL多页、尺寸、菜单与关闭。组合已准确发现并修复菜单结束漏触发及旧截图key在visible丢失时仍有效；各整文件数量与最新冻结实机由Desktop owner维护。此自动测试验证每步状态、身份与无重放，不具备任意网页灰／白像素的语义判断，也不保证WindowServer跨surface原子显示。既有resize与Root首次展宽灰带、普通构建／跨平台资格及整篇proposed保持。
+
+## 侧栏开合的资源复用（2026-11-01，本节代码已实施，资格由owner限定）
+
+用户询问能否缓存右侧栏，以消除每次展开的加载感。现有同scope的SessionTabs保持forceMount，Pane只切visible，Main保留原WebContents／文档，Chrome WebContents同样未销毁；开合路径没有调用loadURL或reload。当前实际丢弃的是呈现effect、旧drawn证明和Host binding／shell，手动展开还默认经历宽度动画，因此复用着同一网页仍要重新量测和交接。页面自身的后台网络行为不能由这条源码结论代为保证。
+
+候选为原生页保活与准确原页的快速恢复：已有页展开先采用最终分栏尺寸；保留可重建的Chrome资源、已准备几何与metrics，和活动输入绑定分开。新Root意图仍为唯一目标，逐项核同owner、准确tab对象／Page token、Root frame／epoch、窗口几何与zoom及文档就绪；准确当前原页可先提供受输入屏障保护的真实live画面，fresh绑定／ACK／Page帧与新坐标确认后才恢复输入。无法证明时走普通loading及既有准备，不猜旧URL，不从缓存取得lease或跳过Page帧门；换scope／Caller、导航、真实关闭、Root或Main重建、Host失败和未知控制结果均不沿旧证明接管。网页、截图、AX引用和坐标的生命周期分别保留，后台Agent的原租约规则不因显示缓存改变。
+
+已考虑缓存旧截图或直接复用旧输入proof：前者把过时表单／阅读画面当当前页面，后者绕过当前身份与坐标核实，均不采用。现有资源本已保留，候选不需要复制一份网页或新增Agent Loop；真正改变的是重新展开的呈现路径及显隐时资源与authority的分离。该候选初次分析时尚未实施；后续用户确认实施，实际机制及过程失败见下段与Desktop owner。它不授缩放灰带、整体无闪或发布资格。
+
+
+用户已确认实施以上方案，并要求普通 loading。030 仅在 Root nonce 上加最小原生矩形的候选已在实际 WindowServer 过程暴露三帧标记；Root 自己的清除帧不能授权提前撤遮挡。后继不再追加覆盖矩形，而复用现有 Chrome WebContentsView 在右侧完整显示 header＋Spinner，准确自身完整帧就绪后才准 Root nonce，Page 完整帧与 fresh ACK 就绪后缩回原 header 高度。需要等待的生命周期事实复用现有 display capsule，取消及超时仍精确归属。
+
+暖恢复仅保存原生资源描述：准确 Page view/token、文档 frame/URL、owner、Root metrics/frame、viewport；不保存截图或旧输入权。原 Page 同尺寸仍在且物理输入盾可用时，可先显示受盾保护的 live Page 与原 Chrome bar；新 wire、Root 两帧、Page 完整帧及 fresh hosted ACK 全部重新取得。任一条件变化回完整 loading。收起不改 Agent lease 或 CDP 注册；物理人类输入的准备屏障不拦 Agent CDP 通道，坐标／观察 freshness 仍按原 lease 规则。Side栏展开不再播放已有 browser tab 的宽度动画，其余详情／导航动画保持。此段记录已确认实现边界；后继034的有限连续画面及回归资格归Desktop owner，不能抹去030、032、033及旧灰带反例。
+
+
+实际集成进一步确认：Main 请求新观察时，旧 Pane cleanup 不能撤掉已经准备好的继任宿主（032失败保留）。Main 通知专用 reobserve 仅在准确同 node／document／owner、DOM 正量测、visible 且无 blocked／清理异常时跳旧 withdrawal，仍清旧 proof／canvas。真正隐藏、换 owner、零尺寸／inert／覆盖、卸载或清理异常照常撤。采用时先裁 Root，再恢复稳定 Page＜Root＜Chrome 后缩宿主，保原 closing 层序；冷暖准备失败都撤临时 Page，仅以同 signal 取消 Main capsule。输入盾 sync 后重新检查 available，不能用调用前事实继续暖显示。
+
+033 已完成原页开合但原尺寸两源读图发现 bar 底边半个 Spinner，原因是准备状态与加载正文被错误等同。后继私有 loadingBody 仅区分 cold 正文与 warm bar 是否绘制 Spinner，不改变 preparing 的取消准入，也不授模型／页面能力；未使用窗口高度阈值或媒体查询猜测阶段。033半圈残片、首开 header 短裁与030／032失败全部保留，最终034连续过程和定向结果由Desktop owner维护。整体 Note 仍 proposed，已实施局部机制不代表灰带、跨平台或发行资格完成。
+
+
+## 窗口恢复回归与真实native resize来源（2026-11-01）
+
+新增实际失败重新打开Cmd+W恢复、已加载页切换和系统标题栏双击。已有shell的新binding未ready不等于cold：整页loading只准完整Root且无shell/handoff/return，正常取消不写loadingFailure；hide释放当前Host及preflight，保Page与资源，show按原意图新绑定。036已有Session实机确认恢复／切页／关闭回邻页／主动刷新，短暂重开灰与Spinner仍保留；准确资格和035夹具失败归[Desktop owner](../../../../apps/desktop/README.md#窗口重开与已加载标签切换回归2026-11-01)。
+
+037的真实制品诊断说明：Main三视图原生边界已经一致，Root逻辑viewport却被首个约350ms未完成的metrics回执串行阻塞，留下约298px内部空档。只在JS maximize/unmaximize调用栈允许更新的038候选虽改善应用调用路径，但系统app-region拖动标题栏双击由Chromium原生performZoom，完全可绕开DOM、IPC和JS包装；该包装已退役，037/038证据保留，039仅准备。不能用应用注入输入代替系统路径，亦不能用will-resize、结束事件或定时器猜准确zoom起点。
+
+当前选择由既有Main applyNativeResize明确标识真实原生尺寸来源，在同一metrics writer内提交最新不同尺寸，Renderer校准继续原串行与最后值合并。代价是原生连续变化期间允许多个尚未回执的幂等Root尺寸命令；按当前请求对象、Root frame和metricsEpoch退休旧回执，真正当前失败仍失败，回到已applied的A也要覆盖已派发B。命令更新与回执分离，不取消或重放页面动作，不产生Page像素／输入／模型观察证明。稳定async校准不再生成Main不消费的nonce，准确同调用完成只清自身旧画布，严格采用核对仍保留。未选择无条件并发所有Renderer校准、截图替身、自动刷新或引擎补丁；前者扩大不必要的派发边界，其余损害当前内容或超出授权范围。最新源、定向回归、固定Electron/Chromium来源和最终CG双击／快速拖边的有限像素资格归[Desktop owner](../../../../apps/desktop/README.md#标题栏双击与root逻辑尺寸2026-11-01)，整体Note仍proposed，不授无灰带或发布资格。
+
+040已通过准确CG系统双击两向和单次快速拖边的功能／状态核对，完整活动段像素未再采到037宽内部暗空与条纹；放大窄缝、还原窗口内右外灰带仍失败，明确保留且不启动引擎补丁。415项Main/Host/Pane、Desktop类型及适用门禁与有限原片范围支持该切口的iteration_complete为ready，不能将038/040不同输入路线当严格同路线性能A/B，也不授整体无灰/FPS/普通发行或跨平台资格。具体PTS、源hash、失败、探针不足全拖动及原页身份继续只由Desktop owner维护，整体Note仍proposed。

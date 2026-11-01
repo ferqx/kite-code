@@ -6,6 +6,7 @@ import { act, Component, type ComponentProps, type ReactNode } from 'react';
 import { createBrowserDisplayBootstrap } from '../../electron/browser-display-bootstrap';
 import {
   type NativeBrowserLayoutFrameAck,
+  type NativeBrowserPresentationRequest,
   type NativeBrowserRequest,
   type NativeBrowserRestoreScope,
   type NativeBrowserState,
@@ -246,6 +247,7 @@ test('measured Native layout follows the production Panel resize policy and refu
   const paints: { fillStyle: string; x: number; width: number; height: number }[] = [];
   const context = {
     fillStyle: '',
+    clearRect() {},
     fillRect(x: number, _y: number, width: number, height: number) {
       paints.push({ fillStyle: this.fillStyle, x, width, height });
     },
@@ -798,7 +800,7 @@ type LayoutReply =
   | import('../../src/native-browser-bridge').NativeBrowserLayoutReceipt
   | null;
 
-function measuredLayoutPortFixture(asyncPort = true, initialBlank = false) {
+function measuredLayoutPortFixture(asyncPort = true, initialBlank = false, recoveryPort = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -864,12 +866,18 @@ function measuredLayoutPortFixture(asyncPort = true, initialBlank = false) {
   };
   let notify: ((page: NativeBrowserState) => void) | undefined;
   let frameAck: ((ack: NativeBrowserLayoutFrameAck) => void) | undefined;
+  let observe: ((request: NativeBrowserPresentationRequest) => void) | undefined;
   let waiting = true;
+  let syncReply: ((input: MeasuredPresent) => LayoutReply) | undefined;
   const requests: NativeBrowserRequest[] = [];
+  const cleared: number[][] = [];
   if (initialBlank)
     dom.window.HTMLCanvasElement.prototype.getContext = (() => ({
       fillStyle: '',
       fillRect() {},
+      clearRect(...rect: number[]) {
+        cleared.push(rect);
+      },
     })) as unknown as typeof dom.window.HTMLCanvasElement.prototype.getContext;
   const events: { port: 'sync' | 'async' | 'legacy'; input: MeasuredPresent }[] = [];
   const pending: {
@@ -879,8 +887,19 @@ function measuredLayoutPortFixture(asyncPort = true, initialBlank = false) {
   }[] = [];
   Object.assign(window, {
     kiteNative: {
+      ...(recoveryPort
+        ? {
+            watchBrowserPresentation(receive: (request: NativeBrowserPresentationRequest) => void) {
+              observe = receive;
+              return () => {
+                observe = undefined;
+              };
+            },
+          }
+        : {}),
       presentBrowserLayout(input: MeasuredPresent) {
         events.push({ port: 'sync', input });
+        if (syncReply) return syncReply(input);
         return initialBlank ? { state, waiting } : null;
       },
       ...(asyncPort
@@ -952,14 +971,21 @@ function measuredLayoutPortFixture(asyncPort = true, initialBlank = false) {
     events,
     pending,
     requests,
+    cleared,
     document: dom.window.document,
     scope,
     flush,
     set waiting(value: boolean) {
       waiting = value;
     },
+    set syncReply(value: (input: MeasuredPresent) => LayoutReply) {
+      syncReply = value;
+    },
     get frameAck() {
       return frameAck!;
+    },
+    get observe() {
+      return observe!;
     },
     updatePage(patch: Partial<NativeBrowserState>) {
       return flush(() => {
@@ -1042,6 +1068,10 @@ function measuredLayoutPortFixture(asyncPort = true, initialBlank = false) {
         window.dispatchEvent(new dom.window.Event('resize'));
       });
     },
+    setGeometry(nextWidth: number, nextHeight = height) {
+      width = nextWidth;
+      height = nextHeight;
+    },
     split(nextFraction: number) {
       return flush(() => {
         fraction = nextFraction;
@@ -1080,7 +1110,8 @@ test('a retained page uses accurate restoration metadata without showing new-tab
     await f.render(false, null, draft, true, hint);
     const viewport = f.document.querySelector('.native-browser-viewport'),
       first = f.positive('sync').at(-1)!.input;
-    expect(f.document.querySelector('.native-browser-start')?.textContent).toBe('正在显示原网页…');
+    expect(f.document.querySelector('[role="status"][aria-label="网页加载中"]')).not.toBeNull();
+    expect(f.document.body.textContent).not.toContain('正在显示原网页');
     expect(f.document.querySelector<HTMLInputElement>('.native-browser-address')!.value).toBe(
       hint.url,
     );
@@ -1098,6 +1129,196 @@ test('a retained page uses accurate restoration metadata without showing new-tab
     await f.close();
   }
 });
+
+for (const kind of ['session', 'draft'] as const)
+  for (const sequence of [
+    'missing-visibility',
+    'hidden-delivery',
+    'old-owner',
+    'late-calibration',
+  ] as const) {
+    test(`Main reconciliation converges ${kind}/${sequence} without replaying page actions`, async () => {
+      const f = measuredLayoutPortFixture(true, true, true),
+        draft = kind === 'draft' ? '00112233445566778899aabbccddeeff' : undefined,
+        hint: NativeBrowserState = {
+          id: 'browser',
+          url: 'https://example.test/original',
+          title: 'Original',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        };
+      const signal: NativeBrowserPresentationRequest = {
+        id: 'browser',
+        key: '112233445566778899aabbccddeeff00',
+        ...(draft ? { draft } : { scope: f.scope }),
+      };
+      const settle = async () => {
+        await f.ack(f.positive('sync').at(-1)!.input, { step: 1 });
+        await f.ack(f.positive('sync').at(-1)!.input, { presented: true });
+      };
+      try {
+        await f.updatePage(hint);
+        await f.render(true, draft ? null : f.scope, draft, true, hint);
+        await settle();
+        const originalViewport = f.document.querySelector('.native-browser-viewport'),
+          oldAck = f.frameAck,
+          oldInput = f.positive('sync').at(-1)!.input,
+          oldObserver = f.observe;
+        let count = f.positive('sync').length;
+        if (sequence === 'old-owner') {
+          const replacement = draft ? 'ffeeddccbbaa99887766554433221100' : undefined,
+            scope = { ...f.scope, generation: 2, viewSelection: 2 };
+          await f.render(true, replacement ? null : scope, replacement, true, hint);
+          count = f.positive('sync').length;
+          await f.flush(() => {
+            oldObserver(signal);
+            f.observe(signal);
+          });
+          expect(f.positive('sync')).toHaveLength(count);
+          await f.flush(() =>
+            f.observe({ ...signal, ...(replacement ? { draft: replacement } : { scope }) }),
+          );
+        } else if (sequence === 'hidden-delivery') {
+          Object.defineProperty(f.document, 'hidden', { configurable: true, value: true });
+          await f.flush(() => {
+            f.observe(signal);
+            f.observe(signal);
+          });
+          expect(f.positive('sync')).toHaveLength(count);
+          await f.flush(() => {
+            Object.defineProperty(f.document, 'hidden', { configurable: true, value: false });
+            f.document.dispatchEvent(new Event('visibilitychange'));
+          });
+        } else {
+          if (sequence === 'late-calibration') await f.resize(1200);
+          // Main's native lifecycle notification works even when no DOM
+          // visibilitychange was delivered to this still-mounted component.
+          await f.flush(() => f.observe(signal));
+          const after = f.positive('sync').length;
+          await f.flush(() => {
+            f.observe(signal);
+            f.observe(signal);
+          });
+          expect(f.positive('sync')).toHaveLength(after);
+          if (sequence === 'late-calibration')
+            await f.flush(() => f.pending[0]!.resolve({ state: hint, waiting: false }));
+        }
+        expect(f.positive('sync').length).toBeGreaterThan(count);
+        expect(f.positive('sync').at(-1)!.input.presentationRevision!).toBeGreaterThan(
+          oldInput.presentationRevision!,
+        );
+        await f.flush(() =>
+          oldAck({
+            id: oldInput.id,
+            scope: oldInput.scope,
+            draft: oldInput.draft,
+            presentationRevision: oldInput.presentationRevision!,
+            key: oldInput.witness!.key,
+            step: 2,
+            presented: true,
+          }),
+        );
+        expect(f.document.querySelector('.native-browser-start')).not.toBeNull();
+        await settle();
+        expect(f.document.querySelector('.native-browser-start')).toBeNull();
+        expect(f.document.querySelector('.native-browser-viewport')).toBe(originalViewport);
+        expect(
+          f.requests.some((r) => ['navigate', 'reload', 'grant', 'close'].includes(r.action)),
+        ).toBe(false);
+        const receiver = f.observe;
+        await f.unmount();
+        const retired = f.positive('sync').length;
+        await f.flush(() => receiver({ ...signal, key: '00ffeeddccbbaa998877665544332211' }));
+        expect(f.positive('sync')).toHaveLength(retired);
+      } finally {
+        await f.close();
+      }
+    });
+  }
+
+for (const kind of ['session', 'draft'] as const) {
+  test(`window visibility resumes the exact ${kind} page through fresh bootstrap, fencing hidden-frame work and late calibration`, async () => {
+    const f = measuredLayoutPortFixture(true, true),
+      draft = kind === 'draft' ? '00112233445566778899aabbccddeeff' : undefined,
+      hint: NativeBrowserState = {
+        id: 'browser',
+        url: 'https://example.test/original',
+        title: 'Original page',
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+      };
+    const raf = globalThis.requestAnimationFrame,
+      cancel = globalThis.cancelAnimationFrame;
+    const paused = new Map<number, FrameRequestCallback>();
+    let next = -1;
+    globalThis.requestAnimationFrame = (callback) => {
+      if (!f.document.hidden) return raf(callback);
+      const id = next--;
+      paused.set(id, callback);
+      return id;
+    };
+    globalThis.cancelAnimationFrame = (id) => {
+      if (id < 0) paused.delete(id);
+      else cancel(id);
+    };
+    const visibility = (hidden: boolean) =>
+      f.flush(() => {
+        Object.defineProperty(f.document, 'hidden', { configurable: true, value: hidden });
+        f.document.dispatchEvent(new Event('visibilitychange'));
+      });
+    try {
+      await f.updatePage(hint);
+      await f.render(true, draft ? null : f.scope, draft);
+      await f.ack(f.positive('sync').at(-1)!.input, { step: 1 });
+      const adopted = f.positive('sync').at(-1)!.input,
+        oldAck = f.frameAck;
+      await f.ack(adopted, { presented: true });
+      expect(f.document.querySelector('.native-browser-start')).toBeNull();
+      await f.resize(1200);
+      const calibration = f.pending[0]!;
+      expect(calibration).toBeDefined();
+      const syncCount = f.positive('sync').length;
+      await visibility(true);
+      expect(paused.size).toBeGreaterThan(0);
+      await visibility(false);
+      expect(paused.size).toBe(0);
+      expect(f.positive('sync').length).toBeGreaterThan(syncCount);
+      const fresh = f.positive('sync').at(-1)!.input;
+      expect(fresh.presentationRevision! > adopted.presentationRevision!).toBe(true);
+      expect(fresh.witness!.key).not.toBe(adopted.witness!.key);
+      await f.flush(() => {
+        calibration.resolve({ state: hint, waiting: false });
+        oldAck({
+          id: adopted.id,
+          scope: adopted.scope,
+          draft: adopted.draft,
+          presentationRevision: adopted.presentationRevision!,
+          key: adopted.witness!.key,
+          step: 2,
+          presented: true,
+        });
+      });
+      expect(f.document.querySelector('.native-browser-start')).not.toBeNull();
+      expect(f.document.querySelector('[role="status"][aria-label="网页加载中"]')).not.toBeNull();
+      await f.ack(fresh, { step: 1 });
+      await f.ack(f.positive('sync').at(-1)!.input, { presented: true });
+      expect(f.document.querySelector('.native-browser-start')).toBeNull();
+      expect(
+        f.requests.some((request) =>
+          ['navigate', 'reload', 'grant', 'close'].includes(request.action),
+        ),
+      ).toBe(false);
+      await f.resize(1300);
+      expect(f.positive('async')).toHaveLength(2);
+    } finally {
+      globalThis.requestAnimationFrame = raf;
+      globalThis.cancelAnimationFrame = cancel;
+      await f.close();
+    }
+  });
+}
 
 test('a new draft page navigates without Session scope and adopts only its current draft proof before async resize', async () => {
   const f = measuredLayoutPortFixture(true, true),
@@ -1241,6 +1462,358 @@ test('draft replacement retires the old display owner and its late confirmation 
   }
 });
 
+for (const owner of ['session', 'draft'] as const)
+  test(`Main reobserves a rejected ${owner} preflight without withdrawing its newly prepared native cover`, async () => {
+    const f = measuredLayoutPortFixture(false, true, true);
+    const present = window.kiteNative!.presentBrowserLayout;
+    const draft = owner === 'draft' ? '00112233445566778899aabbccddeeff' : undefined;
+    let reject = true;
+    try {
+      await f.render(false, draft ? null : f.scope, draft);
+      Object.assign(window.kiteNative!, {
+        presentBrowserLayout(input: MeasuredPresent) {
+          if (reject) {
+            f.events.push({ port: 'sync', input });
+            throw Error('browser_presentation_unavailable');
+          }
+          return present!(input);
+        },
+      });
+      await f.navigate('https://example.test/preflight');
+      const old = f.positive('sync').at(-1)!.input;
+      const start = f.events.length;
+      expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+      expect(f.cleared.length).toBeGreaterThan(0);
+      const signal: NativeBrowserPresentationRequest = {
+        id: 'browser',
+        key: '112233445566778899aabbccddeeff00',
+        ...(draft ? { draft } : { scope: f.scope }),
+      };
+      reject = false;
+      await f.flush(() => f.observe(signal));
+      const fresh = f.positive('sync').at(-1)!.input;
+      expect(fresh.presentationRevision!).toBeGreaterThan(old.presentationRevision!);
+      expect(fresh.witness!.key).not.toBe(old.witness!.key);
+      expect(f.events.slice(start)).toHaveLength(1);
+      expect(f.events[start]).toMatchObject({ port: 'sync', input: fresh });
+      expect(f.events.slice(start).some(({ input }) => !input.bounds)).toBe(false);
+      const count = f.events.length;
+      await f.flush(async () => {
+        f.observe(signal);
+        f.observe(signal);
+        await Bun.sleep(80);
+      });
+      expect(f.events).toHaveLength(count);
+      await f.ack(fresh, { step: 1 });
+      await f.ack(f.positive('sync').at(-1)!.input, { presented: true });
+      expect(f.document.querySelector('.native-browser-start')).toBeNull();
+      expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+      expect(
+        f.requests.some((request) => ['reload', 'grant', 'close'].includes(request.action)),
+      ).toBe(false);
+    } finally {
+      Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+      await f.close();
+    }
+  });
+
+for (const boundary of ['hide', 'scope', 'unmount', 'error'] as const)
+  test(`a Main preflight reobservation still withdraws on a genuine ${boundary}`, async () => {
+    const f = measuredLayoutPortFixture(false, true, true);
+    const present = window.kiteNative!.presentBrowserLayout;
+    let reject = true;
+    try {
+      await f.render(false);
+      Object.assign(window.kiteNative!, {
+        presentBrowserLayout(input: MeasuredPresent) {
+          if (reject) throw Error('browser_presentation_unavailable');
+          return present!(input);
+        },
+      });
+      await f.navigate('https://example.test/preflight');
+      reject = false;
+      const signal: NativeBrowserPresentationRequest = {
+        id: 'browser',
+        key: '112233445566778899aabbccddeeff00',
+        scope: f.scope,
+      };
+      await f.flush(() => f.observe(signal));
+      const current = f.positive('sync').at(-1)!.input;
+      const receiver = f.observe;
+      const before = f.requests.length;
+      if (boundary === 'hide') await f.render(false, f.scope, undefined, false);
+      if (boundary === 'scope') await f.render(false, { ...f.scope, viewSelection: 2 });
+      if (boundary === 'unmount') await f.unmount();
+      if (boundary === 'error') await f.updatePage({ error: 'process_gone' });
+      expect(
+        f.requests
+          .slice(before)
+          .some(
+            (request) =>
+              request.action === 'present' &&
+              request.bounds === null &&
+              request.presentationRevision === current.presentationRevision,
+          ),
+      ).toBe(true);
+      const count = f.positive('sync').length;
+      await f.flush(() => receiver({ ...signal, key: '00ffeeddccbbaa998877665544332211' }));
+      expect(f.positive('sync')).toHaveLength(count);
+      expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+      expect(
+        f.requests.some((request) => ['reload', 'grant', 'close'].includes(request.action)),
+      ).toBe(false);
+    } finally {
+      Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+      await f.close();
+    }
+  });
+
+for (const boundary of ['hidden', 'inert', 'overlay', 'zero'] as const)
+  test(`a Main prepared handoff cannot retain a rejected proof behind a ${boundary} DOM measurement`, async () => {
+    const f = measuredLayoutPortFixture(false, true, true);
+    const present = window.kiteNative!.presentBrowserLayout;
+    const rejected: MeasuredPresent[] = [];
+    try {
+      await f.render(false);
+      Object.assign(window.kiteNative!, {
+        presentBrowserLayout(input: MeasuredPresent) {
+          rejected.push(input);
+          throw Error('browser_presentation_unavailable');
+        },
+      });
+      await f.navigate('https://example.test/preflight');
+      const old = rejected.at(-1)!;
+      Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+      const before = f.requests.length;
+      const positives = f.positive('sync').length;
+      await f.flush(() => {
+        const details = f.document.getElementById('port-details')!;
+        if (boundary === 'hidden') details.hidden = true;
+        if (boundary === 'inert') details.setAttribute('inert', '');
+        if (boundary === 'zero')
+          f.document.querySelector<HTMLElement>('.native-browser-viewport')!.getBoundingClientRect =
+            () => new window.DOMRect(0, 0, 0, 0);
+        if (boundary === 'overlay') {
+          const overlay = f.document.createElement('div');
+          overlay.setAttribute('data-native-browser-overlay', '');
+          overlay.getBoundingClientRect = () => new window.DOMRect(0, 0, 1400, 800);
+          f.document.body.append(overlay);
+        }
+        f.observe({
+          id: 'browser',
+          key: '112233445566778899aabbccddeeff00',
+          scope: f.scope,
+        });
+      });
+      expect(
+        f.requests
+          .slice(before)
+          .some(
+            (request) =>
+              request.action === 'present' &&
+              request.bounds === null &&
+              request.presentationRevision === old.presentationRevision,
+          ),
+      ).toBe(true);
+      expect(f.positive('sync')).toHaveLength(positives);
+      expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+      expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+    } finally {
+      Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+      await f.close();
+    }
+  });
+
+test('a Main prepared handoff withdraws before reporting an old frame unsubscribe failure', async () => {
+  const order: string[] = [];
+  const f = measuredLayoutPortFixture(false, true, true);
+  const host = window.kiteNative!;
+  const present = host.presentBrowserLayout;
+  const watch = host.watchBrowserLayoutFrame!;
+  const request = host.browserRequest!;
+  const failure = Error('old frame unsubscribe failed');
+  let failCleanup = false;
+  try {
+    Object.assign(host, {
+      watchBrowserLayoutFrame(receive: Parameters<typeof watch>[0]) {
+        const unwatch = watch(receive);
+        return () => {
+          unwatch();
+          if (failCleanup) {
+            failCleanup = false;
+            throw failure;
+          }
+        };
+      },
+      presentBrowserLayout() {
+        throw Error('browser_presentation_unavailable');
+      },
+      browserRequest(input: NativeBrowserRequest) {
+        if (input.action === 'present' && input.bounds === null) order.push('withdraw');
+        return request(input);
+      },
+    });
+    await f.render(false);
+    await f.navigate('https://example.test/preflight');
+    order.length = 0;
+    failCleanup = true;
+    Object.assign(host, { presentBrowserLayout: present });
+    let reported: unknown;
+    try {
+      await f.flush(() =>
+        f.observe({
+          id: 'browser',
+          key: '112233445566778899aabbccddeeff00',
+          scope: f.scope,
+        }),
+      );
+    } catch (cause) {
+      order.push('error');
+      reported = cause;
+    }
+    expect(reported).toBe(failure);
+    expect(order.indexOf('withdraw')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('withdraw')).toBeLessThan(order.indexOf('error'));
+    expect(f.frameAck).toBeUndefined();
+    expect(f.document.querySelector('.native-browser-viewport')).toBeNull();
+    expect(f.requests.filter((input) => input.action === 'navigate')).toHaveLength(1);
+  } finally {
+    Object.assign(host, {
+      presentBrowserLayout: present,
+      watchBrowserLayoutFrame: watch,
+      browserRequest: request,
+    });
+    await f.close();
+  }
+});
+
+test('a rejected initial presentation clears its proof pixels while keeping normal loading for a fresh retry', async () => {
+  const f = measuredLayoutPortFixture(false, true);
+  const present = window.kiteNative!.presentBrowserLayout;
+  let rejected = 0;
+  try {
+    await f.render(false);
+    Object.assign(window.kiteNative!, {
+      presentBrowserLayout() {
+        rejected++;
+        throw Error('browser_page_scope_denied');
+      },
+    });
+    await f.navigate('https://example.test/first');
+    expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+    expect(f.cleared.length).toBeGreaterThan(0);
+    expect(f.document.querySelector('[aria-label="网页加载中"]')).not.toBeNull();
+    const attempts = rejected;
+    await f.flush(() => Bun.sleep(80));
+    expect(rejected).toBe(attempts);
+    Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+    await f.resize(1200);
+    const first = f.positive('sync').at(-1)!.input;
+    await f.ack(first, { step: 1 });
+    await f.ack(f.positive('sync').at(-1)!.input, { presented: true });
+    expect(f.document.querySelector('[aria-label="网页加载中"]')).toBeNull();
+    expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+    expect(f.requests.some((request) => ['reload', 'grant'].includes(request.action))).toBe(false);
+  } finally {
+    Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+    await f.close();
+  }
+});
+
+for (const owner of ['session', 'draft'] as const)
+  test(`a rejected ${owner} draw accepts only its exact late error and never a success receipt`, async () => {
+    const f = measuredLayoutPortFixture(false, true);
+    const present = window.kiteNative!.presentBrowserLayout;
+    const rejected: MeasuredPresent[] = [];
+    const draft = owner === 'draft' ? '00112233445566778899aabbccddeeff' : undefined;
+    try {
+      await f.render(false, draft ? null : f.scope, draft);
+      const source = f.document.querySelector('.native-browser-start');
+      Object.assign(window.kiteNative!, {
+        presentBrowserLayout(input: MeasuredPresent) {
+          rejected.push(input);
+          throw Error('browser_presentation_unavailable');
+        },
+      });
+      await f.navigate('https://example.test/rejected');
+      const first = rejected.at(-1)!;
+      expect(first.witness?.step).toBe(1);
+      const error = { presented: false, error: 'browser_presentation_unavailable' } as const;
+      const issue = () => f.document.querySelector('[aria-label="页面状态与选项"]');
+      expect(issue()).toBeNull();
+      for (const patch of [
+        { id: 'other-page' },
+        { key: 'f'.repeat(24) },
+        { presentationRevision: first.presentationRevision! + 1 },
+        draft
+          ? { draft: 'f'.repeat(32) }
+          : { scope: { ...f.scope, viewSelection: f.scope.viewSelection + 1 } },
+        draft ? { scope: f.scope } : { draft: 'f'.repeat(32) },
+      ]) {
+        await f.ack(first, { ...error, ...patch });
+        expect(issue()).toBeNull();
+      }
+      await f.ack(first, { presented: true });
+      expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+      expect(f.document.querySelector('[aria-label="网页加载中"]')).not.toBeNull();
+      await f.ack(first, error);
+      expect(issue()?.getAttribute('title')).toContain('网页显示尚未确认');
+      await f.ack(first, { presented: true });
+      expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+      expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+      expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+      expect(f.requests.some((request) => ['reload', 'grant'].includes(request.action))).toBe(
+        false,
+      );
+    } finally {
+      Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+      await f.close();
+    }
+  });
+
+for (const owner of ['session', 'draft'] as const)
+  test(`a new ${owner} draw retires an older rejected witness even at the same presentation revision`, async () => {
+    const f = measuredLayoutPortFixture(false, true);
+    const present = window.kiteNative!.presentBrowserLayout;
+    const rejected: MeasuredPresent[] = [];
+    const draft = owner === 'draft' ? '00112233445566778899aabbccddeeff' : undefined;
+    try {
+      await f.render(false, draft ? null : f.scope, draft);
+      Object.assign(window.kiteNative!, {
+        presentBrowserLayout(input: MeasuredPresent) {
+          rejected.push(input);
+          throw Error('browser_presentation_unavailable');
+        },
+      });
+      await f.navigate('https://example.test/rejected');
+      const old = rejected.at(-1)!;
+      Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+      await f.resize(1200);
+      const current = f.positive('sync').at(-1)!.input;
+      expect(current.presentationRevision).toBe(old.presentationRevision);
+      expect(current.witness!.key).not.toBe(old.witness!.key);
+      const oldError = { presented: false, error: 'browser_presentation_unavailable' } as const;
+      await f.ack(old, oldError);
+      expect(f.document.querySelector('[aria-label="页面状态与选项"]')).toBeNull();
+      await f.ack(current, { step: 1 });
+      const second = f.positive('sync').at(-1)!.input;
+      await f.ack(old, oldError);
+      expect(f.document.querySelector('[aria-label="页面状态与选项"]')).toBeNull();
+      await f.ack(second, { presented: true });
+      expect(f.document.querySelector('.native-browser-start')).toBeNull();
+      await f.ack(old, oldError);
+      expect(f.document.querySelector('.native-browser-start')).toBeNull();
+      expect(f.document.querySelector('[aria-label="页面状态与选项"]')).toBeNull();
+      expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
+      expect(f.requests.some((request) => ['reload', 'grant'].includes(request.action))).toBe(
+        false,
+      );
+    } finally {
+      Object.assign(window.kiteNative!, { presentBrowserLayout: present });
+      await f.close();
+    }
+  });
+
 test('first navigation keeps the original Root source until its exact native presentation completes', async () => {
   const f = measuredLayoutPortFixture(false, true);
   try {
@@ -1248,8 +1821,11 @@ test('first navigation keeps the original Root source until its exact native pre
     const source = f.document.querySelector('.native-browser-start')!;
     const viewport = f.document.querySelector('.native-browser-viewport');
     expect(source).not.toBeNull();
+    expect(f.document.querySelector('[aria-label="网页加载中"]')).toBeNull();
     await f.navigate('https://example.test/first');
     expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
+    expect(f.document.querySelector('[role="status"][aria-label="网页加载中"]')).not.toBeNull();
+    expect(f.document.body.textContent).not.toContain('正在显示原网页');
     expect(f.document.querySelector('.native-browser-viewport') === viewport).toBe(true);
     const first = f.positive('sync').at(-1)!.input;
     await f.render(true);
@@ -1257,11 +1833,15 @@ test('first navigation keeps the original Root source until its exact native pre
     await f.ack(first, { step: 1 });
     const second = f.positive('sync').at(-1)!.input;
     expect(second.witness!.step).toBe(2);
+    const clears = f.cleared.length;
     await f.ack(second, { presented: false });
     expect(f.document.querySelector('.native-browser-start') === source).toBe(true);
     expect(f.document.querySelector<HTMLCanvasElement>('canvas')!.hidden).toBe(true);
+    expect(f.cleared.slice(clears)).toEqual([[0, 0, 120, 3]]);
+    expect(f.document.querySelector('[role="status"][aria-label="网页加载中"]')).not.toBeNull();
     await f.ack(second, { presented: true });
     expect(f.document.querySelector('.native-browser-start')).toBeNull();
+    expect(f.document.querySelector('[aria-label="网页加载中"]')).toBeNull();
     expect(f.document.querySelector('.native-browser-viewport') === viewport).toBe(true);
     expect(f.requests.filter((request) => request.action === 'navigate')).toHaveLength(1);
     expect(f.requests.some((request) => ['grant', 'reload'].includes(request.action))).toBe(false);
@@ -1364,15 +1944,143 @@ for (const completion of ['legacy-ack', 'receipt'] as const)
     }
   });
 
+test('a successful hosted receipt retires only its own palette when newer DOM geometry prevents adoption', async () => {
+  const f = measuredLayoutPortFixture(false, true);
+  try {
+    await f.render(true);
+    await f.navigate('https://example.test/original');
+    const source = f.document.querySelector('.native-browser-start');
+    expect(source).not.toBeNull();
+    const canvas = f.document.querySelector<HTMLCanvasElement>('canvas')!;
+    expect(canvas.hidden).toBe(false);
+    const cleared = f.cleared.length;
+    // The accepted input was real. At reply time a newer DOM layout exists,
+    // before its ResizeObserver delivery; it is not permission to adopt it.
+    f.syncReply = (input) => {
+      expect(input.witness).toBeDefined();
+      f.setGeometry(1200, 740);
+      return {
+        state: {
+          id: 'browser',
+          url: 'https://example.test/original',
+          title: 'Original page',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        },
+        waiting: false,
+      };
+    };
+    await f.resize(1100, 760);
+    expect(canvas.hidden).toBe(true);
+    expect(f.cleared.length).toBeGreaterThan(cleared);
+    expect(f.document.querySelector('.native-browser-start')).toBe(source);
+    expect(f.pending).toHaveLength(0); // Compatibility uses its real synchronous port.
+    expect(f.requests.filter((r) => r.action === 'navigate')).toHaveLength(1);
+    expect(f.requests.some((r) => r.action === 'grant')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a hosted receipt for another page cannot retire the current palette or adopt the source', async () => {
+  const f = measuredLayoutPortFixture(false, true);
+  try {
+    await f.render(true);
+    await f.navigate('https://example.test/original');
+    const canvas = f.document.querySelector<HTMLCanvasElement>('canvas')!,
+      source = f.document.querySelector('.native-browser-start'),
+      cleared = f.cleared.length;
+    expect(canvas.hidden).toBe(false);
+    f.syncReply = () => ({
+      state: {
+        id: 'another-page',
+        url: 'https://example.test/original',
+        title: 'Other page',
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+      },
+      waiting: false,
+    });
+    await f.resize(1100, 760);
+    expect(canvas.hidden).toBe(false);
+    expect(f.cleared).toHaveLength(cleared);
+    expect(f.document.querySelector('.native-browser-start')).toBe(source);
+    expect(f.requests.some((r) => r.action === 'grant')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const boundary of ['scope', 'stop'] as const)
+  test(`a successful old hosted reply after ${boundary} cannot clear the successor palette or adopt its source`, async () => {
+    const f = measuredLayoutPortFixture(true, true);
+    try {
+      await f.render(true);
+      await f.navigate('https://example.test/original');
+      const original = f.positive('sync').at(-1)!.input;
+      await f.resize(1100, 760);
+      const pending = f.pending[0]!;
+      expect(pending.input.witness).toBeUndefined();
+      if (boundary === 'scope') await f.render(true, { ...f.scope, viewSelection: 2 });
+      else await f.stop();
+      const current = f.positive('sync').at(-1)!.input,
+        canvas = f.document.querySelector<HTMLCanvasElement>('canvas')!,
+        source = f.document.querySelector('.native-browser-start');
+      expect(current.witness!.key).not.toBe(original.witness!.key);
+      expect(canvas.hidden).toBe(false);
+      expect(source).not.toBeNull();
+      const cleared = f.cleared.length;
+      await f.ack(current, { scope: { ...f.scope, viewSelection: 999 }, presented: true });
+      expect(canvas.hidden).toBe(false);
+      expect(f.cleared).toHaveLength(cleared);
+      await f.flush(() =>
+        pending.resolve({
+          state: {
+            id: 'browser',
+            url: 'https://example.test/original',
+            title: 'Original page',
+            loading: false,
+            canGoBack: false,
+            canGoForward: false,
+          },
+          waiting: false,
+        }),
+      );
+      expect(canvas.hidden).toBe(false);
+      expect(f.cleared).toHaveLength(cleared);
+      expect(f.document.querySelector('.native-browser-start')).toBe(source);
+      expect(f.pending).toHaveLength(1);
+      expect(f.requests.filter((r) => r.action === 'navigate')).toHaveLength(1);
+      expect(f.requests.some((r) => r.action === 'grant')).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
 test('stable hosted measurements including same-window splitter changes use one asynchronous port and remeasure the latest layout', async () => {
-  const f = measuredLayoutPortFixture();
+  const f = measuredLayoutPortFixture(true, true);
   try {
     await f.render();
+    await f.navigate('https://example.test/original');
+    const first = f.positive('sync').at(-1)!.input;
+    expect(first.witness?.step).toBe(1);
+    await f.ack(first, { step: 1 });
+    const second = f.positive('sync').at(-1)!.input;
+    expect(second.witness).toEqual({ key: first.witness!.key, step: 2 });
+    await f.ack(second, { presented: true });
+    const canvas = f.document.querySelector<HTMLCanvasElement>('canvas')!,
+      cleared = f.cleared.length;
+    expect(canvas.hidden).toBe(true);
     expect(f.positive('sync').length).toBeGreaterThan(0);
     expect(f.pending).toHaveLength(0); // bootstrap still establishes layout synchronously
     const sync = f.positive('sync').length;
     await f.resize(1100, 760);
     expect(f.pending).toHaveLength(1);
+    expect(f.pending[0]!.input.witness).toBeUndefined();
+    expect(canvas.hidden).toBe(true);
+    expect(f.cleared).toHaveLength(cleared);
     expect(f.pending[0]!.input.layout).toMatchObject({ windowWidth: 1100, windowHeight: 760 });
     expect(f.positive('sync')).toHaveLength(sync);
     await f.resize(1000, 720);
@@ -1397,6 +2105,9 @@ test('stable hosted measurements including same-window splitter changes use one 
     expect(f.positive('sync')).toHaveLength(sync);
     expect(f.pending).toHaveLength(3);
     await f.flush(() => f.pending[2]!.resolve());
+    expect(f.pending.every(({ input }) => input.witness === undefined)).toBe(true);
+    expect(canvas.hidden).toBe(true);
+    expect(f.cleared).toHaveLength(cleared);
     expect(f.positive('legacy')).toHaveLength(0);
   } finally {
     await f.close();
@@ -2093,7 +2804,7 @@ test('a staged real Pane measures the whole window and claims its restored slot 
   };
   const f = paneFixture(page);
   Object.assign(f.window.HTMLCanvasElement.prototype, {
-    getContext: () => ({ fillStyle: '', fillRect() {} }),
+    getContext: () => ({ fillStyle: '', fillRect() {}, clearRect() {} }),
   });
   const scope = { storeId: 'store', sessionId: 'session', generation: 2, viewSelection: 2 };
   const bounds = { x: 602, y: 100, width: 421, height: 667, radius: 0 };

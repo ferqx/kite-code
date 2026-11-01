@@ -1,4 +1,4 @@
-import { SessionTabsChrome } from '@kite-ai/ui/desktop';
+import { SessionTabsChrome, Spinner } from '@kite-ai/ui/desktop';
 import {
   type KeyboardEvent,
   useCallback,
@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   isNativeBrowserChromeEnvelope,
+  isNativeBrowserChromePreparingAction,
   type NativeBrowserChromeAction,
   type NativeBrowserChromeBridge,
   type NativeBrowserChromeEnvelope,
@@ -44,6 +45,18 @@ function actionable(value: NativeBrowserChromeEnvelope) {
     value.snapshot.tabs.visible &&
     value.snapshot.tabs.present
   );
+}
+function preparing(value: NativeBrowserChromeEnvelope) {
+  return (
+    value.preparing === true &&
+    value.snapshot.interactive &&
+    !value.snapshot.covered &&
+    value.snapshot.tabs.visible &&
+    value.snapshot.tabs.present
+  );
+}
+function preparingAction(value: NativeBrowserChromeEnvelope, action: NativeBrowserChromeAction) {
+  return preparing(value) && isNativeBrowserChromePreparingAction(action, value.snapshot);
 }
 type Send = (
   binding: string,
@@ -159,6 +172,7 @@ function Chrome({
     // A retained input can receive the old page's final IME event after blur.
     // Only the current focused editor owns user input; explicit restoration
     // still uses the separately fenced action path below.
+    if (live.current.preparing) return;
     if (
       !restoring &&
       document.activeElement !== host.current?.querySelector('.native-browser-address')
@@ -228,7 +242,7 @@ function Chrome({
       return;
     }
     if (action.type === 'address-focus') {
-      editing.current = action.focused;
+      editing.current = action.focused && !live.current.preparing;
       if (!action.focused) {
         edit.current = undefined;
         cancelSubmission();
@@ -236,7 +250,11 @@ function Chrome({
       if (actionable(live.current) && !uncertain.current) void emit({ part: 'toolbar', action });
       return;
     }
-    if (!actionable(live.current) || uncertain.current) return;
+    if (
+      (!actionable(live.current) && !preparingAction(live.current, { part: 'toolbar', action })) ||
+      uncertain.current
+    )
+      return;
     if (
       ['navigate', 'back', 'forward', 'reload'].includes(action.type) &&
       !live.current.snapshot.toolbar.canNavigate
@@ -300,9 +318,16 @@ function Chrome({
     }
   }
   const canAct = actionable(envelope) && (changingPage || !uncertain.current);
+  const isPreparing = envelope.preparing === true;
+  const canStop =
+    preparingAction(envelope, { part: 'toolbar', action: { type: 'reload' } }) &&
+    envelope.snapshot.toolbar.canNavigate &&
+    !uncertain.current &&
+    !busy;
   // Preserve an in-progress editor/IME across a geometry attachment handshake.
   // Local echo grants no action: every dispatch is separately admitted above.
   const localEditing =
+    !isPreparing &&
     !changingPage &&
     (editing.current || composing.current) &&
     envelope.snapshot.toolbar.canNavigate &&
@@ -317,12 +342,15 @@ function Chrome({
       : envelope.snapshot.toolbar.readonlyURL,
     canNavigate:
       (changingPage || (!busy && !uncertain.current)) && envelope.snapshot.toolbar.canNavigate,
+    ...(isPreparing
+      ? { canGoBack: false, canGoForward: false, notesAvailable: false, optionsAvailable: false }
+      : {}),
   };
   const visibleBusy = !changingPage && busy;
   const visibleIssue = changingPage ? '' : issue;
   return (
     <div
-      className="kite-client"
+      className={`kite-client${isPreparing ? ' native-browser-chrome-preparing' : ''}`}
       ref={host}
       onKeyDownCapture={keyboard}
       onCompositionStartCapture={() => {
@@ -337,7 +365,7 @@ function Chrome({
         <SessionTabsChrome
           data={envelope.snapshot.tabs}
           dispatch={(action) => {
-            if (!canAct) return;
+            if (!canAct && !preparingAction(envelope, { part: 'tabs', action })) return;
             cancelSubmission();
             void emit({ part: 'tabs', action }).then((result) => {
               if (
@@ -351,8 +379,8 @@ function Chrome({
         />
         <NativeBrowserChromeToolbar
           data={toolbar}
-          interactionPending={!canAct}
-          addressReadOnly={!canAct && !localEditing}
+          interactionPending={!canAct && !canStop}
+          addressReadOnly={isPreparing || (!canAct && !localEditing)}
           dispatch={toolbarAction}
           tools={
             <>
@@ -369,7 +397,7 @@ function Chrome({
                     : '正在核对地址'}
                 </span>
               )}
-              {envelope.snapshot.control && (
+              {!isPreparing && envelope.snapshot.control && (
                 <NativeBrowserChromeControl
                   data={envelope.snapshot.control}
                   dispatch={(action) => {
@@ -380,6 +408,11 @@ function Chrome({
             </>
           }
         />
+        {isPreparing && envelope.loadingBody !== false && (
+          <div className="native-browser-chrome-loading">
+            <Spinner aria-label="正在加载网页" />
+          </div>
+        )}
       </section>
     </div>
   );
@@ -460,7 +493,10 @@ export function NativeBrowserChromeRenderer({
         !bridge ||
         !value ||
         bindingKey(value) !== binding ||
-        (action.part !== 'escape' && action.part !== 'focus-root' && !actionable(value))
+        (action.part !== 'escape' &&
+          action.part !== 'focus-root' &&
+          !actionable(value) &&
+          !preparingAction(value, action))
       )
         return 'stale';
       // Main attachments are unique. Retired bindings cannot send again, so

@@ -3,6 +3,7 @@ import {
   isNativeBrowserChromeEnvelope,
   isNativeBrowserChromeEvent,
   isNativeBrowserChromeOwner,
+  isNativeBrowserChromePreparingAction,
   isNativeBrowserChromeRendered,
   isNativeBrowserChromeSnapshot,
   type NativeBrowserChromeSnapshot,
@@ -93,6 +94,66 @@ test('Chrome draft owners are disjoint from Session authority and cannot carry A
     },
   ])
     expect(isNativeBrowserChromeSnapshot(invalid)).toBe(false);
+});
+
+test('preparing envelopes retain legacy compatibility and admit only exact cancellation action types', () => {
+  const value = snapshot();
+  const envelope = {
+    attachment: 'preparing-attachment',
+    pageToken: 'current-page',
+    hosted: false,
+    actionable: false,
+    snapshot: value,
+  };
+  expect(isNativeBrowserChromeEnvelope(envelope)).toBe(true);
+  expect(isNativeBrowserChromeEnvelope({ ...envelope, preparing: true })).toBe(true);
+  expect(isNativeBrowserChromeEnvelope({ ...envelope, preparing: true, hosted: true })).toBe(true);
+  expect(isNativeBrowserChromeEnvelope({ ...envelope, preparing: false })).toBe(true);
+  expect(isNativeBrowserChromeEnvelope({ ...envelope, preparing: true, loadingBody: true })).toBe(
+    true,
+  );
+  expect(isNativeBrowserChromeEnvelope({ ...envelope, preparing: true, loadingBody: false })).toBe(
+    true,
+  );
+  expect(isNativeBrowserChromeEnvelope({ ...envelope, loadingBody: 'false' })).toBe(false);
+  for (const invalid of [
+    { ...envelope, preparing: 'yes' },
+    { ...envelope, preparing: 1 },
+    { ...envelope, preparing: null },
+    { ...envelope, preparing: true, actionable: true },
+    { ...envelope, preparing: true, execute: 'not-allowed' },
+  ])
+    expect(isNativeBrowserChromeEnvelope(invalid)).toBe(false);
+  const loading = { ...value, toolbar: { ...value.toolbar, loading: true } };
+  for (const action of [
+    { part: 'escape' },
+    { part: 'focus-root' },
+    { part: 'tabs', action: { type: 'close', id: 'browser' } },
+    { part: 'tabs', action: { type: 'collapse' } },
+    { part: 'toolbar', action: { type: 'reload' } },
+  ] as const)
+    expect(isNativeBrowserChromePreparingAction(action, loading)).toBe(true);
+  expect(
+    isNativeBrowserChromePreparingAction({ part: 'toolbar', action: { type: 'reload' } }, value),
+  ).toBe(false);
+  for (const action of [
+    { part: 'tabs', action: { type: 'select', id: 'child' } },
+    { part: 'tabs', action: { type: 'add' } },
+    { part: 'tabs', action: { type: 'retryRestore' } },
+    { part: 'tabs', action: { type: 'openChanges' } },
+    { part: 'toolbar', action: { type: 'navigate' } },
+    { part: 'toolbar', action: { type: 'back' } },
+    { part: 'toolbar', action: { type: 'forward' } },
+    { part: 'toolbar', action: { type: 'address-change', value: 'https://example.org/' } },
+    { part: 'toolbar', action: { type: 'address-focus', focused: true } },
+    { part: 'toolbar', action: { type: 'toggle-notes' } },
+    {
+      part: 'toolbar',
+      action: { type: 'show-options', anchor: { x: 0, y: 0, width: 1, height: 1 } },
+    },
+    { part: 'control', action: { type: 'show-menu', anchor: { x: 0, y: 0, width: 1, height: 1 } } },
+  ] as const)
+    expect(isNativeBrowserChromePreparingAction(action, loading)).toBe(false);
 });
 
 test('readonly Chrome render receipt contains only bounded current-wire identity and revision', () => {

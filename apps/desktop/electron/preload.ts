@@ -27,6 +27,7 @@ import {
   isNativeBrowserMenuAction,
   isNativeBrowserPreparation,
   isNativeBrowserPresentationFrame,
+  isNativeBrowserPresentationRequest,
   isNativeBrowserRestoreResult,
   isNativeBrowserState,
   type NativeBrowserBridge,
@@ -40,6 +41,7 @@ import {
   nativeBrowserMenuChannel,
   nativeBrowserPreparationCancelChannel,
   nativeBrowserPreparationChannel,
+  nativeBrowserPresentationChannel,
   parseNativeBrowserRequest,
 } from '../src/native-browser-bridge';
 import {
@@ -256,6 +258,13 @@ const bridge: NativeBridge &
     };
     ipcRenderer.on(nativeBrowserLayoutFrameChannel, receive);
     return () => ipcRenderer.removeListener(nativeBrowserLayoutFrameChannel, receive);
+  },
+  watchBrowserPresentation(listener) {
+    const receive = (_event: unknown, value: unknown) => {
+      if (isNativeBrowserPresentationRequest(value)) listener(value);
+    };
+    ipcRenderer.on(nativeBrowserPresentationChannel, receive);
+    return () => ipcRenderer.removeListener(nativeBrowserPresentationChannel, receive);
   },
   async showBrowserMenu(input) {
     const action: unknown = await ipcRenderer.invoke(nativeBrowserMenuChannel, input);

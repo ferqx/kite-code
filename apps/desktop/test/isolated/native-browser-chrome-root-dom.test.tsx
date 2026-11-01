@@ -269,6 +269,7 @@ async function fixture(
     id,
     hosted,
     notesOpen,
+    loading,
     title,
     registerToolbar,
     registerControl,
@@ -276,6 +277,7 @@ async function fixture(
     id: string;
     hosted: boolean;
     notesOpen: boolean;
+    loading: boolean;
     title: string;
     registerToolbar: (port: NativeBrowserToolbarPort | undefined) => void;
     registerControl: (port: NativeBrowserControlPort | undefined) => void;
@@ -287,7 +289,7 @@ async function fixture(
           id,
           address,
           readonlyURL: `https://example.com/${id}`,
-          loading: false,
+          loading,
           hasPage: true,
           canGoBack: false,
           canGoForward: false,
@@ -301,7 +303,7 @@ async function fixture(
           if (action.type === 'address-change') setAddress(action.value);
         },
       }),
-      [id, address, notesOpen],
+      [id, address, notesOpen, loading],
     );
     const control = useMemo<NativeBrowserControlPort>(
       () => ({
@@ -337,6 +339,7 @@ async function fixture(
     covered = false,
     active = ids[0]!,
     notesOpen = false,
+    loading = false,
     title = 'Page',
     nonbrowser = false,
     presentationOwner = modernOwner,
@@ -346,6 +349,7 @@ async function fixture(
     covered?: boolean;
     active?: string;
     notesOpen?: boolean;
+    loading?: boolean;
     title?: string;
     nonbrowser?: boolean;
     presentationOwner?: NativeBrowserChromeOwner;
@@ -454,6 +458,7 @@ async function fixture(
               id={id}
               title={title}
               notesOpen={notesOpen && id === active}
+              loading={loading && id === active}
               hosted={chrome.hosted(id)}
               registerToolbar={toolbar(id)}
               registerControl={chrome.control(id)}
@@ -539,14 +544,15 @@ async function fixture(
           ),
         ),
       ),
-    async host(hosted = true, binding = attachment) {
+    async host(hosted = true, binding = attachment, preparing = false) {
       attachment = binding;
       await flush(() =>
         stateListeners.at(-1)!({
           attachment,
           pageToken,
           hosted,
-          actionable: true,
+          actionable: !preparing,
+          ...(preparing ? { preparing: true } : {}),
           snapshot: latest(),
         }),
       );
@@ -926,6 +932,44 @@ test('address edits accept an earlier current-binding revision, then echo commit
         (snapshot) => snapshot?.toolbar.address === 'https://example.com/temporary',
       ),
     ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Root preparation admits cancellation only on the current interactive wire and exact revision', async () => {
+  const f = await fixture();
+  try {
+    await f.render({ loading: true });
+    await f.host(false, 'preparing-wire', true);
+    expect(f.latest().hosted).toBe(false);
+    expect(await f.event({ part: 'toolbar', action: { type: 'reload' } })).toBe(true);
+    expect(f.actions.at(-1)?.action.type).toBe('reload');
+    expect(await f.event({ part: 'tabs', action: { type: 'close', id: 'page-0' } })).toBe(true);
+    expect(await f.event({ part: 'tabs', action: { type: 'collapse' } })).toBe(true);
+    expect(await f.event({ part: 'escape' })).toBe(true);
+    expect(await f.event({ part: 'focus-root' })).toBe(true);
+    for (const action of [
+      { part: 'toolbar', action: { type: 'navigate' } },
+      { part: 'toolbar', action: { type: 'back' } },
+      { part: 'toolbar', action: { type: 'address-change', value: 'https://example.org/' } },
+      { part: 'tabs', action: { type: 'select', id: 'page-1' } },
+      { part: 'tabs', action: { type: 'add' } },
+      {
+        part: 'control',
+        action: { type: 'show-menu', anchor: { x: 1, y: 1, width: 1, height: 1 } },
+      },
+    ] as const)
+      expect(await f.event(action)).toBe(false);
+    const cancellation = { part: 'toolbar', action: { type: 'reload' } } as const;
+    expect(await f.event(cancellation, { attachment: 'retired-wire' })).toBe(false);
+    expect(await f.event(cancellation, { revision: f.latest().revision - 1 })).toBe(false);
+    expect(await f.event(cancellation, { sequence: 100 })).toBe(true);
+    expect(await f.event(cancellation, { sequence: 100 })).toBe(false);
+    await f.render({ loading: true, interactive: false });
+    expect(await f.event(cancellation, { sequence: 101 })).toBe(false);
+    await f.render({ loading: true, covered: true });
+    expect(await f.event(cancellation, { sequence: 102 })).toBe(false);
   } finally {
     await f.close();
   }

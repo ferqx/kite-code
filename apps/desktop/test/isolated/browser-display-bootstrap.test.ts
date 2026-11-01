@@ -10,6 +10,7 @@ import {
   nativeBrowserChannel,
   nativeBrowserLayoutChannel,
   nativeBrowserLayoutFrameChannel,
+  nativeBrowserPresentationChannel,
 } from '../../src/native-browser-bridge';
 import {
   type NativeBrowserChromeRootBridge,
@@ -303,7 +304,7 @@ test('built preload removes its actual staging sheet with Electron 44.3 author-o
   }
 });
 
-test('built preload uses invoke for hosted calibration and shares exact sync layout result validation', async () => {
+test('built preload validates hosted calibration and independent readonly presentation subscriptions', async () => {
   const built = await Bun.build({
     entrypoints: [resolve(import.meta.dir, '../../electron/preload.ts')],
     target: 'node',
@@ -340,7 +341,8 @@ test('built preload uses invoke for hosted calibration and shares exact sync lay
           on(channel: string, receive: (_event: unknown, value: unknown) => void) {
             listeners.set(channel, receive);
           },
-          removeListener(channel: string) {
+          removeListener(channel: string, receive: (_event: unknown, value: unknown) => void) {
+            expect(listeners.get(channel)).toBe(receive);
             listeners.delete(channel);
           },
         },
@@ -432,8 +434,38 @@ test('built preload uses invoke for hosted calibration and shares exact sync lay
   ])
     listeners.get(nativeBrowserLayoutFrameChannel)!(null, value);
   expect(received).toEqual(valid);
+  const callsBeforePresentation = calls.length;
+  const presentationRequests: unknown[] = [];
+  const stopPresentation = bridge.watchBrowserPresentation!((value) =>
+    presentationRequests.push(value),
+  );
+  const request = { id: 'page', key: 'b'.repeat(32), scope: ack.scope };
+  const draftRequest = { id: 'draft-page', key: 'c'.repeat(32), draft: 'd'.repeat(32) };
+  for (const value of [
+    request,
+    draftRequest,
+    null,
+    { id: request.id, key: request.key },
+    { ...request, draft: draftRequest.draft },
+    { ...request, scope: { storeId: 'store', sessionId: 'session', generation: 1 } },
+    { ...request, scope: { ...request.scope, generation: 0 } },
+    { ...request, key: 'B'.repeat(32) },
+    { ...request, key: 'b'.repeat(24) },
+    { ...draftRequest, draft: 'D'.repeat(32) },
+    { ...request, lease: 'private-control' },
+    { ...request, action: 'reload' },
+  ])
+    listeners.get(nativeBrowserPresentationChannel)!(null, value);
+  expect(presentationRequests).toEqual([request, draftRequest]);
+  expect(calls).toHaveLength(callsBeforePresentation);
   stop();
   expect(listeners.has(nativeBrowserLayoutFrameChannel)).toBe(false);
+  expect(listeners.has(nativeBrowserPresentationChannel)).toBe(true);
+  listeners.get(nativeBrowserPresentationChannel)!(null, request);
+  expect(presentationRequests).toEqual([request, draftRequest, request]);
+  stopPresentation();
+  expect(listeners.has(nativeBrowserPresentationChannel)).toBe(false);
+  expect(calls).toHaveLength(callsBeforePresentation);
 });
 
 test('built Root preload restores only bounded draft pages and never accepts their inventory as an ordinary page reply', async () => {

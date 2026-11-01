@@ -1,4 +1,4 @@
-import type { SessionBrowserPageProps } from '@kite-ai/ui/desktop';
+import { type SessionBrowserPageProps, Spinner } from '@kite-ai/ui/desktop';
 import {
   type ReactNode,
   useCallback,
@@ -13,6 +13,7 @@ import type {
   NativeBrowserGroupLayout,
   NativeBrowserLayout,
   NativeBrowserPanelLayout,
+  NativeBrowserPresentationRequest,
   NativeBrowserRequest,
   NativeBrowserRestoreScope,
   NativeBrowserState,
@@ -310,6 +311,14 @@ export function NativeBrowserPane({
   const viewport = useRef<HTMLElement>(null);
   const layoutWitness = useRef<HTMLCanvasElement>(null);
   const frozenViewport = useRef<HTMLImageElement>(null);
+  const hideWitness = useCallback(() => {
+    const canvas = layoutWitness.current;
+    if (!canvas || canvas.hidden) return;
+    canvas.hidden = true;
+    // Retire the backing pixels as well as the DOM visibility. A retained
+    // canvas must not bring an old proof back into a later loading surface.
+    canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+  }, []);
   const chromeHostedRef = useRef(chromeHosted);
   chromeHostedRef.current = chromeHosted;
   useLayoutEffect(() => {
@@ -334,16 +343,28 @@ export function NativeBrowserPane({
     displayIdentity.current = { id, host, scopeKey, draft, token: {} };
   const displayOwner = displayIdentity.current.token;
   const [presentedOwner, setPresentedOwner] = useState<object>();
+  const previouslyPresentedOwner = useRef<object>(undefined);
   const awaitingPresentation = presentedOwner !== displayOwner;
   const awaitingPresentationRef = useRef(awaitingPresentation);
   awaitingPresentationRef.current = awaitingPresentation;
   const startupEpoch = useRef(0);
   const [presentationEpoch, setPresentationEpoch] = useState(0);
+  const retirePresentation = useRef<((reobserve?: boolean) => void) | undefined>(undefined);
+  const restartPresentation = useCallback(
+    (reobserve = false) => {
+      if (displayIdentity.current.token !== displayOwner) return;
+      retirePresentation.current?.(reobserve);
+      awaitingPresentationRef.current = true;
+      setPresentedOwner(undefined);
+      setPresentationEpoch(++startupEpoch.current);
+    },
+    [displayOwner],
+  );
   const observedNavigation = useRef('');
   const invalidateInitialPresentation = useCallback(() => {
     if (!awaitingPresentationRef.current) return;
-    setPresentationEpoch(++startupEpoch.current);
-  }, []);
+    restartPresentation();
+  }, [restartPresentation]);
   const identity = JSON.stringify([
     scope,
     draft,
@@ -394,6 +415,52 @@ export function NativeBrowserPane({
       unwatch?.();
     };
   }, [id, host, apply, draft, displayOwner]);
+  useEffect(() => {
+    if (!host?.watchBrowserPresentation) return;
+    let disposed = false;
+    let pending: NativeBrowserPresentationRequest | undefined;
+    let lastRequest: string | undefined;
+    const observe = (request: NativeBrowserPresentationRequest) => {
+      if (
+        disposed ||
+        !mounted.current ||
+        displayIdentity.current.token !== displayOwner ||
+        !presentationIdentity.current.visible ||
+        request.id !== id ||
+        (draft
+          ? request.draft !== draft || request.scope !== undefined
+          : request.draft !== undefined ||
+            !presentationScope ||
+            !request.scope ||
+            !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
+              (key) => request.scope![key] === presentationScope[key],
+            ))
+      )
+        return;
+      if (document.hidden) {
+        pending = request;
+        return;
+      }
+      pending = undefined;
+      if (lastRequest === request.key) return;
+      lastRequest = request.key;
+      restartPresentation(true);
+    };
+    const resume = () => {
+      if (!document.hidden && pending) observe(pending);
+    };
+    const unwatchPresentation = host.watchBrowserPresentation(observe);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      disposed = true;
+      pending = undefined;
+      try {
+        unwatchPresentation();
+      } finally {
+        document.removeEventListener('visibilitychange', resume);
+      }
+    };
+  }, [id, host, draft, displayOwner, presentationScope, restartPresentation]);
   useEffect(() => {
     title.current(state.title || '新标签页');
   }, [state.title]);
@@ -469,6 +536,7 @@ export function NativeBrowserPane({
     let stopped = false;
     let recoveryAnimating = false;
     let drawn: Extract<NativeBrowserRequest, { action: 'present' }> | undefined;
+    let rejectedDraw: typeof drawn;
     const frozenFrames = new Map<string, { image: HTMLImageElement; src: string }>();
     let displayedKey: string | undefined;
     let layoutWaiting = false;
@@ -513,7 +581,12 @@ export function NativeBrowserPane({
       const image = frozenViewport.current;
       if (value && typeof value === 'object' && 'waiting' in value) {
         const receipt = value as import('./native-browser-bridge').NativeBrowserLayoutReceipt;
-        if (!receipt.waiting && receipt.state?.id === id) completePresentation(input);
+        if (!receipt.waiting && receipt.state?.id === id) {
+          // Retire only this completed draw even when DOM geometry has moved.
+          // Adopting the page still requires the independent current measure.
+          if (input && drawn === input) hideWitness();
+          completePresentation(input);
+        }
       }
       if (chromeHostedRef.current) {
         if (image) {
@@ -561,11 +634,14 @@ export function NativeBrowserPane({
         context.fillRect(tile * 3, 0, 3, 3);
       });
       canvas.hidden = false;
+      rejectedDraw = undefined;
       drawn = input;
     };
     let unwatchFrame: (() => void) | undefined;
     const receiveFrame = (ack: import('./native-browser-bridge').NativeBrowserLayoutFrameAck) => {
-      const input = drawn;
+      // A rejected preflight may later report a bounded display failure. It
+      // can explain that failure, never acknowledge successful presentation.
+      const input = drawn ?? (ack.error ? rejectedDraw : undefined);
       if (
         stopped ||
         !input?.bounds ||
@@ -593,7 +669,7 @@ export function NativeBrowserPane({
       }
       if (input.witness.key !== ack.key) return;
       if (ack.step === 2) {
-        if (layoutWitness.current) layoutWitness.current.hidden = true;
+        hideWitness();
         if (ack.error) {
           if (presentationCurrent(input)) {
             drawn = undefined;
@@ -727,8 +803,9 @@ export function NativeBrowserPane({
       input: Extract<NativeBrowserRequest, { action: 'present' }> | undefined,
     ) => {
       if (!presentationCurrent(input)) return;
-      if (layoutWitness.current) layoutWitness.current.hidden = true;
+      hideWitness();
       awaitingPresentationRef.current = false;
+      previouslyPresentedOwner.current = displayOwner;
       setPresentedOwner(displayOwner);
     };
     const publish = () => {
@@ -780,7 +857,8 @@ export function NativeBrowserPane({
         ...(layout ? { layout } : {}),
         ...(presentationScope ? { scope: presentationScope } : {}),
         ...(draft ? { draft } : {}),
-        ...(bounds &&
+        ...(!asyncCalibration &&
+        bounds &&
         layout &&
         host.watchBrowserLayoutFrame &&
         bounds.width >= nativeBrowserWitnessWidth(window.devicePixelRatio || 1) &&
@@ -806,7 +884,7 @@ export function NativeBrowserPane({
       }
       if (!bounds) {
         drawn = undefined;
-        if (layoutWitness.current) layoutWitness.current.hidden = true;
+        hideWitness();
         if (frozenViewport.current) frozenViewport.current.hidden = true;
         freeze({ waiting: false });
         frozenViewport.current?.removeAttribute('src');
@@ -821,7 +899,12 @@ export function NativeBrowserPane({
         committedLayout = !!layout;
       };
       const rejected = () => {
-        if (!stopped && sent === sequence) pending = '';
+        if (!stopped && sent === sequence) {
+          pending = '';
+          hideWitness();
+          rejectedDraw = drawn;
+          drawn = undefined;
+        }
       };
       // Main already owns native window projection and invalidates old input.
       // Do not block Root painting on Main's AppKit live-resize callback. The
@@ -881,6 +964,22 @@ export function NativeBrowserPane({
       last = '';
       schedule();
     };
+    const visibilityChanged = () => {
+      if (
+        stopped ||
+        document !== originalDocument ||
+        displayIdentity.current.token !== displayOwner
+      )
+        return;
+      if (document.hidden) {
+        force();
+        return;
+      }
+      if (host.watchBrowserPresentation && chromeHostedRef.current) return;
+      // Main withdraws the live Page when the window hides. Returning is a
+      // fresh presentation, not calibration of the former active native view.
+      restartPresentation();
+    };
     const invalidateSize = () => {
       last = '';
       if (host.presentBrowserLayout) publish();
@@ -888,8 +987,15 @@ export function NativeBrowserPane({
     };
     let resize: ResizeObserver | undefined;
     let mutations: MutationObserver | undefined;
+    let reobserving = false;
+    const retire = (reobserve = false) => {
+      stopped = true;
+      reobserving = reobserve;
+    };
+    retirePresentation.current = retire;
     const cleanup = (retain: boolean) => {
       let qualified = false;
+      let measuredPositive = false;
       try {
         const current = presentationIdentity.current;
         const measured =
@@ -908,7 +1014,8 @@ export function NativeBrowserPane({
           current.draft === draft
             ? measure()
             : undefined;
-        qualified = !!measured?.bounds && !pending && measured.key === last;
+        measuredPositive = !!measured?.bounds;
+        qualified = measuredPositive && !pending && measured?.key === last;
         const display = host.browserDisplayIntent?.();
         // The first passive state read has not observed this retained page yet.
         // A real unmount, identity change, hide or error still cancels it below.
@@ -932,6 +1039,7 @@ export function NativeBrowserPane({
           qualified = true;
       } catch {}
       stopped = true;
+      if (retirePresentation.current === retire) retirePresentation.current = undefined;
       let failure: { cause: unknown } | undefined;
       const stop = (dispose: () => void) => {
         try {
@@ -944,7 +1052,7 @@ export function NativeBrowserPane({
       stop(() => unwatchFrame?.());
       drawn = undefined;
       stop(() => {
-        if (layoutWitness.current) layoutWitness.current.hidden = true;
+        hideWitness();
         if (frozenViewport.current) frozenViewport.current.hidden = true;
         freeze({ waiting: false });
         frozenViewport.current?.removeAttribute('src');
@@ -959,10 +1067,29 @@ export function NativeBrowserPane({
       stop(() => mutations?.disconnect());
       stop(() => window.removeEventListener('resize', invalidateSize));
       stop(() => window.removeEventListener('scroll', schedule, true));
-      stop(() => document.removeEventListener('visibilitychange', force));
+      stop(() => document.removeEventListener('visibilitychange', visibilityChanged));
       // Repeated effects can leave the exact same connected viewport in place.
       // Retain only its last positive measurement; every uncertain boundary hides.
-      if (!qualified) hide(revision);
+      const current = presentationIdentity.current;
+      const preparedHandoff =
+        reobserving &&
+        measuredPositive &&
+        !failure &&
+        originalNode === viewport.current &&
+        originalNode?.isConnected &&
+        document === originalDocument &&
+        !document.hidden &&
+        current.id === id &&
+        current.host === host &&
+        current.visible &&
+        !current.blocked &&
+        current.external === external &&
+        current.draft === draft &&
+        JSON.stringify(current.presentationScope) === JSON.stringify(presentationScope) &&
+        displayIdentity.current.token === displayOwner;
+      // Main already retired the prior proof before asking this exact owner to
+      // observe again. Its prepared native cover belongs to the successor.
+      if (!qualified && !preparedHandoff) hide(revision);
       if (failure) throw failure.cause;
     };
     try {
@@ -979,7 +1106,17 @@ export function NativeBrowserPane({
         for (let ancestor = originalNode.parentElement; ancestor; ancestor = ancestor.parentElement)
           resize?.observe(ancestor);
       }
-      mutations = new MutationObserver(schedule);
+      mutations = new MutationObserver((records) => {
+        // Our proof/fallback pixels are outputs, not new layout observations.
+        // In particular, retiring a rejected proof must not retry itself.
+        if (
+          records.some(
+            (record) =>
+              record.target !== layoutWitness.current && record.target !== frozenViewport.current,
+          )
+        )
+          schedule();
+      });
       mutations.observe(originalDocument.body, {
         childList: true,
         subtree: true,
@@ -996,7 +1133,9 @@ export function NativeBrowserPane({
       });
       window.addEventListener('resize', invalidateSize);
       window.addEventListener('scroll', schedule, true);
-      document.addEventListener('visibilitychange', force);
+      // Hosted views use Main's request. Other platforms/legacy presenters
+      // still need the same restart entry when no native Chrome owns the page.
+      document.addEventListener('visibilitychange', visibilityChanged);
       publish();
     } catch (cause) {
       try {
@@ -1015,6 +1154,8 @@ export function NativeBrowserPane({
     draft,
     displayOwner,
     presentationEpoch,
+    restartPresentation,
+    hideWitness,
   ]);
   const error =
     issue ||
@@ -1189,10 +1330,15 @@ export function NativeBrowserPane({
         {(!state.url || awaitingPresentation) && (
           <section
             className="native-browser-start"
-            aria-label="浏览器起始页"
-            inert={!!state.url || undefined}
+            aria-label={state.url || initialHint?.url ? '网页加载' : '浏览器起始页'}
           >
-            {initialHint?.url ? <p role="status">正在显示原网页…</p> : tools}
+            {state.url || initialHint?.url || previouslyPresentedOwner.current === displayOwner
+              ? !blocked && (
+                  <div className="native-browser-loading">
+                    <Spinner aria-label="网页加载中" className="size-5" />
+                  </div>
+                )
+              : tools}
           </section>
         )}
         {annotate && state.control?.browserId && (
@@ -1209,7 +1355,7 @@ export function NativeBrowserPane({
           className="native-browser-viewport"
           ref={viewport}
           aria-label="网页内容"
-          aria-busy={state.loading}
+          aria-busy={state.loading || (external && awaitingPresentation && !blocked)}
           style={{ position: 'relative' }}
         >
           <img

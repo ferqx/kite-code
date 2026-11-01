@@ -209,7 +209,11 @@ function fixture() {
   let inputScope: NativeBrowserRestoreScope | undefined = scope;
   let token = 'page-incarnation-navigation';
   let pageDraft: string | undefined;
+  let protection = true;
+  const loadingFailures: string[] = [];
+  const cancelledDisplays: { id: string; signal: AbortSignal }[] = [];
   let contextChanges = 0;
+  let stateChanges = 0;
   const returnCancelled: string[] = [];
   const retained = new Map<
     string,
@@ -229,9 +233,14 @@ function fixture() {
       id === 'page'
         ? { id, view: page as never, token, ...(pageDraft ? { draft: pageDraft } : { scope }) }
         : (retained.get(id) as never),
+    onLoadingFailed: (id) => loadingFailures.push(id),
+    onDisplayCancelled: (id, signal) => cancelledDisplays.push({ id, signal }),
+    canProtectLivePage: () => true,
+    protectLivePage: () => protection,
     onContextChanged: () => {
       contextChanges++;
     },
+    onStateChanged: () => stateChanges++,
     onRootReturnCancelled: (id) => returnCancelled.push(id),
     onReady: (id) => ready.push(id),
     onSuspend: (id) => suspended.push(id),
@@ -392,7 +401,13 @@ function fixture() {
     draft(value: string) {
       pageDraft = value;
     },
+    loadingFailures,
+    cancelledDisplays,
+    protection(value: boolean) {
+      protection = value;
+    },
     contextChanges: () => contextChanges,
+    stateChanges: () => stateChanges,
     returnCancelled,
     select(value?: NativeBrowserRestoreScope) {
       selected = value;
@@ -434,6 +449,212 @@ function retainedSnapshot(
     },
   };
 }
+
+test('display facts distinguish an unpublished owner from explicit Root presentation without creating authority', async () => {
+  const f = fixture();
+  try {
+    expect(f.host.displayState()).toEqual({ kind: 'unknown' });
+    f.context(1, f.scope);
+    expect(f.host.displayState()).toEqual({ kind: 'unknown' });
+    const notifications = f.stateChanges();
+    f.modern(null, 1);
+    expect(f.host.displayState()).toEqual({ kind: 'root' });
+    expect(f.stateChanges()).toBeGreaterThan(notifications);
+    const changes = f.stateChanges();
+    const writes = f.root.boundsHistory.length;
+    expect(f.host.displayState()).toEqual({ kind: 'root' });
+    expect(f.stateChanges()).toBe(changes);
+    expect(f.root.boundsHistory).toHaveLength(writes);
+    expect(f.ready).toEqual([]);
+    expect(f.root.webContents.commands).toEqual([]);
+    f.context(2, f.scope);
+    expect(f.host.displayState()).toEqual({ kind: 'unknown' });
+    f.modern(f.snapshot(1), 2);
+    await tick();
+    expect(f.host.displayState()).toMatchObject({
+      kind: 'page',
+      id: 'page',
+      scope: f.scope,
+      token: 'page-incarnation-navigation',
+      presented: false,
+    });
+    for (const value of [
+      { ...f.snapshot(2), covered: true },
+      { ...f.snapshot(3), toolbar: { ...f.snapshot(3).toolbar, hasPage: false } },
+      { ...f.snapshot(4), toolbar: { ...f.snapshot(4).toolbar, notesOpen: true } },
+      { ...f.snapshot(5), tabs: { ...f.snapshot(5).tabs, restoreIssue: true } },
+    ]) {
+      f.modern(value, 2);
+      expect(f.host.displayState()).toEqual({ kind: 'root' });
+      expect(f.host.readyFor('page')).toBe(false);
+    }
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('display facts select same-URL pages by current id and token instead of an old binding', async () => {
+  const f = fixture();
+  const second = f.addPage('second', f.page.webContents.getURL());
+  try {
+    await f.activate();
+    expect(f.host.displayState()).toMatchObject({
+      kind: 'page',
+      id: 'page',
+      token: 'page-incarnation-navigation',
+      busy: false,
+      presented: true,
+    });
+    const next = retainedSnapshot(f, 3, 'second');
+    next.toolbar.readonlyURL = f.page.webContents.getURL();
+    f.publish(next);
+    expect(second.webContents.getURL()).toBe(f.page.webContents.getURL());
+    expect(f.host.displayState()).toMatchObject({
+      kind: 'page',
+      id: 'second',
+      token: 'second-incarnation',
+      busy: true,
+      presented: false,
+    });
+    f.publish(retainedSnapshot(f, 4, 'page'));
+    f.token('page-next-navigation');
+    expect(f.host.displayState()).toMatchObject({
+      kind: 'page',
+      id: 'page',
+      token: 'page-next-navigation',
+      presented: false,
+    });
+    expect(f.page.webContents.destroyed).toBe(false);
+    expect(second.webContents.destroyed).toBe(false);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('display facts keep exact first-surface preparation and Root return busy until actual adoption', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  const bounds = { x: 600, y: 96, width: 400, height: 604 };
+  try {
+    f.publish(f.snapshot(1));
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: true, presented: false });
+    await tick();
+    f.chrome().webContents.autoFrames = false;
+    const prepared = f.host.prepareDisplay('page', bounds, f.scope, controller.signal);
+    await tick();
+    const wire = f.envelope();
+    await f.call({
+      action: 'rendered',
+      attachment: wire.attachment,
+      pageToken: wire.pageToken,
+      revision: wire.snapshot.revision,
+    });
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: true, presented: false });
+    expect(f.chrome().webContents.frame).toBeDefined();
+    f.chrome().webContents.frame!(f.chrome().webContents.frameImage());
+    expect(await prepared).toBe(true);
+    expect(f.host.offerDisplay('page', bounds, f.scope)).toBe(true);
+    f.publish(f.snapshot(2, true));
+    expect(f.host.readyFor('page')).toBe(true);
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: true, presented: false });
+    expect(f.layout('page', bounds, f.scope)).toBe(true);
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: false, presented: true });
+    expect(f.host.beginRootReturn('page', f.scope)).not.toBeNull();
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: true, presented: false });
+    f.publish(null);
+    expect(f.host.displayState()).toEqual({ kind: 'root' });
+    expect(f.host.rootReturnCurrent('page', f.scope)).toBe(true);
+  } finally {
+    controller.abort();
+    f.host.dispose();
+  }
+});
+
+test('display facts retain the original page through resize invalidation and in-flight metrics', async () => {
+  const f = fixture();
+  let complete!: (value: unknown) => void;
+  try {
+    await f.activate();
+    f.root.webContents.command = () => new Promise((resolve) => (complete = resolve));
+    f.size[0] = 820;
+    f.size[1] = 650;
+    f.host.invalidateGeometry();
+    expect(f.page.getVisible()).toBe(true);
+    expect(f.host.displayState()).toMatchObject({
+      kind: 'page',
+      id: 'page',
+      token: 'page-incarnation-navigation',
+      presented: false,
+    });
+    f.host.syncViewport();
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: true, presented: false });
+    complete({});
+    await tick();
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: false, presented: false });
+    expect(f.layout('page', { x: 510, y: 96, width: 310, height: 554 }, f.scope)).toBe(true);
+    expect(f.host.displayState()).toMatchObject({
+      kind: 'page',
+      id: 'page',
+      token: 'page-incarnation-navigation',
+      busy: false,
+      presented: true,
+    });
+    expect(f.page.webContents.destroyed).toBe(false);
+    expect(
+      f.root.webContents.sent.some((item) => item.channel === nativeBrowserChromeActionChannel),
+    ).toBe(false);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('display facts require a fresh context and publication after Root document replacement', async () => {
+  const f = fixture();
+  try {
+    f.context(1, f.scope);
+    f.modern(f.snapshot(1), 1);
+    await tick();
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', id: 'page' });
+    f.root.webContents.mainFrame = { url: 'http://localhost/?replacement' };
+    f.root.webContents.emit('did-start-navigation', {}, 'http://localhost/', false, true);
+    expect(f.host.displayState()).toEqual({ kind: 'unknown' });
+    expect(() => f.modern(f.snapshot(2), 1)).toThrow('browser_chrome_context_stale');
+    f.context(2, f.scope);
+    expect(f.host.displayState()).toEqual({ kind: 'unknown' });
+    f.modern(f.snapshot(2), 2);
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', id: 'page', presented: false });
+    expect(f.page.webContents.destroyed).toBe(false);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('display facts stay unknown after Host failure without reviving old intent or replaying actions', async () => {
+  for (const failure of ['chrome', 'debugger'] as const) {
+    const f = fixture();
+    try {
+      await f.activate();
+      if (failure === 'chrome') f.chrome().webContents.close();
+      else f.root.webContents.debugger.detach();
+      expect(f.host.displayState()).toEqual({ kind: 'unknown' });
+      const commands = f.root.webContents.commands.length;
+      const ready = f.ready.length;
+      f.host.update();
+      f.host.syncViewport();
+      expect(f.host.displayState()).toEqual({ kind: 'unknown' });
+      expect(f.host.readyFor('page')).toBe(false);
+      expect(f.root.webContents.commands).toHaveLength(commands);
+      expect(f.ready).toHaveLength(ready);
+      expect(f.page.webContents.destroyed).toBe(false);
+      expect(f.root.getBounds().width).toBe(1000);
+      expect(
+        f.root.webContents.sent.some((item) => item.channel === nativeBrowserChromeActionChannel),
+      ).toBe(false);
+    } finally {
+      f.host.dispose();
+    }
+  }
+});
 
 test('an explicit draft context binds its own page without borrowing the selected Session', async () => {
   const f = fixture(),
@@ -1039,10 +1260,17 @@ test('Chrome render receipts are exact readonly facts and retired native frame c
       { ...ack, attachment: 'retired' },
       { ...ack, pageToken: 'retired' },
       { ...ack, revision: 2 },
+    ]) {
+      expect(f.call(changed)).toBeUndefined();
+    }
+    for (const changed of [
       { ...ack, sequence: 1 },
       { ...ack, action: 'rendered', code: 'unsafe' },
+      { ...ack, revision: 0 },
+      { ...ack, revision: 1.5 },
+      { ...ack, pageToken: '' },
     ]) {
-      expect(() => f.call(changed)).toThrow('browser_chrome_stale_rendered');
+      expect(() => f.call(changed)).toThrow('invalid_browser_chrome_request');
     }
     expect(() => f.call(ack, f.root.webContents)).toThrow('native_sender_denied');
     expect(() =>
@@ -1059,7 +1287,7 @@ test('Chrome render receipts are exact readonly facts and retired native frame c
     expect(f.envelope()).toMatchObject({ hosted: false, actionable: false });
     f.publish(f.snapshot(2));
     expect(contents.frameEnds).toBe(1);
-    expect(() => f.call(ack)).toThrow('browser_chrome_stale_rendered');
+    expect(f.call(ack)).toBeUndefined();
     await f.call({ ...ack, revision: 2 });
     await tick();
     expect(contents.frameStarts).toBe(2);
@@ -1076,6 +1304,81 @@ test('Chrome render receipts are exact readonly facts and retired native frame c
     expect(contents.frameStarts).toBe(2);
     expect(f.host.offerDisplay('page', bounds, f.scope)).toBe(true);
     expect(f.envelope().actionable).toBe(false);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('Chrome ignores render receipts retired by window rebind and subsequent resize without confirming fresh display', async () => {
+  const f = fixture();
+  const receipt = (env: NativeBrowserChromeEnvelope) => ({
+    action: 'rendered',
+    attachment: env.attachment,
+    pageToken: env.pageToken,
+    revision: env.snapshot.revision,
+  });
+  try {
+    await f.activate();
+    const beforeHide = receipt(f.envelope()),
+      contents = f.chrome().webContents,
+      document = f.page.webContents;
+    contents.autoFrames = false;
+    // Reopening retires the former presentation, while keeping the same Page.
+    f.page.setVisible(false);
+    f.host.release('page');
+    const previousStarts = contents.frameStarts;
+    expect(f.call(beforeHide)).toBeUndefined();
+    expect(contents.frameStarts).toBe(previousStarts);
+    f.publish(f.snapshot(3));
+    await tick();
+    const reopened = receipt(f.envelope());
+    expect(reopened.attachment).not.toBe(beforeHide.attachment);
+    const bounds = { x: 600, y: 96, width: 400, height: 604 };
+    const prepared = f.host.prepareDisplay('page', bounds, f.scope, new AbortController().signal);
+    expect(f.call(beforeHide)).toBeUndefined();
+    await tick();
+    expect(contents.frameStarts).toBe(previousStarts);
+    expect(f.host.offerDisplay('page', bounds, f.scope)).toBe(false);
+    expect(f.envelope()).toMatchObject({ hosted: false, actionable: false });
+    f.call(reopened);
+    expect(contents.frameStarts).toBe(previousStarts + 1);
+    contents.frame!(contents.frameImage());
+    expect(await prepared).toBe(true);
+    expect(f.host.offerDisplay('page', bounds, f.scope)).toBe(true);
+    f.publish(f.snapshot(4, true));
+    expect(f.layout('page', bounds, f.scope)).toBe(true);
+    f.page.setVisible(true);
+    const beforeResize = receipt(f.envelope());
+    f.size[0] = 1100;
+    f.host.invalidateGeometry();
+    f.host.syncViewport();
+    await tick();
+    f.publish(f.snapshot(5, true));
+    const resized = { x: 650, y: 96, width: 450, height: 604 };
+    expect(f.layout('page', resized, f.scope)).toBe(true);
+    const current = receipt(f.envelope()),
+      starts = contents.frameStarts,
+      state = f.host.displayState();
+    expect(current.attachment).not.toBe(beforeResize.attachment);
+    for (const stale of [beforeHide, reopened, beforeResize]) {
+      expect(f.call(stale)).toBeUndefined();
+      expect(contents.frameStarts).toBe(starts);
+      expect(f.host.displayState()).toEqual(state);
+      expect(f.envelope()).toMatchObject({
+        attachment: current.attachment,
+        snapshot: { revision: current.revision },
+      });
+    }
+    f.call(current);
+    expect(contents.frameStarts).toBe(starts);
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', presented: true });
+    expect(f.page.getBounds()).toEqual(resized);
+    expect(f.page.webContents).toBe(document);
+    expect(document.getURL()).toBe('https://example.com/weather');
+    expect(document.isDestroyed()).toBe(false);
+    expect(
+      f.root.webContents.sent.filter((item) => item.channel === nativeBrowserChromeActionChannel),
+    ).toEqual([]);
   } finally {
     f.host.dispose();
   }
@@ -2120,6 +2423,206 @@ test('a superseded pending size is dropped when the latest desire equals the in-
   }
 });
 
+for (const rejectOld of [false, true])
+  test(`native resize supersedes pending Root metrics and ignores old ${rejectOld ? 'rejection' : 'completion'} while ordinary updates stay serial`, async () => {
+    const f = fixture(),
+      requests: { resolve(): void; reject(error: Error): void }[] = [];
+    try {
+      await f.activate();
+      const before = f.root.webContents.commands.length,
+        finalWidth = rejectOld ? 1400 : 820; // Completion also exercises same-size ABA.
+      f.root.webContents.command = () =>
+        new Promise<void>((resolve, reject) => requests.push({ resolve, reject }));
+      for (const width of [820, 1100, finalWidth]) {
+        f.size[0] = width;
+        f.host.invalidateGeometry();
+        f.host.syncViewport(true);
+      }
+      f.host.syncViewport(true); // The current identical desire is not a fourth command.
+      expect(
+        f.root.webContents.commands
+          .slice(before)
+          .map((command) => (command.params as { width: number }).width),
+      ).toEqual([820, 1100, finalWidth]);
+      expect(requests).toHaveLength(3);
+      const changes = f.stateChanges();
+      if (rejectOld) requests[0]!.reject(Error('superseded native resize'));
+      else requests[0]!.resolve();
+      await tick();
+      expect(f.stateChanges()).toBe(changes);
+      expect(f.suspended).toEqual([]);
+      expect(f.envelope().actionable).toBe(false);
+      expect(f.root.webContents.commands).toHaveLength(before + 3);
+      requests[2]!.resolve();
+      await tick();
+      expect(
+        f.layout('page', { x: finalWidth - 310, y: 96, width: 310, height: 604 }, f.scope),
+      ).toBe(true);
+      expect(f.envelope().actionable).toBe(true);
+      const current = f.envelope(),
+        commands = f.root.webContents.commands.length;
+      if (rejectOld) requests[1]!.reject(Error('late superseded native resize'));
+      else requests[1]!.resolve();
+      await tick();
+      expect(f.envelope()).toEqual(current);
+      expect(f.suspended).toEqual([]);
+      expect(f.root.webContents.commands).toHaveLength(commands);
+      f.host.syncViewport();
+      expect(f.root.webContents.commands).toHaveLength(commands);
+      // Ordinary calls retain their single-flight path after native resize callbacks.
+      for (const width of [1250, 1300]) {
+        f.size[0] = width;
+        f.host.invalidateGeometry();
+        f.host.syncViewport();
+      }
+      expect(requests).toHaveLength(4);
+      requests[3]!.resolve();
+      await tick();
+      expect(requests).toHaveLength(5);
+      expect(f.root.webContents.commands.at(-1)?.params).toMatchObject({ width: 1300 });
+      requests[4]!.resolve();
+      await tick();
+      expect(f.layout('page', { x: 990, y: 96, width: 310, height: 604 }, f.scope)).toBe(true);
+      expect(f.envelope().actionable).toBe(true);
+    } finally {
+      f.host.dispose();
+      for (const request of requests) request.resolve();
+      await tick();
+    }
+  });
+
+test('native resize reasserts already-applied A while a previously dispatched B is pending', async () => {
+  const f = fixture(),
+    requests: { resolve(): void; reject(error: Error): void }[] = [];
+  try {
+    await f.activate(); // A=1000 is already applied.
+    const before = f.root.webContents.commands.length;
+    f.root.webContents.command = () =>
+      new Promise<void>((resolve, reject) => requests.push({ resolve, reject }));
+    f.size[0] = 820; // Ordinary B was already dispatched before the native resize callback.
+    f.host.invalidateGeometry();
+    f.host.syncViewport();
+    expect(requests).toHaveLength(1);
+    f.size[0] = 1000;
+    f.host.invalidateGeometry();
+    f.host.syncViewport(true);
+    f.host.syncViewport(true);
+    expect(
+      f.root.webContents.commands
+        .slice(before)
+        .map((command) => (command.params as { width: number }).width),
+    ).toEqual([820, 1000]);
+    expect(requests).toHaveLength(2);
+    const changes = f.stateChanges();
+    requests[0]!.resolve();
+    await tick();
+    expect(f.stateChanges()).toBe(changes);
+    expect(f.envelope().actionable).toBe(false);
+    expect(f.root.webContents.commands).toHaveLength(before + 2);
+    requests[1]!.resolve();
+    await tick();
+    expect(f.layout('page', { x: 600, y: 96, width: 400, height: 604 }, f.scope)).toBe(true);
+    expect(f.envelope().actionable).toBe(true);
+    expect(f.suspended).toEqual([]);
+    f.host.syncViewport();
+    expect(f.root.webContents.commands).toHaveLength(before + 2);
+  } finally {
+    f.host.dispose();
+    for (const request of requests) request.resolve();
+    await tick();
+  }
+});
+
+test('native resize still fails the actual latest Root metrics rejection and late predecessors cannot revive it', async () => {
+  const f = fixture(),
+    requests: { resolve(): void; reject(error: Error): void }[] = [];
+  try {
+    await f.activate();
+    f.root.webContents.command = () =>
+      new Promise<void>((resolve, reject) => requests.push({ resolve, reject }));
+    for (const width of [820, 1100, 1400]) {
+      f.size[0] = width;
+      f.host.invalidateGeometry();
+      f.host.syncViewport(true);
+    }
+    expect(requests).toHaveLength(3);
+    requests[2]!.reject(Error('current native resize failed'));
+    await tick();
+    expect(f.envelope()).toBeNull();
+    expect(f.suspended).toEqual(['page']);
+    expect(f.root.getBounds()).toEqual({ x: 0, y: 0, width: 1400, height: 700 });
+    expect(f.chrome().getVisible()).toBe(false);
+    expect(f.page.webContents.destroyed).toBe(false);
+    const commands = f.root.webContents.commands.length;
+    requests[0]!.resolve();
+    requests[1]!.reject(Error('obsolete failure after current failure'));
+    await tick();
+    f.host.syncViewport();
+    expect(f.root.webContents.commands).toHaveLength(commands);
+    expect(f.suspended).toEqual(['page']);
+    expect(f.envelope()).toBeNull();
+  } finally {
+    f.host.dispose();
+    for (const request of requests) request.resolve();
+    await tick();
+  }
+});
+
+for (const boundary of ['root-frame', 'dispose'] as const)
+  test(`native resize predecessors and latest work remain retired after ${boundary}`, async () => {
+    const f = fixture(),
+      requests: { resolve(): void; reject(error: Error): void }[] = [];
+    let disposed = false;
+    try {
+      await f.activate();
+      f.root.webContents.command = () =>
+        new Promise<void>((resolve, reject) => requests.push({ resolve, reject }));
+      for (const width of [820, 1100, 1400]) {
+        f.size[0] = width;
+        f.host.invalidateGeometry();
+        f.host.syncViewport(true);
+      }
+      expect(requests).toHaveLength(3);
+      if (boundary === 'dispose') {
+        f.host.dispose();
+        disposed = true;
+      } else {
+        f.root.webContents.mainFrame = { url: 'http://localhost/' };
+        f.root.webContents.emit('did-start-navigation', {}, 'http://localhost/', false, true);
+        f.publish(f.snapshot(1, true));
+      }
+      requests[0]!.reject(Error('superseded resize on obsolete environment'));
+      requests[2]!.resolve();
+      await tick();
+      expect(f.host.readyFor('page')).toBe(false);
+      expect(f.suspended).toEqual(boundary === 'dispose' ? [] : ['page']);
+      expect(f.root.getBounds()).toEqual({ x: 0, y: 0, width: 1400, height: 700 });
+      expect(requests).toHaveLength(4); // New Root desire, or the exact disposal metrics reset.
+      requests[3]!.resolve();
+      await tick();
+      if (boundary === 'root-frame') {
+        expect(f.envelope()).toMatchObject({ hosted: false, snapshot: { hosted: false } });
+        await f.prime({ x: 1090, y: 96, width: 310, height: 604 });
+        f.publish(f.snapshot(2, true));
+        expect(f.layout('page', { x: 1090, y: 96, width: 310, height: 604 }, f.scope)).toBe(true);
+        expect(f.envelope().actionable).toBe(true);
+      }
+      const changes = f.stateChanges(),
+        commands = f.root.webContents.commands.length;
+      requests[1]!.reject(Error('late old resize after replacement adoption'));
+      await tick();
+      expect(f.stateChanges()).toBe(changes);
+      expect(f.root.webContents.commands).toHaveLength(commands);
+      expect(f.host.readyFor('page')).toBe(boundary === 'root-frame');
+      expect(f.page.webContents.destroyed).toBe(false);
+      if (disposed) expect(f.root.webContents.attached).toBe(false);
+    } finally {
+      if (!disposed) f.host.dispose();
+      for (const request of requests) request.resolve();
+      await tick();
+    }
+  });
+
 test('pure same-value layout performs no native writes, metrics or broadcasts; controller update publishes the applied state', async () => {
   const f = fixture();
   try {
@@ -2330,6 +2833,356 @@ test('ignoring an obsolete rejection still checks detached transport for the new
     expect(f.envelope()).toBeNull();
     expect(f.host.readyFor('page')).toBe(false);
     expect(f.page.webContents.destroyed).toBe(false);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+for (const transition of ['loaded-tab', 'prepared-close-fallback'] as const)
+  test(`cold loading cannot replace the native shell during a ${transition} fresh target handshake`, async () => {
+    const f = fixture();
+    const second = f.addPage('second');
+    const viewport = { x: 600, y: 96, width: 400, height: 604 };
+    try {
+      await f.activate();
+      f.publish(retainedSnapshot(f, 3, 'page'));
+      for (const [revision, id, previous] of [
+        [4, 'second', 'page'],
+        [6, 'page', 'second'],
+      ] as const) {
+        if (transition === 'prepared-close-fallback' && id === 'page') f.prepare(previous, id);
+        const next = retainedSnapshot(f, revision, id);
+        f.publish(next);
+        expect(f.host.readyFor(id, f.scope)).toBe(false);
+        const root = f.root.getBounds();
+        const chrome = f.chrome().getBounds();
+        const children = [...f.window.contentView.children];
+        const rootWrites = f.root.boundsHistory.length;
+        const chromeWrites = f.chrome().boundsHistory.length;
+        const attachment = f.envelope().attachment;
+        const hold = f.host.holdsPresentation(previous);
+        if (transition === 'loaded-tab' || id === 'second') expect(hold).toBeDefined();
+        expect(f.host.loadingReady(id, viewport, f.scope)).toBe(false);
+        expect(f.chrome().getBounds()).toEqual(chrome);
+        expect(f.root.getBounds()).toEqual(root);
+        expect(f.chrome().boundsHistory).toHaveLength(chromeWrites);
+        expect(f.root.boundsHistory).toHaveLength(rootWrites);
+        expect(f.window.contentView.children).toEqual(children);
+        expect(f.envelope().attachment).toBe(attachment);
+        expect(f.envelope().preparing).toBeUndefined();
+        f.host.update();
+        expect(f.host.holdsPresentation(previous)).toEqual(hold);
+        expect(f.host.presentationViewport(f.scope)).toEqual(viewport);
+        f.publish({ ...next, revision: revision + 1, hosted: true });
+        expect(f.host.layout(id, viewport, f.scope)).toBe(true);
+        const target = id === 'page' ? f.page : second;
+        target.setBounds(viewport);
+        target.setVisible(true);
+        f.host.completePresentation(id);
+        expect(f.host.readyFor(id, f.scope)).toBe(true);
+        expect(f.root.getBounds()).toEqual(root);
+        expect(f.chrome().getBounds()).toEqual(chrome);
+        expect(f.loadingFailures).toEqual([]);
+      }
+    } finally {
+      f.host.dispose();
+    }
+  });
+
+test('ordinary loading geometry cancellation permits a fresh attempt for the same current intent', async () => {
+  const f = fixture();
+  const bounds = { x: 600, y: 96, width: 400, height: 604 };
+  try {
+    f.publish(f.snapshot(1));
+    await tick();
+    f.chrome().webContents.autoFrames = false;
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+    const attachment = f.envelope().attachment;
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: true });
+    f.host.invalidateGeometry();
+    expect(f.loadingFailures).toEqual([]);
+    expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: false });
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+    const current = f.envelope();
+    expect(current.attachment).not.toBe(attachment);
+    expect(current.preparing).toBe(true);
+    f.chrome().webContents.autoFrames = true;
+    await f.call({
+      action: 'rendered',
+      attachment: current.attachment,
+      pageToken: current.pageToken,
+      revision: 1,
+    });
+    await tick();
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(true);
+    expect(f.loadingFailures).toEqual([]);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('native loading host covers the complete right pane before Root proof and keeps fresh cancellation available', async () => {
+  const f = fixture(),
+    bounds = { x: 600, y: 96, width: 400, height: 604 };
+  try {
+    f.publish(f.snapshot(1));
+    await tick();
+    const old = f.envelope();
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+    const env = f.envelope();
+    expect(env.attachment).not.toBe(old.attachment);
+    expect(env).toMatchObject({ preparing: true, hosted: false, actionable: false });
+    expect(f.chrome().getBounds()).toEqual({ x: 600, y: 0, width: 400, height: 700 });
+    expect(f.window.contentView.children.indexOf(f.chrome() as never)).toBeLessThan(
+      f.window.contentView.children.indexOf(f.root as never),
+    );
+    f.chrome().webContents.autoFrames = false;
+    await f.call({
+      action: 'rendered',
+      attachment: env.attachment,
+      pageToken: env.pageToken,
+      revision: 1,
+    });
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+    f.chrome().webContents.frame?.({
+      isEmpty: () => false,
+      getSize: () => ({ width: 400, height: 96 }),
+    });
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+    f.chrome().webContents.frame?.({
+      isEmpty: () => false,
+      getSize: () => ({ width: 400, height: 700 }),
+    });
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(true);
+    expect(f.host.readyFor('page', f.scope)).toBe(false);
+    expect(f.window.contentView.children.indexOf(f.chrome() as never)).toBeGreaterThan(
+      f.window.contentView.children.indexOf(f.root as never),
+    );
+    const send = (sequence: number, part: string, action: object) =>
+      f.call({
+        action: 'send',
+        event: {
+          attachment: env.attachment,
+          pageToken: env.pageToken,
+          revision: 1,
+          sequence,
+          part,
+          action,
+        },
+      });
+    expect(await send(1, 'toolbar', { type: 'navigate' })).toBe('stale');
+    const closing = send(2, 'tabs', { type: 'collapse' });
+    f.acknowledge(2);
+    expect(await closing).toBe('forwarded');
+    expect(f.root.getBounds()).toEqual({ x: 0, y: 0, width: 1000, height: 700 });
+    f.publish(null);
+    expect(f.chrome().getVisible()).toBe(false);
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+for (const change of ['none', 'navigation', 'geometry', 'document-loading'] as const) {
+  test(`retained native resource resume uses live exact page only with unchanged ${change} facts`, async () => {
+    const f = fixture(),
+      bounds = { x: 600, y: 96, width: 400, height: 604 };
+    try {
+      await f.activate();
+      const oldWire = f.envelope();
+      f.publish(null);
+      f.page.setVisible(false);
+      if (change === 'navigation') f.token('new-navigation');
+      if (change === 'geometry') f.size[0] = 1010;
+      if (change === 'document-loading') {
+        f.page.webContents.loadingMain = true;
+      }
+      f.publish(f.snapshot(3));
+      expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+      await tick();
+      const env = f.envelope();
+      expect(env.attachment).not.toBe(oldWire.attachment);
+      expect(env.actionable).toBe(false);
+      const expectedHeight = change === 'none' ? 96 : 700;
+      const width = change === 'geometry' ? 410 : 400;
+      f.chrome().webContents.frameImage = () => ({
+        isEmpty: () => false,
+        getSize: () => ({ width, height: expectedHeight }),
+      });
+      await f.call({
+        action: 'rendered',
+        attachment: env.attachment,
+        pageToken: env.pageToken,
+        revision: 3,
+      });
+      await tick();
+      expect(f.host.loadingReady('page', bounds, f.scope)).toBe(true);
+      expect(f.host.preparingPage() === (f.page as never)).toBe(change === 'none');
+      expect(f.host.readyFor('page', f.scope)).toBe(false);
+      expect(f.chrome().getBounds().height).toBe(expectedHeight);
+      expect(f.envelope().loadingBody).toBe(change !== 'none');
+      f.publish(null);
+      expect(f.host.preparingPage()).toBeUndefined();
+      expect(f.page.getVisible()).toBe(false);
+    } finally {
+      f.host.dispose();
+    }
+  });
+}
+
+test('native loading preparation transfers to the existing Page preparation and retires only on actual adoption', async () => {
+  const f = fixture(),
+    bounds = { x: 600, y: 96, width: 400, height: 604 };
+  try {
+    f.publish(f.snapshot(1));
+    await tick();
+    f.host.loadingReady('page', bounds, f.scope);
+    const env = f.envelope();
+    f.chrome().webContents.frameImage = () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 400, height: 700 }),
+    });
+    await f.call({
+      action: 'rendered',
+      attachment: env.attachment,
+      pageToken: env.pageToken,
+      revision: 1,
+    });
+    await tick();
+    expect(f.host.loadingReady('page', bounds, f.scope)).toBe(true);
+    const starts = f.chrome().webContents.frameStarts;
+    const controller = new AbortController();
+    expect(await f.host.prepareDisplay('page', bounds, f.scope, controller.signal)).toBe(true);
+    expect(f.chrome().webContents.frameStarts).toBe(starts);
+    expect(f.host.offerDisplay('page', bounds, f.scope)).toBe(true);
+    expect(f.envelope()).toMatchObject({ preparing: true, hosted: true, actionable: false });
+    expect(f.chrome().getBounds().height).toBe(700);
+    f.publish(f.snapshot(2, true));
+    expect(f.layout('page', bounds, f.scope)).toBe(true);
+    expect(f.chrome().getBounds().height).toBe(96);
+    expect(f.envelope().preparing).toBeUndefined();
+    expect(f.envelope().actionable).toBe(true);
+    controller.abort();
+    expect(f.host.readyFor('page', f.scope)).toBe(true);
+    expect(f.loadingFailures).toEqual([]);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+for (const boundary of ['native-frame', 'fresh-root'] as const)
+  test(`missing ${boundary} reports one bounded loading failure without an observe/fail loop`, async () => {
+    const f = fixture(),
+      bounds = { x: 600, y: 96, width: 400, height: 604 };
+    try {
+      f.publish(f.snapshot(1));
+      await tick();
+      f.chrome().webContents.autoFrames = boundary !== 'native-frame';
+      f.chrome().webContents.frameImage = () => ({
+        isEmpty: () => false,
+        getSize: () => ({ width: 400, height: 700 }),
+      });
+      f.host.loadingReady('page', bounds, f.scope);
+      const env = f.envelope();
+      await f.call({
+        action: 'rendered',
+        attachment: env.attachment,
+        pageToken: env.pageToken,
+        revision: 1,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1550));
+      expect(f.loadingFailures).toEqual(['page']);
+      expect(f.chrome().getVisible()).toBe(false);
+      expect(f.host.displayState()).toMatchObject({ kind: 'page', busy: true });
+      const starts = f.chrome().webContents.frameStarts;
+      expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+      f.host.update();
+      expect(f.chrome().webContents.frameStarts).toBe(starts);
+      expect(f.loadingFailures).toHaveLength(1);
+      f.publish(null);
+      expect(f.host.displayState()).toMatchObject({ kind: 'root' });
+      f.publish(f.snapshot(2));
+      expect(f.host.loadingReady('page', bounds, f.scope)).toBe(false);
+      expect(f.envelope().attachment).not.toBe(env.attachment);
+    } finally {
+      f.host.dispose();
+    }
+  });
+
+test('cold loading Chrome read failure withdraws its temporary visible Page and cancels only the claimed preparation', async () => {
+  const f = fixture(),
+    bounds = { x: 600, y: 96, width: 400, height: 604 };
+  try {
+    f.publish(f.snapshot(1));
+    await tick();
+    f.host.loadingReady('page', bounds, f.scope);
+    let env = f.envelope();
+    f.chrome().webContents.frameImage = () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 400, height: 700 }),
+    });
+    await f.call({
+      action: 'rendered',
+      attachment: env.attachment,
+      pageToken: env.pageToken,
+      revision: 1,
+    });
+    await tick();
+    const controller = new AbortController();
+    expect(await f.host.prepareDisplay('page', bounds, f.scope, controller.signal)).toBe(true);
+    f.page.setBounds(bounds);
+    f.page.setVisible(true);
+    f.window.contentView.addChildView(f.page as never);
+    f.publish(f.snapshot(2));
+    f.chrome().webContents.capturePage = async () => {
+      throw Error('native-read-failed');
+    };
+    const pending = f.host.prepareDisplay('page', bounds, f.scope, controller.signal);
+    env = f.envelope();
+    await f.call({
+      action: 'rendered',
+      attachment: env.attachment,
+      pageToken: env.pageToken,
+      revision: 2,
+    });
+    expect(await pending).toBe(false);
+    expect(f.page.getVisible()).toBe(false);
+    expect(f.chrome().getVisible()).toBe(false);
+    expect(f.cancelledDisplays).toEqual([{ id: 'page', signal: controller.signal }]);
+    expect(f.loadingFailures).toEqual([]);
+    expect(f.host.readyFor('page', f.scope)).toBe(false);
+  } finally {
+    f.host.dispose();
+  }
+});
+
+test('warm resource resume reports protection failure and withdraws the original live page without acquiring input', async () => {
+  const f = fixture(),
+    bounds = { x: 600, y: 96, width: 400, height: 604 };
+  try {
+    await f.activate();
+    f.publish(null);
+    f.page.setVisible(false);
+    f.publish(f.snapshot(3));
+    f.host.loadingReady('page', bounds, f.scope);
+    f.protection(false);
+    const env = f.envelope();
+    f.chrome().webContents.frameImage = () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 400, height: 96 }),
+    });
+    await f.call({
+      action: 'rendered',
+      attachment: env.attachment,
+      pageToken: env.pageToken,
+      revision: 3,
+    });
+    await tick();
+    expect(f.host.preparingPage()).toBeUndefined();
+    expect(f.page.getVisible()).toBe(false);
+    expect(f.chrome().getVisible()).toBe(false);
+    expect(f.host.readyFor('page', f.scope)).toBe(false);
+    expect(f.loadingFailures).toEqual(['page']);
   } finally {
     f.host.dispose();
   }

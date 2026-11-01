@@ -25,6 +25,7 @@ import {
   nativeBrowserMenuChannel,
   nativeBrowserPreparationCancelChannel,
   nativeBrowserPreparationChannel,
+  nativeBrowserPresentationChannel,
   nativeBrowserWitnessSamplePoints,
   parseNativeBrowserMenuRequest,
   parseNativeBrowserRequest,
@@ -286,6 +287,15 @@ export function registerNativeBrowserIpc(options: {
   let pendingLayout:
     | { tab: BrowserTab; request: DrawnPresentation; confirmed: boolean }
     | undefined;
+  let loadingRequest:
+    | {
+        tab: BrowserTab;
+        request: DrawnPresentation;
+        frame: Electron.WebFrameMain;
+        epoch: number;
+        token: string;
+      }
+    | undefined;
   let initialDisplay:
     | {
         tab: BrowserTab;
@@ -300,6 +310,7 @@ export function registerNativeBrowserIpc(options: {
         timer: ReturnType<typeof setTimeout>;
         ready: boolean;
         offered: boolean;
+        stopPageFrame?: () => void;
       }
     | undefined;
   type Closing = {
@@ -319,11 +330,123 @@ export function registerNativeBrowserIpc(options: {
     finishing?: (value: boolean) => void;
   };
   let closing: Closing | undefined;
+  let reconciliationQueued = false;
+  let windowAvailable = window.isVisible() && !window.isMinimized();
+  let displayAttempt:
+    | {
+        tab: BrowserTab;
+        scope: NativeBrowserChromeOwner;
+        token: string;
+        frame: Electron.WebFrameMain;
+        epoch: number;
+        geometry: string;
+        key: string;
+      }
+    | undefined;
+  function rememberDisplayAttempt(tab: BrowserTab, scope: NativeBrowserChromeOwner) {
+    const geometry = JSON.stringify([...window.getContentSize(), owner.getZoomFactor()]),
+      token = pageToken(tab);
+    if (
+      displayAttempt?.tab === tab &&
+      sameNativeBrowserChromeOwner(displayAttempt.scope, scope) &&
+      displayAttempt.token === token &&
+      displayAttempt.frame === owner.mainFrame &&
+      displayAttempt.epoch === rootEpoch &&
+      displayAttempt.geometry === geometry
+    )
+      return false;
+    displayAttempt = {
+      tab,
+      scope,
+      token,
+      frame: owner.mainFrame,
+      epoch: rootEpoch,
+      geometry,
+      key: randomUUID().replaceAll('-', ''),
+    };
+    return true;
+  }
+  function reconcileDisplay() {
+    if (disposed || window.isDestroyed() || owner.isDestroyed() || !chromeHost) return;
+    const available = window.isVisible() && !window.isMinimized();
+    if (available !== windowAvailable) {
+      windowAvailable = available;
+      displayAttempt = undefined;
+    }
+    if (
+      !available ||
+      closing ||
+      initialDisplay ||
+      pendingLayout ||
+      preparation ||
+      heldPresentation ||
+      retainedDisplay ||
+      menu
+    )
+      return;
+    // Root's current accepted intent is the target. Neither a former active
+    // Page nor a remembered URL can authorize a replacement or a new goal.
+    const desired = chromeHost.displayState();
+    if (desired.kind !== 'page') {
+      displayAttempt = undefined;
+      if (desired.kind === 'root')
+        for (const [id, tab] of tabs)
+          if (tab.view.getVisible() || tab.presentation) present(id, null);
+      return;
+    }
+    const tab = tabs.get(desired.id);
+    if (
+      !tab ||
+      tab.view.webContents.isDestroyed() ||
+      tab.state.error ||
+      !displayOwnerCurrent(tab, desired.scope) ||
+      pageToken(tab) !== desired.token
+    )
+      return;
+    if (desired.presented && active === desired.id && tab.presentation) {
+      displayAttempt = undefined;
+      return;
+    }
+    if (desired.busy) return;
+    // A source/target capsule owns any intentional overlapping live views.
+    // Outside one, retire an unrelated surface before asking for fresh proof.
+    for (const [id, other] of tabs)
+      if (other !== tab && (other.view.getVisible() || other.presentation)) present(id, null);
+    if (!rememberDisplayAttempt(tab, desired.scope)) return;
+    // Retire the old display proof before notifying Root. A late Host ready or
+    // resize callback must not revive it, and old screenshot coordinates must
+    // stay invalid even if the new observation measures identical bounds.
+    tab.sizeEpoch++;
+    delete tab.presentationFrame;
+    delete tab.drawnRequest;
+    delete tab.drawnPresentation;
+    if (!chromeHost.preparingPage()) present(desired.id, null, undefined, false);
+    try {
+      owner.send(nativeBrowserPresentationChannel, {
+        id: desired.id,
+        key: displayAttempt!.key,
+        ...('draft' in desired.scope ? { draft: desired.scope.draft } : { scope: desired.scope }),
+      });
+    } catch {
+      // An unconfirmed UI notification changes no Page/control authority.
+      // Keep this attempt fenced until a new target or lifecycle boundary.
+    }
+  }
+  function queueDisplayReconciliation() {
+    if (disposed || reconciliationQueued) return;
+    reconciliationQueued = true;
+    queueMicrotask(() => {
+      reconciliationQueued = false;
+      reconcileDisplay();
+    });
+  }
   function cancelInitialDisplay(id?: string, adopted = false) {
     const d = initialDisplay;
     if (!d || (id && d.tab.state.id !== id)) return;
     initialDisplay = undefined;
     clearTimeout(d.timer);
+    d.stopPageFrame?.();
+    if (!adopted) cancelLayout(d.tab.state.id);
     if (adopted) return;
     d.controller.abort();
     const contents = tabs.get(d.tab.state.id) === d.tab ? d.tab.view.webContents : undefined;
@@ -520,6 +643,11 @@ export function registerNativeBrowserIpc(options: {
       chromeHost?.cancelPresentationHold(heldPresentation.tab.state.id);
       clearHeldPresentation();
     }
+    const preparingPage = chromeHost?.preparingPage();
+    if (preparingPage) {
+      inputShield.sync(preparingPage, true);
+      return;
+    }
     const tab = active ? tabs.get(active) : undefined;
     if (
       tab &&
@@ -560,6 +688,7 @@ export function registerNativeBrowserIpc(options: {
       canGoForward: tab.view.webContents.navigationHistory.canGoForward(),
     };
     syncInput();
+    queueDisplayReconciliation();
     if (
       tab.drawnPresentation &&
       !tab.state.loading &&
@@ -575,6 +704,8 @@ export function registerNativeBrowserIpc(options: {
     }, 16);
   };
   const hide = () => {
+    windowAvailable = false;
+    displayAttempt = undefined;
     cancelClosePreparation();
     cancelInitialDisplay();
     cancelPreparation();
@@ -583,13 +714,20 @@ export function registerNativeBrowserIpc(options: {
     cancelRetainedDisplay();
     cancelLayout();
     cancelMenu();
+    // Window visibility owns both pending Host preparation and active display.
+    // Retain the Page/resources, but reopen only through a fresh binding.
+    loadingRequest = undefined;
+    chromeHost?.release();
     inputShield.hide();
     for (const tab of tabs.values()) {
       stopNativeFrames(tab);
+      tab.sizeEpoch++;
+      delete tab.presentationFrame;
       tab.view.setVisible(false);
       automation?.present(tab.state.id, false);
     }
     active = undefined;
+    queueDisplayReconciliation();
   };
   const replaceRenderer = (retainLive = true) => {
     cancelClosePreparation();
@@ -1585,7 +1723,7 @@ export function registerNativeBrowserIpc(options: {
   };
   // Both native resize predictions and accepted Renderer corrections are
   // computed here against the current window, then diffed at the native output.
-  const applyCurrentLayout = (tab: BrowserTab) => {
+  const applyCurrentLayout = (tab: BrowserTab, nativeResize = false) => {
     const anchor = tab.presentation;
     if (
       !anchor ||
@@ -1656,7 +1794,7 @@ export function registerNativeBrowserIpc(options: {
     }
     // Crop the app Root with its own native bounds before moving the live page.
     // A slow Root paint can no longer cover or receive input in the right column.
-    chromeHost?.syncViewport();
+    chromeHost?.syncViewport(nativeResize);
     chromeHost?.layout(id, { x, y, ...viewportSize }, chromeOwner(tab));
     const previous = tab.view.getBounds();
     if (
@@ -1714,6 +1852,38 @@ export function registerNativeBrowserIpc(options: {
       ipcMain,
       rendererUrl,
       preloadPath: options.chrome.preloadPath,
+      onStateChanged() {
+        syncInput();
+        queueDisplayReconciliation();
+      },
+      onDisplayCancelled(id, signal) {
+        const d = initialDisplay;
+        if (!d || d.tab.state.id !== id || d.controller.signal !== signal) return;
+        const current = initialDisplayCurrent(d);
+        cancelInitialDisplay(id);
+        if (current) acknowledgeDisplay(d.request, false, true);
+      },
+      onLoadingFailed(id) {
+        const pending = loadingRequest;
+        if (
+          !pending ||
+          pending.tab.state.id !== id ||
+          pending.frame !== owner.mainFrame ||
+          pending.epoch !== rootEpoch ||
+          tabs.get(id) !== pending.tab ||
+          pageToken(pending.tab) !== pending.token ||
+          !chromeHost?.acceptsPresentation(id, requestOwner(pending.request)!)
+        )
+          return;
+        loadingRequest = undefined;
+        acknowledgeDisplay(pending.request, false, true);
+      },
+      canProtectLivePage: () => displayShieldReady && inputShield.available(),
+      protectLivePage(view) {
+        if (!displayShieldReady || !inputShield.available()) return false;
+        inputShield.sync(view, true);
+        return inputShield.available();
+      },
       currentScope(forInput) {
         const scope = (
           forInput ? options.selectedScope : (options.grantScope ?? options.selectedScope)
@@ -1760,6 +1930,7 @@ export function registerNativeBrowserIpc(options: {
         stopNativeFrames(tab);
         tab.presentationScope = request.scope;
         present(id, request.bounds, request.layout);
+        cancelLayout();
       },
       onSuspend(id) {
         if (!disposed && tabs.has(id)) present(id, null, undefined, false);
@@ -1778,6 +1949,8 @@ export function registerNativeBrowserIpc(options: {
         cancelClosePreparation(undefined, id);
       },
       onContextChanged() {
+        loadingRequest = undefined;
+        displayAttempt = undefined;
         cancelClosePreparation();
         cancelInitialDisplay();
         cancelPreparation();
@@ -2528,6 +2701,7 @@ export function registerNativeBrowserIpc(options: {
     cancelInitialDisplay(tab.state.id, true);
     tab.presentationScope = request.scope;
     present(tab.state.id, request.bounds, request.layout);
+    cancelLayout();
     if (active === tab.state.id && tab.view.getVisible()) acknowledgeDisplay(request, true);
   };
   const beginInitialDisplay = (tab: BrowserTab, request: DrawnPresentation) => {
@@ -2562,8 +2736,8 @@ export function registerNativeBrowserIpc(options: {
       timer: setTimeout(fail, 12000),
     };
     initialDisplay = d;
-    // The Root remains attached and full size. Prepare only the real target
-    // underneath it, at the exact witnessed viewport, without exposing pixels.
+    // The full native loading host covers Root's private proof. Put the exact
+    // Page above Root and below that host before shrinking the host to its bar.
     tab.sizeEpoch++;
     tab.viewportSize = { width: bounds.width, height: bounds.height };
     const children = window.contentView.children,
@@ -2574,12 +2748,18 @@ export function registerNativeBrowserIpc(options: {
       fail();
       return;
     }
-    if (children.indexOf(tab.view) > rootIndex)
-      window.contentView.addChildView(tab.view, rootIndex);
+    if (children.indexOf(tab.view) !== rootIndex + 1)
+      window.contentView.addChildView(tab.view, rootIndex + 1);
     tab.view.setBounds(bounds);
     tab.view.setVisible(true);
     automation?.present(tab.state.id, false);
-    acknowledgeDisplay(request, false);
+    syncInput();
+    const chromePreparation = chromeHost!.prepareDisplay(
+      tab.state.id,
+      bounds,
+      requestOwner(request)!,
+      controller.signal,
+    );
     void (async () => {
       if (!(await tab.waitForDisplayDocument?.(controller.signal)) || !initialDisplayCurrent(d)) {
         fail();
@@ -2605,25 +2785,57 @@ export function registerNativeBrowserIpc(options: {
       }
       const read = contents
         .capturePage()
-        .then((image) => {
+        .then(async (image) => {
           if (!current() || !fullFrameMatches(image, bounds))
             throw Error('browser_presentation_unavailable');
+          // A copy request is not a native presentation event. Keep Root as
+          // the source until this exact page also delivers its current full
+          // frame; never classify page readiness from its pixel colors.
+          await new Promise<void>((resolve, reject) => {
+            let subscribed = false,
+              settled = false;
+            const finish = (error?: unknown) => {
+              if (settled) return;
+              settled = true;
+              controller.signal.removeEventListener('abort', abort);
+              if (d.stopPageFrame === abort) d.stopPageFrame = undefined;
+              if (subscribed && !contents.isDestroyed()) {
+                try {
+                  contents.endFrameSubscription();
+                } catch (cause) {
+                  error ??= cause;
+                }
+              }
+              if (error) reject(error);
+              else resolve();
+            };
+            const abort = () => finish(Error('browser_presentation_cancelled'));
+            d.stopPageFrame = abort;
+            controller.signal.addEventListener('abort', abort, { once: true });
+            if (!current()) {
+              abort();
+              return;
+            }
+            try {
+              subscribed = true;
+              contents.beginFrameSubscription(false, (frame) => {
+                if (!current()) {
+                  abort();
+                  return;
+                }
+                if (fullFrameMatches(frame, bounds)) finish();
+              });
+              contents.invalidate();
+            } catch (cause) {
+              finish(cause);
+            }
+          });
         })
         .finally(() => {
           if (tab.presentationReady?.read === read) delete tab.presentationReady;
         });
       tab.presentationReady = { key: request.witness.key, read };
-      const [, chromeReady] = await Promise.all([
-        read,
-        requestOwner(request)
-          ? chromeHost!.prepareDisplay(
-              tab.state.id,
-              bounds,
-              requestOwner(request)!,
-              controller.signal,
-            )
-          : Promise.resolve(true),
-      ]);
+      const [, chromeReady] = await Promise.all([read, chromePreparation]);
       if (!chromeReady || !current()) {
         fail();
         return;
@@ -2785,7 +2997,12 @@ export function registerNativeBrowserIpc(options: {
       // A repeated effect does not require hiding an unchanged, fully proved
       // viewport. Its new revision still completes both real Root draws below.
       const prepared = currentPreparation();
-      if (!retain && !retained && !(prepared?.ready && prepared.target === tab)) {
+      if (
+        !retain &&
+        !retained &&
+        chromeHost?.preparingPage() !== tab.view &&
+        !(prepared?.ready && prepared.target === tab)
+      ) {
         if (retainedDisplay) cancelRetainedDisplay();
         tab.view.setVisible(false);
         automation?.present(tab.state.id, false);
@@ -2829,6 +3046,7 @@ export function registerNativeBrowserIpc(options: {
           // made a full Main -> Renderer -> compositor round trip. This avoids
           // moving the sibling in the first new Root frame's generation turn;
           // it is not an OS-wide atomic presentation guarantee.
+          acknowledgeDisplay(pending.request, false);
           cancelLayout();
           const retained = retainedDisplay;
           if (retained?.tab === pending.tab) retainedDisplay = undefined;
@@ -2842,6 +3060,7 @@ export function registerNativeBrowserIpc(options: {
             return;
           }
           present(pending.tab.state.id, pending.request.bounds, pending.request.layout);
+          cancelLayout();
           startNativeFrames(pending.tab);
           if (retained && !owner.isDestroyed())
             owner.send(nativeBrowserDisplayChannel, { token: retained.intent.token });
@@ -3137,8 +3356,52 @@ export function registerNativeBrowserIpc(options: {
         assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
       }
       const revisionGeneration = presentationGeneration(tab, request);
+      if (
+        !hostedOnly &&
+        request.witness &&
+        chromeHost &&
+        targetOwner &&
+        !chromeHost.readyFor(tab.state.id, targetOwner) &&
+        !chromeHost.presentationViewport(targetOwner)
+      ) {
+        const zoom = owner.getZoomFactor(),
+          [width = 0, height = 0] = window.getContentSize();
+        assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
+        const x = Math.ceil(request.bounds.x * zoom),
+          y = Math.ceil(request.bounds.y * zoom);
+        const viewport = {
+          x,
+          y,
+          width: Math.floor((request.bounds.x + request.bounds.width) * zoom) - x,
+          height: Math.floor((request.bounds.y + request.bounds.height) * zoom) - y,
+        };
+        if (!chromeHost.loadingReady(tab.state.id, viewport, targetOwner)) {
+          loadingRequest = {
+            tab,
+            request: request as DrawnPresentation,
+            frame: owner.mainFrame,
+            epoch: rootEpoch,
+            token: pageToken(tab),
+          };
+          // No Root palette may paint until the native loading surface is ready.
+          // Its readiness event requests a fresh observation; no timed retries.
+          displayAttempt = undefined;
+          throw Error('browser_presentation_unavailable');
+        }
+      }
+      // A real UI bootstrap counts as this target's one in-flight attempt too.
+      // Its own failure must not produce an automatic observe/fail loop.
+      const recoveryOwner = requestOwner(request);
+      if (!hostedOnly && chromeHost && recoveryOwner) rememberDisplayAttempt(tab, recoveryOwner);
       if (!request.witness) {
         cancelLayout();
+        if (hostedOnly) {
+          stopNativeFrames(tab);
+          // An admitted active-page calibration is geometry, not a new Root
+          // drawing proof. Neither its predecessor nor an invented nonce qualifies.
+          delete tab.drawnRequest;
+          delete tab.drawnPresentation;
+        }
         present(request.id, request.bounds, request.layout);
       }
       if (request.witness) proposeLayout(tab, request as DrawnPresentation);
@@ -3147,7 +3410,7 @@ export function registerNativeBrowserIpc(options: {
         tab.presentationGeneration = revisionGeneration;
       }
       if (active === request.id && tab.view.getVisible()) tab.presentationScope = scope;
-      chromeHost?.update();
+      queueDisplayReconciliation();
       delete tab.presentationFrame;
       return {
         ok: true,
@@ -3276,7 +3539,10 @@ export function registerNativeBrowserIpc(options: {
         const finish = () => {
           if (settled) return;
           settled = true;
-          if (menu?.id === request.requestId) menu = undefined;
+          if (menu?.id === request.requestId) {
+            menu = undefined;
+            queueDisplayReconciliation();
+          }
           resolve(!cancelled && current() ? chosen : null);
         };
         const template: Electron.MenuItemConstructorOptions[] = [];
@@ -3597,14 +3863,16 @@ export function registerNativeBrowserIpc(options: {
             (key) => scope[key] === tab.presentationScope![key],
           ))
       )
-        applyCurrentLayout(tab);
+        applyCurrentLayout(tab, true);
     } else {
       // Bootstrap and withdrawn Root still need the current logical viewport.
-      chromeHost?.syncViewport();
+      chromeHost?.syncViewport(true);
     }
     syncInput();
+    queueDisplayReconciliation();
   };
   const resize = () => {
+    if (pendingLayout) cancelLayout();
     cancelClosePreparation();
     cancelInitialDisplay();
     if (retainedDisplay && !displayCurrent()) cancelRetainedDisplay();
@@ -3623,6 +3891,10 @@ export function registerNativeBrowserIpc(options: {
   };
   window.on('resize', resize);
   window.on('hide', hide);
+  window.on('minimize', hide);
+  window.on('show', queueDisplayReconciliation);
+  window.on('restore', queueDisplayReconciliation);
+  window.on('focus', queueDisplayReconciliation);
   const dispose = () => {
     if (disposed) return;
     disposed = true;
@@ -3658,6 +3930,10 @@ export function registerNativeBrowserIpc(options: {
     ipcMain.off?.(nativeBrowserDisplayChannel, displayBootstrap);
     window.off('resize', resize);
     window.off('hide', hide);
+    window.off('minimize', hide);
+    window.off('show', queueDisplayReconciliation);
+    window.off('restore', queueDisplayReconciliation);
+    window.off('focus', queueDisplayReconciliation);
   };
   window.once('closed', dispose);
   return dispose;

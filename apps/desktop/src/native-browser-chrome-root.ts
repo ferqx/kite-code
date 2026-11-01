@@ -3,6 +3,7 @@ import { useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import {
   isNativeBrowserChromeEnvelope,
   isNativeBrowserChromeEvent,
+  isNativeBrowserChromePreparingAction,
   isNativeBrowserChromeSnapshot,
   type NativeBrowserChromeEnvelope,
   type NativeBrowserChromeEvent,
@@ -463,15 +464,20 @@ class BrowserChromeRoot {
     const envelope = this.envelope,
       snapshot = this.snapshot,
       selected = this.selected();
+    const cancelling =
+      envelope?.preparing === true &&
+      !!snapshot &&
+      isNativeBrowserChromeEvent(event) &&
+      isNativeBrowserChromePreparingAction(event, snapshot);
     if (
       !this.live() ||
       this.bindingUncertain ||
       !isNativeBrowserChromeEvent(event) ||
       !this.current().interactive ||
       !this.eligible() ||
-      !envelope?.hosted ||
-      !envelope.actionable ||
-      !snapshot?.hosted ||
+      (!cancelling && (!envelope?.hosted || !envelope.actionable || !snapshot?.hosted)) ||
+      !envelope ||
+      !snapshot ||
       !selected ||
       document.hidden ||
       event.attachment !== envelope.attachment ||
