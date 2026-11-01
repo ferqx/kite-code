@@ -2852,17 +2852,46 @@ async function prepareRootReturn(f: Awaited<ReturnType<typeof rootReturnFixture>
   return receipt;
 }
 
+function hideRootReturnPresentation(f: Awaited<ReturnType<typeof rootReturnFixture>>) {
+  expect(
+    f.invoke({
+      action: 'present',
+      id: f.id,
+      bounds: null,
+      ...(f.draft ? { draft: f.draft } : { scope: f.scope }),
+      presentationRevision: f.second.presentationRevision + 1,
+    }),
+  ).toMatchObject({ ok: true });
+  const shield = views.at(-1)!,
+    children = f.window.contentView.children;
+  expect(f.view.getVisible()).toBe(true);
+  expect(f.contents.destroyed).toBe(false);
+  expect(f.contents.closes).toBe(0);
+  expect(f.root!.getBounds()).toEqual({ x: 0, y: 0, width: 1600, height: 1200 });
+  expect(children.indexOf(f.view as unknown as Electron.View)).toBeLessThan(
+    children.indexOf(f.root! as unknown as Electron.View),
+  );
+  expect(shield).not.toBe(f.view);
+  expect(shield.getVisible()).toBe(true);
+  expect(shield.getBounds()).toEqual(f.view.getBounds());
+  expect(children.indexOf(shield as unknown as Electron.View)).toBeGreaterThan(
+    children.indexOf(f.root! as unknown as Electron.View),
+  );
+  return shield;
+}
+
 if (process.platform === 'darwin') {
   for (const kind of ['draft', 'session'] as const)
     test(`Root return closes ${kind} exactly once only after marked and then opaque marker-free full frames`, async () => {
       const f = await rootReturnFixture(kind);
       try {
+        let captureId: string | undefined,
+          dispatched = 0;
         if (kind === 'session') {
           f.state.phase = 'acquiring';
           await f.page.attach();
           f.state.phase = 'agent';
           f.contents.readMetrics = async () => ({ ...metrics, width: 799, height: 600 });
-          let dispatched = 0;
           f.contents.screenshot = async () => {
             dispatched++;
             return {
@@ -2870,7 +2899,7 @@ if (process.platform === 'darwin') {
             };
           };
           await f.page.send('Page.captureScreenshot', { format: 'png' });
-          const captureId = (f.page.captureMeta() as { metadata: { captureId: string } }).metadata
+          captureId = (f.page.captureMeta() as { metadata: { captureId: string } }).metadata
             .captureId;
           expect(await f.page.validateCapture!(captureId)).toBe(true);
           expect(dispatched).toBe(1);
@@ -2878,19 +2907,19 @@ if (process.platform === 'darwin') {
             dispatched++;
             return image;
           };
-          const receipt = await prepareRootReturn(f);
+        }
+        const receipt = await prepareRootReturn(f),
+          shield = hideRootReturnPresentation(f);
+        if (captureId) {
           expect(await f.page.validateCapture!(captureId)).toBe(false);
           await expect(f.page.send('Page.captureScreenshot', { format: 'png' })).rejects.toThrow(
             'browser_page_read_stale',
           );
           expect(dispatched).toBe(1);
-          expect(await f.invoke({ action: 'cancelClose', key: receipt.key })).toMatchObject({
-            ok: true,
-            value: null,
-          });
         }
-        const receipt = await prepareRootReturn(f);
         expect(await f.asyncLayout(f.second)).toMatchObject({ ok: false });
+        expect(f.view.getVisible()).toBe(true);
+        expect(shield.getVisible()).toBe(true);
         expect(f.contents.closes).toBe(0);
         let confirmed = false;
         const confirmation = Promise.resolve(
@@ -2941,6 +2970,7 @@ if (process.platform === 'darwin') {
         expect(f.contents.closes).toBe(1);
         expect(f.contents.destroyed).toBe(true);
         expect(f.view.getVisible()).toBe(false);
+        expect(shield.getVisible()).toBe(false);
         expect(f.window.contentView.children).not.toContain(f.view as unknown as Electron.View);
         expect(f.chrome.finishedRootReturns).toEqual([f.id]);
         draw(rootReturnDraw(receipt));
@@ -3008,6 +3038,7 @@ if (process.platform === 'darwin') {
         const f = await rootReturnFixture(boundary === 'scope' ? 'session' : 'draft');
         try {
           const receipt = await prepareRootReturn(f),
+            shield = hideRootReturnPresentation(f),
             draw = f.owner.frame!,
             confirmation = f.invoke({ action: 'confirmClose', key: receipt.key });
           let pending = confirmation;
@@ -3061,6 +3092,17 @@ if (process.platform === 'darwin') {
           expect(f.contents.closes).toBe(boundary === 'page-replace' ? 1 : 0);
           expect(replacement?.closes ?? 0).toBe(0);
           expect(f.chrome.finishedRootReturns).toEqual([]);
+          expect(f.view.getVisible()).toBe(false);
+          expect(shield.getVisible()).toBe(false);
+          expect(await f.asyncLayout(f.second)).toMatchObject({ ok: false });
+          f.chrome.announceReady(f.id);
+          f.contents.emit('dom-ready');
+          draw(rootReturnDraw(receipt));
+          draw(rootReturnDraw(receipt, { marker: false }));
+          expect(f.view.getVisible()).toBe(false);
+          expect(shield.getVisible()).toBe(false);
+          expect(f.contents.closes).toBe(boundary === 'page-replace' ? 1 : 0);
+          expect(replacement?.closes ?? 0).toBe(0);
           expect(f.contents.loads).toBe(1);
           expect(f.armed).toEqual([]);
         } finally {

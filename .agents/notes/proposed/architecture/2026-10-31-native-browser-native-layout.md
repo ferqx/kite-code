@@ -148,3 +148,19 @@ Root按Store在窗口sessionStorage保存token及draft展示revision，HMR保同
 本节替代前述018草稿专用Root本地工具栏/采用后上移的显示策略，不替代其独立draft、不借旧Session和观察/输入边界。020原片中的切会话灰列、resize灰/短缺页及旧bar残留完整保留；后继仅对旧bar清内容的关闭因果切口做021定向，不重复天气/模型或宣称整体渲染完成。准确代码、实机PTS及验证范围仍归Desktop owner，整篇Note继续proposed。
 
 021限定关闭片已观察Page直接退Root，未再采到020旧toolbar/stale提示悬留，也未见白L或nonce；右上Root按钮仍在空strip退休后分步出现。此后继只为清旧内容取得本机开发切口证据，不覆盖020已有的切Session/resize灰列，不把两阶段JS/帧顺序当作系统像素原子保证。准确PTS/原片完整性沿Desktop owner，本次不继续等价实验或升级发行资格。
+
+## 关闭绘制标记的最小原生遮挡（2026-11-01，代码已实现，实机范围另列）
+
+021已确认Root目标正文出现后，整条空Chrome仍挡住右上按钮75–108ms；nonce实际仅使用原strip左上120×3 CSS区域。继续保整条宿主没有帧证明上的必要，也不能为提前露按钮跳过Root清除帧。拟只在有效Root-return且Root已提交准确null意图后，把同一个Chrome View收成覆盖nonce的最小保守矩形（普通zoom1约124×7 DIP），保原receipt坐标、Root有序两帧与真实关闭顺序，不增加View/Renderer/协议字段。
+
+Host先核准确原geometry，再更新Root-return保存的Chrome bounds；重复null省写，context/Root/resize/页面失效照常取消。按mac backing scale不低于1，以Root zoom作为Canvas DPR保守下界复用现有witness尺寸；新矩形必须覆盖实际palette且不越原strip。小zoom可能需要更大保守高度，只承诺准确遮住marker并缩小无必要遮挡，不伪造全zoom按钮同时出现。finish/cancel撤原View，下一普通layout重新给完整工具栏bounds，不把临时mask当成长期anchor。定向回归后仅重验关闭实际切口。
+
+另沿固定Electron44.3.0/Chromium152源码核到Root setVisibleSize会走RWHVMac实际SetBounds，并非只预分配bitmap。它与已否定的父View/调度/AsyncLiveResize候选不同，尚未证明Electron外层物理裁剪能约束更宽RWHV；只允许一次私有边界probe，不接产品。真实裁剪、字体/坐标或点击任一不成立即否定，不追加参数搜索或等价完整UI重验；不由本段授权引擎补丁。当前灰列及所有旧反例保持。
+
+最小遮挡已接现有Host的release路径，先通过原Root-return/current守卫；原strip另存以便重复null幂等，临时小bounds不成为shell anchor。完整Host回归92项1047断言通过。补核极低zoom的DPR下界可能过度估算实际能放下的palette，此时保原准确条带继续关闭，不因优化取消合法关闭；真正setBounds故障仍安全取消。023已观察按钮随首个全宽Root帧出现，但process8/0.141667有一帧正文先撤、旧窄布局/旧bar尚在，下一样本才完整Root；原反例不改写为无闪。
+
+该新切口对应Main在有效closing事实中present(null)仍提前hide。后继仅在原capsule仍准确、shield可用、同一未销毁Page确在Root下时保真实live像素，仍清presentation/active并automation.present(false)，旧坐标/新截图/异步旧布局照常拒绝。现有nonce/clear完成才真实hide/close，不重挂、不保存截图、不扩跨scope显示；取消只清准确原Map对象且无新presentation的临时页，并同步收回shield。Main完整179项3050断言和18个取消边界支持此close-only顺序，实际24号制品范围由Desktop owner维护。物理visible不授Actor能力；通用后台CDP仍归原lease，不声称输入盾拦截CDP。
+
+可见surface预留候选已由唯一实际命令明确否定：私有Root API bounds仍700×760，实际帧从1400×1520扩大到2400×1520，WindowServer两源均见Root洋红覆盖原橙/青Chrome与Page。字体/文档/输入/阅读位置保持也不能授裁剪正确。原001基线夹具因同步helper阻塞后过早读点击停止、候选0次；002仅修异步真实点击事件确认，基线两个trusted点击成功后才调用一次setVisibleSize，见越界即结束，没有参数搜索或产品接入。此反例对应固定[EmulationHandler](https://github.com/chromium/chromium/blob/152.0.7977.78/content/browser/devtools/protocol/emulation_handler.cc#L808)经WebContents到[mac RenderWidgetHostView SetSize/SetBounds](https://github.com/chromium/chromium/blob/152.0.7977.78/content/browser/renderer_host/render_widget_host_view_mac.mm#L616)改变真实内容视图的路径。不能靠完整Root帧/外层getBounds推断独立预分配surface，不放宽输入/呈现边界，也不据此进入引擎补丁。Root展宽灰列与原resize缺口继续保留。
+
+024冻结开发制品的两路关闭切口已观察完整原Page直接到完整Root与按钮，未采到023正文先撤的过渡，也未见nonce/色条/白L/旧正文闪回；Source最终确认前未hide，到真实close与shield/Chrome一起撤。此结果只支持同一owner准确closing事实中的物理live页寿命与Root目标帧交接；不推广为跨scope旧页面显示，也不替代Actor lease或Root compositor原子保证。Main/Host回归和准确PTS/原片完整性沿Desktop owner，切Session/resize灰列与整篇proposed资格保持。

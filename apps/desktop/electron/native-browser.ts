@@ -1551,7 +1551,24 @@ export function registerNativeBrowserIpc(options: {
       cancelMenu(id);
       tab.presentation = undefined;
       delete tab.nativeProjection;
-      if (!retain || heldPresentation?.tab !== tab) tab.view.setVisible(false);
+      // The exact live page can fill the old native crop until Root's new
+      // surface arrives. It stays below Root, with no presentation authority.
+      let returning = false;
+      if (
+        closing?.tab === tab &&
+        closePreparationCurrent(closing) &&
+        displayShieldReady &&
+        inputShield.available() &&
+        tab.view.getVisible()
+      ) {
+        const children = window.contentView.children,
+          rootIndex = children.findIndex(
+            (view) => view instanceof WebContentsView && view.webContents === owner,
+          ),
+          pageIndex = children.indexOf(tab.view);
+        returning = pageIndex >= 0 && pageIndex < rootIndex;
+      }
+      if ((!retain || heldPresentation?.tab !== tab) && !returning) tab.view.setVisible(false);
       automation?.present(id, false);
       if (active === id) active = undefined;
       syncInput();
@@ -2336,7 +2353,13 @@ export function registerNativeBrowserIpc(options: {
     stopCloseFrames(p);
     p.confirming?.(false);
     p.finishing?.(false);
+    const contents = tabs.get(p.tab.state.id) === p.tab ? p.tab.view.webContents : undefined;
+    if (contents && !contents.isDestroyed() && !p.tab.presentation) {
+      p.tab.view.setVisible(false);
+      automation?.present(p.tab.state.id, false);
+    }
     chromeHost?.cancelRootReturn(p.tab.state.id);
+    syncInput();
   }
   function finishClosePreparation(p: Closing) {
     if (!p.finishing || !p.cleared || !closePreparationCurrent(p)) return;

@@ -6,7 +6,13 @@ import {
   WebContentsView,
   type WebFrameMain,
 } from 'electron';
-import type { NativeBrowserBounds, NativeBrowserRestoreScope } from '../src/native-browser-bridge';
+import {
+  type NativeBrowserBounds,
+  type NativeBrowserRestoreScope,
+  nativeBrowserWitnessPosition,
+  nativeBrowserWitnessTileSize,
+  nativeBrowserWitnessWidth,
+} from '../src/native-browser-bridge';
 import {
   isNativeBrowserChromeEvent,
   isNativeBrowserChromeOwner,
@@ -101,6 +107,7 @@ export function createNativeBrowserChromeHost(options: {
         metrics: Metrics;
         context?: number;
         chrome: Bounds;
+        strip: Bounds;
         root: Bounds;
       }
     | undefined;
@@ -375,6 +382,49 @@ export function createNativeBrowserChromeHost(options: {
     options.onRootReturnCancelled?.(r.binding.id);
     options.onSuspend(r.binding.id);
   }
+  function shrinkRootReturn() {
+    const saved = rootReturn;
+    if (!saved || !chrome || intent !== null) return;
+    const strip = saved.strip,
+      zoom = saved.metrics.zoom,
+      scale = Math.min(1, zoom),
+      bounds = {
+        x: strip.x / zoom,
+        y: strip.y / zoom,
+        width: strip.width / zoom,
+        height: strip.height / zoom,
+        radius: 0,
+      },
+      position = nativeBrowserWitnessPosition(bounds, scale),
+      right = (position.x + nativeBrowserWitnessWidth(scale)) * zoom,
+      bottom = (position.y + nativeBrowserWitnessTileSize(scale)) * zoom,
+      mask = {
+        x: strip.x,
+        y: strip.y,
+        width: Math.min(strip.width, Math.ceil(right + 2 * zoom) - strip.x),
+        height: Math.min(strip.height, Math.ceil(bottom + 2 * zoom) - strip.y),
+      };
+    // macOS backing scale is at least one. The zoom lower bound encloses
+    // every actual palette without changing its receipt coordinates or proof.
+    if (
+      position.x * zoom < mask.x ||
+      position.y * zoom < mask.y ||
+      right > mask.x + mask.width ||
+      bottom > mask.y + mask.height ||
+      mask.width <= 0 ||
+      mask.height <= 0
+    ) {
+      // A DPR lower bound can overestimate a palette that fits the actual
+      // backing scale. Keep the original exact strip rather than fail close.
+      return;
+    }
+    saved.chrome = mask;
+    try {
+      if (!sameBounds(chrome.getBounds(), mask)) chrome.setBounds(mask);
+    } catch {
+      cancelRootReturn();
+    }
+  }
   const finishHandoff = () => {
     const previous = handoff;
     if (!previous) return;
@@ -646,6 +696,7 @@ export function createNativeBrowserChromeHost(options: {
     if (rootReturn) {
       if (!rootReturnCurrent(rootReturn.binding.id, rootReturn.binding.scope)) cancelRootReturn();
       else {
+        shrinkRootReturn();
         settle();
         broadcast();
         return;
@@ -1278,6 +1329,7 @@ export function createNativeBrowserChromeHost(options: {
         metrics: currentMetrics(),
         context: contextual ? context?.revision : undefined,
         chrome: chrome.getBounds(),
+        strip,
         root: { x: 0, y: 0, width, height },
       };
       rootReturn = saved;

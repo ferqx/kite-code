@@ -1,7 +1,12 @@
 import { expect, mock, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
-import type { NativeBrowserRestoreScope } from '../../src/native-browser-bridge';
+import {
+  type NativeBrowserRestoreScope,
+  nativeBrowserWitnessPosition,
+  nativeBrowserWitnessTileSize,
+  nativeBrowserWitnessWidth,
+} from '../../src/native-browser-bridge';
 import {
   type NativeBrowserChromeEnvelope,
   type NativeBrowserChromeEvent,
@@ -453,6 +458,112 @@ test('an explicit draft context binds its own page without borrowing the selecte
   }
 });
 
+test('Root return footprint exposes Root controls while covering the unchanged palette at supported zooms', async () => {
+  for (const zoom of [1, 0.5, 1.25]) {
+    const f = fixture();
+    try {
+      f.root.webContents.zoom = zoom;
+      await f.activate();
+      const strip = f.chrome().getBounds(),
+        receipt = f.host.beginRootReturn('page', f.scope)!;
+      expect(receipt).not.toBeNull();
+      f.publish(null);
+      const mask = f.chrome().getBounds();
+      expect(mask.width < strip.width / 2).toBe(true);
+      expect(mask.height < strip.height / 4).toBe(true);
+      expect(mask.x).toBe(strip.x);
+      expect(mask.y).toBe(strip.y);
+      expect(mask.x + mask.width <= strip.x + strip.width).toBe(true);
+      expect(mask.y + mask.height <= strip.y + strip.height).toBe(true);
+      for (const backing of [1, 2, 3]) {
+        const scale = backing * zoom,
+          position = nativeBrowserWitnessPosition(receipt.bounds, scale);
+        expect(position.x * zoom >= mask.x).toBe(true);
+        expect(position.y * zoom >= mask.y).toBe(true);
+        expect((position.x + nativeBrowserWitnessWidth(scale)) * zoom <= mask.x + mask.width).toBe(
+          true,
+        );
+        expect(
+          (position.y + nativeBrowserWitnessTileSize(scale)) * zoom <= mask.y + mask.height,
+        ).toBe(true);
+      }
+      expect(mask.x + mask.width < strip.x + strip.width - 32).toBe(true);
+      expect(mask.y + mask.height < 24).toBe(true);
+      expect(f.host.rootReturnCurrent('page', f.scope)).toBe(true);
+      const writes = f.chrome().boundsHistory.length;
+      f.publish(null);
+      f.host.release('page');
+      f.host.update();
+      expect(f.chrome().boundsHistory).toHaveLength(writes);
+      f.host.cancelRootReturn('page');
+      f.publish(f.snapshot(3));
+      await tick();
+      await f.prime();
+      f.publish(f.snapshot(4, true));
+      expect(f.layout('page', { x: 600, y: 96, width: 400, height: 604 }, f.scope)).toBe(true);
+      expect(f.chrome().getBounds()).toEqual(strip);
+      expect(f.chrome().getVisible()).toBe(true);
+      f.host.finishRootReturn('page');
+      expect(f.chrome().getBounds()).toEqual(strip);
+      expect(f.chrome().getVisible()).toBe(true);
+    } finally {
+      f.host.dispose();
+    }
+  }
+  const narrow = fixture();
+  try {
+    await narrow.activate();
+    const strip = { x: 880, y: 0, width: 120, height: 96 };
+    expect(narrow.layout('page', { x: 880, y: 96, width: 120, height: 604 }, narrow.scope)).toBe(
+      true,
+    );
+    const receipt = narrow.host.beginRootReturn('page', narrow.scope)!;
+    narrow.publish(null);
+    expect(narrow.chrome().getBounds()).toEqual({ ...strip, height: 7 });
+    expect(nativeBrowserWitnessPosition(receipt.bounds).x).toBe(880);
+    expect(narrow.host.rootReturnCurrent('page', narrow.scope)).toBe(true);
+  } finally {
+    narrow.host.dispose();
+  }
+  const lowZoom = fixture();
+  try {
+    lowZoom.root.webContents.zoom = 0.25;
+    await lowZoom.activate();
+    expect(lowZoom.layout('page', { x: 925, y: 96, width: 75, height: 604 }, lowZoom.scope)).toBe(
+      true,
+    );
+    const strip = lowZoom.chrome().getBounds(),
+      receipt = lowZoom.host.beginRootReturn('page', lowZoom.scope)!;
+    const actual = nativeBrowserWitnessPosition(receipt.bounds, 0.5);
+    expect(actual.x * 0.25 >= strip.x).toBe(true);
+    expect((actual.x + nativeBrowserWitnessWidth(0.5)) * 0.25 <= strip.x + strip.width).toBe(true);
+    const writes = lowZoom.chrome().boundsHistory.length;
+    lowZoom.publish(null);
+    expect(lowZoom.chrome().getBounds()).toEqual(strip);
+    expect(lowZoom.host.rootReturnCurrent('page', lowZoom.scope)).toBe(true);
+    expect(lowZoom.returnCancelled).toEqual([]);
+    lowZoom.publish(null);
+    lowZoom.host.release('page');
+    lowZoom.host.update();
+    expect(lowZoom.chrome().boundsHistory).toHaveLength(writes);
+    expect(lowZoom.host.rootReturnCurrent('page', lowZoom.scope)).toBe(true);
+  } finally {
+    lowZoom.host.dispose();
+  }
+  const changed = fixture();
+  try {
+    await changed.activate();
+    expect(changed.host.beginRootReturn('page', changed.scope)).not.toBeNull();
+    changed.chrome().setBounds({ ...changed.chrome().getBounds(), x: 601 });
+    changed.publish(null);
+    expect(changed.host.rootReturnCurrent('page', changed.scope)).toBe(false);
+    expect(changed.returnCancelled).toEqual(['page']);
+    expect(changed.chrome().getVisible()).toBe(false);
+  } finally {
+    changed.host.dispose();
+  }
+});
+
 test('Root return keeps its Chrome strip through negative publication and ends safely after real page removal', async () => {
   const f = fixture();
   try {
@@ -468,7 +579,7 @@ test('Root return keeps its Chrome strip through negative publication and ends s
     expect(f.root.getBounds().width).toBe(1000);
     f.publish(null);
     expect(f.chrome().getVisible()).toBe(true);
-    expect(f.chrome().getBounds()).toEqual(chromeBounds);
+    expect(f.chrome().getBounds()).toEqual({ ...chromeBounds, width: 124, height: 7 });
     Reflect.set(f.page, 'webContents', undefined);
     expect(f.host.rootReturnCurrent('page', f.scope)).toBe(true);
     f.host.finishRootReturn('page');
@@ -495,7 +606,7 @@ test('a modern Root return clears stale Chrome content and reads while retaining
     expect(f.envelope()).toBeNull();
     expect(await f.call({ action: 'read' })).toBeNull();
     expect(f.chrome().getVisible()).toBe(true);
-    expect(f.chrome().getBounds()).toEqual(bounds);
+    expect(f.chrome().getBounds()).toEqual({ ...bounds, width: 124, height: 7 });
     expect(f.host.rootReturnCurrent('page', f.scope)).toBe(true);
     f.host.release('page');
     f.host.update();
@@ -609,6 +720,7 @@ for (const boundary of [
     try {
       await f.activate();
       expect(f.host.beginRootReturn('page', f.scope)).not.toBeNull();
+      f.publish(null);
       f.host.cancelRootReturn('unrelated');
       expect(f.host.rootReturnCurrent('page', f.scope)).toBe(true);
       if (boundary === 'context') f.context(1, f.scope);

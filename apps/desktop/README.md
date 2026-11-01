@@ -1945,6 +1945,16 @@ Root viewport沿原host的`syncViewport`按desired／inflight／applied及准确
 
 本次Main完整179项2707断言、Host最终91项914断言、Native bridge14项218断言、Chrome bridge4项52断言、Root preload11项191断言、Chrome preload1项23断言通过，日志在本机root-return-capture-20261101和root-return-host-20261101；它们覆盖双帧顺序、draft/Session、无效/透明/旧帧、Root/scope/context/resize/重建取消、坐标失效和旧异步校准。Pane独立整文件30项362断言、SessionTabs独立整文件38项514断言、Chrome Renderer最终独立13项121断言通过；首次错误地合跑isolated DOM文件的4项HMR失败保留，按仓库隔离进程重跑后通过，未改生产来适配夹具。020退出后仅修Native关闭失败hint Map边更新边迭代的循环，改遍历快照；专项目标1项7断言证只读一次、不重发、移除canvas并可读失败，该分支未被020正常关闭路径触及，不重跑等价GUI。
 
+按用户要求先将前轮39文件本地提交为`4137f24f6`，未推送，再继续021按钮延迟。Root-return收到准确null后，现仅将原Chrome View收小到覆盖实际nonce的保守左上矩形（通常124×7 DIP），更新同一保存fact的物理bounds；原receipt坐标、Root两帧、页面token/context和真实close顺序保持。先核原geometry，重复null不重写，取消/结束恢复原职责，下一正常layout重新给完整bar。zoom下界过保守、无法证明小矩形覆盖时保原strip继续关闭，不为优化制造失败。Host完整92项1047断言与Desktop类型/Biome通过，涵盖普通zoom/backing、最窄边界、实际palette包含、低zoom回退及九种取消/恢复。
+
+灰列另只核一个有依据的新候选：固定44.3.0/Chromium152的Root `Emulation.setVisibleSize`并非纯buffer预留。私有root-visible-surface-001在基线同步helper后立即读点击而停止、候选0次；root-visible-surface-002-input-ack仅修异步真实事件回执，两个基线trusted点击均0→1后调用候选恰好一次。Root外层bounds仍700×760、字体/文档/表单/阅读位置不变，但原生帧1400×1520→2400×1520，WindowServer窗口/桌面原图均见Root洋红覆盖右橙/青区域，故明确否定并未接产品。两个Main正常结束/无源码漂移，原失败保持；没有模型/Service或第三次启动。不能据完整Root帧或getBounds正确授实际裁剪，原切Session和resize灰带尚未解决，未扩大引擎补丁或发行资格。
+
+`hosted-close-mask-023-final`冻结制品Main8819实际把Chrome从297×92收成124×7；process9/0.158333、display10/0.191667的首个完整Root已同时有右上按钮，未复现021的75–108ms遮挡。0–2秒及末0.4秒的process133样本（77直接、56完整PNG相同复用）、display87全部观察，原片hash/bytes保持；后继小mask未见nonce/色条/白L/短提示。但process8/0.141667有一帧正文先撤、聊天仍窄且旧bar尚在，9下一样本才完整交接；display未采中该过渡。该反例保留，不把按钮修复授为所有样本无旧栏。
+
+源码继续定位到`present(null)`在同一有效closing事实中仍提前hide原Page。现仅在准确capsule、原Map对象、shield可用且Page实际位于Root下时保留尚未销毁的真实live页，仍clear presentation/active并automation.present(false)；原Root两帧完成才hide/close，不重挂或保旧截图。取消时只撤准确旧对象且无新presentation的临时像素，并同步恢复shield，避免透明挡输入面残留。正式截图/旧坐标/旧异步布局仍拒绝，物理visible不新增Actor权限；通用后台CDP能力仍由原lease决定，不把输入盾当CDP权限栅栏。Main完整179项3050断言及两owner、18种取消边界通过；原首轮shield未收回失败日志保留，修正后不放宽断言。
+
+`hosted-close-live-source-024-final`仅针对023提前hide的新因果复核。Main14656/driver/两录像正常0、17源码drift为空、无verification-failed；Root全宽+4ms、小mask+18ms，原Page没有提前hide，到+54ms真实关闭时才与shield/Chrome一起撤下并destroy。process9/0.158333完整Page到10/0.175000完整Root+按钮，display8/0.183333到9/0.200000同样直接接替，未再采到023窄聊天/旧bar/缺正文过渡；顶部原像素无nonce/色条/白L，稳定尾无旧网页闪回。0–2秒及末0.4秒的process128样本（72直接看、56完整PNG相同复用）、display102全部观察，原片hash/bytes保持。此资格限普通缩放下本次关闭切口，不升级系统原子提交、低zoom回退、跨会话/resize、普通构建、跨平台或FPS；旧020/021/023失败均保持。最新Desktop类型及定向Biome通过，UI源码未变复用前轮结果。本轮未新增模型，账本仍209＋295＝504；检查点4137f24f6之后的修复保工作树，未再commit/push。
+
 [Chrome host](electron/browser-chrome-host.ts)只接收 Root 的有界纯展示快照，向唯一 Root 业务处理器转发封闭 UI 事件。独立[受限 preload](electron/browser-chrome-preload.ts)没有 NativeBridge、Service caller、任意代码或 CDP 入口；它与普通网页使用不同 session。Root 保留唯一 tab model、observer、地址草稿及权限读取。scope、真实页对象、attachment、revision、序号与一次性确认核实后才转发，确认丢失不重发；实际导航与控制仍由原 owner 受理。混合 reader、注释或遮挡右栏的全局界面恢复 Root 完整展示并隐藏原生绘制，网页对象保留。
 
 此处源码已接入，冻结生产制品的连续 OS 画面、1.25 倍缩放、跨宿主输入／菜单和正常退出仍在验收，不能仅凭原型静态图或 DOM 回归宣布缩窗闪烁已消除。受控回归分别位于 [host](test/isolated/browser-chrome-host.test.ts)、[Root 工厂](test/isolated/native-root-window.test.ts)、[Root 分派](test/isolated/native-browser-chrome-root-dom.test.tsx)、[独立 Renderer](test/isolated/native-browser-chrome-renderer-dom.test.tsx)与[原页面呈现](test/isolated/native-browser-capture.test.ts)。
