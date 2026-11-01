@@ -9,9 +9,9 @@ import {
   type StartCommandRequest,
 } from '@kite-ai/client';
 import type {
-  ScheduledTaskInput,
   ScheduledTaskRun,
   ScheduledTaskRunUpdate,
+  ScheduledTaskSaveInput,
 } from '../src/scheduled-task-types';
 import type { PrivateData } from './private-data';
 import {
@@ -36,6 +36,7 @@ const startRequest = (run: ScheduledTaskRun): StartCommandRequest => ({
   commandId: run.startCommandId,
   content: run.task.prompt,
   modelId: run.task.modelId,
+  ...(run.task.reasoningEffort === undefined ? {} : { reasoningEffort: run.task.reasoningEffort }),
 });
 const requestDigest = (run: ScheduledTaskRun) =>
   createHash('sha256')
@@ -66,11 +67,21 @@ export class ScheduledTaskRunner {
   private legacyCheckSequence = 0;
   private readonly client: AgentClient;
   private readonly data: NativeScheduledTaskData & Pick<PrivateData, 'begin' | 'finish'>;
-  private readonly options: { clock?: ScheduledTaskClock; pollMs?: number; changed?: () => void };
+  private readonly options: {
+    clock?: ScheduledTaskClock;
+    timeZone?: () => string;
+    pollMs?: number;
+    changed?: () => void;
+  };
   constructor(
     client: AgentClient,
     data: NativeScheduledTaskData & Pick<PrivateData, 'begin' | 'finish'>,
-    options: { clock?: ScheduledTaskClock; pollMs?: number; changed?: () => void } = {},
+    options: {
+      clock?: ScheduledTaskClock;
+      timeZone?: () => string;
+      pollMs?: number;
+      changed?: () => void;
+    } = {},
   ) {
     this.client = client;
     this.data = data;
@@ -78,6 +89,7 @@ export class ScheduledTaskRunner {
     this.clock = options.clock ?? clock;
   }
   list() {
+    this.syncLocalClock();
     const result = {
       kind: 'scheduled.tasks' as const,
       tasks: this.data.scheduledTasks(),
@@ -117,8 +129,21 @@ export class ScheduledTaskRunner {
     if (!storeId || this.client.serverInfo?.storeId !== storeId)
       throw new ClientError('store_identity_mismatch');
   }
-  async save(input: ScheduledTaskInput, operation: 'create' | 'update') {
-    const original = parseScheduledTaskInput(structuredClone(input));
+  private localTimeZone() {
+    return this.options.timeZone?.() ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  }
+  private syncLocalClock() {
+    const storeId = this.client.serverInfo?.storeId;
+    if (storeId)
+      this.data.syncScheduledTaskTimeZone(this.localTimeZone(), this.clock.now(), storeId);
+  }
+  async save(input: ScheduledTaskSaveInput, operation: 'create' | 'update') {
+    this.syncLocalClock();
+    const candidate = structuredClone(input);
+    const original = parseScheduledTaskInput({
+      ...candidate,
+      schedule: { ...candidate.schedule, timeZone: this.localTimeZone() },
+    });
     const assertEditingTarget = () => {
       const existing = this.data.scheduledTasks().find((task) => task.id === original.id);
       if ((original.id && this.deleted.has(original.id)) || (operation === 'update' && !existing))
@@ -126,29 +151,40 @@ export class ScheduledTaskRunner {
       if (
         operation === 'create' &&
         existing &&
-        JSON.stringify(validateScheduledTaskInput(existing)) !== JSON.stringify(original)
+        JSON.stringify(validateScheduledTaskInput(existing)) !==
+          JSON.stringify({
+            ...original,
+            schedule: { ...original.schedule, timeZone: existing.schedule.timeZone },
+          })
       )
         throw Error('scheduled_task_identity_conflict');
     };
     assertEditingTarget();
     this.assertStore(original.storeId);
     const [workspaces, models] = await Promise.all([
-      this.client.listWorkspaces(),
+      this.client.listAllWorkspaces(),
       this.client.getModelSettings('user', { storeId: original.storeId }),
     ]);
     this.assertStore(original.storeId);
     if (!workspaces.some((workspace) => workspace.id === original.workspaceId))
       throw Error('scheduled_workspace_missing');
+    const model = models.models.find(
+      (model) => model.id === original.modelId && model.enabled && model.configured,
+    );
+    if (!model) throw Error('scheduled_model_unavailable');
     if (
-      !models.models.some(
-        (model) => model.id === original.modelId && model.enabled && model.configured,
-      )
+      original.reasoningEffort !== undefined &&
+      !model.reasoningEffortChoices?.includes(original.reasoningEffort) &&
+      original.reasoningEffort !== model.reasoningEffort
     )
-      throw Error('scheduled_model_unavailable');
+      throw Error('scheduled_reasoning_effort_unavailable');
     // Explicit creates preserve the renderer retry identity; updates never recreate a
     // deleted target after their read-only validation, including outside NativeCaller.
     assertEditingTarget();
-    this.data.saveScheduledTask(original, this.clock.now());
+    this.data.saveScheduledTask(
+      { ...original, schedule: { ...original.schedule, timeZone: this.localTimeZone() } },
+      this.clock.now(),
+    );
     this.changed();
     return this.list();
   }
@@ -159,6 +195,7 @@ export class ScheduledTaskRunner {
     return this.list();
   }
   async toggle(id: string, enabled: boolean) {
+    this.syncLocalClock();
     const task = this.data.scheduledTasks().find((task) => task.id === id);
     if (!task) throw Error('scheduled_task_missing');
     const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = task;
@@ -171,6 +208,7 @@ export class ScheduledTaskRunner {
     return this.save({ ...input, enabled }, 'update');
   }
   runNow(id: string) {
+    this.syncLocalClock();
     const work = this.runManual(id);
     this.manual.add(work);
     void work.then(
@@ -211,7 +249,8 @@ export class ScheduledTaskRunner {
       manual: true,
       storeId: this.client.serverInfo?.storeId,
     });
-    if (run) await this.launch(run);
+    if (!run) throw Error('scheduled_task_not_started');
+    await this.launch(run);
     this.changed();
     return this.list();
   }
@@ -285,6 +324,7 @@ export class ScheduledTaskRunner {
     }
   }
   private async cycle() {
+    this.syncLocalClock();
     for (const run of this.data.scheduledTaskRuns().filter((run) => !terminal(run))) {
       if (this.stopped) return;
       // Restored records retain their original identity and are read-only history.
@@ -433,8 +473,10 @@ export class ScheduledTaskRunner {
     }
     const application = await readOrdinaryCommandApplication(this.client, command);
     if (!application?.run || application.observation) {
+      const waiting = ['accepted', 'needs_review'].includes(command.status);
       this.update(run, {
-        status: ['accepted', 'needs_review'].includes(command.status) ? 'waiting' : 'unknown',
+        status: waiting ? 'waiting' : 'unknown',
+        ...(waiting ? { error: null } : {}),
       });
       return;
     }
@@ -576,7 +618,7 @@ export class ScheduledTaskRunner {
       ...(['completed', 'failed', 'cancelled'].includes(status)
         ? { settlementVersion: 1 as const }
         : {}),
-      ...(actual.reason ? { error: actual.reason } : {}),
+      error: actual.reason ?? (status === 'unknown' ? 'scheduled_outcome_unknown' : null),
     });
   }
 }

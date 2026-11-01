@@ -1,4 +1,8 @@
-import type { ScheduledTask, ScheduledTaskInput, ScheduledTaskRun } from './scheduled-task-types';
+import type {
+  ScheduledTask,
+  ScheduledTaskRun,
+  ScheduledTaskSaveInput,
+} from './scheduled-task-types';
 
 export type NativeScheduledRequest =
   | { method: 'scheduled.list'; generation: number }
@@ -6,7 +10,7 @@ export type NativeScheduledRequest =
       method: 'scheduled.save';
       generation: number;
       operation: 'create' | 'update';
-      input: ScheduledTaskInput;
+      input: ScheduledTaskSaveInput;
     }
   | { method: 'scheduled.toggle'; generation: number; id: string; enabled: boolean }
   | { method: 'scheduled.delete' | 'scheduled.runNow'; generation: number; id: string };

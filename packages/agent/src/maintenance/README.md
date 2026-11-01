@@ -279,9 +279,15 @@ macOS真实代码版本链另由未修改的包内 `bin/kite maintenance backup/
 
 ## Desktop DB10 与 manifest v19
 
+真实Node恢复夹具的固定UTC时钟同时注入UTC时区，使重新绑定后的claim断言不依赖测试机器时区；生产宿主时钟行为仍由[Desktop owner](../../../../apps/desktop/README.md#native-安排任务草稿)维护。2026-11-01在上述Windows／Node环境复验同一整文件1项32断言通过，原字节、Store身份及零重放断言保持。
+
+定时任务及嵌套运行快照可保留可选`reasoningEffort`，仅接受`none/minimal/low/medium/high/xhigh/max/ultar`字符串；无字段的旧记录继续有效，不补默认值。原字节备份／恢复保留该值与原Store绑定，数组、未知档位及其他未知字段仍拒绝。此为现有DB10／manifest19的受控可选元数据，不改schema或版本；实际Model覆盖与原请求摘要由Desktop沿既有run.start负责。
+
 [资产验证](assets.ts)在DB9十表上只接受准确的 scheduled_tasks 和 scheduled_task_runs schema；[独立行验证](desktop-schedules.ts)核闭合字段、UTF8原字节、SQL主键／task_id／occurrence_at、时区、状态、快照和同任务、同 Store 绑定的活动运行唯一性。频率和状态必须是原枚举字符串，数组等可转为同名文本的值仍拒绝。运行的可选 `settlementVersion: 1` 只记录可信 Main 已核原组的终态结算，不由恢复或终态字符串自动补造；旧缺标识历史保持原样。任务上限128条／1MiB，运行上限10000条／32MiB；坏行、未知字段和超限拒绝发表备份或恢复。manifest v19只接受实际DB10，v2–v18仍按原白名单，不可只修改版本标签升级。
 
-备份和恢复保留原任务 Store 与 Command／Session 身份，不改写为新授权；Native 在新Store拒绝自动和手动执行旧任务。恢复后用户可明确编辑保存任务到当前Store，旧运行结果仍留原身份、只供历史阅读，不阻止新绑定运行。维护仍以原字节容量检查备份；超容量旧历史需先由用户明确清理已结算任务，不能借只读展示兼容性发表超限备份。DB10不新增 Core schema，Core仍按实际0001／0002／0003迁移链校验。[真实Node DB10备份恢复测试](../../test/isolated/maintenance/desktop-schedules-profile.test.ts)核原文件字节保持、manifest19 inspect、实际新Store恢复、冷读快照及零Service请求，并核0002链checksum、原恢复证书与执行来源不重绑、新Store拒绝旧Run接续；[闭合manifest测试](../../test/isolated/maintenance/desktop-schedules.test.ts)覆盖改标签拒绝及严格行格式。
+备份和恢复保留原任务 Store 与 Command／Session 身份，不改写为新授权；Native 在新Store拒绝自动和手动执行旧任务。恢复后用户可明确编辑保存任务到当前Store，旧运行结果仍留原身份、只供历史阅读，不阻止新绑定运行。维护仍以原字节容量检查备份；超容量旧历史需先由用户明确清理已结算任务，不能借只读展示兼容性发表超限备份。DB10不新增 Core schema，Core按当前完整迁移链校验。[真实Node DB10备份恢复测试](../../test/isolated/maintenance/desktop-schedules-profile.test.ts)核原文件字节保持、manifest19 inspect、实际新Store恢复、冷读快照及零Service请求，并核完整迁移checksum、原恢复证书与执行来源不重绑、新Store拒绝旧Run接续；[闭合manifest测试](../../test/isolated/maintenance/desktop-schedules.test.ts)覆盖改标签拒绝及严格行格式。
+
+2026-10-31，Windows x64／Bun1.4.3／Node24.15.0，`65c6bee72`加当前工作树：上述真实Node DB10整文件1项／32断言通过。修复前夹具未传Windows原生访问资产，在备份断言前以`windows_access_asset_unavailable`失败；现使用所属私有临时目录，并沿既有MSVC环境准备与固定Node-API builder构建、传入准确路径和SHA，不绕过Profile／私有库准入。原备份、inspect、新Store恢复、原SQL字节、旧Run拒绝接续、零Service请求和明确重新绑定后再次备份全部实际执行。手动旧任务检查发生在运行器仍启用时，必须由`store_identity_mismatch`拒绝，不能由已停止状态代替Store门禁。原60秒整例与20秒子进程预算保持；此为本机真实Node与SQLite维护链，不代完整Native安装／发布资格。
 
 Provider原配置意图新增有限可选kind（upsert/remove）与name；省略kind仍表示原保存语义。DB6及其后继格式的配置codec核命名和删除形状，删除要求准确连接ID、无新凭据、空模型数组；备份恢复仍只保留同一原GET身份，不重建连接、不重发删除、不接触Vault。该闭合扩展由[实际Node配置备份回归](../../test/isolated/maintenance/desktop-configurations.test.ts)覆盖，旧manifest/数据库版本接纳范围不扩大。
 

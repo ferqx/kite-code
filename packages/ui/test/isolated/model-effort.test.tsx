@@ -81,6 +81,56 @@ async function openSelector() {
   expect(document.querySelector('.model-effort-popover')).not.toBeNull();
 }
 
+test('separate model and effort controls reuse the model columns and sparse gem slider independently', async () => {
+  const modelChanges: string[] = [];
+  const effortChanges: string[] = [];
+  const models = [
+    { id: 'a', provider: 'OpenAI', name: 'Same name' },
+    {
+      id: 'b',
+      provider: 'Gateway',
+      name: 'Same name',
+      reasoningEffortChoices: ['low', 'high'] as const,
+    },
+  ];
+  const props = {
+    model: models[1],
+    models,
+    reasoningEffort: 'low',
+    onModelChange: (_provider: string, _name: string, id?: string) => modelChanges.push(id!),
+    onReasoningEffortChange: (effort: string) => effortChanges.push(effort),
+  };
+  await render(<ModelEffortSelector {...props} mode="model" />);
+  expect(document.querySelector('[data-model-trigger]')!.getAttribute('aria-label')).toBe(
+    '模型：Same name',
+  );
+  expect(document.querySelector('.model-effort-summary')).toBeNull();
+  await openSelector();
+  expect(document.querySelector('.model-effort-panel')).toBeNull();
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(document.activeElement?.textContent).toBe('Gateway');
+  await click(document.querySelector('[aria-label="选择模型 b"]'));
+  expect(modelChanges).toEqual(['b']);
+  expect(document.querySelector('.model-effort-popover')).toBeNull();
+  expect(effortChanges).toEqual([]);
+
+  await act(() => root!.render(<ModelEffortSelector {...props} mode="effort" />));
+  expect(document.querySelector('[data-model-trigger]')).toBeNull();
+  expect(document.querySelector('[data-effort-trigger]')!.textContent).toBe('轻度');
+  await click(document.querySelector('[data-effort-trigger]'));
+  expect(document.querySelector('.model-effort-columns')).toBeNull();
+  expect(document.querySelector('.model-effort-switch')).toBeNull();
+  expect(document.querySelectorAll('.gem-ticks i')).toHaveLength(2);
+  await act(() =>
+    document
+      .querySelector('[role="slider"]')!
+      .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true })),
+  );
+  expect(effortChanges).toContain('high');
+  expect(effortChanges.every((effort) => effort === 'high')).toBe(true);
+  expect(modelChanges).toEqual(['b']);
+});
+
 test('same-name models remain distinct by provider and the popup uses two columns without radio choices', async () => {
   const selected: Array<[string, string]> = [];
   const models = [

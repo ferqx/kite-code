@@ -27,6 +27,37 @@ function fixture() {
   db.exec('PRAGMA user_version=7');
   return { db, data: createScheduledTaskData(() => db as unknown as DatabaseSync) };
 }
+
+test('host clock rebinding changes only current task metadata and preserves unknown snapshots and restored bindings', () => {
+  const { db, data } = fixture();
+  try {
+    const now = at('2026-10-15T03:00Z');
+    data.saveScheduledTask(input, now - 86400000);
+    data.saveScheduledTask({ ...input, id: 'foreign', storeId: 'restored' }, now);
+    data.saveScheduledTask({ ...input, id: 'paused', enabled: false }, now);
+    const run = data.claimScheduledTask('task', now, { manual: true, storeId: 'store' })!;
+    data.updateScheduledTaskRun(run.id, { status: 'unknown' }, now);
+    const history = db.query('SELECT state FROM scheduled_task_runs').get();
+    const foreign = JSON.stringify(data.scheduledTasks().find((task) => task.id === 'foreign'));
+    data.syncScheduledTaskTimeZone('Asia/Shanghai', now, 'store');
+    const task = data.scheduledTasks().find((task) => task.id === 'task')!;
+    expect(task.schedule.timeZone).toBe('Asia/Shanghai');
+    expect(task.nextRunAt).toBe(at('2026-10-16T02:00Z'));
+    expect(data.scheduledTasks().find((task) => task.id === 'paused')!.nextRunAt).toBeNull();
+    expect(db.query('SELECT state FROM scheduled_task_runs').get()).toEqual(history);
+    expect(JSON.stringify(data.scheduledTasks().find((task) => task.id === 'foreign'))).toBe(
+      foreign,
+    );
+    expect(data.claimScheduledTask('task', now, { storeId: 'store' })).toBeNull();
+    expect(data.claimScheduledTask('task', now, { manual: true, storeId: 'store' })).toBeNull();
+    const before = JSON.stringify(data.scheduledTasks());
+    expect(() => data.syncScheduledTaskTimeZone('+05:00', now, 'store')).toThrow();
+    expect(JSON.stringify(data.scheduledTasks())).toBe(before);
+    verifyDesktopScheduleRows(db);
+  } finally {
+    db.close();
+  }
+});
 test('recurrence skips DST gaps and uses first overlap only', () => {
   expect(new Date(nextScheduledOccurrence(schedule, at('2026-03-07T08:00Z'))).toISOString()).toBe(
     '2026-03-09T06:30:00.000Z',
@@ -51,6 +82,8 @@ test('weekday weekly half-hour zone and strict input', () => {
   ).toBe(at('2026-10-25T00:00Z'));
   for (const bad of [
     { ...input, extra: true },
+    { ...input, reasoningEffort: 'super' },
+    { ...input, reasoningEffort: ['high'] },
     { ...input, schedule: { ...input.schedule, time: '25:00' } },
     { ...input, schedule: { ...input.schedule, timeZone: 'Not/AZone' } },
   ])
@@ -91,6 +124,19 @@ test('closed backup metadata rejects extra fields', () => {
   db.exec("UPDATE scheduled_tasks SET state=json_set(state,'$.injected',1)");
   expect(() => verifyDesktopScheduleRows(db)).toThrow('backup_ui_invalid');
   db.close();
+});
+test('closed backup metadata preserves valid effort and rejects malformed effort', () => {
+  const { db, data } = fixture();
+  try {
+    data.saveScheduledTask({ ...input, reasoningEffort: 'high' }, 0);
+    verifyDesktopScheduleRows(db);
+    db.exec(
+      "UPDATE scheduled_tasks SET state=json_set(state,'$.reasoningEffort',json('[\"high\"]'))",
+    );
+    expect(() => verifyDesktopScheduleRows(db)).toThrow('backup_ui_invalid');
+  } finally {
+    db.close();
+  }
 });
 test('actual Node sqlite preserves claims and enforces raw-byte capacity through updates, deletion and restored bindings', async () => {
   const { mkdtempSync, rmSync } = await import('node:fs');

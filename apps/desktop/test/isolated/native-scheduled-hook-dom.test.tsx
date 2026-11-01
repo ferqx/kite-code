@@ -6,6 +6,139 @@ import type { NativeBridge, NativeRequest } from '../../src/native-bridge';
 import { useNativeScheduledTasks } from '../../src/native-scheduled-tasks';
 import type { NativeScheduledResult } from '../../src/scheduled-bridge';
 
+test('model read failures survive list and mutation success, retry independently, and ignore old-scope results', async () => {
+  const dom = new JSDOM('<div id="root"></div>');
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+  };
+  const timers = new Map<ReturnType<typeof setTimeout>, () => void>();
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+    setTimeout: ((...args: Parameters<typeof setTimeout>) => {
+      const handle = previous.setTimeout(...args);
+      const [callback, delay, ...values] = args;
+      if (delay === 5000) timers.set(handle, () => callback(...values));
+      return handle;
+    }) as typeof setTimeout,
+    clearTimeout: ((handle: ReturnType<typeof setTimeout>) => {
+      timers.delete(handle);
+      previous.clearTimeout(handle);
+    }) as typeof clearTimeout,
+  });
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  const facts: NativeScheduledResult = { kind: 'scheduled.tasks', tasks: [], runs: [] };
+  let props!: ScheduledTasksProps,
+    releaseList!: (value: NativeScheduledResult) => void,
+    releaseModels!: (value: Awaited<ReturnType<NativeBridge['request']>>) => void,
+    listReads = 0,
+    modelReads = 0,
+    listFailure = false,
+    modelFailure = true;
+  const modelFacts = (id: string) => ({
+    kind: 'settings.models' as const,
+    storeId: 'store',
+    scope: 'user' as const,
+    observationId: 1,
+    canWrite: false,
+    errors: [],
+    defaultModelId: id,
+    models: [{ id, enabled: true, configured: true, diagnostics: [] }],
+  });
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    async request(request) {
+      if (request.method === 'scheduled.list') {
+        if (++listReads === 1)
+          return new Promise<NativeScheduledResult>((resolve) => {
+            releaseList = resolve;
+          });
+        if (listFailure) throw Error('list_network_failed');
+        return facts;
+      }
+      if (request.method === 'conversation.models.read') {
+        modelReads++;
+        if (modelFailure) throw Error('models_network_failed');
+        return new Promise((resolve) => {
+          releaseModels = resolve;
+        });
+      }
+      if (request.method === 'scheduled.toggle') return facts;
+      throw Error('unexpected_request');
+    },
+  };
+  function Harness({ revision = 0 }: { revision?: number }) {
+    props = useNativeScheduledTasks({
+      bridge,
+      generation: 1,
+      storeId: 'store',
+      revision,
+      active: true,
+      workspaces: [],
+      onOpen: async () => {},
+    });
+    return <div>{props.error}</div>;
+  }
+  async function poll() {
+    const pending = [...timers];
+    await act(async () => {
+      for (const [handle, callback] of pending) {
+        clearTimeout(handle);
+        callback();
+      }
+    });
+  }
+  try {
+    await act(async () => root.render(<Harness />));
+    expect(props.error).toContain('models_network_failed');
+    await act(async () => releaseList(facts));
+    expect(props.error).toContain('models_network_failed');
+    await act(async () => props.onToggle!('task', false));
+    expect(props.error).toContain('models_network_failed');
+    listFailure = true;
+    modelFailure = false;
+    await poll();
+    expect(modelReads).toBe(2);
+    expect(props.error).toContain('models_network_failed');
+    expect(props.error).toContain('list_network_failed');
+    expect(props.models).toEqual([]);
+    await act(async () => releaseModels(modelFacts('recovered')));
+    expect(props.models?.map((model) => model.id)).toEqual(['recovered']);
+    expect(props.error).toBe('list_network_failed');
+    listFailure = false;
+    await poll();
+    expect(props.error).toBe('');
+    expect(modelReads).toBe(2);
+
+    modelFailure = true;
+    await act(async () => root.render(<Harness revision={1} />));
+    expect(props.models).toEqual([]);
+    modelFailure = false;
+    await poll();
+    const oldModels = releaseModels;
+    await act(async () => root.render(<Harness revision={2} />));
+    await act(async () => releaseModels(modelFacts('current')));
+    await act(async () => oldModels(modelFacts('stale')));
+    expect(props.models?.map((model) => model.id)).toEqual(['current']);
+    expect(props.error).toBe('');
+  } finally {
+    releaseList(facts);
+    await act(async () => root.unmount());
+    const remaining = timers.size;
+    for (const handle of timers.keys()) previous.clearTimeout(handle);
+    Object.assign(globalThis, previous);
+    dom.window.close();
+    expect(remaining).toBe(0);
+  }
+});
+
 test('scheduled page reads do not navigate; create retry reuses identity and results open exact session', async () => {
   const dom = new JSDOM('<div id="root"></div>');
   const previous = {
@@ -39,7 +172,18 @@ test('scheduled page reads do not navigate; create retry reuses identity and res
           canWrite: false,
           errors: [],
           defaultModelId: 'fixed',
-          models: [{ id: 'fixed', enabled: true, configured: true, diagnostics: [] }],
+          models: [
+            {
+              id: 'fixed',
+              provider: 'codex',
+              model: 'gpt-6-luna',
+              reasoningEffort: 'low',
+              reasoningEffortChoices: ['low', 'high'],
+              enabled: true,
+              configured: true,
+              diagnostics: [],
+            },
+          ],
         };
       if (request.method === 'scheduled.save') {
         if (!failed) {
@@ -47,7 +191,14 @@ test('scheduled page reads do not navigate; create retry reuses identity and res
           throw Error('reply_lost');
         }
         facts.tasks = [
-          { ...request.input, id: request.input.id!, createdAt: 1, updatedAt: 1, nextRunAt: 1000 },
+          {
+            ...request.input,
+            schedule: { ...request.input.schedule, timeZone: 'UTC' },
+            id: request.input.id!,
+            createdAt: 1,
+            updatedAt: 1,
+            nextRunAt: 1000,
+          },
         ];
         facts.runs = [
           {
@@ -91,8 +242,9 @@ test('scheduled page reads do not navigate; create retry reuses identity and res
       prompt: 'Review project',
       workspaceId: 'w',
       modelId: 'fixed',
+      reasoningEffort: 'high',
       environment: 'local',
-      schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+      schedule: { frequency: 'daily', time: '09:00' },
     };
     await act(async () => {
       await expect(Promise.resolve(props!.onCreate!(draft))).rejects.toThrow('reply_lost');
@@ -105,12 +257,30 @@ test('scheduled page reads do not navigate; create retry reuses identity and res
         call.method === 'scheduled.save',
     );
     expect(saves[0]!.input.id).toBe(saves[1]!.input.id);
+    expect(saves[1]!.input.reasoningEffort).toBe('high');
+    expect(saves[1]!.input.schedule).not.toHaveProperty('timeZone');
+    expect(props!.tasks[0]!.draft!.schedule).not.toHaveProperty('timeZone');
+    expect(props!.tasks[0]!.draft!.reasoningEffort).toBe('high');
+    expect(props!.models![0]).toMatchObject({
+      id: 'fixed',
+      name: 'gpt-6-luna',
+      provider: 'codex',
+      reasoningEffort: 'low',
+      reasoningEffortChoices: ['low', 'high'],
+    });
     expect(props!.tasks[0]!.runs![0]!.status).toBe('waiting');
     await act(async () => {
       await props!.onOpenRun!(saves[0]!.input.id!, 'run');
     });
     expect(opened).toEqual(['independent']);
     expect(calls.some((call) => call.method === 'select')).toBe(false);
+    facts.runs[0]!.status = 'completed';
+    facts.runs[0]!.error = 'network_outcome_unknown';
+    await act(async () => {
+      await props!.onToggle!(saves[0]!.input.id!, false);
+    });
+    expect(props!.tasks[0]!.runs![0]!.error).toBeUndefined();
+    expect(facts.runs[0]!.error).toBe('network_outcome_unknown');
   } finally {
     await act(async () => root.unmount());
     Object.assign(globalThis, previous);
@@ -152,7 +322,7 @@ test('scheduled hook creates through the real closed IPC and caller; retries kee
         signal.addEventListener('abort', () => resolve(), { once: true }),
       ),
     disposeNetwork() {},
-    listWorkspaces: async () => [{ id: 'w' }],
+    listAllWorkspaces: async () => [{ id: 'w' }],
     getModelSettings: async () => {
       if (modelId === 'changed')
         await new Promise<void>((resolve) => {
@@ -173,11 +343,16 @@ test('scheduled hook creates through the real closed IPC and caller; retries kee
   })) as import('../../src/native-bridge').NativeState;
   const calls: NativeRequest[] = [];
   let lost = false,
+    failNextLookup = false,
     props!: ScheduledTasksProps;
   const bridge: NativeBridge = {
     watch: () => () => {},
     async request(request) {
       calls.push(request);
+      if (request.method === 'scheduled.list' && failNextLookup) {
+        failNextLookup = false;
+        throw Error('lookup_failed');
+      }
       const result = await caller.invoke(decodeNativeRequest(request));
       if (request.method === 'scheduled.save' && !lost) {
         lost = true;
@@ -204,7 +379,7 @@ test('scheduled hook creates through the real closed IPC and caller; retries kee
     workspaceId: 'w',
     modelId: 'fixed',
     environment: 'local',
-    schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+    schedule: { frequency: 'daily', time: '09:00' },
   };
   try {
     await act(async () => root.render(<Harness />));
@@ -223,7 +398,7 @@ test('scheduled hook creates through the real closed IPC and caller; retries kee
       (call): call is Extract<NativeRequest, { method: 'scheduled.save' }> =>
         call.method === 'scheduled.save',
     );
-    expect(saves.map((save) => save.operation)).toEqual(['create', 'create']);
+    expect(saves.map((save) => save.operation)).toEqual(['create', 'update']);
     expect(saves[0]!.input.id).toBe(saves[1]!.input.id);
     await expect(
       caller.invoke({ ...saves[0]!, input: { ...saves[0]!.input, prompt: 'conflicting create' } }),
@@ -238,6 +413,59 @@ test('scheduled hook creates through the real closed IPC and caller; retries kee
     });
     await expect(caller.invoke(saves[0]!)).rejects.toThrow('scheduled_task_not_found');
     expect(data.scheduledTasks()).toHaveLength(0);
+
+    lost = false;
+    await act(async () => {
+      await expect(Promise.resolve(props.onCreate!(draft, 'edited-retry'))).rejects.toThrow(
+        'reply_lost',
+      );
+    });
+    const pending = data.scheduledTasks()[0]!;
+    const edited = { ...draft, prompt: 'Changed after the lost save response' };
+    failNextLookup = true;
+    const writes = calls.filter((call) => call.method === 'scheduled.save').length;
+    await act(async () => {
+      await expect(Promise.resolve(props.onCreate!(edited, 'edited-retry'))).rejects.toThrow(
+        'lookup_failed',
+      );
+    });
+    expect(calls.filter((call) => call.method === 'scheduled.save')).toHaveLength(writes);
+    expect(data.scheduledTasks()).toEqual([pending]);
+    await act(async () => {
+      await props.onCreate!(edited, 'edited-retry');
+    });
+    expect(data.scheduledTasks()).toHaveLength(1);
+    expect(data.scheduledTasks()[0]).toMatchObject({
+      id: pending.id,
+      prompt: edited.prompt,
+      enabled: true,
+    });
+    await act(async () => {
+      await props.onCreate!(draft, 'separate-editor');
+    });
+    expect(data.scheduledTasks()).toHaveLength(2);
+    const existing = new Set(data.scheduledTasks().map((task) => task.id));
+    lost = false;
+    await act(async () => {
+      await expect(Promise.resolve(props.onCreate!(draft, 'deleted-retry'))).rejects.toThrow(
+        'reply_lost',
+      );
+    });
+    const deleted = data.scheduledTasks().find((task) => !existing.has(task.id))!;
+    await act(async () => {
+      await props.onToggle!(deleted.id, false);
+      await props.onDelete!(deleted.id);
+    });
+    const beforeDeletedRetry = calls.filter((call) => call.method === 'scheduled.save').length;
+    await act(async () => {
+      await expect(Promise.resolve(props.onCreate!(edited, 'deleted-retry'))).rejects.toThrow(
+        'scheduled_task_not_found',
+      );
+    });
+    expect(calls.filter((call) => call.method === 'scheduled.save')).toHaveLength(
+      beforeDeletedRetry,
+    );
+    expect(data.scheduledTasks()).toHaveLength(2);
     modelId = 'changed';
     await act(async () => root.render(<Harness revision={1} />));
     expect(props.models).toEqual([]);
@@ -276,6 +504,8 @@ test('creation retry identity survives settings refresh and same-Store reconnect
   const bridge: NativeBridge = {
     watch: () => () => {},
     async request(request) {
+      if (request.method === 'scheduled.list')
+        return { kind: 'scheduled.tasks', tasks: [], runs: [] };
       if (request.method !== 'scheduled.save') throw Error('unexpected_read');
       calls.push(request);
       throw Error('reply_lost');
@@ -307,7 +537,7 @@ test('creation retry identity survives settings refresh and same-Store reconnect
     workspaceId: 'w',
     modelId: 'm',
     environment: 'local',
-    schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+    schedule: { frequency: 'daily', time: '09:00' },
   };
   try {
     for (const scope of [

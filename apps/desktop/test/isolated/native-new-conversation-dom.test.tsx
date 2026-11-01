@@ -2863,7 +2863,7 @@ test('original global/project preparation and page navigation retain independent
     expect(f.host.querySelector('[aria-label="分支"]')).toBeNull();
     expect(f.calls.filter((call) => call.method === 'conversation.models.read')).toHaveLength(4);
     await f.click('安排任务');
-    await f.click('返回新对话');
+    await f.click('新对话');
     expect(promptValue(f.input())).toBe('prepare draft');
     await f.click('Original A');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsaved A\n雪🙂');
@@ -2985,7 +2985,7 @@ test('a completed first send preserves the scheduled page and returning enters i
     const send = await f.resolve('accepted');
     expect(f.selected()).toBe('a');
     expect(f.host.querySelector('.scheduled-page')).not.toBeNull();
-    await f.click('返回新对话');
+    await f.click('新对话');
     expect(f.host.body.textContent).not.toContain('正在发送');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     expect(f.selected()).toBe(send.creation.sessionId);
@@ -3553,7 +3553,7 @@ test('returning to a still-pending first submission enters the created Session w
     await f.chooseModel();
     await f.click('发送首条消息');
     await f.click('安排任务');
-    await f.click('返回新对话');
+    await f.click('新对话');
     expect(f.host.querySelector('.message.user')!.textContent).toContain('original pending return');
     const send = await f.resolve('accepted');
     expect(f.selected()).toBe(send.creation.sessionId);

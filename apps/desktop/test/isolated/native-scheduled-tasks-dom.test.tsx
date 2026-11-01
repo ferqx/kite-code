@@ -289,7 +289,7 @@ test('Native reuses the scheduled page and editor with real projects, model vali
     expect(input()).toBeNull();
     expect(f.host.querySelector('#native-session-tools')).toBeNull();
     expect(f.selected()).toBe('a');
-    await f.click('创建第一个任务');
+    await f.click('新建');
     const editor = f.host.querySelector<HTMLFormElement>('.scheduled-editor')!;
     expect(editor).not.toBeNull();
     expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
@@ -299,23 +299,50 @@ test('Native reuses the scheduled page and editor with real projects, model vali
       editor.querySelector<HTMLTextAreaElement>('[aria-label="任务说明"]')!,
       '检查提交\n🙂',
     );
-    const selects = [...editor.querySelectorAll('select')];
-    expect([...selects[0]!.options].map((option) => [option.value, option.text])).toEqual([
-      ['w', 'Actual Workspace'],
-      ['empty', 'Empty Workspace'],
-    ]);
-    await f.edit(selects[0]!, 'empty');
-    expect(selects[1]!.value).toBe('model');
-    expect(selects[2]!.value).toBe('local');
-    expect(selects[2]!.disabled).toBe(true);
-    await f.edit(selects[3]!, 'weekly');
-    expect(f.button('保存任务')!.disabled).toBe(false);
-    expect(editor.textContent).toContain('仅在应用运行时执行');
+    await act(async () =>
+      editor
+        .querySelector('[aria-label="项目空间"]')!
+        .dispatchEvent(
+          new f.dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0, ctrlKey: false }),
+        ),
+    );
+    expect(
+      [...editor.querySelectorAll('[role="menuitemradio"]')].map((item) => item.textContent),
+    ).toEqual(['Actual Workspace', 'Empty Workspace']);
+    await act(async () =>
+      [...editor.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+        .find((item) => item.textContent === 'Empty Workspace')!
+        .click(),
+    );
+    expect(editor.querySelector('[aria-label="项目空间"]')!.textContent).toBe('Empty Workspace');
+    expect(editor.querySelector('[data-model-trigger]')!.textContent).toBe('model');
+    expect(editor.querySelector('select')).toBeNull();
+    await act(async () =>
+      editor
+        .querySelector('[aria-label="重复频率"]')!
+        .dispatchEvent(
+          new f.dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0, ctrlKey: false }),
+        ),
+    );
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+        .find((item) => item.textContent === '每周')!
+        .click(),
+    );
+    expect(editor.querySelector('[aria-label="星期一"]')).not.toBeNull();
+    expect(f.button('创建')!.disabled).toBe(false);
+    expect(editor.querySelector('[aria-label="时区"]')).toBeNull();
+    expect(f.host.querySelector('.scheduled-page')!.textContent).toContain('仅在应用运行时执行');
     expect(f.calls.slice(baseline).map((call) => call.method)).toEqual([
       'scheduled.list',
       'conversation.models.read',
     ]);
-    await f.click('返回会话');
+    expect(
+      Array.from(document.querySelectorAll('button')).some((button) =>
+        /返回新对话|返回会话/.test(button.textContent ?? ''),
+      ),
+    ).toBe(false);
+    await f.click('Original A');
     expect(promptValue(input())).toBe('unsaved original\n雪🙂');
     expectResumedReads(1);
     await f.click('安排任务');

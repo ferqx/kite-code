@@ -423,7 +423,9 @@ Native普通输入区可经已有Tool Message read lease读取该预测的有限
 
 ## Desktop 本地定时任务
 
-Desktop Main在应用存续期内触发本地定时任务，调度元数据属desktop-private DB10／closed manifest19；Agent业务执行仍只由普通Session创建与run.start拥有。每次新Session，运行前持久稳定原身份与完整快照，未知及冷恢复只查询原申请，不恢复POST权利；新Store不retag原任务，也不自动重放。权限、审批、Agent baseline与schema保持。精确实现和验证归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)与[maintenance DB10合同](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。
+Desktop Main在应用存续期内触发本地定时任务，调度元数据属desktop-private DB10／closed manifest19；时钟取本地Service宿主的系统时间，renderer只提交墙钟字段，Main持有时区绑定。绑定变化只重算当前Store的未来安排，冻结运行快照和外来Store不改写；Agent业务执行仍只由普通Session创建与run.start拥有。每次新Session，运行前持久稳定原身份与完整快照，未知及冷恢复只查询原申请，不恢复POST权利；新Store不retag原任务，也不自动重放。权限、审批、Agent baseline与schema保持。精确实现和验证归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)与[maintenance DB10合同](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。
+
+任务可选`reasoningEffort`与准确Model ID一起进入私有保存和每次运行快照，经原`run.start.reasoningEffort`传递并进入原请求摘要；保存前按当前模型目录核档位。旧任务无此字段时不造覆盖，原摘要不变；编辑后的值不重写已派发快照。DB10与manifest19行白名单仅增加受控可选枚举，原字节预算、坏行拒绝、新Store及冷零POST规则保持，不提升格式或API版本。
 
 
 ### 显式模型协议与私有 continuation

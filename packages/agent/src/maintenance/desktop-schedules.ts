@@ -19,19 +19,23 @@ export function verifyDesktopScheduleRows(db: Database) {
   };
   const task = (v: unknown) => {
     const t = object(v);
-    keys(t, [
-      'id',
-      'name',
-      'prompt',
-      'workspaceId',
-      'modelId',
-      'storeId',
-      'schedule',
-      'enabled',
-      'nextRunAt',
-      'createdAt',
-      'updatedAt',
-    ]);
+    keys(
+      t,
+      [
+        'id',
+        'name',
+        'prompt',
+        'workspaceId',
+        'modelId',
+        'storeId',
+        'schedule',
+        'enabled',
+        'nextRunAt',
+        'createdAt',
+        'updatedAt',
+      ],
+      ['reasoningEffort'],
+    );
     if (
       ![t.id, t.workspaceId, t.storeId].every(id) ||
       typeof t.modelId !== 'string' ||
@@ -43,6 +47,11 @@ export function verifyDesktopScheduleRows(db: Database) {
       !t.prompt.trim() ||
       Buffer.byteLength(t.prompt) > 262144 ||
       typeof t.enabled !== 'boolean' ||
+      (t.reasoningEffort !== undefined &&
+        (typeof t.reasoningEffort !== 'string' ||
+          !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'].includes(
+            t.reasoningEffort,
+          ))) ||
       !time(t.createdAt) ||
       !time(t.updatedAt) ||
       (t.nextRunAt !== null && !time(t.nextRunAt)) ||

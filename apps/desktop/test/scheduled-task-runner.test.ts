@@ -176,10 +176,108 @@ function fakeClient(f: ReturnType<typeof fixture>) {
   return { client: client as unknown as AgentClient, posts, commands, runs };
 }
 
+test('scheduler uses host time for writes, listing and clock changes without rewriting old run snapshots', async () => {
+  const f = fixture(),
+    c = fakeClient(f);
+  let zone = 'Asia/Shanghai';
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => zone,
+  });
+  Object.assign(c.client, {
+    listAllWorkspaces: async () => [{ id: 'workspace' }],
+    getModelSettings: async () => ({ models: [{ id: 'fixed', enabled: true, configured: true }] }),
+  });
+  try {
+    expect(runner.list().tasks[0]!.schedule.timeZone).toBe('Asia/Shanghai');
+    expect(runner.list().tasks[0]!.nextRunAt).toBe(Date.UTC(2026, 9, 16, 1));
+    const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
+    await runner.save(input, 'update');
+    expect(f.data.scheduledTasks()[0]!.schedule.timeZone).toBe('Asia/Shanghai');
+    zone = 'UTC';
+    expect(runner.list().tasks[0]!.nextRunAt).toBe(Date.UTC(2026, 9, 15, 9));
+    runner.start();
+    f.advance(60000);
+    await runner.tick();
+    expect(c.posts).toEqual(['create', 'start']);
+    const snapshot = JSON.stringify(f.data.scheduledTaskRuns()[0]!.task);
+    zone = 'America/New_York';
+    expect(runner.list().tasks[0]!.nextRunAt).toBe(Date.UTC(2026, 9, 15, 13));
+    expect(JSON.stringify(f.data.scheduledTaskRuns()[0]!.task)).toBe(snapshot);
+    expect(c.posts).toEqual(['create', 'start']);
+  } finally {
+    await runner.stop();
+    f.db.close();
+  }
+});
+
+test('saved effort is frozen into each scheduled request and later edits do not change its digest', async () => {
+  const f = fixture(),
+    c = fakeClient(f),
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
+  const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
+  f.data.saveScheduledTask({ ...input, reasoningEffort: 'high' }, f.clock.now());
+  let dispatched: Parameters<AgentClient['startRun']>[1] | undefined;
+  const start = c.client.startRun.bind(c.client);
+  c.client.startRun = async (session, request) => {
+    dispatched = structuredClone(request);
+    return start(session, request);
+  };
+  try {
+    runner.start();
+    await runner.runNow('task');
+    expect(dispatched?.reasoningEffort).toBe('high');
+    const original = runner.list().runs[0]!;
+    expect(f.data.scheduledTaskRuns()[0]!.task.reasoningEffort).toBe('high');
+    f.data.saveScheduledTask({ ...input, reasoningEffort: 'low' }, f.clock.now());
+    expect(f.data.scheduledTaskRuns()[0]!.task.reasoningEffort).toBe('high');
+    expect(f.data.scheduledTasks()[0]!.reasoningEffort).toBe('low');
+    expect(c.commands.get(original.startCommandId)!.requestDigest).toBe(
+      createHash('sha256').update(canonicalCallerCommandRequest(dispatched!)).digest('hex'),
+    );
+  } finally {
+    await runner.stop();
+    f.db.close();
+  }
+});
+
+test('save rejects an effort outside the current model choices without changing persisted tasks', async () => {
+  const f = fixture(),
+    c = fakeClient(f),
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
+  const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
+  Object.assign(c.client, {
+    listAllWorkspaces: async () => [{ id: 'workspace' }],
+    getModelSettings: async () => ({
+      models: [
+        {
+          id: 'fixed',
+          enabled: true,
+          configured: true,
+          reasoningEffort: 'low',
+          reasoningEffortChoices: ['low', 'high'],
+        },
+      ],
+    }),
+  });
+  try {
+    await runner.save({ ...input, reasoningEffort: 'high' }, 'update');
+    const before = JSON.stringify(f.data.scheduledTasks());
+    await expect(runner.save({ ...input, reasoningEffort: 'ultar' }, 'update')).rejects.toThrow(
+      'scheduled_reasoning_effort_unavailable',
+    );
+    expect(JSON.stringify(f.data.scheduledTasks())).toBe(before);
+    expect(c.posts).toEqual([]);
+  } finally {
+    await runner.stop();
+    f.db.close();
+  }
+});
+
 test('due work snapshots IDs before effects, waits for real Run, avoids overlap, uses fresh sessions and one timer', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
@@ -189,7 +287,7 @@ test('due work snapshots IDs before effects, waits for real Run, avoids overlap,
     await Promise.all([runner.tick(), runner.tick()]);
     expect(c.posts).toEqual(['create', 'start']);
     expect(runner.list().runs[0]!.status).toBe('waiting');
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(c.posts).toHaveLength(2);
     const original = runner.list().runs[0]!;
     Object.assign(c.runs.get(original.serviceRunId!)!, { status: 'completed', isActive: false });
@@ -214,14 +312,14 @@ test('lost start receipt and restart reconcile original IDs with GET only, obser
     await start(...args);
     throw Error('physical_response_lost');
   };
-  let runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  let runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
     await runner.runNow('task');
     expect(runner.list().runs[0]!.status).toBe('unknown');
     await runner.stop();
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
     runner.start();
     await runner.tick();
     expect(runner.list().runs[0]!.status).toBe('waiting');
@@ -237,15 +335,64 @@ test('lost start receipt and restart reconcile original IDs with GET only, obser
   }
 });
 
-test('crash after claim before POST and foreign store never replay or launch work', async () => {
+test('confirmed progress and completion clear stale read errors without replaying an occurrence', async () => {
   const f = fixture(),
     c = fakeClient(f);
-  f.data.claimScheduledTask('task', f.clock.now(), { manual: true, storeId: 'store' });
-  const runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  const start = c.client.startRun.bind(c.client);
+  c.client.startRun = async (...args) => {
+    await start(...args);
+    throw new ClientError('network_outcome_unknown');
+  };
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => 'UTC',
+  });
   try {
     runner.start();
     await runner.tick();
     await runner.runNow('task');
+    expect(runner.list().runs[0]).toMatchObject({
+      status: 'unknown',
+      error: 'network_outcome_unknown',
+    });
+    await runner.tick();
+    const original = runner.list().runs[0]!;
+    expect(original.status).toBe('waiting');
+    expect(original.error).toBeUndefined();
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
+    Object.assign(c.runs.get(original.serviceRunId!)!, { status: 'completed', isActive: false });
+    const getView = c.client.getView.bind(c.client);
+    c.client.getView = async () => {
+      throw new ClientError('network_outcome_unknown');
+    };
+    await runner.tick();
+    expect(runner.list().runs[0]!.status).toBe('unknown');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
+    c.client.getView = getView;
+    await runner.tick();
+    expect(runner.list().runs[0]).toMatchObject({ status: 'completed', settlementVersion: 1 });
+    expect(runner.list().runs[0]!.error).toBeUndefined();
+    const stored = f.db.query('SELECT state FROM scheduled_task_runs').get() as { state: string };
+    expect(JSON.parse(stored.state)).not.toHaveProperty('error');
+    expect(c.posts).toEqual(['create', 'start']);
+  } finally {
+    await runner.stop();
+    f.db.close();
+  }
+});
+
+test('crash after claim before POST and foreign store never replay or launch work', async () => {
+  const f = fixture(),
+    c = fakeClient(f);
+  f.data.claimScheduledTask('task', f.clock.now(), { manual: true, storeId: 'store' });
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => 'UTC',
+  });
+  try {
+    runner.start();
+    await runner.tick();
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(runner.list().runs[0]!.status).toBe('unknown');
     expect(c.posts).toEqual([]);
     (c.client as unknown as { serverInfo: { storeId: string } }).serverInfo.storeId = 'foreign';
@@ -406,7 +553,10 @@ for (const protocol of ['fixed-model', 'responses'] as const) {
     await client.connect();
     const storeId = client.serverInfo!.storeId!,
       f = fixture(storeId);
-    const runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock });
+    const runner = new ScheduledTaskRunner(client, f.data, {
+      clock: f.clock,
+      timeZone: () => 'UTC',
+    });
     try {
       await client.createWorkspace({
         expectedStoreId: storeId,
@@ -414,12 +564,31 @@ for (const protocol of ['fixed-model', 'responses'] as const) {
         rootUri: pathToFileURL(root).href,
         name: 'Disposable',
       });
+      if (protocol === 'fixed-model') {
+        for (let i = 0; i < 201; i++)
+          await client.createWorkspace({
+            expectedStoreId: storeId,
+            id: `earlier-${i}`,
+            rootUri: pathToFileURL(join(root, `earlier-${i}`)).href,
+            name: `Earlier project ${i}`,
+          });
+        expect((await client.listWorkspaces()).some((item) => item.id === 'workspace')).toBe(false);
+        expect(await client.listAllWorkspaces()).toHaveLength(202);
+      }
       const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
       f.data.deleteScheduledTask('task');
       expect(runner.list().tasks).toHaveLength(0);
       const saved = await runner.save({ ...input, id: undefined }, 'create');
       const taskId = saved.tasks[0]!.id;
       expect(runner.list().tasks).toHaveLength(1);
+      if (protocol === 'fixed-model') {
+        await runner.save({ ...input, id: taskId, name: 'Updated task' }, 'update');
+        await runner.toggle(taskId, false);
+        expect(runner.list().tasks[0]!.enabled).toBe(false);
+        await runner.toggle(taskId, true);
+        expect(runner.list().tasks[0]!.enabled).toBe(true);
+        expect(runner.list().tasks[0]!.name).toBe('Updated task');
+      }
       runner.start();
       await runner.tick();
       await runner.runNow(taskId);
@@ -484,17 +653,17 @@ test('lost creation response remains unknown after restart and never invents a s
     await create(...args);
     throw Error('response_lost');
   };
-  let runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  let runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
     await runner.runNow('task');
     expect(runner.list().runs[0]!.status).toBe('unknown');
     await runner.stop();
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
     runner.start();
     await runner.tick();
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(runner.list().runs[0]!.status).toBe('unknown');
     expect(c.posts).toEqual(['create']);
   } finally {
@@ -516,7 +685,10 @@ test('shutdown during creation waits for settlement and prevents the subsequent 
     await gate;
     return result;
   };
-  const runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => 'UTC',
+  });
   try {
     runner.start();
     await runner.tick();
@@ -536,7 +708,7 @@ test('shutdown during creation waits for settlement and prevents the subsequent 
 test('wrong original request digest cannot be reported as success', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
@@ -625,7 +797,7 @@ test('actual scheduled Service Run waits for ordinary approval and completes onl
   await client.connect();
   const storeId = client.serverInfo!.storeId!,
     f = fixture(storeId),
-    runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     await client.createWorkspace({
       expectedStoreId: storeId,
@@ -652,7 +824,7 @@ test('actual scheduled Service Run waits for ordinary approval and completes onl
     const opened = await client.getView(sessionId);
     expect(opened.session.id).toBe(sessionId);
     expect(opened.runs[0]!.status).toBe('waiting_interaction');
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(runner.list().runs).toHaveLength(1);
     expect(effects).toBe(0);
     await client.answerInteraction(sessionId, approval.id, {
@@ -693,7 +865,10 @@ test('creation rejection releases its private intent, while start rejection keep
     };
     if (phase === 'create') c.client.createSession = failure;
     else c.client.startRun = failure;
-    const runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    const runner = new ScheduledTaskRunner(c.client, f.data, {
+      clock: f.clock,
+      timeZone: () => 'UTC',
+    });
     try {
       runner.start();
       await runner.tick();
@@ -725,7 +900,10 @@ test('list returns bounded newest run metadata without persisted prompt snapshot
     createdAt: index,
   }));
   f.data.scheduledTaskRuns = () => structuredClone(runs);
-  const runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => 'UTC',
+  });
   try {
     const result = runner.list();
     expect(result.runs).toHaveLength(128);
@@ -761,7 +939,10 @@ test('list bounds actual escaped JSON bytes for maximal control-character run er
   }));
   f.data.scheduledTasks = () => structuredClone(tasks);
   f.data.scheduledTaskRuns = () => structuredClone(runs);
-  const runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => 'UTC',
+  });
   try {
     expect(Buffer.byteLength(JSON.stringify(tasks))).toBeLessThanOrEqual(1024 * 1024);
     const unbounded = {
@@ -794,13 +975,16 @@ test('an edit deleted during read-only validation cannot become a new enabled ta
     release = resolve;
   });
   Object.assign(c.client, {
-    listWorkspaces: async () => {
+    listAllWorkspaces: async () => {
       await gate;
       return [{ id: 'workspace' }];
     },
     getModelSettings: async () => ({ models: [{ id: 'fixed', enabled: true, configured: true }] }),
   });
-  const runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => 'UTC',
+  });
   const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
   try {
     const saving = runner.save({ ...input, prompt: 'Earlier edit' }, 'update');
@@ -831,7 +1015,10 @@ test('restored foreign running rows stay byte-identical even if Store changes du
     (c.client as unknown as { serverInfo: { storeId: string } }).serverInfo.storeId = 'restored';
     throw Error('connection_changed');
   };
-  const runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  const runner = new ScheduledTaskRunner(c.client, f.data, {
+    clock: f.clock,
+    timeZone: () => 'UTC',
+  });
   try {
     runner.start();
     await runner.tick();
@@ -853,7 +1040,7 @@ for (const foreground of ['completed', 'failed', 'cancelled'] as const) {
   test(`terminal ${foreground} Run does not settle unknown child tools or active detached group work`, async () => {
     const f = fixture(),
       c = fakeClient(f),
-      runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+      runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
     try {
       runner.start();
       await runner.tick();
@@ -907,7 +1094,7 @@ for (const foreground of ['completed', 'failed', 'cancelled'] as const) {
       expect(runner.list().runs[0]!.status).toBe('unknown');
       f.advance(60000);
       await runner.tick();
-      await runner.runNow('task');
+      await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
       expect(runner.list().runs).toHaveLength(1);
       expect(c.posts).toHaveLength(2);
       effectStatus = 'succeeded';
@@ -927,7 +1114,7 @@ for (const foreground of ['completed', 'failed', 'cancelled'] as const) {
 test('failed group reads keep the exact scheduled occurrence unknown and never replay it', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
@@ -941,7 +1128,7 @@ test('failed group reads keep the exact scheduled occurrence unknown and never r
     expect(runner.list().runs[0]!.status).toBe('unknown');
     f.advance(60000);
     await runner.tick();
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(runner.list().runs).toHaveLength(1);
     expect(c.posts).toHaveLength(2);
     c.client.listAllBackgroundExecutions = async () => [];
@@ -1015,7 +1202,7 @@ test('actual Runtime unknown tool outcome keeps the failed scheduled Run blocked
   await client.connect();
   const storeId = client.serverInfo!.storeId!,
     f = fixture(storeId);
-  let runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock });
+  let runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     await client.createWorkspace({
       expectedStoreId: storeId,
@@ -1035,12 +1222,12 @@ test('actual Runtime unknown tool outcome keeps the failed scheduled Run blocked
     expect(runner.list().runs[0]!.status).toBe('unknown');
     expect(runner.list().runs[0]!.finishedAt).toBeUndefined();
     await runner.stop();
-    runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
     runner.start();
     await runner.tick();
     f.advance(60000);
     await runner.tick();
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(runner.list().runs).toHaveLength(1);
     expect(runner.list().runs[0]!.sessionId).toBe(original.sessionId);
     expect(runner.list().runs[0]!.status).toBe('unknown');
@@ -1169,7 +1356,7 @@ test('actual detached child remains a scheduling gate after the original foregro
   await client.connect();
   const storeId = client.serverInfo!.storeId!,
     f = fixture(storeId);
-  const runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock });
+  const runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     await client.createWorkspace({
       expectedStoreId: storeId,
@@ -1188,7 +1375,7 @@ test('actual detached child remains a scheduling gate after the original foregro
     expect(runner.list().runs[0]!.status).toBe('waiting');
     f.advance(60000);
     await runner.tick();
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(runner.list().runs).toHaveLength(1);
     expect(effects).toBe(0);
     release();
@@ -1202,7 +1389,7 @@ test('actual detached child remains a scheduling gate after the original foregro
     expect(runner.list().runs[0]!.status).toBe('unknown');
     f.advance(86400000);
     await runner.tick();
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(runner.list().runs).toHaveLength(1);
     expect(effects).toBe(1);
     expect(parent.requests).toHaveLength(2);
@@ -1220,7 +1407,7 @@ test('actual detached child remains a scheduling gate after the original foregro
 test('older unverified failed history cannot hide behind a later completed Run across restart or read failure', async () => {
   const f = fixture(),
     c = fakeClient(f);
-  let runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+  let runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
@@ -1271,7 +1458,7 @@ test('older unverified failed history cannot hide behind a later completed Run a
     await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_history_unverified');
     await runner.stop();
     unreadable = true;
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
     runner.start();
     await runner.tick();
     await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_history_unverified');
@@ -1297,7 +1484,7 @@ test('older unverified failed history cannot hide behind a later completed Run a
 test('legacy settlement checks use a global four-record batch without consuming the pending due occurrence', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
@@ -1336,7 +1523,7 @@ test('legacy settlement checks use a global four-record batch without consuming 
 test('terminal after-turn report and later same-group active Run prevent a premature settlement marker', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
@@ -1552,7 +1739,7 @@ test('actual after-turn report admission and its active Run block scheduling unt
   const storeId = client.serverInfo!.storeId!;
   const f = fixture(storeId),
     data = f.data;
-  const runner = new ScheduledTaskRunner(client, data, { clock: f.clock });
+  const runner = new ScheduledTaskRunner(client, data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     await client.createWorkspace({
       expectedStoreId: storeId,
@@ -1636,7 +1823,7 @@ test('actual after-turn report admission and its active Run block scheduling unt
 test('stop drains manual legacy verification before private storage closes and never starts another run', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   let release!: () => void;
   try {
     runner.start();
@@ -1686,10 +1873,10 @@ test('stop drains manual legacy verification before private storage closes and n
 test('an identical create retry across its due time preserves persisted scheduling bytes and rejects changed identity', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
   Object.assign(c.client, {
-    listWorkspaces: async () => [{ id: 'workspace' }],
+    listAllWorkspaces: async () => [{ id: 'workspace' }],
     getModelSettings: async () => ({ models: [{ id: 'fixed', enabled: true, configured: true }] }),
   });
   try {
@@ -1733,7 +1920,7 @@ test('an identical create retry across its due time preserves persisted scheduli
 test('a retained human_work_deferred Run does not prove scheduled work settled or admit another occurrence', async () => {
   const f = fixture(),
     c = fakeClient(f),
-    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(c.client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   try {
     runner.start();
     await runner.tick();
@@ -1747,7 +1934,7 @@ test('a retained human_work_deferred Run does not prove scheduled work settled o
     await runner.tick();
     f.advance(60000);
     await runner.tick();
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(f.data.scheduledTaskRuns()).toHaveLength(1);
     expect(f.data.scheduledTaskRuns()[0]).toMatchObject({
       id: first.id,
@@ -1842,7 +2029,7 @@ test('a queued human turn cannot settle unfinished scheduled Tool work or admit 
   await client.connect();
   const storeId = client.serverInfo!.storeId!;
   const f = fixture(storeId),
-    runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock });
+    runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock, timeZone: () => 'UTC' });
   const until = async (read: () => Promise<boolean>) => {
     const end = Date.now() + 6000;
     while (!(await read())) {
@@ -1890,7 +2077,7 @@ test('a queued human turn cannot settle unfinished scheduled Tool work or admit 
     f.advance(60000);
     await runner.tick();
     expect(f.data.scheduledTaskRuns()).toHaveLength(1);
-    await runner.runNow('task');
+    await expect(runner.runNow('task')).rejects.toThrow('scheduled_task_not_started');
     expect(f.data.scheduledTaskRuns()[0]!.status).toBe('running');
     expect(f.data.scheduledTaskRuns()[0]!.settlementVersion).toBeUndefined();
     expect(f.data.scheduledTaskRuns()).toHaveLength(1);

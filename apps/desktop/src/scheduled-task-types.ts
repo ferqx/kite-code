@@ -1,3 +1,4 @@
+import type { StartCommandRequest } from '@kite-ai/client';
 export type ScheduledTaskSchedule = {
   frequency: 'daily' | 'weekdays' | 'weekly';
   time: string;
@@ -10,9 +11,14 @@ export type ScheduledTaskInput = {
   prompt: string;
   workspaceId: string;
   modelId: string;
+  reasoningEffort?: StartCommandRequest['reasoningEffort'];
   storeId: string;
   schedule: ScheduledTaskSchedule;
   enabled: boolean;
+};
+/** Renderer supplies wall-clock fields; the scheduling host owns the time zone. */
+export type ScheduledTaskSaveInput = Omit<ScheduledTaskInput, 'schedule'> & {
+  schedule: Omit<ScheduledTaskSchedule, 'timeZone'>;
 };
 export type ScheduledTask = Omit<ScheduledTaskInput, 'id'> & {
   id: string;
@@ -50,6 +56,7 @@ export type ScheduledTaskRun = {
 export type ScheduledTaskRunUpdate = {
   status: ScheduledTaskRunStatus;
   serviceRunId?: string;
-  error?: string;
+  /** null clears a recovered read error; persisted rows still only contain strings. */
+  error?: string | null;
   settlementVersion?: 1;
 };

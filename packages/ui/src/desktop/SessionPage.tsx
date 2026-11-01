@@ -84,7 +84,8 @@ function useNavigationCallbacks(
       open: (id: string) => committed.current.props.onOpen?.(id),
       expand: (id: string) => committed.current.props.onExpand?.(id),
       newSession: () => {
-        committed.current.props.actions.newSession?.();
+        const actions = committed.current.props.actions;
+        (actions.resumeNewConversation ?? actions.newSession)?.();
         committed.current.focusComposer();
       },
       newWorkspaceSession: (id: string) => {
@@ -104,6 +105,7 @@ function useNavigationCallbacks(
     [],
   );
   const newSession = !!props.actions.newSession;
+  const resumeNewConversation = !!props.actions.resumeNewConversation;
   const newWorkspaceSession = !!props.actions.newWorkspaceSession;
   const addWorkspace = !!props.actions.addWorkspace;
   const removeWorkspace = !!props.actions.removeWorkspace;
@@ -116,6 +118,7 @@ function useNavigationCallbacks(
   const actions = useMemo<PageActions>(
     () => ({
       newSession: newSession ? callbacks.newSession : undefined,
+      resumeNewConversation: resumeNewConversation ? callbacks.newSession : undefined,
       newWorkspaceSession: newWorkspaceSession ? callbacks.newWorkspaceSession : undefined,
       addWorkspace: addWorkspace ? callbacks.addWorkspace : undefined,
       removeWorkspace: removeWorkspace ? callbacks.removeWorkspace : undefined,
@@ -129,6 +132,7 @@ function useNavigationCallbacks(
     }),
     [
       newSession,
+      resumeNewConversation,
       newWorkspaceSession,
       addWorkspace,
       removeWorkspace,
@@ -425,6 +429,19 @@ function SessionPageContent({
     () => schedulePanelChange(detailsPanelFrame, detailsPanel, false),
     [schedulePanelChange],
   );
+  useLayoutEffect(() => {
+    if (!scheduledEditor || !props.scheduledTasks) return;
+    const group = contentGroupElement.current;
+    if (!group || typeof ResizeObserver === 'undefined') return;
+    // The narrow scheduled rail overlays the list without remounting its draft.
+    // If it could not acquire a docked allocation, expand when room returns.
+    const observer = new ResizeObserver(() => {
+      if (group.getBoundingClientRect().width >= 680 && detailsPanel.current?.isCollapsed())
+        expandDetails();
+    });
+    observer.observe(group);
+    return () => observer.disconnect();
+  }, [scheduledEditor, props.scheduledTasks, expandDetails]);
   const changeTabsOpen = useCallback(
     (open: boolean) => {
       // Closing a host panel can replace its pending layout frame, not this intent.
@@ -687,7 +704,7 @@ function SessionPageContent({
     <RightSidebar
       key="scheduled-editor"
       label={scheduledEditor.task ? '编辑安排任务' : '新建安排任务'}
-      title={scheduledEditor.task ? '编辑' : '新建'}
+      title={scheduledEditor.task ? '编辑任务' : '新建任务'}
       onClose={closeRightSidebar}
     >
       <ScheduledTaskEditor
@@ -837,7 +854,10 @@ function SessionPageContent({
           </Button>
         </div>
         <ResizablePanel id="workspace" minSize="200px" style={{ overflow: 'visible' }}>
-          <div className="client-content-frame">
+          <div
+            className="client-content-frame"
+            data-scheduled-editor={scheduledEditor && props.scheduledTasks ? 'true' : undefined}
+          >
             <ResizablePanelGroup
               id="content-layout"
               orientation="horizontal"

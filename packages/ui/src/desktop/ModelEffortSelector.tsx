@@ -22,6 +22,7 @@ export interface ModelOption {
   readonly reasoningEffortChoices?: readonly (ThinkingEffort | 'none' | 'minimal')[];
 }
 export interface ModelEffortSelectorProps {
+  mode?: 'combined' | 'model' | 'effort';
   model?: { readonly id?: string; readonly provider: string; readonly name: string };
   models: readonly ModelOption[];
   onModelChange: (provider: string, name: string, id?: string) => void;
@@ -35,10 +36,24 @@ function popoverSize(element: HTMLElement) {
   const style = getComputedStyle(element);
   return { width: Number.parseFloat(style.width), height: Number.parseFloat(style.height) };
 }
+function focusProviderTab(element: HTMLElement | null) {
+  const tab = element?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+  if (!tab) return false;
+  tab.focus({ preventScroll: true });
+  const viewport = tab.closest<HTMLElement>('[data-radix-scroll-area-viewport]');
+  if (viewport) {
+    const item = tab.getBoundingClientRect();
+    const area = viewport.getBoundingClientRect();
+    if (item.top < area.top) viewport.scrollTop += item.top - area.top;
+    else if (item.bottom > area.bottom) viewport.scrollTop += item.bottom - area.bottom;
+  }
+  return true;
+}
 
 export function ModelEffortSelector(props: ModelEffortSelectorProps) {
+  const mode = props.mode ?? 'combined';
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<'effort' | 'models'>('effort');
+  const [view, setView] = useState<'effort' | 'models'>(mode === 'model' ? 'models' : 'effort');
   const [activeProvider, setActiveProvider] = useState('');
   const modelSwitch = useRef<HTMLButtonElement>(null);
   const modelView = useRef<HTMLDivElement>(null);
@@ -68,6 +83,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       selected.reasoningEffortChoices.includes(value),
   );
   const allowedPositions = choices.map((value) => effortValues.indexOf(value));
+  const disabled = props.disabled || (mode === 'effort' && (!canAdjustEffort || !choices.length));
   const provider = providers.includes(activeProvider) ? activeProvider : providers[0];
 
   function changeView(next: 'effort' | 'models') {
@@ -111,20 +127,11 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
 
   useEffect(() => {
     if (view !== 'models') return;
-    const tab = modelView.current?.querySelector<HTMLButtonElement>(
-      '[role="tab"][aria-selected="true"]',
-    );
-    tab?.focus({ preventScroll: true });
-    const viewport = tab?.closest<HTMLElement>('[data-radix-scroll-area-viewport]');
-    if (!tab || !viewport) return;
-    const item = tab.getBoundingClientRect();
-    const area = viewport.getBoundingClientRect();
-    if (item.top < area.top) viewport.scrollTop += item.top - area.top;
-    else if (item.bottom > area.bottom) viewport.scrollTop += item.bottom - area.bottom;
+    focusProviderTab(modelView.current);
   }, [view]);
   useEffect(() => {
-    if (props.disabled) setOpen(false);
-  }, [props.disabled]);
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   function focusModelSwitch() {
     requestAnimationFrame(() => modelSwitch.current?.focus({ preventScroll: true }));
@@ -133,10 +140,10 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
     <Popover
       open={open}
       onOpenChange={(next) => {
-        if (next && props.disabled) return;
+        if (next && disabled) return;
         setOpen(next);
         if (next) {
-          setView('effort');
+          setView(mode === 'model' ? 'models' : 'effort');
           setActiveProvider(props.model?.provider ?? providers[0] ?? '');
         }
       }}
@@ -144,17 +151,26 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       <PopoverTrigger asChild>
         <PillSelectTrigger
           className="model-trigger model-effort-trigger"
-          data-model-trigger
-          aria-label={`模型：${props.model?.name ?? '选择模型'}${canAdjustEffort && effortLabel ? `，思考程度：${effortLabel}` : ''}`}
-          title={props.model ? `${props.model.provider} / ${props.model.name}` : undefined}
-          disabled={props.disabled}
+          data-model-trigger={mode !== 'effort' || undefined}
+          data-effort-trigger={mode === 'effort' || undefined}
+          aria-label={
+            mode === 'effort'
+              ? `思考程度：${effortLabel}`
+              : `模型：${props.model?.name ?? '选择模型'}${mode === 'combined' && canAdjustEffort && effortLabel ? `，思考程度：${effortLabel}` : ''}`
+          }
+          title={
+            mode !== 'effort' && props.model
+              ? `${props.model.provider} / ${props.model.name}`
+              : undefined
+          }
+          disabled={disabled}
           suffix={
-            canAdjustEffort && effortLabel ? (
+            mode === 'combined' && canAdjustEffort && effortLabel ? (
               <span className="model-effort-summary">{effortLabel}</span>
             ) : undefined
           }
         >
-          {props.model?.name ?? '选择模型'}
+          {mode === 'effort' ? effortLabel : (props.model?.name ?? '选择模型')}
         </PillSelectTrigger>
       </PopoverTrigger>
       <PopoverContent
@@ -163,9 +179,12 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
         align="start"
         sideOffset={6}
         className={cn('model-effort-popover', view === 'models' && 'model-effort-popover-models')}
-        aria-label="模型与思考程度"
+        aria-label={mode === 'combined' ? '模型与思考程度' : mode === 'model' ? '模型' : '思考程度'}
+        onOpenAutoFocus={(event) => {
+          if (mode === 'model' && focusProviderTab(modelView.current)) event.preventDefault();
+        }}
         onEscapeKeyDown={(event) => {
-          if (view === 'models') {
+          if (mode === 'combined' && view === 'models') {
             event.preventDefault();
             changeView('effort');
             focusModelSwitch();
@@ -184,18 +203,20 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                   {effortLabel}
                 </output>
               )}
-              <PillSelectTrigger
-                ref={modelSwitch}
-                className="model-effort-switch"
-                indicator="right"
-                onClick={() => {
-                  setActiveProvider(props.model?.provider ?? providers[0] ?? '');
-                  changeView('models');
-                }}
-                aria-label={`选择模型，当前 ${props.model ? `${props.model.provider} / ${props.model.name}` : '未选择'}`}
-              >
-                {props.model ? `${props.model.provider} / ${props.model.name}` : '选择模型'}
-              </PillSelectTrigger>
+              {mode === 'combined' && (
+                <PillSelectTrigger
+                  ref={modelSwitch}
+                  className="model-effort-switch"
+                  indicator="right"
+                  onClick={() => {
+                    setActiveProvider(props.model?.provider ?? providers[0] ?? '');
+                    changeView('models');
+                  }}
+                  aria-label={`选择模型，当前 ${props.model ? `${props.model.provider} / ${props.model.name}` : '未选择'}`}
+                >
+                  {props.model ? `${props.model.provider} / ${props.model.name}` : '选择模型'}
+                </PillSelectTrigger>
+              )}
             </div>
             {canAdjustEffort && (
               <div className="mt-1">
@@ -274,8 +295,11 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                                 aria-label={model.id ? `选择模型 ${model.id}` : undefined}
                                 onSelect={() => {
                                   props.onModelChange(model.provider, model.name, model.id);
-                                  changeView('effort');
-                                  focusModelSwitch();
+                                  if (mode === 'model') setOpen(false);
+                                  else {
+                                    changeView('effort');
+                                    focusModelSwitch();
+                                  }
                                 }}
                                 className="model-effort-option"
                                 data-current={selected === model || undefined}

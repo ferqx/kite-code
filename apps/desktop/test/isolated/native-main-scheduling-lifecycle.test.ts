@@ -455,7 +455,7 @@ async function mainFixture(
       prefix +
       `import { ScheduledTaskRunner as Runner } from ${JSON.stringify(runnerPath)};
       export class ScheduledTaskRunner extends Runner {
-        constructor(client, data) { super(client, data, { clock: f.clockFor(client) }); f.registerRunner(this); }
+        constructor(client, data) { super(client, data, { clock: f.clockFor(client), timeZone: () => 'UTC' }); f.registerRunner(this); }
         async stop() { try { await super.stop(); } catch (error) { f.errors.push(String(error)); throw error; } }
       }`,
   };

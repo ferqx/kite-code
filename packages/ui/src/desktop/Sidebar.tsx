@@ -330,6 +330,7 @@ const Workspace = memo(function Workspace({
 /** Only granted operations are supplied by the entry point. Absence means unavailable. */
 export interface PageActions {
   newSession?: () => void;
+  resumeNewConversation?: () => void;
   newWorkspaceSession?: (workspaceId: string) => void;
   addWorkspace?: () => void;
   removeWorkspace?: (workspaceId: string) => void;
@@ -372,8 +373,8 @@ export function Sidebar({
               className={newConversationSelected ? 'new-session selected' : 'new-session'}
               aria-current={newConversationSelected ? 'page' : undefined}
               variant="ghost"
-              disabled={props.busy || props.mutationBusy}
-              onClick={actions.newSession}
+              disabled={!actions.resumeNewConversation && (props.busy || props.mutationBusy)}
+              onClick={actions.resumeNewConversation ?? actions.newSession}
             >
               <HugeiconsIcon data-icon="inline-start" icon={PencilEdit02Icon} />
               <span>新对话</span>

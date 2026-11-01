@@ -293,8 +293,8 @@ test('scheduled tasks is a first-class page below workbench without inventing sa
   expect(html).toContain('<span>工作台</span>');
   expect(html).toContain('<span>安排任务</span>');
   expect(html.indexOf('<span>工作台</span>')).toBeLessThan(html.indexOf('<span>安排任务</span>'));
-  expect(html).toContain('还没有安排任务');
-  expect(html).toContain('创建第一个任务');
+  expect(html).toContain('暂无任务');
+  expect(html).toContain('>新建</button>');
   expect(html).not.toContain('每日检查 CI');
   expect(html).not.toContain('conversation-footer');
 });

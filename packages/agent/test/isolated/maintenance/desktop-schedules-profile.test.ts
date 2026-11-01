@@ -1,10 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { buildWindowsAccess } from '../../../../../apps/desktop/scripts/build-windows-access';
+import { initializeDesktopBuildEnvironment } from '../../../../../scripts/development/windows-desktop-environment';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import {
   createProfileBackup,
@@ -18,9 +20,15 @@ import { matchingSchema } from '../../../src/storage/sqlite/migrations';
 const sha = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
 test('actual Node DB10 backup restores exact original bindings and foreign Store runner issues zero requests', async () => {
   const qualified = await prepareQualifiedSqliteFixture();
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-schedule-profile-'))),
+  const root = realpathSync(temporaryDirectory('kite-schedule-profile-')),
     profile = { dataRoot: join(root, 'data'), profile: 'schedule' };
   try {
+    let windowsAsset: { path: string; sha256: string } | undefined;
+    if (process.platform === 'win32') {
+      initializeDesktopBuildEnvironment();
+      const built = await buildWindowsAccess(root);
+      windowsAsset = { path: join(root, built.relativePath), sha256: built.sha256 };
+    }
     const store = await openSqliteStore(profile),
       storeId = (await store.getMetadata()).storeId;
     await store.createWorkspace({
@@ -89,7 +97,7 @@ import {ScheduledTaskRunner} from ${JSON.stringify(resolve('apps/desktop/electro
 const input=JSON.parse(process.argv[2]);const lease=await acquireDesktopProfileAccess(input.access);let data;
 try {data=openPrivateData(input.profilePath,lease);
 if(input.action==='seed') {
- data.saveScheduledTask({id:'daily',name:'Daily review',prompt:'Original é🙂 task',workspaceId:'workspace',modelId:'model',storeId:input.storeId,enabled:true,schedule:{frequency:'daily',time:'09:00',timeZone:'UTC'}},0);
+ data.saveScheduledTask({id:'daily',name:'Daily review',prompt:'Original é🙂 task',workspaceId:'workspace',modelId:'model',reasoningEffort:'high',storeId:input.storeId,enabled:true,schedule:{frequency:'daily',time:'09:00',timeZone:'UTC'}},0);
  const run=data.claimScheduledTask('daily',Date.parse('2026-10-14T12:00Z'),{storeId:input.storeId});
  data.updateScheduledTaskRun(run.id,{status:'unknown'});
  data.saveScheduledTask({id:'unclaimed',name:'Unclaimed',prompt:'No restored automatic authority',workspaceId:'workspace',modelId:'model',storeId:input.storeId,enabled:true,schedule:{frequency:'daily',time:'09:00',timeZone:'UTC'}},0);
@@ -97,15 +105,16 @@ if(input.action==='seed') {
 let requests=0;let manualBlocked=false;
 if(input.action==='foreign'){
  const client=new Proxy({serverInfo:{storeId:input.storeId,subjectId:'subject'}},{get(target,key){if(key==='serverInfo')return target.serverInfo;return async()=>{requests++;throw Error('unexpected_service_request')};}});
- const runner=new ScheduledTaskRunner(client,data,{clock:{now:()=>Date.parse('2026-10-15T12:00Z'),setTimeout:()=>0,clearTimeout:()=>{}}});
- runner.start();await runner.tick();await runner.stop();
- try{await runner.runNow('unclaimed')}catch{manualBlocked=true;}
+ const runner=new ScheduledTaskRunner(client,data,{timeZone:()=> 'UTC',clock:{now:()=>Date.parse('2026-10-15T12:00Z'),setTimeout:()=>0,clearTimeout:()=>{}}});
+ runner.start();await runner.tick();
+ try{await runner.runNow('unclaimed')}catch(error){if(error.code!=='store_identity_mismatch')throw error;manualBlocked=true;}
+ await runner.stop();
 }
 if(input.action==='rebind') {
- const client={serverInfo:{storeId:input.storeId},listWorkspaces:async()=>[{id:'workspace'}],getModelSettings:async()=>({models:[{id:'model',enabled:true,configured:true}]})};
- const runner=new ScheduledTaskRunner(client,data,{clock:{now:()=>Date.parse('2026-10-15T08:00Z'),setTimeout:()=>0,clearTimeout:()=>{}}});
+ const client={serverInfo:{storeId:input.storeId},listAllWorkspaces:async()=>[{id:'workspace'}],getModelSettings:async()=>({models:[{id:'model',enabled:true,configured:true,reasoningEffortChoices:['high']}]})};
+ const runner=new ScheduledTaskRunner(client,data,{timeZone:()=> 'UTC',clock:{now:()=>Date.parse('2026-10-15T08:00Z'),setTimeout:()=>0,clearTimeout:()=>{}}});
  const {nextRunAt,createdAt,updatedAt,...task}=data.scheduledTasks().find(t=>t.id==='daily');
- await runner.save({...task,storeId:input.storeId});
+ await runner.save({...task,storeId:input.storeId},'update');
  const run=data.claimScheduledTask('daily',Date.parse('2026-10-15T09:00Z'),{storeId:input.storeId});
  if(!run)throw Error('rebound_claim_blocked');
 }
@@ -142,6 +151,7 @@ console.log(JSON.stringify({tasks:data.scheduledTasks(),runs:data.scheduledTaskR
               bunSha256: sha(process.execPath),
               helperPath: helper,
               helperSha256: sha(helper),
+              ...(windowsAsset ? { windowsAsset } : {}),
             },
           }),
         ],

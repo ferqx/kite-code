@@ -15,6 +15,7 @@ const task = data.saveScheduledTask(
     workspaceId: 'workspace',
     storeId: 'store',
     modelId: 'model',
+    reasoningEffort: 'high',
     schedule: { frequency: 'daily', time: '10:00', timeZone: 'UTC' },
     enabled: true,
   },
@@ -27,7 +28,19 @@ assert.equal(run.status, 'queued');
 db.close();
 db = new DatabaseSync(path);
 data = createScheduledTaskData(() => db);
+assert.equal(data.scheduledTasks()[0]?.reasoningEffort, 'high');
+assert.equal(data.scheduledTaskRuns()[0]?.task.reasoningEffort, 'high');
 assert.equal(data.scheduledTaskRuns()[0]?.createCommandId, run.createCommandId);
+data.updateScheduledTaskRun(run.id, { status: 'unknown', error: 'network_outcome_unknown' });
+data.updateScheduledTaskRun(run.id, { status: 'waiting', error: null });
+assert.equal(data.scheduledTaskRuns()[0]?.error, undefined);
+assert.equal(
+  Object.hasOwn(
+    JSON.parse(String(db.prepare('SELECT state FROM scheduled_task_runs').get()!.state)),
+    'error',
+  ),
+  false,
+);
 assert.equal(data.claimScheduledTask(task.id, Date.parse('2026-10-16T12:00Z')), null);
 assert.equal(data.scheduledTasks()[0]?.nextRunAt, Date.parse('2026-10-17T10:00Z'));
 db.close();

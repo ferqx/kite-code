@@ -341,7 +341,7 @@ async function ordinaryJournal(
     kind,
     commandId: 'public-input',
     expectedStoreId: 'store',
-    content: 'New task: 完整🙂é\r\n原输入',
+    content: 'New task: 完整🙂e\r\n原输入',
   };
   const request: CallerCommandRequest =
     kind === 'input.steer'
@@ -2297,7 +2297,7 @@ test('Native caller serializes a waiting scheduled save before provider removal 
   });
   const port = client();
   Object.assign(port, {
-    listWorkspaces: async () => [{ id: 'w' }],
+    listAllWorkspaces: async () => [{ id: 'w' }],
     getProviderSettings: async () => ({
       storeId: 'store',
       errors: [],
@@ -2359,7 +2359,7 @@ test('Native caller serializes a waiting scheduled save before provider removal 
         modelId: 'local-model',
         prompt: 'test-only',
         enabled: false,
-        schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+        schedule: { frequency: 'daily', time: '09:00' },
       },
     });
     await ready;
@@ -2414,7 +2414,7 @@ test('Native caller orders confirmed deletion after earlier scheduled save or en
       entered = resolve;
     });
     Object.assign(port, {
-      listWorkspaces: async () => [{ id: 'w' }],
+      listAllWorkspaces: async () => [{ id: 'w' }],
       getModelSettings: async () => {
         entered();
         await gate;
@@ -2425,7 +2425,15 @@ test('Native caller orders confirmed deletion after earlier scheduled save or en
     caller.setScheduledTasks(new ScheduledTaskRunner(port, data));
     try {
       const state = (await caller.invoke({ method: 'attach' })) as NativeState;
-      const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = task;
+      const {
+        nextRunAt: _next,
+        createdAt: _created,
+        updatedAt: _updated,
+        schedule,
+        ...fields
+      } = task;
+      const { timeZone: _zone, ...wallClock } = schedule;
+      const input = { ...fields, schedule: wallClock };
       const saving = caller.invoke(
         operation === 'save'
           ? {
@@ -2601,7 +2609,7 @@ test('Native close drains an in-flight scheduled save before releasing private d
     entered = resolve;
   });
   Object.assign(port, {
-    listWorkspaces: async () => [{ id: 'w' }],
+    listAllWorkspaces: async () => [{ id: 'w' }],
     getModelSettings: async () => {
       entered();
       await gate;
@@ -2625,7 +2633,7 @@ test('Native close drains an in-flight scheduled save before releasing private d
           modelId: 'fixed',
           prompt: 'Test',
           enabled: false,
-          schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+          schedule: { frequency: 'daily', time: '09:00' },
         },
       })
       .catch((cause: unknown) => cause);

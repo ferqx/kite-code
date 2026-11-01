@@ -258,6 +258,10 @@ Native 正文中的 Code Block 单独复制沿用上述原宿主 port 和 1MiB �
 
 ## Windows 顶栏菜单
 
+Windows 设置页的 `.desktop-settings-header` 不再预留额外高度，`.settings-sidebar` 顶部只取面板6px留白加8px间距；原独立32px菜单／窗口标题栏已经负责窗口安全区。规则仅作用于 Windows Native，macOS 的48px窗口按钮避让、设置主内容和右侧编辑栏保持原布局。
+
+2026-11-01，Windows x64／Electron44.3.0：实际开发窗口前后核左栏返回行上移42px，右侧外框和菜单栏保持；独立Profile、生产renderer（诊断关闭）与原配套Service另核常规／MCP切换、顶部返回按钮及原页面恢复，窗口正常退出0，5个所属进程全部结束，零模型请求。过程图与无障碍树在本机`.cache/settings-win-sidebar-20261101/`，隔离renderer复用`.cache/scheduled-inline-time-20261101/app`。原窗口动作DOM整文件1项21断言、CSS Biome及文档检查通过；仅改CSS，不扩展安装版或其他平台资格。
+
 [窗口容器](src/native-window-frame.tsx)在进入主界面后，于 Windows 顶栏左侧绘制“文件、编辑、视图、帮助”，沿共享主题颜色和圆角，菜单按钮使用 `no-drag`，其余顶栏保持原拖动区域。菜单支持 F10、左右键与下键，以及 Alt+F／E／V／H；点击时保留原编辑器焦点与选区。macOS／Linux 主界面保留原顶栏。窗口布局由 `NativeDesktop` 明确启用，启动准备及失败页按[启动显示规则](#原启动页与初始化重试)隐藏 header，进入应用后全屏设置页继续保留菜单。
 
 [菜单 owner](electron/native-window-menu.ts)定义中文原生项，[Main](electron/main.ts)安装隐藏的窗口菜单以保留原生快捷键，再从相同模板通过 [Electron Menu.popup](https://www.electronjs.org/docs/latest/api/menu#menupopupoptions)打开对应下拉，不增加另一行菜单。编辑、缩放、全屏、隐藏与退出使用 Electron roles，退出仍经过原 `before-quit` 与 `settleDesktopQuit`。文件前三项沿固定事件返回原 renderer controller 的 `prepareConversation`、`addWorkspace` 与设置状态；Ctrl+N／O／, 在 Main 的 `before-input-event` 中按同一固定动作分发，拒绝组词、重复和额外修饰键，并阻止重复进入原生 accelerator。F10／Alt 导航留给 renderer。准备中、原 mutation 进行中或退出中不进入页面操作，迟到事件同样核当前状态。进入新对话保原草稿，不创建会话或发任务，添加空间保持原准确选择及登记路径。
@@ -322,7 +326,9 @@ macOS 复用上述玻璃透明层、设置遮盖、导航对齐和调宽样式�
 
 ## 交互状态与透明材质
 
-Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。已选设置分类将按下变量映射到选中值，避免点击时加深；Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。
+2026-11-01，设置分类恢复持续选中高亮：Windows x64／Electron44.3.0、独立Profile及普通生产renderer实际核常规、MCP、Skills、提供商与模型四项，鼠标移开后仍只有当前项保留底色；Tab把焦点移到Skills时仍保留MCP选中，Enter后选中转到Skills，键盘焦点环保持，返回原页面正常。过程截图和无障碍树在本机`.cache/settings-selection-20261101/`；零模型请求，窗口正常退出0，5个所属进程全部结束。本轮仅改CSS及当前文档，未改页面状态或TypeScript；原窗口动作DOM结果沿用前轮，CSS Biome与文档检查通过，不扩展安装或其他平台资格。
+
+Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。设置分类沿原aria-pressed标记当前页，选中项持续保留悬停底色，指针移开或重复点击不撤下也不加深；切换只标记新的分类，保留原生按钮及键盘焦点提示；Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。
 
 2026-10-19 Windows x64／Bun 1.4.3／Chrome 155.0.8059.82，在 `f734245a` 加当前未提交源码上，用隔离夹具加载实际 SessionPage、Sidebar 与 Native 编译样式，Windows／macOS CSS 标记下亮暗、Mica／Vibrancy／实色、窄侧栏、选中导航与设置分类选择器共14组对照：悬停／按下底色不一致的采样由64处降为0。键盘按下空间标题只绘制一层背景，焦点提示、透明承载层、草稿和主区普通按钮的原按下反馈保持；页面无异常，定向 CSS Biome 与文档检查通过。设置页仅核选择器夹具，未复验真实 Service、Electron 实窗或系统材质最终合成。
 
@@ -856,7 +862,57 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 安排任务草稿
 
+当前安排统一采用本地Service所在宿主的系统时间。[Main运行器](electron/scheduled-task-runner.ts)读取系统IANA时区，在列表、保存、启禁、立即运行和每次调度前同步当前Store的任务绑定；旧绑定不同或宿主时区变化时，重算下一次未来发生，不追补转换前的时间。同一时区的重开／睡眠最新一次补跑保持。renderer的[保存DTO](src/scheduled-task-types.ts)只带频率、时分和可选星期，[IPC](electron/native-ipc.ts)拒绝调用者附带timeZone；宿主在保存时补充准确时区。DB10及manifest19保留原字段、严格格式和容量，冻结运行快照及其他Store任务不改字节。取舍见[本地时钟决定](../../.agents/notes/implemented/architecture/2026-11-01-desktop-schedule-local-clock.md)。
+
+右栏时间行直接使用共享shadcn TimePicker／Input编辑时分，保留标签；项目、模型及思考程度的原控件和分行标签保持。安排页移除顶栏返回按钮，左栏“新对话”在准备页提交进行中只恢复同一准备／提交观察，不重复发送；选择原会话恢复未保存输入。其他忙碌门禁保持。
+
+同日按用户要求改为行内时间输入：共享安排与Native导航两个整文件23项243断言、UI／Desktop类型、定向Biome及文档检查通过。普通Native独立Profile实际观察直接输入、清空禁用及原文保留、键盘恢复10:01后回车创建、编辑回填并保存10:02，始终无时间浮层；实际任务ID保持，零模型请求，窗口正常退出0，5个所属进程全部结束。过程截图及前后事实在本机`.cache/scheduled-inline-time-20261101/`。本次只改UI，宿主时钟、持久格式与调度资格沿前述验证范围。
+
+2026-11-01，Windows x64／Bun1.4.3／Electron44.3.0，`65c6bee72`加本轮工作树：调度／私有库／IPC／页面桥／Main生命周期五个完整文件80项883断言、安排与模型UI两个完整文件25项239断言通过；Native新对话、caller、侧栏及SessionPage受影响整文件完成回归，旧原生select和空状态文案断言更新后，相关两整文件16项156断言通过。UI／Desktop类型、32文件Biome、文档／影响及跨包边界检查通过。维护DB10／manifest19字段与字节格式、Native安装／发布边界均核对保持，不另取得发布资格。
+
+同环境独立HOME／Profile、普通development Main及生产renderer（`testDiagnostics:false`），实际配套Service的宿主TZ=UTC接管3条原Asia/Shanghai任务。逐步观察紧凑列表、右栏、共享时间浮层、无系统下拉图标、清空时间禁用创建且其他字段保留、键盘恢复10:01并在浮层回车创建、编辑回填并改为11:02保存、左栏往返保留未发送草稿。私有库保持同一新任务ID，nextRunAt准确为2026-11-02T11:02:00Z；3条旧任务时分／启禁／说明不变、3条旧运行及Core计数保持，零模型请求。过程截图、无障碍树与前后事实在本机`.cache/scheduled-local-clock-20261101/`；窗口正常退出0，5个所属进程全部结束。本轮未让机器睡眠，不扩展原真实模型或其他平台资格；既有CSS关键帧及大chunk编译提示保留。
+
 安排任务现已接入本地持久化与调度，不再只是草稿占位。操作与运行边界见[Desktop 手册](../../docs/handbook/clients/desktop/README.md)。[共享 UI](../../packages/ui/src/desktop/ScheduledTasks.tsx)负责异步表单、编辑、启禁、运行、删除确认和历史入口；[页面桥](src/native-scheduled-tasks.ts)沿封闭 IPC 读取事实，不改变当前会话，明确打开结果才导航。失败保留输入，打开不存在的结果会话失败仍保留任务页。
+
+2026-10-31，Windows x64／Bun1.4.3／Electron44.3.0，`65c6bee72`加当前工作树：以独立HOME／Profile／Electron数据目录、普通development Main、生产renderer（`testDiagnostics:false`）、真实paired Service和本机Codex登录完成`gpt-6-luna/low`真实模型窗口验证。普通UI保存、修改时间、暂停／启用，22:48实际墙钟触发在项目A创建独立根Session；模型仅调用一次`files.read`，返回文件后来更换的随机验证码与正确合计43，完整正文约4秒完成。暂停后将同一任务改名、修改说明并绑定项目B，明确立即运行仍可新建项目B根Session，约3秒回复“项目B验证；结果=437”；原三条项目A运行与会话身份保持，不因编辑重绑，任务定义仍只有一条。任务页在派发期间保持阅读位置，明确打开原记录才进入结果；完整退出冷重开后四条运行及A／B全文保持，Session4／Run5／Execution11／Command9／Message15／权限申请1的数量和完整任务、运行快照均不增、不改，正常退出及所记录Main／Service进程消失已核。
+
+上述样本保留首次未带代理的`model_failed`与原失败会话；带入本机已有HTTP(S)代理后模型正常返回，未更换模型、路由或认证。首次文件读取在未准备项目访问时由`workspace_untrusted`拒绝，adapter未执行，模型如实说明无法读取；随后经普通会话明确发送准备原项目授权，才进行成功的自动读取，不绕过权限门禁。原“已完成”只表示对应技术Run正常结束，仍须核正文是否完成业务。共8个持久Model执行（7成功、1失败），全部snapshot核Codex／Responses／`gpt-6-luna/low`；7个成功执行实报36960输入／152输出／3712缓存输入token，不称完整账户用量或独立HTTP计数。验证中复现长说明撑大ScrollArea内容表格，默认1100×780窗口的任务按钮被裁切；共享样式将该表格固定到viewport宽度，复验默认窗口、编辑栏打开、保存关闭和冷开时四个操作完整可见，17项／131断言页面回归与Biome通过。完整Profile、模型输入输出、15张阶段截图、无障碍树与只读核验报告在本机`.cache/scheduled-luna-live-20261031/report.json`及同目录。此范围不代正式安装包、其他平台、机器睡眠补跑、真实审批决定或取消验收；既有编译提示保留。
+
+同日补充默认 Auto 审批和取消的真实窗口验证：独立HOME／Profile、普通development Main、生产renderer（`testDiagnostics:false`）及真实Service，共11次真实Codex HTTP请求全部200，11个持久Model执行（9成功、2取消）及实际请求均核`gpt-6-luna/low`，其中2次为真正的内部自动审核。普通明确输入先准备项目访问，未修改审批模式；安排任务的`files.write`取得真实`approve_once`，仅创建`approval-result.txt`，完整内容为`AUTO_APPROVAL_OK`加换行，随后真实读取核实；原工具行显示“已自动批准”。内部审核不创建子会话，全部四次安排运行均为所属项目的独立根Session。
+
+审核中取消使用仅在隔离Service包装器内的透明时序屏障：真实上游审核HTTP200且完整响应已收到后，暂缓交还未改写的原Response；点击原会话停止入口，核Run已cancelled后释放晚到响应。原`files.write`为cancelled、`dispatched=0`，原审核Model为cancelled，目标文件始终不存在；不把未被Runtime接收保存的晚到响应称为批准决定。另一次自然Model流式回复未使用屏障，观察到部分整数回复后点击停止，结算为cancelled，保留1到309的1127字符部分正文，终态收起处理过程，主动展开及冷开均可读。取消后同一暂停任务明确再次运行成功返回`CANCEL_RECOVERY_OK`。四条安排记录依次completed／cancelled／cancelled／completed，均`settlementVersion=1`；正常退出及冷开后Session5／Run5／Execution17／Command19／Message17／权限申请1、完整任务／运行／消息／文件及HTTP记录逐项保持，零重放，两个Main和所属Service均正常退出且记录进程全部消失。27张阶段截图、无障碍树、真实wire元数据、屏障前后只读事实及核验报告位于本机`.cache/scheduled-luna-boundaries-20261031/report.json`及同目录；wire的business分类还包含内部标题调用，不作为纯用户业务调用数。
+
+该补充只判上述功能场景通过，完整界面体验仍有两项实际问题：首次进入取消后恢复会话时短暂显示“模型目录不可用：native_request_failed”，当时操作禁用，随后自动恢复且原Run成功，根因尚未确认；运行历史把`cancel_requested`直接作为原因展示（[原展示](../../packages/ui/src/desktop/ScheduledTasks.tsx)的`run.error`），冷开仍可见。分别保留第16／17和第19／27截图，本轮没有生产代码修复，不以最终成功覆盖中间闪现。用户明确暂不让电脑睡眠，因此只完成S3与一次性唤醒计时器可用性探测并撤销计时器，未执行机器睡眠或取得睡眠补跑资格；没有强制切换Manual／Full或验收人工作答审批，也不替代正式安装包和其他平台资格。
+
+同日安排任务UI改版由[共享UI owner](../../packages/ui/README.md)维护页面、卡片、右栏编辑器与原宿主契约，Native调度及IPC未因展示改版改变。Windows x64／Bun1.4.3／Electron44.3.0，`65c6bee72`加当前工作树：独立HOME／Profile、普通development Main、生产renderer（`testDiagnostics:false`）和实际配套Service，完整窗口观察深浅主题、新建／编辑、项目搜索及Enter确认、周日与真实weekday=0保存、无效时区阻止保存及输入保留、276字符说明两行省略、暂停、明确立即运行、历史打开原项目根会话、筛选无匹配及清除、删除复核后取消。原最小800px窗口不能分配360px主区加300px右栏，表单存在却不可见；安排编辑专属覆盖布局修复后，800px右栏可见，拉宽恢复并排，同一未保存草稿保持，Escape关闭回到原编辑按钮，未改变左导航宽度。原失败第22／23截图与修复后第26至29截图均保留。
+
+上述新运行使用本机固定响应Provider，仅验证UI到真实Main／Service／私有库及原会话的操作链；三条预置旧历史只用于展示，不能算新的实际执行证据，没有调用OpenAI账户。新任务保存及修改保持同一ID，暂停状态保持，四任务／四条安排记录与Core Session1／Run1／Execution1／Command2／Message2在完整退出重开后逐项不变，模型请求从首窗1次到冷开0次；两次Main退出0，末轮记录的五个Main／Service等所属进程全部消失。安排与SessionPage定向回归22项／182断言、UI及Desktop类型检查、Biome通过；本机32张过程截图、无障碍树、两次私有事实与范围报告在`.cache/scheduled-ui-20261031/report.json`及同目录。此前历史中的`cancel_requested`展示已改为可读原因；普通会话模型目录的原瞬时错误未在这轮独立修复。睡眠、真实模型和安装包资格沿前述原范围，既有构建提示保留。
+
+2026-11-01修正上述表单的控件复用：项目与普通新对话共用ProjectSelector／ContextMenu，模型与思考程度直接复用ModelEffortSelector／GemSlider，移除自建TaskChoice及其浮层样式。[页面桥](src/native-scheduled-tasks.ts)保留提供商、模型名称、准确ID、配置档位及可选档位，不再压成只有ID／label的目录。[私有任务类型](src/scheduled-task-types.ts)、[Main校验](electron/scheduled-tasks.ts)与[运行器](electron/scheduled-task-runner.ts)保存可选`reasoningEffort`，按当前模型目录核有效档位，进入每次任务快照、原run.start及请求摘要；后续编辑不重写旧快照。旧记录无字段时继续沿原请求，不补造覆盖；DB10／manifest19与公共API版本保持，维护白名单同步接受受控可选枚举，原备份字节、容量和未知结果门禁保持。
+
+同环境独立HOME／Profile、普通development Main、生产renderer（诊断关闭）和真实配套Service完成15个窗口检查点：原新对话项目菜单与安排菜单同源，选中Design System，公共模型浮层、提供商／模型双栏、宝石滑块键盘选择高档位，保存后真实库及运行快照为`high`；全局配置仍`low`，一次本机固定响应Provider请求实际携带`reasoning_effort: high`，Model快照同为high，原项目根Session正常completed。完整退出冷重开后任务、运行、Model事实及Core计数保持，公共编辑器回填高档位，冷开零模型请求；两个Main与各自记录的所属进程正常退出。UI／Model／SessionPage26项217断言、Main及页面桥35项422断言、私有库10项52断言、真实Node备份恢复1项32断言通过；UI／Desktop／Agent类型检查及Biome通过。证据在本机`.cache/scheduled-reuse-20261101/report.json`与同目录，不改写前一轮失败及资格；三条预置历史只是展示夹具，本轮未调用OpenAI账户，不新增睡眠、安装包或跨平台资格。
+
+同日精简安排任务文案：移除常驻说明、重复标题／状态、空历史与安排摘要，保留字段、操作和必要错误／删除确认。上述普通Native环境沿独立HOME／Profile实际观察新增、无效时区禁用与纠错恢复、保存中禁用、编辑回填及更新、展开预置停止／失败记录、删除复核后取消；真实私有库只有一个新增任务，编辑保持同一ID，未创建会话或调用模型。13张过程截图、无障碍树及事实在本机`.cache/scheduled-copy-20261101/`。UI三文件26项216断言、类型与Biome通过；后台调度、模型和恢复逻辑本轮未改，沿用前述证据。检查结束后电脑控制工具无法再激活窗口，核验归属后停止本轮五个隔离进程，未将本轮计为正常退出验证。
+
+同日按参考布局恢复项目／模型标签，右栏改用左标签／右控件的分组卡片、共享重复菜单和可折叠高级设置。相同普通Native环境的新隔离Profile逐步核对菜单、每周日、折叠恢复、项目切换、原模型滑块、高档位回填、无效时区提示及修正、新建与编辑保存；真实任务为ui-b／weekly／weekday=0／high，更新仍为同一ID。14张过程截图、无障碍树及只读事实在本机`.cache/scheduled-layout-20261101/`；UI三文件26项222断言、类型及Biome通过，窗口正常退出0、零模型请求。此轮只改变表单展示与交互组织，调度、持久化和原恢复资格沿前述范围。
+
+同日模型与思考程度进一步分行，复用方式归[UI owner](../../packages/ui/README.md)。同环境新隔离Profile观察直接打开模型双栏、选中后关闭并显示新模型配置档位、独立宝石滑块调至高、创建与编辑回填、仅改思考程度再保存；真实库保持同一任务及modelId，只变化reasoningEffort与updatedAt。9张过程截图和前后只读事实在本机`.cache/scheduled-split-20261101/`。共享UI三文件27项243断言、Native模型选择整文件31项372断言、UI／Desktop类型与Biome通过；普通窗口正常退出0、零模型请求、所属五个进程全部结束。后台调度、IPC与保存格式本轮未变。
+
+同日时间与时区合并为单行，复用原PillSelectTrigger／Popover及原生输入。同环境新隔离Profile实际核“中国时间 09:00”、UTC与时间同步更新、无效时区关闭后保留错误、纠错后在浮层回车创建、编辑回填及仅修改时间保存；私有库始终保存Asia/Shanghai，原任务ID、模型和档位保持，时间从10:01更新到11:01。过程截图、无障碍树及前后事实在本机`.cache/scheduled-time-20261101/`。共享UI三文件27项258断言、UI类型及Biome通过；窗口正常退出0、零模型请求、所属进程全部结束。原调度与存储契约未变，沿前述范围。
+
+同日收紧列表与右栏尺寸：常用操作移至标题行，名称／说明单行预览，表单行高36px、默认说明区80px。同环境独立Profile实际观察四项列表、新建与原模型浮层、长名称编辑、196字符说明首尾滚动、保存、展开运行记录和删除复核后取消；真实原任务ID、说明全文及暂停状态保持。11张过程截图、无障碍树及前后事实在本机`.cache/scheduled-compact-20261101/`；共享UI三文件27项258断言、UI类型及Biome通过，窗口正常退出0、零模型请求、所属进程全部结束。调度与数据契约沿前述范围。
+
+保存和重新启用沿 Client 的 `listAllWorkspaces()` 完整读取项目目录，不使用前100项的兼容入口判断项目不存在。页面桥分别维护任务列表与模型目录的读取错误；模型目录失败每5秒独立重试，列表刷新或任务操作成功不能清除模型错误，成功恢复后停止模型重试。离开页面、连接或设置修订变化时取消旧定时器，并拒绝旧模型结果，原表单字段继续保留。
+
+创建重试的原任务ID按Store和编辑器创建意图保存，不随字段内容变化。回执丢失后的明确重试先读本地任务列表；存在时更新同一任务并保留当前启禁状态，不存在时仍沿原ID创建，已观察到后来删除的任务不复活。读取失败不继续保存，连接或设置修订变化拒绝旧核对；新的编辑器拥有独立意图。此意图只属于窗口内重试，不恢复冷写资格或改动封闭IPC格式。
+
+2026-10-31，Windows DB10完整备份恢复夹具的原生资产缺失已修复，真实Node整文件已进入全部备份／恢复／重新绑定断言并通过；资产准备、Store门禁与实际范围见[维护owner](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。下文此前未进入备份断言的失败记录保留为修复前证据；本次不据此扩展完整安装版或发布资格。
+
+运行器核实正常进展或终态后，用内部update的`error:null`清除旧读取错误；写入时移除该字段，持久记录仍只允许字符串错误，不增加DB或协议版本。已经结算的旧历史不改字节，页面对已完成记录不再显示旧错误。原失败／未知和执行组结算继续保留；立即运行没有claim时明确拒绝，UI解释“本次未新建运行”，不将未派发当作成功。
+
+2026-10-31，同一Windows x64／Bun1.4.3工作树继续修复上述三项：[调度器](test/scheduled-task-runner.test.ts)、[hook](test/isolated/native-scheduled-hook-dom.test.tsx)、[存储](test/isolated/scheduled-tasks.test.ts)、[页面导航](test/isolated/native-scheduled-tasks-dom.test.tsx)和[共享UI](../../packages/ui/test/isolated/scheduled-tasks.test.tsx)五个完整文件62项／744断言通过，另[DB10闭合格式](../../packages/agent/test/isolated/maintenance/desktop-schedules.test.ts)4项／43断言通过；实际Node SQLite另核清除错误后JSON不保存null，原容量及恢复身份测试保持。Desktop／UI类型检查、定向Biome、文档与影响检查通过。三个问题的回归场景在修复前均失败，另核已观察到的原创建删除后重试不再提交保存。隔离Electron44.3.0窗口沿生产SessionPage、hook与样式逐步观察首次保存中禁用→回执丢失保留字段→修改说明→查询原任务并更新→仅一个新任务、完成状态去除旧网络错误，以及立即运行未接纳的完整提示；过程中发现并修正提示／历史挤入卡片横排和长提示截断。受控桥接页面异常为0，窗口正常退出0，本机夹具在`.cache/scheduled-current-native`；它不代证完整Native Main/preload、安装版、真实模型或其他平台。此前Windows DB10完整备份恢复夹具缺少原生访问资产，在备份断言前以`windows_access_asset_unavailable`失败的范围保留，本轮不重标通过；原嵌套`@keyframes`编译提示保留。
+
+2026-10-31，Windows x64／Bun1.4.3，`65c6bee72` 加本轮修复：[调度器](test/scheduled-task-runner.test.ts)、[hook](test/isolated/native-scheduled-hook-dom.test.tsx)及[页面导航](test/isolated/native-scheduled-tasks-dom.test.tsx)三个完整文件35项／423断言通过，Desktop类型检查、定向Biome和文档检查通过。真实SQLite／HTTP／Client使用202个项目核后页目标的创建、编辑、暂停与重新启用，并继续运行原独立会话；模型失败回归核列表／操作不掩盖错误、独立重试、恢复、旧设置结果失效和卸载清理。两个新增回归场景在修复前均失败。隔离生产组件与样式可构建，但IAB连接本机地址超时，本机Chrome的Computer Use因无法可靠识别URL而终止，未取得本轮真实浏览器过程、完整Electron或安装版验收；既有嵌套`@keyframes`优化提示保留。
 
 [调度器](electron/scheduled-task-runner.ts)通过公共 `readOrdinaryCommandApplication` 核原公开 run.start 申请、派生业务 Command 与实际 Run 的准确保存关系，再沿实际 rootWork 核后台效果和子轮。原申请 accepted 不证明业务完成，解释轮不当成已完成排程；缺关系保持待核实。原 detached child／unknown 效果及 after-turn 报告均继续阻止下一次排程。[实际 Runtime/HTTP 回归](test/scheduled-task-runner.test.ts)26项通过，报告夹具使用当前六工具 prompt 合同。
 

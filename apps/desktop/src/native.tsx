@@ -1586,6 +1586,17 @@ function NativeDesktopContent({
     }
   }
   function prepareConversation(workspaceId?: string) {
+    if (scheduledTasksView && preparing && workspaceId === undefined) {
+      pageIntent.current++;
+      if (firstRef.current) {
+        firstOpenPage.current = pageIntent.current;
+        const creation = firstRef.current.result?.creation;
+        if (creation?.phase === 'created' && creation.input.expectedStoreId === directory?.storeId)
+          void report(() => select(creation.input.sessionId, false));
+      }
+      setScheduledTasksView(false);
+      return;
+    }
     setNewChoice({});
     setNewModelReady({ ready: false });
     setNewModelRevision((value) => value + 1);
@@ -3996,6 +4007,8 @@ function NativeDesktopContent({
       defaultExpanded
       actions={{
         newSession: () => prepareConversation(),
+        resumeNewConversation:
+          scheduledTasksView && preparing ? () => prepareConversation() : undefined,
         newWorkspaceSession: prepareConversation,
         addWorkspace: () => void addWorkspace(),
         removeWorkspace: directory?.unavailable
@@ -4018,7 +4031,7 @@ function NativeDesktopContent({
           selected.current === sessionId &&
           (!!selectionRead.current ||
             (selection?.storeId === directory?.storeId && selection?.session.id === sessionId));
-        if (sameTarget && readingParent) return;
+        if (sameTarget && readingParent && !scheduledTasksView && !preparing) return;
         pageIntent.current++;
         setScheduledTasksView(false);
         setPreparing(false);
@@ -4051,28 +4064,7 @@ function NativeDesktopContent({
       scheduledTasks={scheduledTasksView ? scheduledTaskProps : undefined}
       headerActions={
         <>
-          {scheduledTasksView ? (
-            (selection || preparing) && (
-              <DesktopButton
-                variant="ghost"
-                onClick={() => {
-                  pageIntent.current++;
-                  if (preparing && firstRef.current) {
-                    firstOpenPage.current = pageIntent.current;
-                    const creation = firstRef.current.result?.creation;
-                    if (
-                      creation?.phase === 'created' &&
-                      creation.input.expectedStoreId === directory?.storeId
-                    )
-                      void report(() => select(creation.input.sessionId, false));
-                  }
-                  setScheduledTasksView(false);
-                }}
-              >
-                {preparing ? '返回新对话' : '返回会话'}
-              </DesktopButton>
-            )
-          ) : (
+          {!scheduledTasksView && (
             <NativeDiagnostic>
               <DesktopButton
                 variant="ghost"

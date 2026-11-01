@@ -6,11 +6,13 @@ import type {
   ScheduledTaskRun,
   ScheduledTaskRunStatus,
   ScheduledTaskRunUpdate,
+  ScheduledTaskSaveInput,
   ScheduledTaskSchedule,
 } from '../src/scheduled-task-types';
 
 export type NativeScheduledTaskData = {
   scheduledTasks(): ScheduledTask[];
+  syncScheduledTaskTimeZone(timeZone: string, now: number, storeId: string): void;
   saveScheduledTask(input: ScheduledTaskInput, now?: number): ScheduledTask;
   deleteScheduledTask(id: string): void;
   scheduledTaskRuns(taskId?: string): ScheduledTaskRun[];
@@ -61,6 +63,23 @@ const statuses = [
   'unknown',
   'cancelled',
 ];
+export function parseScheduledTaskSaveInput(value: unknown): ScheduledTaskSaveInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail();
+  const schedule = (value as ScheduledTaskSaveInput).schedule;
+  if (
+    !schedule ||
+    typeof schedule !== 'object' ||
+    Array.isArray(schedule) ||
+    'timeZone' in schedule
+  )
+    fail();
+  const clean = parseScheduledTaskInput({
+    ...(value as ScheduledTaskSaveInput),
+    schedule: { ...schedule, timeZone: 'UTC' },
+  });
+  const { timeZone: _zone, ...wallClock } = clean.schedule;
+  return { ...clean, schedule: wallClock };
+}
 export function parseScheduledTaskInput(value: unknown): ScheduledTaskInput {
   if (
     !value ||
@@ -74,6 +93,7 @@ export function parseScheduledTaskInput(value: unknown): ScheduledTaskInput {
           'prompt',
           'workspaceId',
           'modelId',
+          'reasoningEffort',
           'storeId',
           'schedule',
           'enabled',
@@ -109,6 +129,13 @@ export function validateScheduledTaskInput(input: ScheduledTaskInput): Scheduled
     typeof input.enabled !== 'boolean'
   )
     fail();
+  if (
+    input.reasoningEffort !== undefined &&
+    !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'].includes(
+      input.reasoningEffort,
+    )
+  )
+    fail();
   const s = input.schedule;
   if (
     !s ||
@@ -133,6 +160,7 @@ export function validateScheduledTaskInput(input: ScheduledTaskInput): Scheduled
     prompt: input.prompt,
     workspaceId: input.workspaceId,
     modelId: input.modelId,
+    ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
     storeId: input.storeId,
     enabled: input.enabled,
     schedule: {
@@ -245,6 +273,7 @@ export function createScheduledTaskData(database: () => DatabaseSync): NativeSch
             'prompt',
             'workspaceId',
             'modelId',
+            'reasoningEffort',
             'storeId',
             'schedule',
             'enabled',
@@ -367,6 +396,36 @@ export function createScheduledTaskData(database: () => DatabaseSync): NativeSch
   };
   const port: NativeScheduledTaskData = {
     scheduledTasks: tasks,
+    syncScheduledTaskTimeZone(timeZone, now, storeId) {
+      if (
+        !timeValid(now) ||
+        !idValid(storeId) ||
+        typeof timeZone !== 'string' ||
+        !timeZone ||
+        timeZone.length > 128 ||
+        /^[+-]/.test(timeZone)
+      )
+        fail();
+      try {
+        formatter(timeZone).format(0);
+      } catch {
+        fail();
+      }
+      transaction(() => {
+        for (const task of tasks()) {
+          if (task.storeId !== storeId || task.schedule.timeZone === timeZone) continue;
+          const schedule = { ...task.schedule, timeZone };
+          // A changed clock binding starts at the next local occurrence, never a retroactive run.
+          // Original run snapshots and restored Store bindings remain untouched.
+          writeTask({
+            ...task,
+            schedule,
+            nextRunAt: task.enabled ? nextScheduledOccurrence(schedule, now) : null,
+            updatedAt: now,
+          });
+        }
+      });
+    },
     scheduledTaskRuns(taskId) {
       return runs()
         .filter((r) => taskId === undefined || r.taskId === taskId)
@@ -529,7 +588,7 @@ export function createScheduledTaskData(database: () => DatabaseSync): NativeSch
           ...old,
           status: update.status,
           ...(update.serviceRunId !== undefined ? { serviceRunId: update.serviceRunId } : {}),
-          ...(update.error !== undefined ? { error: update.error } : {}),
+          ...(update.error !== undefined ? { error: update.error ?? undefined } : {}),
           ...(update.settlementVersion !== undefined
             ? { settlementVersion: update.settlementVersion }
             : {}),

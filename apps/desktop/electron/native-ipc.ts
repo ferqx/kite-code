@@ -26,7 +26,7 @@ import {
 import { promptTextForSend } from '../src/prompt-text';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
-import { parseScheduledTaskInput } from './scheduled-tasks';
+import { parseScheduledTaskSaveInput } from './scheduled-tasks';
 import { saveStartupDiagnosticReport } from './startup-report';
 
 const requestBytes = 1048576,
@@ -380,7 +380,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
   }
   if (method === 'scheduled.save') {
-    parseScheduledTaskInput(input.input);
+    parseScheduledTaskSaveInput(input.input);
     if (input.operation !== 'create' && input.operation !== 'update')
       throw Error('invalid_native_request');
     if (input.operation === 'update' && !(input.input as { id?: string }).id)

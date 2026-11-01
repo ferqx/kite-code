@@ -267,7 +267,8 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   height: var(--ui-icon-size, 14px);
   flex-shrink: 0;
 }
-.kite-client .settings-sidebar nav button:hover:not(:disabled) {
+.kite-client .settings-sidebar nav button:hover:not(:disabled),
+.kite-client .settings-sidebar nav button[aria-pressed="true"] {
   background: var(--control-hover);
 }
 .kite-client .settings-sidebar nav button:active:not(:disabled),
@@ -797,6 +798,15 @@ html[data-native-window] .native-window-content > .kite-client.shell {
   position: absolute;
   width: 100%;
   height: 100%;
+}
+
+/* Windows already reserves its titlebar above the settings surface. */
+html[data-native-window][data-platform="windows"] .kite-client .desktop-settings-header {
+  height: 0;
+}
+
+html[data-native-window][data-platform="windows"] .kite-client .settings-sidebar {
+  padding-top: calc(var(--native-panel-inset) + 8px);
 }
 
 /* macOS window controls share the first row with the navigation and session headers. */

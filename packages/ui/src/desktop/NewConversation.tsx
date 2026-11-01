@@ -40,7 +40,7 @@ function ContextMenu(props: {
   options: readonly { value: string; label: string; detail?: string }[];
   disabled: boolean;
   onSelect: (value: string) => void;
-  action: { label: string; run: () => void };
+  action?: { label: string; run: () => void };
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -89,17 +89,19 @@ function ContextMenu(props: {
                     ))}
                   </DropdownMenuGroup>
                 </DropdownMenuRadioGroup>
-                <DropdownMenuSeparator />
+                {props.action && <DropdownMenuSeparator />}
               </>
             )}
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                className="context-menu-item context-menu-action"
-                onSelect={props.action.run}
-              >
-                <span>{props.action.label}</span>
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
+            {props.action && (
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  className="context-menu-item context-menu-action"
+                  onSelect={props.action.run}
+                >
+                  <span>{props.action.label}</span>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            )}
           </DropdownMenuContent>
         )}
       </DropdownMenu>
@@ -107,23 +109,37 @@ function ContextMenu(props: {
   );
 }
 
+/** The same registered-project selector is used by new conversations and scheduled work. */
+export function ProjectSelector(props: {
+  projects: readonly { id: string; label: string }[];
+  value: string;
+  disabled?: boolean;
+  onChange: (id: string) => void;
+  onAddProject?: () => void;
+}) {
+  return (
+    <ContextMenu
+      name="项目空间"
+      label={props.projects.find((project) => project.id === props.value)?.label ?? '选择项目'}
+      icon={Folder01Icon}
+      selected={props.value}
+      options={props.projects.map((project) => ({ value: project.id, label: project.label }))}
+      disabled={!!props.disabled}
+      onSelect={props.onChange}
+      action={props.onAddProject ? { label: '添加项目…', run: props.onAddProject } : undefined}
+    />
+  );
+}
+
 export function NewConversationContext(props: NewConversationProps) {
   return (
     <div className="new-conversation-context">
-      <ContextMenu
-        name="项目空间"
-        label={
-          props.projects.find((project) => project.path === props.workspace)?.label ?? '选择项目'
-        }
-        icon={Folder01Icon}
-        selected={props.workspace}
-        options={props.projects.map((project) => ({
-          value: project.path,
-          label: project.label,
-        }))}
+      <ProjectSelector
+        projects={props.projects.map((project) => ({ id: project.path, label: project.label }))}
+        value={props.workspace}
         disabled={props.busy}
-        onSelect={props.onProject}
-        action={{ label: '添加项目…', run: props.onAddProject }}
+        onChange={props.onProject}
+        onAddProject={props.onAddProject}
       />
       {props.workspace && props.branch?.repository === true && (
         <ContextMenu
