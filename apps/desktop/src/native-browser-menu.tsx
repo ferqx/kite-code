@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import type {
   NativeBrowserMenuAction,
   NativeBrowserMenuRequest,
@@ -32,7 +32,7 @@ export function useNativeBrowserPopup(options: {
     pending.current = undefined;
     if (old) window.kiteNative?.cancelBrowserMenu?.(old.id);
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (
       !options.visible ||
       (!options.scope && !options.draft) ||
@@ -145,6 +145,7 @@ export function useNativeBrowserPopup(options: {
           if (pending.current !== request) return;
           pending.current = undefined;
           if (
+            current.current.visible &&
             current.current.identity === request.identity &&
             current.current.hostKey === request.hostKey &&
             JSON.stringify([current.current.scope, current.current.draft]) === request.scopeKey

@@ -227,3 +227,6 @@ Cmd+W实际hide并未销毁Page，但Main清active后Renderer仍保hosted／comm
 当前选择由既有Main applyNativeResize明确标识真实原生尺寸来源，在同一metrics writer内提交最新不同尺寸，Renderer校准继续原串行与最后值合并。代价是原生连续变化期间允许多个尚未回执的幂等Root尺寸命令；按当前请求对象、Root frame和metricsEpoch退休旧回执，真正当前失败仍失败，回到已applied的A也要覆盖已派发B。命令更新与回执分离，不取消或重放页面动作，不产生Page像素／输入／模型观察证明。稳定async校准不再生成Main不消费的nonce，准确同调用完成只清自身旧画布，严格采用核对仍保留。未选择无条件并发所有Renderer校准、截图替身、自动刷新或引擎补丁；前者扩大不必要的派发边界，其余损害当前内容或超出授权范围。最新源、定向回归、固定Electron/Chromium来源和最终CG双击／快速拖边的有限像素资格归[Desktop owner](../../../../apps/desktop/README.md#标题栏双击与root逻辑尺寸2026-11-01)，整体Note仍proposed，不授无灰带或发布资格。
 
 040已通过准确CG系统双击两向和单次快速拖边的功能／状态核对，完整活动段像素未再采到037宽内部暗空与条纹；放大窄缝、还原窗口内右外灰带仍失败，明确保留且不启动引擎补丁。415项Main/Host/Pane、Desktop类型及适用门禁与有限原片范围支持该切口的iteration_complete为ready，不能将038/040不同输入路线当严格同路线性能A/B，也不授整体无灰/FPS/普通发行或跨平台资格。具体PTS、源hash、失败、探针不足全拖动及原页身份继续只由Desktop owner维护，整体Note仍proposed。
+
+
+分隔线反复显隐的新实际菜单错误（用户制品FCMrwe的!current拒绝）进一步要求把UI取消与页面失效分开：Main失效菜单沿原null取消，真实来源／参数／Native失败继续报告；Popup在layout提交退休旧请求。optionsIssue和Control.issue只表达局部菜单反馈，不得进入Host的网页可用性判定；真正toolbar.error、scope、绘制和权限门保留。避免把一个过期菜单扩大成原页撤销和恢复循环，不新增Agent Loop、自动重试或工具版本。准确复现、实际连续过程和有限资格仍归Desktop owner，旧灰带范围不借此升级。

@@ -214,6 +214,7 @@ let popupTemplate: Electron.MenuItemConstructorOptions[] = [],
   popupOptions: Electron.PopupOptions | undefined;
 let popupCloses = 0;
 let deferPopupClose = false;
+let popupBuildError: Error | undefined;
 const pendingPopupCloses: (() => void)[] = [];
 mock.module('electron', () => ({
   BrowserWindow: {
@@ -221,6 +222,7 @@ mock.module('electron', () => ({
   },
   Menu: {
     buildFromTemplate(template: Electron.MenuItemConstructorOptions[]) {
+      if (popupBuildError) throw popupBuildError;
       popupTemplate = template;
       let originalOptions: Electron.PopupOptions | undefined;
       return {
@@ -774,9 +776,9 @@ function fixture(
       events.get(nativeBrowserLayoutChannel)!(event, input);
       return event.returnValue;
     },
-    menu: (input: NativeBrowserMenuRequest) =>
+    menu: (input: unknown, frame = owner.mainFrame, sender = owner) =>
       handlers.get(nativeBrowserMenuChannel)!(
-        { sender: owner, senderFrame: owner.mainFrame } as unknown as IpcMainInvokeEvent,
+        { sender, senderFrame: frame } as unknown as IpcMainInvokeEvent,
         input,
       ),
     cancelMenu: (id: string) =>
@@ -2034,6 +2036,100 @@ test('presentation pixels resolving after a changed Main selection or scroll are
     } finally {
       f.close();
     }
+  }
+});
+
+for (const boundary of ['withdraw', 'hide', 'owner', 'close'] as const)
+  test(`a stale native menu after ${boundary} cancels without a popup and a current successor can still open`, async () => {
+    const f = fixture(),
+      bounds = { x: 50, y: 60, width: 800, height: 600, radius: 8 };
+    f.state.phase = 'human';
+    try {
+      f.present(bounds);
+      const request: NativeBrowserMenuRequest = {
+        requestId: 'stale-lifecycle-menu',
+        id: 'page',
+        scope: { ...f.scope },
+        incarnation: 'incarnation',
+        navigation: 0,
+        x: 850,
+        y: 60,
+        details: [],
+        items: [{ action: 'reload', enabled: true }],
+      };
+      const template = popupTemplate,
+        options = popupOptions,
+        loads = f.contents.loads;
+      if (boundary === 'withdraw') f.present(null);
+      if (boundary === 'hide') f.windowEvent('hide');
+      if (boundary === 'owner') f.scope.viewSelection++;
+      if (boundary === 'close') f.invoke({ action: 'close', id: 'page' });
+      expect(await f.menu(request)).toBeNull();
+      expect(popupTemplate).toBe(template);
+      expect(popupOptions).toBe(options);
+      expect(f.contents.loads).toBe(loads);
+      expect(f.contents.stops).toBe(0);
+      expect(f.state.navigation).toBe(0);
+      expect(f.armed).toEqual([]);
+      if (boundary === 'hide') f.windowEvent('show');
+      const id = boundary === 'close' ? 'successor' : 'page';
+      if (boundary === 'close')
+        expect(f.invoke({ action: 'navigate', id, input: 'http://localhost/page' })).toMatchObject({
+          ok: true,
+        });
+      expect(f.invoke({ action: 'present', id, bounds })).toMatchObject({ ok: true });
+      const response = f.menu({
+        ...request,
+        requestId: 'current-successor-menu',
+        id,
+        scope: { ...f.scope },
+      });
+      expect(popupTemplate).not.toBe(template);
+      expect(popupTemplate.map((row) => row.label)).toEqual(['刷新网页']);
+      popupTemplate[0]!.click!({} as Electron.MenuItem, f.window, {} as Electron.KeyboardEvent);
+      popupOptions!.callback!();
+      expect(await response).toBe('reload');
+      expect(f.contents.loads).toBe(loads); // Returning a menu choice executes no page action itself.
+      expect(f.armed).toEqual([]);
+    } finally {
+      f.close();
+    }
+  });
+
+test('native menus still reject invalid senders, malformed requests and actual native failures', async () => {
+  const f = fixture();
+  f.state.phase = 'human';
+  const request: NativeBrowserMenuRequest = {
+    requestId: 'strict-menu',
+    id: 'page',
+    scope: { ...f.scope },
+    incarnation: 'incarnation',
+    navigation: 0,
+    x: 850,
+    y: 60,
+    details: [],
+    items: [{ action: 'reload', enabled: true }],
+  };
+  try {
+    f.present({ x: 50, y: 60, width: 800, height: 600, radius: 8 });
+    const template = popupTemplate;
+    await expect(f.menu(request, f.owner.mainFrame, f.contents)).rejects.toThrow(
+      'native_sender_denied',
+    );
+    await expect(f.menu(request, { url: f.owner.mainFrame.url })).rejects.toThrow(
+      'native_sender_denied',
+    );
+    await expect(f.menu({ ...request, x: -1 })).rejects.toThrow('invalid_browser_request');
+    expect(popupTemplate).toBe(template);
+    popupBuildError = Error('native menu construction failed');
+    await expect(f.menu(request)).rejects.toThrow('native menu construction failed');
+    expect(popupTemplate).toBe(template);
+    expect(f.contents.loads).toBe(1);
+    expect(f.contents.stops).toBe(0);
+    expect(f.armed).toEqual([]);
+  } finally {
+    popupBuildError = undefined;
+    f.close();
   }
 });
 
@@ -3553,13 +3649,15 @@ if (process.platform === 'darwin') {
       popupTemplate[0]!.click!({} as Electron.MenuItem, f.window, {} as Electron.KeyboardEvent);
       popupOptions!.callback!();
       expect(await response).toBe('reload');
-      await expect(f.menu({ ...request, draft: 'f'.repeat(32) })).rejects.toThrow();
-      await expect(
-        f.menu({ ...request, items: [{ action: 'handoff', enabled: true }] }),
-      ).rejects.toThrow();
-      await expect(
-        f.menu({ ...request, draft: undefined, scope: { ...f.scope } }),
-      ).rejects.toThrow();
+      const template = popupTemplate,
+        options = popupOptions;
+      expect(await f.menu({ ...request, draft: 'f'.repeat(32) })).toBeNull();
+      expect(
+        await f.menu({ ...request, items: [{ action: 'handoff', enabled: true }] }),
+      ).toBeNull();
+      expect(await f.menu({ ...request, draft: undefined, scope: { ...f.scope } })).toBeNull();
+      expect(popupTemplate).toBe(template);
+      expect(popupOptions).toBe(options);
       const stale = f.menu({ ...request, requestId: 'stale-draft-menu' });
       f.owner.mainFrame = { url: f.owner.mainFrame.url };
       popupTemplate[0]!.click!({} as Electron.MenuItem, f.window, {} as Electron.KeyboardEvent);

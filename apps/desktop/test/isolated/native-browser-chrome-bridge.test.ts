@@ -55,6 +55,17 @@ const event = () => ({
   action: { type: 'navigate' },
 });
 
+test('options-menu feedback is bounded display text, independent of page errors', () => {
+  const value = snapshot();
+  Object.assign(value.toolbar, { optionsIssue: '页面选项暂不可用，请重试。' });
+  expect(isNativeBrowserChromeSnapshot(value)).toBe(true);
+  expect(value.toolbar.error).toBeUndefined();
+  for (const invalid of [true, {}, 'x'.repeat(2049), 'untrusted\0text']) {
+    Object.assign(value.toolbar, { optionsIssue: invalid });
+    expect(isNativeBrowserChromeSnapshot(value)).toBe(false);
+  }
+});
+
 test('Chrome draft owners are disjoint from Session authority and cannot carry Agent control or notes', () => {
   const value = snapshot(),
     draft = { draft: 'a'.repeat(32) };

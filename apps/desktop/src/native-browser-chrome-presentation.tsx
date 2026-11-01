@@ -54,9 +54,9 @@ export function NativeBrowserChromeToolbar({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={data.error ? '页面状态与选项' : '页面选项'}
-              title={data.error || '页面选项'}
-              data-status={data.error ? 'error' : undefined}
+              aria-label={data.error || data.optionsIssue ? '页面状态与选项' : '页面选项'}
+              title={data.optionsIssue || data.error || '页面选项'}
+              data-status={data.error || data.optionsIssue ? 'error' : undefined}
               onClick={(event) =>
                 dispatch({ type: 'show-options', anchor: menuAnchor(event.currentTarget) })
               }

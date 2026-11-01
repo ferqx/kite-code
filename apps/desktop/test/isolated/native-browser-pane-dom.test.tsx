@@ -14,6 +14,7 @@ import {
   projectNativeBrowserBounds,
   projectNativeBrowserLayout,
 } from '../../src/native-browser-bridge';
+import type { NativeBrowserToolbarPort } from '../../src/native-browser-chrome-types';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -2996,6 +2997,55 @@ test('annotation tools use the outer toolbar host and navigation is writable onl
       expect(surface.querySelector('button, input, header')).toBeNull();
       expect(f.document.querySelector('.native-browser-viewport') === viewport).toBe(true);
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test('a current options-menu failure stays readable without withdrawing the page or becoming a page error', async () => {
+  const page: NativeBrowserState = {
+    id: 'browser',
+    title: 'Page',
+    url: 'https://example.test/retained',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  };
+  const f = paneFixture(page);
+  let toolbar: NativeBrowserToolbarPort | undefined;
+  let attempts = 0;
+  Object.assign(f.window.kiteNative!, {
+    async showBrowserMenu() {
+      if (++attempts === 1) throw Error('native_menu_failed');
+      return 'reload' as const;
+    },
+  });
+  try {
+    await f.render({
+      scope: { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 },
+      onChromePresentation: (port) => {
+        toolbar = port;
+      },
+    });
+    const viewport = f.document.querySelector<HTMLElement>('.native-browser-viewport')!;
+    viewport.getBoundingClientRect = () => new f.window.DOMRect(100, 100, 300, 400);
+    await f.flush(() => f.window.dispatchEvent(new f.window.Event('resize')));
+    const withdrawals = () => f.requests.filter((r) => r.action === 'present' && !r.bounds).length;
+    const before = withdrawals();
+    await f.flush(() => f.button('页面选项').click());
+    expect(attempts).toBe(1);
+    expect(toolbar?.data.error).toBeUndefined();
+    expect(toolbar?.data.optionsIssue).toBe('页面选项暂不可用，请重试。');
+    expect(f.button('页面状态与选项').title).toBe('页面选项暂不可用，请重试。');
+    expect(withdrawals()).toBe(before);
+    expect(f.document.querySelector('.native-browser-viewport')).toBe(viewport);
+    expect(f.requests.some((r) => r.action === 'reload')).toBe(false);
+    await f.flush(() => f.button('页面状态与选项').click());
+    expect(attempts).toBe(2);
+    expect(toolbar?.data.optionsIssue).toBeUndefined();
+    expect(toolbar?.data.error).toBeUndefined();
+    expect(f.requests.filter((r) => r.action === 'reload')).toHaveLength(1);
+    expect(withdrawals()).toBe(before);
   } finally {
     await f.close();
   }

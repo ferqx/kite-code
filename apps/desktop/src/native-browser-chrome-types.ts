@@ -16,6 +16,8 @@ export interface NativeBrowserToolbarPresentation {
   readonly canGoForward: boolean;
   readonly canNavigate: boolean;
   readonly error?: string;
+  /** A local options-menu failure does not invalidate the page presentation. */
+  readonly optionsIssue?: string;
   readonly notesAvailable: boolean;
   readonly notesOpen: boolean;
   readonly optionsAvailable: boolean;

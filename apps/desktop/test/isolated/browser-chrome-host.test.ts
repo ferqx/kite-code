@@ -493,6 +493,60 @@ test('display facts distinguish an unpublished owner from explicit Root presenta
   }
 });
 
+for (const part of ['options', 'control'] as const)
+  test(`a local ${part} menu issue retains the exact live page while a real page error still withdraws it`, async () => {
+    const f = fixture();
+    try {
+      await f.activate();
+      const root = f.root.getBounds(),
+        chrome = f.chrome().getBounds(),
+        wire = f.envelope(),
+        next = f.snapshot(3, true);
+      if (part === 'options')
+        Object.assign(next.toolbar, { optionsIssue: '页面选项暂不可用，请重试。' });
+      else
+        Object.assign(next, {
+          control: {
+            id: 'page',
+            label: '浏览器控制',
+            detail: '当前由用户控制',
+            issue: '控制菜单暂不可用，请重试。',
+            handoffAvailable: false,
+            closeAvailable: false,
+            pending: false,
+            details: [],
+          },
+        });
+      f.publish(next);
+      await tick();
+      expect(f.host.readyFor('page', f.scope)).toBe(true);
+      expect(f.envelope()).toMatchObject({
+        attachment: wire.attachment,
+        pageToken: wire.pageToken,
+        hosted: true,
+        actionable: true,
+      });
+      expect(f.host.displayState()).toMatchObject({ kind: 'page', id: 'page', presented: true });
+      expect(f.root.getBounds()).toEqual(root);
+      expect(f.chrome().getBounds()).toEqual(chrome);
+      expect(f.chrome().getVisible()).toBe(true);
+      expect(f.page.getVisible()).toBe(true);
+      expect(f.suspended).toEqual([]);
+      const failed = f.snapshot(4, true);
+      Object.assign(failed.toolbar, { error: '网页加载失败' });
+      f.publish(failed);
+      await tick();
+      expect(f.host.readyFor('page')).toBe(false);
+      expect(f.host.displayState()).toMatchObject({ kind: 'root' });
+      expect(f.root.getBounds()).toEqual({ x: 0, y: 0, width: 1000, height: 700 });
+      expect(f.chrome().getVisible()).toBe(false);
+      expect(f.suspended).toEqual(['page']);
+      expect(f.page.webContents.destroyed).toBe(false);
+    } finally {
+      f.host.dispose();
+    }
+  });
+
 test('display facts select same-URL pages by current id and token instead of an old binding', async () => {
   const f = fixture();
   const second = f.addPage('second', f.page.webContents.getURL());

@@ -3474,7 +3474,7 @@ export function registerNativeBrowserIpc(options: {
       assertNativeSender(event, disposed ? undefined : window, rendererUrl);
       const request = parseNativeBrowserMenuRequest(value),
         tab = tabs.get(request.id);
-      if (!tab) throw Error('browser_presentation_unavailable');
+      if (!tab) return null;
       const selected = (options.grantScope ?? options.selectedScope)?.();
       const binding = JSON.stringify([
         request.draft ?? selected,
@@ -3518,7 +3518,9 @@ export function registerNativeBrowserIpc(options: {
           request.navigation === control?.navigation
         );
       };
-      if (!current()) throw Error('browser_presentation_unavailable');
+      // A collapse/selection change may overtake this asynchronous UI request.
+      // Retire it like a late native-menu selection, without failing the page.
+      if (!current()) return null;
       if (menu) {
         cancelMenu();
         return null;

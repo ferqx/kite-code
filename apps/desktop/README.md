@@ -2336,3 +2336,17 @@ Main capture／grant36项383断言、Producer／menu／human／flow／async-root
 用户新增输入网址、网页呈现后整右栏变色。Root的`.right-sidebar`明确使用`--page-background`，但独立Chrome的html/body/root和`.kite-client`保持透明，稳定`.session-tabs`没有绘制自己的底色；准备阶段另铺`--background`，因此准备／稳定接管出现不同表面。主题值原已通过snapshot同步，该缺口是实际承载层漏背景，网页CSS不参与独立Chrome文档。现在只为该宿主的`.session-tabs`补与Root一致的`--page-background`；外层透明、物理几何／层序、准备与Page确认、输入和权限均保持，不借添加`.right-sidebar`类引入额外边框或材质inset。网页正文仍由站点自身配色，标签／地址栏跟随应用主题。
 
 本切口只改变CSS背景，手册中主题与网页保留承诺已核对，Agent／Main／工具协议和生命周期未改；原415项状态回归及类型结果按未变源码复用，不重做导航／resize矩阵，也不升级040的整体视觉资格。私有041以原生产Vite／Tailwind样式、独立最小DOM文档核深浅主题×修前修后，共4组／12个表面。修前Root／准备为主题实色，稳定宿主computed透明，PNG透出夹具灰色背衬；该灰色不是Electron默认canvas色。修后Root／准备／稳定三者的computed与真实PNG均一致：浅色RGB250／暗色RGB25且alpha255，前后几何逐字段相同、pageErrors为空，两份源hash不变。4张PNG已检查，具体值与原始失败／警告保留在本机`.cache/browser-native-clip-probe-20261031/chrome-surface-color-041/REVIEW.json`及`RESULT.json`；此证据只授CSS与shell配色，不代替真实Electron导航交接、resize或全程无闪。CSS Biome、diff空白及文档结构／影响检查通过，本小修复的限定iteration_complete为ready，未暂存／提交／推送。
+
+### 分隔线显隐后的迟到菜单（2026-11-01）
+
+用户在聊天／浏览器分隔线反复收起展开后报`kite:native:browser-menu` handler异常。准确用户制品`.cache/unified-desktop-FCMrwe/main.cjs:217882`是Main菜单`!current()`拒绝分支，页面对象存在；不能由截图推定某一个准入条件或实际DOM事件来源。源码另证确定的放大链：过期菜单请求抛异常，Popup将其写成menuIssue，Pane又将该局部提示并入网页error，Host因此判整页失格并撤展示。Control的issue同样仅来自菜单局部反馈，不等于页面／权限故障。
+
+Main现在将已解析但页面／展示owner已失效的菜单请求按原`null`取消语义退休；来源校验、畸形输入和真实Native异常仍拒绝，不捕获或改写业务错误。Popup在layout提交阶段取消hide／host／owner变化下的旧请求，晚拒绝另核当前visible；取消不重试、不重放。页面选项的局部失败通过有界`toolbar.optionsIssue`传递，仍在原选项按钮和详情中可读，不能成为`toolbar.error`；Control菜单局部issue也不撤原页。真正网页错误、notes／overlay、scope、Page帧和权限限制继续沿原门禁。该字段仅属私有纯展示数据，没有工具／协议版本变更。
+
+受控定向Main242项4153断言、Host120项1522断言、Pane61项629断言、Popup17项85断言、Chrome Renderer16项156断言、bridge6项88断言全绿。Popup隐藏／host／owner三项有准确layout提交前后红绿，Main／Host新例首次执行时补丁已在，不冒充红绿；旧制品异常是其修前事实。当前测试核迟到取消、零popup／业务派发及后继显式菜单、严格sender／frame／参数与真实Native失败、局部可读提示保页及真实网页错误仍撤，真实内部分隔线过程资格续于本节，不以受控回归称像素无异常。
+
+042冻结开发制品用原隔离HOME/Profile完成一次有界场景：真实CG拖内部分隔线收起两轮，再由既有标题栏按钮恢复（收起后分隔线已禁用，不冒称拖回）；Native隐藏分别早于可信pointerup995／999ms，期间未复活。自然menu invoke／show-options均0，原始非预期菜单事件来源尚未复现。另明确标记的一次受控迟到请求在收起后执行原Main，准确返回null且未创建popup；其后显式菜单真实打开、关闭回调和null结果正常，零handler错误。原百度WebContents／timeOrigin／输入及scrollY0、Root文档保持，业务导航仅初次URL，无重放或新模型。21份生产源零漂移，6175ms场景、两路12秒录制code0、launcher退出0、normal-terminate/drop0；隔离Main2743已absent，启动前用户旧Main87395已自行退出，未操作其Profile或进程。原始driver仅正常ready，无同截图handler异常或窗口warning；不能据此撤销原用户日志或猜其唯一准入失败条件。
+
+完整离线复核在本机`.cache/browser-native-clip-probe-20261031/hosted-divider-menu-042-final/review/REVIEW.json`，原逻辑事实另见同目录上级`analysis.json`：两路活动0–约6.8秒及尾0.4秒，共672个选定样本，经34张去重联系表和16张原尺寸帧核实，重复只按同源完整PNG字节复用。未见菜单错误文案扩大撤页，最后显式菜单可见并淡出；真实关闭callback不是像素全撤证明（D282/6.038333、D284/6.096667仍有淡出影，D290/6.238333已无）。原片字节／SHA保持。既有过渡仍明确保留：D38/0.721667收起灰列，D39全宽Root；P125/2.638333灰列后P126全宽；D89/1.813333展开暗正文到D90/1.855000原页，D178/3.746667短Spinner到D179/3.763333原输入。该菜单修复不授整体无灰／无闪或FPS资格，也不以两轮自然未触发冒称原触发来源已查明。
+
+本切口按`document-before-commit`完成限定`iteration_complete`：462项相关回归／6633断言、Desktop类型、实际变更TS/TSX的Biome、Core边界、测试归属及文档结构／影响检查通过。手册与跨包边界同步正常取消、菜单局部反馈保页及真实故障保留；原权限／Tool／Agent Loop未改，不重跑等价天气任务。当前改动未暂存、提交或推送；Main修复须完整重启开发进程生效，Renderer HMR不会替换旧Main handler。

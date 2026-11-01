@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, useLayoutEffect } from 'react';
 import type {
   NativeBrowserMenuAction,
   NativeBrowserMenuRequest,
@@ -39,6 +39,7 @@ function Harness({
   hostKey,
   generation = 1,
   anchor,
+  onLayout,
 }: {
   identity?: string;
   visible?: boolean;
@@ -48,6 +49,7 @@ function Harness({
   hostKey?: string;
   generation?: number;
   anchor?: NativeBrowserChromeRect;
+  onLayout?: () => void;
 }) {
   const popup = useNativeBrowserPopup({
     identity,
@@ -61,6 +63,7 @@ function Harness({
     onAction: (action) => actions.push(action),
     onError: (cause) => errors.push(cause),
   });
+  useLayoutEffect(() => onLayout?.(), [onLayout]);
   return (
     <button type="button" onClick={(event) => popup(anchor ?? event.currentTarget)}>
       Menu
@@ -166,14 +169,78 @@ test('a newly disabled action cannot use an earlier enabled native result', asyn
 test('a native failure retains its error and allows an explicit retry', async () => {
   await render();
   await open();
-  await flush(() => reject(Error('native_menu_failed')));
-  expect(errors).toHaveLength(1);
+  const failure = Error('browser_presentation_unavailable');
+  await flush(() => reject(failure));
+  expect(errors).toEqual([failure]);
   expect(actions).toHaveLength(0);
   await open();
   expect(requests).toHaveLength(2);
   await flush(() => resolve('close'));
   expect(actions).toEqual(['close']);
 });
+for (const boundary of ['hide', 'host', 'owner'] as const)
+  test(`a ${boundary} commit retires the old popup before passive cleanup and its late rejection cannot affect the next explicit menu`, async () => {
+    const replies: {
+      accept(action: NativeBrowserMenuAction | null): void;
+      decline(cause: Error): void;
+    }[] = [];
+    Object.assign(window, {
+      kiteNative: {
+        ...window.kiteNative,
+        showBrowserMenu(input: NativeBrowserMenuRequest) {
+          requests.push(input);
+          // Deliver the already queued native reaction at a controlled layout
+          // boundary; awaiting React act would flush passive cleanup first.
+          return {
+            // biome-ignore lint/suspicious/noThenProperty: This lifecycle regression intentionally delivers a native reaction before passive cleanup.
+            then(
+              accept: (action: NativeBrowserMenuAction | null) => void,
+              decline: (cause: Error) => void,
+            ) {
+              replies.push({ accept, decline });
+              return Promise.resolve();
+            },
+          };
+        },
+      },
+    });
+    await render({ hostKey: 'chrome' });
+    await open();
+    expect(replies).toHaveLength(1);
+    const first = requests[0]!;
+    let retiredAtLayout = false;
+    let requestCountAtLayout = 0;
+    let errorsAtLayout: unknown[] = [];
+    await render({
+      hostKey: boundary === 'host' ? 'root' : 'chrome',
+      generation: boundary === 'owner' ? 2 : 1,
+      visible: boundary !== 'hide',
+      onLayout() {
+        retiredAtLayout = cancels.includes(first.requestId);
+        if (boundary !== 'hide') document.querySelector('button')!.click();
+        replies[0]!.decline(Error('browser_presentation_unavailable'));
+        requestCountAtLayout = requests.length;
+        errorsAtLayout = [...errors];
+      },
+    });
+    expect(retiredAtLayout).toBe(true);
+    expect(errorsAtLayout).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(actions).toEqual([]);
+    expect(cancels).toEqual([first.requestId]);
+    if (boundary === 'hide') {
+      expect(requestCountAtLayout).toBe(1);
+      await render({ hostKey: 'chrome' });
+      expect(requests).toHaveLength(1); // returning never reopens the old popup
+      await open();
+    } else expect(requestCountAtLayout).toBe(2);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.requestId).not.toBe(first.requestId);
+    expect(replies).toHaveLength(2);
+    await flush(() => replies[1]!.accept('close'));
+    expect(actions).toEqual(['close']);
+    expect(errors).toEqual([]);
+  });
 test('late failures from an obsolete identity do not appear in the selected page', async () => {
   await render();
   await open();

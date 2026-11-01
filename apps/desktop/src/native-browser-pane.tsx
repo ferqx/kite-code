@@ -1159,7 +1159,6 @@ export function NativeBrowserPane({
   ]);
   const error =
     issue ||
-    menuIssue ||
     (state.error === 'process_gone' && state.control?.phase === 'unknown'
       ? '浏览页面已停止，控制权尚未确认，请先停止原浏览器任务。'
       : state.error && errors[state.error]);
@@ -1178,9 +1177,11 @@ export function NativeBrowserPane({
           { action: state.loading ? 'stop' : 'reload', enabled: canNavigate },
         ]
       : [],
-    details: [error, !canNavigate ? '页面由 Agent 控制，接管后可手动导航。' : undefined].filter(
-      (value): value is string => !!value,
-    ),
+    details: [
+      error,
+      menuIssue,
+      !canNavigate ? '页面由 Agent 控制，接管后可手动导航。' : undefined,
+    ].filter((value): value is string => !!value),
     onAction(action) {
       if (['back', 'forward', 'reload', 'stop'].includes(action))
         void request({ action: action as 'back' | 'forward' | 'reload' | 'stop', id });
@@ -1205,6 +1206,7 @@ export function NativeBrowserPane({
       canGoForward: state.canGoForward,
       canNavigate,
       error,
+      optionsIssue: menuIssue,
       notesAvailable,
       notesOpen,
       optionsAvailable: !!state.url || !!error,
@@ -1218,6 +1220,7 @@ export function NativeBrowserPane({
       state.canGoForward,
       canNavigate,
       error,
+      menuIssue,
       notesAvailable,
       notesOpen,
     ],

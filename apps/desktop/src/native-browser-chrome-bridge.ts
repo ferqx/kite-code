@@ -238,6 +238,7 @@ export function isNativeBrowserChromeSnapshot(
       'canGoForward',
       'canNavigate',
       'error',
+      'optionsIssue',
       'notesAvailable',
       'notesOpen',
       'optionsAvailable',
@@ -247,6 +248,7 @@ export function isNativeBrowserChromeSnapshot(
     !text(toolbar.address, 2048) ||
     !text(toolbar.readonlyURL, 4096) ||
     !optionalText(toolbar.error, 2048) ||
+    !optionalText(toolbar.optionsIssue, 2048) ||
     !bools(toolbar, [
       'loading',
       'hasPage',

@@ -278,6 +278,31 @@ test('warm native preparation keeps the same bar without a clipped loading body 
   }
 });
 
+test('a local options issue stays readable in live Chrome without replacing its address or disabling retry', async () => {
+  const f = await fixture();
+  try {
+    await f.render();
+    const address = f.address();
+    await f.update({
+      toolbar: { ...f.current.snapshot.toolbar, optionsIssue: '页面选项暂不可用，请重试。' },
+    });
+    const button = document.querySelector<HTMLButtonElement>('[aria-label="页面状态与选项"]')!;
+    expect(button.title).toBe('页面选项暂不可用，请重试。');
+    expect(button.dataset.status).toBe('error');
+    expect(button.disabled).toBe(false);
+    expect(f.address()).toBe(address);
+    expect(address.readOnly).toBe(false);
+    expect(f.current.snapshot.toolbar.error).toBeUndefined();
+    await f.click('页面状态与选项');
+    expect(f.events.at(-1)).toMatchObject({ part: 'toolbar', action: { type: 'show-options' } });
+    await f.update({ toolbar: { ...f.current.snapshot.toolbar, optionsIssue: undefined } });
+    expect(document.querySelector('[aria-label="页面选项"]')).not.toBeNull();
+    expect(f.address()).toBe(address);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a cleared Chrome intent removes old controls and status while retaining an opaque themed strip', async () => {
   const f = await fixture();
   try {

@@ -277,8 +277,7 @@ export function createNativeBrowserChromeHost(options: {
     !value.tabs.restoreIssue &&
     !value.covered &&
     !value.toolbar.notesOpen &&
-    !value.toolbar.error &&
-    !value.control?.issue;
+    !value.toolbar.error;
   const qualified = (value: NativeBrowserChromeSnapshot) =>
     targetIntent(value) && value.toolbar.hasPage;
   const acceptsPresentation = (id: string, scope: NativeBrowserChromeOwner) =>
