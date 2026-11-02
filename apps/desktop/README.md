@@ -32,6 +32,10 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 ## Markdown 与附件输入
 
+[网页链接入口](electron/external-links.ts)由 Main 为当前准确 renderer 注册新窗口处理：只将不带凭据的 HTTP／HTTPS 地址交给系统默认浏览器，始终拒绝创建新的应用窗口。延期投递前重核窗口与 renderer，拒绝本地文件、自定义协议和无效地址；浏览器启动失败显示“无法打开链接”，原聊天仍可阅读并再次点击。消息内标题／脚注继续由共享 Markdown 在原消息跳转，输入框编辑链接仍不导航。[Main 回归](test/isolated/native-main-scheduling-lifecycle.test.ts)核接线、地址拒绝、页面变化／关闭与失败重试；[Electron 回归](test/isolated/native-browser.test.ts)通过原 MessageContent 的鼠标点击、键盘 Enter 和消息内跳转核系统打开请求与原窗口保持。Main 更新需完全退出并重启客户端。
+
+2026-11-02，Windows x64／Bun1.4.3／Electron44.3.0，`840f71b31`加本次链接修复：`bun test --parallel=1 --max-concurrency=1 ./apps/desktop/test/isolated/native-main-scheduling-lifecycle.test.ts`为33项／388断言通过；`bun test --parallel=1 --max-concurrency=1 ./apps/desktop/test/isolated/native-browser.test.ts`为1项及实际窗口断言通过，Desktop typecheck、定向Biome、边界、测试归属及文档检查通过。隔离夹具另启用真实系统打开，在可见回复上实际点击 Excalidraw，Main准确交出原GitHub地址，系统Chrome出现对应项目标题；全过程记录原聊天仅一条回复、相同页面地址和滚动位置，无脚本错误。观察产物位于本机`.cache/native-links-acceptance/`。Computer Use随后因无法可靠识别浏览器当前URL而停止，浏览器页面截图未完成核验；自动回归中的系统打开端口为替身，真实点击仅覆盖本机隔离组件窗口，不代表完整安装包或其他平台资格。生产renderer诊断常量保持关闭，未调用模型。
+
 用户消息的图片和普通文件通过 `SessionPage.renderMessageAttachments` 从正文气泡中分离，由 [NativeUserImages](src/native-user-images.tsx) 接入[共享 Attachment 列表](../../packages/ui/src/desktop/MessageAttachments.tsx)，沿原文件后图片的顺序显示，超宽时横向滚动；正文、时间和复制归原消息。首次发送及已有会话发送冻结附件名称作为占位，接管前不再将图片数量写进正文，也不借用已被草稿释放的 blob URL；历史确认后由原图片 reader／缩略图缓存显示预览。原输入身份、图片暂存、文件引用、读取与失败重试不变。空正文且没有需显示的真实格式／读取状态时不创建正文内容。产品尺寸和操作归[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。
 
 2026-10-23，Windows x64／Bun1.4.3、Chrome155.0.8059.85、`7af0dee6b` 加本次附件工作树：[图片浏览器夹具](test/image-previews-browser-runner.fixture.ts)的 `--attachments --observe` 在生产组件与样式中逐步观察深浅主题×1280／390px的发送占位→保存预览、滚动两端→键盘回翻、刷新→缓存切回、失败→仅附件→重开；正文位置、消息顺序、时间／复制数量和横向溢出均核对。发现并修正仅附件消息被空正文过滤、失败边框跨附件和窄屏焦点裁切；最终 `--attachments` 四组通过，并补核重开图片就绪与焦点轮廓。过程截图／报告位于本机 `.cache/image-previews-browser-SfuHgK`，最终复验位于 `.cache/image-previews-browser-Xpmahn`。[首条消息DOM回归](test/isolated/native-new-conversation-dom.test.tsx)70项通过，包含文字＋文件／仅文件的延迟选择与历史接管；图片读取、输入附件、消息复制及阅读滚动定向回归通过。此为隔离生产组件及受控桥接验收，未取得本轮完整安装版Electron、真实模型或其他平台资格；既有嵌套 `@keyframes` 编译提示保留。

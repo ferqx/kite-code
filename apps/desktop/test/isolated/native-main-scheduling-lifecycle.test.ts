@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AgentClient } from '@kite-ai/client';
+import type { WebContents } from 'electron';
 import type { DevelopmentServiceReload } from '../../electron/development';
 import type { ScheduledTaskClock, ScheduledTaskRunner } from '../../electron/scheduled-task-runner';
 import { createScheduledTaskData } from '../../electron/scheduled-tasks';
@@ -75,6 +76,9 @@ async function mainFixture(
   const trace: string[] = [],
     errors: unknown[] = [];
   const dialogs: unknown[][] = [];
+  const externalUrls: string[] = [];
+  let rejectExternalOpen = false;
+  let windowOpenHandler!: Parameters<WebContents['setWindowOpenHandler']>[0];
   let windowDestroyed = false;
   let windowVisible = false;
   let windowMinimized = false;
@@ -149,7 +153,9 @@ async function mainFixture(
       send: (_channel: string, event: { kind: string; phase: string }) => {
         if (event.kind === 'lifecycle') lifecyclePhases.push(event.phase);
       },
-      setWindowOpenHandler: () => {},
+      setWindowOpenHandler: (handler: typeof windowOpenHandler) => {
+        windowOpenHandler = handler;
+      },
       setIgnoreMenuShortcuts: () => {},
       session: {
         setPermissionRequestHandler: () => {},
@@ -224,6 +230,12 @@ async function mainFixture(
       app,
       BrowserWindow,
       clipboard: { writeText: () => {} },
+      shell: {
+        async openExternal(url: string) {
+          externalUrls.push(url);
+          if (rejectExternalOpen) throw Error('fixture_browser_unavailable');
+        },
+      },
       dialog: {
         showErrorBox: (...args: unknown[]) => errors.push(args),
         showMessageBox: async (...args: unknown[]) => {
@@ -418,7 +430,17 @@ async function mainFixture(
     prefix + names.map((name) => `export const ${name} = ${source}.${name};`).join('\n');
   const mocks: Record<string, string> = {
     electron: exports(
-      ['app', 'BrowserWindow', 'clipboard', 'dialog', 'ipcMain', 'Menu', 'nativeTheme', 'Tray'],
+      [
+        'app',
+        'BrowserWindow',
+        'clipboard',
+        'dialog',
+        'ipcMain',
+        'Menu',
+        'nativeTheme',
+        'shell',
+        'Tray',
+      ],
       'f.electron',
     ),
     '@kite-ai/agent/profile': exports(['selectProfile']),
@@ -508,7 +530,10 @@ async function mainFixture(
               };
             });
             build.onResolve({ filter: /.*/ }, (args) => {
-              if (resolve(args.importer) === mainPath && Object.hasOwn(mocks, args.path))
+              if (
+                (resolve(args.importer) === mainPath || args.path === 'electron') &&
+                Object.hasOwn(mocks, args.path)
+              )
                 return { path: args.path, namespace: 'native-main-fixture' };
               return undefined;
             });
@@ -550,6 +575,15 @@ async function mainFixture(
     trace,
     errors,
     dialogs,
+    externalUrls,
+    rejectExternalOpen: (reject: boolean) => {
+      rejectExternalOpen = reject;
+    },
+    openWindow: (url: string) =>
+      windowOpenHandler({ url } as Parameters<typeof windowOpenHandler>[0]),
+    rendererLocation: (url: string) => {
+      windows.at(-1)!.webContents.mainFrame.url = url;
+    },
     destroyWindow: () => {
       windows.at(-1)?.destroy();
     },
@@ -613,6 +647,62 @@ async function mainFixture(
 }
 
 const replacement = { id: 'a'.repeat(32), sha256: 'b'.repeat(64) };
+
+test('Main opens only web links from its current renderer and keeps app navigation closed', async () => {
+  const fixture = await mainFixture('none');
+  const drain = () => new Promise<void>((resolve) => setImmediate(resolve));
+  try {
+    for (const url of [
+      'https://github.com/excalidraw/excalidraw',
+      'http://localhost:3000/path?q=1#top',
+    ]) {
+      expect(fixture.openWindow(url)).toEqual({ action: 'deny' });
+      await drain();
+      expect(fixture.externalUrls.at(-1)).toBe(url);
+    }
+    for (const url of [
+      'file:///C:/private.txt',
+      'javascript:alert(1)',
+      'mailto:user@example.com',
+      'kite://private',
+      'https://user:secret@example.com/',
+      'https://',
+      `https://example.com/${'x'.repeat(8192)}`,
+    ])
+      expect(fixture.openWindow(url)).toEqual({ action: 'deny' });
+    await drain();
+    expect(fixture.externalUrls).toHaveLength(2);
+    fixture.rendererLocation('https://foreign.example/');
+    fixture.openWindow('https://example.com/foreign');
+    await drain();
+    expect(fixture.externalUrls).toHaveLength(2);
+    fixture.rendererLocation('http://127.0.0.1:43219/#message');
+    fixture.openWindow('https://example.com/late');
+    fixture.rendererLocation('https://foreign.example/');
+    await drain();
+    expect(fixture.externalUrls).toHaveLength(2);
+    fixture.rendererLocation('http://127.0.0.1:43219/');
+    fixture.rejectExternalOpen(true);
+    fixture.openWindow('https://example.com/retry');
+    await drain();
+    expect(fixture.errors.splice(0)).toEqual([
+      ['无法打开链接', '无法打开浏览器，请检查系统默认浏览器设置后重试。'],
+    ]);
+    fixture.rejectExternalOpen(false);
+    fixture.openWindow('https://example.com/retry');
+    await drain();
+    expect(fixture.externalUrls.slice(-2)).toEqual([
+      'https://example.com/retry',
+      'https://example.com/retry',
+    ]);
+    fixture.openWindow('https://example.com/closed');
+    fixture.destroyWindow();
+    await drain();
+    expect(fixture.externalUrls).toHaveLength(4);
+  } finally {
+    await fixture.close();
+  }
+});
 
 for (const response of [0, 1]) {
   test.skipIf(process.platform !== 'win32')(

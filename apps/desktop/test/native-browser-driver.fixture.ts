@@ -46,6 +46,32 @@ try {
       console.error(await electron!.evaluate(() => globalThis.browserTabsHostFixture.hits));
       throw error;
     });
+  const rendererUrl = page.url();
+  await page.getByRole('link', { name: 'Excalidraw', exact: true }).click();
+  await page.getByRole('link', { name: 'Stirling-PDF', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const externalDeadline = Date.now() + 6000;
+  let externalUrls = await electron.evaluate(() => globalThis.browserTabsHostFixture.externalUrls);
+  while (externalUrls.length < 2 && Date.now() < externalDeadline) {
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    externalUrls = await electron.evaluate(() => globalThis.browserTabsHostFixture.externalUrls);
+  }
+  assert.deepEqual(externalUrls, [
+    'https://github.com/excalidraw/excalidraw',
+    'https://github.com/Stirling-Tools/Stirling-PDF',
+  ]);
+  await page.getByRole('link', { name: '跳转', exact: true }).click();
+  assert.equal(
+    await page
+      .getByRole('heading', { name: '目标', exact: true })
+      .evaluate((node) => node === document.activeElement),
+    true,
+  );
+  assert.equal(page.url(), rendererUrl);
+  assert.equal(electron.windows().length, 1);
+  assert.equal(await page.getByText('链接后保留的回复。', { exact: true }).count(), 1);
   await page.getByRole('button', { name: '标签页', exact: true }).click();
   const rail = page.getByRole('complementary', { name: '标签页', exact: true });
   await rail.getByRole('tab').waitFor();
@@ -330,7 +356,7 @@ try {
     }
   }
   console.log(
-    'browser_electron_pass: navigation, history, readers, resize, isolation, foreign IPC, popup, download, destruction',
+    'browser_electron_pass: external reply links, keyboard, fragments, navigation, history, readers, resize, isolation, foreign IPC, popup, download, destruction',
   );
 } finally {
   clearTimeout(timeout);

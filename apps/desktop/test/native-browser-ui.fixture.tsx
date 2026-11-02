@@ -1,4 +1,4 @@
-import { SessionPage } from '@kite-ai/ui/desktop';
+import { MessageContent, SessionPage } from '@kite-ai/ui/desktop';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { closeNativeBrowserTab, renderNativeBrowser } from '../src/native-browser-pane';
@@ -36,11 +36,20 @@ function Fixture() {
       selected={scope}
       readingKey={scope}
       sessionLabel="会话标题"
-      messages={[]}
+      messages={[
+        {
+          id: 'reply-with-links',
+          role: 'assistant',
+          settled: true,
+          finalReply: true,
+          text: '- [Excalidraw](https://github.com/excalidraw/excalidraw)\n- [Stirling-PDF](https://github.com/Stirling-Tools/Stirling-PDF)\n\n[跳转](#目标)\n\n## 目标\n\n链接后保留的回复。',
+        },
+      ]}
       loading={false}
       connected
       connectionLabel=""
       actions={{}}
+      renderMessageContent={(message) => <MessageContent text={message.text} />}
       renderBrowser={renderNativeBrowser}
       closeBrowser={closeNativeBrowserTab}
       fileChangesContent={<Changes />}

@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join, resolve, sep } from 'node:path';
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { desktopContentSecurityPolicy } from '../electron/development';
+import { registerNativeExternalLinks } from '../electron/external-links';
 import { registerNativeBrowserIpc } from '../electron/native-browser';
 
 const directory = resolve(process.argv.at(-1)!);
@@ -12,6 +13,8 @@ declare global {
     window: BrowserWindow;
     origin: string;
     hits: Record<string, number>;
+    externalUrls: string[];
+    forwardExternal: boolean;
   };
 }
 void app.whenReady().then(async () => {
@@ -77,7 +80,20 @@ void app.whenReady().then(async () => {
     },
   });
   registerNativeBrowserIpc({ ipcMain, window, rendererUrl: `${origin}/` });
-  globalThis.browserTabsHostFixture = { window, origin, hits };
+  registerNativeExternalLinks(window, `${origin}/`);
+  const externalUrls: string[] = [];
+  const openExternal = shell.openExternal.bind(shell);
+  shell.openExternal = async (url, options) => {
+    externalUrls.push(url);
+    if (globalThis.browserTabsHostFixture.forwardExternal) await openExternal(url, options);
+  };
+  globalThis.browserTabsHostFixture = {
+    window,
+    origin,
+    hits,
+    externalUrls,
+    forwardExternal: false,
+  };
   await window.loadURL(`${origin}/`);
   app.once('will-quit', () => {
     server.closeAllConnections();

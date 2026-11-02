@@ -22,6 +22,7 @@ import {
   parseDesktopDevelopment,
   serveDevelopmentReload,
 } from './development';
+import { registerNativeExternalLinks } from './external-links';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { registerNativeBrowserIpc } from './native-browser';
 import { NativeCaller } from './native-caller';
@@ -570,7 +571,7 @@ void app
     };
     nativeTheme.on('updated', updateSystemBackground);
     window.once('closed', () => nativeTheme.off('updated', updateSystemBackground));
-    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    registerNativeExternalLinks(window, rendererUrl);
     window.webContents.on('will-attach-webview', (event) => event.preventDefault());
     window.webContents.on('will-navigate', (event, url) => {
       if (url.split('#')[0] !== rendererUrl) event.preventDefault();
