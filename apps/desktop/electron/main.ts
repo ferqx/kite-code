@@ -38,6 +38,7 @@ import {
   parseDesktopDevelopment,
   serveDevelopmentReload,
 } from './development';
+import { configureMacosElectronResize, type MacosElectronResize } from './macos-electron-resize';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { registerNativeBrowserIpc } from './native-browser';
 import { createNativeCallerGenerationOwner, NativeCaller } from './native-caller';
@@ -83,6 +84,11 @@ declare const __KITE_DESKTOP_WINDOWS_ACCESS__: {
   relativePath: 'windows-access.node';
   sha256: string;
 } | null;
+declare const __KITE_DESKTOP_MACOS_RESIZE__: MacosElectronResize | null;
+configureMacosElectronResize(
+  app,
+  typeof __KITE_DESKTOP_MACOS_RESIZE__ === 'undefined' ? null : __KITE_DESKTOP_MACOS_RESIZE__,
+);
 const inputAssets = __KITE_DESKTOP_NATIVE_ASSETS__;
 const candidate =
   !!inputAssets &&

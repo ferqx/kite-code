@@ -415,3 +415,45 @@ test('permission and workspace confirmations share the same modal ownership and 
     }
   }
 });
+
+test('closed disposal releases captured owners after native window accessors become unavailable', async () => {
+  for (const state of ['cold', 'warm', 'active'] as const) {
+    const f = fixture();
+    const content = f.parent.contentView;
+    const root = f.root.webContents;
+    // Electron's BaseWindow getters throw once native destruction precedes closed.
+    for (const [key, value] of [
+      ['contentView', content],
+      ['webContents', root],
+    ] as const)
+      Object.defineProperty(f.parent, key, {
+        get() {
+          if (f.parent.destroyed) throw new TypeError('Object has been destroyed');
+          return value;
+        },
+      });
+    let decision: Promise<boolean> | undefined;
+    if (state === 'warm') {
+      f.host.prewarm();
+      await f.ready();
+    } else if (state === 'active') {
+      decision = f.host.confirm(
+        { kind: 'full-permission', language: 'zh' },
+        new AbortController().signal,
+      );
+      await f.ready();
+      f.present();
+    }
+    f.parent.destroyed = true;
+    expect(() => f.parent.emit('closed')).not.toThrow();
+    if (decision) expect(await decision).toBe(false);
+    expect(f.host.active()).toBe(false);
+    expect(content.listenerCount('bounds-changed')).toBe(0);
+    expect(root.listenerCount('did-start-navigation')).toBe(0);
+    expect(root.listenerCount('render-process-gone')).toBe(0);
+    expect(root.listenerCount('destroyed')).toBe(0);
+    expect(f.ipc.listenerCount(nativeGlobalDialogEventChannel)).toBe(0);
+    for (const overlay of f.views) expect(overlay.webContents.destroyed).toBe(true);
+    expect(() => f.host.dispose()).not.toThrow();
+  }
+});

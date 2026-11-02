@@ -302,12 +302,12 @@ function SessionPageContent({
   const directDetails = useRef(false);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
   const tabsScopeKey = props.tabsScopeKey ?? props.readingKey;
+  const committedDetailsIntent = useRef({ scope: tabsScopeKey, open: false });
   const tabsIntent = useRef<{ scope?: string; key?: string }>({});
   const detailsScope = useRef({ scope: tabsScopeKey, settling: false });
   if (tabsIntent.current.scope !== tabsScopeKey) {
     tabsIntent.current = { scope: tabsScopeKey };
   }
-  const detailsAnimating = !!detailsAnimation && detailsAnimation.scope === tabsScopeKey;
   const [, tabsChanged] = useState(0);
   const setTabsKey = useCallback((key: string | undefined) => {
     if (tabsIntent.current.key === key) return;
@@ -391,6 +391,33 @@ function SessionPageContent({
   };
   const rightSidebarOpen =
     hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
+  const startDetailsAnimation = useCallback((scope: string | undefined) => {
+    setDetailsAnimation({ scope });
+    if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
+    detailsAnimationTimer.current = setTimeout(() => {
+      detailsAnimationTimer.current = undefined;
+      setDetailsAnimation(undefined);
+    }, 240);
+  }, []);
+  // Re-registering the enabled separator can expand the Group before our RAF.
+  // Put the transition on that first commit, then retain it for the full motion.
+  const openingDetails =
+    rightSidebarOpen &&
+    !committedDetailsIntent.current.open &&
+    committedDetailsIntent.current.scope === tabsScopeKey &&
+    detailsScope.current.scope === tabsScopeKey &&
+    !detailsScope.current.settling &&
+    !directDetails.current &&
+    detailsPanel.current?.isCollapsed() === true &&
+    !!contentGroupElement.current &&
+    contentGroupElement.current.offsetWidth > 0 &&
+    contentGroupElement.current.getBoundingClientRect().width > 0;
+  const detailsAnimating =
+    openingDetails || (!!detailsAnimation && detailsAnimation.scope === tabsScopeKey);
+  useLayoutEffect(() => {
+    committedDetailsIntent.current = { scope: tabsScopeKey, open: rightSidebarOpen };
+    if (openingDetails) startDetailsAnimation(tabsScopeKey);
+  }, [tabsScopeKey, rightSidebarOpen, openingDetails, startDetailsAnimation]);
   const detailsPending = !!(props.loading || props.browserPending || tabModel.restoring);
   const closingTabsVisible =
     !!pendingTabsClose &&
@@ -457,19 +484,13 @@ function SessionPageContent({
           }, 240);
           return;
         }
-        setDetailsAnimation({ scope });
-        if (detailsAnimationTimer.current !== undefined)
-          clearTimeout(detailsAnimationTimer.current);
-        detailsAnimationTimer.current = setTimeout(() => {
-          detailsAnimationTimer.current = undefined;
-          setDetailsAnimation(undefined);
-        }, 240);
+        startDetailsAnimation(scope);
         if (open) target.expand();
         else target.collapse();
       });
       frame.current = scheduled;
     },
-    [],
+    [startDetailsAnimation],
   );
   const setSidebarOpen = useCallback(
     (open: boolean) => {
@@ -659,7 +680,7 @@ function SessionPageContent({
     if (page) tabModel.select(page.id);
     else tabModel.addBrowser();
     detailClose.current?.();
-    changeTabsOpen(true, !page);
+    changeTabsOpen(true);
   }, [
     props.browserTabRequest,
     hasTabs,
@@ -1233,11 +1254,7 @@ function SessionPageContent({
                             if (tabModel.tabs.length === 0) tabModel.addBrowser();
                             props.detailPanel?.onClose();
                           }
-                          // Retained browser pages reopen at their final native viewport width.
-                          const retainedBrowser = tabModel.tabs.some(
-                            (tab) => tab.kind === 'browser' && tab.id === tabModel.active,
-                          );
-                          changeTabsOpen(!tabsOpen, tabsOpen || !retainedBrowser);
+                          changeTabsOpen(!tabsOpen);
                         }}
                       >
                         <HugeiconsIcon icon={BrowserIcon} />

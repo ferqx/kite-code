@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { release } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { app, ipcMain, type WebContents, type WebContentsView, type WebFrameMain } from 'electron';
 import { desktopContentSecurityPolicy } from '../electron/development';
@@ -11,6 +12,15 @@ import {
 } from '../electron/native-root-window';
 
 const directory = resolve(process.argv.at(-1)!);
+// Match Native renderer/Main's platform and material CSS branches.
+const platform =
+  process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : undefined;
+const material =
+  process.platform === 'win32' && Number(release().split('.')[2]) >= 22621
+    ? 'mica'
+    : process.platform === 'darwin'
+      ? 'vibrancy'
+      : 'none';
 app.setPath('userData', join(directory, 'profile'));
 declare global {
   var browserTabsHostFixture: {
@@ -30,7 +40,7 @@ void app.whenReady().then(async () => {
       response.setHeader('content-security-policy', desktopContentSecurityPolicy(null));
       response.setHeader('content-type', 'text/html');
       response.end(
-        '<!doctype html><html data-theme="dark" data-native-window="true" data-platform="windows" data-window-material="mica"><head><link rel="stylesheet" href="/browser-ui.css"></head><body><div id="root"></div><script type="module" src="/browser-ui.js"></script></body></html>',
+        `<!doctype html><html data-theme="dark" data-native-window="true"${platform ? ` data-platform="${platform}"` : ''} data-window-material="${material}"><head><link rel="stylesheet" href="/browser-ui.css"></head><body><div id="root"></div><script type="module" src="/browser-ui.js"></script></body></html>`,
       );
     } else if (url.pathname === '/one' || url.pathname === '/two') {
       const title = url.pathname === '/one' ? 'Page One' : 'Page Two';

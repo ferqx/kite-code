@@ -506,10 +506,15 @@ export function NativeBrowserPane({
       }
       const key = JSON.stringify(measured);
       if (!hidden && last === key) return;
-      if (initialPlacement && host.presentBrowserLayout) {
+      const animating = node.closest(
+        '[data-slot="resizable-panel-group"][data-animate-width="true"]',
+      );
+      if ((initialPlacement || animating) && host.presentBrowserLayout) {
         // The original page must occupy this exact viewport before the Root
-        // commit paints its newly selected toolbar/loading UI. Stable resize
-        // calibration remains asynchronous after this initial native placement.
+        // commit paints its newly selected UI or animated panel boundary.
+        // ResizeObserver runs before paint; waiting for asynchronous calibration
+        // here would leave the page one frame behind the sidebar transition.
+        // Stable resize calibration remains asynchronous and coalesced.
         inFlight = undefined;
         dirty = false;
         hidden = false;

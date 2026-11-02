@@ -100,6 +100,16 @@ export async function runDevelopmentDesktop(
   let watchError: Error | undefined;
   let sourceChanged = false;
   try {
+    const macosRuntime =
+      process.platform === 'darwin' && process.arch === 'arm64'
+        ? (
+            await import('../../apps/desktop/scripts/macos-electron-runtime')
+          ).prepareMacosElectronRuntime({
+            sourceDist: resolve(dirname(electron), '../../..'),
+            outdir: join(outdir, 'electron'),
+          })
+        : null;
+    if (macosRuntime) electron = macosRuntime.executable;
     renderer = await startDesktopRenderer(root);
     control = await startDesktopControl();
     sourceWatcher = await startDevelopmentServiceWatcher({
@@ -137,7 +147,10 @@ export async function runDevelopmentDesktop(
         },
       },
       outdir,
-      { development: { ...renderer.configuration, control: control.configuration } },
+      {
+        development: { ...renderer.configuration, control: control.configuration },
+        macosResize: macosRuntime?.resize ?? null,
+      },
     );
     if (watchError) throw watchError;
     if (requested) return requested === 'SIGINT' ? 130 : 143;

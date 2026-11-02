@@ -457,8 +457,8 @@ function isNativeBrowserLayout(value: unknown): value is NativeBrowserLayout {
   );
 }
 
-/** Current two-panel contract: preserve measured pixels/relative shares, apply
- * the Panel library's min/max/collapse rules, then normalize the actual flex allocation. */
+/** Current two-panel contract: use observed allocations at the measured width;
+ * apply the Panel library's target constraints only when predicting a new width. */
 export function projectNativeBrowserBounds(
   bounds: NativeBrowserBounds,
   layout: NativeBrowserLayout,
@@ -506,6 +506,9 @@ export function projectNativeBrowserLayout(
     );
     if (fixed === 0) sizes = panels.map((panel) => (panel.size / total) * 100);
     const clamp = (size: number, panel: NativeBrowserPanelLayout) => {
+      // CSS transitions can still be between the old size and the new min/max.
+      // Reapplying the target at the observed width discards those valid frames.
+      if (width === layout.windowWidth) return size;
       const min = panel.minUnit === '%' ? panel.min : (panel.min / available) * 100;
       const max = panel.maxUnit === '%' ? panel.max : (panel.max / available) * 100;
       if (round(size) < round(min))

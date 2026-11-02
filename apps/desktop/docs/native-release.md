@@ -20,6 +20,10 @@ Windows Main 保初始完整内容／语义验证，再由 [Node-API owner](../n
 
 根 `npm run desktop` 需要先生成默认 Terminal 和Native候选：`npm run release:build`、`npm run release:build -- --product native`。缺外层路径或内嵌Terminal时，launch保原双使用锁／完整验证顺序，失败返回 `native_bundle_unavailable` 和准备命令，已取得的锁仍在finally释放。日常开发使用 `npm run build` 后 `npm run desktop:dev`，由独立development profile与每次新建应用目录承载源码调整；不将该开发入口算作完整候选或发行资格。
 
+macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-electron-runtime.ts)只接受完整原始Framework SHA与封闭分发，在新候选的独立 `electron` 副本内应用[resize补丁](../patches/electron-44.3.0-macos-resize.patch)，重新进行 ad-hoc 签名及校验，再执行SQLite探针、Main构建和完整manifest。两处指令及签名以外的payload、源分发与副本独立性均复核；重新签名产生的CodeResources与最终Framework字节进入原清单，不跳过任何文件。开发入口也准备每次专属副本；不修改 `node_modules` 或已存在的不可变候选。
+
+[Main准入](../electron/macos-electron-resize.ts)在 `app.whenReady` 前核实际加载Framework路径、构建时摘要、完整已审payload和两处指令，随后启用配套 `CATransactionV2`；禁用冲突、未知原始字节、半补丁或错误加载路径均拒绝。Windows、Linux及macOS非arm64沿原链路；通用app-only测试构建没有配对证明时不启用该feature。普通启动、归档、安装及回退不临时修补制品，旧候选须重新构建才包含本次优化。该同版本定点修正不提供正式签名、公证、其他引擎字节或跨平台发行资格，当前像素与集成测试范围归[Desktop owner](../README.md#固定-renderer-布局收敛2026-11-02)。
+
 ```sh
 bun run release:build --directory /absolute/output/terminal
 bun run release:build --product native --terminal /absolute/output/terminal --directory /absolute/output/native --archive /absolute/output/native.tar.gz

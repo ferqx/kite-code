@@ -489,4 +489,4 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 
 保留的[SessionPage](src/desktop/SessionPage.tsx)切换tabs scope时，在layout阶段取消旧右栏RAF／timer，按目标已确认的右栏意图直接布局；loading／browserPending／restore未决时不把空tabs当作用户关闭。导航与右栏分别持有动画状态和timer，右栏动画只属于原scope，普通手动开合保持动画。自动reveal与已有页请求在layout阶段采用；reveal去重只限当前scope的一次激活，返回原scope可重新接纳，而用户显式收起的记忆仍保留。任务编辑器退休不再另排一次无目标的collapse，由当前右栏意图统一决定。上述[回归](test/isolated/desktop-session-page-render.test.tsx)通过受控RAF和真实Group／Panel核提交前收栏、旧动作取消、未决原页恢复、目标详情、显式关闭和独立导航动画；原生连续画面与灰带限制仍归Desktop owner。
 
-已有选中浏览器标签从标题栏重新展开时直接采用最终详情宽度，避免保留网页重新呈现经历中间尺寸；首次空白标签、子会话、变更及普通详情和导航动画不变。实际Page／文档是否可暖恢复仍由Desktop Main核实，UI标签存在不授显示或Agent能力。
+标题栏重开保留的浏览器标签、请求已有网页，与首次空白标签、子会话及普通详情统一使用180ms缓出动画。同scope从真实折叠状态打开时，首个render即带上过渡标记，避免启用的分隔线重新注册、Group先于RAF重建布局而跳过动画；layout阶段提交打开意图，并沿现有240ms计时保留标记。实际折叠状态读取Panel handle，不能使用可能迟于布局的React通知状态。scope切换、恢复与明确直接布局继续沿原逻辑；尚未开始的收起被取消时保持原宽度，不另播动画。[回归](test/isolated/desktop-session-page-render.test.tsx)覆盖收起未执行、进行中及动画结束后的重开，已有页请求和普通详情的首个提交、旧回调取消、原页节点与输入保持。实际Page／文档是否可暖恢复仍由Desktop Main核实，UI标签存在不授显示或Agent能力；真实Electron连续画面及限制归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。

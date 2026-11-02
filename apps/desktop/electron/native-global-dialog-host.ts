@@ -19,6 +19,9 @@ export function createNativeGlobalDialogHost(options: {
   theme: () => 'light' | 'dark';
 }) {
   const parent = options.window;
+  // Native BaseWindow accessors are already unavailable in the closed callback.
+  const contentView = parent.contentView;
+  const rootContents = parent.webContents;
   let view: WebContentsView | undefined;
   let release: (() => void) | undefined;
   let preparing: Promise<void> | undefined;
@@ -46,7 +49,7 @@ export function createNativeGlobalDialogHost(options: {
     const bounds = view.getBounds();
     if (bounds.x !== 0 || bounds.y !== 0 || bounds.width !== width || bounds.height !== height)
       view.setBounds({ x: 0, y: 0, width, height });
-    const zoom = parent.webContents.getZoomFactor();
+    const zoom = rootContents.getZoomFactor();
     if (view.webContents.getZoomFactor() !== zoom) view.webContents.setZoomFactor(zoom);
     keepNativeOverlayOnTop(parent);
   };
@@ -59,12 +62,12 @@ export function createNativeGlobalDialogHost(options: {
     };
     const focus = () => {
       if (!pending || parent.isDestroyed()) return;
-      const target = view?.getVisible() ? view.webContents : parent.webContents;
+      const target = view?.getVisible() ? view.webContents : rootContents;
       if (target !== contents) focusInWindow(target);
     };
     // Page CDP input also emits these Electron events. Native hit-testing and
     // focus fence human input; never silently consume an authorized Page action.
-    if (contents === parent.webContents) {
+    if (contents === rootContents) {
       contents.on('before-input-event', block);
       contents.on('before-mouse-event', block);
     }
@@ -87,7 +90,7 @@ export function createNativeGlobalDialogHost(options: {
     release?.();
     release = undefined;
     if (current) {
-      if (!parent.isDestroyed()) parent.contentView.removeChildView(current);
+      if (!parent.isDestroyed()) contentView.removeChildView(current);
       if (!current.webContents.isDestroyed())
         current.webContents.close({ waitForBeforeUnload: false });
     }
@@ -220,27 +223,27 @@ export function createNativeGlobalDialogHost(options: {
   };
   options.ipcMain.on(nativeGlobalDialogEventChannel, event);
   parent.on('resize', sync);
-  parent.contentView.on('bounds-changed', sync);
+  contentView.on('bounds-changed', sync);
   parent.on('hide', cancel);
   parent.on('minimize', cancel);
   parent.on('focus', focusOverlay);
-  parent.webContents.on('did-start-navigation', rootNavigation);
-  parent.webContents.on('render-process-gone', cancel);
-  parent.webContents.on('destroyed', cancel);
+  rootContents.on('did-start-navigation', rootNavigation);
+  rootContents.on('render-process-gone', cancel);
+  rootContents.on('destroyed', cancel);
   const dispose = () => {
     if (disposed) return;
     disposed = true;
     cancel();
     options.ipcMain.off(nativeGlobalDialogEventChannel, event);
     parent.off('resize', sync);
-    parent.contentView.off('bounds-changed', sync);
+    contentView.off('bounds-changed', sync);
     parent.off('hide', cancel);
     parent.off('minimize', cancel);
     parent.off('focus', focusOverlay);
     parent.off('closed', dispose);
-    parent.webContents.off('did-start-navigation', rootNavigation);
-    parent.webContents.off('render-process-gone', cancel);
-    parent.webContents.off('destroyed', cancel);
+    rootContents.off('did-start-navigation', rootNavigation);
+    rootContents.off('render-process-gone', cancel);
+    rootContents.off('destroyed', cancel);
     for (const remove of protectedContents.values()) remove();
     protectedContents.clear();
     destroyView();
@@ -265,16 +268,14 @@ export function createNativeGlobalDialogHost(options: {
       if (disposed || parent.isDestroyed() || !parent.isVisible() || parent.isMinimized())
         return Promise.reject(Error('native_global_dialog_unavailable'));
       if (pending) return Promise.reject(Error('native_global_dialog_busy'));
-      const focused = parent.contentView.children.find(
+      const focused = contentView.children.find(
         (child) =>
           'webContents' in child &&
           !(child.webContents as WebContents).isDestroyed() &&
           (child.webContents as WebContents).isFocused(),
       );
       const previous =
-        focused && 'webContents' in focused
-          ? (focused.webContents as WebContents)
-          : parent.webContents;
+        focused && 'webContents' in focused ? (focused.webContents as WebContents) : rootContents;
       const frame = previous?.mainFrame;
       return new Promise<boolean>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout>;
@@ -288,8 +289,8 @@ export function createNativeGlobalDialogHost(options: {
           if (pending?.state.requestId !== state.requestId) return;
           pending = undefined;
           try {
-            if (!parent.webContents.isDestroyed())
-              parent.webContents.send(nativeGlobalDialogActiveChannel, false);
+            if (!rootContents.isDestroyed())
+              rootContents.send(nativeGlobalDialogActiveChannel, false);
           } catch {}
           clearTimeout(timer);
           signal.removeEventListener('abort', abort);
@@ -305,7 +306,7 @@ export function createNativeGlobalDialogHost(options: {
             parent.isFocused() &&
             parent.isVisible() &&
             !parent.isMinimized() &&
-            parent.contentView.children.some(
+            contentView.children.some(
               (child) =>
                 'webContents' in child && child.webContents === previous && child.getVisible(),
             )
@@ -318,14 +319,14 @@ export function createNativeGlobalDialogHost(options: {
         };
         pending = { state, presented: false, finish };
         try {
-          parent.webContents.send(nativeGlobalDialogActiveChannel, true);
+          rootContents.send(nativeGlobalDialogActiveChannel, true);
           if (view) {
             sync();
             view.setVisible(true);
             focusInWindow(view.webContents);
           } else {
             // No event turn elapses before prepare installs the native overlay.
-            focusInWindow(parent.webContents);
+            focusInWindow(rootContents);
           }
         } catch {
           finish(false, Error('native_global_dialog_unavailable'));

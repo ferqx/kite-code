@@ -32,6 +32,8 @@ Windows原对象pin现以实际读取/遍历权限建立共享保护，区域锁
 
 Windows `desktop:dev` 在构建前可向当前 npm Electron 的独立物理 `dist` 追加受限应用包读取／执行权限；完整预检拒绝链接、硬链接和适用的拒绝 ACE，权限已满足时不写入。该准备只属于显式开发入口，不覆盖项目、私有应用目录、Profile 或正式候选，也不关闭浏览器沙箱。范围、实现与重装后实际沙箱验证归 [Desktop owner](../../apps/desktop/README.md)；正式 Runtime protection、installed Main 和发布安装 ACL 契约保持。
 
+macOS arm64 的新开发应用与Native候选在独立副本内应用固定Electron44.3.0的resize修正，原依赖和版本不变。候选在SQLite探针及完整清单生成前完成补丁、ad-hoc重签及全payload复核；Main在ready前核实际加载Framework与构建证明，才选择配套CA策略。最终签名字节和CodeResources仍受原完整manifest、搬迁校验与双使用锁保护；启动、安装和回退不修改已封存候选。准确来源、拒绝边界和未取得的正式签名／公证／平台资格归[Native owner](../../apps/desktop/docs/native-release.md#构建与安装)，持久取舍归[resize决定](../../.agents/notes/implemented/bug-fix/2026-11-02-macos-electron-resize.md)。
+
 完整候选只物化生成 exports 真正需要的解析边。当前唯一内联的核心图标依赖归[UI build owner](../../packages/ui/README.md#原桌面展示层)：其他 external／peer、原 exports／CSS与准确许可保持，builder拒绝残留该包的外部引用。复制器不能以内联声明跳过 peer、optional或workspace；新闭包的全部文件仍纳入原manifest和每次独立完整校验。此构建收束不改变三次准入、双使用锁或平台完成约束。
 
 Native非development renderer的React／JSX模式由[builder](../../apps/desktop/scripts/build-native.ts)固定为production，不继承测试调用进程环境；显式测试诊断常量独立封存，普通dev／prod关闭要求保持，Vite开发服务器仍走原开发分支。原child-stream真实资产守卫与窗口门禁核开发栈不混入正式renderer，具体范围归[Native发行owner](../../apps/desktop/docs/native-release.md)。此修正不改变候选身份、完整库存或平台发布资格。

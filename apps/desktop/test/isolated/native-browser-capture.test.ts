@@ -2637,6 +2637,68 @@ test('native resize projects the current panel allocation immediately and keeps 
   }
 });
 
+test('live sidebar animation accepts measured intermediate widths while rejecting mismatched viewport bounds', async () => {
+  const f = fixture();
+  try {
+    f.contentSize.splice(0, 2, 1000, 800);
+    f.window.emit('resize');
+    f.state.phase = 'human';
+    await f.show({ x: 201, y: 100, width: 799, height: 600, radius: 0 });
+    const loads = f.contents.loads;
+    const reads = f.contents.frameCallbacks.length;
+    f.view.visibility.length = 0;
+    for (const size of [200, 150, 100, 50, 0]) {
+      const layout: NativeBrowserLayout = {
+        windowWidth: 1000,
+        windowHeight: 800,
+        insetLeft: 0,
+        insetRight: 0,
+        groups: [
+          {
+            left: 0,
+            right: 0,
+            gap: 1,
+            panels: [
+              {
+                size,
+                min: 0,
+                max: 0,
+                minUnit: 'px',
+                maxUnit: 'px',
+                preserve: 'pixel',
+                collapsible: false,
+              },
+              {
+                size: 999 - size,
+                min: 200,
+                max: 100,
+                minUnit: 'px',
+                maxUnit: '%',
+                preserve: 'relative',
+                collapsible: false,
+              },
+            ],
+          },
+        ],
+      };
+      const measured = { x: size + 1, y: 100, width: 999 - size, height: 600, radius: 0 };
+      expect(await f.asyncLayout(f.layoutRequest('page', measured, layout))).toMatchObject({
+        ok: true,
+      });
+      expect(f.view.bounds).toEqual({ x: measured.x, y: 100, width: measured.width, height: 600 });
+      expect(f.view.visible).toBe(true);
+      expect(f.present({ ...measured, x: measured.x + 10 }, layout)).toMatchObject({ ok: false });
+      expect(f.view.bounds.x).toBe(measured.x);
+    }
+    expect(f.view.visibility).not.toContain(false);
+    expect(f.contents.loads).toBe(loads);
+    expect(f.contents.frameCallbacks).toHaveLength(reads);
+    expect(f.contents.closes).toBe(0);
+  } finally {
+    f.close();
+  }
+});
+
 test('rejected stale and mixed panel measurements cannot replace the current native projection or invalidate a valid page-coordinate proof', async () => {
   const f = fixture();
   const panel = (size: number) => ({

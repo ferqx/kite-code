@@ -627,8 +627,10 @@ test('retained browser collapse keeps its original page until panel motion start
     }).toEqual({ visible: 'false', width: 0, animating: 'true' });
 
     await f.click('标签页');
+    expect(f.animating()).toBe('true');
+    await f.frame();
     expect(f.width()).toBe(width);
-    expect(f.animating()).toBeNull();
+    expect(f.animating()).toBe('true');
     expect(page.getAttribute('data-visible')).toBe('true');
     expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
     expect(page.querySelector('input')).toBe(field);
@@ -639,8 +641,8 @@ test('retained browser collapse keeps its original page until panel motion start
   }
 });
 
-for (const closing of ['pending', 'completed'] as const)
-  test(`retained browser header reopen settles final width without animation after ${closing} collapse`, async () => {
+for (const closing of ['pending', 'completed', 'settled'] as const)
+  test(`retained browser header reopen preserves animation after ${closing} collapse`, async () => {
     const f = retainedSidebarFixture();
     try {
       await f.show();
@@ -653,21 +655,26 @@ for (const closing of ['pending', 'completed'] as const)
       expect(f.animating()).toBeNull();
       await f.click('标签页');
       const pendingFrames = f.pendingFrames();
-      if (closing === 'completed') {
+      if (closing !== 'pending') {
         await f.frame();
         expect(f.width()).toBe(0);
         expect(f.animating()).toBe('true');
       }
+      if (closing === 'settled') {
+        await act(() => Bun.sleep(260));
+        expect(f.animating()).toBeNull();
+        expect(f.width()).toBe(0);
+      }
       await f.click('标签页');
-      expect(f.width()).toBe(width); // before any queued animation frame
-      expect(f.animating()).toBeNull();
+      if (closing === 'pending') expect(f.width()).toBe(width);
+      expect(f.animating()).toBe(closing === 'pending' ? null : 'true');
       expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
-      expect(page.getAttribute('data-visible')).toBe('true');
       expect(field.value).toBe('User original form');
       await f.frame(pendingFrames); // A cancelled callback cannot close the reopened page.
       await f.frame();
       expect(f.width()).toBe(width);
-      expect(f.animating()).toBeNull();
+      expect(f.animating()).toBe(closing === 'pending' ? null : 'true');
+      expect(page.getAttribute('data-visible')).toBe('true');
       expect(f.closed).toEqual([]);
       await f.click('收起侧栏');
       await f.frame();
@@ -795,7 +802,7 @@ for (const target of ['missing', 'collapsed'] as const)
     }
   });
 
-test('retained browser requests settle directly while new browser and ordinary detail opens keep their animation', async () => {
+test('retained browser requests, new browser and ordinary detail opens keep their animation', async () => {
   const f = retainedSidebarFixture();
   try {
     await f.show();
@@ -805,12 +812,15 @@ test('retained browser requests settle directly while new browser and ordinary d
     await f.click('标签页');
     await f.frame();
     await f.show({ request: 1 });
+    expect(f.animating()).toBe('true');
+    await f.frame();
     expect(f.width()).toBe(width);
-    expect(f.animating()).toBeNull();
+    expect(f.animating()).toBe('true');
     expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(original);
     await f.click('标签页');
     await f.frame();
     await f.show({ child: 1 }); // background browser must not bypass child-reader animation
+    expect(f.animating()).toBe('true');
     await f.frame();
     expect(f.animating()).toBe('true');
     expect(f.host.textContent).toContain('Child reader');
@@ -822,6 +832,7 @@ test('retained browser requests settle directly while new browser and ordinary d
     await f.click('标签页');
     await f.frame();
     await f.show({ details: true });
+    expect(f.animating()).toBe('true');
     await f.frame();
     expect(f.animating()).toBe('true');
     expect(f.host.textContent).toContain('Original details reader');
@@ -834,6 +845,7 @@ test('retained browser requests settle directly while new browser and ordinary d
     await fresh.show();
     await fresh.frame();
     await fresh.click('标签页');
+    expect(fresh.animating()).toBe('true');
     await fresh.frame();
     expect(fresh.animating()).toBe('true');
     expect(fresh.host.querySelectorAll('[data-retained-page]')).toHaveLength(1);

@@ -11,6 +11,59 @@ import {
   projectNativeBrowserLayout,
 } from '../src/native-browser-bridge';
 
+test('sidebar animation keeps measured widths until a real window resize applies the target constraints', () => {
+  for (const [size, min, max] of [
+    [200, 0, 0],
+    [100, 200, 320],
+  ] as const) {
+    const layout: NativeBrowserLayout = {
+      windowWidth: 1000,
+      windowHeight: 800,
+      insetLeft: 0,
+      insetRight: 0,
+      groups: [
+        {
+          left: 0,
+          right: 0,
+          gap: 1,
+          panels: [
+            {
+              size,
+              min,
+              max,
+              minUnit: 'px',
+              maxUnit: 'px',
+              preserve: 'pixel',
+              collapsible: false,
+            },
+            {
+              size: 999 - size,
+              min: 200,
+              max: 100,
+              minUnit: 'px',
+              maxUnit: '%',
+              preserve: 'relative',
+              collapsible: false,
+            },
+          ],
+        },
+      ],
+    };
+    const bounds = { x: size + 1, y: 80, width: 999 - size, height: 720, radius: 0 };
+    expect(projectNativeBrowserBounds(bounds, layout, 1000, 800)).toEqual(bounds);
+    expect(projectNativeBrowserBounds(bounds, layout, 1000, 900)).toEqual({
+      ...bounds,
+      height: 820,
+    });
+    const resized = projectNativeBrowserLayout(bounds, layout, 1200, 800)!;
+    expect(resized.layout.groups[0]!.panels[0].size).toBeCloseTo(min, 1);
+    expect(resized.bounds.x).toBeCloseTo(min + 1, 1);
+    expect(resized.bounds.width).toBeCloseTo(1199 - min, 1);
+    // The measured panel boundary must still validate a caller's viewport.
+    expect(projectNativeBrowserBounds({ ...bounds, x: 1 }, layout, 1000, 800)?.x).toBe(bounds.x);
+  }
+});
+
 test('native layout projection returns independent constrained allocations for the next resize', () => {
   const panel = (size: number, min: number) => ({
     size,

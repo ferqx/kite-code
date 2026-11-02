@@ -16,7 +16,7 @@ Status: implemented
 
 Root IPC 仍只提交准确请求 ID 与固定语言的 Full 确认。Main 校验准确 Root、主 frame、URL、父窗口和在途 owner；专用 Renderer 只能接收有限 kind 的状态并返回同一 requestId 的决定，没有 Service、浏览器、文件或通用 HTML 执行桥。空间名称按文本呈现，不能成为 HTML。两类自绘确认共用一个 modal owner；退出请求先退休旧自绘确认，再沿原生退出流程，旧肯定结果不能落到继任者。
 
-Root 的准确应用节点在 modal 期间 inert，Main 只拦截 Root 的 before-input／before-mouse 事件。Page 的这些事件也接收授权 CDP 输入，不能统一 preventDefault；人工鼠标由最高原生 Overlay 命中，人工键盘由浮层焦点与 DOM 模态约束，Page 授权输入继续沿原 lease／控制门禁。显式焦点操作仅在父窗口仍 focused 时执行，后台取消不重新激活客户端；重新激活时当前浮层接回焦点，隐藏浮层不再参与 Root 的焦点目标选择。关闭后仅在父窗仍 focused 时恢复仍属于同一主窗口、仍可见、文档未替换的原 WebContents；隐藏、最小化、Root 导航／崩溃／销毁、overlay 崩溃或请求取消都退休当前决定。崩溃的 overlay 可以在下一次请求重新创建。当前取消不等待首帧，肯定决定仍需presented；初始化或提交失败不构成确认；父窗口仍在的原生退出确认失败保留服务，并发送有限的可读临时消息；无主窗口的失败保留原退出契约。
+Root 的准确应用节点在 modal 期间 inert，Main 只拦截 Root 的 before-input／before-mouse 事件。Page 的这些事件也接收授权 CDP 输入，不能统一 preventDefault；人工鼠标由最高原生 Overlay 命中，人工键盘由浮层焦点与 DOM 模态约束，Page 授权输入继续沿原 lease／控制门禁。显式焦点操作仅在父窗口仍 focused 时执行，后台取消不重新激活客户端；重新激活时当前浮层接回焦点，隐藏浮层不再参与 Root 的焦点目标选择。关闭后仅在父窗仍 focused 时恢复仍属于同一主窗口、仍可见、文档未替换的原 WebContents；隐藏、最小化、Root 导航／崩溃／销毁、overlay 崩溃或请求取消都退休当前决定。崩溃的 overlay 可以在下一次请求重新创建。Host在创建时保存准确contentView与Root WebContents，用同一引用注册及解绑；closed回调不重新读取已销毁BaseWindow的原生访问器。该清理修正针对实际退出时的Object has been destroyed／原生错误框留存，不改变document reload、确认或输入门。当前取消不等待首帧，肯定决定仍需presented；初始化或提交失败不构成确认；父窗口仍在的原生退出确认失败保留服务，并发送有限的可读临时消息；无主窗口的失败保留原退出契约。
 
 预热 view 平时隐藏；发起确认时，冷启动与预热未 ready 的 view 都立即以完整尺寸、最高原生层级显示透明背景并承接人工输入，再等待共享 Dialog 提交后的 presented 通知，避免加载空档和依赖隐藏 Chromium view 的 rAF。Dialog DOM 尚未加载时没有取消按钮或 Esc 处理器；当前 false 不等待 presented，只说明已有决定的准入，不承诺整个加载阶段物理 Esc 可立即处理。通知用于当前 dialog 的决策准入，不是 WindowServer 像素回执，也不恢复被删除的浏览器 ACK／witness 或截图交接。网页绘制与 UI 实际过程仍分别核证据。
 

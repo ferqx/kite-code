@@ -702,6 +702,70 @@ test('explicit annotation mode withdraws the real page and returning restores it
   }
 });
 
+test('sidebar closing publishes its intermediate measured widths before the zero-width target is reached', async () => {
+  const f = await fixture(loaded(), true);
+  try {
+    await f.show();
+    const hides = f.withdrawals.length;
+    await f.flush(() => {
+      document.getElementById('panel-left')!.dataset.nativeBrowserLayout = JSON.stringify({
+        minSize: '0px',
+        maxSize: '0px',
+        groupResizeBehavior: 'preserve-pixel-size',
+        collapsible: false,
+      });
+    });
+    for (const x of [550, 450, 350]) {
+      await f.resize(x, 1000 - x);
+      expect(f.layouts.at(-1)?.bounds).toMatchObject({ x, width: 1000 - x });
+      expect(f.layouts.at(-1)?.layout?.groups[0]?.panels[0]).toMatchObject({ size: x - 1, max: 0 });
+    }
+    expect(f.withdrawals).toHaveLength(hides);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an animated panel places every measured frame synchronously and retires a late asynchronous calibration', async () => {
+  const f = await fixture(loaded(), true);
+  let rejectOld!: (cause: unknown) => void;
+  try {
+    await f.show();
+    f.hold(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectOld = reject;
+        }),
+    );
+    await f.resize(550, 450);
+    expect(f.asyncLayouts).toHaveLength(1);
+    await f.flush(() => {
+      document.querySelector<HTMLElement>('.client-panels')!.dataset.animateWidth = 'true';
+    });
+    for (const x of [500, 450, 400]) {
+      const before = f.syncLayouts.length;
+      await f.resize(x, 1000 - x);
+      expect(f.syncLayouts).toHaveLength(before + 1);
+      expect(f.syncLayouts.at(-1)?.bounds).toMatchObject({ x, width: 1000 - x });
+      expect(f.asyncLayouts).toHaveLength(1);
+    }
+    const count = f.layouts.length;
+    await f.flush(() => rejectOld(Error('obsolete native failure')));
+    expect(f.layouts).toHaveLength(count);
+    expect(document.querySelector('[data-status="error"], [role="alert"]')).toBeNull();
+    await f.resize(400, 600);
+    expect(f.layouts).toHaveLength(count);
+    await f.flush(() => {
+      delete document.querySelector<HTMLElement>('.client-panels')!.dataset.animateWidth;
+    });
+    f.hold(undefined);
+    await f.resize(350, 650);
+    expect(f.asyncLayouts).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
 test('one measured panel layout supplies the native resize projection, and unsupported ancestry withdraws', async () => {
   const f = await fixture(loaded(), true);
   try {
@@ -1012,13 +1076,16 @@ test('true unmount withdraws before the replacement Root commit can paint', asyn
   }
 });
 
-test('a preload without a synchronous placement port retains bounded asynchronous initial compatibility', async () => {
-  const f = await fixture();
+test('a preload without a synchronous placement port retains bounded asynchronous initial and animated compatibility', async () => {
+  const f = await fixture(loaded(), true);
   try {
     f.withoutSync();
     await f.show({ initialHint: loaded() });
     expect(f.syncLayouts).toHaveLength(0);
     expect(f.asyncLayouts).toHaveLength(1);
+    await f.flush(() => {
+      document.querySelector<HTMLElement>('.client-panels')!.dataset.animateWidth = 'true';
+    });
     await f.resize(500, 500);
     expect(f.asyncLayouts).toHaveLength(2);
   } finally {

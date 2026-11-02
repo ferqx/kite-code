@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { ElectronApplication } from 'playwright';
 
 const require = createRequire(process.argv[2]!);
 const { _electron } = require('playwright') as typeof import('playwright');
 const directory = process.argv[3]!;
+const executable = process.argv[4];
+assert.ok(executable && isAbsolute(executable), 'browser_fixture_exact_executable_required');
+const runtime = process.argv[5];
+assert.ok(runtime === 'macos-resize' || runtime === 'stock', 'browser_fixture_runtime_required');
 let electron: ElectronApplication | undefined;
 const timeout = setTimeout(() => {
   console.error('browser_fixture_timeout');
@@ -13,10 +18,23 @@ const timeout = setTimeout(() => {
 }, 60000);
 try {
   electron = await _electron.launch({
-    executablePath: require('electron'),
+    executablePath: executable,
     args: [join(directory, 'main.cjs'), directory],
     timeout: 20000,
   });
+  assert.equal(
+    realpathSync(await electron.evaluate(() => process.execPath)),
+    realpathSync(executable),
+    'browser_fixture_executable_changed',
+  );
+  if (runtime === 'macos-resize')
+    assert.equal(
+      await electron.evaluate(({ app }) =>
+        app.commandLine.getSwitchValue('enable-features').split(',').includes('CATransactionV2'),
+      ),
+      true,
+      'browser_fixture_resize_policy_missing',
+    );
   electron.process().stderr?.on('data', (chunk) => console.error(String(chunk)));
   const page = await electron.firstWindow();
   page.setDefaultTimeout(6000);
