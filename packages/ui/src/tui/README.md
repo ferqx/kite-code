@@ -1,5 +1,7 @@
 # 独立终端消费者
 
+清屏只过滤原已观察消息、结束执行和本地回执的展示身份；`exportLoadedText` 使用当前已加载 snapshot 与原位置的全部本地回执，完整已读正文及 reasoning 继续沿同一 reader 缓存。重复清屏不删除导出输入，换会话仍清理本地回执，导出不增加 Model、Tool 或正文读取。[导出回归](../../test/tui/export.test.ts)核完整正文、未读取预览标记和重复清屏；[实际 PTY 场景](../../../../tests/tui-system/scenarios/slash-commands.test.ts)核正文隐藏、输入恢复与导出字节，按[手册](../../../../docs/handbook/clients/tui/guides/history-and-export.md)的既有保全合同验收。
+
 ## 原 Ink 展示与明确测试诊断
 
 原真实终端场景经[统一 runner](../../../../scripts/run-unified-tui-system-tests.ts)逐整文件消费当前 UI／CLI Host／公共 Client／默认 Service。原参数与模型声明在[测试协议映射](../../../../tests/tui-system/harness/original-tool-contract.ts)准确转换，不生产旧 Runtime 事件或伪造结果；不导入历史 Store9/11／State26。原 Store9/11 旧格式转换不在 D08 范围；对应历史／维护旅程改验新 Store／Profile，State26 则保实际旧文件隔离反例。这是测试范围迁移，不是旧格式转换或兼容通过。完整执行证据及后置平台范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。

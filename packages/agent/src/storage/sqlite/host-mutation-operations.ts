@@ -1,3 +1,4 @@
+import { validateMcpSourceEntry } from '../../config/mcp-entry';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type HostMutationRecord, type Json } from '../types';
@@ -48,33 +49,9 @@ function validMcpSettingsOperation(value: Json | undefined): boolean {
       !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.name)
     )
       return false;
-    const entry = value.entry;
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-    if (entry.type === 'stdio')
-      return (
-        Object.keys(entry).sort().join(',') === 'command,type' &&
-        typeof entry.command === 'string' &&
-        entry.command.length > 0 &&
-        entry.command.length <= 4096 &&
-        !/[\0\r\n]/.test(entry.command)
-      );
-    if (
-      entry.type !== 'http' ||
-      Object.keys(entry).sort().join(',') !== 'type,url' ||
-      typeof entry.url !== 'string' ||
-      !entry.url ||
-      entry.url.length > 8192
-    )
-      return false;
     try {
-      const url = new URL(entry.url);
-      return (
-        ['http:', 'https:'].includes(url.protocol) &&
-        !url.username &&
-        !url.password &&
-        !url.search &&
-        !url.hash
-      );
+      validateMcpSourceEntry(value.entry, { allowLaunchNames: true });
+      return true;
     } catch {
       return false;
     }
@@ -501,7 +478,9 @@ function receipt(
       (authentication !== null &&
         (!object(authentication) ||
           !exact(authentication, 'loginAllowed,policy,status') ||
-          !['none', 'credential', 'oauth', 'auto'].includes(String(authentication.policy)) ||
+          !['none', 'credential', 'oauth', 'auto', 'environment'].includes(
+            String(authentication.policy),
+          ) ||
           !['none', 'missing', 'present', 'locked', 'unavailable', 'unknown'].includes(
             String(authentication.status),
           ) ||

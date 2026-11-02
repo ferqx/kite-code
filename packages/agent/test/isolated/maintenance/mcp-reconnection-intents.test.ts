@@ -1,20 +1,13 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  existsSync,
-  linkSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, linkSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -114,8 +107,7 @@ function seal<
   return value;
 }
 async function fixture() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-reconnection-assets-')));
-  chmodSync(root, 0o700);
+  const root = temporaryDirectory('kite-reconnection-assets-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const store = await openSqliteStore(profile);
   let storeId: string;
@@ -437,9 +429,9 @@ test('128 original unknown rows and exact 16MiB accepted; excess, unsafe permiss
     write(f.path, [...records, row(f.storeId, 128)]);
     expect(() => verifyMcpReconnectionIntentsDocument(f.path)).toThrow();
     write(f.path, [records[0]]);
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => verifyMcpReconnectionIntentsDocument(f.path)).toThrow();
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     const hard = join(f.root, 'hard');
     linkSync(f.path, hard);
     expect(() => verifyMcpReconnectionIntentsDocument(f.path)).toThrow();
@@ -447,7 +439,7 @@ test('128 original unknown rows and exact 16MiB accepted; excess, unsafe permiss
     const source = join(f.root, 'source');
     writeFileSync(source, readFileSync(f.path), { mode: 0o600 });
     unlinkSync(f.path);
-    symlinkSync(source, f.path);
+    recordReparseEntry(source, f.path);
     expect(() => verifyMcpReconnectionIntentsDocument(f.path)).toThrow();
   } finally {
     f.close();

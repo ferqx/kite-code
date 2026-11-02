@@ -82,7 +82,11 @@ test('source-free original MCP prepare and physical first GET loss survive calle
     writeFileSync(join(evidence, 'candidate-build.log'), out + err);
     expect(exit).toBe(0);
     const candidate = verifyTerminalBundle(join(root, 'candidate'));
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const built = await Bun.build({
       entrypoints: [join(repo, 'apps/cli/test/fixtures/tui-mcp-cold.ts')],
       target: 'bun',

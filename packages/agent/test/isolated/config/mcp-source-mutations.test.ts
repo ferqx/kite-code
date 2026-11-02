@@ -1,17 +1,5 @@
 import { expect, test } from 'bun:test';
-import {
-  existsSync,
-  linkSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -22,12 +10,17 @@ import {
   writeMcpSourceEntry,
   writeMcpSourceMetadata,
 } from '@kite-ai/agent/config';
-import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  expectPrivateMode,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { acquireFileLock } from '../../../src/platform/locks';
 
 const http = { type: 'http', url: 'https://example.test/mcp' } as const;
 function fixture() {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'kite-source-mutations-')));
+  const base = temporaryDirectory('kite-source-mutations-');
   const profilePath = join(base, 'profile'),
     workspacePath = join(base, 'workspace');
   privateDirectory(profilePath);
@@ -69,7 +62,7 @@ test('basic Add is private, marked, closed and does not overwrite same layer or 
     expect(first.target.source.kind).toBe('workspace');
     expect(first.fallback).toBeNull();
     expect(first.oldEtag).not.toBe(first.newEtag);
-    expect(statSync(f.project).mode & 0o777).toBe(0o600);
+    expectPrivateMode(f.project, 0o600);
     const s = readMcpSources(f.options);
     expect(s.entries[0]!.raw).toMatchObject({
       _kiteSourceCreation: { version: 1, operationId: 'op' },
@@ -84,7 +77,7 @@ test('basic Add is private, marked, closed and does not overwrite same layer or 
     expect(() =>
       f.mutate(
         JSON.parse(
-          '{"kind":"add","scope":"user","name":"bad","entry":{"type":"http","url":"https://example.test","headers":{}}}',
+          '{"kind":"add","scope":"user","name":"bad","entry":{"type":"http","url":"https://example.test","unknown":{}}}',
         ),
       ),
     ).toThrow('mcp_source_mutation_invalid');
@@ -432,9 +425,12 @@ for (const window of ['after-rename', 'successful-publication', 'before-publicat
       );
       const lockModule = fileURLToPath(new URL('../../../src/platform/locks.ts', import.meta.url));
       const errorModule = fileURLToPath(new URL('../../../src/config/types.ts', import.meta.url));
+      const securityModule = fileURLToPath(
+        new URL('../../../src/platform/windows-path-security.ts', import.meta.url),
+      );
       // Child module isolation keeps fault wrappers out of normal readers and every neighboring test.
       // Every acquired lock and every file mutation below is real; only failures after real close,
-      // or the directory fsync after the real rename, are injected.
+      // or the platform's post-rename verification/sync, are injected.
       const program = `
         import { mock } from 'bun:test';
         const fs = await import('node:fs');
@@ -471,6 +467,17 @@ for (const window of ['after-rename', 'successful-publication', 'before-publicat
             return actualSync(fd);
           },
         }));
+        if (process.platform === 'win32') {
+          const {defaultWindowsPathSecurity} = await import(${JSON.stringify(securityModule)});
+          const native = defaultWindowsPathSecurity();
+          options.windowsPathSecurity = {
+            ...native,
+            verifyFile(path) {
+              native.verifyFile(path);
+              if (window === 'after-rename' && published) throw Error('owned_post_rename_verification_failure');
+            },
+          };
+        }
         const {readMcpSources, writeMcpSourceEntry} = await import(${JSON.stringify(sourceModule)});
         const before = fs.readFileSync(options.profilePath + '/mcp.json');
         let code = null, receipt = null;
@@ -583,7 +590,7 @@ test('invalid UTF8, symlink, hardlink and root replacement refuse writes', () =>
     );
     rmSync(f.user);
     f.put(join(f.base, 'foreign'), {});
-    symlinkSync(join(f.base, 'foreign'), f.user);
+    recordReparseEntry(join(f.base, 'foreign'), f.user);
     expect(() => f.mutate({ kind: 'add', scope: 'user', name: 'x', entry: http })).toThrow(
       'mcp_source_unavailable',
     );
@@ -596,6 +603,7 @@ test('invalid UTF8, symlink, hardlink and root replacement refuse writes', () =>
     f.put(f.project, { mcpServers: {} });
     const old = readFileSync(f.project),
       moved = join(f.base, 'moved');
+    let replacementDenied = false;
     expect(() =>
       writeMcpSourceEntry({
         ...f.options,
@@ -603,12 +611,22 @@ test('invalid UTF8, symlink, hardlink and root replacement refuse writes', () =>
         mutation: { kind: 'add', scope: 'workspace', name: 'x', entry: http },
         operationId: 'op',
         validatePublication() {
-          renameSync(f.options.workspacePath!, moved);
+          try {
+            renameSync(f.options.workspacePath!, moved);
+          } catch (error) {
+            // Windows retains real lock handles below this root, preventing its
+            // replacement before the subsequent Source identity check can run.
+            replacementDenied = (error as NodeJS.ErrnoException).code === 'EPERM';
+            throw error;
+          }
           privateDirectory(f.options.workspacePath!);
         },
       }),
-    ).toThrow('mcp_source_conflict');
-    expect(readFileSync(join(moved, '.kite-code', 'mcp.json'))).toEqual(old);
+    ).toThrow(process.platform === 'win32' ? 'mcp_source_unavailable' : 'mcp_source_conflict');
+    expect(replacementDenied).toBe(process.platform === 'win32');
+    expect(
+      readFileSync(replacementDenied ? f.project : join(moved, '.kite-code', 'mcp.json')),
+    ).toEqual(old);
   } finally {
     f.close();
   }

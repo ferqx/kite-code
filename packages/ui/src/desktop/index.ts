@@ -46,17 +46,27 @@ export {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+export { Input } from './components/ui/input';
 export {
   PillSelectTrigger,
   type PillSelectTriggerProps,
 } from './components/ui/pill-select-trigger';
 export { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 export { ScrollArea, ScrollBar } from './components/ui/scroll-area';
+export {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './components/ui/select';
 export {
   Sheet,
   SheetClose,
@@ -67,6 +77,8 @@ export {
   SheetTrigger,
 } from './components/ui/sheet';
 export { Spinner } from './components/ui/spinner';
+export { Switch } from './components/ui/switch';
+export { Textarea } from './components/ui/textarea';
 export {
   Tooltip,
   TooltipContent,
@@ -93,7 +105,12 @@ export {
 } from './markdown-parse-cache';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { QueuedMessages, type QueuedMessagesProps, type QueuedPrompt } from './QueuedMessages';
-export { RightSidebar, type RightSidebarProps, type RightSidebarTab } from './RightSidebar';
+export {
+  RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
+  RightSidebar,
+  type RightSidebarProps,
+  type RightSidebarTab,
+} from './RightSidebar';
 export { ReadingStateCache } from './reading-state';
 export {
   type ScheduledTaskDraft,
@@ -103,7 +120,7 @@ export {
   ScheduledTasks,
   type ScheduledTasksProps,
 } from './ScheduledTasks';
-export { SessionPage, type SessionPageProps } from './SessionPage';
+export { NAVIGATION_MIN_WIDTH, SessionPage, type SessionPageProps } from './SessionPage';
 export {
   type SessionBrowserPageProps,
   SessionBrowserToolbar,
@@ -115,6 +132,7 @@ export {
   type SessionTabsModel,
   useSessionTabs,
 } from './SessionTabs';
+export { SettingsActionIcon } from './SettingsActionIcon';
 export { SettingsNavigationIcon } from './SettingsNavigationIcon';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';

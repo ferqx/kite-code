@@ -1,3 +1,4 @@
+import { validateMcpSourceEntry } from '@kite-ai/agent/mcp-entry';
 import { validateMcpCommandRequest, validateRequest } from '@kite-ai/client';
 import type { NativeMcpOperation, NativeUserMcpOperation } from '../src/mcp-bridge';
 
@@ -87,14 +88,6 @@ export function parseNativeUserMcpOperation(value: unknown): NativeUserMcpOperat
   };
   validateRequest('UserMcpSettingsRequest', request);
   const operation = value as NativeUserMcpOperation;
-  if (operation.kind === 'add') {
-    // Apply the existing finite nonsecret entry grammar before persisting an intent.
-    parseNativeMcpOperation({
-      kind: 'add',
-      scope: 'user',
-      name: operation.name,
-      entry: operation.entry,
-    });
-  }
+  if (operation.kind === 'add') validateMcpSourceEntry(operation.entry, { allowLaunchNames: true });
   return structuredClone(operation);
 }

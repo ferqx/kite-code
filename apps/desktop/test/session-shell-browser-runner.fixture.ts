@@ -6,7 +6,15 @@ import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
 import type {} from './session-shell-browser.fixture';
-import { verifySessionShellGeometry } from './session-shell-geometry.fixture';
+import {
+  verifyFormControlStyles,
+  verifyMcpCustomForms,
+  verifyMcpFailureFeedback,
+  verifyMcpSettingsProduct,
+  verifySessionShellGeometry,
+  verifySettingsGeometry,
+  verifySwitchGeometry,
+} from './session-shell-geometry.fixture';
 
 // Explicit standalone fixture; it never loads Service, user data or the production diagnostics.
 const directory = import.meta.dir;
@@ -99,7 +107,13 @@ const writes = new Set([
 ]);
 try {
   report.cases.push(
+    ...(await verifyFormControlStyles(browser, server.url.toString(), artifact)),
+    ...(await verifySwitchGeometry(browser, server.url.toString(), artifact)),
     ...(await verifySessionShellGeometry(browser, server.url.toString(), artifact)),
+    ...(await verifySettingsGeometry(browser, server.url.toString(), artifact)),
+    ...(await verifyMcpSettingsProduct(browser, server.url.toString(), artifact)),
+    ...(await verifyMcpFailureFeedback(browser, server.url.toString(), artifact)),
+    ...(await verifyMcpCustomForms(browser, server.url.toString(), artifact)),
   );
   for (const theme of ['light', 'dark'] as const) {
     const page = await browser.newPage({

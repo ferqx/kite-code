@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Json } from '@kite-ai/agent/extensions';
-import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const flag = '--owned-source-publication-child';
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -31,12 +31,13 @@ async function faultChild(root: string, packetPath: string) {
   const before = actual.readFileSync(project);
   const paths = new Map<number, string>();
   const sourceLockFds = new Set<number>();
+  const windowsSourceLocks = new Set<unknown>();
   let armed = false,
     published = false,
-    directoryFaults = 0,
+    publicationFaults = 0,
     releaseFaults = 0,
     renames = 0,
-    realFsyncs = 0,
+    realFlushes = 0,
     vault = 0,
     rpc = 0;
   mock.module('node:fs', () => ({
@@ -62,25 +63,89 @@ async function faultChild(root: string, packetPath: string) {
       }
     },
     fsyncSync(fd: number) {
-      if (armed && published && paths.get(fd) === dirname(project) && directoryFaults === 0) {
-        directoryFaults++;
+      if (armed && published && paths.get(fd) === dirname(project) && publicationFaults === 0) {
+        publicationFaults++;
         throw Error('owned_directory_fsync_failure');
       }
       actual.fsyncSync(fd);
-      realFsyncs++;
+      realFlushes++;
     },
     closeSync(fd: number) {
       const path = paths.get(fd);
       actual.closeSync(fd);
       paths.delete(fd);
       sourceLockFds.delete(fd);
-      if (armed && directoryFaults === 1 && path === `${project}.lock` && releaseFaults === 0) {
+      if (armed && publicationFaults === 1 && path === `${project}.lock` && releaseFaults === 0) {
         releaseFaults++;
         // Kernel close really completed; only the post-close error is injected.
         throw Error('owned_lock_release_failure');
       }
     },
   }));
+  if (process.platform === 'win32') {
+    const securityModule = new URL(
+      '../../../../packages/agent/src/platform/windows-path-security.ts',
+      import.meta.url,
+    ).href;
+    const security = await import(securityModule);
+    const native = security.defaultWindowsPathSecurity()!;
+    const scoped = {
+      ...native,
+      writeScopeFile(path: string, bytes: Uint8Array) {
+        native.writeScopeFile(path, bytes);
+        realFlushes++; // The original Windows writer completed FlushFileBuffers.
+      },
+      readScopeFile(path: string, maxBytes: number, privateFile?: boolean) {
+        const value = native.readScopeFile(path, maxBytes, privateFile);
+        if (armed && published && path === project && publicationFaults === 0) {
+          publicationFaults++;
+          throw Error('owned_post_publication_readback_failure');
+        }
+        return value;
+      },
+    };
+    mock.module(securityModule, () => ({ ...security, defaultWindowsPathSecurity: () => scoped }));
+    const lockModule = new URL('../../../../packages/agent/src/platform/locks.ts', import.meta.url)
+      .href;
+    const locks = await import(lockModule);
+    const acquire = locks.acquireFileLock,
+      assertLive = locks.assertLiveLock;
+    const originals = new WeakMap();
+    mock.module(lockModule, () => ({
+      ...locks,
+      acquireFileLock(...args: Parameters<typeof acquire>) {
+        const original = acquire(...args);
+        const proxy = {
+          ...original,
+          release() {
+            original.release();
+            windowsSourceLocks.delete(original);
+            if (
+              armed &&
+              publicationFaults === 1 &&
+              original.path === `${project}.lock` &&
+              releaseFaults === 0
+            ) {
+              releaseFaults++;
+              throw Error('owned_lock_release_failure');
+            }
+          },
+        };
+        if (original.path.startsWith(root)) windowsSourceLocks.add(original);
+        originals.set(proxy, original);
+        return proxy;
+      },
+      assertLiveLock(
+        lock: Parameters<typeof assertLive>[0],
+        ...args: [string, 'shared' | 'exclusive']
+      ) {
+        return assertLive(
+          (typeof lock === 'object' && lock !== null ? originals.get(lock) : undefined) ?? lock,
+          ...args,
+        );
+      },
+    }));
+  }
   const { createRuntime } = await import('@kite-ai/agent');
   const { initializeLivePermissionFixture } = await import('../fixtures/live-permission-fixture');
   const { createArtifactStore } = await import('@kite-ai/agent/artifacts');
@@ -93,7 +158,7 @@ async function faultChild(root: string, packetPath: string) {
   const { createDefaultProcessConfiguration } = await import('../../src/configuration');
   const { startService } = await import('../../src/index');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  actual.mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   actual.writeFileSync(join(profile.profilePath, 'mcp.json'), '{"mcpServers":{}}\n', {
     mode: 0o600,
   });
@@ -316,14 +381,15 @@ async function faultChild(root: string, packetPath: string) {
     Object.assign(packet, {
       published,
       renames,
-      directoryFaults,
+      publicationFaults,
       releaseFaults,
-      realFsyncs,
-      sourceLocksRemaining: sourceLockFds.size,
+      realFlushes,
+      sourceLocksRemaining: sourceLockFds.size + windowsSourceLocks.size,
       vault,
       rpc,
       cleanupErrors,
-      cleanupConfirmed: cleanupErrors.length === 0 && sourceLockFds.size === 0,
+      cleanupConfirmed:
+        cleanupErrors.length === 0 && sourceLockFds.size === 0 && windowsSourceLocks.size === 0,
     });
     actual.writeFileSync(packetPath, `${JSON.stringify(packet, null, 2)}\n`, {
       flag: 'wx',
@@ -338,7 +404,7 @@ if (process.argv.includes(flag)) {
     process.argv[process.argv.indexOf(flag) + 2]!,
   );
 } else {
-  test('published source remains unknown across directory fsync plus lock-release failure; original duplicate never writes again', async () => {
+  test('published source remains unknown across platform read-back/sync plus lock-release failure; original duplicate never writes again', async () => {
     const root = fs.realpathSync(temporaryDirectory('kite-service-source-publication-'));
     fs.chmodSync(root, 0o700);
     const evidence = temporaryDirectory('kite-source-publication-evidence-');
@@ -366,9 +432,9 @@ if (process.argv.includes(flag)) {
       expect(p.sourceLocksRemaining).toBe(0);
       expect(p.published).toBe(true);
       expect(p.renames).toBe(1);
-      expect(p.directoryFaults).toBe(1);
+      expect(p.publicationFaults).toBe(1);
       expect(p.releaseFaults).toBe(1);
-      expect(p.realFsyncs).toBeGreaterThan(0);
+      expect(p.realFlushes).toBeGreaterThan(0);
       expect(p.sourceBeforeSha).not.toBe(p.sourceAfterSha);
       expect(p.commentRetained).toBe(true);
       expect(p.unrelatedRetained).toBe(true);

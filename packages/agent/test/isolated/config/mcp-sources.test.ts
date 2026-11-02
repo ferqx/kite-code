@@ -9,8 +9,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,7 +20,12 @@ import {
   readMcpSources,
   writeMcpSourceMetadata,
 } from '@kite-ai/agent/config';
-import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  directoryLink,
+  expectPrivateMode,
+  privateDirectory,
+  recordReparseEntry,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { acquireFileLock } from '../../../src/platform/locks';
 
 function fixture() {
@@ -59,6 +62,48 @@ function fixture() {
   };
 }
 const source = { type: 'http', url: 'https://example.test/mcp', auth: { type: 'none' } };
+test('custom user environment references remain private declarations and never grant project environment access', () => {
+  const f = fixture();
+  try {
+    const stdio = {
+      type: 'stdio',
+      command: process.execPath,
+      args: ['two words'],
+      env: { VISIBLE: 'configured' },
+      envPassthrough: ['SERVICE_TOKEN'],
+    };
+    const http = {
+      type: 'http',
+      url: 'https://example.test/mcp',
+      bearerTokenEnv: 'MCP_TOKEN',
+      headers: { 'X-Client': 'kite' },
+      headersFromEnv: { 'X-Api-Key': 'SERVICE_KEY' },
+    };
+    f.put(f.user, { mcpServers: { 'user-stdio': stdio, 'user-http': http } });
+    f.put(f.project, { mcpServers: { 'project-stdio': stdio, 'project-http': http } });
+    const state = readMcpSources(f.options);
+    expect(
+      state.entries
+        .filter((row) => row.server.source.kind === 'user')
+        .every((row) => row.server.admitted),
+    ).toBe(true);
+    expect(
+      state.entries
+        .filter((row) => row.server.source.kind === 'workspace')
+        .map((row) => row.server.reason),
+    ).toEqual(['mcp_user_configuration_required', 'mcp_user_configuration_required']);
+    expect(
+      state.entries.find((row) => row.server.name === 'user-stdio')!.transport!.envPassthrough,
+    ).toEqual(['SERVICE_TOKEN']);
+    expect(state.entries.find((row) => row.server.name === 'user-http')!.transport!.auth).toEqual({
+      type: 'environment',
+    });
+    expect(JSON.stringify(state.registry)).not.toContain('SERVICE_TOKEN');
+    expect(JSON.stringify(state.registry)).not.toContain('SERVICE_KEY');
+  } finally {
+    f.close();
+  }
+});
 const reference = (name: string) => ['$', '{', name, '}'].join('');
 const proof = {
   decisionId: 'decision',
@@ -144,7 +189,7 @@ test('global user observations exclude project approvals while Session observati
     expect(invalid.registry.servers[0]!.admitted).toBe(true);
     expect(readMcpSources(f.options).registry.errors.approval).toBe('mcp_approval_unavailable');
     rmSync(path);
-    symlinkSync(f.project, path);
+    recordReparseEntry(f.project, path);
     expect(readMcpSources(options).readSet).toEqual(original.readSet);
     expect(readMcpSources(f.options).approvals.error).toBe('mcp_source_path_unsafe');
   } finally {
@@ -190,7 +235,7 @@ test('malformed/unsafe project source blocks user fallback; bad unrelated server
     expect(state.registry.servers.every((server) => !server.admitted)).toBe(true);
     expect(JSON.stringify(state.registry)).not.toContain('secret text');
     rmSync(f.project);
-    symlinkSync(f.user, f.project);
+    recordReparseEntry(f.user, f.project);
     state = readMcpSources(f.options);
     expect(state.registry.errors.workspace).toBe('mcp_source_path_unsafe');
     expect(state.registry.servers[0]!.admitted).toBe(false);
@@ -488,7 +533,7 @@ test('exact metadata proof schema, wrong original scope and canonical lock set a
       },
     });
     expect(validations).toBe(3);
-    expect(statSync(state.approvals.path).mode & 0o777).toBe(0o600);
+    expectPrivateMode(state.approvals.path, 0o600);
   } finally {
     f.close();
   }
@@ -510,7 +555,7 @@ test('duplicate keys, invalid UTF8, hardlinks and directory redirection are loca
     linkSync(f.user, join(f.base, 'hardlink'));
     expect(readMcpSources(f.options).registry.errors.user).toBe('mcp_source_path_unsafe');
     rmSync(join(f.base, 'hardlink'));
-    symlinkSync(f.options.profilePath, join(f.options.workspacePath!, '.kite-code'));
+    directoryLink(f.options.profilePath, join(f.options.workspacePath!, '.kite-code'));
     expect(readMcpSources(f.options).registry.errors.workspace).toBe('mcp_source_path_unsafe');
     expect(readMcpSources(f.options).registry.servers[0]!.admitted).toBe(false);
   } finally {

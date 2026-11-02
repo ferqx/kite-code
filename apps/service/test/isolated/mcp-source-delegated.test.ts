@@ -126,7 +126,7 @@ async function fixture(
           });
           const result = await context.operations.wait(ref, {
             signal: context.signal,
-            timeoutMs: 5000,
+            timeoutMs: process.platform === 'win32' ? 30000 : 5000,
           });
           return {
             outcome: result.status === 'succeeded' ? 'succeeded' : 'failed',
@@ -293,7 +293,9 @@ async function fixture(
         subjectId: 'owner',
         request: { kind: 'run.start', content: 'delegate source' },
       });
-      await runtime.waitForCommand('work', { timeoutMs: 8000 });
+      await runtime.waitForCommand('work', {
+        timeoutMs: process.platform === 'win32' ? 90000 : 8000,
+      });
     },
     async submit() {
       return runtime.submitCommand({
@@ -328,7 +330,9 @@ async function fixture(
         subjectId: 'owner',
         request: { kind: 'run.start', content: 'wrong Workspace frozen child template' },
       });
-      await runtime.waitForCommand('other-work', { timeoutMs: 5000 });
+      await runtime.waitForCommand('other-work', {
+        timeoutMs: process.platform === 'win32' ? 60000 : 5000,
+      });
       return store.getView('unrelated');
     },
     async close() {
@@ -339,234 +343,257 @@ async function fixture(
   };
 }
 
-test('actual activated child derives original source selection and opens its own connection without retagging parent', async () => {
-  const f = await fixture();
-  try {
-    await f.run();
-    expect(f.effects).toBe(1);
-    expect(f.opens).toBe(2);
-    const childSessionId = f.ref!.childSessionId!;
-    expect(childSessionId).not.toBe('parent');
-    expect((await f.store.getSession(childSessionId))!.parentSessionId).toBe('parent');
-    const parentRun = (await f.store.getView('parent')).runs[0]!;
-    const persisted = (await f.store.getRun(parentRun.id))!.configuration as unknown as {
-      snapshot: { mcp: { sources: McpSelectedSourceSnapshot } };
-    };
-    expect(persisted.snapshot.mcp.sources).toEqual(f.original!);
-    const execution = (await f.store.listExecutions('parent')).find(
-      (execution) => execution.definitionId === 'owned.delegate',
-    )!;
-    const actualRun = (await f.store.getRun(parentRun.id))!;
-    const session = (await f.store.getSession('parent'))!;
-    const workspace = (await f.store.getWorkspace(session.workspaceId))!;
-    const command = (await f.store.getCommand(execution.originCommandId))!;
-    const selected = await f.sources.deriveChildSelection(
-      {
-        parentExecution: execution,
-        parentRun: actualRun,
-        parentSession: session,
-        workspace,
-        command,
-      },
-      { present: false, configurations: [] },
-    );
-    const wireBefore = [...f.wire];
-    let rejected = '';
+test(
+  'actual activated child derives original source selection and opens its own connection without retagging parent',
+  async () => {
+    const f = await fixture();
     try {
-      await selected.assertExecutionScope({
-        kind: 'tool',
-        sessionId: 'parent',
-        runId: actualRun.id,
-        executionId: execution.id,
-        definitionId: execution.definitionId,
-        definitionVersion: execution.definitionVersion,
-        input: execution.input,
-        signal: new AbortController().signal,
-      });
-    } catch (error) {
-      rejected = (error as Error).message;
-    }
-    expect(rejected).toContain('mcp_source_scope_invalid');
-    rejected = '';
-    try {
-      await f.sources.deriveChildSelection(
+      await f.run();
+      expect(f.effects).toBe(1);
+      expect(f.opens).toBe(2);
+      const childSessionId = f.ref!.childSessionId!;
+      expect(childSessionId).not.toBe('parent');
+      expect((await f.store.getSession(childSessionId))!.parentSessionId).toBe('parent');
+      const parentRun = (await f.store.getView('parent')).runs[0]!;
+      const persisted = (await f.store.getRun(parentRun.id))!.configuration as unknown as {
+        snapshot: { mcp: { sources: McpSelectedSourceSnapshot } };
+      };
+      expect(persisted.snapshot.mcp.sources).toEqual(f.original!);
+      const execution = (await f.store.listExecutions('parent')).find(
+        (execution) => execution.definitionId === 'owned.delegate',
+      )!;
+      const actualRun = (await f.store.getRun(parentRun.id))!;
+      const session = (await f.store.getSession('parent'))!;
+      const workspace = (await f.store.getWorkspace(session.workspaceId))!;
+      const command = (await f.store.getCommand(execution.originCommandId))!;
+      const selected = await f.sources.deriveChildSelection(
         {
           parentExecution: execution,
-          parentRun: { ...actualRun, configuration: { forged: true } },
+          parentRun: actualRun,
           parentSession: session,
           workspace,
           command,
         },
         { present: false, configurations: [] },
       );
-    } catch (error) {
-      rejected = (error as Error).message;
-    }
-    expect(rejected).toContain('mcp_source_scope_invalid');
-    expect(f.wire).toEqual(wireBefore);
-    const noParent = await f.sources.deriveChildSelection(
-      { parentExecution: execution, parentRun: null, parentSession: session, workspace, command },
-      { present: false, configurations: [] },
-    );
-    expect(noParent.servers).toHaveLength(0);
-    expect(noParent.snapshot.readSet).toBeNull();
-    expect(f.wire).toEqual(wireBefore);
-    const unrelated = await f.unrelated();
-    expect(unrelated.runs[0]!.status).toBe('failed');
-    expect(unrelated.runs[0]!.reason).toBe('execution_failed');
-    expect(await f.store.listExecutions('unrelated')).toHaveLength(0);
-    expect(f.sourceFailures).toContain('mcp_source_scope_invalid');
-    expect(f.wire).toEqual(wireBefore);
-  } finally {
-    await f.close();
-  }
-}, 20000);
-
-test('child connect and source Job each require an actual child approval, independently of parent allowed calls', async () => {
-  const f = await fixture(false, false, 'ask');
-  try {
-    await f.submit();
-    const approvals: string[] = [];
-    for (let i = 0; i < 2; i++) {
-      const deadline = Date.now() + 5000;
-      let card: InteractionRecord | undefined;
-      while (!card) {
-        card = (
-          await f.runtime.listInteractions({
-            expectedStoreId: f.expectedStoreId,
-            sessionId: 'parent',
-            state: 'pending',
-          })
-        ).interactions[0];
-        if (Date.now() > deadline) throw Error('child_approval_deadline');
-        if (!card) await Bun.sleep(10);
+      const wireBefore = [...f.wire];
+      let rejected = '';
+      try {
+        await selected.assertExecutionScope({
+          kind: 'tool',
+          sessionId: 'parent',
+          runId: actualRun.id,
+          executionId: execution.id,
+          definitionId: execution.definitionId,
+          definitionVersion: execution.definitionVersion,
+          input: execution.input,
+          signal: new AbortController().signal,
+        });
+      } catch (error) {
+        rejected = (error as Error).message;
       }
-      expect(card.sessionId).not.toBe('parent');
-      expect(f.opens).toBe(1);
-      approvals.push(card.definitionId);
-      await f.runtime.answerInteraction({
-        expectedStoreId: f.expectedStoreId,
-        commandId: `answer-${i}`,
-        presentationSessionId: 'parent',
-        interactionId: card.id,
-        expectedRevision: card.revision,
-        subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
-      });
+      expect(rejected).toContain('mcp_source_scope_invalid');
+      rejected = '';
+      try {
+        await f.sources.deriveChildSelection(
+          {
+            parentExecution: execution,
+            parentRun: { ...actualRun, configuration: { forged: true } },
+            parentSession: session,
+            workspace,
+            command,
+          },
+          { present: false, configurations: [] },
+        );
+      } catch (error) {
+        rejected = (error as Error).message;
+      }
+      expect(rejected).toContain('mcp_source_scope_invalid');
+      expect(f.wire).toEqual(wireBefore);
+      const noParent = await f.sources.deriveChildSelection(
+        { parentExecution: execution, parentRun: null, parentSession: session, workspace, command },
+        { present: false, configurations: [] },
+      );
+      expect(noParent.servers).toHaveLength(0);
+      expect(noParent.snapshot.readSet).toBeNull();
+      expect(f.wire).toEqual(wireBefore);
+      const unrelated = await f.unrelated();
+      expect(unrelated.runs[0]!.status).toBe('failed');
+      expect(unrelated.runs[0]!.reason).toBe('execution_failed');
+      expect(await f.store.listExecutions('unrelated')).toHaveLength(0);
+      expect(f.sourceFailures).toContain('mcp_source_scope_invalid');
+      expect(f.wire).toEqual(wireBefore);
+    } finally {
+      await f.close();
     }
-    await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
-    expect(approvals).toEqual(['mcp.connect', 'mcp.source.connection']);
-    expect(f.opens).toBe(2);
-    expect(f.effects).toBe(1);
-  } finally {
-    await f.close();
-  }
-}, 20000);
+  },
+  process.platform === 'win32' ? 150000 : 20000,
+);
 
-test('source drift after child template capture and independent child denial have zero additional connection or effect', async () => {
-  for (const mode of ['drift', 'deny', 'deny_job'] as const) {
-    const f = await fixture(false, mode === 'drift', mode === 'drift' ? 'allow' : mode);
+test(
+  'child connect and source Job each require an actual child approval, independently of parent allowed calls',
+  async () => {
+    const f = await fixture(false, false, 'ask');
+    try {
+      await f.submit();
+      const approvals: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        const deadline = Date.now() + (process.platform === 'win32' ? 30000 : 5000);
+        let card: InteractionRecord | undefined;
+        while (!card) {
+          card = (
+            await f.runtime.listInteractions({
+              expectedStoreId: f.expectedStoreId,
+              sessionId: 'parent',
+              state: 'pending',
+            })
+          ).interactions[0];
+          if (Date.now() > deadline) throw Error('child_approval_deadline');
+          if (!card) await Bun.sleep(10);
+        }
+        expect(card.sessionId).not.toBe('parent');
+        expect(f.opens).toBe(1);
+        approvals.push(card.definitionId);
+        await f.runtime.answerInteraction({
+          expectedStoreId: f.expectedStoreId,
+          commandId: `answer-${i}`,
+          presentationSessionId: 'parent',
+          interactionId: card.id,
+          expectedRevision: card.revision,
+          subjectId: 'owner',
+          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        });
+      }
+      await f.runtime.waitForCommand('work', {
+        timeoutMs: process.platform === 'win32' ? 90000 : 8000,
+      });
+      expect(approvals).toEqual(['mcp.connect', 'mcp.source.connection']);
+      expect(f.opens).toBe(2);
+      expect(f.effects).toBe(1);
+    } finally {
+      await f.close();
+    }
+  },
+  process.platform === 'win32' ? 150000 : 20000,
+);
+
+test(
+  'source drift after child template capture and independent child denial have zero additional connection or effect',
+  async () => {
+    for (const mode of ['drift', 'deny', 'deny_job'] as const) {
+      const f = await fixture(false, mode === 'drift', mode === 'drift' ? 'allow' : mode);
+      try {
+        await f.run();
+        expect(f.opens).toBe(1);
+        expect(f.effects).toBe(0);
+        expect(f.wire).toEqual(['initialize', 'tools/list']);
+      } finally {
+        await f.close();
+      }
+    }
+  },
+  process.platform === 'win32' ? 150000 : 20000,
+);
+
+test(
+  'cold parent cannot expand its dynamic schema upper bound through a new child catalogue',
+  async () => {
+    const f = await fixture(true);
     try {
       await f.run();
       expect(f.opens).toBe(1);
       expect(f.effects).toBe(0);
-      expect(f.wire).toEqual(['initialize', 'tools/list']);
+      const childRuns = (await f.store.getView(f.ref!.childSessionId!)).runs;
+      expect(childRuns[0]!.status).toBe('failed');
+      expect(childRuns[0]!.reason).toBe('child_tool_scope_exceeds_parent');
     } finally {
       await f.close();
     }
-  }
-}, 20000);
+  },
+  process.platform === 'win32' ? 150000 : 20000,
+);
 
-test('cold parent cannot expand its dynamic schema upper bound through a new child catalogue', async () => {
-  const f = await fixture(true);
-  try {
-    await f.run();
-    expect(f.opens).toBe(1);
-    expect(f.effects).toBe(0);
-    const childRuns = (await f.store.getView(f.ref!.childSessionId!)).runs;
-    expect(childRuns[0]!.status).toBe('failed');
-    expect(childRuns[0]!.reason).toBe('child_tool_scope_exceeds_parent');
-  } finally {
-    await f.close();
-  }
-}, 20000);
-
-test('explicit zero child selection remains an ordinary child with no inherited source grant or additional connection', async () => {
-  const f = await fixture(false, false, 'allow', true);
-  try {
-    await f.run();
-    expect(f.opens).toBe(1);
-    expect(f.effects).toBe(0);
-    const view = await f.store.getView(f.ref!.childSessionId!);
-    expect(view.runs[0]!.status).toBe('completed');
-    expect(
-      view.executions.filter(
-        (execution) => execution.kind === 'model' && execution.status === 'succeeded',
-      ),
-    ).toHaveLength(1);
-    expect(
-      view.executions.some((execution) => execution.definitionId === 'mcp.source.connection'),
-    ).toBe(false);
-    const saved = (await f.store.getRun(view.runs[0]!.id))!.configuration as unknown as {
-      snapshot: { mcp: { sources: McpSelectedSourceSnapshot } };
-    };
-    expect(saved.snapshot.mcp.sources.readSet).toBeNull();
-    const root = await f.store.getView('parent');
-    const execution = root.executions.find((value) => value.definitionId === 'owned.delegate')!;
-    expect(saved.snapshot.mcp.sources.inheritance).toMatchObject({
-      version: 1,
-      parentExecutionId: execution.id,
-      parentExecutionDigest: createHash('sha256')
-        .update(mcpCanonical(execution.input))
-        .digest('hex'),
-      parentRunId: root.runs[0]!.id,
-      parentSessionId: 'parent',
-      rootSessionId: root.session.rootSessionId,
-      rootWorkCommandId: execution.rootWorkCommandId,
-      rootWorkSeq: execution.rootWorkSeq,
-      parentSnapshot: f.original!,
-      parentSnapshotDigest: createHash('sha256').update(mcpCanonical(f.original!)).digest('hex'),
-    });
-    const originalBytes = readFileSync(f.sourcePath);
-    const wire = [...f.wire];
+test(
+  'explicit zero child selection remains an ordinary child with no inherited source grant or additional connection',
+  async () => {
+    const f = await fixture(false, false, 'allow', true);
     try {
-      writeFileSync(f.sourcePath, '{ changed optional source');
-      const model = view.executions.find((value) => value.kind === 'model')!;
-      const next = await f.sources.deriveChildSelection(
-        {
-          parentExecution: (await f.store.getExecution(model.id))!,
-          parentRun: (await f.store.getRun(view.runs[0]!.id))!,
-          parentSession: view.session,
-          workspace: (await f.store.getWorkspace(view.session.workspaceId))!,
-          command: (await f.store.getCommand(model.originCommandId))!,
-        },
-        { present: false, configurations: [] },
-      );
-      expect(next.snapshot.readSet).toBeNull();
-      expect(next.servers).toEqual([]);
-      expect(next.snapshot.inheritance?.parentSnapshot).toEqual(saved.snapshot.mcp.sources);
-      expect(
-        (await f.store.listExecutions(view.session.id)).filter(
-          (execution) => execution.kind === 'model',
-        ),
-      ).toHaveLength(1);
+      await f.run();
       expect(f.opens).toBe(1);
       expect(f.effects).toBe(0);
-      expect(f.wire).toEqual(wire);
+      const view = await f.store.getView(f.ref!.childSessionId!);
+      expect(view.runs[0]!.status).toBe('completed');
+      expect(
+        view.executions.filter(
+          (execution) => execution.kind === 'model' && execution.status === 'succeeded',
+        ),
+      ).toHaveLength(1);
+      expect(
+        view.executions.some((execution) => execution.definitionId === 'mcp.source.connection'),
+      ).toBe(false);
+      const saved = (await f.store.getRun(view.runs[0]!.id))!.configuration as unknown as {
+        snapshot: { mcp: { sources: McpSelectedSourceSnapshot } };
+      };
+      expect(saved.snapshot.mcp.sources.readSet).toBeNull();
+      const root = await f.store.getView('parent');
+      const execution = root.executions.find((value) => value.definitionId === 'owned.delegate')!;
+      expect(saved.snapshot.mcp.sources.inheritance).toMatchObject({
+        version: 1,
+        parentExecutionId: execution.id,
+        parentExecutionDigest: createHash('sha256')
+          .update(mcpCanonical(execution.input))
+          .digest('hex'),
+        parentRunId: root.runs[0]!.id,
+        parentSessionId: 'parent',
+        rootSessionId: root.session.rootSessionId,
+        rootWorkCommandId: execution.rootWorkCommandId,
+        rootWorkSeq: execution.rootWorkSeq,
+        parentSnapshot: f.original!,
+        parentSnapshotDigest: createHash('sha256').update(mcpCanonical(f.original!)).digest('hex'),
+      });
+      const originalBytes = readFileSync(f.sourcePath);
+      const wire = [...f.wire];
+      try {
+        writeFileSync(f.sourcePath, '{ changed optional source');
+        const model = view.executions.find((value) => value.kind === 'model')!;
+        const next = await f.sources.deriveChildSelection(
+          {
+            parentExecution: (await f.store.getExecution(model.id))!,
+            parentRun: (await f.store.getRun(view.runs[0]!.id))!,
+            parentSession: view.session,
+            workspace: (await f.store.getWorkspace(view.session.workspaceId))!,
+            command: (await f.store.getCommand(model.originCommandId))!,
+          },
+          { present: false, configurations: [] },
+        );
+        expect(next.snapshot.readSet).toBeNull();
+        expect(next.servers).toEqual([]);
+        expect(next.snapshot.inheritance?.parentSnapshot).toEqual(saved.snapshot.mcp.sources);
+        expect(
+          (await f.store.listExecutions(view.session.id)).filter(
+            (execution) => execution.kind === 'model',
+          ),
+        ).toHaveLength(1);
+        expect(f.opens).toBe(1);
+        expect(f.effects).toBe(0);
+        expect(f.wire).toEqual(wire);
+      } finally {
+        writeFileSync(f.sourcePath, originalBytes);
+      }
     } finally {
-      writeFileSync(f.sourcePath, originalBytes);
+      await f.close();
     }
-  } finally {
-    await f.close();
-  }
-}, 20000);
+  },
+  process.platform === 'win32' ? 150000 : 20000,
+);
 
 test('strict Session derivation validates both real scopes and rejects same-name sources in another canonical Workspace or parent byte drift', () => {
   const root = realpathSync(temporaryDirectory('kite-source-derivation-'));
   const profilePath = join(root, 'profile'),
     a = join(root, 'a'),
     b = join(root, 'b');
-  for (const path of [profilePath, a, b]) mkdirSync(path);
+  privateDirectory(profilePath);
+  for (const path of [a, b]) mkdirSync(path);
   const raw = JSON.stringify({
     mcpServers: { same: { type: 'http', url: 'https://owned.invalid', auth: { type: 'none' } } },
   });

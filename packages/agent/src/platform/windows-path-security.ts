@@ -27,6 +27,7 @@ export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   retainPrivateRecordFile(path: string, maxBytes: number): WindowsPrivateRecordRead;
   writePrivateRecordFile(path: string, bytes: Uint8Array): { remove(): void };
   writePrivateFile(path: string, bytes: Uint8Array): void;
+  writeScopeFile(path: string, bytes: Uint8Array): void;
   writePrivateArtifactFile(path: string, bytes: Uint8Array): void;
   writePrivateArtifactFiles(root: string, files: ReadonlyMap<string, Uint8Array>): void;
   copyPrivateArtifactFiles(sourceRoot: string, targetRoot: string, files: readonly string[]): void;
@@ -404,10 +405,15 @@ function createNativeWindowsPathSecurity(): Implementation {
       total += count[0]!;
     }
   };
-  const transfer = (target: string, provide: (handle: bigint | number, held: Held[]) => void) => {
+  const transfer = (
+    target: string,
+    provide: (handle: bigint | number, held: Held[]) => void,
+    privateParent = true,
+  ) => {
     target = resolve(target);
     api.verifyPath(target);
-    api.verifyDirectory(dirname(target));
+    if (privateParent) api.verifyDirectory(dirname(target));
+    else api.verifyScopeDirectory(dirname(target));
     const held: Held[] = [];
     ownedTransfers.add(held);
     let failure: unknown;
@@ -427,7 +433,8 @@ function createNativeWindowsPathSecurity(): Implementation {
       if (!kernel.symbols.FlushFileBuffers(handle)) fail();
       if (identity(info(handle)) !== original) fail();
       verifyHandle(handle, target, false);
-      api.verifyDirectory(dirname(target));
+      if (privateParent) api.verifyDirectory(dirname(target));
+      else api.verifyScopeDirectory(dirname(target));
       for (const parent of held.filter((entry) => entry.directory))
         verifyHandle(parent.handle, parent.path, true, false);
     } catch (error) {
@@ -598,6 +605,18 @@ function createNativeWindowsPathSecurity(): Implementation {
         const actual = info(handle);
         if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
       });
+    },
+    writeScopeFile(path, bytes) {
+      if (!(bytes instanceof Uint8Array) || bytes.length > 8388608) fail();
+      transfer(
+        path,
+        (handle) => {
+          writeChunks(handle, bytes);
+          const actual = info(handle);
+          if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
+        },
+        false,
+      );
     },
     writePrivateArtifactFile(path, bytes) {
       if (!(bytes instanceof Uint8Array) || bytes.length > 1024 * 1024 * 1024) fail();

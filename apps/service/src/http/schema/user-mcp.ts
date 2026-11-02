@@ -13,8 +13,29 @@ const code = z
   .regex(/^[a-z0-9_]+$/);
 const serverId = z.string().regex(/^mcp-[a-f0-9]{64}$/);
 const sourceEntry = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('http'), url: z.string().min(1).max(8192) }),
-  z.strictObject({ type: z.literal('stdio'), command: z.string().min(1).max(4096) }),
+  z.strictObject({
+    type: z.literal('http'),
+    url: z.string().min(1).max(8192),
+    bearerTokenEnv: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/)
+      .optional(),
+    headers: z.record(z.string(), z.string().max(8192)).optional(),
+    headersFromEnv: z
+      .record(z.string(), z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/))
+      .optional(),
+  }),
+  z.strictObject({
+    type: z.literal('stdio'),
+    command: z.string().min(1).max(4096),
+    args: z.array(z.string().max(8192)).max(128).optional(),
+    env: z.record(z.string(), z.string().max(8192)).optional(),
+    envPassthrough: z
+      .array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/))
+      .max(128)
+      .optional(),
+    cwd: z.string().min(1).max(4096).optional(),
+  }),
 ]);
 const target = { serverId };
 export const UserMcpSettingsOperationSchema = z.discriminatedUnion('kind', [
@@ -56,7 +77,7 @@ export const UserMcpToolsQuerySchema = z.strictObject({
   afterIndex: z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
 });
 export const UserMcpAuthenticationSchema = z.strictObject({
-  policy: z.enum(['none', 'credential', 'oauth', 'auto']),
+  policy: z.enum(['none', 'credential', 'oauth', 'auto', 'environment']),
   status: z.enum(['none', 'missing', 'present', 'locked', 'unavailable', 'unknown']),
   loginAllowed: z.boolean(),
 });

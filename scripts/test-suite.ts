@@ -1,7 +1,12 @@
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { availableParallelism, tmpdir } from 'node:os';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
+import {
+  privateDirectory,
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../tests/fixtures/test-filesystem';
 import { testToolchainEnvironment } from './test-environment';
 
 export const TEST_FILE_PATTERN = /\.(?:test|spec)\.[cm]?[jt]sx?$/u;
@@ -121,8 +126,10 @@ export function shardTestFiles(files: readonly string[], requestedShards: number
 }
 
 function testEnvironment(prefix: string): { env: Record<string, string>; dispose(): void } {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const home = temporaryDirectory(prefix);
   const codeRoot = join(home, '.kite-code');
+  const temporary = join(home, 'tmp');
+  if (process.platform === 'win32') privateDirectory(temporary);
   return {
     env: {
       ...process.env,
@@ -130,9 +137,11 @@ function testEnvironment(prefix: string): { env: Record<string, string>; dispose
       HOME: home,
       // KLSV1 Service contract: this is the exact code root, not an OS-home override.
       KITE_CODE_HOME: codeRoot,
-      ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+      ...(process.platform === 'win32'
+        ? { USERPROFILE: home, TEMP: temporary, TMP: temporary }
+        : {}),
     } as Record<string, string>,
-    dispose: () => rmSync(home, { recursive: true, force: true }),
+    dispose: () => removeTemporaryDirectory(home),
   };
 }
 
@@ -145,6 +154,7 @@ export async function runTestJob(
   if (options.signal?.aborted) return 130;
   const environment = testEnvironment('kite-test-v2-');
   const startedAt = performance.now();
+  let succeeded = false;
   const displayFiles = job.files.map((file) => relative(repositoryRoot, file).split(sep).join('/'));
   const maxConcurrency = options.maxConcurrency ?? job.maxConcurrency;
   console.log(
@@ -182,6 +192,7 @@ export async function runTestJob(
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();
     const exitCode = await child.exited;
+    succeeded = exitCode === 0;
     options.signal?.removeEventListener('abort', abort);
     console.log(
       '[test:' +
@@ -193,7 +204,8 @@ export async function runTestJob(
     );
     return exitCode;
   } finally {
-    environment.dispose();
+    if (succeeded) environment.dispose();
+    else console.error(`[test:${job.label}] retained failed environment: ${environment.env.HOME}`);
   }
 }
 

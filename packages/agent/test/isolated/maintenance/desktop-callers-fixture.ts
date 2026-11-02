@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
-import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
+import { nodeAssets, nodeWindowsAccess, retainLegacyDb5Fixture } from './assets-fixture';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 export async function nodeCallerAssets(
@@ -14,6 +14,7 @@ export async function nodeCallerAssets(
   action: 'seed' | 'read' = 'seed',
   windowsAsset?: { path: string; sha256: string },
 ) {
+  windowsAsset = await nodeWindowsAccess(root, windowsAsset);
   if (action === 'seed') await nodeAssets(root, profile, storeId, 'seed', windowsAsset);
   const directory = join(root, 'node-caller-fixture');
   privateDirectory(directory);

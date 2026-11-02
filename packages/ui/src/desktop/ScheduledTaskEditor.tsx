@@ -152,7 +152,7 @@ export function ScheduledTaskEditor({
   return (
     <form
       id={formId}
-      className="scheduled-editor"
+      className="scheduled-editor right-sidebar-editor"
       aria-busy={pending}
       onSubmit={async (event) => {
         event.preventDefault();
@@ -171,7 +171,7 @@ export function ScheduledTaskEditor({
         }
       }}
     >
-      <div className="scheduled-editor-body">
+      <div className="scheduled-editor-body right-sidebar-editor-body">
         <EditorSection title="任务内容">
           <div className="scheduled-setting-card">
             <EditorRow label="名称" htmlFor={nameId}>
@@ -306,7 +306,7 @@ export function ScheduledTaskEditor({
           </p>
         )}
       </div>
-      <footer className="scheduled-editor-footer">
+      <footer className="scheduled-editor-footer right-sidebar-editor-footer">
         <Button variant="ghost" onClick={onClose} disabled={pending}>
           取消
         </Button>

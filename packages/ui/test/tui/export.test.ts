@@ -141,6 +141,11 @@ test('loaded-only export preserves full text and reasoning, marks unread preview
   expect(text).not.toContain('preview only');
   expect(f.saved[1]!.sessionId).toBe('a');
   expect(Object.isFrozen(f.saved[1]!.messages)).toBe(true);
+  f.controller.clearDisplay();
+  expect(f.controller.visibleTranscript).toEqual([]);
+  await f.controller.exportLoadedText();
+  expect(serializeLoadedText(f.saved[2]!)).toBe(text);
+  expect(f.reads()).toBe(1);
   // Original menu tails are ignored; they never select a different export target.
   expect(parseTuiCommand('/export other')).toEqual({ kind: 'export' });
 });
@@ -173,7 +178,7 @@ test('late export, closed view and write failure never publish success into anot
   expect(f.controller.state.notice).toBeUndefined();
 });
 
-test('clear exports only the visible conversation and later successful local theme commands without business I/O', async () => {
+test('clear preserves loaded conversation and local receipts for export without business I/O', async () => {
   const f = setup();
   let facts = {
     revision: 'a'.repeat(64),
@@ -206,8 +211,16 @@ test('clear exports only the visible conversation and later successful local the
   const text = serializeLoadedText(f.saved[0]!);
   expect(text).toContain('**You:** /theme purple');
   expect(text).toContain('Theme set to purple');
-  expect(text).not.toContain('original task');
-  expect(text).not.toContain('preview');
+  expect(text).toContain('original task');
+  expect(text).toContain('preview');
+  expect(text).toContain('Loaded preview only');
+  expect(
+    f.controller.visibleTranscript.some((message) => message.content === 'original task'),
+  ).toBe(false);
+  f.controller.clearDisplay();
+  expect(f.controller.visibleTranscript).toEqual([]);
+  await f.controller.exportLoadedText();
+  expect(serializeLoadedText(f.saved[1]!)).toBe(text);
   expect(f.controller.state.snapshot!.messages).toEqual(originalMessages);
   expect(f.reads()).toBe(0);
   await f.controller.savePreference({
@@ -220,6 +233,6 @@ test('clear exports only the visible conversation and later successful local the
   await f.controller.select('b');
   expect(f.controller.state.localMessages).toEqual([]);
   await f.controller.exportLoadedText();
-  expect(serializeLoadedText(f.saved[1]!)).not.toContain('/theme');
+  expect(serializeLoadedText(f.saved[2]!)).not.toContain('/theme');
   f.controller.dispose();
 });

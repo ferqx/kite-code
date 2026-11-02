@@ -1,8 +1,9 @@
 import type { UserSkillCataloguePage } from '@kite-ai/client';
-import { RightSidebar } from '@kite-ai/ui/desktop';
+import { Button, RightSidebar } from '@kite-ai/ui/desktop';
 import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NativeBridge, NativeSkillsScope } from './native-bridge';
+import { NativeSettingsListRow } from './native-settings-list-row';
 import { readNativeSkillCatalogue } from './native-skills';
 
 const safeError = (cause: unknown) => {
@@ -142,12 +143,12 @@ export function NativeSkillsSettings({
       aria-label="Skills 目录"
       aria-busy={busy || undefined}
     >
-      <header className="provider-page-heading">
+      <header className="settings-page-heading">
         <div>
           <h2>Skills</h2>
           <p>查看用户 Skills，以及它们的来源与可用状态。</p>
         </div>
-        <button
+        <Button
           ref={refreshButton}
           className="provider-button provider-refresh"
           type="button"
@@ -155,7 +156,7 @@ export function NativeSkillsSettings({
           onClick={() => setRefresh((value) => value + 1)}
         >
           刷新 Skills 目录
-        </button>
+        </Button>
       </header>
       {!available ? (
         <p className="provider-notice" role="status">
@@ -184,35 +185,28 @@ export function NativeSkillsSettings({
                     </div>
                     <ul className="provider-instance-list" aria-label="Skills 条目">
                       {facts.entries.map((item) => (
-                        <li key={item.id}>
-                          <button
-                            className="provider-instance settings-catalogue-row"
-                            type="button"
-                            aria-label={`查看 ${item.name || item.id} 详情`}
-                            aria-expanded={detailId === item.id}
-                            aria-controls={detailId === item.id ? panelId : undefined}
-                            data-selected={detailId === item.id || undefined}
-                            disabled={!panelHost}
-                            onClick={(event) => {
-                              origin.current = event.currentTarget;
-                              setDetail({ identity, id: item.id });
-                            }}
-                          >
-                            <span className="provider-instance-info">
-                              <strong>{item.name || item.id}</strong>
-                              <span className="settings-catalogue-summary">
-                                {item.description ?? '摘要未记录'}
-                              </span>
-                              <span>配置来源：{sourceLabel(item.source)}</span>
-                            </span>
+                        <NativeSettingsListRow
+                          key={item.id}
+                          label={`查看 ${item.name || item.id} 详情`}
+                          title={item.name || item.id}
+                          description={item.description ?? '摘要未记录'}
+                          metadata={`配置来源：${sourceLabel(item.source)}`}
+                          selected={detailId === item.id}
+                          controls={detailId === item.id ? panelId : undefined}
+                          disabled={!panelHost}
+                          onOpen={(event) => {
+                            origin.current = event.currentTarget;
+                            setDetail({ identity, id: item.id });
+                          }}
+                          status={
                             <span
                               className={`provider-badge${item.state === 'available' ? ' is-configured' : ''}`}
                             >
                               <span className="provider-status-dot" />
                               {stateLabel[item.state]}
                             </span>
-                          </button>
-                        </li>
+                          }
+                        />
                       ))}
                     </ul>
                     {!facts.entries.length && (
@@ -241,7 +235,7 @@ export function NativeSkillsSettings({
               className="catalogue-settings skills-settings provider-panel-content"
               aria-busy={busy || undefined}
             >
-              <div className="provider-editor">
+              <div className="provider-editor right-sidebar-editor">
                 <header className="provider-editor-heading">
                   <div>
                     <h3 ref={detailHeading} tabIndex={-1}>
@@ -257,7 +251,7 @@ export function NativeSkillsSettings({
                     </span>
                   )}
                 </header>
-                <div className="provider-editor-body">
+                <div className="provider-editor-body right-sidebar-editor-body">
                   {error && (
                     <p className="provider-notice provider-notice-error" role="alert">
                       详情尚未确认最新状态：{error}。保留上次完整目录。
@@ -297,10 +291,10 @@ export function NativeSkillsSettings({
                     </p>
                   )}
                 </div>
-                <footer className="provider-editor-footer">
-                  <button className="provider-button" type="button" onClick={close}>
+                <footer className="provider-editor-footer right-sidebar-editor-footer">
+                  <Button className="provider-button" type="button" onClick={close}>
                     返回列表
-                  </button>
+                  </Button>
                 </footer>
               </div>
             </div>

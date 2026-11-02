@@ -59,6 +59,9 @@ export function prepareDesktopDom(dom: JSDOM) {
   const globals = {
     HTMLElement: dom.window.HTMLElement,
     HTMLFormElement: dom.window.HTMLFormElement,
+    HTMLSelectElement: dom.window.HTMLSelectElement,
+    DocumentFragment: dom.window.DocumentFragment,
+    Option: dom.window.Option,
     HTMLInputElement: dom.window.HTMLInputElement,
     HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
     Node: dom.window.Node,

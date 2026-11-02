@@ -15,6 +15,7 @@ import { verifyDesktopMcpRecord, verifyDesktopMcpRows } from '../../../src/maint
 import { selectProfile } from '../../../src/platform/profile';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage/types';
+import { nodeWindowsAccess } from './assets-fixture';
 import { nodeConfigurationAssets } from './desktop-configurations-fixture';
 
 const hash = 'a'.repeat(64);
@@ -327,6 +328,7 @@ test('actual Node DB7 backup v15 inspect and restore preserve all original reque
     const storeId = (await store.getMetadata()).storeId;
     await store.close();
     await nodeConfigurationAssets(root, profile, storeId);
+    const windowsAsset = await nodeWindowsAccess(root);
     const path = join(selectProfile(profile).profilePath, 'desktop-private/data.sqlite');
     const original = [
       ...actions.map((_, i) => record(i, storeId)),
@@ -413,6 +415,7 @@ try {data=openPrivateData(input.profilePath,lease);
               bunSha256: digest(process.execPath),
               helperPath: helper,
               helperSha256: digest(helper),
+              ...(windowsAsset ? { windowsAsset } : {}),
             },
           }),
         ],

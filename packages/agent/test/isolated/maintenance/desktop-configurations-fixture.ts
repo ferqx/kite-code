@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
-import { retainLegacyDb6Fixture } from './assets-fixture';
+import { nodeWindowsAccess, retainLegacyDb6Fixture } from './assets-fixture';
 import { nodeCallerAssets } from './desktop-callers-fixture';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -16,7 +16,8 @@ export async function nodeConfigurationAssets(
   action: 'seed' | 'read' = 'seed',
   currentStoreId = storeId,
 ) {
-  if (action === 'seed') await nodeCallerAssets(root, profile, storeId);
+  const windowsAsset = await nodeWindowsAccess(root);
+  if (action === 'seed') await nodeCallerAssets(root, profile, storeId, 'seed', windowsAsset);
   const directory = join(root, 'node-configuration-fixture');
   privateDirectory(directory);
   const helper = join(root, 'node-ui-fixture/profile-access-helper.js');
@@ -80,6 +81,7 @@ try {data=openPrivateData(input.profilePath,lease);
         currentStoreId,
         profilePath: selectProfile(profile).profilePath,
         access: {
+          ...(windowsAsset ? { windowsAsset } : {}),
           profile,
           bunExecutable: process.execPath,
           bunSha256: digest(process.execPath),

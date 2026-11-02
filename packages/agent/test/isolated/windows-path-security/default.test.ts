@@ -17,6 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fixturePermissions } from '../../../../../tests/fixtures/test-filesystem';
 import { readConfigurationFile, updateConfigurationFile } from '../../../src/config/files';
 import { readMcpSources } from '../../../src/config/mcp-sources';
 import { closePrivate, fingerprint, openPrivate } from '../../../src/maintenance/files';
@@ -284,11 +285,19 @@ test.skipIf(process.platform !== 'win32')(
   'ordinary inherited-ACL Workspace absent/read/edit and project declarations do not become private grants',
   () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-windows-workspace-')));
+    fixturePermissions(root, 0o777);
     const native = defaultWindowsPathSecurity()!;
     try {
       native.verifyScopeDirectory(root);
       expect(() => native.verifyDirectory(root)).toThrow();
       const aclBefore = spawnSync('icacls.exe', [root], { encoding: 'utf8' });
+      expect(() =>
+        native.writePrivateFile(join(root, 'private-parent.txt'), Buffer.from('private')),
+      ).toThrow();
+      const scoped = join(root, 'scope-parent.txt');
+      native.writeScopeFile(scoped, Buffer.from('scoped private bytes'));
+      expect(() => native.verifyFile(scoped)).not.toThrow();
+      expect(readFileSync(scoped, 'utf8')).toBe('scoped private bytes');
       expect(aclBefore.status).toBe(0);
       const path = join(root, 'kite-agent.jsonc');
       expect(readConfigurationFile({ path }).exists).toBe(false);

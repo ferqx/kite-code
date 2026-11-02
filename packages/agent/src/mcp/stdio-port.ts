@@ -59,7 +59,17 @@ type Configuration = {
   env: Record<string, string>;
 };
 export interface McpStdioPortOptions<B extends Binding = McpSessionTransportBinding> {
-  servers: readonly { id: string; configuration: Configuration }[];
+  servers: readonly {
+    id: string;
+    configuration: Configuration;
+    environment?: {
+      names: readonly string[];
+      resolve(
+        binding: B,
+        options: { signal: AbortSignal },
+      ): Record<string, string> | Promise<Record<string, string>>;
+    };
+  }[];
   guardianPath: string;
   bunExecutable: string;
   /** Original host permissions and network; the PID namespace owns connection descendants. */
@@ -115,7 +125,7 @@ function createHostMcpStdioTransportPort<B extends Binding>(
   if (
     [...envNames].some(
       (name) =>
-        !/^[A-Z_][A-Z0-9_]{0,127}$/.test(name) ||
+        !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) ||
         /SECRET|TOKEN|API_?KEY|PASSWORD|CREDENTIAL|PROXY|^(?:LD_|DYLD_|NODE_|BUN_)/i.test(name),
     )
   )
@@ -136,10 +146,26 @@ function createHostMcpStdioTransportPort<B extends Binding>(
         )
       )
         throw new McpStdioPortError('mcp_stdio_configuration_invalid');
+      if (
+        server.environment &&
+        (server.environment.names.length > 128 ||
+          server.environment.names.some(
+            (name) =>
+              !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) ||
+              /proxy|^(?:LD_|DYLD_|NODE_|BUN_)|^(?:COMSPEC|PATHEXT)$/i.test(name),
+          ))
+      )
+        throw new McpStdioPortError('mcp_stdio_environment_denied');
       return [
         server.id,
         {
           configuration,
+          environment: server.environment
+            ? {
+                names: Object.freeze([...server.environment.names]),
+                resolve: server.environment.resolve,
+              }
+            : undefined,
           configDigest: createMcpAdapter({ id: server.id, transport: configuration }).getCatalogue()
             .configDigest,
         },
@@ -186,11 +212,27 @@ function createHostMcpStdioTransportPort<B extends Binding>(
       }
       if (signal.aborted) throw new McpStdioPortError('mcp_stdio_aborted');
       assertFresh?.(binding, { signal });
-      if (
-        ![guardianPath, bun, server.configuration.command, server.configuration.cwd].every(
-          existsSync,
+      const configuration = structuredClone(server.configuration);
+      if (server.environment) {
+        const values = await server.environment.resolve(binding, { signal });
+        signal.throwIfAborted();
+        assertFresh?.(binding, { signal });
+        if (
+          Object.entries(values).some(
+            ([name, value]) =>
+              !server.environment!.names.includes(name) ||
+              Object.hasOwn(configuration.env, name) ||
+              typeof value !== 'string' ||
+              value.length > 8192 ||
+              value.includes('\0'),
+          )
         )
-      )
+          throw new McpStdioPortError('mcp_stdio_environment_denied');
+        Object.assign(configuration.env, values);
+        if (Buffer.byteLength(JSON.stringify(configuration)) > 256 * 1024)
+          throw new McpStdioPortError('mcp_stdio_environment_denied');
+      }
+      if (![guardianPath, bun, configuration.command, configuration.cwd].every(existsSync))
         throw new McpStdioPortError('mcp_stdio_asset_unavailable');
       if (process.platform === 'linux') {
         if (
@@ -199,7 +241,7 @@ function createHostMcpStdioTransportPort<B extends Binding>(
         )
           throw new McpStdioPortError('mcp_stdio_asset_unavailable');
         const { openLinuxStdio } = await import('./linux-stdio-port');
-        return openLinuxStdio(binding, signal, server.configuration, options, {
+        return openLinuxStdio(binding, signal, configuration, options, {
           maximum,
           stderrMaximum,
           timeout,
@@ -208,9 +250,9 @@ function createHostMcpStdioTransportPort<B extends Binding>(
       }
       if (process.platform === 'win32') {
         // No ambient COMSPEC or .cmd fallback: the configured native executable is explicit.
-        if (!/\.exe$/i.test(server.configuration.command))
+        if (!/\.exe$/i.test(configuration.command))
           throw new McpStdioPortError('mcp_stdio_executable_unsupported');
-        return openWindowsStdio(binding, signal, server.configuration, options, {
+        return openWindowsStdio(binding, signal, configuration, options, {
           maximum,
           stderrMaximum,
           timeout,
@@ -513,7 +555,7 @@ function createHostMcpStdioTransportPort<B extends Binding>(
         throw error;
       }
       broker.stdin!.write(
-        `${JSON.stringify({ ...server.configuration, type: 'start', nonce, controlBase: options.controlBase ?? tmpdir(), graceMs: grace, stderrBytes: stderrMaximum, frameBytes: maximum })}\n`,
+        `${JSON.stringify({ ...configuration, type: 'start', nonce, controlBase: options.controlBase ?? tmpdir(), graceMs: grace, stderrBytes: stderrMaximum, frameBytes: maximum })}\n`,
       );
       startTimer = setTimeout(() => {
         rejectReady(new McpStdioPortError('mcp_stdio_ready_timeout'));

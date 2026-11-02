@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import {mock} from 'bun:test';
 import * as fs from 'node:fs';
 const original = {...fs};
+const actualPlatform = process.platform;
 Object.defineProperty(process,'platform',{value:'linux'});
 const init=${JSON.stringify(join(root, 'init'))}, bwrap=${JSON.stringify(join(root, 'bwrap'))};
 for(const path of [init,bwrap]) { original.writeFileSync(path,'original complete executable bytes');original.chmodSync(path,0o755); }
@@ -21,6 +22,9 @@ let mode='confirmed', opens=0, closes=0, reads=0;
 const held = new Set<number>();
 const closeError=new Error('original_close_unknown'),readError=new Error('original_read_failed');
 mock.module('node:fs',()=>({...original,
+ // The branch is emulating Linux metadata; Windows cannot express executable bits.
+ lstatSync(...args){const stat=original.lstatSync(...args);if(actualPlatform==='win32')stat.mode|=0o111n;return stat;},
+ fstatSync(...args){const stat=original.fstatSync(...args);if(actualPlatform==='win32')stat.mode|=0o111n;return stat;},
  openSync(path,flags){const fd=original.openSync(path,flags);opens++;held.add(fd);return fd;},
  readSync(...args){reads++;if(mode==='read-close-unknown')throw readError;return original.readSync(...args);},
  closeSync(fd){closes++;assert.ok(held.has(fd));if(mode!=='confirmed')throw closeError;original.closeSync(fd);held.delete(fd);},

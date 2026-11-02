@@ -1,18 +1,20 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
-  chmodSync,
   existsSync,
   linkSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  fixturePermissions,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import {
   createProfileBackup,
@@ -224,11 +226,11 @@ test('MCP raw assets retain private regular-file guards and cancellation never p
       const original = join(f.root, 'original'),
         source = join(f.selected.profilePath, path);
       writeFileSync(original, '{}', { mode: 0o600 });
-      if (kind === 'symlink') symlinkSync(original, source);
+      if (kind === 'symlink') recordReparseEntry(original, source);
       else if (kind === 'hardlink') linkSync(original, source);
       else {
         writeFileSync(source, 'x'.repeat(2 * 1024 * 1024), { mode: 0o600 });
-        if (kind === 'permissions') chmodSync(source, 0o644);
+        if (kind === 'permissions') fixturePermissions(source, 0o644);
       }
       const before = databaseFiles(f.selected.databasePath),
         controller = new AbortController(),

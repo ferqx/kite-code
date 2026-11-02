@@ -146,6 +146,29 @@ test('global Main reads, adds, enables, removes and lists tools without acquirin
     expect(row.request.operation).not.toHaveProperty('scope');
   }
 });
+test('global Main preserves structured custom STDIO declarations across a cold reopen without replay', async () => {
+  const f = fixture(),
+    manager = f.manager(),
+    facts = await manager.read();
+  const operation = {
+    kind: 'add' as const,
+    name: 'server-memory',
+    entry: {
+      type: 'stdio' as const,
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-memory'],
+      env: { MEMORY_FILE_PATH: 'C:\\Data\\memory.jsonl' },
+      envPassthrough: ['SERVICE_TOKEN'],
+      cwd: '~/code',
+    },
+  };
+  const submitted = await manager.submit(facts.observationId, operation);
+  expect(submitted.phase).toBe('completed');
+  expect(f.data.userMcps()[0]!.request.operation).toEqual(operation);
+  const reopened = f.manager();
+  expect(reopened.submissions[0]!.operation).toEqual(operation);
+  expect(f.calls.filter((call) => call.method === 'post')).toHaveLength(1);
+});
 test('one hot ID owns one POST; reopening and lookup of a lost reply never repeat it', async () => {
   const f = fixture();
   let resolvePost!: (result: UserMcpOperationResult) => void;
@@ -245,6 +268,25 @@ test('closed global operation grammar rejects renderer project authority, secret
       entry: { type: 'http', url: 'https://example.com/?token=secret' },
     },
     { kind: 'bind', serverId, expiresAt: 12, secret: 'raw' },
+    {
+      kind: 'add',
+      name: 'secret-header',
+      entry: {
+        type: 'http',
+        url: 'https://example.com/mcp',
+        headers: { Authorization: 'raw-secret' },
+      },
+    },
+    {
+      kind: 'add',
+      name: 'secret-env',
+      entry: { type: 'stdio', command: 'npx', env: { API_TOKEN: 'raw-secret' } },
+    },
+    {
+      kind: 'add',
+      name: 'loader-env',
+      entry: { type: 'stdio', command: 'npx', envPassthrough: ['NODE_OPTIONS'] },
+    },
   ];
   for (const operation of invalid)
     expect(() => manager.submit(facts.observationId, operation as never)).toThrow();

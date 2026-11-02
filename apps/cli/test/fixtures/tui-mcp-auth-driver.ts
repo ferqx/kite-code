@@ -55,7 +55,12 @@ const control = async (path: string) => {
     `owned_auth_control_deadline:${path}`,
   );
 };
-const wait = async (text: string, compact = false, originalId?: string) => {
+const wait = async (
+  text: string,
+  compact = false,
+  originalId?: string,
+  focusedApproval?: string,
+) => {
   const end = Date.now() + 10000;
   for (;;) {
     const frame = await current();
@@ -66,9 +71,13 @@ const wait = async (text: string, compact = false, originalId?: string) => {
     const candidate = retained ?? frame.text;
     if (
       (frame.fresh || retained !== undefined) &&
-      (compact ? candidate.replace(/ /g, '') : candidate).includes(text)
+      ((compact ? candidate.replace(/ /g, '') : candidate).includes(text) ||
+        (focusedApproval !== undefined && candidate.includes(focusedApproval)))
     ) {
-      note('matched', { text, frame: frame.text.slice(-32768) });
+      note('matched', {
+        text: candidate.includes(text) ? text : focusedApproval,
+        frame: frame.text.slice(-32768),
+      });
       return;
     }
     if (Date.now() > end) throw Error(`owned_auth_frame_deadline:${text}`);
@@ -201,7 +210,8 @@ const leave = async (pending = false) => {
   await key('\x03');
   await wait('Project sources');
   await key('\x03');
-  await wait(pending ? 'Ctrl+B pending cards' : 'New Run >');
+  if (pending) await wait('Ctrl+B pending cards', false, undefined, 'General tool · Tool approval');
+  else await wait('New Run >');
 };
 const close = async (phase: string) => {
   await key('\x11');

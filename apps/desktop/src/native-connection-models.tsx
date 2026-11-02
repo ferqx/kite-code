@@ -1,4 +1,4 @@
-import { Popover, PopoverContent, PopoverTrigger, ScrollArea } from '@kite-ai/ui/desktop';
+import { Button, Popover, PopoverContent, PopoverTrigger, ScrollArea } from '@kite-ai/ui/desktop';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { NativeModelSettingsRows, type NativeModelSettingsState } from './native-model-settings';
 
@@ -38,7 +38,7 @@ export function NativeConnectionModels({
     <div className="connection-models">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button
+          <Button
             ref={triggerRef}
             type="button"
             className="connection-models-trigger"
@@ -58,7 +58,7 @@ export function NativeConnectionModels({
                 <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="1.5" />
               </svg>
             </span>
-          </button>
+          </Button>
         </PopoverTrigger>
         {open && container && (
           <PopoverContent

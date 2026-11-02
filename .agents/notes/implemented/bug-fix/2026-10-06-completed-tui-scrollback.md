@@ -14,6 +14,8 @@ Status: implemented
 
 语义替换在Ink提交前清理旧原生历史，使用Ink自有stdout writer恢复当前动态输入栏及光标。`/clear` 仍消费controller已有显示基线，原snapshot、全文和导出输入不变；不增加公共port、DTO、执行manager或第二份历史缓存。当前完整结论归[TUI owner](../../../../packages/ui/src/tui/README.md)，消费者归[CLI owner](../../../../apps/cli/README.md#tui-原生滚动与清屏)。
 
+2026-11-02 Windows MCP 回归发现导出误用过滤后的 visible transcript，违反上述保全合同。导出改从同一已加载 snapshot 和已有本地回执组装；清屏仅记录本地回执的已观察 ID，不删除其输入。完整 reader 缓存继续按原消息身份取全文和 reasoning，未读正文仍标预览，重复清屏不增加读取，换会话按原规则结束本地回执。没有增加历史副本或网络补读。
+
 ## Alternatives considered
 
 - 保留完整动态历史：真实状态更新仍清历史并移动阅读位置，无法恢复既有承诺。

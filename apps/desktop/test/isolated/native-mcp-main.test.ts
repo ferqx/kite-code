@@ -281,6 +281,7 @@ async function fixture() {
       client.disposeNetwork();
       await service.close();
       await runtime.close();
+      await serial.close();
       await store.close();
       remote.stop(true);
       rmSync(root, { recursive: true, force: true });

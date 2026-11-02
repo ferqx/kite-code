@@ -67,6 +67,7 @@ export function checkUnifiedFormalConsumers(root: string): {
   const packageAt = (cwd: string): Record<string, unknown> =>
     JSON.parse(readFileSync(resolve(root, cwd, 'package.json'), 'utf8'));
   const paths = (path: string, explicitTestFile = false): void => {
+    path = path.replaceAll('\\', '/');
     if (!path || path === '.' || path === 'tests' || path === 'packages' || path === 'apps') {
       add('formal-discovery-too-wide', path, 'requires finite current suites/entrypoints');
       return;

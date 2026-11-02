@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildWindowsAccess } from '../../../../../apps/desktop/scripts/build-windows-access';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireProfileAccess,
@@ -11,6 +12,22 @@ import {
 } from '../../../src/platform/profile';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
+type NodeWindowsAsset = { path: string; sha256: string };
+const windowsAssets = new Map<string, Promise<NodeWindowsAsset>>();
+export async function nodeWindowsAccess(root: string, provided?: NodeWindowsAsset) {
+  if (provided || process.platform !== 'win32') return provided;
+  let current = windowsAssets.get(root);
+  if (!current) {
+    current = (async () => {
+      const directory = join(root, 'node-windows-access');
+      privateDirectory(directory);
+      const built = await buildWindowsAccess(directory);
+      return { path: join(directory, built.relativePath), sha256: built.sha256 };
+    })();
+    windowsAssets.set(root, current);
+  }
+  return current;
+}
 export const configBytes = Buffer.from(
   '// exact config with comments\n{"future":{"unchanged":true},"credentialRef":"credential:01234567-1234-1234-1234-012345678901"}\n',
 );
@@ -73,6 +90,7 @@ export async function nodeAssets(
   action: 'seed' | 'read' | 'add' = 'seed',
   windowsAsset?: { path: string; sha256: string },
 ) {
+  windowsAsset = await nodeWindowsAccess(root, windowsAsset);
   const directory = join(root, 'node-ui-fixture');
   privateDirectory(directory);
   const helper = join(directory, 'profile-access-helper.js'),

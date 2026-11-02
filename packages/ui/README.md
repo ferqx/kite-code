@@ -1,5 +1,19 @@
 # UI
 
+表单样式按职责分类：主题提供`--card`、`--input`与8px的`--form-control-radius`；公共Input／Textarea／SelectTrigger共用[form-control](src/desktop/components/ui/form-control.ts)的背景、边框、文字、焦点、禁用和无效状态，控件自身只补尺寸及各自语义。`ui-form-control`标记使旧原生控件兜底避开这些组件，因此脱离设置页容器仍保持相同外观；Native不再为它们另设错误边框或禁用透明度。公共Select的浮层选项直接消费同一圆角token。右栏表单与底栏沿用RightSidebar背景，容器只提供布局和表单内选择器形态变量，PillSelectTrigger在表单内使用常规圆角。
+
+[Switch](src/desktop/components/ui/switch.tsx)自行管理36×20px轨道、16px滑块和两端2px留白，显式设置border-box、起始对齐及零padding，避免原生button内边距将圆点推偏或推出轨道；开关两态及切换中保持垂直居中，颜色与滑动过渡遵循系统减少动态效果设置。业务层继续只传入受控状态、禁用状态和变更回调。
+
+2026-11-01，Windows x64／Bun1.4.3，Switch内边距修复：模型、联合设置和提供商三个完整文件151项／2021断言，UI／Desktop类型、四文件Biome和文档检查通过。[几何回归](../../apps/desktop/test/session-shell-geometry.fixture.ts)定向执行深浅主题×正常／减少动态效果四场景，核独立开关及实际Native模型浮层中的两态、禁用、点击和Space切换；逐帧检查圆点不越界、垂直居中，动画完成后对应端留白为2px，减少动态效果时轨道和圆点均不执行过渡。浏览器矩形采用0.1px浮点容差，截图与数据归`.cache/switch-check-hWiG2r/`。实际Windows开发窗口只读观察原模型浮层，另逐步观察隔离开关点击、键盘切换及中间位置到终态；未改动用户模型启停配置，页面零异常。产品启停与受控提交语义核对保持，不扩大完整安装或其他平台资格。
+
+2026-11-01，Windows x64／Bun1.4.3，表单样式归属整理：提供商、模型、联合设置、MCP、Skills、Native页面／菜单、安排任务和SessionPage九个完整文件283项／4257断言，UI／Desktop类型、九文件Biome、文档结构／影响、测试归属及边界检查通过。[现有隔离入口](../../apps/desktop/test/session-shell-browser-runner.fixture.ts)的[组件样式与几何函数](../../apps/desktop/test/session-shell-geometry.fixture.ts)定向执行12组：深浅主题下，脱离设置页的三类控件在正常、无效、禁用及键盘焦点时保持相同外观，禁用和输入／选择语义有效；另外十组右栏共1969帧核对边界、滚动、统一宽度及草稿恢复。实际逐步观察独立组件输入／选择／焦点，以及Native设置长表单输入、MCP校验从名称错误转到地址错误时的边框和焦点恢复，页面零异常。生产编译制品与原始数据归`.cache/form-components-2Jxlba/`。产品样式承诺核对保持；完整会话视觉段沿用[Native owner已记录的限制](../../apps/desktop/README.md#复用原桌面展示层)，此项不取得安装版或其他平台资格。
+
+[RightSidebar](src/desktop/RightSidebar.tsx)导出的`RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH`统一定义420px固定表单宽度，SessionPage与Native设置通过`--right-sidebar-form-width`交给各自的布局消费。安排任务表单使用静态分隔线，关闭拖拽与键盘调宽；会话阅读详情仍沿原约束调宽。内容外框不足800px时与设置一样改为覆盖，窄于默认值时按外框收缩。窄窗中暂存的展开尺寸在恢复宽窗时取得真实分配，不重挂载草稿；关闭会清除该待恢复意图。重复新建不递增编辑器 generation，草稿、原创建身份和输入节点保持；关闭后新建才建立新编辑器。
+
+Desktop入口导出公共shadcn Input、Textarea、Select和Switch供Native设置复用。Select使用Radix触发器、选项和可指定容器的Portal，Switch保留受控的`checked`／`onCheckedChange`及无障碍语义；共享样式的旧设置按钮兜底避开带`data-slot`的公共组件，防止覆盖开关几何和状态底色。`SessionPage`导出的`NAVIGATION_MIN_WIDTH`同时提供设置导航宽度，数值只在共享布局中维护。`RightSidebar`内的安排任务和Native配置表单共用`.right-sidebar-editor`、`-body`、`-footer`结构：标题和底栏固定，中段收缩并独立滚动，内容与底栏留白分别为12px和8px／12px；正文也是绝对定位辅助控件的包含块，隐藏表单控件不撑开外层栏体。设置页的布局与实际验证归[Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)。
+
+新增Select沿现有Dialog的Radix依赖族锁定版本，共用DismissableLayer与FocusScope，避免嵌套菜单的Escape同时关闭父层；更新依赖时须保留该嵌套交互回归。Native的选择器组合仅提交当前选项中的值，条件选项重建时隐藏表单控件的空值通知不会清空已选的凭据处理方式。
+
 共享 [QueuedMessages](src/desktop/QueuedMessages.tsx) 只在宿主提供 `onSteer` 时显示每条“引导发送”，`steerable` 与 pending 门禁决定可操作性；它只返回准确原 ID，不自行撤回、发送、改变当前 Run 或消费草稿。普通 Native 发送先排队，实际原子转换、原回执与前台工具等待由 [Native owner](../../apps/desktop/README.md#原运行中消息队列)和 Agent 负责。[队列组件回归](test/isolated/desktop-queued-messages.test.tsx)核显式点击、禁用和保留原条目；Main 成功核实后才由宿主更新。
 
 桌面会话的正文阅读列与底部输入区通过[共享样式](src/desktop/style.css)统一采用 740px 最大宽度，水平居中；可用空间不足时继续随容器缩小。“回到最新消息”的覆盖层与正文视口共用内边距、滚动条预留和环境信息占位，保持按钮中心对齐；按钮采用圆形、浅阴影与不透出正文的悬停底色。会话容器建立独立层叠上下文，正文为0层，置底覆盖层为1层，仍位于外部环境卡及弹层之下；图标复用会话忙碌事实，活动时为三点跳动，静态时为向下箭头。左侧当前页面按钮与会话项使用与悬停相同的选中底色，文字颜色和字重不变，悬停／按下仍共用即时反馈。`SessionPage` 根据实际页面标记新对话、工作台或安排任务；新对话选定的项目 ID 匹配当前空间目录时，通过 `selectedWorkspace` 将唯一选中语义标记在空间按钮，并由整行 `.space-heading.selected` 保留原悬停底色，替代“新对话”的高亮。未选项目或目录中已无对应空间时仍标记“新对话”；项目切换、读取忙碌与空间折叠不改变这套归属。这些页面打开时不同时高亮宿主保留的旧会话，返回会话后恢复对应项。Native设置分类的选中高亮与键盘焦点由[Desktop owner](../../apps/desktop/README.md#交互状态与透明材质)维护。
@@ -314,7 +328,7 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 
 [ScheduledTasks](src/desktop/ScheduledTasks.tsx)负责安排任务页、状态筛选与任务／说明／项目文字搜索；[ScheduledTaskCard](src/desktop/ScheduledTaskCard.tsx)负责卡片、更多菜单、删除复核与独立展开的运行历史；[ScheduledTaskEditor](src/desktop/ScheduledTaskEditor.tsx)负责右栏表单，项目直接复用[新对话的ProjectSelector／ContextMenu](src/desktop/NewConversation.tsx)，模型和思考程度分行使用上述ModelEffortSelector的`model`／`effort`模式。安排表单不提供额外添加项目操作；项目菜单、选中标记与普通新对话同源，不保留自建TaskChoice或选择浮层样式。模型目录保留准确ID、提供商、名称、已配置思考程度和可选档位，选择模型后按新模型配置显示，保存当前显示档位；未指定时不生成覆盖。已保存但当前不支持的档位不能保存，不静默改成其他档位。[类型与校验](src/desktop/scheduled-task-types.ts)保存宿主契约，原ScheduledTasks入口继续重导出类型、编辑器和校验函数；实际持久化与派发归Desktop。卡片采用12px上下留白与8px列表间距，名称／说明单行省略并通过title保留全文；编辑、立即运行及更多菜单位于标题行，项目、安排、下次运行共用元信息行，窄容器按需换行，不再单设操作页脚。历史独立展开，失败与未知详情仍完整换行。右栏内容独立滚动，底部操作固定；表单的EditorSection／EditorRow保留分组卡片与左右标签／原控件，行高36px，默认说明区80px且可拉伸到240px，留白和圆角同步收紧。重复与时间同组，频率复用DropdownMenu单选与PillSelectTrigger，每周星期保留原生单选语义。时间行内联共享[TimePicker](src/desktop/components/ui/time-picker.tsx)／[Input](src/desktop/components/ui/input.tsx)，沿[shadcn Time Picker 示例](https://ui.shadcn.com/docs/components/base/date-picker#time-picker)采用type=time并隐藏系统选择器图标；step=60保持原分钟精度，通过form属性关联右栏原表单。时间输入位于行右侧，左侧label通过htmlFor关联；不再渲染时间触发按钮、Popover和额外标题。草稿和校验不含时区，时钟归Desktop宿主；清空时间会禁用保存，重新输入后可继续。高级设置复用AnimatedCollapsibleContent，默认展开项目、模型和思考程度，各行保留标签；折叠不丢失父层草稿，调整思考程度不改变模型。不附加安排摘要和环境解释。
 
-卡片保留编辑与立即运行，将启禁和删除收在Radix菜单；删除仍须明确复核，并说明已有会话保留。没有运行记录时隐藏历史入口，展开后不重复显示最近状态；主动停止只显示“已停止”，具体失败与未知详情保留。页面不重复顶栏标题，只留一句运行条件；空页、筛选和暂停状态不追加解释。SessionPage／Sidebar透传宿主的resumeNewConversation导航回调，只有宿主明确授予时才允许在忙碌期间返回已有准备页，不授予新的提交或项目操作。事实和执行资格均来自宿主参数，UI不调度或调用模型。异步失败保留字段，pending阻止重复点击，缺宿主保存回调仍禁用；新建表单保留稳定创建意图key，真实任务ID、未知回执核对及原会话归属仍由Native持有。ScrollArea内容表格继续固定到viewport宽度，SessionPage原编辑器代次防止旧保存回执收起后来面板，关闭后按原触发按钮恢复焦点。安排编辑开启时，内容外框使用专属容器查询；不足680px时同一右栏覆盖列表，隐藏不可用的调宽线，不重挂编辑器或改变左导航宽度。恢复足够宽度后沿原Panel句柄展开并排，ResizeObserver随编辑器关闭释放。此修复针对实际最小800px窗口中原360px主区加300px右栏无法分配、表单存在但不可见的问题，不扩展其他详情面板。验证见[DOM测试](test/isolated/scheduled-tasks.test.tsx)，真实持久化、权限及完整Native窗口观察归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
+卡片保留编辑与立即运行，将启禁和删除收在Radix菜单；删除仍须明确复核，并说明已有会话保留。没有运行记录时隐藏历史入口，展开后不重复显示最近状态；主动停止只显示“已停止”，具体失败与未知详情保留。页面不重复顶栏标题，只留一句运行条件；空页、筛选和暂停状态不追加解释。SessionPage／Sidebar透传宿主的resumeNewConversation导航回调，只有宿主明确授予时才允许在忙碌期间返回已有准备页，不授予新的提交或项目操作。事实和执行资格均来自宿主参数，UI不调度或调用模型。异步失败保留字段，pending阻止重复点击，缺宿主保存回调仍禁用；新建表单保留稳定创建意图key，真实任务ID、未知回执核对及原会话归属仍由Native持有。ScrollArea内容表格继续固定到viewport宽度，SessionPage原编辑器代次防止旧保存回执收起后来面板，关闭后按原触发按钮恢复焦点。安排编辑开启时，内容外框使用专属容器查询；不足800px时同一右栏覆盖列表，表单始终使用静态分隔线，不重挂编辑器或改变左导航宽度。恢复足够宽度后沿原Panel句柄展开并排，ResizeObserver随编辑器关闭释放。此修复针对实际最小800px窗口中原360px主区加300px右栏无法分配、表单存在但不可见的问题，不扩展其他详情面板。验证见[DOM测试](test/isolated/scheduled-tasks.test.tsx)，真实持久化、权限及完整Native窗口观察归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
 
 2026-10-25，Windows x64／Bun1.4.3，`b31d05415` 加本轮工作树：原模型浮层与Native模型选择器DOM两个完整文件24项／326断言通过，核思考面板无常驻提示、模型列表单份辅助说明、选模后撤下说明、档位回调、三种原协议来源过滤及首次运行前不限协议。Chrome155隔离组件配合生产编译CSS在深浅主题、1280×800／390×800／390×360六组场景逐步核打开、调档、双栏切换、滚动选择末项和返回，说明12px且完整位于原290px外框内，无横向溢出或浏览器异常。UI／Desktop类型检查、定向Biome与文档检查通过；未重验完整安装版Electron或真实模型。
 
@@ -339,6 +353,8 @@ Conversation 在调用宿主 `renderMessage` 之前统一排除 thinking、timin
 宿主明确交付 `Message.inputKind:input.steer` 及 `turnId` 的用户引导属于原 Turn 的过程，沿同一 MessageItem／Markdown／附件与复制入口渲染；多条引导和前后工具／说明保持输入顺序，不新增处理段。可读轮次与结构锚点使用相同归组判断，只有引导及隐藏结构标记时也保一段过程。准确本地 sending 占位沿同一归属接管，failed／unknown 保原独立恢复展示；缺少类别或 Turn 身份的用户消息不推断为引导。终态后随原“用时”折叠，展开、阅读恢复和冷挂载保留完整正文，原最终回复与耗时仍各一份。
 
 ## 公共表单与观察
+
+设置动作图标由 [SettingsActionIcon](src/desktop/SettingsActionIcon.tsx)统一使用共享图标库；[DropdownMenu](src/desktop/components/ui/dropdown-menu.tsx)公开普通菜单项和分隔线，Content 可指定 Portal container，使设置内的菜单留在所属 Dialog 的焦点及 Escape 边界内。宿主决定菜单内容与业务资格，公共组件不建立连接或授权。
 
 普通问题共用中立的 [原 schema 解析器](src/question.ts)。DOM [Questionnaire](src/questionnaire.tsx) 为完整可表达的标量或浅 object 提供单选、闭合自由输入与多步骤；可以先浏览未回答的题目，最终明确点击提交时才发送完整答案。原字段和 choice 值、Unicode codepoint 长度与非空白约束保持；仅闭合浅 object 加明确 null alternative 的根 oneOf 可作为整份问卷的另一项决定，其他未知或重叠约束仍回退原 JSON。选项说明以悬停／聚焦浮层展示完整原文，不推移翻页按钮；翻页和最终提交保留不同按钮身份，避免浏览器将末次翻页解释为提交。
 

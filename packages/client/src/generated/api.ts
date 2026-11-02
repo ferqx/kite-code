@@ -549,7 +549,22 @@ export type UserMcpSettingsRequest = {
     | {
         kind: 'add';
         name: string;
-        entry: { type: 'http'; url: string } | { type: 'stdio'; command: string };
+        entry:
+          | {
+              type: 'http';
+              url: string;
+              bearerTokenEnv?: string;
+              headers?: { [key: string]: string };
+              headersFromEnv?: { [key: string]: string };
+            }
+          | {
+              type: 'stdio';
+              command: string;
+              args?: Array<string>;
+              env?: { [key: string]: string };
+              envPassthrough?: Array<string>;
+              cwd?: string;
+            };
       }
     | { kind: 'remove'; serverId: string }
     | { kind: 'enabled'; serverId: string; enabled: boolean }
@@ -577,7 +592,7 @@ export type UserMcpSettingsView = {
     configured: boolean;
     diagnostics: Array<string>;
     authentication: {
-      policy: 'none' | 'credential' | 'oauth' | 'auto';
+      policy: 'none' | 'credential' | 'oauth' | 'auto' | 'environment';
       status: 'none' | 'missing' | 'present' | 'locked' | 'unavailable' | 'unknown';
       loginAllowed: boolean;
     };
@@ -599,7 +614,22 @@ export type UserMcpOperationResult = {
     | {
         kind: 'add';
         name: string;
-        entry: { type: 'http'; url: string } | { type: 'stdio'; command: string };
+        entry:
+          | {
+              type: 'http';
+              url: string;
+              bearerTokenEnv?: string;
+              headers?: { [key: string]: string };
+              headersFromEnv?: { [key: string]: string };
+            }
+          | {
+              type: 'stdio';
+              command: string;
+              args?: Array<string>;
+              env?: { [key: string]: string };
+              envPassthrough?: Array<string>;
+              cwd?: string;
+            };
       }
     | { kind: 'remove'; serverId: string }
     | { kind: 'enabled'; serverId: string; enabled: boolean }
@@ -619,7 +649,7 @@ export type UserMcpOperationResult = {
     cancelled: boolean;
     configuration: 'unchanged' | 'published' | 'outcome_unknown';
     authentication: {
-      policy: 'none' | 'credential' | 'oauth' | 'auto';
+      policy: 'none' | 'credential' | 'oauth' | 'auto' | 'environment';
       status: 'none' | 'missing' | 'present' | 'locked' | 'unavailable' | 'unknown';
       loginAllowed: boolean;
     } | null;

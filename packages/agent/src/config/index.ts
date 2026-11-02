@@ -18,6 +18,7 @@ export {
   repairConfigurationFile,
   updateConfigurationFile,
 } from './files';
+export { type McpSourceEntry, validateMcpSourceEntry } from './mcp-entry';
 export {
   type McpRegistry,
   type McpSelectionReadSet,

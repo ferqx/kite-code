@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createMcpAdapter } from '@kite-ai/agent/mcp';
 import {
   discoverAuthorizationServerMetadata,
@@ -14,6 +14,17 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 import { createMcpOAuthNetwork } from '../../src/mcp-oauth-network';
+
+function opensslExecutable() {
+  const available = Bun.which('openssl');
+  if (available) return realpathSync(available);
+  const git = process.platform === 'win32' ? Bun.which('git') : null;
+  if (git) {
+    const bundled = join(dirname(dirname(realpathSync(git))), 'usr/bin/openssl.exe');
+    if (existsSync(bundled)) return realpathSync(bundled);
+  }
+  throw Error('openssl_fixture_unavailable');
+}
 
 async function fixture() {
   const sockets = new Set<Socket>();
@@ -336,7 +347,7 @@ test('real pinned TLS uses original servername and rejects an untrusted certific
     cert = join(root, 'cert.pem');
   const certificate = Bun.spawn(
     [
-      '/usr/bin/openssl',
+      opensslExecutable(),
       'req',
       '-x509',
       '-newkey',
@@ -455,7 +466,7 @@ test('baked fixture certificate permits actual OAuth and MCP TLS while retaining
   );
   const certificate = Bun.spawn(
     [
-      '/usr/bin/openssl',
+      opensslExecutable(),
       'req',
       '-x509',
       '-newkey',

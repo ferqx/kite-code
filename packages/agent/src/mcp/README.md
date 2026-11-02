@@ -150,6 +150,8 @@ Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)生成 `di
 
 ## Windows stdio 所属 Job
 
+用户自定义声明的命名环境传递由 Service 的私人 `environment {names,resolve}` 端口在原连接准入之后装配，await 后重核取消与 freshness；仅允许列出的名字，拒绝额外键、覆盖 literal env、NUL、预算超限及 proxy／loader/runtime 注入。原配置摘要绑定声明，环境实际值只写入所属 guardian 的私有启动帧，不进持久绑定或证据。项目来源不能使用该环境权限，用户级最小系统变量和明确引用范围归[Service owner](../../../../apps/service/README.md#自定义-mcp-表单与启动配置)。没有回退到直接无监督 spawn。
+
 [Windows guardian](windows-stdio-guardian.ts)使用内部[原生 owned-child](../platform/process/windows-owned-child.ts)：无名非继承 Job／KILL_ON_JOB_CLOSE，suspended CreateProcessW 与准确三 stdio HANDLE_LIST，Assign 原 process HANDLE 后才 Resume。该 leaf 不依赖旧 runtime-host／Rust runner，不接受 caller SID／ACL／HANDLE，不提供 Shell sandbox。只覆盖原 Job 成员，外部系统 broker 代启动的工作和远端 Tool 效果另保未知边界。
 
 配置仍由原 Source／SQL connection Job／bootstrap 私有事实选定，准入和 freshness 在 await 后及每次 wire 前复核。Windows 要求绝对 `.exe`、完整 argv／cwd 与明确 env；`.cmd`／`.bat` 返回 `mcp_stdio_executable_unsupported`，不发现 COMSPEC／PATH。Node／Bun executable 加脚本 argv 保原声明。guardian 与业务分别只继承所需管道，秘密和 env 不进 argv／证据。stdin 是私有 first-instance named pipe 的有限 overlapped write；cancel 后保原 buffer／event 到真实 completion，stdout／stderr 在停止后继续完整排空 EOF。

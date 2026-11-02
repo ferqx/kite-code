@@ -38,6 +38,11 @@ export interface McpHttpPortOptions<B extends Binding = McpSessionTransportBindi
     id: string;
     url: string;
     headers?: Readonly<Record<string, string>>;
+    /** Explicit source environment names, resolved only after this original connection is admitted. */
+    resolveHeaders?: (
+      binding: B,
+      options: { signal: AbortSignal },
+    ) => Record<string, string> | Promise<Record<string, string>>;
     /** Host resolves from the admitted SQL Job and canonical Workspace/source, never HTTP payload. */
     credential?: {
       broker: McpCredentialBroker;
@@ -200,6 +205,7 @@ function createHostMcpHttpTransportPort<B extends Binding>(
           url,
           rawUrl: server.url,
           headers,
+          resolveHeaders: server.resolveHeaders,
           configDigest,
           credential: server.credential
             ? {
@@ -606,6 +612,25 @@ function createHostMcpHttpTransportPort<B extends Binding>(
             if (closed || requestSignal?.aborted) abort();
             else request.end(bytes);
           });
+        if (server.resolveHeaders) {
+          const extra = new Headers(
+            await server.resolveHeaders(binding, { signal: requestSignal }),
+          );
+          if (
+            [...extra].length > 64 ||
+            [...extra].some(
+              ([name, value]) =>
+                /^(?:host|content-length|content-type|accept|connection|transfer-encoding|proxy-.*|mcp-.*)$/i.test(
+                  name,
+                ) ||
+                name.length + value.length > 8192 ||
+                headers.has(name),
+            )
+          )
+            throw new McpHttpPortError('mcp_http_configuration_invalid');
+          for (const [name, value] of extra) headers.set(name, value);
+          assertFresh?.(binding, { signal: requestSignal });
+        }
         if (server.managementCredential) {
           if (!isUserMcpTransportBinding(binding))
             throw new McpHttpPortError('mcp_http_binding_invalid');

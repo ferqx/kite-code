@@ -12,7 +12,7 @@ MCP 的完整参数和结果校验、Workflow 的完整来源编译在各自所�
 
 macOS 通用 Service 的本地 stdio MCP 连接结束或所属 Service 退出时，会收束该连接派生的完整进程树，包括自行转组或脱离父进程的后代；其他连接和无关进程不受影响。实际停止或清理不能确认时保留未知，远端 Tool 已发生的效果不因此撤销。冷读旧连接结果不会重新连接或重做工具；具体当前平台与证据见[MCP owner](../../../packages/agent/src/mcp/README.md#显式-stdio-guardian-port)。
 
-Windows x64 的同一来源、连接与工具入口已接入独立 stdio 后端源码：配置必须指定绝对 `.exe` 和完整参数，可用明确的 Node／Bun executable 执行脚本，不从 PATH 或 COMSPEC 猜测启动器，`.cmd`／`.bat` 当前明确拒绝。进程归属覆盖该连接原 Windows Job 的成员，取消须核原根退出、Job 空树及实际 HANDLE／管道关闭；通过其他系统 broker 另行启动的工作不计入该归属，也不由此取得 Shell 文件隔离或远端效果撤销。Windows 实际运行及完整安装恢复资格仍待重构后验证，源码和本机 mock 不表示平台支持已验收。
+Windows x64 的同一来源、连接与工具入口使用独立 stdio 后端：底层配置指定绝对 `.exe` 和完整参数，可用明确 Node／Bun executable 执行脚本，不从 PATH 或 COMSPEC 猜测启动器，任意 `.cmd`／`.bat` 继续拒绝。桌面新增表单可填写已安装命令名，保存时解析为上述准确程序；已知 `npx`／`npm` 包装器转为 Node 与 CLI 脚本参数。进程归属覆盖原 Windows Job 的成员，取消须核原根退出、Job 空树及实际 HANDLE／管道关闭；通过其他系统 broker 另行启动的工作不计入归属，也不由此取得 Shell 文件隔离或远端效果撤销。本机用户设置已核 Node 参数／环境、官方 memory 服务发现和断开，具体证据见[Service owner](../../../apps/service/README.md#自定义-mcp-表单与启动配置)；完整 Run、安装恢复和其他 MCP 的 Windows 资格仍分别验证。
 
 Linux 的同一声明、来源批准、连接申请和工具入口现已接入独立 stdio 后端源码：直接执行原绝对 command、完整 args／cwd 和明确环境，以原 PID namespace 收束所属后代，保完整工具输出。准确取消与 Service 关闭须等原根回收、原树结束和全部管道／FD 关闭；不能确认时保 unknown 和原资源。冷查历史保原身份与结果，不重新连接或重做工具。它保持原 MCP 程序权限和网络，具体实现归[MCP owner](../../../packages/agent/src/mcp/README.md#linux-stdio-所属-namespace)；Linux 实机、正式安装恢复与全部客户端资格仍待重构后验证。
 

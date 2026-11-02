@@ -1,13 +1,5 @@
 import { expect, test } from 'bun:test';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,7 +13,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src/index';
 import {
   createMcpSourceConfiguration,
@@ -98,7 +90,12 @@ async function fixture(
   const built = stdio
     ? await Bun.build({
         entrypoints: [
-          join(import.meta.dir, '../../../../packages/agent/src/mcp/stdio-guardian.ts'),
+          join(
+            import.meta.dir,
+            process.platform === 'win32'
+              ? '../../../../packages/agent/src/mcp/windows-stdio-guardian.ts'
+              : '../../../../packages/agent/src/mcp/stdio-guardian.ts',
+          ),
         ],
         outdir: root,
         naming: 'qualified-guardian.js',
@@ -372,7 +369,13 @@ async function fixture(
       } finally {
         network.stop(true);
         provider.stop(true);
-        rmSync(root, { recursive: true, force: true });
+        if (runtime.getLifecycleState().state === 'closed')
+          rmSync(root, { recursive: true, force: true });
+        else
+          console.log(
+            'source fixture retains original unconfirmed owner until isolated process exit',
+            root,
+          );
       }
     },
   };
@@ -1052,7 +1055,7 @@ test('supported macOS ancestor alias binds actual canonical source root while fi
       object(object(canonical.readSet).workspace).identity,
     );
     const link = join(f.root, 'workspace-symlink');
-    symlinkSync(f.workspace, link);
+    directoryLink(f.workspace, link);
     await f.runtime.createWorkspace({
       expectedStoreId: f.expectedStoreId,
       id: 'symlink-w',

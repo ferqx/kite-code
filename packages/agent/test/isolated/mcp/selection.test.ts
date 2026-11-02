@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { type McpRegistry, readMcpSelection, updateMcpSelection } from '../../../src/config';
 
 test('MCP selection checks full registry and other source again inside original publication lock without replacing comments or unknown fields', () => {
-  const root = mkdtempSync(join(tmpdir(), 'kite-mcp-select-cas-')),
+  const root = temporaryDirectory('kite-mcp-select-cas-'),
     userPath = join(root, 'user.jsonc'),
     workspacePath = join(root, 'workspace.jsonc');
   const original =

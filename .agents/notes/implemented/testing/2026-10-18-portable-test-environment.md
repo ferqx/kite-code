@@ -22,6 +22,8 @@ Windows 本轮验收按用户最新要求限定为 Agent 核心流程，不再�
 
 TUI 模型夹具保留完整请求观察，精确标题system指令且无Tool的自动命名请求另行响应；普通工作响应队列和getWorkRequests视图不被它消耗。原完整请求计数仍包含自动命名，越界Tool和普通响应缺失仍失败。Files baseline改用实际WorkspaceFiles完整原生身份、EOF与SHA，SDK wire别名只接受唯一原定义，未声明或截断重名不迁移。夹具观察用途明确，不增加普通客户端诊断开关。
 
+2026-11-01 MCP 完整回归继续采用上述隔离原则：Windows 作业的 TEMP/TMP 也位于同一自有私有 HOME 下，避免源码外制品因系统临时父目录权限而在业务之前被拒绝。成功清理逐项验证自有根内边界，reparse 目录只解除入口，私有只读文件沿父目录删除权处理；失败与中断保留 HOME 和过程证据。Node 维护夹具显式构建并传递原 Windows access 原生资产，不把缺资产当平台不可用跳过。功能等待预算与控制 HTTP idle budget 按实测 Windows 持久化成本设置，审批次数、完整正文、原身份和拒绝反例保持。
+
 ## Alternatives considered
 
 - 给机器开启符号链接特权或放宽产品ACL：已有真实junction与ACL夹具可表达反例，无需改变系统或产品权限。

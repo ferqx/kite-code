@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fixturePermissions } from '../../../../../tests/fixtures/test-filesystem';
 import { readMcpSelection, updateMcpSelection } from '../../../src/config/mcp-selection';
 import {
   defaultWindowsPathSecurity,
@@ -14,6 +15,7 @@ test.skipIf(process.platform !== 'win32')(
   'MCP selection keeps private user capture/CAS and ordinary inherited-ACL project capture/CAS distinct',
   () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-selection-native-')));
+    fixturePermissions(root, 0o777);
     try {
       const native = defaultWindowsPathSecurity()!;
       const profile = join(root, 'profile');

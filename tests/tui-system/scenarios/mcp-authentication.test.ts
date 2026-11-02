@@ -159,7 +159,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     await waitForOutputQuiescence(() => tui!.outputSinceLastAction());
     const openerFrames = tui.markScreen();
     await tui.writeExact('\r');
-    await waitForText(() => tui!.viewport(), 'browser_open_failed', 15_000);
+    await waitForText(() => tui!.viewport(), 'mcp_oauth_browser_unavailable', 15_000);
     const openerFailureOutput = tui.screenFramesSince(openerFrames).join('\n');
     expect(metadataRequests).toBeGreaterThanOrEqual(2);
     expect(authorizationRequests).toBe(0);
@@ -167,7 +167,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(screenContains(openerFailureOutput, 'pty-client')).toBe(false);
 
     tui.write('\x1b');
-    await waitForText(() => tui!.viewport(), '❯ 认证', 10_000);
+    await waitForText(() => tui!.viewport(), '服务器详情', 10_000);
     tui.write('\x1b');
     await waitForText(() => tui!.viewport(), '1 个服务器', 10_000);
     tui.write('\x1b');
@@ -198,7 +198,10 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     await submitUserMessage(tui, modelServer, message, { timeout: 15_000 });
     await waitForText(() => tui!.viewport(), 'completed without provider', 15_000);
     expect(modelServer.getWorkRequestCount()).toBe(1);
-    expect(modelServer.hasRequestMessage(message, 0, 'work')).toBe(true);
+    expect(modelServer.getWorkRequests()[0]?.messages).toContainEqual({
+      role: 'user',
+      content: message,
+    });
     expect(screenContains(tui.viewport(), 'Session Waive')).toBe(false);
     await waitForCondition(
       () => {

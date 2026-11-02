@@ -540,6 +540,7 @@ export class TuiController {
   private displayClearGeneration = 0;
   private clearedDisplay?: {
     sessionId: string;
+    localMessageIds: ReadonlySet<string>;
     messages: Map<
       string,
       {
@@ -828,12 +829,13 @@ export class TuiController {
   }
   /** Hide only the exact observed display; the complete history remains available to readers. */
   clearDisplay(): void {
-    this.publish({ mcpPromptSelections: undefined, localMessages: [] });
+    this.publish({ mcpPromptSelections: undefined });
     const snapshot = this.value.snapshot;
     if (this.disposed || !snapshot || snapshot.view.session.id !== this.value.sessionId) return;
     this.displayClearGeneration++;
     this.clearedDisplay = {
       sessionId: snapshot.view.session.id,
+      localMessageIds: new Set(this.value.localMessages.map((message) => message.id)),
       messages: new Map(
         snapshot.messages.map((message) => [
           message.id,
@@ -880,9 +882,13 @@ export class TuiController {
   }
   /** Keep local-only UI receipts at their original position without inventing Runtime facts. */
   get visibleTranscript(): readonly (Message | TuiLocalMessage)[] {
-    const messages = this.visibleMessages;
+    return this.transcript(this.visibleMessages);
+  }
+  private transcript(messages: readonly Message[], includeCleared = false) {
     const locals = this.value.localMessages.filter(
-      (message) => message.sessionId === this.value.sessionId,
+      (message) =>
+        message.sessionId === this.value.sessionId &&
+        (includeCleared || !this.clearedDisplay?.localMessageIds.has(message.id)),
     );
     const ids = new Set(messages.map((message) => message.id));
     const after = (id: string | null) => locals.filter((message) => message.afterMessageId === id);
@@ -5453,33 +5459,33 @@ export class TuiController {
       storeId: this.port.storeId,
       sessionId,
       generation,
-      messages: this.visibleTranscript.flatMap<TuiLoadedTextExport['messages'][number]>(
-        (message) => {
-          if (message.role !== 'user' && message.role !== 'assistant') return [];
-          if ('afterMessageId' in message)
-            return [
-              {
-                id: message.id,
-                seq: 'local',
-                role: message.role,
-                content: message.content,
-                complete: true,
-              },
-            ];
-          const loaded = this.value.loadedOutputBodies.get(message.id);
+      messages: this.transcript(snapshot.messages, true).flatMap<
+        TuiLoadedTextExport['messages'][number]
+      >((message) => {
+        if (message.role !== 'user' && message.role !== 'assistant') return [];
+        if ('afterMessageId' in message)
           return [
             {
               id: message.id,
-              seq: message.seq,
+              seq: 'local',
               role: message.role,
-              content: loaded?.content ?? message.content,
-              ...(loaded?.reasoning ? { reasoning: loaded.reasoning } : {}),
-              previewOnly: Boolean(message.outputBody && !loaded),
-              complete: loaded?.complete ?? message.status === 'complete',
+              content: message.content,
+              complete: true,
             },
           ];
-        },
-      ),
+        const loaded = this.value.loadedOutputBodies.get(message.id);
+        return [
+          {
+            id: message.id,
+            seq: message.seq,
+            role: message.role,
+            content: loaded?.content ?? message.content,
+            ...(loaded?.reasoning ? { reasoning: loaded.reasoning } : {}),
+            previewOnly: Boolean(message.outputBody && !loaded),
+            complete: loaded?.complete ?? message.status === 'complete',
+          },
+        ];
+      }),
     });
     const read = this.reading();
     this.publish({ notice: undefined, error: undefined });

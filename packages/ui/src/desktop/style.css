@@ -41,6 +41,7 @@ body {
   /* Surfaces and fields stay soft; actions use a tighter corner. */
   --radius: 16px;
   --button-radius: 8px;
+  --form-control-radius: 8px;
   --input-radius: 16px;
   --radius-xs: var(--radius);
   --radius-sm: var(--radius);
@@ -165,16 +166,16 @@ body {
     display: none;
   }
   .button,
-  :where(.settings, .results, .interaction-area) button,
-  input,
-  select,
-  textarea {
+  :where(.settings, .results, .interaction-area) button:where(:not(.ui-form-control)),
+  input:where(:not(.ui-form-control)),
+  select:where(:not(.ui-form-control)),
+  textarea:where(:not(.ui-form-control)) {
     font: inherit;
     color: inherit;
   }
   .button,
   :where(.interaction-area) button,
-  :where(.settings) button,
+  :where(.settings) button:where(:not([data-slot])),
   :where(.results) button {
     display: inline-flex;
     align-items: center;
@@ -186,7 +187,8 @@ body {
     transition: background-color 120ms;
   }
   .button:where(:not([data-size^="icon"])),
-  :where(.interaction-area, .settings, .results) button:where(:not([data-size^="icon"])) {
+  :where(.interaction-area, .results) button:where(:not([data-size^="icon"])),
+  :where(.settings) button:where(:not([data-slot])):where(:not([data-size^="icon"])) {
     gap: var(--control-gap);
     min-height: 32px;
     padding: 5px 10px;
@@ -194,7 +196,7 @@ body {
   }
   .button:hover:not(:disabled),
   :where(.interaction-area) button:hover:not(:disabled),
-  :where(.settings) button:hover:not(:disabled),
+  :where(.settings) button:where(:not([data-slot])):hover:not(:disabled),
   :where(.results) button:hover:not(:disabled) {
     background: var(--control-hover);
   }
@@ -214,28 +216,28 @@ body {
   }
   .button:disabled,
   :where(.interaction-area) button:disabled,
-  :where(.settings) button:disabled,
+  :where(.settings) button:where(:not([data-slot])):disabled,
   :where(.results) button:disabled {
     opacity: 0.45;
     cursor: default;
   }
-  :where(button, input, select, textarea, summary, a):focus-visible {
+  :where(button, input, select, textarea, summary, a):where(:not(.ui-form-control)):focus-visible {
     outline: 2px solid var(--ring, var(--input));
     outline-offset: 3px;
   }
-  input,
-  select,
-  textarea {
+  input:where(:not(.ui-form-control)),
+  select:where(:not(.ui-form-control)),
+  textarea:where(:not(.ui-form-control)) {
     border: 1px solid var(--input);
     background: var(--card);
     border-radius: var(--input-radius);
     padding: 7px 10px;
   }
-  input::placeholder,
-  textarea::placeholder {
+  input:where(:not(.ui-form-control))::placeholder,
+  textarea:where(:not(.ui-form-control))::placeholder {
     color: var(--muted-foreground);
   }
-  textarea {
+  textarea:where(:not(.ui-form-control)) {
     width: 100%;
     min-height: 68px;
     max-height: 200px;
@@ -2541,21 +2543,11 @@ body {
   line-height: 20px;
   margin-bottom: 16px;
 }
-.kite-client .scheduled-editor {
-  display: flex;
-  height: 100%;
-  min-width: 0;
-  flex-direction: column;
-}
 .kite-client .scheduled-editor-body {
   container-type: inline-size;
   display: flex;
-  min-height: 0;
-  flex: 1;
   flex-direction: column;
   gap: 10px;
-  padding: 12px;
-  overflow-y: auto;
 }
 .kite-client .scheduled-editor-section {
   display: flex;
@@ -2705,29 +2697,19 @@ body {
 .kite-client .scheduled-weekdays + .scheduled-setting-row {
   border-top: 1px solid var(--border);
 }
-.kite-client .scheduled-editor-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex: none;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--background);
-}
 .kite-client .scheduled-editor-footer .button {
   height: 28px;
 }
 .kite-client .client-content-frame[data-scheduled-editor="true"] {
   container: scheduled-task-frame / inline-size;
 }
-@container scheduled-task-frame (max-width: 679px) {
+@container scheduled-task-frame (max-width: 799px) {
   .kite-client .client-content-panels > #details {
     position: absolute;
     inset-block: 0;
+    left: max(0px, calc(100% - var(--right-sidebar-form-width)));
     right: 0;
     z-index: 20;
-    width: min(360px, 100%);
     border-left: 1px solid var(--border);
     box-shadow: -12px 0 32px rgb(0 0 0 / 8%);
   }
@@ -3199,6 +3181,7 @@ body {
   flex-direction: column;
   width: 100%;
   min-width: 0;
+  min-height: 0;
   height: 100%;
   flex: 1;
   background: var(--page-background);
@@ -3291,6 +3274,7 @@ body {
 .kite-client .right-sidebar-tabs {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex: 1;
   flex-direction: column;
 }
@@ -3307,6 +3291,7 @@ body {
   gap: 12px;
 }
 .kite-client .right-sidebar-heading {
+  flex: none;
   min-height: var(--app-header-height, 48px);
   padding: 6px 16px;
 }
@@ -3351,11 +3336,44 @@ body {
 .kite-client .right-sidebar [data-slot="tabs-content"] {
   padding: 18px;
 }
-.kite-client .right-sidebar-content:has(.scheduled-editor) {
+.kite-client .right-sidebar-content:has(.right-sidebar-editor) {
   min-height: 0;
   flex: 1;
-  height: 100%;
+  overflow: hidden;
   padding: 0;
+}
+.kite-client :is(.settings, .right-sidebar-editor) {
+  --input-radius: var(--form-control-radius);
+  --select-trigger-radius: var(--form-control-radius);
+}
+.kite-client .right-sidebar-editor {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.kite-client .right-sidebar-editor-body {
+  /* Keep absolute form helpers inside the body's scrolling and clipping boundary. */
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kite-client .right-sidebar-editor-footer {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
 }
 .kite-client .right-sidebar [data-slot="tabs-content"] {
   margin: 0;

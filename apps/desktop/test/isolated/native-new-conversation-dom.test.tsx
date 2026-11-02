@@ -2186,8 +2186,9 @@ test('settings replace the painted page without remounting its draft or re-readi
     );
     await f.click('管理 其他模型 的模型');
     expect(
-      f.host.querySelector<HTMLInputElement>('[role="switch"][aria-label="启用模型 model"]')
-        ?.checked,
+      f.host
+        .querySelector<HTMLInputElement>('[role="switch"][aria-label="启用模型 model"]')
+        ?.getAttribute('aria-checked') === 'true',
     ).toBe(true);
     const managerTrigger = f.host.querySelector<HTMLButtonElement>(
       '[aria-label="管理 其他模型 的模型"]',
@@ -2307,14 +2308,30 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
     const main = shell.querySelector('.settings-content')!;
     const rail = shell.querySelector('.settings-editor-panel')!;
     expect(rail.parentElement).toBe(main.parentElement);
-    expect(rail).toBe(shell.lastElementChild!);
+    expect(main.closest('.client-content-frame')).toBe(shell.lastElementChild!);
+    expect(rail).toBe(main.parentElement!.lastElementChild!);
     expect(rail.querySelector('.right-sidebar form')).not.toBeNull();
+    expect(rail.querySelector('form.right-sidebar-editor')).not.toBeNull();
+    expect(rail.querySelector('.right-sidebar-editor-body')).not.toBeNull();
+    expect(rail.querySelector('.right-sidebar-editor-footer')).not.toBeNull();
     expect(main.querySelector('form')).toBeNull();
     expect(main.querySelectorAll('.provider-instance')).toHaveLength(0);
     expect(f.host.activeElement?.getAttribute('aria-label')).toBe('服务商预设');
-    const preset = rail.querySelector<HTMLSelectElement>('[aria-label="服务商预设"]')!;
-    expect(preset.tagName).toBe('SELECT');
-    expect(preset.value).toBe('openai');
+    const preset = rail.querySelector<HTMLButtonElement>('[aria-label="服务商预设"]')!;
+    expect(preset.getAttribute('role')).toBe('combobox');
+    expect(preset.dataset.slot).toBe('select-trigger');
+    expect(preset.textContent).toBe('OpenAI');
+    await act(async () =>
+      preset.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      ),
+    );
+    expect(f.host.querySelector('[role="listbox"]')).not.toBeNull();
+    await pressEscape();
+    expect(f.host.querySelector('[role="listbox"]')).toBeNull();
+    expect(rail.querySelector('form')).not.toBeNull();
+    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(f.host.activeElement).toBe(preset);
     expect(rail.querySelectorAll('.provider-preset')).toHaveLength(0);
     expect(rail.textContent).not.toContain('更换预设');
     expect(rail.textContent).not.toContain('提供商提交结果');
@@ -3994,7 +4011,8 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
     const shell = () => f.host.querySelector('.desktop-settings')!;
     const main = () => shell().querySelector('.settings-content')!;
     const rail = () => shell().querySelector('.settings-editor-panel')!;
-    expect(rail() === shell().lastElementChild).toBe(true);
+    expect(main().closest('.client-content-frame')).toBe(shell().lastElementChild!);
+    expect(rail()).toBe(main().parentElement!.lastElementChild!);
     expect(rail().parentElement === main().parentElement).toBe(true);
     expect(main().querySelector('form, .right-sidebar')).toBeNull();
     expect(rail().childElementCount).toBe(0);

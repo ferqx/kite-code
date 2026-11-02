@@ -17,13 +17,19 @@ Run 中的 Login 仍是同一个普通 Action：Agent 的 nested Action 端口�
 
 [OAuth provider](../../packages/agent/src/mcp/oauth-provider.ts) 只把 tokens、dynamic client information、discovery state、时间及 tokenRevision 写入 owned account。PKCE verifier 和随机 state 仅在当前 flow 内存中。完整材料最多 64KiB；保存与读取共同验证实际 HTTP 可消费的 Bearer token，沿已有 Broker 的 8000 字符上限。原生 put 已开始后的取消或错误保持 publication unknown，不能据取消推断零写入。
 
+Windows owned 材料在同一 OS 后端内使用有界分段，解决单项 UTF-16 的2560字节限制；格式、固定槽清理与完整性核对归[配置 owner](../../packages/agent/src/config/README.md#同-vault-的-owned-oauth-材料)。中断／混合写入仍拒绝读取并保持原未知语义，不形成文件回退、第二套Vault或跨项原子性承诺。
+
 同一个 [Broker](../../packages/agent/src/mcp/credentials.ts) 发放短期 opaque handle；header materialization 再读准确 scope 和原 tokenRevision。清理后重新登录得到新 revision，旧连接不能借用新 Token。删除失败会阻断本 Vault 当前 authority；其他 Vault 可能仍看到实际残留，不宣称跨进程删除成功。秘密不进 Command、Event、SSE、普通结果、JSONC 或 UI。
 
 ## 配置与自动资格
 
+用户级自定义 MCP 可保存 `bearerTokenEnv` 和 `headersFromEnv` 的明确变量名；归一化后的私人 auth 为 `environment`，只表示外部变量引用，不查询 Vault、不报告已登录，也不取得 OAuth 自动资格。用户 Source 的原完整摘要／HostMutation 与连接准入通过后，私有 HTTP port 才逐请求读取这些名字并复核 freshness，协议保留头与重复头拒绝；实际值不进配置、SQL、journal、registry或普通结果。敏感 literal 键仍拒绝，缺失值局部失败且零对应 RPC，401不转为浏览器授权。普通来源批准不能授予项目条目读取宿主环境；项目中的这些字段明确拒绝，既有 owned OAuth 与手工 Bearer 绑定不变。STDIO 的显式变量传递与最小系统环境归[Service owner](../../apps/service/README.md#自定义-mcp-表单与启动配置)。
+
 HTTP raw auth 接受 none、有限手工 Bearer credential 或 oauth。OAuth 只保存 profile label `credentialRef`、可选 scopes/clientId 和 opaque `clientSecretRef:credential:<uuid>`；拒绝 inline clientSecret。metadata 私人保留，不成为批准、Vault 或浏览器许可。stdio 不接受 auth。
 
 显式 oauth 的 enabled/admitted Source 可经新的普通 Login Action 请求认证。省略 auth 的 HTTP 是 auto 候选，只有当前进程、同一 owned 域的实际 401 才允许 Login，并可使用响应中经校验的 resource metadata URL/scopes；资格不持久化。显式 none 或 manual credential 不升级。普通 401 只记录有限 login/reauth required，零 browser、callback、DCR 或原 RPC 重发。
+
+用户设置的其他 HTTP 失败只发布有限错误类别供客户端解释原因，不携 SDK message、远端响应体或响应头；404、403、限流与服务端错误不取得 Login 资格，也不自动打开浏览器、重新认证或重发原 RPC。认证资格继续只取决于上述 policy 和实际401观察。
 
 ## 普通认证 Action 与历史
 

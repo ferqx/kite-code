@@ -79,7 +79,7 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/clear removes prior conversation state from a later export',
+    '/clear hides prior display and preserves conversation for a later export',
     async () => {
       server.setResponses([{ message: { content: 'Conversation response before clear.' } }]);
       await submitUserMessage(tui, server, 'hello world');
@@ -87,6 +87,8 @@ describe('TUI PTY System — Slash Commands', () => {
       await waitForTuiReady(tui);
 
       await submitCommand(tui, '/clear');
+      await waitForTuiReady(tui);
+      expect(tui.viewport()).not.toContain('Conversation response before clear.');
       await submitCommand(tui, '/theme');
       await waitForText(() => tui.viewport(), '选择色彩主题', 10_000);
       tui.write('\x1b[B');
@@ -106,8 +108,8 @@ describe('TUI PTY System — Slash Commands', () => {
       const exportedContent = readFileSync(join(exportDirectory, exportedFiles[0]!), 'utf8');
       expect(exportedContent).toContain('# Kite Code Session Export');
       expect(exportedContent).toContain('**You:** /theme purple');
-      expect(exportedContent).not.toContain('**You:** hello world');
-      expect(exportedContent).not.toContain('Conversation response before clear.');
+      expect(exportedContent).toContain('hello world');
+      expect(exportedContent).toContain('Conversation response before clear.');
     },
     TIMEOUT,
   );

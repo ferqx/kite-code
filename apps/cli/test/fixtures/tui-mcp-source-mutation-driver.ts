@@ -188,6 +188,27 @@ const changes = async () => {
 };
 const selected = (id: string) =>
   wait(`Originalsourcechange:${id}OriginalStore:${storeId}·Sessiona`, true);
+const outcome = async (id: string, phase: 'saved' | 'outcome_unknown') => {
+  const end = Date.now() + 10000;
+  const identity = `Originalsourcechange:${id}OriginalStore:${storeId}·Sessiona`;
+  for (;;) {
+    const frame = await current();
+    const value = normalized(frame.text).replaceAll(' ', '');
+    const start = value.lastIndexOf(identity);
+    if (
+      frame.fresh &&
+      start >= 0 &&
+      value.slice(start).startsWith(identity + phase) &&
+      !value.includes('Readingsourceentryfacts')
+    ) {
+      note('outcome', { id, phase, frame: frame.text.slice(-32768) });
+      return;
+    }
+    if (Date.now() > end) throw Error(`owned_source_mutation_outcome_deadline:${id}:${phase}`);
+    if (active!.ended) throw Error('owned_source_mutation_pty_eof');
+    await Bun.sleep(50);
+  }
+};
 const selectOriginal = async (id: string) => {
   await choose(`Original source change: ${id}`);
   const known = normalized((await current()).text)
@@ -258,7 +279,8 @@ try {
   await choose('Check original source change');
   await key('\r');
   await selected(added);
-  await wait('saved');
+  await waitAbsent('Reading source entry facts');
+  await outcome(added, 'saved');
   await choose('Remove source entry: shared · workspace');
   await key('\r');
   await wait('Review source entry change');
@@ -280,7 +302,8 @@ try {
   await choose('Check original source change');
   await key('\r');
   await selected(removed);
-  await wait('saved');
+  await waitAbsent('Reading source entry facts');
+  await outcome(removed, 'saved');
   await control('warm-complete');
   await leave();
   await close('warm');
@@ -293,7 +316,8 @@ try {
   await choose('Check original source change');
   await key('\r');
   await selected(removed);
-  await wait('saved');
+  await waitAbsent('Reading source entry facts');
+  await outcome(removed, 'saved');
   await control('cold-lookup');
   await leave('MCP · unavailable');
   await close('cold-removed');
@@ -306,7 +330,8 @@ try {
   await choose('Check original source change');
   await key('\r', true);
   await selected(removed);
-  await wait('outcome_unknown');
+  await waitAbsent('Reading source entry facts');
+  await outcome(removed, 'outcome_unknown');
   await control('foreign-lookup');
   await leave('MCP · unavailable');
   await close('cold-foreign');

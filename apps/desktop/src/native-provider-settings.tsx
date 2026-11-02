@@ -1,4 +1,4 @@
-import { RightSidebar } from '@kite-ai/ui/desktop';
+import { Button, Input, RightSidebar, Textarea } from '@kite-ai/ui/desktop';
 import { type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
@@ -14,6 +14,7 @@ import {
   NativeModelSettingsFeedback,
   type NativeModelSettingsState,
 } from './native-model-settings';
+import { NativeSettingsSelect } from './native-settings-select';
 
 export type NativeProviderSettingsActivity = {
   busy: boolean;
@@ -255,7 +256,7 @@ export function NativeProviderSettings({
   recoveredCallback.current = onRecovered;
 
   const nameField = useRef<HTMLInputElement>(null),
-    presetField = useRef<HTMLSelectElement>(null),
+    presetField = useRef<HTMLButtonElement>(null),
     cancelField = useRef<HTMLButtonElement>(null),
     addButton = useRef<HTMLButtonElement>(null),
     urlField = useRef<HTMLInputElement>(null),
@@ -663,6 +664,7 @@ export function NativeProviderSettings({
     setError('');
   }
   function add(button: HTMLButtonElement) {
+    if (panelMode === 'add') return;
     const preset = facts?.providers.find((entry) => entry.id !== 'codex');
     if (preset) choose(preset, undefined, 'add', button);
   }
@@ -1008,14 +1010,14 @@ export function NativeProviderSettings({
             ：{submission.operation.kind === 'remove' ? '删除' : '保存'}结果待确认。
             {facts && submission.storeId !== facts.storeId && '此更改来自先前的数据源。'}
           </p>
-          <button
+          <Button
             className="provider-button"
             type="button"
             disabled={reading || writing}
             onClick={() => void lookup(submission)}
           >
             查看结果
-          </button>
+          </Button>
         </div>
       ))}
     </section>
@@ -1026,7 +1028,7 @@ export function NativeProviderSettings({
       className={`provider-settings${models ? ' provider-model-settings' : ''}`}
       aria-busy={reading || models?.reading || undefined}
     >
-      <header className="provider-page-heading">
+      <header className="settings-page-heading">
         <div>
           <h2>{models ? '提供商与模型' : '提供商'}</h2>
           <p>
@@ -1035,7 +1037,7 @@ export function NativeProviderSettings({
         </div>
         <div className="provider-page-actions">
           {!models && (
-            <button
+            <Button
               className="provider-button provider-refresh"
               type="button"
               aria-label="刷新提供商配置"
@@ -1044,9 +1046,9 @@ export function NativeProviderSettings({
             >
               <ProviderIcon name="refresh" />
               <span>刷新配置</span>
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             ref={addButton}
             aria-expanded={panelMode === 'add'}
             aria-controls={panelMode === 'add' ? `${fieldId}-editor` : undefined}
@@ -1057,7 +1059,7 @@ export function NativeProviderSettings({
           >
             <ProviderIcon name="plus" />
             新增提供商
-          </button>
+          </Button>
         </div>
       </header>
       {!panelMode && error && (
@@ -1103,7 +1105,7 @@ export function NativeProviderSettings({
                     </span>
                     {entry.id !== 'codex' && (
                       <div className="provider-instance-actions">
-                        <button
+                        <Button
                           className="provider-button"
                           type="button"
                           aria-label={`编辑 ${label}`}
@@ -1112,8 +1114,8 @@ export function NativeProviderSettings({
                           onClick={(event) => choose(entry, item, 'edit', event.currentTarget)}
                         >
                           编辑
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           className="provider-button provider-delete-link"
                           type="button"
                           aria-label={`删除 ${label}`}
@@ -1122,7 +1124,7 @@ export function NativeProviderSettings({
                           onClick={(event) => choose(entry, item, 'remove', event.currentTarget)}
                         >
                           删除
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -1154,13 +1156,13 @@ export function NativeProviderSettings({
               <ProviderIcon name="connection" />
               <h3>尚未添加提供商</h3>
               <p>添加一个模型服务，开始配置你的模型。</p>
-              <button
+              <Button
                 className="provider-button"
                 type="button"
                 onClick={(event) => add(event.currentTarget)}
               >
                 添加第一个提供商
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -1179,21 +1181,21 @@ export function NativeProviderSettings({
                     正在后台读取提供商配置。
                   </p>
                 ) : panelMode !== 'add' && !connection ? (
-                  <div className="provider-editor">
-                    <div className="provider-editor-body">
+                  <div className="provider-editor right-sidebar-editor">
+                    <div className="provider-editor-body right-sidebar-editor-body">
                       <p className="provider-notice" role="status">
                         此提供商已不在最新配置中，请返回列表重新选择。
                       </p>
                     </div>
-                    <footer className="provider-editor-footer">
-                      <button className="provider-button" type="button" onClick={close}>
+                    <footer className="provider-editor-footer right-sidebar-editor-footer">
+                      <Button className="provider-button" type="button" onClick={close}>
                         返回列表
-                      </button>
+                      </Button>
                     </footer>
                   </div>
                 ) : panelMode === 'remove' && connection ? (
                   <form
-                    className="provider-editor"
+                    className="provider-editor right-sidebar-editor"
                     aria-label={`删除 ${editingLabel} 确认`}
                     onSubmit={(event) => {
                       event.preventDefault();
@@ -1207,7 +1209,7 @@ export function NativeProviderSettings({
                         <p>删除前确认影响范围</p>
                       </div>
                     </header>
-                    <div className="provider-editor-body">
+                    <div className="provider-editor-body right-sidebar-editor-body">
                       {draftStale && (
                         <p className="provider-notice provider-notice-error" role="alert">
                           {panelMode === 'remove'
@@ -1268,27 +1270,27 @@ export function NativeProviderSettings({
                       )}
                       {unresolvedNotice}
                     </div>
-                    <footer className="provider-editor-footer">
-                      <button
+                    <footer className="provider-editor-footer right-sidebar-editor-footer">
+                      <Button
                         ref={cancelField}
                         className="provider-button"
                         type="button"
                         onClick={close}
                       >
                         取消
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         className="provider-button provider-remove"
                         type="submit"
                         disabled={!writable || blockedRemoval}
                       >
                         {writing ? '正在删除…' : '确认删除提供商'}
-                      </button>
+                      </Button>
                     </footer>
                   </form>
                 ) : (
                   <form
-                    className="provider-editor"
+                    className="provider-editor right-sidebar-editor"
                     aria-label={`${editingLabel} 配置`}
                     noValidate
                     onSubmit={(event) => {
@@ -1303,7 +1305,7 @@ export function NativeProviderSettings({
                         <p>{connection ? presetLabel(provider) : '添加新的模型连接'}</p>
                       </div>
                     </header>
-                    <div className="provider-editor-body">
+                    <div className="provider-editor-body right-sidebar-editor-body">
                       {draftStale && (
                         <p className="provider-notice provider-notice-error" role="alert">
                           {panelMode === 'remove'
@@ -1326,35 +1328,35 @@ export function NativeProviderSettings({
                         </h4>
                         <div className="provider-form-grid">
                           {panelMode === 'add' && (
-                            <label className="provider-field">
+                            <label className="provider-field" htmlFor={`${fieldId}-field-1`}>
                               <span>服务商预设</span>
-                              <select
+                              <NativeSettingsSelect
+                                id={`${fieldId}-field-1`}
                                 ref={presetField}
                                 aria-label="服务商预设"
                                 value={provider.id}
                                 disabled={writing}
-                                onChange={(event) => {
+                                onValueChange={(value) => {
                                   const preset = facts?.providers.find(
-                                    (entry) =>
-                                      entry.id !== 'codex' &&
-                                      entry.id === event.currentTarget.value,
+                                    (entry) => entry.id !== 'codex' && entry.id === value,
                                   );
                                   if (preset) choose(preset);
                                 }}
-                              >
-                                {facts?.providers
-                                  .filter((entry) => entry.id !== 'codex')
-                                  .map((entry) => (
-                                    <option key={entry.id} value={entry.id}>
-                                      {presetLabel(entry)}
-                                    </option>
-                                  ))}
-                              </select>
+                                options={
+                                  facts?.providers
+                                    .filter((entry) => entry.id !== 'codex')
+                                    .map((entry) => ({
+                                      value: entry.id,
+                                      label: presetLabel(entry),
+                                    })) ?? []
+                                }
+                              />
                             </label>
                           )}
-                          <label className="provider-field">
+                          <label className="provider-field" htmlFor={`${fieldId}-field-2`}>
                             <span>提供商名称</span>
-                            <input
+                            <Input
+                              id={`${fieldId}-field-2`}
                               ref={nameField}
                               aria-label="提供商名称"
                               aria-describedby={
@@ -1380,20 +1382,22 @@ export function NativeProviderSettings({
                             </p>
                           )}
                           {supportsResponses(provider.id) && (
-                            <label className="provider-field">
+                            <label className="provider-field" htmlFor={`${fieldId}-field-3`}>
                               <span>API 协议</span>
-                              <select
+                              <NativeSettingsSelect
+                                id={`${fieldId}-field-3`}
                                 aria-label="API 协议"
                                 aria-describedby={`${fieldId}-protocol-help`}
                                 value={protocol}
                                 disabled={writing}
-                                onChange={(event) => {
-                                  setProtocol(event.currentTarget.value as Protocol);
+                                onValueChange={(value) => {
+                                  setProtocol(value as Protocol);
                                 }}
-                              >
-                                <option value="chat-completions">Chat Completions</option>
-                                <option value="responses">Responses</option>
-                              </select>
+                                options={[
+                                  { value: 'chat-completions', label: 'Chat Completions' },
+                                  { value: 'responses', label: 'Responses' },
+                                ]}
+                              />
                             </label>
                           )}
                         </div>
@@ -1402,9 +1406,10 @@ export function NativeProviderSettings({
                             按服务商支持的接口选择；现有配置默认使用 Chat Completions。
                           </p>
                         )}
-                        <label className="provider-field">
+                        <label className="provider-field" htmlFor={`${fieldId}-field-4`}>
                           <span>服务地址</span>
-                          <input
+                          <Input
+                            id={`${fieldId}-field-4`}
                             ref={urlField}
                             aria-label="服务地址"
                             aria-describedby={
@@ -1446,35 +1451,36 @@ export function NativeProviderSettings({
                           <ProviderIcon name="shield" />
                           访问凭据
                         </h4>
-                        <label className="provider-field">
+                        <label className="provider-field" htmlFor={`${fieldId}-field-5`}>
                           <span>凭据</span>
-                          <select
+                          <NativeSettingsSelect
+                            id={`${fieldId}-field-5`}
                             aria-label="凭据处理"
                             value={credential}
                             disabled={writing}
-                            onChange={(event) => {
-                              setCredential(
-                                event.currentTarget.value as NativeProviderOperation['credential'],
-                              );
+                            onValueChange={(value) => {
+                              setCredential(value as NativeProviderOperation['credential']);
                               setSecret('');
                               setFieldError(undefined);
                             }}
-                          >
-                            {connection?.hasCredential && (
-                              <option value="keep">保留已保存凭据</option>
-                            )}
-                            <option value="replace">保存新 API key</option>
-                            {!provider.requiresCredential && (
-                              <option value="none">不使用凭据</option>
-                            )}
-                          </select>
+                            options={[
+                              ...(connection?.hasCredential
+                                ? [{ value: 'keep', label: '保留已保存凭据' }]
+                                : []),
+                              { value: 'replace', label: '保存新 API key' },
+                              ...(!provider.requiresCredential
+                                ? [{ value: 'none', label: '不使用凭据' }]
+                                : []),
+                            ]}
+                          />
                         </label>
                         {credential === 'replace' && (
-                          <label className="provider-field">
+                          <label className="provider-field" htmlFor={`${fieldId}-field-6`}>
                             <span>
                               API key <span className="provider-field-optional">仅用于此连接</span>
                             </span>
-                            <input
+                            <Input
+                              id={`${fieldId}-field-6`}
                               ref={keyField}
                               aria-label="API key"
                               aria-describedby={
@@ -1522,11 +1528,12 @@ export function NativeProviderSettings({
                           <ProviderIcon name="models" />
                           连接模型目录
                         </h4>
-                        <label className="provider-field">
+                        <label className="provider-field" htmlFor={`${fieldId}-field-7`}>
                           <span>
                             模型名称 <span className="provider-field-optional">可选</span>
                           </span>
-                          <textarea
+                          <Textarea
+                            id={`${fieldId}-field-7`}
                             aria-label="模型名称"
                             aria-describedby={`${fieldId}-models-help`}
                             rows={3}
@@ -1553,17 +1560,17 @@ export function NativeProviderSettings({
                       )}
                       {unresolvedNotice}
                     </div>
-                    <footer className="provider-editor-footer">
-                      <button className="provider-button" type="button" onClick={close}>
+                    <footer className="provider-editor-footer right-sidebar-editor-footer">
+                      <Button className="provider-button" type="button" onClick={close}>
                         取消
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         className="provider-button provider-save"
                         type="submit"
                         disabled={!writable}
                       >
                         {writing ? '正在保存…' : '保存提供商配置'}
-                      </button>
+                      </Button>
                     </footer>
                   </form>
                 )}

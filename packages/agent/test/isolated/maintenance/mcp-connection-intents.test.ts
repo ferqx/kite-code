@@ -1,20 +1,22 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
-  chmodSync,
   existsSync,
   linkSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,
@@ -193,9 +195,9 @@ test('exact 128 unknown/16MiB raw bytes accepted; excess, private mode and linke
     write(f.path, [...rows, row(f.storeId, 128)]);
     expect(() => verifyMcpConnectionIntentsDocument(f.path)).toThrow();
     write(f.path, [rows[0]]);
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => verifyMcpConnectionIntentsDocument(f.path)).toThrow();
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     const hard = join(f.root, 'hard');
     linkSync(f.path, hard);
     expect(() => verifyMcpConnectionIntentsDocument(f.path)).toThrow();
@@ -203,7 +205,7 @@ test('exact 128 unknown/16MiB raw bytes accepted; excess, private mode and linke
     const source = join(f.root, 'source');
     writeFileSync(source, readFileSync(f.path), { mode: 0o600 });
     unlinkSync(f.path);
-    symlinkSync(source, f.path);
+    recordReparseEntry(source, f.path);
     expect(() => verifyMcpConnectionIntentsDocument(f.path)).toThrow();
   } finally {
     f.close();

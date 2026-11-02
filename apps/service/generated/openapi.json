@@ -6575,6 +6575,30 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 8192
+                          },
+                          "bearerTokenEnv": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                          },
+                          "headers": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "maxLength": 8192
+                            }
+                          },
+                          "headersFromEnv": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                            }
                           }
                         },
                         "required": ["type", "url"],
@@ -6588,6 +6612,37 @@
                             "const": "stdio"
                           },
                           "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          },
+                          "args": {
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 8192
+                            }
+                          },
+                          "env": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "maxLength": 8192
+                            }
+                          },
+                          "envPassthrough": {
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                            }
+                          },
+                          "cwd": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 4096
@@ -6877,7 +6932,7 @@
                   "properties": {
                     "policy": {
                       "type": "string",
-                      "enum": ["none", "credential", "oauth", "auto"]
+                      "enum": ["none", "credential", "oauth", "auto", "environment"]
                     },
                     "status": {
                       "type": "string",
@@ -7017,6 +7072,30 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 8192
+                          },
+                          "bearerTokenEnv": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                          },
+                          "headers": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "maxLength": 8192
+                            }
+                          },
+                          "headersFromEnv": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                            }
                           }
                         },
                         "required": ["type", "url"],
@@ -7030,6 +7109,37 @@
                             "const": "stdio"
                           },
                           "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          },
+                          "args": {
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 8192
+                            }
+                          },
+                          "env": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "maxLength": 8192
+                            }
+                          },
+                          "envPassthrough": {
+                            "maxItems": 128,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                            }
+                          },
+                          "cwd": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 4096
@@ -7268,7 +7378,7 @@
                     "properties": {
                       "policy": {
                         "type": "string",
-                        "enum": ["none", "credential", "oauth", "auto"]
+                        "enum": ["none", "credential", "oauth", "auto", "environment"]
                       },
                       "status": {
                         "type": "string",

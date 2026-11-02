@@ -61,6 +61,11 @@ import type {
   WorkspaceRecord,
 } from '@kite-ai/agent/storage';
 import { createMcpHttpTransportPort, type McpHttpPortOptions } from './mcp-http-port';
+import {
+  type McpEnvironmentReader,
+  mcpHttpHeaders,
+  mcpStdioEnvironment,
+} from './mcp-launch-configuration';
 import { createMcpOAuthActions, type McpOAuthTarget } from './mcp-oauth-actions';
 import { openMcpOAuthBrowser } from './mcp-oauth-browser';
 import {
@@ -194,6 +199,7 @@ export interface McpSourceConfigurationOptions {
   runtime: () => Host;
   credentialVault: { resolve(ref: string): Promise<string> } & Partial<McpOAuthVault>;
   variables?: () => Readonly<Record<string, string>>;
+  environment?: McpEnvironmentReader;
   /** Current general JSONC overlay; absent defaults to enabled raw source set, empty selects none. */
   selection?: (scope: Readonly<McpSourceScope>, workspacePath: string) => McpSourceSelectionInput;
   programmaticServerIds?: readonly string[];
@@ -496,6 +502,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
   >();
   const oauthPolicy = (entry: ReturnType<typeof readMcpSources>['entries'][number]) =>
     entry.transport?.type === 'http' &&
+    object(entry.transport.auth).type !== 'environment' &&
     (object(entry.transport.auth).type === 'oauth' || !Object.hasOwn(object(entry.raw), 'auth'))
       ? object(entry.transport.auth).type === 'oauth'
         ? ('oauth' as const)
@@ -1706,6 +1713,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
           {
             id: input.serverId,
             url: transport.url,
+            ...mcpHttpHeaders(entry.transport!, options.environment),
             ...(savedBinding
               ? {
                   credential: {
@@ -1860,6 +1868,9 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
           {
             id: input.serverId,
             configuration: { ...transport, args: [...transport.args], env: { ...transport.env } },
+            ...(entry.server.source.kind === 'user'
+              ? { environment: mcpStdioEnvironment(entry.transport!, options.environment) }
+              : {}),
           },
         ],
         allowedEnvNames: Object.keys(transport.env),

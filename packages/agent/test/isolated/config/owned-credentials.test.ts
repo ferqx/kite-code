@@ -168,7 +168,11 @@ test('native owned accounts are lazy, same namespace, and status preserves locke
   await vault.writeOwned(scope, 'material');
   expect(await vault.readOwned(scope)).toBe('material');
   expect(
-    accounts.every((account) => /^owned-profile\/owned-credential:[a-f0-9]{64}$/.test(account)),
+    accounts.every((account) =>
+      /^owned-profile\/owned-credential:[a-f0-9]{64}(?:\/part-(?:[0-9]|[1-7][0-9]|8[0-7]))?$/.test(
+        account,
+      ),
+    ),
   ).toBe(true);
   state = 'locked';
   expect(await vault.statusOwned(scope)).toBe('locked');

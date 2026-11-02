@@ -157,6 +157,62 @@ test('actual Native page retains window actions and connects Windows menus to th
     await act(async () => menuAction!('settings'));
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
     expect(menus[0]!.closest('[aria-hidden="true"]')).toBeNull();
+    // Windows settings is non-modal so native menus and nested Select focus guards
+    // can receive focus outside the full-page content without leaving settings.
+    await act(async () => menus[1]!.focus());
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    await act(async () => menus[1]!.click());
+    expect(menuRequests.at(-1)).toEqual({ menu: 'edit', x: 0, y: 0, applicationEnabled: true });
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    const focusGuard = dom.window.document.querySelector<HTMLElement>('[data-radix-focus-guard]')!;
+    expect(focusGuard).not.toBeNull();
+    await act(async () => focusGuard.focus());
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    const outsidePointer = new dom.window.MouseEvent('pointerdown', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      detail: 2,
+    });
+    await act(async () => dom.window.document.documentElement.dispatchEvent(outsidePointer));
+    expect(outsidePointer.defaultPrevented).toBe(true);
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    const editor = host.querySelector<HTMLButtonElement>('[aria-label="默认编辑器"]')!;
+    await act(async () =>
+      editor.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', {
+          key: 'ArrowDown',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(dom.window.document.querySelector('[role="listbox"]')).not.toBeNull();
+    await act(async () =>
+      dom.window.document.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(dom.window.document.querySelector('[role="listbox"]')).toBeNull();
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(dom.window.document.activeElement).toBe(editor);
+    await act(async () =>
+      dom.window.document.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).toBeNull();
+    await act(async () => menuAction!('settings'));
+    expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
     await act(async () => menuAction!('add-workspace'));
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).toBeNull();
     expect(

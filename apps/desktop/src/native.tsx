@@ -25,7 +25,9 @@ import {
   DialogHeader,
   DialogTitle,
   MessageContent,
+  NAVIGATION_MIN_WIDTH,
   ReadingStateCache,
+  RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
   type SessionChildTabRequest,
   type SessionChildTarget,
   SessionPage,
@@ -34,6 +36,7 @@ import {
   ToolActivity,
 } from '@kite-ai/ui/desktop';
 import {
+  type CSSProperties,
   Fragment,
   type ReactNode,
   useEffect,
@@ -4519,6 +4522,12 @@ function NativeDesktopContent({
             <DialogContent
               portalled={false}
               className="desktop-settings-dialog translate-x-0 translate-y-0"
+              style={
+                {
+                  '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
+                  '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
+                } as CSSProperties
+              }
               showCloseButton={false}
               showOverlay={false}
               onEscapeKeyDown={(event) => {
@@ -4528,12 +4537,11 @@ function NativeDesktopContent({
                 }
               }}
               onInteractOutside={(event) => {
-                if (
-                  nativeWindow &&
-                  event.target instanceof Element &&
-                  event.target.closest('.native-window-titlebar')
-                )
-                  event.preventDefault();
+                // Full-page settings closes through navigation or Escape. A nested
+                // Select can temporarily retarget a double-click or focus to the document.
+                event.preventDefault();
+                if (event.detail.originalEvent.type === 'pointerdown')
+                  event.detail.originalEvent.preventDefault();
               }}
             >
               <DialogHeader className="desktop-settings-header">
@@ -4554,95 +4562,103 @@ function NativeDesktopContent({
                       <SettingsNavigationIcon name="back" />
                       <span>返回应用</span>
                     </DesktopButton>
-                    <button
+                    <DesktopButton
+                      variant="ghost"
                       type="button"
                       aria-pressed={settingsPage === 'general'}
                       onClick={() => setSettingsPage('general')}
                     >
                       <SettingsNavigationIcon name="general" />
                       <span>常规</span>
-                    </button>
-                    <button
+                    </DesktopButton>
+                    <DesktopButton
+                      variant="ghost"
                       type="button"
                       aria-pressed={settingsPage === 'providers'}
                       onClick={() => setSettingsPage('providers')}
                     >
                       <SettingsNavigationIcon name="providers" />
                       <span>提供商与模型</span>
-                    </button>
-                    <button
+                    </DesktopButton>
+                    <DesktopButton
+                      variant="ghost"
                       type="button"
                       aria-pressed={settingsPage === 'mcp'}
                       onClick={() => setSettingsPage('mcp')}
                     >
                       <SettingsNavigationIcon name="mcp" />
                       <span>MCP</span>
-                    </button>
-                    <button
+                    </DesktopButton>
+                    <DesktopButton
+                      variant="ghost"
                       type="button"
                       aria-pressed={settingsPage === 'skills'}
                       onClick={() => setSettingsPage('skills')}
                     >
                       <SettingsNavigationIcon name="skills" />
                       <span>Skills</span>
-                    </button>
+                    </DesktopButton>
                   </nav>{' '}
                 </aside>
-                <div className="settings-content">
-                  {error && (
-                    <p className="notice error" role="alert">
-                      {error}
-                    </p>
-                  )}
+                <div className="client-content-frame settings-content-frame">
+                  <div className="settings-content-panels">
+                    <div className="settings-content">
+                      {error && (
+                        <p className="notice error" role="alert">
+                          {error}
+                        </p>
+                      )}
 
-                  {settingsPage === 'general' ? (
-                    <NativeGeneralSettings
-                      bridge={bridge}
-                      generation={generation.current}
-                      storeId={directory?.storeId}
-                      selection={!preparing ? selection : undefined}
-                      revision={settingsRevision}
-                      editor={editor}
-                      onEditorChange={setEditor}
-                    />
-                  ) : settingsPage === 'skills' ? (
-                    <NativeSkillsSettings
-                      panelHost={settingsEditorHost}
-                      editorControl={settingsEditorControl}
-                      bridge={bridge}
-                      generation={generation.current}
-                      storeId={directory?.storeId}
-                    />
-                  ) : settingsPage === 'mcp' ? (
-                    <NativeMcpSettings
-                      panelHost={settingsEditorHost}
-                      editorControl={settingsEditorControl}
-                      bridge={bridge}
-                      generation={generation.current}
-                      storeId={directory?.storeId}
-                      submissions={state?.userMcpSubmissions ?? []}
-                    />
-                  ) : (
-                    <NativeProviderModelSettings
-                      key={JSON.stringify([
-                        generation.current,
-                        directory?.storeId,
-                        selection?.session.id,
-                        selection?.viewSelection,
-                      ])}
-                      panelHost={settingsEditorHost}
-                      editorControl={settingsEditorControl}
-                      bridge={bridge}
-                      generation={generation.current}
-                      selection={selection}
-                      storeId={directory?.storeId}
-                      providerSubmissions={state?.providerSettingsSubmissions ?? []}
-                      modelSubmissions={state?.modelSettingsSubmissions ?? []}
-                      onSaved={() => setSettingsRevision((value) => value + 1)}
-                    />
-                  )}
+                      {settingsPage === 'general' ? (
+                        <NativeGeneralSettings
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory?.storeId}
+                          selection={!preparing ? selection : undefined}
+                          revision={settingsRevision}
+                          editor={editor}
+                          onEditorChange={setEditor}
+                        />
+                      ) : settingsPage === 'skills' ? (
+                        <NativeSkillsSettings
+                          panelHost={settingsEditorHost}
+                          editorControl={settingsEditorControl}
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory?.storeId}
+                        />
+                      ) : settingsPage === 'mcp' ? (
+                        <NativeMcpSettings
+                          panelHost={settingsEditorHost}
+                          editorControl={settingsEditorControl}
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory?.storeId}
+                          submissions={state?.userMcpSubmissions ?? []}
+                        />
+                      ) : (
+                        <NativeProviderModelSettings
+                          key={JSON.stringify([
+                            generation.current,
+                            directory?.storeId,
+                            selection?.session.id,
+                            selection?.viewSelection,
+                          ])}
+                          panelHost={settingsEditorHost}
+                          editorControl={settingsEditorControl}
+                          bridge={bridge}
+                          generation={generation.current}
+                          selection={selection}
+                          storeId={directory?.storeId}
+                          providerSubmissions={state?.providerSettingsSubmissions ?? []}
+                          modelSubmissions={state?.modelSettingsSubmissions ?? []}
+                          onSaved={() => setSettingsRevision((value) => value + 1)}
+                        />
+                      )}
+                    </div>
+                    <div className="settings-editor-panel" ref={setSettingsEditorHost} />
+                  </div>
                 </div>
-                <div className="settings-editor-panel" ref={setSettingsEditorHost} />
               </div>
             </DialogContent>
           </Dialog>

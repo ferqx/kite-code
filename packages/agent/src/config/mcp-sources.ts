@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { applyEdits, modify, type ParseError, parse, visit } from 'jsonc-parser';
 import {
   acquireFileLock,
@@ -22,6 +22,12 @@ import {
   type WindowsPathSecurity,
 } from '../platform/locks';
 import { defaultWindowsPathSecurity, privateDirectory } from '../platform/windows-path-security';
+import {
+  type McpSourceEntry,
+  mcpReservedEnvironment,
+  mcpSecretName,
+  validateMcpSourceEntry,
+} from './mcp-entry';
 import { mcpCanonical } from './mcp-selection';
 import { ConfigurationError, type Json, type JsonObject } from './types';
 
@@ -98,7 +104,7 @@ export type McpSourceEntryMutation =
       kind: 'add';
       scope: 'user' | 'workspace';
       name: string;
-      entry: { type: 'http'; url: string } | { type: 'stdio'; command: string };
+      entry: McpSourceEntry;
     }
   | {
       kind: 'remove';
@@ -301,6 +307,13 @@ function bytes(path: string, options: McpSourceOptions, privateFile = true) {
   let fd: number | undefined;
   try {
     if (process.platform === 'win32') {
+      // Classify known unsafe entries consistently; the native handle checks below
+      // still own admission and detect replacement after this local observation.
+      if (existsSync(path)) {
+        const entry = lstatSync(path);
+        if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1)
+          fail('mcp_source_path_unsafe');
+      }
       const native = defaultWindowsPathSecurity()!;
       if (existsSync(dirname(path))) {
         if (privateFile) native.verifyDirectory(dirname(path));
@@ -510,6 +523,17 @@ function pickBinding(value: JsonObject | McpSourceBinding): McpSourceBinding {
     transportDigest: value.transportDigest as string,
   };
 }
+function userOnlyFields(raw: unknown) {
+  if (!record(raw)) return false;
+  if ((raw.type ?? 'stdio') === 'stdio')
+    return Array.isArray(raw.envPassthrough) && raw.envPassthrough.length > 0;
+  return (
+    raw.type === 'http' &&
+    (typeof raw.bearerTokenEnv === 'string' ||
+      (record(raw.headersFromEnv) && Object.keys(raw.headersFromEnv).length > 0) ||
+      (record(raw.headers) && Object.keys(raw.headers).length > 0))
+  );
+}
 function normalize(raw: Json, variables: Readonly<Record<string, string>>) {
   if (!record(raw)) fail('mcp_server_invalid');
   const expand = (value: unknown) => {
@@ -540,29 +564,47 @@ function normalize(raw: Json, variables: Readonly<Record<string, string>>) {
       url.hash
     )
       fail('mcp_transport_unavailable');
-    if (raw.headers !== undefined && (!record(raw.headers) || Object.keys(raw.headers).length))
-      fail('mcp_headers_unavailable');
-    transport = { type, url: url.href };
+    const declaration = {
+      type,
+      url: url.href,
+      ...(raw.headers !== undefined ? { headers: raw.headers } : {}),
+      ...(raw.headersFromEnv !== undefined ? { headersFromEnv: raw.headersFromEnv } : {}),
+      ...(raw.bearerTokenEnv !== undefined ? { bearerTokenEnv: raw.bearerTokenEnv } : {}),
+    };
+    validateMcpSourceEntry(declaration, { sourceDocument: true });
+    transport = declaration;
   } else if (type === 'stdio') {
     const command = expand(raw.command);
     const cwd = raw.cwd === undefined ? undefined : expand(raw.cwd);
-    if (!command.startsWith('/') || (cwd !== undefined && !cwd.startsWith('/')))
+    if (!isAbsolute(command) || (cwd !== undefined && !isAbsolute(cwd)))
       fail('mcp_transport_unavailable');
     if (raw.args !== undefined && (!Array.isArray(raw.args) || raw.args.length > 128))
       fail('mcp_server_invalid');
-    const args = ((raw.args as Json[] | undefined) ?? []).map(expand);
+    const args = ((raw.args as Json[] | undefined) ?? []).map((value) =>
+      value === '' ? '' : expand(value),
+    );
     if (raw.env !== undefined && !record(raw.env)) fail('mcp_server_invalid');
     const env: JsonObject = {};
     for (const [key, value] of Object.entries(raw.env ?? {})) {
       if (
         !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ||
-        /secret|token|api.?key|password|credential|proxy|^LD_|^DYLD_|^NODE_|^BUN_/i.test(key)
+        mcpSecretName.test(key) ||
+        mcpReservedEnvironment.test(key)
       )
         fail('mcp_environment_unavailable');
-      env[key] = expand(value);
+      env[key] = value === '' ? '' : expand(value);
     }
     if (Object.keys(env).length > 128) fail('mcp_environment_unavailable');
-    transport = { type, command, args, env, ...(cwd ? { cwd } : {}) };
+    const declaration = {
+      type,
+      command,
+      args,
+      env,
+      ...(cwd ? { cwd } : {}),
+      ...(raw.envPassthrough !== undefined ? { envPassthrough: raw.envPassthrough } : {}),
+    };
+    validateMcpSourceEntry(declaration, { sourceDocument: true });
+    transport = declaration;
   } else fail('mcp_transport_unavailable');
   const auth = raw.auth ?? { type: 'none' };
   const authText = (value: unknown, maximum: number): value is string =>
@@ -570,7 +612,14 @@ function normalize(raw: Json, variables: Readonly<Record<string, string>>) {
     value.length <= maximum &&
     !Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
   if (!record(auth)) fail('mcp_auth_unavailable');
-  if (auth.type === 'none' && closed(auth, ['type'])) transport.auth = { type: 'none' };
+  if (
+    type === 'http' &&
+    (raw.bearerTokenEnv || (record(raw.headersFromEnv) && Object.keys(raw.headersFromEnv).length))
+  ) {
+    if (raw.auth !== undefined && (auth.type !== 'none' || !closed(auth, ['type'])))
+      fail('mcp_auth_unavailable');
+    transport.auth = { type: 'environment' };
+  } else if (auth.type === 'none' && closed(auth, ['type'])) transport.auth = { type: 'none' };
   else if (
     type === 'http' &&
     auth.type === 'credential' &&
@@ -746,6 +795,8 @@ export function readMcpSources(options: McpSourceOptions) {
     let userAuthBinding: McpUserSourceCredentialBinding | null = null;
     try {
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) fail('mcp_server_invalid');
+      if (document.identity.kind !== 'user' && userOnlyFields(raw))
+        fail('mcp_user_configuration_required');
       transport = normalize(raw, variables);
       server.transport = transport.type as 'http' | 'stdio';
       server.transportDigest = hash({ version: 1, transport });
@@ -1149,35 +1200,18 @@ export function writeMcpSourceEntry(
     )
       fail('mcp_server_invalid');
     if (!record(mutation.entry)) fail('mcp_source_mutation_invalid');
-    const basicText = (value: unknown, max: number, whitespace: boolean): value is string =>
-      typeof value === 'string' &&
-      value.length > 0 &&
-      value.length <= max &&
-      !value.includes('${') &&
-      !Array.from(value).some((character) => {
-        const point = character.codePointAt(0)!;
-        return point < (whitespace ? 33 : 32) || point === 127;
-      });
-    if (mutation.entry.type === 'http') {
-      exact(mutation.entry, ['type', 'url']);
-      const value = mutation.entry.url;
-      if (!basicText(value, 8192, true) || value.includes('?') || value.includes('#'))
-        fail('mcp_transport_unavailable');
-      try {
-        const url = new URL(value);
-        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
-          fail('mcp_transport_unavailable');
-      } catch {
-        fail('mcp_transport_unavailable');
-      }
-    } else if (mutation.entry.type === 'stdio') {
-      exact(mutation.entry, ['type', 'command']);
+    if (mutation.scope !== 'user' && userOnlyFields(mutation.entry))
+      fail('mcp_user_configuration_required');
+    try {
+      validateMcpSourceEntry(mutation.entry);
+    } catch (error) {
       if (
-        !basicText(mutation.entry.command, 4096, false) ||
-        !mutation.entry.command.startsWith('/')
+        error instanceof ConfigurationError &&
+        ['mcp_absolute_command_required', 'mcp_http_url_invalid'].includes(error.code)
       )
         fail('mcp_transport_unavailable');
-    } else fail('mcp_source_mutation_invalid');
+      throw error;
+    }
     try {
       normalize(mutation.entry, {});
     } catch (error) {
@@ -1274,9 +1308,12 @@ export function writeMcpSourceEntry(
     if (Buffer.byteLength(text) > (options.maxBytes ?? 1048576)) fail('mcp_source_limit');
     json(text);
     temporary = join(dirname(target.path), `.${basename(target.path)}.${randomUUID()}.tmp`);
-    if (process.platform === 'win32')
-      defaultWindowsPathSecurity()!.writePrivateFile(temporary, Buffer.from(text, 'utf8'));
-    else {
+    if (process.platform === 'win32') {
+      const native = defaultWindowsPathSecurity()!;
+      if (mutation.scope === 'workspace')
+        native.writeScopeFile(temporary, Buffer.from(text, 'utf8'));
+      else native.writePrivateFile(temporary, Buffer.from(text, 'utf8'));
+    } else {
       const fd = openSync(
         temporary,
         constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,

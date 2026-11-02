@@ -7,9 +7,11 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
+  Input,
   ScrollArea,
+  Switch,
 } from '@kite-ai/ui/desktop';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type {
   NativeBridge,
   NativeModelSettingsFacts,
@@ -242,7 +244,7 @@ export function NativeDefaultModelSettings({ state }: { state: NativeModelSettin
               }}
             >
               <div className="settings-model-search-toolbar">
-                <input
+                <Input
                   ref={searchRef}
                   type="search"
                   className="settings-model-search"
@@ -358,7 +360,7 @@ export function NativeModelSettingsFeedback({ state }: { state: NativeModelSetti
                     : '模型禁用'}
                 更改结果待确认。
               </p>
-              <button
+              <Button
                 type="button"
                 disabled={writing || reading}
                 onClick={() =>
@@ -370,7 +372,7 @@ export function NativeModelSettingsFeedback({ state }: { state: NativeModelSetti
                 }
               >
                 查看结果
-              </button>
+              </Button>
             </article>
           ))}
         </section>
@@ -386,24 +388,29 @@ export function NativeModelSettingsRows({
   state: NativeModelSettingsState;
   modelIds?: readonly string[];
 }) {
+  const rowId = useId();
   const { generation, facts, reading, writing, canToggle, groups, modelName, write } = state;
   const renderRows = (models: NativeModelSettingsFacts['models']) =>
     models.map((model) => (
-      <label className="settings-model-option" key={model.id} data-enabled={model.enabled}>
+      <label
+        className="settings-model-option"
+        key={model.id}
+        data-enabled={model.enabled}
+        htmlFor={`${rowId}-${model.id}`}
+      >
         <span>
           <strong>{modelName(model)}</strong>
           {model.diagnostics.map((code) => (
             <small key={code}>{code}</small>
           ))}
         </span>
-        <input
-          type="checkbox"
-          role="switch"
+        <Switch
+          id={`${rowId}-${model.id}`}
           aria-label={`启用模型 ${model.id}`}
           checked={model.enabled}
           aria-checked={model.enabled}
           disabled={!canToggle}
-          onChange={(event) => {
+          onCheckedChange={(enabled) => {
             if (canToggle)
               void write(
                 {
@@ -411,7 +418,7 @@ export function NativeModelSettingsRows({
                   generation,
                   observationId: facts!.observationId,
                   modelId: model.id,
-                  enabled: event.currentTarget.checked,
+                  enabled,
                 },
                 facts,
               );
@@ -479,13 +486,13 @@ export function NativeModelSettings(props: NativeModelSettingsProps) {
           <h2>模型</h2>
           <p className="settings-models-description">选择默认模型，管理任务中可用的模型。</p>
         </div>
-        <button
+        <Button
           type="button"
           disabled={state.reading || state.writing}
           onClick={() => void state.refresh()}
         >
           刷新配置
-        </button>
+        </Button>
       </div>
       <NativeDefaultModelSettings state={state} />
       <div className="settings-model-section-heading">

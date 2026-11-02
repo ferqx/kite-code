@@ -79,10 +79,13 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
       return await Promise.race([
         work,
         new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            onTimeout?.();
-            reject(Error(`cold_reconnect_stage_deadline:${label}`));
-          }, 30000);
+          timer = setTimeout(
+            () => {
+              onTimeout?.();
+              reject(Error(`cold_reconnect_stage_deadline:${label}`));
+            },
+            label === 'build' && process.platform === 'win32' ? 120000 : 30000,
+          );
         }),
       ]);
     } finally {
@@ -252,7 +255,11 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
     expect(exit).toBe(0);
     assertOpen();
     const candidate = verifyTerminalBundle(join(root, 'candidate'));
-    symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'));
+    symlinkSync(
+      join(candidate.root, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const built = await Bun.build({
       entrypoints: [join(import.meta.dir, '../fixtures/mcp-cold-reconnect.ts')],
       outdir: root,
@@ -667,7 +674,12 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
       storeId,
       subjectId,
       candidateManifestSha: candidate.digest,
-      deadlines: { businessMs: 10000, stageMs: 30000, testMs: 180000 },
+      deadlines: {
+        businessMs: 10000,
+        buildMs: process.platform === 'win32' ? 120000 : 30000,
+        stageMs: 30000,
+        testMs: 180000,
+      },
     });
     success = true;
   } catch (error) {

@@ -157,7 +157,7 @@ function fixture(request: NativeBridge['request']) {
       (node) => node.getAttribute('aria-label') === name || node.textContent === name,
     )!;
   const toggle = (id: string) =>
-    element.querySelector<HTMLInputElement>(`[role="switch"][aria-label="启用模型 ${id}"]`)!;
+    element.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="启用模型 ${id}"]`)!;
   const field = (name: string) =>
     element.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
       `[aria-label="${name}"]`,
@@ -407,7 +407,7 @@ test('a provider save synchronously excludes a peer model write and each applied
     });
     expect(f.button('保存提供商配置').disabled).toBe(true);
     await f.openModels('Same service', 1);
-    expect(f.toggle('b').checked).toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(false);
     await f.openModels('Same service', 0);
     expect(f.toggle('a').disabled).toBe(false);
     expect(f.calls.filter((input) => input.method === 'settings.models.read')).toHaveLength(3);
@@ -678,32 +678,32 @@ test('continuous toggles keep peer rows interactive through model continuation a
       c = f.toggle('c');
     await act(async () => b.click());
     expect(posts).toBe(1);
-    expect(b.checked).toBe(false);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(false);
     expect(b.disabled).toBe(false);
     expect(c.disabled).toBe(false);
     await act(async () => b.click());
     await act(async () => c.click());
-    expect(b.checked).toBe(true);
-    expect(c.checked).toBe(true);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(true);
+    expect(c.getAttribute('aria-checked') === 'true').toBe(true);
     expect(posts).toBe(1);
     expect(f.button('保存提供商配置').disabled).toBe(true);
     await act(async () => releaseFirst());
     expect(continuations).toBe(1);
-    expect(b.checked).toBe(true); // Old confirmed false must not cover the newer intent.
+    expect(b.getAttribute('aria-checked') === 'true').toBe(true); // Old confirmed false must not cover the newer intent.
     expect(b.disabled).toBe(false);
     expect(c.disabled).toBe(false);
     await act(async () => b.click()); // Collapse the unsent compensation back to applied false.
-    expect(b.checked).toBe(false);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(false);
     expect(posts).toBe(1);
     await act(async () => continuation.resolve(structuredClone(state.models)));
     expect(posts).toBe(2);
     expect(flushes).toBe(1);
-    expect(c.checked).toBe(true);
+    expect(c.getAttribute('aria-checked') === 'true').toBe(true);
     expect(b.disabled).toBe(false);
     expect(c.disabled).toBe(false);
     expect(f.button('保存提供商配置').disabled).toBe(true);
     await act(async () => b.click()); // The peer GET must not interrupt a new intent.
-    expect(b.checked).toBe(true);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(true);
     expect(posts).toBe(2);
     await act(async () => peer.resolve(structuredClone(state.providers)));
     expect(posts).toBe(3);
@@ -755,7 +755,9 @@ test('continuous toggles keep peer rows interactive through model continuation a
     expect(f.toggle('b')).toBe(b);
     expect(f.toggle('c')).toBe(c);
     expect(popup.querySelectorAll('[role="switch"]')).toHaveLength(2);
-    expect(b.checked && c.checked).toBe(true);
+    expect(
+      b.getAttribute('aria-checked') === 'true' && c.getAttribute('aria-checked') === 'true',
+    ).toBe(true);
     expect(b.disabled || c.disabled).toBe(false);
     expect(state.models.models.find((model) => model.id === 'b')!.enabled).toBe(true);
     expect(state.models.models.find((model) => model.id === 'c')!.enabled).toBe(true);
@@ -847,7 +849,7 @@ test('a sixty-model connection opens only a scrollable model list, retains its r
     expect(f.calls).toHaveLength(reads);
     const route = f.toggle('route-059');
     const row = route.closest('label');
-    expect(route.checked).toBe(false);
+    expect(route.getAttribute('aria-checked') === 'true').toBe(false);
     await act(async () => {
       route.focus({ preventScroll: true });
       route.click();
@@ -864,7 +866,7 @@ test('a sixty-model connection opens only a scrollable model list, retains its r
     expect(switches()).toHaveLength(60);
     expect(f.toggle('route-059') === route).toBe(true);
     expect(route.closest('label') === row).toBe(true);
-    expect(route.checked).toBe(true);
+    expect(route.getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.dom.window.document.activeElement === viewport).toBe(true);
     expect(viewport.scrollTop).toBe(1440);
     expect(f.toggle('route-059').disabled).toBe(true);
@@ -894,7 +896,7 @@ test('a sixty-model connection opens only a scrollable model list, retains its r
     expect(switches()).toHaveLength(60);
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
     expect(f.toggle('route-059') === route).toBe(true);
-    expect(f.toggle('route-059').checked).toBe(true);
+    expect(f.toggle('route-059').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.toggle('route-059').disabled).toBe(false);
     expect(trigger.textContent).toContain('60 个模型 · 已启用 31 个');
     expect(f.saved).toBe(1);
@@ -938,14 +940,14 @@ test('failed provider flush preserves applied model results and lets the accepte
     const b = f.toggle('b');
     await act(async () => b.click());
     expect(posts).toBe(1);
-    expect(b.checked).toBe(false);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(false);
     expect(b.disabled).toBe(false);
     await act(async () => b.click());
-    expect(b.checked).toBe(true);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(true);
     expect(posts).toBe(1);
     await act(async () => flush.resolve());
     expect(posts).toBe(2);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.toggle('b').disabled).toBe(false);
     expect(state.models.models.find((model) => model.id === 'b')!.enabled).toBe(true);
     expect(f.saved).toBe(2);
@@ -1041,7 +1043,7 @@ test('a model publication forces a newer Provider GET instead of borrowing an ol
     const row = f.toggle('b');
     await act(async () => row.click());
     expect(posts).toBe(1);
-    expect(row.checked).toBe(false);
+    expect(row.getAttribute('aria-checked') === 'true').toBe(false);
     expect(row.disabled).toBe(false);
     expect(reads).toBe(2);
     expect(f.element.textContent).toContain('peer_model_read_unavailable');
@@ -1055,7 +1057,7 @@ test('a model publication forces a newer Provider GET instead of borrowing an ol
     expect(posts).toBe(2);
     expect(reads).toBe(4);
     expect(f.toggle('b') === row).toBe(true);
-    expect(row.checked).toBe(true);
+    expect(row.getAttribute('aria-checked') === 'true').toBe(true);
     expect(row.disabled).toBe(false);
     expect(f.element.textContent).not.toContain('peer_model_read_unavailable');
     expect(f.element.textContent).toContain('Newest snapshot');

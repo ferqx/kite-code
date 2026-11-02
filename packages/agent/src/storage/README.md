@@ -244,6 +244,8 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 ## 持久权限模式
 
+用户 MCP HostMutation 的 Add 声明与认证回执沿[共享有限语法](../config/mcp-entry.ts)验证：持久记录可保结构化 argv、非秘密环境值及环境引用名称，不能携已知敏感 literal 或任意环境对象；环境引用认证只保存 `environment` 分类和有限状态，不保存实际值。闭合范围、原请求摘要、冷查询与终态一致性继续由 [host-mutation-operations](sqlite/host-mutation-operations.ts)核实，不增加 SQL 迁移或协议版本。
+
 `permission.mode` 控制只接受 `accept_edits`、`auto`、`full`。写入校验发生在创建 mutation 之前；读出既有控制、幂等回执和冷只读路径同样验证模式。旧 `ask` 记录以 `invalid_host_control` 拒绝，原行和 cursor 保持，不静默改为其他策略。`getHostMutation` 在只读事务提交前解码，保留原拒绝原因。完整 [控制测试](../../test/isolated/storage/host-controls.test.ts)与[派发测试](../../test/isolated/storage/host-control-dispatch.test.ts)核验三策略、CAS、幂等、旧模式拒绝与零 Tool 效果；用户策略由 Service 负责。
 
 暂停后的原完成订阅沿 [继续资格 owner](sqlite/job-report-continuation-README.md)处理：真实 continue 决定同事务保存有限 carrier/start/subscription 依据，旧 suppressed report 保留历史，新 `job.report.continue` 仍由既有 Source/ack 事务唯一接纳。原停止、unknown、Rewind 与 fence 不因继续而解除。

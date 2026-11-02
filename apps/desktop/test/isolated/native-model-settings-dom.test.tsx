@@ -169,7 +169,7 @@ function fixture(
       (entry) => entry.getAttribute('aria-label') === name || entry.textContent === name,
     )!;
   const toggle = (id: string) =>
-    element.querySelector<HTMLInputElement>(`[role="switch"][aria-label="启用模型 ${id}"]`)!;
+    element.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="启用模型 ${id}"]`)!;
   const menuItem = (id: string) =>
     element.querySelector<HTMLElement>(`[role="menuitemradio"][aria-label="设为默认 ${id}"]`);
   return {
@@ -254,8 +254,8 @@ test('opening model settings loads the retained list once, groups all models and
     expect(f.button('默认模型').textContent).toContain('openai · remote-a');
     expect(f.element.querySelectorAll('.settings-model-default-badge')).toHaveLength(0);
     expect(f.toggle('a').disabled).toBe(false);
-    expect(f.toggle('c').checked).toBe(false);
-    expect(f.toggle('broken').checked).toBe(true);
+    expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(false);
+    expect(f.toggle('broken').getAttribute('aria-checked') === 'true').toBe(true);
     await f.render();
     expect(f.calls).toHaveLength(1);
     await f.openMenu();
@@ -318,7 +318,7 @@ test('switches and the default dropdown save one exact intent, retain rows and r
     await act(async () => {
       f.toggle('c').click();
     });
-    expect(f.toggle('c').checked).toBe(true);
+    expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.toggle('c').disabled).toBe(false);
     expect(f.element.textContent).not.toContain('正在保存模型配置');
     expect(f.toggle('c').closest('label')).toBe(row);
@@ -375,7 +375,7 @@ test('an externally disabled default stays explicit and can be enabled again wit
   try {
     await f.render();
     expect(f.button('默认模型').textContent).toContain('c · 当前不可用');
-    expect(f.toggle('c').checked).toBe(false);
+    expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(false);
     expect(f.toggle('c').disabled).toBe(false);
     await act(async () => f.toggle('c').click());
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toEqual([
@@ -434,7 +434,7 @@ test('failed enablement restores the same switch and requires a fresh observatio
     await f.render();
     const row = f.toggle('c').closest('label');
     await act(async () => f.toggle('c').click());
-    expect(f.toggle('c').checked).toBe(true);
+    expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(true);
     await act(async () =>
       save.resolve({
         kind: 'settings.models.submission',
@@ -448,7 +448,7 @@ test('failed enablement restores the same switch and requires a fresh observatio
       }),
     );
     expect(f.toggle('c').closest('label')).toBe(row);
-    expect(f.toggle('c').checked).toBe(false);
+    expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(false);
     expect(f.toggle('c').disabled).toBe(true);
     expect(f.element.textContent).toContain('configuration_conflict');
     await act(async () => f.toggle('c').click());
@@ -968,7 +968,7 @@ for (const conflict of [false, true])
         }),
       );
       expect(row.disabled).toBe(false);
-      expect(row.checked).toBe(false);
+      expect(row.getAttribute('aria-checked') === 'true').toBe(false);
       expect(released).toBe(0);
       expect(f.dom.window.document.activeElement).toBe(row);
       await advanceRecovery(250);
@@ -981,7 +981,7 @@ for (const conflict of [false, true])
       ).toHaveLength(2);
       if (conflict) {
         expect(posts).toBe(1);
-        expect(row.checked).toBe(true);
+        expect(row.getAttribute('aria-checked') === 'true').toBe(true);
         expect(row.disabled).toBe(true);
         await advanceRecovery(250);
         expect(row.disabled).toBe(false);
@@ -995,7 +995,7 @@ for (const conflict of [false, true])
       }
       expect(posts).toBe(2);
       expect(f.toggle('b')).toBe(row);
-      expect(row.checked).toBe(false);
+      expect(row.getAttribute('aria-checked') === 'true').toBe(false);
       expect(acquired).toBe(conflict ? 2 : 1);
       expect(released).toBe(acquired);
     } finally {
@@ -1049,7 +1049,8 @@ for (const lifecycle of ['close', 'scope-change'] as const)
       await advanceRecovery(10000);
       expect(posts).toBe(lifecycle === 'close' ? 2 : 1);
       expect(proofReads).toBe(lifecycle === 'close' ? 2 : 1);
-      if (lifecycle === 'scope-change') expect(f.toggle('b').checked).toBe(true);
+      if (lifecycle === 'scope-change')
+        expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
       expect(f.saved).toBe(1);
       expect(f.calls.filter((input) => input.method === 'settings.models.close')).toHaveLength(
         lifecycle === 'close' ? 1 : 0,
@@ -1126,7 +1127,7 @@ test('a known failed head automatically reads new facts without replaying its di
     expect(f.toggle('b').disabled).toBe(true);
     await advanceRecovery(250);
     expect(f.toggle('b').disabled).toBe(false);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
     expect(reads).toBe(2);
   } finally {
@@ -1167,7 +1168,7 @@ test('a hot unknown automatically queries only its original ID until terminal an
       f.toggle('b').click();
       response.resolve(original);
     });
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     await advanceRecovery(250);
     expect(lookups).toBe(1);
     expect(reads).toBe(1);
@@ -1709,16 +1710,15 @@ test('toggle intents stay interactive and ordered through serial POST, proof-bou
     await f.render(selected('old'), [], { acquireWrite, onSaved });
     const c = f.toggle('c'),
       b = f.toggle('b');
-    await act(async () => {
-      c.focus();
-      c.click(); // Immutable head: C true.
-      c.click(); // Pending C false keeps its first position.
-      b.click(); // Pending B false follows C.
-      c.click();
-      c.click(); // Only the last pending C false survives.
-    });
-    expect(c.checked).toBe(false);
-    expect(b.checked).toBe(false);
+    c.focus();
+    // Separate browser events commit the controlled Switch state between clicks.
+    await act(async () => c.click()); // Immutable head: C true.
+    await act(async () => c.click()); // Pending C false keeps its first position.
+    await act(async () => b.click()); // Pending B false follows C.
+    await act(async () => c.click());
+    await act(async () => c.click()); // Only the last pending C false survives.
+    expect(c.getAttribute('aria-checked') === 'true').toBe(false);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(false);
     expect(c.disabled).toBe(false);
     expect(b.disabled).toBe(false);
     expect(f.dom.window.document.activeElement === c).toBe(true);
@@ -1729,7 +1729,7 @@ test('toggle intents stay interactive and ordered through serial POST, proof-bou
     expect(f.calls.filter((input) => input.method === 'settings.models.read')).toHaveLength(1);
     await apply(0);
     expect(posts).toHaveLength(1);
-    expect(c.checked).toBe(false);
+    expect(c.getAttribute('aria-checked') === 'true').toBe(false);
     expect(c.disabled).toBe(false);
     expect(b.disabled).toBe(false);
     expect(f.calls.filter((input) => input.method === 'settings.models.read').at(-1)).toEqual({
@@ -1738,11 +1738,9 @@ test('toggle intents stay interactive and ordered through serial POST, proof-bou
       scope: 'user',
       afterCommandId: 'queued-1',
     });
-    await act(async () => {
-      b.click();
-      b.click();
-      continuation.resolve(structuredClone(current));
-    });
+    await act(async () => b.click());
+    await act(async () => b.click());
+    await act(async () => continuation.resolve(structuredClone(current)));
     expect(posts.map((input) => [input.modelId, input.enabled, input.observationId])).toEqual([
       ['c', true, 7],
       ['c', false, 8],
@@ -1758,7 +1756,7 @@ test('toggle intents stay interactive and ordered through serial POST, proof-bou
     expect(released).toBe(0);
     expect(f.button('默认模型').disabled).toBe(true);
     await act(async () => c.click());
-    expect(c.checked).toBe(true);
+    expect(c.getAttribute('aria-checked') === 'true').toBe(true);
     expect(posts).toHaveLength(3);
     await act(async () => flush.resolve());
     expect(posts.map((input) => [input.modelId, input.enabled, input.observationId])).toEqual([
@@ -1774,8 +1772,8 @@ test('toggle intents stay interactive and ordered through serial POST, proof-bou
     expect(maximumPosts).toBe(1);
     expect(c === f.toggle('c')).toBe(true);
     expect(b === f.toggle('b')).toBe(true);
-    expect(c.checked).toBe(true);
-    expect(b.checked).toBe(false);
+    expect(c.getAttribute('aria-checked') === 'true').toBe(true);
+    expect(b.getAttribute('aria-checked') === 'true').toBe(false);
     expect(f.dom.window.document.activeElement === c).toBe(true);
     expect(
       f.calls
@@ -1832,10 +1830,10 @@ test('a saved flush failure preserves the applied head and drops intents accepte
     expect(released).toBe(0);
     expect(f.toggle('b').disabled).toBe(false);
     await act(async () => f.toggle('b').click());
-    expect(f.toggle('b').checked).toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(false);
     await act(async () => flush.resolve());
-    expect(f.toggle('c').checked).toBe(true);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(true);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.toggle('b').disabled).toBe(true);
     expect(released).toBe(1);
     expect(f.element.textContent).toContain('provider_read_failed');
@@ -1882,8 +1880,8 @@ for (const outcome of ['failed', 'unknown', 'continuation-conflict'] as const)
       });
       if (outcome !== 'failed') current.models.find((model) => model.id === 'c')!.enabled = true;
       await act(async () => response.resolve(original));
-      expect(f.toggle('b').checked).toBe(true);
-      expect(f.toggle('c').checked).toBe(outcome !== 'failed');
+      expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
+      expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(outcome !== 'failed');
       expect(f.toggle('b').disabled).toBe(true);
       expect(f.toggle('c').disabled).toBe(true);
       expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
@@ -1899,7 +1897,7 @@ for (const outcome of ['failed', 'unknown', 'continuation-conflict'] as const)
         await act(async () => f.button('刷新配置').click());
       }
       expect(f.toggle('b').disabled).toBe(false);
-      expect(f.toggle('b').checked).toBe(true);
+      expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
       expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
     } finally {
       await f.close();
@@ -1945,8 +1943,8 @@ test('closing and immediately reopening settings reuses the active queue and del
         reopenedSaved++;
       },
     });
-    expect(f.toggle('c').checked).toBe(true);
-    expect(f.toggle('b').checked).toBe(false);
+    expect(f.toggle('c').getAttribute('aria-checked') === 'true').toBe(true);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(false);
     expect(f.toggle('b').disabled).toBe(false);
     expect(f.calls.filter((input) => input.method === 'settings.models.read')).toHaveLength(1);
     expect(acquired).toBe(1);
@@ -2040,8 +2038,8 @@ test('changing the selected identity discards the old unsent tail and never publ
     });
     await f.render(selected('new'));
     const currentRow = f.toggle('c');
-    expect(currentRow.checked).toBe(false);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(currentRow.getAttribute('aria-checked') === 'true').toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     await act(async () =>
       response.resolve({
         kind: 'settings.models.submission',
@@ -2054,8 +2052,8 @@ test('changing the selected identity discards the old unsent tail and never publ
       }),
     );
     expect(f.toggle('c')).toBe(currentRow);
-    expect(currentRow.checked).toBe(false);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(currentRow.getAttribute('aria-checked') === 'true').toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'settings.models.read')).toHaveLength(2);
     expect(f.calls.filter((input) => input.method === 'settings.models.close')).toHaveLength(0);
@@ -2122,13 +2120,13 @@ test('a real same-scope unknown watcher stops the healthy queue before the immut
       f.toggle('c').click();
       f.toggle('b').click();
     });
-    expect(f.toggle('b').checked).toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(false);
     await f.render(undefined, [original]);
     expect(f.toggle('b').disabled).toBe(true);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     await act(async () => response.resolve({ ...original, phase: 'applied' }));
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.toggle('b').disabled).toBe(false);
   } finally {
     await f.close();
@@ -2188,7 +2186,7 @@ for (const peer of ['own-submitting', 'foreign-submitting', 'provider-submitting
         { blocked: true, hardBlocked: peer === 'provider-submitting' },
       );
       expect(f.toggle('b').disabled).toBe(peer !== 'own-submitting');
-      expect(f.toggle('b').checked).toBe(peer !== 'own-submitting');
+      expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(peer !== 'own-submitting');
       current = {
         ...current,
         observationId: 8,
@@ -2198,7 +2196,8 @@ for (const peer of ['own-submitting', 'foreign-submitting', 'provider-submitting
       };
       await act(async () => response.resolve({ ...head, phase: 'applied' }));
       expect(posts).toBe(peer === 'own-submitting' ? 2 : 1);
-      if (peer !== 'own-submitting') expect(f.toggle('b').checked).toBe(true);
+      if (peer !== 'own-submitting')
+        expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     } finally {
       await f.close();
     }
@@ -2249,7 +2248,7 @@ test('a large connection popover contains only its full exact model list and swi
       row.click();
     });
     expect(f.toggle('route-059') === row).toBe(true);
-    expect(row.checked).toBe(true);
+    expect(row.getAttribute('aria-checked') === 'true').toBe(true);
     expect(row.disabled).toBe(false);
     expect(f.dom.window.document.activeElement === row).toBe(true);
     expect(f.element.querySelector('.connection-models-viewport') === viewport).toBe(true);
@@ -2282,7 +2281,7 @@ test('a large connection popover contains only its full exact model list and swi
       }),
     );
     expect(f.toggle('route-059') === row).toBe(true);
-    expect(row.checked).toBe(true);
+    expect(row.getAttribute('aria-checked') === 'true').toBe(true);
     expect(row.disabled).toBe(false);
     expect(f.dom.window.document.activeElement === row).toBe(true);
     expect(f.element.querySelector('.connection-models-viewport') === viewport).toBe(true);
@@ -2293,7 +2292,7 @@ test('a large connection popover contains only its full exact model list and swi
     expect(f.element.querySelectorAll('[role="switch"]')).toHaveLength(0);
     await act(async () => trigger.click());
     expect(f.element.querySelectorAll('[role="switch"]')).toHaveLength(60);
-    expect(f.toggle('route-059').checked).toBe(true);
+    expect(f.toggle('route-059').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
   } finally {
     await f.close();
@@ -2562,7 +2561,7 @@ test('the default model can be disabled and re-enabled, including an all-disable
     expect(defaultRow.disabled).toBe(false);
     expect(defaultRow.closest('label')?.getAttribute('title') ?? '').not.toContain('不可禁用');
     await act(async () => defaultRow.click());
-    expect(defaultRow.checked).toBe(false);
+    expect(defaultRow.getAttribute('aria-checked') === 'true').toBe(false);
     expect(defaultRow.disabled).toBe(false);
     expect(current.defaultModelId).toBe('a');
     expect(f.button('默认模型').textContent).toContain('a · 当前不可用');
@@ -2575,7 +2574,7 @@ test('the default model can be disabled and re-enabled, including an all-disable
     expect(defaultRow.disabled).toBe(false);
     await act(async () => defaultRow.click());
     expect(f.toggle('a')).toBe(defaultRow);
-    expect(defaultRow.checked).toBe(true);
+    expect(defaultRow.getAttribute('aria-checked') === 'true').toBe(true);
     expect(current.defaultModelId).toBe('a');
     expect(f.calls.filter((input) => input.method === 'settings.models.default')).toHaveLength(0);
     expect(
@@ -2628,12 +2627,12 @@ test('an unknown default-disable keeps its original intent, discards the queued 
       f.toggle('a').click();
       f.toggle('b').click();
     });
-    expect(f.toggle('a').checked).toBe(false);
-    expect(f.toggle('b').checked).toBe(false);
+    expect(f.toggle('a').getAttribute('aria-checked') === 'true').toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(false);
     await act(async () => pending.resolve(original));
     expect(f.toggle('a').disabled).toBe(true);
-    expect(f.toggle('a').checked).toBe(false);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('a').getAttribute('aria-checked') === 'true').toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     await act(async () => f.toggle('a').click());
     await advanceRecovery(250);
     expect(f.calls.filter((input) => input.method === 'settings.models.lookup')).toEqual([
@@ -2650,8 +2649,8 @@ test('an unknown default-disable keeps its original intent, discards the queued 
     ]);
     expect(f.calls.filter((input) => input.method === 'settings.models.default')).toHaveLength(0);
     expect(f.toggle('a').disabled).toBe(false);
-    expect(f.toggle('a').checked).toBe(false);
-    expect(f.toggle('b').checked).toBe(true);
+    expect(f.toggle('a').getAttribute('aria-checked') === 'true').toBe(false);
+    expect(f.toggle('b').getAttribute('aria-checked') === 'true').toBe(true);
     expect(current.defaultModelId).toBe('a');
     expect(f.saved).toBe(1);
   } finally {

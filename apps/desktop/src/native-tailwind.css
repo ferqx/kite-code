@@ -81,6 +81,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   width: max-content;
   height: 100%;
   padding: 4px 8px 0;
+  user-select: none;
   -webkit-app-region: no-drag;
 }
 
@@ -153,7 +154,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   z-index: 1;
   left: 0;
   top: 0;
-  width: 236px;
+  width: var(--navigation-min-width);
   height: var(--app-header-height, 48px);
   padding: 0;
   background: var(--sidebar);
@@ -187,13 +188,26 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
 }
 .kite-client .desktop-settings.settings-layout {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr) 0px;
-  transition: grid-template-columns var(--sidebar-motion-duration) var(--sidebar-motion-easing);
+  grid-template-columns: var(--navigation-min-width) minmax(0, 1fr);
   gap: 0;
   height: 100%;
 }
-.kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
-  grid-template-columns: 236px minmax(0, 1fr) 420px;
+.kite-client .desktop-settings .settings-content-frame {
+  container: settings-frame / inline-size;
+}
+.kite-client .desktop-settings .settings-content-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  transition: grid-template-columns var(--sidebar-motion-duration) var(--sidebar-motion-easing);
+}
+.kite-client
+  .desktop-settings
+  .settings-content-panels:has(> .settings-editor-panel > .right-sidebar) {
+  grid-template-columns: minmax(0, 1fr) var(--right-sidebar-form-width);
 }
 .kite-client .desktop-settings .settings-editor-panel:empty {
   opacity: 0;
@@ -203,6 +217,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
 }
 .kite-client .desktop-settings .settings-editor-panel {
   min-width: 0;
+  min-height: 0;
   height: 100%;
   overflow: hidden;
   background: var(--page-background);
@@ -212,11 +227,8 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
     opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing),
     visibility 0s;
 }
-.kite-client .desktop-settings .settings-editor-panel .right-sidebar-content {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  padding: 0;
+.kite-client .desktop-settings .settings-editor-panel > :where(.right-sidebar) {
+  min-width: min(var(--right-sidebar-form-width), 100cqi);
 }
 .kite-client .desktop-settings .settings-editor-panel .right-sidebar-heading {
   min-height: var(--app-header-height, 48px);
@@ -276,16 +288,39 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   background: var(--control-pressed);
 }
 .kite-client .desktop-settings .settings-content {
+  min-width: 0;
+  min-height: 0;
   height: 100%;
-  padding: 76px clamp(28px, 8vw, 144px) 76px clamp(28px, 11vw, 214px);
+  container: settings-content / inline-size;
+  padding: 48px 32px;
+  scrollbar-gutter: stable;
   overflow: auto;
 }
-.kite-client .desktop-settings:has(> .settings-editor-panel > .right-sidebar) .settings-content {
-  padding-inline: clamp(24px, 4vw, 72px);
-}
 .kite-client .desktop-settings .settings-content > section {
-  max-width: 1075px;
+  max-width: 880px;
+  min-width: 0;
   margin: 0 auto;
+}
+.kite-client .desktop-settings .settings-page-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 28px;
+}
+.kite-client .desktop-settings .settings-page-heading h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+}
+.kite-client .desktop-settings .settings-page-heading p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.kite-client .desktop-settings .settings-page-heading > div {
+  min-width: 0;
 }
 .kite-client .desktop-settings .settings-content p {
   font-size: var(--ui-text-size);
@@ -308,6 +343,18 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   font-size: 14px;
   font-weight: 500;
 }
+.kite-client .desktop-settings .settings-content .settings-group-heading {
+  margin: 0 0 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 20px;
+}
+@container settings-content (max-width: 540px) {
+  .kite-client .desktop-settings .settings-page-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 .kite-client .settings-card {
   padding: 0 20px;
   border: 1px solid var(--border);
@@ -327,7 +374,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-row:last-child {
   border-bottom: 0;
 }
-.kite-client .settings-row span:first-child {
+.kite-client .settings-row > span:first-child {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -341,16 +388,14 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   color: var(--muted-foreground);
   font-size: 12px;
 }
-.kite-client .settings-row select {
+.kite-client .settings-row [data-slot="select-trigger"] {
   min-width: 130px;
-  padding: 5px 11px;
-  border: 1px solid var(--input);
-  border-radius: var(--input-radius);
-  background: var(--card);
 }
 .kite-client .settings-value {
   color: var(--muted-foreground);
   font-size: var(--ui-text-size);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 .kite-client .settings-hint {
   margin-top: 18px;
@@ -367,33 +412,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   padding: 0 6px;
   font-weight: 500;
 }
-.kite-client .desktop-settings .settings-content input,
-.kite-client .desktop-settings .settings-content select {
-  min-height: 34px;
-  padding: 5px 10px;
-  border: 1px solid var(--input);
-  border-radius: var(--input-radius);
-  background: var(--card);
-  color: var(--foreground);
-}
-.kite-client .desktop-settings .settings-content button {
-  border-color: var(--border);
-  background: var(--card);
-  color: var(--foreground);
-}
-.kite-client .desktop-settings .settings-content button:hover:not(:disabled) {
-  background: var(--control-hover);
-}
-.kite-client .desktop-settings .settings-content button:active:not(:disabled) {
-  background: var(--control-pressed);
-}
 /* Model configuration uses compact horizontal rows, independent of form labels. */
-.kite-client .desktop-settings .settings-content:has(> .settings-models) {
-  padding-inline: clamp(24px, 5vw, 80px);
-}
-.kite-client .desktop-settings .settings-content > .settings-models {
-  max-width: 880px;
-}
 .kite-client .desktop-settings .settings-models > h2 {
   margin-bottom: 8px;
 }
@@ -584,47 +603,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-model-option[data-enabled="false"] strong {
   color: var(--muted-foreground);
 }
-.kite-client .desktop-settings .settings-model-option input[role="switch"] {
-  appearance: none;
-  position: relative;
-  width: 34px;
-  height: 20px;
-  min-height: 20px;
-  margin: 0;
-  padding: 2px;
-  border: 1px solid var(--input);
-  border-radius: 999px;
-  background: var(--accent);
-  flex: none;
-  cursor: pointer;
-  transition: background 140ms ease;
-}
-.kite-client .desktop-settings .settings-model-option input[role="switch"]::before {
-  content: "";
-  display: block;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--card);
-  box-shadow: 0 1px 3px #0002;
-  transition: transform 140ms ease;
-}
-.kite-client .desktop-settings .settings-model-option input[role="switch"]:checked {
-  background: var(--primary);
-  border-color: var(--primary);
-}
-.kite-client .desktop-settings .settings-model-option input[role="switch"]:checked::before {
-  transform: translateX(14px);
-  background: var(--primary-foreground);
-}
-.kite-client .desktop-settings .settings-model-option input[role="switch"]:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 3px;
-}
-.kite-client .desktop-settings .settings-model-option input[role="switch"]:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
 .kite-client .desktop-settings .settings-model-empty,
 .kite-client .desktop-settings .settings-model-diagnostic {
   margin: 0;
@@ -633,12 +611,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-model-diagnostic {
   border-top: 1px solid var(--border);
-}
-@media (prefers-reduced-motion: reduce) {
-  .kite-client .desktop-settings .settings-model-option input[role="switch"],
-  .kite-client .desktop-settings .settings-model-option input[role="switch"]::before {
-    transition: none;
-  }
 }
 @media (max-width: 760px) {
   .kite-client .desktop-settings .settings-models-title {
@@ -714,17 +686,19 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   background: var(--card);
   color: var(--foreground);
 }
-@media (max-width: 900px) {
-  .kite-client .desktop-settings.settings-layout,
-  .kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
-    grid-template-columns: 236px minmax(0, 1fr) 0px;
+@container settings-frame (max-width: 799px) {
+  .kite-client .desktop-settings .settings-content-panels,
+  .kite-client
+    .desktop-settings
+    .settings-content-panels:has(> .settings-editor-panel > .right-sidebar) {
+    grid-template-columns: minmax(0, 1fr) 0px;
   }
   .kite-client .desktop-settings .settings-editor-panel {
     position: absolute;
     z-index: 2;
-    top: 0;
+    inset-block: 0;
     right: 0;
-    width: min(420px, calc(100vw - 236px));
+    width: min(var(--right-sidebar-form-width), 100%);
     box-shadow: -8px 0 24px #20221e12;
     transform: translateX(0);
     transition:
@@ -738,20 +712,11 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   }
 }
 @media (max-width: 600px) {
-  .kite-client .desktop-settings.settings-layout {
-    grid-template-columns: 180px minmax(0, 1fr) 0px;
-  }
-  .kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
-    grid-template-columns: 180px minmax(0, 1fr) 0px;
-  }
-  .kite-client .desktop-settings .settings-editor-panel {
-    width: min(420px, calc(100vw - 20px));
-  }
   .kite-client .desktop-settings-header {
-    width: 180px;
+    width: var(--navigation-min-width);
   }
   .kite-client .desktop-settings .settings-content {
-    padding: 72px 24px;
+    padding: 48px 20px;
   }
   .kite-client .desktop-settings .settings-row {
     flex-wrap: wrap;
@@ -969,10 +934,6 @@ html[data-native-window] .kite-client .client-content-frame {
   box-shadow: var(--native-content-shadow);
 }
 
-html[data-native-window] .kite-client :is(.desktop-settings .settings-content, .right-sidebar) {
-  box-shadow: var(--native-content-shadow);
-}
-
 /* The right rail owns the single seam; borders must not change the allocated panel width. */
 html[data-native-window] .kite-client .right-sidebar {
   border: 0;
@@ -1004,30 +965,6 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
   content: "";
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-  .kite-client
-  :is(.settings-content, .right-sidebar) {
-  height: calc(100% - var(--native-panel-inset) * 2);
-  margin: var(--native-panel-inset);
-  margin-right: var(--native-content-end-inset, var(--native-panel-inset));
-  border-radius: var(--radius);
-  box-shadow:
-    0 0 0 1px var(--native-content-border),
-    var(--native-content-shadow);
-}
-
-/* Every right rail shares the main surface's inset and joins it with square inner corners. */
-html[data-native-window]:is(
-    [data-window-material="mica"],
-    [data-window-material="vibrancy"]
-  ) .kite-client
-  .right-sidebar {
-  width: calc(100% - var(--native-panel-inset));
-  margin-left: 0;
-  border-radius: 0 var(--radius) var(--radius) 0;
-  box-shadow: var(--native-content-shadow);
-}
-
 /* The right pane is a section of the shared surface, without its own exterior or inset. */
 html[data-native-window] .kite-client .client-content-frame .right-sidebar {
   width: 100%;
@@ -1037,6 +974,9 @@ html[data-native-window] .kite-client .client-content-frame .right-sidebar {
   box-shadow: none;
 }
 
+html[data-native-window][data-platform="windows"][data-window-material="mica"]
+  .kite-client
+  .settings-content-frame,
 html[data-native-window][data-platform="windows"][data-window-material="mica"]
   .kite-client.shell.sidebar-visible
   #navigation-resize[aria-valuenow]:not([aria-valuenow="0"])
@@ -1077,18 +1017,6 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
   background: var(--background);
 }
 
-@media (min-width: 901px) {
-  html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-    .kite-client
-    .desktop-settings:has(> .settings-editor-panel > .right-sidebar)
-    .settings-content {
-    --native-content-end-inset: 0px;
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-    clip-path: inset(-8px 0 -8px -8px);
-  }
-}
-
 html[data-native-window][data-platform="macos"]
   .kite-client
   :is(.client-main-panel, .desktop-settings .settings-content, .right-sidebar) {
@@ -1105,12 +1033,6 @@ html[data-native-window][data-platform="macos"] .kite-client .client-content-fra
 
 html[data-native-window][data-platform="macos"] .kite-client .client-content-frame::after {
   border: 0;
-}
-
-html[data-native-window][data-platform="macos"]
-  .kite-client
-  :is(.desktop-settings .settings-content, .right-sidebar) {
-  box-shadow: var(--native-content-shadow);
 }
 
 .native-browser-page {

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
 import type { NativeBridge, NativeModelSettingsFacts, NativeSelection } from './native-bridge';
+import { NativeSettingsSelect } from './native-settings-select';
 
 /** Retained General card; reads the configuration default, not a temporary next-Run choice. */
 export function NativeGeneralSettings({
@@ -20,6 +21,7 @@ export function NativeGeneralSettings({
   editor: DesktopEditor;
   onEditorChange: (editor: DesktopEditor) => void;
 }) {
+  const fieldId = useId();
   const identity = JSON.stringify([
     generation,
     storeId,
@@ -67,26 +69,34 @@ export function NativeGeneralSettings({
   const model = facts?.models.find((model) => model.id === facts.defaultModelId);
   return (
     <section
+      className="general-settings"
       aria-label="常规设置"
       aria-busy={(!facts && !(state.identity === identity && state.error)) || undefined}
     >
-      <h2>常规</h2>
-      <h3>文件与模型</h3>
+      <header className="settings-page-heading">
+        <div>
+          <h2>常规</h2>
+          <p>管理文件打开方式，查看当前默认模型。</p>
+        </div>
+      </header>
+      <h3 className="settings-group-heading">文件与模型</h3>
       <div className="settings-card">
-        <label className="settings-row">
+        <label className="settings-row" htmlFor={`${fieldId}-field-1`}>
           <span>
             <strong>默认文件打开位置</strong>
             <small>选择打开项目文件的应用；本次运行期间生效</small>
           </span>
-          <select
+          <NativeSettingsSelect
+            id={`${fieldId}-field-1`}
             aria-label="默认编辑器"
             value={editor}
-            onChange={(event) => onEditorChange(event.target.value as DesktopEditor)}
-          >
-            <option value="vscode">VS Code</option>
-            <option value="zed">Zed</option>
-            <option value="textedit">TextEdit</option>
-          </select>
+            onValueChange={(value) => onEditorChange(value as DesktopEditor)}
+            options={[
+              { value: 'vscode', label: 'VS Code' },
+              { value: 'zed', label: 'Zed' },
+              { value: 'textedit', label: 'TextEdit' },
+            ]}
+          />
         </label>
         <div className="settings-row">
           <span>

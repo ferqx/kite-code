@@ -50,7 +50,11 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     await Bun.sleep(2);
   }
 }
-async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRuntimeMcp = false) {
+async function fixture(
+  auth: 'none' | 'oauth' | 'credential' = 'none',
+  actualRuntimeMcp = false,
+  environment: Record<string, string> = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-user-mcp-owner-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'global' });
   privateDirectory(profile.profilePath);
@@ -69,7 +73,14 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
   let browserCalls = 0,
     challenge: string | undefined;
   let holdBrowser = false;
-  const wire: { method: string; authorization: string | null }[] = [],
+  let httpFailureStatus: number | undefined;
+  const environmentReads: string[] = [];
+  const wire: {
+      method: string;
+      authorization: string | null;
+      client: string | null;
+      key: string | null;
+    }[] = [],
     oauthWire: string[] = [];
   const peer: Bun.Server<undefined> = Bun.serve<undefined>({
     hostname: '127.0.0.1',
@@ -124,10 +135,19 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
         oauthWire.push('revoke');
         return new Response(null, { status: 200 });
       }
+      if (httpFailureStatus !== undefined && ['/mcp', '/mcp-next'].includes(url.pathname))
+        return new Response('synthetic-private-response-must-not-leak', {
+          status: httpFailureStatus,
+        });
       if (!['/mcp', '/mcp-next'].includes(url.pathname) || request.method !== 'POST')
         return new Response(null, { status: 405 });
       const rpc = (await request.json()) as { id?: number | string; method: string };
-      wire.push({ method: rpc.method, authorization: request.headers.get('authorization') });
+      wire.push({
+        method: rpc.method,
+        authorization: request.headers.get('authorization'),
+        client: request.headers.get('x-client'),
+        key: request.headers.get('x-api-key'),
+      });
       if (rpc.method === 'tools/list' && hold) {
         hold.entered = true;
         await hold.wait;
@@ -227,10 +247,15 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
       credentialVault: vault,
       userConfigurationPath,
       subjectId: 'owner',
+      environment(name) {
+        environmentReads.push(name);
+        return environment[name];
+      },
       http: { allowLoopbackForTests: true },
       oauth: {
         network: { allowLoopbackForTests: true },
-        callbackTimeoutMs: 1000,
+        // Windows loopback discovery/registration needs more than the old 1s happy-path fixture.
+        callbackTimeoutMs: process.platform === 'win32' ? 5000 : 1000,
         async openBrowser(url, signal) {
           browserCalls++;
           challenge = url.searchParams.get('code_challenge')!;
@@ -278,6 +303,7 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
     vault,
     credential,
     wire,
+    environmentReads,
     oauthWire,
     create,
     manager: () => manager,
@@ -295,6 +321,9 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
       writeFileSync(path, JSON.stringify(source));
     },
     browserCalls: () => browserCalls,
+    failHttp(status: number) {
+      httpFailureStatus = status;
+    },
     holdBrowser: () => {
       holdBrowser = true;
     },
@@ -326,6 +355,127 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
     },
   };
 }
+
+test('custom HTTP headers and Bearer environment names reach the wire without persisting values', async () => {
+  const f = await fixture('none', false, {
+    MCP_BEARER_TOKEN: 'synthetic-env-bearer',
+    SERVICE_KEY: 'synthetic-env-key',
+  });
+  try {
+    const initial = await f.manager().read(f.identity);
+    const entry = {
+      type: 'http' as const,
+      url: initial.sources[0]!.address!,
+      bearerTokenEnv: 'MCP_BEARER_TOKEN',
+      headers: { 'X-Client': 'kite' },
+      headersFromEnv: { 'X-Api-Key': 'SERVICE_KEY' },
+    };
+    const saved = await f.mutate('custom-http-save', { kind: 'add', name: 'custom-http', entry });
+    expect(saved.state).toBe('applied');
+    const source = (await f.manager().read(f.identity)).sources.find(
+      (row) => row.name === 'custom-http',
+    )!;
+    expect(source.authentication).toEqual({
+      policy: 'environment',
+      status: 'unknown',
+      loginAllowed: false,
+    });
+    expect(f.environmentReads).toEqual([]);
+    const connected = await f.mutate('custom-http-connect', {
+      kind: 'connect',
+      serverId: source.id,
+    });
+    expect(connected.state).toBe('applied');
+    expect(f.wire.filter((row) => row.method === 'initialize')).toEqual([
+      {
+        method: 'initialize',
+        authorization: 'Bearer synthetic-env-bearer',
+        client: 'kite',
+        key: 'synthetic-env-key',
+      },
+    ]);
+    const original = await f.runtime.getHostMutation({
+      ...f.identity,
+      commandId: 'custom-http-save',
+    });
+    const publicAndSaved = JSON.stringify([
+      saved,
+      connected,
+      original,
+      await f.manager().read(f.identity),
+      JSON.parse(readFileSync(f.path, 'utf8')),
+    ]);
+    expect(publicAndSaved).not.toContain('synthetic-env-bearer');
+    expect(publicAndSaved).not.toContain('synthetic-env-key');
+    expect(f.oauthWire).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('missing HTTP environment values fail locally, recover on retry and never grant browser login', async () => {
+  const env: Record<string, string> = {};
+  const f = await fixture('none', false, env);
+  try {
+    const initial = await f.manager().read(f.identity);
+    await f.mutate('env-save', {
+      kind: 'add',
+      name: 'env-http',
+      entry: { type: 'http', url: initial.sources[0]!.address!, bearerTokenEnv: 'MCP_TOKEN' },
+    });
+    const source = (await f.manager().read(f.identity)).sources.find(
+      (row) => row.name === 'env-http',
+    )!;
+    const failed = await f.mutate('env-missing', { kind: 'connect', serverId: source.id });
+    expect(failed.receipt.code).toBe('mcp_environment_variable_missing');
+    expect(f.wire).toEqual([]);
+    env.MCP_TOKEN = 'synthetic-recovered-token';
+    expect((await f.mutate('env-retry', { kind: 'connect', serverId: source.id })).state).toBe(
+      'applied',
+    );
+    await f.mutate('env-stop', { kind: 'disconnect', serverId: source.id });
+    f.failHttp(401);
+    expect(
+      (await f.mutate('env-unauthorized', { kind: 'connect', serverId: source.id })).state,
+    ).toBe('failed');
+    expect(
+      (await f.manager().read(f.identity)).sources.find((row) => row.id === source.id)!
+        .authentication.loginAllowed,
+    ).toBe(false);
+    expect(f.browserCalls()).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  [404, 'mcp_http_not_found'],
+  [405, 'mcp_http_endpoint_unsupported'],
+  [403, 'mcp_http_forbidden'],
+  [429, 'mcp_http_rate_limited'],
+  [503, 'mcp_http_server_error'],
+] as const)('HTTP %s produces a safe specific failure and releases the failed connection', async (status, code) => {
+  const f = await fixture();
+  try {
+    const serverId = (await f.manager().read(f.identity)).sources[0]!.id;
+    f.failHttp(status);
+    const result = await f.mutate(`http-${status}`, { kind: 'connect', serverId });
+    expect(result.state).toBe('failed');
+    expect(result.receipt.code).toBe(code);
+    expect(JSON.stringify(result)).not.toContain('synthetic-private-response-must-not-leak');
+    expect((await f.manager().read(f.identity)).sources[0]!.connection).toEqual({
+      state: 'failed',
+      generation: null,
+      toolCount: null,
+    });
+    // A stopped failed attempt does not leave an owner that prevents a later retry.
+    const retry = await f.mutate(`http-${status}-retry`, { kind: 'connect', serverId });
+    expect(retry.receipt.code).toBe(code);
+    expect(retry.receipt.code).not.toBe('mcp_connection_exists');
+  } finally {
+    await f.close();
+  }
+});
 
 test('user owner initializes and reads full live metadata without any Session, Workspace or tools/call authority', async () => {
   const f = await fixture();
@@ -745,7 +895,9 @@ test('global OAuth login is explicit, read stays cold, and original refresh/clea
     expect(f.browserCalls()).toBe(0);
     expect(f.oauthWire).toEqual([]);
     expect(f.wire).toEqual([]);
-    expect((await f.mutate('login', { kind: 'login', serverId })).state).toBe('applied');
+    const login = await f.mutate('login', { kind: 'login', serverId });
+    expect(login.receipt.code).toBeNull();
+    expect(login.state).toBe('applied');
     expect(f.browserCalls()).toBe(1);
     const readCount = f.oauthWire.length,
       current = await f.manager().read(f.identity);
@@ -929,80 +1081,92 @@ test('global HTTP transport rejects execution methods and mixed Session bindings
 });
 
 for (const auth of ['credential', 'oauth'] as const)
-  test(`real connection Jobs in two Workspaces reuse only the explicit global ${auth} account and retain their own permission gates`, async () => {
-    const f = await fixture(auth, true);
-    try {
-      const serverId = (await f.manager().read(f.identity)).sources[0]!.id;
-      expect(
-        (
-          await f.mutate(
-            'global-auth',
-            auth === 'credential'
-              ? { kind: 'bind', serverId, expiresAt: Date.now() + 60000 }
-              : { kind: 'login', serverId },
-          )
-        ).state,
-      ).toBe('applied');
-      expect(f.permissionCalls).toEqual([]);
-      for (const id of ['one', 'two']) {
-        const workspace = join(f.root, id);
-        privateDirectory(workspace);
-        await f.runtime.createWorkspace({
-          expectedStoreId: f.expectedStoreId,
-          id,
-          name: id,
-          rootUri: pathToFileURL(workspace).href,
-        });
-        await f.runtime.createSession({
-          expectedStoreId: f.expectedStoreId,
-          subjectId: 'owner',
-          commandId: `session-${id}`,
-          sessionId: id,
-          workspaceId: id,
-          title: id,
-        });
-      }
-      const invoke = async (sessionId: string, commandId: string) => {
-        await f.runtime.submitCommand({
-          ...f.identity,
-          sessionId,
-          commandId,
-          request: {
-            kind: 'extension.invoke',
-            extensionId: 'builtin.mcp',
-            actionId: 'mcp.connect',
-            definitionVersion: '1',
-            input: { serverId, key: commandId },
-          },
-        });
-        await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
-        return (await f.store.listExecutions(sessionId)).find(
-          (row) => row.originCommandId === commandId,
-        )!;
-      };
-      expect((await invoke('one', 'denied')).status).toBe('failed');
-      expect(f.wire).toEqual([]);
-      f.allowAgent(true);
-      expect((await invoke('one', 'connect-one')).status).toBe('succeeded');
-      expect((await invoke('two', 'connect-two')).status).toBe('succeeded');
-      const starts = f.wire.filter((row) => row.method === 'initialize');
-      expect(starts).toHaveLength(2);
-      expect(starts.map((row) => row.authorization)).toEqual([
-        `Bearer synthetic-${auth === 'credential' ? 'manual-bearer' : 'oauth-access'}`,
-        `Bearer synthetic-${auth === 'credential' ? 'manual-bearer' : 'oauth-access'}`,
-      ]);
-      expect(f.permissionCalls).toContain('mcp.source.connection');
-      for (const id of ['one', 'two'])
+  test(
+    `real connection Jobs in two Workspaces reuse only the explicit global ${auth} account and retain their own permission gates`,
+    async () => {
+      const f = await fixture(auth, true);
+      try {
+        const serverId = (await f.manager().read(f.identity)).sources[0]!.id;
         expect(
-          (await f.store.listExecutions(id)).filter(
-            (row) => row.definitionId === 'mcp.source.connection',
-          ),
-        ).toHaveLength(1);
-      expect(f.wire.some((row) => row.method === 'tools/call')).toBe(false);
-    } finally {
-      await f.close();
-    }
-  }, 20000);
+          (
+            await f.mutate(
+              'global-auth',
+              auth === 'credential'
+                ? { kind: 'bind', serverId, expiresAt: Date.now() + 60000 }
+                : { kind: 'login', serverId },
+            )
+          ).state,
+        ).toBe('applied');
+        expect(f.permissionCalls).toEqual([]);
+        for (const id of ['one', 'two']) {
+          const workspace = join(f.root, id);
+          privateDirectory(workspace);
+          await f.runtime.createWorkspace({
+            expectedStoreId: f.expectedStoreId,
+            id,
+            name: id,
+            rootUri: pathToFileURL(workspace).href,
+          });
+          await f.runtime.createSession({
+            expectedStoreId: f.expectedStoreId,
+            subjectId: 'owner',
+            commandId: `session-${id}`,
+            sessionId: id,
+            workspaceId: id,
+            title: id,
+          });
+        }
+        const invoke = async (sessionId: string, commandId: string) => {
+          await f.runtime.submitCommand({
+            ...f.identity,
+            sessionId,
+            commandId,
+            request: {
+              kind: 'extension.invoke',
+              extensionId: 'builtin.mcp',
+              actionId: 'mcp.connect',
+              definitionVersion: '1',
+              input: { serverId, key: commandId },
+            },
+          });
+          try {
+            // This exercises both real native Source verification and the owned
+            // connection Job; Windows takes 12–14s per Workspace on this runner.
+            await f.runtime.waitForCommand(commandId, {
+              timeoutMs: process.platform === 'win32' ? 30000 : 5000,
+            });
+          } catch (cause) {
+            throw new Error(`global_mcp_fixture_${commandId}_unsettled`, { cause });
+          }
+          return (await f.store.listExecutions(sessionId)).find(
+            (row) => row.originCommandId === commandId,
+          )!;
+        };
+        expect((await invoke('one', 'denied')).status).toBe('failed');
+        expect(f.wire).toEqual([]);
+        f.allowAgent(true);
+        expect((await invoke('one', 'connect-one')).status).toBe('succeeded');
+        expect((await invoke('two', 'connect-two')).status).toBe('succeeded');
+        const starts = f.wire.filter((row) => row.method === 'initialize');
+        expect(starts).toHaveLength(2);
+        expect(starts.map((row) => row.authorization)).toEqual([
+          `Bearer synthetic-${auth === 'credential' ? 'manual-bearer' : 'oauth-access'}`,
+          `Bearer synthetic-${auth === 'credential' ? 'manual-bearer' : 'oauth-access'}`,
+        ]);
+        expect(f.permissionCalls).toContain('mcp.source.connection');
+        for (const id of ['one', 'two'])
+          expect(
+            (await f.store.listExecutions(id)).filter(
+              (row) => row.definitionId === 'mcp.source.connection',
+            ),
+          ).toHaveLength(1);
+        expect(f.wire.some((row) => row.method === 'tools/call')).toBe(false);
+      } finally {
+        await f.close();
+      }
+    },
+    process.platform === 'win32' ? 90000 : 20000,
+  );
 
 test('global Remove clears only the original local OAuth account and never revokes remote or shared credentials', async () => {
   const f = await fixture('oauth');

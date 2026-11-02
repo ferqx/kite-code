@@ -186,9 +186,11 @@ function configurationParent(path: string, options: ConfigurationFileOptions): v
     defaultWindowsPathSecurity()!.verifyScopeDirectory(path);
   else privateDirectory(path, options.windowsPathSecurity);
 }
-function writeTemporary(path: string, bytes: Uint8Array): void {
+function writeTemporary(path: string, bytes: Uint8Array, privateParent = true): void {
   if (process.platform === 'win32') {
-    defaultWindowsPathSecurity()!.writePrivateFile(path, bytes);
+    const native = defaultWindowsPathSecurity()!;
+    if (privateParent) native.writePrivateFile(path, bytes);
+    else native.writeScopeFile(path, bytes);
     return;
   }
   const fd = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
@@ -302,7 +304,7 @@ export function updateConfigurationFile(
       return readConfigurationFile({ ...options, path });
     }
     temporary = join(parent, `.${basename(path)}.${randomUUID()}.tmp`);
-    writeTemporary(temporary, Buffer.from(text, 'utf8'));
+    writeTemporary(temporary, Buffer.from(text, 'utf8'), options.windowsPathPolicy === 'private');
     if (readRaw(path, maxBytes, options.windowsPathPolicy === 'private').etag !== original.etag)
       throw new ConfigurationError('configuration_conflict');
     options.validatePublication?.();
@@ -442,7 +444,7 @@ export function repairConfigurationFile(
       options.windowsPathSecurity.verifyFile(backup);
     }
     temporary = join(parent, `.${basename(path)}.${randomUUID()}.tmp`);
-    writeTemporary(temporary, Buffer.from(text, 'utf8'));
+    writeTemporary(temporary, Buffer.from(text, 'utf8'), options.windowsPathPolicy === 'private');
     if (readRaw(path, maxBytes, options.windowsPathPolicy === 'private').etag !== original.etag)
       throw new ConfigurationError('configuration_conflict');
     if (process.platform === 'win32') {

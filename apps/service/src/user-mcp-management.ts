@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { isAbsolute } from 'node:path';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import {
   type createCredentialVault,
@@ -10,6 +9,7 @@ import {
   readMcpSources,
   updateConfigurationFile,
   userMcpSourceBinding,
+  validateMcpSourceEntry,
   writeMcpSourceEntry,
   writeUserMcpSourceCredentialBinding,
 } from '@kite-ai/agent/config';
@@ -26,7 +26,13 @@ import {
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import type { HostMutationRecord } from '@kite-ai/agent/storage';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { ListToolsResultSchema, type Tool } from '@modelcontextprotocol/sdk/types.js';
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+  ErrorCode,
+  ListToolsResultSchema,
+  McpError,
+  type Tool,
+} from '@modelcontextprotocol/sdk/types.js';
 import {
   type UserMcpOperationResult,
   UserMcpOperationResultSchema,
@@ -38,6 +44,12 @@ import {
   UserMcpToolsPageSchema,
 } from './http/schema/user-mcp';
 import { createUserMcpHttpTransportPort, type McpHttpPortOptions } from './mcp-http-port';
+import {
+  type McpEnvironmentReader,
+  mcpHttpHeaders,
+  mcpStdioEnvironment,
+  resolveMcpLaunchEntry,
+} from './mcp-launch-configuration';
 import { openMcpOAuthBrowser } from './mcp-oauth-browser';
 import { createMcpOAuthSession, type McpOAuthSessionOptions } from './mcp-oauth-session';
 import { acquireUserMcpOAuth, userMcpOAuthScope } from './user-mcp-credentials';
@@ -62,6 +74,7 @@ export interface UserMcpManagementOptions {
   userConfigurationPath: string;
   subjectId?: string;
   variables?: () => Readonly<Record<string, string>>;
+  environment?: McpEnvironmentReader;
   http?: Pick<
     McpHttpPortOptions,
     'resolveAddresses' | 'allowLoopbackForTests' | 'trustedTestCertificate' | 'limits'
@@ -107,6 +120,20 @@ const disconnected = (): ConnectionState => ({
   toolCount: null,
 });
 function safeCode(error: unknown, fallback = 'mcp_settings_unavailable'): string {
+  if (error instanceof McpError && error.code === ErrorCode.RequestTimeout)
+    return 'mcp_connection_timeout';
+  // Preserve only finite HTTP categories, never the remote response body or SDK message.
+  if (error instanceof StreamableHTTPError) {
+    if (error.code === 404) return 'mcp_http_not_found';
+    if ([400, 405, 406, 415].includes(error.code ?? 0)) return 'mcp_http_endpoint_unsupported';
+    if (error.code === 401) return 'mcp_http_unauthorized';
+    if (error.code === 403) return 'mcp_http_forbidden';
+    if (error.code === 408 || error.code === 504) return 'mcp_http_timeout';
+    if (error.code === 429) return 'mcp_http_rate_limited';
+    if (error.code !== undefined && error.code >= 500 && error.code < 600)
+      return 'mcp_http_server_error';
+    return 'mcp_http_response_failed';
+  }
   const value = error && typeof error === 'object' && 'code' in error ? error.code : null;
   return typeof value === 'string' && /^[a-z0-9_]{1,128}$/.test(value) ? value : fallback;
 }
@@ -286,13 +313,15 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
   const policy = (entry: McpPrivateSourceEntry): Auth['policy'] =>
     entry.transport?.type !== 'http'
       ? 'none'
-      : obj(entry.transport.auth).type === 'credential'
-        ? 'credential'
-        : obj(entry.transport.auth).type === 'oauth'
-          ? 'oauth'
-          : Object.hasOwn(obj(entry.raw), 'auth')
-            ? 'none'
-            : 'auto';
+      : obj(entry.transport.auth).type === 'environment'
+        ? 'environment'
+        : obj(entry.transport.auth).type === 'credential'
+          ? 'credential'
+          : obj(entry.transport.auth).type === 'oauth'
+            ? 'oauth'
+            : Object.hasOwn(obj(entry.raw), 'auth')
+              ? 'none'
+              : 'auto';
   async function acceptedCredential(entry: McpPrivateSourceEntry) {
     const saved = entry.userCredentialBinding;
     if (!saved || saved.revoked || saved.expiresAt <= Date.now())
@@ -324,6 +353,7 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
     signal = new AbortController().signal,
   ): Promise<Auth> {
     const kind = policy(entry);
+    if (kind === 'environment') return { policy: kind, status: 'unknown', loginAllowed: false };
     if (kind === 'none') return { policy: kind, status: 'none', loginAllowed: false };
     if (kind === 'credential') {
       if (!entry.userCredentialBinding)
@@ -583,7 +613,8 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
           {
             id: entry.server.id,
             url: configuration.url,
-            ...(kind === 'none'
+            ...mcpHttpHeaders(entry.transport!, options.environment),
+            ...(kind === 'none' || kind === 'environment'
               ? {}
               : {
                   managementCredential: async () => {
@@ -627,6 +658,7 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
               args: [...configuration.args],
               env: { ...configuration.env },
             },
+            environment: mcpStdioEnvironment(entry.transport!, options.environment),
           },
         ],
         allowedEnvNames: Object.keys(configuration.env),
@@ -666,7 +698,10 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
           connectionFacts.set(entry.server.id, disconnected());
         }
       };
-      await client.connect(owned.transport, { signal, timeout: 10000 });
+      await client.connect(owned.transport, {
+        signal,
+        timeout: configuration.type === 'stdio' ? 60000 : 10000,
+      });
       await readCatalogue(connection, signal);
       void owned.stopped
         .then((proof) => {
@@ -786,7 +821,11 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
             ...observed.source,
             expectedReadSet: observed.state.readSet,
             operationId: input.commandId,
-            mutation: { ...op, scope: 'user' },
+            mutation: {
+              ...op,
+              entry: resolveMcpLaunchEntry(op.entry, options.environment),
+              scope: 'user',
+            },
             validatePublication: () => {
               signal.throwIfAborted();
               if (observe().readSet !== input.expectedReadSet)
@@ -1070,38 +1109,8 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
       const operation = UserMcpSettingsOperationSchema.parse(input.operation);
       if (!/^[a-f0-9]{64}$/.test(input.expectedReadSet))
         throw new AgentError('invalid_host_mutation');
-      if (operation.kind === 'add') {
-        const value = operation.entry;
-        if (
-          Object.values(value).some(
-            (part) =>
-              typeof part === 'string' &&
-              (Array.from(part).some(
-                (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-              ) ||
-                part.includes('${')),
-          )
-        )
-          throw new AgentError('mcp_source_mutation_invalid');
-        if (value.type === 'http') {
-          let url: URL;
-          try {
-            url = new URL(value.url);
-          } catch {
-            throw new AgentError('mcp_transport_unavailable');
-          }
-          if (
-            !['http:', 'https:'].includes(url.protocol) ||
-            url.username ||
-            url.password ||
-            url.search ||
-            url.hash ||
-            value.url.includes('?') ||
-            value.url.includes('#')
-          )
-            throw new AgentError('mcp_transport_unavailable');
-        } else if (!isAbsolute(value.command)) throw new AgentError('mcp_transport_unavailable');
-      }
+      if (operation.kind === 'add')
+        validateMcpSourceEntry(operation.entry, { allowLaunchNames: true });
       input = { ...input, operation };
       const requestDigest = hash({
         domain: 'kite-user-mcp-settings-v1',

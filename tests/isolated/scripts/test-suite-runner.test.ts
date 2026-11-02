@@ -22,6 +22,65 @@ afterEach(() => {
 });
 
 describe('layered test runner', () => {
+  test('disposes owned read-only scratch without following an external directory link', async () => {
+    const root = fixture(),
+      outside = join(root, 'outside'),
+      output = join(root, 'scope.json');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'original.txt'), 'keep original');
+    const program = `
+      import {writeFileSync,chmodSync,symlinkSync} from 'node:fs';
+      import {join} from 'node:path';
+      const home=process.env.HOME;
+      const file=join(home,'readonly.txt');
+      writeFileSync(file,'owned');chmodSync(file,0o444);
+      symlinkSync(${JSON.stringify(outside)},join(home,'external'),process.platform==='win32'?'junction':'dir');
+      writeFileSync(${JSON.stringify(output)},JSON.stringify({home}));
+    `;
+    expect(
+      await runTestJob(root, {
+        label: 'owned-disposal',
+        files: [],
+        command: [process.execPath, '--eval', program],
+      }),
+    ).toBe(0);
+    expect(readFileSync(join(outside, 'original.txt'), 'utf8')).toBe('keep original');
+    expect(existsSync(JSON.parse(readFileSync(output, 'utf8')).home)).toBe(false);
+  });
+  test('Windows child TEMP has an owned private parent for real artifact admission', async () => {
+    const root = fixture();
+    const output = join(root, 'temporary.json');
+    const scopeModule = pathToFileURL(
+      resolve(import.meta.dir, '../../../packages/agent/src/platform/windows-artifact-scope.ts'),
+    ).href;
+    const program = `
+      import assert from 'node:assert/strict';
+      import {mkdirSync,writeFileSync} from 'node:fs';
+      import {tmpdir} from 'node:os';
+      import {join} from 'node:path';
+      const home=process.env.HOME;
+      if(process.platform==='win32') {
+        assert.equal(process.env.USERPROFILE,home);
+        assert.equal(process.env.TEMP,join(home,'tmp'));
+        assert.equal(tmpdir(),process.env.TEMP);
+        const child=join(tmpdir(),'artifact-parent');
+        mkdirSync(child);
+        const {retainWindowsArtifactScope}=await import(${JSON.stringify(scopeModule)});
+        const scope=retainWindowsArtifactScope(child);
+        try {scope.verify();} finally {scope.release();}
+      }
+      writeFileSync(${JSON.stringify(output)},JSON.stringify({home}));
+    `;
+    expect(
+      await runTestJob(root, {
+        label: 'private-temp',
+        files: [],
+        command: [process.execPath, '--eval', program],
+      }),
+    ).toBe(0);
+    const result = JSON.parse(readFileSync(output, 'utf8'));
+    expect(existsSync(result.home)).toBe(false);
+  });
   test('uses a qualified same-byte Windows runtime and preserves entry arguments', async () => {
     const root = fixture();
     const entry = join(root, 'entry.ts');

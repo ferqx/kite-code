@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdtempSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -18,14 +19,73 @@ import {
 
 export { privateDirectory };
 
+const ownedTemporaryRoots = new Set<string>();
+
 /** A canonical, owned scratch root with real private permissions on the current OS. */
 export function temporaryDirectory(prefix: string): string {
   const parent = realpathSync.native(tmpdir());
-  if (process.platform !== 'win32') return mkdtempSync(join(parent, prefix));
+  if (process.platform !== 'win32') {
+    const root = mkdtempSync(join(parent, prefix));
+    ownedTemporaryRoots.add(root);
+    return root;
+  }
   // mkdtemp inherits the Windows temp directory's ACL; mode: 0700 does not protect it.
   const root = join(parent, `${prefix}${randomUUID()}`);
   privateDirectory(root);
+  ownedTemporaryRoots.add(root);
   return root;
+}
+
+/** Remove only this process's owned scratch root; never descend through a reparse entry. */
+export function removeTemporaryDirectory(root: string): void {
+  if (
+    !ownedTemporaryRoots.has(root) ||
+    realpathSync.native(root) !== root ||
+    lstatSync(root).isSymbolicLink()
+  )
+    throw Error('temporary_cleanup_scope_changed');
+  if (process.platform !== 'win32') rmSync(root, { recursive: true });
+  else {
+    // Windows networking can create read-only INetCache entries and Content.IE5
+    // junctions under an isolated USERPROFILE. Walk/delete in one native shell,
+    // unlinking reparse entries without listing or touching their targets.
+    const script = join(root, `.cleanup-${randomUUID()}.ps1`);
+    writeFileSync(
+      script,
+      `param([string]$Root)
+$ErrorActionPreference = 'Stop'
+$taskRoot = [IO.Path]::GetFullPath($Root)
+if ($taskRoot -ne $Root -or ((Get-Item -LiteralPath $taskRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'temporary_cleanup_scope_changed' }
+function Clear-OwnedDirectory([string]$Path) {
+  $taskPath = [IO.Path]::GetFullPath($Path)
+  if ($taskPath -ne $taskRoot -and -not $taskPath.StartsWith($taskRoot + '\\', [StringComparison]::OrdinalIgnoreCase)) { throw 'temporary_cleanup_scope_changed' }
+  foreach ($taskEntry in Get-ChildItem -LiteralPath $taskPath -Force) {
+    if ($taskEntry.PSIsContainer -and ($taskEntry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      [IO.Directory]::Delete($taskEntry.FullName, $false)
+    } elseif ($taskEntry.PSIsContainer) {
+      Clear-OwnedDirectory $taskEntry.FullName
+    } else {
+      if (-not ($taskEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ($taskEntry.Attributes -band [IO.FileAttributes]::ReadOnly)) { $taskEntry.IsReadOnly = $false }
+      [IO.File]::Delete($taskEntry.FullName)
+    }
+  }
+  Remove-Item -LiteralPath $taskPath -Force
+}
+Clear-OwnedDirectory $taskRoot
+`,
+      { flag: 'wx' },
+    );
+    const result = spawnSync(
+      join(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', script, '-Root', root],
+      { windowsHide: true, timeout: 10000 },
+    );
+    if (result.error || result.status !== 0)
+      throw Error('temporary_cleanup_failed', {
+        cause: result.error ?? Error(result.stderr.toString()),
+      });
+  }
+  ownedTemporaryRoots.delete(root);
 }
 
 /** macOS's per-user temp path can exceed the Unix socket address limit with owned IDs. */

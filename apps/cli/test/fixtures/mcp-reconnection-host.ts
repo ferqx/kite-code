@@ -65,7 +65,7 @@ export async function prepareReconnectionEngine() {
 }
 
 export async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
-  const deadline = Date.now() + 8000;
+  const deadline = Date.now() + (process.platform === 'win32' ? 30000 : 8000);
   for (;;) {
     const value = await read();
     if (value !== undefined) return value;

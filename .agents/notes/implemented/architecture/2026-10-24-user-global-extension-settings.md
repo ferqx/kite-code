@@ -2,6 +2,8 @@
 
 Status: implemented
 
+用户 Add 的原最小声明界面现由[自定义 MCP 启动声明](../feature/2026-11-01-custom-mcp-launch-and-environment.md)扩展为结构化 STDIO／HTTP 表单及仅用户来源的命名环境引用；下面的全局身份、原申请、未知恢复与实际工具权限理由继续适用。
+
 ## Problem
 
 桌面 MCP 与 Skills 页面原先借当前 Session 反查 Workspace，再消费项目来源与会话 Action。没有会话时设置不可用，切换会话会改变目录；这与用户确认的“全局设置只管理用户级配置，项目空间配置不显示”冲突。仅隐藏项目行仍会读取项目文件、依赖 trust 和释放会话读租约，不能实现该产品边界。

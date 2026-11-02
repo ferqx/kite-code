@@ -31,7 +31,7 @@ async function until<T>(
   work: () => Promise<T | undefined>,
   signal?: AbortSignal,
 ): Promise<T> {
-  const deadline = performance.now() + 10000;
+  const deadline = performance.now() + (process.platform === 'win32' ? 30000 : 10000);
   for (;;) {
     signal?.throwIfAborted();
     const value = await work();
@@ -451,6 +451,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
     control = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
+      idleTimeout: process.platform === 'win32' ? 90 : 30,
       fetch(request) {
         const pending = controlRequest(request);
         controlWork.add(pending);

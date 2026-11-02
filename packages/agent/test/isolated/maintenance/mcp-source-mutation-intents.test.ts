@@ -1,20 +1,22 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
-  chmodSync,
   existsSync,
   linkSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -363,9 +365,9 @@ test('128 records and 16MiB bytes are preserved; excess and unsafe private files
     write(f.path, [...rows, row(f.storeId, 128)]);
     expect(() => verifyMcpSourceMutationIntentsDocument(f.path)).toThrow();
     write(f.path, [rows[0]]);
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => verifyMcpSourceMutationIntentsDocument(f.path)).toThrow();
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     const hard = join(f.root, 'hard');
     linkSync(f.path, hard);
     expect(() => verifyMcpSourceMutationIntentsDocument(f.path)).toThrow();
@@ -373,7 +375,7 @@ test('128 records and 16MiB bytes are preserved; excess and unsafe private files
     const source = join(f.root, 'source');
     writeFileSync(source, readFileSync(f.path), { mode: 0o600 });
     unlinkSync(f.path);
-    symlinkSync(source, f.path);
+    recordReparseEntry(source, f.path);
     expect(() => verifyMcpSourceMutationIntentsDocument(f.path)).toThrow();
   } finally {
     f.close();

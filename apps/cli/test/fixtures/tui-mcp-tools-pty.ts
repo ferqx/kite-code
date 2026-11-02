@@ -44,12 +44,15 @@ const control = async (path: string) =>
   ptyDeadline(
     (async () => {
       const response = await fetch(new URL(path, input.controlURL), {
-        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(12000)]),
+        signal: AbortSignal.any([
+          abort.signal,
+          AbortSignal.timeout(process.platform === 'win32' ? 60000 : 12000),
+        ]),
       });
       if (!response.ok) throw Error(`owned_tools_control_failed:${path}:${response.status}`);
       return (await response.json()) as { indices: number[]; readyExecutionId: string };
     })(),
-    12000,
+    process.platform === 'win32' ? 60000 : 12000,
     `owned_tools_control_deadline:${path}`,
   );
 const start = async () => {
@@ -104,6 +107,11 @@ const frame = async (generation: number, kind: string) => {
 };
 const chooseMenu = async (label: string) => {
   const end = Date.now() + 10000;
+  const selected = (text: string) =>
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.startsWith('❯ '));
   for (let index = 0; index < 32; index++) {
     const observed = await active.projection();
     const text = normalized(observed.text);
@@ -114,10 +122,12 @@ const chooseMenu = async (label: string) => {
       index--;
       continue;
     }
+    const previous = selected(observed.text);
     await key('\x1b[B');
     for (;;) {
       const next = await active.projection();
-      if (next.fresh && normalized(next.text) !== text) break;
+      const currentSelection = selected(next.text);
+      if (next.fresh && currentSelection && currentSelection !== previous) break;
       if (Date.now() > end) throw Error(`owned_tools_menu_deadline:${label}`);
       await Bun.sleep(50);
     }

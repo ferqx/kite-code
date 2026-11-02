@@ -5,7 +5,7 @@ import {
   PanelLeftOpenIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import type { ComponentProps, ReactNode, SyntheticEvent } from 'react';
+import type { ComponentProps, CSSProperties, ReactNode, SyntheticEvent } from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PanelImperativeHandle } from 'react-resizable-panels';
 import { Composer, type ComposerProps } from './Composer';
@@ -20,7 +20,7 @@ import {
   NewConversationWelcome,
 } from './NewConversation';
 import type { PromptEditorHandle } from './PromptEditor';
-import { RightSidebar } from './RightSidebar';
+import { RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH, RightSidebar } from './RightSidebar';
 import { ReadingStateCache } from './reading-state';
 import {
   ScheduledTaskEditor,
@@ -43,7 +43,7 @@ import { Button } from './ui';
 import { Workbench } from './Workbench';
 
 const SESSION_HEADER_LABEL_LIMIT = 10;
-const NAVIGATION_MIN_WIDTH = 200;
+export const NAVIGATION_MIN_WIDTH = 200;
 const NAVIGATION_MAX_WIDTH = 420;
 const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
 // Match the centered column and gutters in the docked safe-area CSS. Automatic
@@ -299,6 +299,7 @@ function SessionPageContent({
   const [tabLimitKey, setTabLimitKey] = useState<string>();
   const tabsOpen = tabsKey === props.readingKey && hasTabs;
   const scheduledEditorGeneration = useRef(0);
+  const detailsOpeningWidth = useRef<number | undefined>(undefined);
   const [scheduledEditor, setScheduledEditor] = useState<{
     generation: number;
     task?: ScheduledTaskSummary;
@@ -342,6 +343,7 @@ function SessionPageContent({
   detailClose.current = props.detailPanel?.onClose;
   const rightSidebarOpen =
     hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
+  const rightSidebarFormOpen = !!scheduledEditor && !!props.scheduledTasks && !hostDetailsOpen;
   const tabsVisible = tabsOpen && detailsCollapsed !== true;
   const tabsPresent =
     tabsVisible ||
@@ -383,7 +385,15 @@ function SessionPageContent({
         const group = groupElement.current;
         if (!group || group.offsetWidth <= 0 || group.getBoundingClientRect().width <= 0) return;
         const target = panel.current;
-        if (!target || (panel !== navigationPanel && target.isCollapsed() !== open)) return;
+        if (!target) return;
+        const openingWidth =
+          open && panel === detailsPanel ? detailsOpeningWidth.current : undefined;
+        if (
+          panel !== navigationPanel &&
+          target.isCollapsed() !== open &&
+          openingWidth === undefined
+        )
+          return;
         setPanelsAnimating(true);
         if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
         panelAnimationTimer.current = setTimeout(() => {
@@ -392,7 +402,12 @@ function SessionPageContent({
         }, 240);
         // Navigation uses explicit size constraints; only its button changes them.
         if (panel === navigationPanel) return;
-        if (open) target.expand();
+        // Keep the form's requested default while it is a narrow overlay, then
+        // acquire the same docked width once the main pane can also fit.
+        if (openingWidth !== undefined && group.getBoundingClientRect().width >= 800) {
+          detailsOpeningWidth.current = undefined;
+          target.resize(`${openingWidth}px`);
+        } else if (open) target.expand();
         else target.collapse();
       });
     },
@@ -425,10 +440,10 @@ function SessionPageContent({
     () => schedulePanelChange(detailsPanelFrame, detailsPanel, true),
     [schedulePanelChange],
   );
-  const collapseDetails = useCallback(
-    () => schedulePanelChange(detailsPanelFrame, detailsPanel, false),
-    [schedulePanelChange],
-  );
+  const collapseDetails = useCallback(() => {
+    detailsOpeningWidth.current = undefined;
+    schedulePanelChange(detailsPanelFrame, detailsPanel, false);
+  }, [schedulePanelChange]);
   useLayoutEffect(() => {
     if (!scheduledEditor || !props.scheduledTasks) return;
     const group = contentGroupElement.current;
@@ -436,7 +451,10 @@ function SessionPageContent({
     // The narrow scheduled rail overlays the list without remounting its draft.
     // If it could not acquire a docked allocation, expand when room returns.
     const observer = new ResizeObserver(() => {
-      if (group.getBoundingClientRect().width >= 680 && detailsPanel.current?.isCollapsed())
+      if (
+        group.getBoundingClientRect().width >= 800 &&
+        (detailsOpeningWidth.current !== undefined || detailsPanel.current?.isCollapsed())
+      )
         expandDetails();
     });
     observer.observe(group);
@@ -784,7 +802,12 @@ function SessionPageContent({
     />
   );
   return (
-    <div className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
+    <div
+      className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}
+      style={
+        { '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px` } as CSSProperties
+      }
+    >
       <ResizablePanelGroup
         id="client-layout"
         orientation="horizontal"
@@ -968,6 +991,7 @@ function SessionPageContent({
                             {...props.scheduledTasks}
                             onEditTask={(task, trigger) => {
                               scheduledEditorToggle.current = trigger;
+                              detailsOpeningWidth.current = RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH;
                               setScheduledEditor({
                                 generation: ++scheduledEditorGeneration.current,
                                 task,
@@ -975,7 +999,9 @@ function SessionPageContent({
                               expandDetails();
                             }}
                             onNewTask={(trigger) => {
+                              if (scheduledEditor && !scheduledEditor.task) return;
                               scheduledEditorToggle.current = trigger;
+                              detailsOpeningWidth.current = RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH;
                               setScheduledEditor({
                                 generation: ++scheduledEditorGeneration.current,
                               });
@@ -1056,30 +1082,45 @@ function SessionPageContent({
                   </main>
                 </div>
               </ResizablePanel>
-              {/* Re-register neighboring panels when resize availability changes. */}
-              <ResizableHandle
-                key={rightSidebarOpen ? 'details-open' : 'details-closed'}
-                id="details-resize"
-                className="collapsible-sidebar-handle"
-                data-open={rightSidebarOpen ? 'true' : 'false'}
-                disabled={!rightSidebarOpen}
-                withHandle
-              />
+              {rightSidebarFormOpen ? (
+                <div
+                  id="details-resize"
+                  className="relative collapsible-sidebar-handle"
+                  data-slot="right-sidebar-form-divider"
+                  data-open="true"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ResizableHandle
+                  key={rightSidebarOpen ? 'details-open' : 'details-closed'}
+                  id="details-resize"
+                  className="collapsible-sidebar-handle"
+                  data-open={rightSidebarOpen ? 'true' : 'false'}
+                  disabled={!rightSidebarOpen}
+                  withHandle
+                />
+              )}
               <ResizablePanel
                 id="details"
                 className="collapsible-sidebar-viewport"
                 style={{ overflow: 'hidden' }}
                 panelRef={detailsPanel}
-                disabled={!rightSidebarOpen}
+                disabled={!rightSidebarOpen || rightSidebarFormOpen}
                 collapsible
                 collapsedSize="0px"
                 defaultSize="0px"
                 minSize="300px"
                 maxSize="640px"
+                groupResizeBehavior={
+                  props.scheduledTasks ? 'preserve-pixel-size' : 'preserve-relative-size'
+                }
               >
                 <div
                   className="collapsible-sidebar-content"
-                  style={{ minWidth: '300px' }}
+                  style={{
+                    minWidth:
+                      scheduledEditor && props.scheduledTasks ? 'min(300px, 100cqi)' : '300px',
+                  }}
                   aria-hidden={!rightSidebarOpen}
                   inert={!rightSidebarOpen}
                 >

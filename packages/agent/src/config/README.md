@@ -6,6 +6,8 @@
 
 `readConfigurationFile({path})` returns `{path,exists,etag,value}`. An absent file has a stable absence ETag and creates no directory or lock. The default bound is 1 MiB, optionally up to 8 MiB. Non-object, malformed, duplicate-key JSONC, non-regular/hardlinked/symlink files and invalid UTF-8 fail locally. Error codes contain no raw file text, backend exception or credentials.
 
+Windows 的普通 Workspace 发布临时文件使用原生 `writeScopeFile`，在 host 明确选择的普通父目录内新建 current SID 私有文件；原父 HANDLE、叶子身份、有限写入、Flush 和私有 ACL 复核保持。Profile 配置及 MCP 私有元数据继续要求私有父目录。工作区选择回归特意赋予父目录外部权限，验证修改成功且父 ACL 不变；平台反例同时核普通父目录不能通过 `writePrivateFile`，防止用放宽私有政策掩盖 scope 写入问题。
+
 配置数组不再额外按 512 或 4096 项拒绝；实际配置文件字节边界、JSON 深度、对象字段与凭据校验仍适用。完整命名目录按准确 ID 合并并封存，超过单页的目录由宿主公共读取接口分页，不能因默认项目数静默丢项。真实 5001 项 Skill 配置的文件读取、覆盖合并与不可变快照见[配置测试](../../test/isolated/config/config.test.ts)。
 
 `updateConfigurationFile({path,ifMatch,operations})` supports field `set` and `remove` with explicit paths. It takes a short nonblocking stable sibling OS lock (`<path>.lock`), reads the latest bytes, checks their SHA-256 ETag, validates the existing JSONC, applies `jsonc-parser` edits, fsyncs a private temporary file and atomically renames it into place. Unrelated unknown fields and comments are retained where the parser can preserve them; comments attached to removed/replaced syntax cannot always survive. Malformed originals are retained verbatim instead of becoming empty objects. A stale ETag returns `configuration_conflict`; a held OS lock returns `configuration_busy`. Retry requires a fresh read and explicit fresh IfMatch, rather than blindly repeating the edit. File, edit-count, path-depth and JSON shape limits are finite.
@@ -46,9 +48,15 @@ Evidence: twelve focused tests use actual temporary files, two real Bun processe
 
 `readOwned/writeOwned/removeOwned/statusOwned` 只接收闭合 `{namespace:'mcp.oauth',ownerDigest:<64hex>}`。key 是 domain-separated `owned-credential:<sha256>`，普通 `credential:<uuid>` 不能解析或删除它；同一 backend 与 Vault 负责全部存储，没有第二套认证 store。完整 UTF-8 材料≤64KiB，同 key 的 mutation 串行；remove/new login 会使本 Vault 的旧 pending read 失效。后端删除失败仍阻断当前 authority，但另一 Vault 可能看到实际残留，已解析字符串或已发送请求不能撤回。
 
+Windows 的[原生适配](os-credentials.ts)仅对 owned OAuth 使用[有界分段](windows-owned-credential.ts)：同一 service/account 下的固定88个子项，每项最多1000个Base64字符加随机写入标记，适配原生2560字节／UTF-16限制。base 保存 writing／ready、长度、段数、摘要及标记；完整段校验与base重读通过才返回材料。部分写入、混合段、损坏或并发替换拒绝读取，失败仍为原 publication unknown，不回滚或声称多项原子提交。更新清除未使用的固定槽，Remove核对全部槽后才移除base；中断删除保留base并可明确重试。旧单项材料仍可读取并在下一次写入转换；macOS/Linux及普通手工引用保持原路径。所有材料留在同一OS后端，没有文件回退、账户枚举或新的公开协议版本。
+
+2026-11-01 Windows x64／Bun1.4.3，默认`@napi-rs/keyring`在准确随机自有命名空间完成65536字节、20000字节Unicode和5字节缩小更新；每次由新Vault核完整值，最后由新后端核absence，共6059ms。`windows-owned-credential.test.ts`另覆盖原生单项上限、完整预算、写入中断、混合段拒绝、删除失败重试、旧材料及读中替换；模拟工厂结果不代替真实系统库记录。
+
 `statusOwned` 由实际 native status/probe 区分 available、locked、unavailable，不把 metadata 当 presence。默认原生 backend 是 lazy 的，owned operation 才加载模块。当前 macOS synthetic native scope 的 status/write/read/remove 与 fresh-Vault absence 已实际验证；Windows/Linux、真实账号及完整 OAuth 平台资格仍按[认证边界](../../../../docs/active/mcp-authentication.md)核对。受控 [owned Vault 测试](../../test/isolated/config/owned-credentials.test.ts)只证明材料/epoch/序列及错误语义。
 
 ## Private MCP sources and approval metadata
+
+用户级自定义 Add 的[有限声明语法](mcp-entry.ts)支持 STDIO command／args／非秘密 env／envPassthrough／cwd，以及 HTTP url／非秘密 headers／bearerTokenEnv／headersFromEnv；基本新请求总预算60000字节以内，原高级源文件的8192字符 command／cwd 能力保持。纯校验通过独立公共入口 `@kite-ai/agent/mcp-entry` 供 Electron Main 使用，避免导入整个配置模块及其 JSONC／凭据 I/O 依赖；Agent 构建同时交付该入口。Source 只保存和摘要化引用名字，不读取宿主环境。新标头和环境引用仅限用户来源，项目声明在发布与读取前均拒绝，不能借普通来源批准取得环境权限。原 Session Source Add 工具仍收 basic 字段；桌面命令名解析、环境值 materialization、跨层持久校验和证据归[Service owner](../../../../apps/service/README.md#自定义-mcp-表单与启动配置)。
 
 `readMcpSources({profilePath,workspacePath?,scope,variables?,maxBytes?,now?})` 是独立 host leaf。用户源固定为选定 Profile 的 `mcp.json`，项目源固定为实际 canonical Workspace 的 `.kite-code/mcp.json`；没有 home 发现、旧数据迁移、连接、Model 或 vault 端口。可信宿主提供准确 `scope {profileId,storeId,sessionId,workspaceId}` 和无 symlink 的 canonical 根目录。读取不创建目录、文件或锁。文件实际字节限额默认 1 MiB、最高 8 MiB，JSON 深度有限；没有整个 Server 目录的累计项数限额。
 
@@ -58,7 +66,7 @@ Evidence: twelve focused tests use actual temporary files, two real Bun processe
 
 源文档保留准确原字节 SHA-256 ETag，拒绝 symlink/hardlink/非普通文件、目录重定向、无效 UTF-8、重复 JSONC key。完整原始条目（包括 unknown 字段、未展开变量、数组顺序）参与 `rawEntryDigest`。实际 URL/command/cwd/args/显式 env/认证声明参与 `transportDigest`。`registry.revision` 另覆盖准确 Store/Session/Profile/Workspace、源 identity/ETags、批准与认证文件 ETags、可信变量供应摘要及有效目录状态。项目同名条目始终遮蔽用户条目，disabled/invalid/pending/rejected 不回退；整个项目源无法解释或不安全时，用户来源也不能借未知项目内容成为 fallback。
 
-变量只识别 `${NAME}`，值来自宿主显式有限、非秘密供应；不读取 ambient `process.env`，不支持 `${NAME:-default}`，不把缺失或空值替换为空串。stdio command/cwd 为绝对路径，args 与显式 env 有限，不继承进程环境；secret/proxy/runtime 注入环境名拒绝。HTTP 原始 headers、userinfo/query/fragment 不装配。认证接受明确 none、opaque Bearer credential 或闭合 OAuth metadata；省略 auth 的归一化值仍为 none，Service 仅从私人 raw 字段是否存在区分 auto 候选。配置中的 UUID 不授予读取权。OAuth 的 credentialRef 是可选有限 profile label，scopes/clientId 仅配置 metadata，clientSecretRef 必须为 credential:<uuid>，拒 inline secret。命名手工 credential profile、其他 header/scheme 和旧 trust/Tool effects/annotation/retry 声明仍 unavailable，不隐式降级。
+变量只识别 `${NAME}`，值来自宿主显式有限、非秘密供应；不读取 ambient `process.env`，不支持 `${NAME:-default}`，不把缺失或空值替换为空串。stdio command/cwd 为绝对路径，args 与显式 env 有限，不继承进程环境；literal env 的 secret/proxy/runtime 注入环境名拒绝。用户自定义非秘密 headers 与命名环境引用沿上述新入口装配，userinfo/query/fragment 仍拒绝。认证接受明确 none、opaque Bearer credential 或闭合 OAuth metadata；未声明环境认证且省略 auth 的归一化值仍为 none，Service 仅从私人 raw 字段是否存在区分 auto 候选。配置中的 UUID 不授予读取权。OAuth 的 credentialRef 是可选有限 profile label，scopes/clientId 仅配置 metadata，clientSecretRef 必须为 credential:<uuid>，拒 inline secret。命名手工 credential profile、手工 credential 的其他 header/scheme 和旧 trust/Tool effects/annotation/retry 声明仍 unavailable，不隐式降级。
 
 批准文件为 Profile `mcp-approvals.json`，认证绑定为 `mcp-auth-bindings.json`，根对象 unknown 字段与可保留的 JSONC comments 留存。每个 `records` entry 是闭合 schema：共同绑定 `scopeDigest/sourceDigest/serverId/rawEntryDigest/transportDigest`，批准记录另含 approved/rejected；认证记录另含 authProfile、固定 purpose `mcp.http`、opaque vaultRef、expiresAt 和 revoked。原用户 proof 保留 decisionId、Store/Session/Interaction、acceptedRevision、subjectId、requestDigest、recordedAt。读取凭据绑定元数据没有 vault presence lookup。
 
@@ -66,7 +74,7 @@ Evidence: twelve focused tests use actual temporary files, two real Bun processe
 
 `writeMcpSourceMetadata({expectedReadSet,value,validateDecision,afterPublication?})` 只写准确批准/认证元数据；宿主必须通过同步 `validateDecision` 检验真实用户决定，宽权限 allow 不替代此端口。按 canonical 路径顺序同时持有 user/project/approval/binding 的稳定短 OS 锁，在锁内重读完整原 read-set、binding 和决定，临时文件 fsync、0600 原子发布并同步目录。过期 read-set、错误 scope、无效 proof 或原始声明变化在发布前拒绝。发布后的宿主回执失败返回 `mcp_source_publication_unknown`；已发布原 proof 保留，leaf 不重试。文件与 SQLite 不原子，宿主应保存原 HostMutation/Execution ID 并查询原回执。外部编辑者不遵守锁时，最后检查与 rename 之间仍存在真实文件系统 race；不能称为跨介质事务。
 
-`readMcpSourceEntryPreview({scope,serverId,expectedReadSet})` 只投影准确有效来源声明及移除项目后显露的同名用户声明。`writeMcpSourceEntry` 是独立增删 leaf，输入闭合 `mutation`、完整六字段 Source read-set、可信原 Action Execution `operationId` 与同步 publication callback。Add 只收 basic HTTP URL 或绝对 STDIO command，同层已有原名称即拒；创建标记 `_kiteSourceCreation {version:1,operationId}` 参与完整 raw digest，使已移除同配置的旧批准不能在重加时复活。标记没有批准或连接权限。Remove 按稳定 serverId 找唯一真实原 key，再核 source/raw digest；非法名称的 public 净化标签不用于定位私有写入。
+`readMcpSourceEntryPreview({scope,serverId,expectedReadSet})` 只投影准确有效来源声明及移除项目后显露的同名用户声明。`writeMcpSourceEntry` 是独立增删 leaf，输入闭合 `mutation`、完整六字段 Source read-set、可信原 Action Execution `operationId` 与同步 publication callback。普通 Session Source Add 只收 basic HTTP URL 或绝对 STDIO command；用户设置的结构化声明沿本节上述入口，同层已有原名称即拒；创建标记 `_kiteSourceCreation {version:1,operationId}` 参与完整 raw digest，使已移除同配置的旧批准不能在重加时复活。标记没有批准或连接权限。Remove 按稳定 serverId 找唯一真实原 key，再核 source/raw digest；非法名称的 public 净化标签不用于定位私有写入。
 
 增删按固定 canonical 顺序同时持有 user/project/approval/binding 短 OS 锁，完整 CAS 和可信 callback 通过后才发布目标 `mcpServers` 语法编辑。保未触及 env、unknown fields、可保留 comments 与原 CRLF；不覆盖整个文档，不放宽 generic configuration writer 的 secret 规则。回执恰 target/fallback/operationId/kind/oldEtag/newEtag；fallback 只是声明事实，不授予来源、凭据或 Tool 权限。临时文件 fsync、atomic rename、directory sync、read-back 及发布后 unknown 沿 Source 合同；所有已取得的锁均尝试释放，rename 后的 release 异常不能覆盖 unknown，发布前原有限失败保留。释放尝试不保证操作系统已关闭。SQL 与文件仍不原子，不合作外部 writer 的 final-check/rename race、被外部移根带走的 scratch 与删除项附属注释分别保留实际限制。leaf 零 vault、Model、transport、metadata invalidation 或重放。
 

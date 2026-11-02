@@ -13,6 +13,8 @@
 
 新正式/default/CI已使用通用Service。trusted programmatic registry 提供 `mcp.servers` Query、`mcp.server.select` 普通 Action，以及准确原 live connection 的 `mcp.catalogue.refresh`；六字段 read-set 和实际 Workspace identity 进入文件锁/HostMutation复核，不由通用patch注册原始Server。默认用户来源是选定Profile/mcp.json，项目来源是canonical Workspace/.kite-code/mcp.json；同名项目声明即使disabled/invalid/pending/rejected仍遮蔽用户来源，不读旧全局home或转换旧数据。raw原文留宿主私人源，目录只保安全ID/transport/source/digest/status；批准来源、绑定凭据和实际连接分别是普通Action/Job，不授Tool权限。当前实现与实际三段Ask、漂移前零vault/RPC、默认源码外stdio及nested source child证据归[Service owner](../../apps/service/README.md)、[MCP owner](../../packages/agent/src/mcp/README.md)和[scoped提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)。OAuth/续期与四个普通认证Action已接入同一Vault，原申请及owned清理合同见[认证边界](mcp-authentication.md)。公开child冷恢复、系统浏览器/OAuth PTY及完整平台资格仍按实际证据核验。
 
+Windows 的项目来源发布在 host 明确选择的普通 Workspace scope 内通过原生 `writeScopeFile` 新建私有临时文件，持有原父 HANDLE，复核叶子 private ACL、单链接及路径身份并 Flush；不要求或修改工作区目录的私有 ACL。Profile 声明、批准／认证元数据和凭据继续采用私有父目录政策，工作区内容不因此成为授权。完整写入边界与反例归[配置 owner](../../packages/agent/src/config/README.md)和[Windows 路径 owner](../../packages/agent/src/platform/windows-path-security.README.md)。
+
 ## 当前 TUI 的有限选择
 
 新 `/mcp` 通过共享UI的[MCP port/panel](../../packages/ui/src/tui/README.md#mcp-安全目录与原选择意图)和[CLI host](../../apps/cli/README.md#tui-mcp-目录与配置选择)接固定Query及普通Server选择Action。上下/Enter/Esc、可见刷新/原结果查询与独立user/project范围确认保原Select取舍；Query零Model/连接/凭据。准确Command受理仅pending，保存确认须原subject/Store/requestSHA、成功Execution binding及真实HostMutation applied/CAS receipt和原GET一致；发布后SQLreceipt故障继续unknown，不重POST。JSONC注释与未知字段保留，外部CAS冲突零修改，普通Ask批准前零修改。
@@ -24,6 +26,8 @@ CLI host 现在独立持久保存 `ui/mcp-selection-intents.json@1`。成功 dur
 公开 Service 的[冷后显式新连接](../../apps/service/test/isolated/mcp-cold-reconnect.test.ts)当前1项65断言通过：同 Profile/Store 的旧历史 GET 不连接，新 key 经新的独立 Action/Job Ask 后发现新目录并完成真实 Tool，旧 record 不被替换连接污染，source 漂移阻止派发。该本机 auth:none/loopback 正常 paired 关闭资格由[Service owner](../../apps/service/README.md)维护；它没有增加面板重连、认证或增删功能，也不证明崩溃接管和三平台。
 
 ## 当前显式连接与原申请
+
+Native 用户级自定义表单现通过独立 HostMutation Add 保存结构化 STDIO 参数／非秘密环境值／命名环境传递／工作目录，以及 HTTP 非秘密标头／命名 Bearer 和标头变量。命令名只在保存时解析为准确可执行程序，Windows 传输后端继续只收绝对 `.exe`，不增加 Shell fallback。新标头和宿主环境引用仅限用户来源，项目条目明确拒绝；普通 Session Source Add 工具的 basic 输入、原定义版本与项目批准合同保持。完整字段、秘密隔离、持久校验与实际平台证据归[Service owner](../../apps/service/README.md#自定义-mcp-表单与启动配置)。
 
 新面板的可见Request connection经独立确认，只申请普通 `builtin.mcp/mcp.connect@1`；准确selected/admitted/available来源与完整Workspace目录在Host复核，来源捕获与实际connection Job仍沿Service普通许可和最后派发检查。accepted不等ready，warm可复用原Job；原ready、当前live/currentGeneration和created/reused独立。有限只读 `mcp.connection@1` 核原Action/Job/parent/ref/inputDigest，完整envelope≤16KiB，不输出transport、凭据或定义正文。holder unavailable时generation为null，原ready不变。
 

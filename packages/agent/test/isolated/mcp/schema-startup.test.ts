@@ -9,7 +9,7 @@ mock.module('node:fs/promises', () => ({
   ...nativeFS,
   async readFile(...args: Parameters<typeof fs.readFile>) {
     const bytes = await nativeRead(...args);
-    if (held && String(args[0]).endsWith('/mcp/schema-worker.js')) {
+    if (held && String(args[0]).replaceAll('\\', '/').endsWith('/mcp/schema-worker.js')) {
       const lease = held;
       lease.entered();
       await lease.wait;

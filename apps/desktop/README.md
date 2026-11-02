@@ -172,13 +172,29 @@ Windows GUI stdin 的实际过早 EOF 已否定其控制通道方案。当前父
 
 ## 复用原桌面展示层
 
+配置表单根容器不另铺背景色，直接沿用RightSidebar底色；内容、标题与底栏之间继续保留原分隔线及滚动结构。
+
+Input、Textarea、SelectTrigger的基础外观与交互状态归[UI公共表单样式](../../packages/ui/src/desktop/components/ui/form-control.ts)统一维护；Native表单负责字段布局、帮助／错误文案和业务语义，不再用页面CSS重复覆盖控件背景、圆角、无效边框或禁用透明度。
+
+提供商与模型复用设置的公共单列列表及分隔线，取消模型页专属的自适应卡片网格、卡片背景和圆角。每行以连接信息为主体，模型数量及管理入口对齐名称列；`provider-row`容器查询负责窄行内的状态和操作换行。[连接模型组件](src/native-connection-models.tsx)继续管理原连接的模型浮层，不改变配置提交与启用语义。
+
+2026-11-01，Windows x64／Bun1.4.3，列表调整通过提供商及联合设置两文件91项／1433断言、Desktop类型、两文件Biome及文档检查。既有[侧栏几何回归](test/session-shell-geometry.fixture.ts)在深浅主题、500／800／1000／1020／1280px十组通过；内嵌浏览器另逐步观察普通、长名称、自动接入三行在宽窄窗口和并排编辑时的排列、模型浮层开合、双击表单及取消恢复，行内横向溢出为零。隔离生产夹具的截图与数据归`.cache/provider-list-8mbw1e/`，未重验正式安装客户端或真实配置写入。
+
+2026-11-01，Windows x64／Bun1.4.3，默认栏宽统一：安排任务和提供商／MCP／Skills均消费UI公共420px默认值。安排任务保留手动调宽，宽窗口缩放按像素保持栏宽，新建或编辑另一份表单恢复默认值；不足800px的内容外框统一改用覆盖布局。安排任务／SessionPage及Native页面壳／Windows菜单四个完整文件104项／1982断言、UI／Desktop类型、八文件Biome、文档结构／影响、测试归属和边界检查通过。既有[几何回归](test/session-shell-geometry.fixture.ts)在隔离生产页面核500／800／1000／1020／1280px、深浅主题十组，共1784帧：四类栏宽在可用空间足够时均为420px；500px窗口按各自内容外框收缩到293／294px，控件无横向裁切。另核覆盖与并排切换、窗口继续拉宽、草稿保留、手动拖到360px及新表单恢复420px。实际观察Windows开发窗口的任务表单及内嵌浏览器中四类面板的开合、焦点和底栏，页面零异常；截图与数据归`.cache/sidebar-width-CXQdKJ/`，不取得完整安装或其他平台原生合成资格。
+
+设置页由[Native壳](src/native.tsx)、[公共样式](src/native-tailwind.css)和[设置样式](src/native-provider-settings.css)统一布局：导航宽度直接消费UI的`NAVIGATION_MIN_WIDTH`（200px），各分类共用880px最大内容列、48px上下／32px左右留白，600px及以下仅将水平留白改为20px。`.settings-page-heading`统一标题、说明与操作区；打开右栏不按分类改写主区padding。所有设置操作使用公共shadcn Button／Input／Textarea／Select／Switch；[选择器组合](src/native-settings-select.tsx)把Select浮层挂到当前Dialog内，保留主题、焦点与Escape层级。配置读取、保存、凭据清理及原申请恢复沿原owner执行。
+
+2026-11-01，Windows x64／Bun1.4.3，`be57a4a1d`加本轮工作树：逐文件执行原[提供商](test/native-provider-settings-dom.test.tsx)、[模型](test/isolated/native-model-settings-dom.test.tsx)、[联合设置](test/isolated/native-provider-model-settings-dom.test.tsx)、[MCP](test/native-mcp-settings.test.tsx)、[Skills](test/native-skills-settings.test.tsx)、[页面壳](test/isolated/native-new-conversation-dom.test.tsx)及[共享侧栏](../../packages/ui/test/isolated/desktop-sidebar.test.tsx)，270项／4357断言通过；UI／Desktop类型、21个变更源码与测试文件的Biome、文档结构／影响、测试归属与边界检查通过。内嵌浏览器加载实际Native与生产编译CSS、独立合成bridge，逐步观察深浅主题、500／800／1280px布局、四页切换、编辑器／提供商／MCP下拉选择、模型开关、右栏开合与重开；菜单Escape只关菜单，下一次才关编辑栏，焦点返回对应入口。1280px下四页标题位置相同、均为24px，内容列880px；500px下侧栏仍200px、水平留白20px且无横向溢出，详情面板内容可读。最终页面无浏览器错误；未重验完整安装版Electron、真实Service或外部提供商，保留既有嵌套`@keyframes`编译提示。
+
 模型和提供商设置的普通保存过程不再插入独立状态段落，提供商保存／删除成功直接更新原列表并关闭所属编辑面板；取消、控件忙碌及失败／结果未知的原申请查询保持。附件准备仅保留原忙碌图标、无障碍名称和取消入口。环境信息有业务名称时保留原名，否则普通页面回退为“Shell”／“子 Agent”；内部执行 ID 及“执行状态待核实”仅供测试诊断显示，实际操作仍绑定原 ID，执行权未核实仍撤销停止资格。安排任务的运行记录沿共享 UI 显示中文状态。设置、环境、附件和任务的回归归各自原有 DOM 测试，不改变 Main／Service 操作协议。
 
 Native 使用现有捆绑的 Geist Variable 与 Geist Mono Variable 字体资源；`--font-geist` 指向共享 `--font-ui`，让会话、工具、输入、设置及浮层消费同一界面字体栈，中文优先系统 UI 字体。界面标题和设置名称使用 500 字重，普通文字为 400；Markdown 强调与等宽代码沿原语义样式。字体加载不改变阅读区排版变量。客户端默认字号由共享 `--ui-text-size: 14px` 管理；[Native样式](src/native-tailwind.css)与[设置样式](src/native-provider-settings.css)中的窗口菜单、设置普通段落、按钮、模型／连接主名称、表单标签和输入、完整详情正文，以及浏览器地址和失败正文统一消费该基准。模型名称多行输入保留等宽字体，字号与普通输入一致；页面标题、徽标、标识符与辅助说明保留各自层级。设置导航不再重复定义窄窗字号，窗口缩放只改变布局。样式入口先登记 `theme, base` 层，再引入 utilities，保持原生控件的字体继承低于组件明确字号；既有 utilities 与 components 的相对优先级保持。提供商删除确认的正文显式继承该区域字号，避免旧段落小字规则覆盖。
 
 2026-10-21，macOS arm64／Bun1.4.2，`a7f629960` 工作树加本次全客户端字号核对：17个相关UI／Native测试文件以 `bun test --parallel=1 --max-concurrency=1` 执行，167项／2701断言通过；UI与Desktop类型检查、四个变更源码文件的Biome、文档结构与影响检查通过。Chrome155.0.8059.86沿实际Native与共享组件、生产编译CSS及隔离只读bridge，在深浅主题、360／767／1000／1280px下完成292组计算字号检查，覆盖设置列表和表单、删除确认、工作台、任务表单、问卷、右栏、地址输入及容器外Portal；另核12px辅助容器内组件明确的14px字号仍生效，并检查宽窄截图。Markdown的8组深浅／宽窄编译样式检查保持14px正文及原相对层级。无脚本错误；保留既有嵌套 `@keyframes` 编译提示，未运行本轮完整安装版窗口。
 
-[Native样式](src/native-tailwind.css)的窗口留白、会话标题和设置右栏与[共享面板](../../packages/ui/src/desktop/SessionPage.tsx)统一消费UI的侧栏动画参数，默认180ms／ease-out。设置布局始终保留可插值的第三列，在0与420px之间开合；空编辑宿主不再直接 `display:none`，透明度与可见性随退出完成。窄窗改用相同曲线的右侧位移动画。提供商、MCP与Skills的原portal内容仍在关闭时立即卸载，原读取取消、秘密清理和焦点语义不等待动画。
+[Native样式](src/native-tailwind.css)的窗口留白、会话标题和设置右栏与[共享面板](../../packages/ui/src/desktop/SessionPage.tsx)统一消费UI的侧栏动画参数，默认180ms／ease-out。设置导航独立于共同的`.client-content-frame`，主内容与编辑宿主在框内分配两列，编辑列消费UI的RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH（420px），在0与默认宽度之间开合；Windows材质的上下6px留白、外沿圆角和描边只由外框持有。内部栏体在动画期间保持目标宽度，避免自动聚焦遇到零宽表单时提前滚动。空编辑宿主不直接 `display:none`，透明度与可见性随退出完成；外框可用宽度不足800px时，与安排任务一样改为框内右侧覆盖，并以相同曲线位移。提供商、MCP与Skills和安排任务共用`.right-sidebar-editor`、`-body`、`-footer`的高度、独立滚动、12px内容留白及8px／12px底栏留白；标题和底栏不随内容滚动。原portal内容仍在关闭时立即卸载，原读取取消、秘密清理和焦点语义不等待动画。
+
+2026-11-01，Windows x64／Bun1.4.3／Electron44.3.0，右栏溢出修复：页面壳、Windows菜单、提供商、MCP、Skills、安排任务和SessionPage七个受影响完整文件206项／3298断言，UI／Desktop类型、12个变更源码与测试文件的Biome、文档结构／影响、测试归属及边界检查通过。[既有浏览器入口](test/session-shell-browser-runner.fixture.ts)扩充[几何检查](test/session-shell-geometry.fixture.ts)，仅在[隔离夹具](test/session-shell-browser.fixture.tsx)内启用Windows Mica标记；500／800／1280px、560px高、深浅主题六组共1039帧检查外框留白、标题／底栏边界、双击聚焦、滚动与重开，均通过。正文建立定位边界，将Radix隐藏表单控件留在内部滚动区，防止短窗口中聚焦带走整个栏体。实际Windows开发窗口逐步观察安排任务、提供商及MCP开合和Escape恢复；内嵌浏览器另观察窄窗下拉菜单、长表单末尾及Skills详情，标题和底栏保持可见，外层滚动量与溢出量均为零。截图与逐帧数据归`.cache/session-shell-browser-JZmv5A/`。同次入口的八组阅读区几何检查通过，但随后完整会话视觉段在`light: action opacity`断言失败（0.45与1）；以HEAD的Native、共享布局与样式源码对照构建后同样失败，未取得该完整入口通过结论，不将本轮设置证据扩展为完整会话或安装发布资格。
 
 2026-10-19 Windows x64／Bun1.4.3、`f734245a` 加本轮动画改动：[Native页面](test/isolated/native-new-conversation-dom.test.tsx)、[提供商](test/native-provider-settings-dom.test.tsx)、[MCP](test/native-mcp-settings.test.tsx)与[Skills](test/native-skills-settings.test.tsx)四个完整文件111项／1713断言及Desktop类型检查通过；连同共享三文件共142项／2007断言。设置宽窄栏的逐帧布局证据见[UI owner](../../packages/ui/README.md#原桌面展示层)，该夹具使用实际RightSidebar与Native CSS，不代证完整安装窗口、真实服务或其他平台资格。
 
@@ -266,7 +282,9 @@ Windows 设置页的 `.desktop-settings-header` 不再预留额外高度，`.set
 
 [菜单 owner](electron/native-window-menu.ts)定义中文原生项，[Main](electron/main.ts)安装隐藏的窗口菜单以保留原生快捷键，再从相同模板通过 [Electron Menu.popup](https://www.electronjs.org/docs/latest/api/menu#menupopupoptions)打开对应下拉，不增加另一行菜单。编辑、缩放、全屏、隐藏与退出使用 Electron roles，退出仍经过原 `before-quit` 与 `settleDesktopQuit`。文件前三项沿固定事件返回原 renderer controller 的 `prepareConversation`、`addWorkspace` 与设置状态；Ctrl+N／O／, 在 Main 的 `before-input-event` 中按同一固定动作分发，拒绝组词、重复和额外修饰键，并阻止重复进入原生 accelerator。F10／Alt 导航留给 renderer。准备中、原 mutation 进行中或退出中不进入页面操作，迟到事件同样核当前状态。进入新对话保原草稿，不创建会话或发任务，添加空间保持原准确选择及登记路径。
 
-Windows Native 的全屏设置保留已有 `covered` 内容区的隐藏与 `inert`，设置 Dialog 使用非 modal 模式以保留顶栏的鼠标、键盘和可访问入口；顶栏交互不触发外部点击关闭，原返回与 Escape 仍可用。其他嵌入及平台保持原 modal 模式。
+Windows Native 的全屏设置保留已有 `covered` 内容区的隐藏与 `inert`，设置 Dialog 使用非 modal 模式以保留顶栏的鼠标、键盘和可访问入口；其他嵌入及平台保持原 modal 模式。全屏设置不按外部鼠标或焦点事件自动关闭：下拉控件开合中的第二次按下可能被重定向到文档，焦点守卫也位于设置DOM外；`onInteractOutside`阻止默认关闭，外部pointerdown同时取消原事件的默认行为，窗口菜单文字禁止选择。正常输入框双击选词、顶栏菜单、原返回与Escape层级保持，未改公共Dialog的默认策略。
+
+2026-11-01，Windows x64／Bun1.4.3，`be57a4a1d`加当前工作树：在现有development Electron44.3.0窗口复现双击“默认编辑器”退回主页面；修复后逐步核对常规下拉框双击、提供商未提交表单的输入框选词与预设下拉框双击、第一次Escape关闭编辑栏／第二次关闭设置，配置未提交并恢复原会话。原[窗口操作回归](test/isolated/native-window-actions-dom.test.tsx)在修复前以焦点守卫聚焦复现设置卸载，修复后核外部焦点／第二次pointerdown不关闭、原事件取消、菜单仍可调用及Select／设置两级Escape；整文件1项／34断言通过。连同原[页面壳](test/isolated/native-new-conversation-dom.test.tsx)共82项／1776断言、Desktop类型检查和定向Biome通过。范围为当前开发窗口及上述DOM事件，不代替完整安装发行或其他平台验证。
 
 [封闭菜单 bridge](src/native-menu-bridge.ts)只暴露四个 menu ID、整数位置与当前可操作状态，以及三个固定页面动作。[preload](electron/preload.ts)过滤未知事件并在卸载时移除监听；Main 核当前窗口、准确主 frame、renderer URL、Windows 平台、闭合 payload 和窗口边界，按实际页面缩放换算下拉位置，窗口菜单端口不打开 Service caller。宿主错误返回通用失败，顶栏允许再次打开。设置和目录仍由已有业务端口核权限。
 
@@ -1635,11 +1653,37 @@ Native局部 `NativeCallerCommandRequest` 增加公共 `ExtensionCommandRequest`
 
 ## Native MCP 完整设置
 
-普通设置不展示已确认成功／取消的提交历史、command/action/Store/Session/association 元数据或原 fact/认证/source DTO 的 JSON。真实失败继续给出可读提示，未确认或进行中的原操作保留“查看结果”和必要取消；数据绑定、精确原申请查询与取消资格不变。连接、来源与认证详情只展示操作所需的可读字段，删除复核保留用户决定所需的名称、地址或启动命令。
+[自定义 MCP 表单](src/native-mcp-add-form.tsx)按 STDIO／流式 HTTP 分开维护草稿，参数与变量／标头行共用增删组件，全部输入沿公共 Input、Button、Select。STDIO 提交独立 command／args／env／envPassthrough／cwd；HTTP 提交 url／bearerTokenEnv／headers／headersFromEnv，切换类型不混用 URL 和命令。已知敏感键只允许环境引用，重复键、协议保留标头和控制字符在提交前提示；Main 在 journal 写入前复核同一有限非秘密声明，冷重开保留完整原操作且不重放。布局继续使用透明420px固定侧栏，内容独立滚动、底部操作固定，错误保留在所属侧栏。安排任务使用静态分隔线，设置表单沿 Grid 固定宽度；不提供拖拽或键盘调宽。提供商和 MCP 重复新增保留现有编辑器、草稿和滚动位置；显式重开既有配置仍重新核对快照。浏览器14组深浅／宽窄窗口回归通过，证据归`.cache/mcp-feedback-7mB35S`。
+
+Main 的 MCP 输入校验只依赖 `@kite-ai/agent/mcp-entry` 独立纯校验入口，避免 config barrel 将 JSONC UMD 的动态相对 require 带入 Node CJS。2026-11-01 Windows／Node24.15.0 的[实际 Node 构建回归](test/isolated/native-mcp-input-node.test.ts)先复现 `Cannot find module './impl/format'`，改用独立入口后1项6断言通过。完整 Main／preload／renderer 另构建并在独立临时 Profile 以 Electron44.3.0 启动，实际观察新对话、设置、MCP 读取与新增表单，无启动错误弹窗；制品归`.cache/mcp-native-startup-1cc15940-af0c-44da-b04e-396f35eafdd7`。此证据不代表正式安装发布资格。
+
+本次实际窗口检查后，关闭按钮按现有行为隐藏到托盘；测试 Main 随后单独终止，其准确所属 Service 经父 EOF 退出，四个 Electron PID 与 Service PID均确认不存在。此项只证明启动与界面加载，不计为正常退出链资格。
+
+2026-11-01 Windows 新增表单验证：页面55项／322断言、Main13项／100断言通过；生产样式的8项深浅主题／500与1280px场景通过，覆盖完整两类字段、参数增删与顺序、独立草稿、公共控件样式、长表单滚动、受理后的锁定和完成收栏，以及既有失败提示归属。证据归`.cache/mcp-feedback-htJEQb/report.json`，另逐步观察了输入、切换、滚动、受理与完成全过程。真实 Windows Node／官方 memory STDIO 与 HTTP 变量认证的结果和未取得范围归[Service owner](../service/README.md#自定义-mcp-表单与启动配置)。
+
+[MCP 反馈投影](src/native-mcp-feedback.ts)集中维护有限错误文案与确认失败的合并。同一 Store／来源的失败只保留一条当前摘要，新的确认成功不继续展示旧失败；主进程记录顺序与状态保持权威，本地回执只补尚未送达的 ID，不按 UUID 推断时间。关闭摘要只顺序清除其中准确的 confirmed failed 原 ID；未知、旧协议或不可关联记录不并入失败组，仍各自保留查询／取消资格。HTTP 提示使用 Service 从真实响应状态码投影的有限错误类别，网络与认证错误按已知事实给出下一步，不按域名覆盖实际错误；未知原因不编造状态码、不显示原始响应文本。
+
+[服务菜单](src/native-mcp-components.tsx)只在 ready／connecting 显示“断开连接”；普通 failed 不显示断开。outcome_unknown、失效旧配置或仍持有旧目录 generation 时显示“清理连接”，继续提交原 disconnect 操作，配置损坏时的独立停止资格保留。失效配置的“重试连接”使用 reconnect，以先释放旧 owner 再建立当前连接，不反复提交会返回 connection_exists 的 connect。
+
+2026-11-01 错误反馈与菜单调整：页面整文件53项317断言通过，核不同域名遵循相同 HTTP／网络错误、未知原因不按地址猜测、重复失败合并与批量关闭、成功后的旧反馈清理、未知原记录保持独立、普通失败没有断开入口及旧 owner 清理／重连。[失败浏览器场景](test/session-shell-geometry.fixture.ts)在深浅主题、500／1280px下4项通过，核提示位于内容下方，出现和关闭时标题及连接按钮保持原位；重复重试仅一条提示，关闭提示后旧失败不重新出现，关闭侧栏后错误不转移到列表或其他服务，重新打开所属服务仍可查看和关闭；菜单只有当前适用项。证据归`.cache/mcp-feedback-YHw3kf/report.json`。逐步观察核对重试前状态、收到404后的下方提示、重复重试及关闭后的恢复，并核侧栏关闭、服务切换、重新打开与关闭提示的全过程。新增表单校验提示位于内容之后、底部按钮之前的验证沿用前次结果。Desktop 类型、Biome与文档检查通过；Service 状态码分类、测试归属与边界未变，复用前次验证。Service 回归与现有 Windows Run／Job 超时的范围归[Service owner](../service/README.md#http-oauth-与原认证结果)，不将隔离 UI 数据作为远端协议或正式发行证据。
+
+MCP 与 Skills 的目录行共用 [NativeSettingsListRow](src/native-settings-list-row.tsx)，在 [设置样式](src/native-provider-settings.css)集中维护主标签／摘要／状态／尾部操作的对齐、窄窗换行、透明选中态、左侧2×16px短标记和单条分隔线。来源按钮与尾部开关是并列控件，行与内部按钮保持透明，行本身拥有选中标记与分隔线，内部按钮无边框；不使用 MCP 独有的字符图标和列表布局。工具参数展开沿独立的工具条目样式，不复用目录导航行的边框与选中规则。
+
+2026-11-01 列表与操作反馈调整后的 MCP／Skills 两整文件44项359断言通过；Desktop 类型、定向 Biome、文档与测试归属检查通过。生产样式的6项深浅主题／500、800、1280px场景核对两页透明选中态与短标记、原控件取消、无普通处理中记录卡、留白、字号、单分隔线及无横向溢出，工具展开行没有标题底边；证据归`.cache/mcp-polish-DTdWo4/report.json`。逐步操作确认主列表开关不打开详情，关闭详情恢复原行焦点，工具可展开阅读；启用前／中／后没有操作记录卡插入，登录取消沿原按钮提供。仅调整展示与组件复用，原全局身份、授权、连接和未决操作恢复契约保持，认证后端与正式发行资格沿用下面原范围。
+
+普通设置不展示已确认成功／取消的提交历史、command/action/Store/Session/association 元数据或原 fact/认证/source DTO 的 JSON。真实失败继续给出可读提示并允许清除准确终态记录，热 pending 自动核对并可取消，未知／冷记录保留“查看结果”和必要取消；数据绑定、精确原申请查询与取消资格不变。连接、来源与认证详情只展示操作所需的可读字段，删除复核保留用户决定所需的名称、地址或启动命令。
+
+MCP 列表行只展示服务摘要、连接状态和公共 Switch，点击服务进入默认420px的共享详情侧栏。新增表单直接提交校验后的有限操作，处理中锁定草稿；新增／删除即使先受理再完成，也只关闭对应且仍打开的同一侧栏，迟到回执不能关闭后来打开的其他详情；详情根据当前连接和登录资格只提供适用的主操作，ready 时自动只读加载工具。[展示组件](src/native-mcp-components.tsx)集中维护工具目录、参数展开和公共 DropdownMenu：连接维护、授权维护及删除按当前事实进入“更多”，删除／本机退出／远端撤销使用不同说明和确认，凭据有效期编辑按需展开。普通 hot submitting／pending 不生成操作记录卡；登录／连接的原按钮变为准确原申请的取消，新增沿原底栏取消，其他服务操作的取消收进“更多”，配置不可用时的必要取消仍留在恢复区。未知和失败仅用无底色的短行放在所属侧栏的主要内容之后、底部操作区之前，错误出现和关闭不挤动服务标题与连接按钮；确认失败只在所属侧栏打开时显示，关闭侧栏不清除原记录，也不转移到列表或其他服务；未决原操作在所属侧栏未打开时仍保留列表恢复入口。终态关闭调用原 clear，不重放业务操作。菜单 Portal 留在设置 Dialog 内，Escape 先关闭菜单，取消确认回到“更多”；关闭详情仍回到原服务行。读取失败使旧观察失效，不能据此编辑或自动读工具；切换来源、刷新观察与关闭侧栏继续隔离迟到工具响应。
 
 [设置页](src/native-mcp-settings.tsx)和新的 [Main manager](electron/user-mcp-settings.ts)消费 `user_mcp_settings`。身份只有实际 Store、认证 subject 与连接 generation，不依赖 Session／Workspace、trust 或对话目录。两个全局页在空 Store 可直接读取，普通会话选择和当前工作区移除不释放其读租约；全局身份替换、页面关闭与连接结束仍废止迟到读取。MCP 只列 user source，页面无范围切换、项目批准或项目配置行。用户从统一列表管理来源、启停、认证与连接，在共享最右侧 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)新增服务或阅读工具参数；参数只显示实际已取得的 descriptor，不调用远端工具。
 
 新增仅收无凭据 HTTP URL 或绝对 stdio command，高级声明由配置 owner 管理。Main 固定 read-set 与本次原操作，renderer 仅提供有限操作和观察 ID。Service 全局 owner 有自己的 HostMutation 与真实资源生命周期，不借用 Session Action 或建立隐藏 Workspace／Session；它不执行工具。认证、连接与真正 Agent Run 的工具授权各自独立，401 不自动 Login 或重放 RPC。关闭详情清理未提交复核和工具读取，关闭分类只释放读取，不取消已提交全局操作；取消必须明确针对原 operation ID。
+
+[MCP 页面](src/native-mcp-settings.tsx)对当前 Store 中仍由热 Main 确认的 `pending` 原操作每750ms只读核对一次，终态后刷新登录资格及连接事实；查询按稳定的原ID调度，每次仍在处理的回执也重新安排下一次核对，避免快速响应将 busy 切换合批后丢失后续计时。其他状态更新不反复推迟计时，关闭分类或身份替换撤销旧查询。`submitting`、`outcome_unknown`、不可关联和旧协议记录不参与自动查询，冷 Main 继续把未决记录投影为未知；这些记录只由“查看结果”核对，不重发操作。已确认的401要求登录、重新认证和超时回执映射为可读提示；登录完成仅更新认证状态，建立连接仍需用户明确操作。即时失败同样刷新事实，避免登录资格直到手动刷新才出现。
+
+2026-11-01 的 MCP 产品界面调整由[页面回归](test/native-mcp-settings.test.tsx)28项194断言与 [Main 回归](test/isolated/native-user-mcp-main.test.ts)12项93断言核对：直接添加、状态主操作、上下文确认、原终态清除、连续 pending、未知结果、取消、读失败恢复及迟到工具隔离。[隔离桥](test/mcp-settings-bridge.fixture.ts)只使用内存状态，[生产样式浏览器场景](test/session-shell-geometry.fixture.ts)在 Windows Chrome 深浅主题、500／800／1280px 下完成6项 MCP 检查，覆盖登录进行中、取消／重试、完成后明确连接、自动工具读取、菜单边界、双击与 Escape；共享侧栏另外10项布局场景通过。证据分别位于`.cache/mcp-product-A7Cxds/report.json`和`.cache/mcp-product-UjTLED/report.json`，最终样式及异步新增／删除的处理中与收尾以前者为准；刷新失败恢复和迟到写入结果不关闭其他侧栏由页面 DOM 回归核对。逐步观察确认单次添加后列表与焦点恢复、热登录状态更新、独立连接和工具展示，无新的生产诊断入口。本轮不重复认证后端或系统浏览器资格，下面原生官方 OAuth 链路证据仍按原范围保留。
+
+2026-11-01 Windows x64／Bun1.4.3／Electron44.3.0，独立development Native从空列表新增官方SDK1.29.0的`simpleStreamableHttp --oauth --oauth-strict`：401后自动开放登录，内嵌浏览器经官方演示AS自动授权、真实回跳和PKCE换码，默认OS Vault保存成功，再明确连接到ready并读取7项工具。fresh Vault实际读取1466字节UTF-8／2932字节UTF-16材料；修复前同案例在原生2560字节限制处publication unknown，原失败记录保留。当前Profile的Add／Login／Connect均applied，401原申请failed；Workspace／Session／Run均0。原生分段取舍及容量／故障断言归[配置 owner](../../packages/agent/src/config/README.md#同-vault-的-owned-oauth-材料)。页面／Main／配置及OAuth provider共六文件73项530断言、Agent／Desktop类型、相关Biome、文档、边界与测试归属检查通过。登录成功后旧认证提示的清理另由同组件的隔离生产样式页面逐步核对；原生链路与该呈现检查不合并成系统浏览器资格。有限原操作、fresh存在及服务端计数归`.cache/mcp-auth-windows-20261101/official-runtime-fixed/official-flow-summary.json`。最终Native正常退出0，fresh后端确认测试owned材料已删除，所属进程无残留，清理事实归同测试根的`cleanup.json`。官方示例仅将localhost示例URL改为127.0.0.1；隔离构建固定HTTP回环和测试开页交接，`testDiagnostics:false`，未修改生产HTTPS／默认opener、测试中无外部账号。不取得Windows系统默认Chrome全链、外部AS或正式安装资格。
 
 原 [Session manager](electron/mcp-settings.ts)及旧闭合 codec 保留历史申请恢复。DB7 同一 `mcp_intents` 表接受显式 version 2 全局 request，保 Store／subject、完整非秘密 operation、read-set 和摘要，version 1 的 Session 请求格式保持。容量、FULL 保存、未知不淘汰与冷行无热 POST 权保持；冷启动不自动查询或重发，明确“查看结果”只按原 ID 读取。可确证 user 的旧未知操作继续阻断冲突修改，旧项目配置不进入全局列表；无法判定来源的历史连接只显示原结果查询通知，不伪装成用户配置。确证终态不被后来 pending／unknown 降级，写文件或停止结果不确定继续保留 unknown。
 

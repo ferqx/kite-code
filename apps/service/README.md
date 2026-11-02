@@ -668,6 +668,28 @@ Native `file_recovery` 仅在实际唯一 `builtin.files` 登记 `files.checkpoi
 
 ## HTTP OAuth 与原认证结果
 
+2026-11-02 Windows x64／Bun1.4.3，按用户最新要求以 MCP 主流程收尾：添加、实际 OAuth 协议与回跳、独立审批、连接／重连、工具调用、取消／停止和冷启动／备份恢复沿本机隔离 Service、Node 与真实 PTY 的已完成完整文件验证。原37份失败文件均已取得定向完整文件通过证据。修复包括自有私有 TEMP、普通 Workspace scope 发布、Node Windows access 资产、真实 ACL／reparse 反例和平台原生进程证据；测试等待沿实测成本设置，未改产品时限、工具／协议版本或原权限门禁。
+
+扩展清单第一轮执行96／126文件，94通过／2失败，保留于`.cache/mcp-regression-fixes-20261101/complete-final`。来源增删 PTY 把历史正文中的 saved 误当成当前查询完成，已改为准确原申请／Store／Session 的面板终态等待，并整文件复验通过；冷连接夹具的 Windows 制品构建等待由30秒对齐为120秒，业务与清理期限保持，原冷连接主流程的完整通过证据继续适用。第二轮完成19文件／0失败，含该来源增删和工具完整元数据的暖冷 PTY；原输入、日志和过程帧保留于`.cache/mcp-regression-fixes-20261101/complete-verified`。用户随后明确不再扩大测试，两轮协调进程已停止，自有子进程退出确认；完整126文件未完成，不作为全量或其他平台／发行资格。清屏保留导出输入的实际修复与原合同核对归[TUI owner](../../packages/ui/src/tui/README.md)。
+
+### 自定义 MCP 表单与启动配置
+
+用户设置的 Add 支持闭合结构化声明：STDIO 的 `command`、`args`、`env`、`envPassthrough`、`cwd`；HTTP 的 `url`、`bearerTokenEnv`、`headers`、`headersFromEnv`。Main、Service 和 SQL HostMutation 复核同一[非秘密声明语法](../../packages/agent/src/config/mcp-entry.ts)，请求和冷回执保原字段与摘要，不增加公开协议／工具版本。普通 Session Source Add 工具的既有 basic 输入保持。实际发布仍经完整 Source CAS、准确 creation marker 与原 HostMutation 回执。
+
+[启动配置](src/mcp-launch-configuration.ts)仅在保存时将明确命令名解析为宿主 PATH 中的准确程序，忽略当前目录和相对 PATH 项，并展开 `~/` 工作目录；不执行命令或安装依赖。Windows `npx`／`npm` 的已知安装布局转换为准确 Node `.exe` 与 CLI 脚本 argv，任意批处理包装器继续拒绝；底层 port 仍只接收绝对程序和独立 argv。设置中的 STDIO 初始化期限为60秒，HTTP保持10秒；原取消和已停止／未知资源语义不变，SDK request timeout 映射为有限连接超时提示。
+
+环境引用只对用户来源开放；项目条目不能借普通来源批准读取宿主环境。读取列表不读取这些变量或 Vault；HTTP 的 `environment` 策略只说明引用已配置，不冒充已登录，也不自动获得 OAuth 资格。原连接经过准确准入及 freshness 检查后，私有 port 才按所列名称读取：STDIO 除显式变量外只加入固定平台运行所需 PATH、HOME／USERPROFILE、临时目录与 Windows 系统目录变量；HTTP 只解析明确 Bearer／标头名称，协议保留标头与重复键拒绝。敏感 literal 键、proxy／loader/runtime 注入名仍拒绝，环境读取到的值不进入配置、SQL、journal、registry或普通结果。变量缺失保持零对应 RPC，可在修正后显式重试；授权撤销与 OS 环境管理不混用。
+
+2026-11-01 Windows x64／Bun1.4.3／Node24.15.0：[实际 STDIO](test/isolated/user-mcp-stdio-windows.test.ts)通过独立 Node MCP 的完整 argv（空格／引号）、cwd、显式非秘密变量和私有变量传递、发现及断开；官方 npm `@modelcontextprotocol/server-memory` 通过 `npx -y` 从隔离缓存首次安装，完成协议握手、取得 `read_graph` 工具及原 Job 停止。两场景共13断言。HTTP 新增2项14断言通过，核真实 Bearer／标头、零读取列表、变量值不入配置／SQL／响应、缺失值零 RPC与重试恢复、401不打开浏览器。启动器路径专项2项通过，HTTP port与OAuth资源回归10项81断言通过，Windows port3项通过。UI证据归[Desktop owner](../desktop/README.md#native-mcp-完整设置)。
+
+2026-11-01 Windows x64／Bun1.4.3 后续复验：用户管理完整28项317断言通过，包含 credential／OAuth 各自两个 Workspace 的真实连接 Job、独立 permission gate、准确原凭据和零远程工具调用。实测每份 Workspace 的完整原生 Source 检查与连接约12–14秒；夹具的 Windows waiter 改为30秒、双 Workspace 整例90秒，其他平台原5秒／20秒保持，未删除或放宽业务断言。Source 两文件30项302断言通过：采用原生私有 ACL／junction 夹具，保硬链接拒绝；Windows 根替换被真实锁句柄提前拒绝，文件字节保持；发布后故障在平台实际执行的校验／sync窗口注入。原22／7基线仍归`.cache/mcp-custom-forms-baseline`。这取得本机上述 Source／Run 资格，不代替其他平台或正式安装发布；完整 MCP inventory 的其他结果单独按本轮实际记录核对。
+
+同轮完整 MCP 清单由当前八 workspace、原 TUI inventory 的 MCP 路径／标题及相邻凭据用例选取，按原 `runTestJob`、Windows 私有 Bun、隔离、完整文件和原预算串行执行125文件，86通过／39失败。随后修复 Native Main 夹具未关闭自有 Workspace 协调器的 `EBUSY`，以及 schema 启动夹具未规范 Windows 路径分隔符的等待停滞；两份完整文件复验通过，加新增 Node Main 校验构建回归，当前126文件89通过／37失败。原清单、日志、原结果与定向复验保留于`.cache/mcp-regression-20261101`。未通过项仍包含源码外制品 ACL／维护资源、其他 Source／child／metadata 等待、POSIX／Linux 夹具和 TUI／CI断言，未取得完整 Windows MCP 资格。私有 TEMP 对照仅确认制品父目录门禁可继续推进，随后仍被原系统程序输入 ACL 门禁拒绝；未修改系统权限、放宽门禁或把此范围当作通过。
+
+用户设置 owner 的有限失败回执保留 SDK `StreamableHTTPError` 的状态类别：404 接口不存在、400／405／406／415 不接受当前端点请求、401 未认证、403 拒绝访问、408／504 超时、429 限流及其他5xx服务错误。只转换为有限 MCP code，不返回 SDK message、远端响应体或头；现有字符串原因保持，未知类型仍用安全回退。[管理器回归](test/isolated/user-mcp-management.test.ts)通过实际回环 HTTP 响应核对404／405／403／429／503、秘密响应体不进入回执，以及失败清理后重试不出现旧连接占用。连接失败只有在所属 transport 停止得到确认后才投影 failed；停止未知仍保 outcome_unknown，与普通失败分开。
+
+2026-11-01 Windows／Bun1.4.3，`bun test ./apps/service/test/isolated/user-mcp-management.test.ts --timeout 20000`运行26项：24项通过，含5项新增真实回环 HTTP 错误、元数据、精确取消、停止／配置失效清理及 OAuth 登录／刷新／清除／撤销。隔离夹具的 Windows 正常授权期限由1秒改为有界5秒；原1秒条件在未修改的 HEAD 管理器中同样返回 `mcp_oauth_timeout`，生产授权期限未变。两项 real connection Jobs 分别在 credential／oauth 的 `connect-one` 上触及原5000ms `waitForCommand` 期限；替换回 HEAD 管理器、保留当前夹具后两项同样超时，基线输入归`.cache/mcp-feedback-baseline`。本轮没有改 Agent Run／Job 路径或放宽该断言，这两项 Windows 资格仍未取得；有限设置错误分类与明确停止的上述24项结果不替代它们。
+
 Native 用户级设置使用独立 [user-mcp-management](src/user-mcp-management.ts) owner 与 `user_mcp_settings` capability。`GET/POST /v1/config/user/mcp` 读取和管理用户来源；`GET /v1/config/user/mcp/operations/:commandId` 只查原操作，`POST .../:commandId/cancel` 取消准确原操作；`GET /v1/config/user/mcp/tools` 读取当前用户连接的固定 generation 工具 metadata。闭合 schema 拒绝 Session、Workspace、范围切换及秘密。请求绑定真实 Store／认证 subject，来源固定 user，不读取项目配置、Workspace 或 trust，也不创建隐式实体。原 Session MCP Actions 与运行时项目来源保留。
 
 该 owner 管理来源增删／启停、已有引用绑定、认证状态与四项 OAuth 操作，以及设置连接／刷新／重连／断开。全局连接只允许 initialize、工具目录和必要协议控制，不执行 `tools/call`、资源读取或 Task。HTTP 复用正式网络边界，stdio 使用明确 user binding 的原 guardian；不是伪造 Session／Execution。服务结束时等待已启动操作并停止准确所属连接，停止未知保 unknown。设置页关闭仅释放 metadata reader，不停止连接或取消操作。正常有限操作直接返回结算结果，长认证按原 ID 查询与取消。

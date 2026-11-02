@@ -1,5 +1,6 @@
 import type { CredentialBackend } from './credentials';
 import { ConfigurationError } from './types';
+import { windowsOwnedCredential } from './windows-owned-credential';
 export interface NativeCredentialEntry {
   setPassword(secret: string): Promise<void>;
   getPassword(): Promise<string | undefined | null>;
@@ -27,7 +28,13 @@ export function createOsCredentialBackend(options: {
   const rawEntry = async (id: string) => {
     if (!/^credential:[0-9a-f-]{36}$/.test(id) && !/^owned-credential:[a-f0-9]{64}$/.test(id))
       throw new ConfigurationError('credential_unavailable');
-    return factory(options.service, `${options.accountNamespace}/${id}`);
+    const account = `${options.accountNamespace}/${id}`;
+    const native = await factory(options.service, account);
+    return process.platform === 'win32' && id.startsWith('owned-credential:')
+      ? windowsOwnedCredential(native, async (index) =>
+          factory(options.service, `${account}/part-${index}`),
+        )
+      : native;
   };
   const entry = async (id: string) => {
     try {

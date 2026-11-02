@@ -11,11 +11,29 @@ import type {
   NativeRequest,
   NativeSelection,
 } from '../src/native-bridge';
-import { NativeProviderSettings } from '../src/native-provider-settings';
+import { prepareDesktopDom } from './native-page-dom.fixture';
 import { memoryPrivateData } from './private-data.fixture';
 
+const bootstrap = new JSDOM('<div></div>');
+const bootstrapPrior = {
+  window: globalThis.window,
+  document: globalThis.document,
+  navigator: globalThis.navigator,
+};
+Object.assign(globalThis, {
+  window: bootstrap.window,
+  document: bootstrap.window.document,
+  navigator: bootstrap.window.navigator,
+});
+const { NativeProviderSettings } = await import('../src/native-provider-settings');
+Object.assign(globalThis, bootstrapPrior);
+bootstrap.window.close();
+
 function fixture() {
-  const dom = new JSDOM('<div id="settings"><main id="root"></main><div id="panel"></div></div>');
+  const dom = new JSDOM('<div id="settings"><main id="root"></main><div id="panel"></div></div>', {
+    pretendToBeVisual: true,
+  });
+  const restoreDom = prepareDesktopDom(dom);
   // React's import-time event detection sees no browser in Bun; JSDOM has no legacy input-event hooks.
   Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {} });
   const prior = {
@@ -37,12 +55,35 @@ function fixture() {
     [...element.querySelectorAll('button')].find(
       (entry) => entry.textContent === name || entry.getAttribute('aria-label') === name,
     )!;
-  const field = <T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+  const field = <
+    T extends HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement,
+  >(
     name: string,
   ) => element.querySelector<T>(`[aria-label="${name}"]`)!;
   async function edit(name: string, value: string) {
+    const control = field(name);
+    if (control?.getAttribute('role') === 'combobox') {
+      const option = [...control.closest('label')!.querySelectorAll('option')].find(
+        (option) => option.value === value,
+      )!;
+      const label = option.textContent;
+      await act(async () =>
+        control.dispatchEvent(
+          new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+        ),
+      );
+      const item = [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (item) => item.textContent === label,
+      )!;
+      await act(async () =>
+        item.dispatchEvent(
+          new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        ),
+      );
+      return;
+    }
     await act(async () => {
-      const input = field(name);
+      const input = field<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(name);
       input.value = value;
       input.dispatchEvent(
         new dom.window.Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }),
@@ -69,10 +110,11 @@ function fixture() {
       };
       const preset = presets[name];
       if (!preset) throw Error(`Unknown preset: ${name}`);
-      if (field('服务商预设').value !== preset) await edit('服务商预设', preset);
+      await edit('服务商预设', preset);
     },
     async close() {
       await act(async () => root.unmount());
+      restoreDom();
       Object.assign(globalThis, prior);
       dom.window.close();
     },
@@ -187,9 +229,11 @@ test('Provider settings show the automatic local Codex source without manual con
     await f.click('刷新提供商配置');
     expect(f.element.contains(row)).toBe(true);
     await f.click('新增提供商');
-    expect(f.field<HTMLSelectElement>('服务商预设').value).toBe('openai');
+    expect(f.field('服务商预设').textContent).toBe('OpenAI');
     expect(
-      [...f.field<HTMLSelectElement>('服务商预设').options].map((option) => option.value),
+      [...f.field('服务商预设').closest('label')!.querySelectorAll('option')].map(
+        (option) => option.value,
+      ),
     ).toEqual(['openai', 'deepseek', 'compatible', 'ollama']);
     expect(calls.some((input) => input.method === 'settings.providers.save')).toBe(false);
   } finally {
@@ -261,7 +305,7 @@ test('Provider form validates inline with focus, clears switched drafts and send
     expect(f.field('服务地址').value).toBe('https://api.deepseek.com');
     expect(f.field('API 协议')).toBeNull();
     await f.edit('服务商预设', 'openai');
-    expect(f.field('API 协议').value).toBe('chat-completions');
+    expect(f.field('API 协议').textContent).toBe('Chat Completions');
     await f.edit('API key', 'saved-secret');
     await f.edit('模型名称', 'exact-a\nexact-b');
     await f.click('保存提供商配置');
@@ -348,10 +392,10 @@ test('Provider keeps distinct endpoint connection intent, discovery uses empty n
     );
     await f.click('编辑 OpenAI-compatible 1');
     expect(f.element.querySelectorAll('.provider-instance')).toHaveLength(2);
-    expect(f.field('凭据处理').value).toBe('keep');
+    expect(f.field('凭据处理').textContent).toBe('保留已保存凭据');
     await f.click('编辑 OpenAI-compatible 2');
     expect(f.field('服务地址').value).toBe('https://two.invalid/v1');
-    expect(f.field('凭据处理').value).toBe('none');
+    expect(f.field('凭据处理').textContent).toBe('不使用凭据');
     await f.edit('模型名称', '');
     await f.click('保存提供商配置');
     expect(calls.filter((input) => input.method === 'settings.providers.save')).toEqual([
@@ -507,17 +551,17 @@ test('Provider protocol defaults legacy connections, survives repeated save and 
       ),
     );
     await f.click('编辑 OpenAI-compatible 1');
-    expect(f.field('API 协议').value).toBe('chat-completions');
+    expect(f.field('API 协议').textContent).toBe('Chat Completions');
     expect(f.main.querySelector('.provider-instance')!.textContent).toContain('Chat Completions');
     await f.click('编辑 OpenAI-compatible 3');
-    expect(f.field('API 协议').value).toBe('responses');
+    expect(f.field('API 协议').textContent).toBe('Responses');
     expect(f.field('模型名称').value).toBe('responses-model');
     await f.click('保存提供商配置');
     expect(f.panelHost.querySelector('form')).toBeNull();
     await f.click('编辑 OpenAI-compatible 1');
     await f.click('编辑 OpenAI-compatible 3');
     expect(f.field('提供商名称').value).toBe('OpenAI-compatible 3');
-    expect(f.field('API 协议').value).toBe('responses');
+    expect(f.field('API 协议').textContent).toBe('Responses');
     await f.click('保存提供商配置');
     expect(saved.map((entry) => entry.operation.connectionId)).toEqual([
       'responses-one',
@@ -526,9 +570,9 @@ test('Provider protocol defaults legacy connections, survives repeated save and 
     expect(saved.every((entry) => entry.operation.protocol === 'responses')).toBe(true);
     await f.click('编辑 OpenAI-compatible 1');
     await f.click('编辑 OpenAI-compatible 3');
-    expect(f.field('API 协议').value).toBe('responses');
+    expect(f.field('API 协议').textContent).toBe('Responses');
     await f.addPreset('自定义服务商');
-    expect(f.field('API 协议').value).toBe('chat-completions');
+    expect(f.field('API 协议').textContent).toBe('Chat Completions');
     await f.edit('API 协议', 'responses');
     await f.edit('服务地址', 'https://new.invalid/v1');
     await f.edit('模型名称', 'new-model');
@@ -546,7 +590,7 @@ test('Provider protocol defaults legacy connections, survives repeated save and 
     await f.click('保存提供商配置');
     expect(saved.at(-1)!.operation.protocol).toBeUndefined();
     await f.addPreset('OpenAI');
-    expect(f.field('API 协议').value).toBe('chat-completions');
+    expect(f.field('API 协议').textContent).toBe('Chat Completions');
     await f.edit('API 协议', 'responses');
     await f.edit('服务地址', 'invalid');
     await f.click('保存提供商配置');
@@ -556,7 +600,7 @@ test('Provider protocol defaults legacy connections, survives repeated save and 
     await f.click('保存提供商配置');
     expect(saved).toHaveLength(4);
     expect(f.dom.window.document.activeElement).toBe(f.field('API key'));
-    expect(f.field('API 协议').value).toBe('responses');
+    expect(f.field('API 协议').textContent).toBe('Responses');
   } finally {
     await f.close();
   }
@@ -597,7 +641,7 @@ test('Provider instance rows expose configuration state and selected editing, wi
         f.dom.window.document.getElementById(section.getAttribute('aria-labelledby')!)?.textContent,
       ).toBeTruthy();
     }
-    expect(f.field('凭据处理').value).toBe('keep');
+    expect(f.field('凭据处理').textContent).toBe('保留已保存凭据');
     expect(f.field('API key')).toBeNull();
     await f.edit('凭据处理', 'replace');
     expect(f.field<HTMLInputElement>('API key').type).toBe('password');
@@ -619,7 +663,7 @@ test('Provider instance rows expose configuration state and selected editing, wi
     expect(f.button('编辑 OpenAI-compatible 1').getAttribute('aria-expanded')).toBe('false');
     expect(f.button('新增提供商').getAttribute('aria-expanded')).toBe('true');
     expect(f.field('API 协议')).toBeNull();
-    expect(f.field('凭据处理').value).toBe('none');
+    expect(f.field('凭据处理').textContent).toBe('不使用凭据');
     await f.click('关闭');
     expect(f.dom.window.document.activeElement === f.button('新增提供商')).toBe(true);
     expect(f.element.querySelector('form')).toBeNull();
@@ -811,7 +855,7 @@ test('Provider successful save refreshes the list, closes the rail and restores 
     expect(f.main.textContent).not.toContain('已保存提供商配置。');
     expect(f.main.textContent).not.toContain('applied-save');
     await f.click('编辑 OpenAI');
-    expect(f.field('凭据处理').value).toBe('keep');
+    expect(f.field('凭据处理').textContent).toBe('保留已保存凭据');
     expect(f.field('API key')).toBeNull();
     expect(f.field('模型名称').value).toBe('saved-model');
   } finally {
@@ -883,6 +927,17 @@ for (const pendingStage of ['save', 'after-save read'] as const) {
     test(`Provider ${pendingStage} completion cannot close or rebind a ${nextProvider}-provider editor opened meanwhile`, async () => {
       const f = fixture(),
         refreshed = structuredClone(facts);
+      const initial = structuredClone(facts);
+      const other = {
+        id: 'deepseek-connection',
+        name: 'DeepSeek',
+        baseURL: 'https://api.deepseek.com',
+        hasCredential: false,
+        modelNames: [],
+        canWrite: true,
+      };
+      initial.providers[1]!.connections.push(other);
+      refreshed.providers[1]!.connections.push(other);
       let reads = 0,
         applied = 0;
       let submitted!: NativeProviderSubmission;
@@ -896,7 +951,7 @@ for (const pendingStage of ['save', 'after-save read'] as const) {
               return new Promise<NativeProviderSettingsFacts>((resolve) => {
                 releaseRead = resolve;
               });
-            return structuredClone(facts);
+            return structuredClone(initial);
           }
           if (input.method === 'settings.providers.save') {
             Object.assign(refreshed.providers[2]!.connections[0]!, {
@@ -938,9 +993,8 @@ for (const pendingStage of ['save', 'after-save read'] as const) {
         await f.click('保存提供商配置');
         expect(f.button('正在保存…').disabled).toBe(true);
         expect(reads).toBe(pendingStage === 'save' ? 1 : 2);
-        const trigger = nextProvider === 'same' ? '编辑 OpenAI-compatible 1' : '新增提供商';
-        if (nextProvider === 'same') await f.click(trigger);
-        else await f.addPreset('DeepSeek');
+        const trigger = nextProvider === 'same' ? '编辑 OpenAI-compatible 1' : '编辑 DeepSeek';
+        await f.click(trigger);
         expect(f.field('模型名称').value).toBe(nextProvider === 'same' ? 'remote-one' : '');
         await act(async () => {
           if (pendingStage === 'save') releaseSave(submitted);
@@ -957,8 +1011,8 @@ for (const pendingStage of ['save', 'after-save read'] as const) {
         expect(f.field('模型名称').value).toBe(nextProvider === 'same' ? 'remote-one' : '');
         if (nextProvider === 'same') {
           expect(f.field('提供商名称').value).toBe('OpenAI-compatible 1');
-          expect(f.field('API 协议').value).toBe('chat-completions');
-          expect(f.field('凭据处理').value).toBe('keep');
+          expect(f.field('API 协议').textContent).toBe('Chat Completions');
+          expect(f.field('凭据处理').textContent).toBe('保留已保存凭据');
         } else {
           expect(f.field('API key').value).toBe('');
           expect(f.field('提供商名称').value).toBe('DeepSeek');
@@ -969,7 +1023,7 @@ for (const pendingStage of ['save', 'after-save read'] as const) {
           expect(f.panelHost.textContent).toContain('已重新读取配置，当前草稿已保留');
         expect(f.panelHost.textContent).not.toContain('late-applied-save');
         expect(f.panelHost.textContent).not.toContain('已保存提供商配置。');
-        expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(2);
+        expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(3);
         await f.click('关闭');
         expect(f.main.textContent).not.toContain('late-applied-save');
       } finally {
@@ -1035,6 +1089,7 @@ test('Provider closing an active refresh cannot restore the old write observatio
 test('Provider hides submission history and technical identities, but unknown stays queryable across every editor', async () => {
   const f = fixture(),
     calls: NativeRequest[] = [];
+  let completeLookup = false;
   const applied: NativeProviderSubmission = {
     kind: 'settings.providers.submission',
     commandId: '7bd966f8-511a-4d69-b8b5-1d490a8356dd',
@@ -1085,7 +1140,8 @@ test('Provider hides submission history and technical identities, but unknown st
     request: async (input) => {
       calls.push(input);
       if (input.method === 'settings.providers.read') return structuredClone(facts);
-      if (input.method === 'settings.providers.lookup') return { ...unknown, phase: 'applied' };
+      if (input.method === 'settings.providers.lookup')
+        return { ...unknown, phase: completeLookup ? 'applied' : 'unknown' };
       return null;
     },
   };
@@ -1147,10 +1203,14 @@ test('Provider hides submission history and technical identities, but unknown st
     await f.click('关闭');
     assertUnknown(f.main);
     await f.addPreset('DeepSeek');
+    completeLookup = true;
     await f.click('查看结果');
-    expect(calls.filter((call) => call.method === 'settings.providers.lookup')).toEqual([
-      { method: 'settings.providers.lookup', generation: 1, commandId: unknown.commandId },
-    ]);
+    const lookups = calls.filter((call) => call.method === 'settings.providers.lookup');
+    expect(lookups.length).toBeGreaterThan(0);
+    // Background recovery may also inspect the original while switching editors.
+    expect(
+      lookups.every((call) => call.generation === 1 && call.commandId === unknown.commandId),
+    ).toBe(true);
     expect(f.element.querySelector('[aria-label="待确认的提供商更改"]')).toBeNull();
     expect(f.button('保存提供商配置').disabled).toBe(false);
     assertNoHistory();
@@ -1162,7 +1222,7 @@ test('Provider hides submission history and technical identities, but unknown st
   }
 });
 
-test('Empty provider list opens the actual Add form with a native preset select that resets each draft', async () => {
+test('Empty provider list opens the actual Add form with a shared preset select that resets each draft', async () => {
   const f = fixture(),
     state = structuredClone(facts),
     calls: NativeRequest[] = [];
@@ -1191,11 +1251,17 @@ test('Empty provider list opens the actual Add form with a native preset select 
       expect(f.main.textContent).not.toContain(label);
     await f.click('添加第一个提供商');
     const form = f.panelHost.querySelector('form');
-    const select = f.field<HTMLSelectElement>('服务商预设');
+    const select = f.field<HTMLButtonElement>('服务商预设');
     expect(form).not.toBeNull();
-    expect(select.tagName).toBe('SELECT');
-    expect(select.value).toBe('openai');
-    expect([...select.options].map((option) => [option.value, option.textContent])).toEqual([
+    expect(select.getAttribute('role')).toBe('combobox');
+    expect(select.dataset.slot).toBe('select-trigger');
+    expect(select.textContent).toBe('OpenAI');
+    expect(
+      [...select.closest('label')!.querySelectorAll('option')].map((option) => [
+        option.value,
+        option.textContent,
+      ]),
+    ).toEqual([
       ['openai', 'OpenAI'],
       ['deepseek', 'DeepSeek'],
       ['compatible', '自定义服务商'],
@@ -1207,7 +1273,7 @@ test('Empty provider list opens the actual Add form with a native preset select 
     expect(f.dom.window.document.activeElement).toBe(select);
     expect(f.field('提供商名称').value).toBe('OpenAI');
     expect(f.field('服务地址').value).toBe('https://api.openai.com/v1');
-    expect(f.field('API 协议').value).toBe('chat-completions');
+    expect(f.field('API 协议').textContent).toBe('Chat Completions');
     for (const [id, label, url, credential] of [
       ['deepseek', 'DeepSeek', 'https://api.deepseek.com', 'replace'],
       ['openai', 'OpenAI', 'https://api.openai.com/v1', 'replace'],
@@ -1227,11 +1293,13 @@ test('Empty provider list opens the actual Add form with a native preset select 
       expect(f.dom.window.document.activeElement).toBe(select);
       expect(f.field('提供商名称').value).toBe(label!);
       expect(f.field('服务地址').value).toBe(url!);
-      expect(f.field('凭据处理').value).toBe(credential!);
+      expect(f.field('凭据处理').textContent).toBe(
+        credential === 'replace' ? '保存新 API key' : '不使用凭据',
+      );
       expect(f.field('API key')?.value ?? '').toBe('');
       expect(f.field('模型名称').value).toBe('');
       if (id === 'openai' || id === 'compatible')
-        expect(f.field('API 协议').value).toBe('chat-completions');
+        expect(f.field('API 协议').textContent).toBe('Chat Completions');
       else expect(f.field('API 协议')).toBeNull();
       expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(0);
     }
@@ -1311,7 +1379,7 @@ test('Named instances of one preset remain separate even at the same endpoint; e
     );
     await f.click('编辑 个人服务');
     expect(f.field('提供商名称').value).toBe('个人服务');
-    expect(f.field('凭据处理').value).toBe('keep');
+    expect(f.field('凭据处理').textContent).toBe('保留已保存凭据');
     await f.edit('提供商名称', '个人服务改名');
     await f.click('保存提供商配置');
     expect(saves.at(-1)!.operation.connectionId).toBe('private-instance-2');
@@ -1892,7 +1960,7 @@ test('Every new observation locks existing drafts even when credentials and publ
     await f.click('刷新提供商配置');
     expect(f.field('提供商名称').value).toBe('unsaved-name');
     expect(f.field('服务地址').value).toBe('https://draft-endpoint.invalid/v1');
-    expect(f.field('凭据处理').value).toBe('keep');
+    expect(f.field('凭据处理').textContent).toBe('保留已保存凭据');
     expect(f.button('保存提供商配置').disabled).toBe(true);
     expect(f.panelHost.textContent).toContain('已重新读取配置，当前草稿已保留');
     await act(async () => {

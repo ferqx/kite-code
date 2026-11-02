@@ -163,6 +163,7 @@ test('ordinary preferences and three permission choices retain useful descriptio
       <TuiPreferencePanel controller={controller} />
     </TuiPresentationProvider>,
   );
+  Object.defineProperty(ui.stdout, 'rows', { value: 40, writable: true, configurable: true });
   try {
     await tick();
     for (const text of ['❯ Teal', 'Default dark theme', 'Blue accent theme', 'Current'])
@@ -195,6 +196,15 @@ test('ordinary preferences and three permission choices retain useful descriptio
       'revision',
     ])
       expect(ui.lastFrame()).not.toContain(text);
+    Object.defineProperty(ui.stdout, 'rows', { value: 24, writable: true, configurable: true });
+    ui.stdout.emit('resize');
+    await tick();
+    expect(ui.lastFrame()).toContain('Workspace writes are allowed.');
+    expect(ui.lastFrame()).not.toContain('model reviews commands');
+    ui.stdin.write('\u001b[B');
+    await tick();
+    expect(ui.lastFrame()).toContain('model reviews commands');
+    expect(ui.lastFrame()).not.toContain('Workspace writes are allowed.');
   } finally {
     ui.unmount();
   }

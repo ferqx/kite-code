@@ -22,11 +22,13 @@ async function until(read: () => boolean | Promise<boolean>) {
 async function network() {
   const sockets = new Set<Socket>(),
     headers: { host?: string; authorization?: string }[] = [];
-  let rpcCount = 0,
+  let requestCount = 0,
+    rpcCount = 0,
     calls = 0;
   let mode: 'normal' | 'redirect' | 'large' | 'wait' = 'normal';
   let release!: () => void;
   const server = createServer(async (req, res) => {
+    requestCount++;
     if (req.method !== 'POST') {
       res.writeHead(405).end();
       return;
@@ -78,6 +80,9 @@ async function network() {
     url,
     sockets,
     headers,
+    get requestCount() {
+      return requestCount;
+    },
     get rpcCount() {
       return rpcCount;
     },
@@ -112,7 +117,9 @@ function binding(url: string, executionId = 'actual-job') {
 
 test('real HTTP sockets stay pinned across hostile resolver change, retain original Host and private header, and stop confirms only the owned transport', async () => {
   const n = await network();
-  let resolutions = 0;
+  let resolutions = 0,
+    admissions = 0,
+    headerReads = 0;
   const secret = 'Bearer test-secret-not-a-user-credential';
   const proxy = await network();
   const proxyKeys = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NODE_USE_ENV_PROXY'] as const;
@@ -121,9 +128,21 @@ test('real HTTP sockets stay pinned across hostile resolver change, retain origi
     process.env[key] =
       key === 'NODE_USE_ENV_PROXY' ? '1' : proxy.url.replace('mcp-fixture.invalid', '127.0.0.1');
   const port = createMcpHttpTransportPort({
-    servers: [{ id: 'local', url: n.url, headers: { authorization: secret } }],
+    servers: [
+      {
+        id: 'local',
+        url: n.url,
+        resolveHeaders: () => {
+          expect(admissions).toBeGreaterThan(0);
+          headerReads++;
+          return { authorization: secret };
+        },
+      },
+    ],
     allowLoopbackForTests: true,
-    admit: async () => {},
+    admit: async () => {
+      admissions++;
+    },
     resolveAddresses: async () => {
       resolutions++;
       return resolutions === 1
@@ -135,11 +154,13 @@ test('real HTTP sockets stay pinned across hostile resolver change, retain origi
     client = new Client({ name: 'test', version: '1' });
   try {
     expect(n.rpcCount).toBe(0);
+    expect(headerReads).toBe(0);
     await client.connect(owned.transport);
     await client.listTools();
     await client.callTool({ name: 'effect', arguments: { value: 'exact' } });
     expect(resolutions).toBe(1);
     expect(n.calls).toBe(1);
+    expect(headerReads).toBe(n.requestCount);
     expect(
       n.headers.every((h) => h.host === new URL(n.url).host && h.authorization === secret),
     ).toBe(true);

@@ -18,6 +18,8 @@ assert.equal(typeof require('bun:ffi').dlopen,'function');
 require('node:fs');require('node:child_process');
 Object.defineProperty(process,'platform',{value:'linux'});
 Object.defineProperty(process,'arch',{value:'x64'});
+Object.defineProperty(process,'getuid',{value:()=>1000});
+Object.defineProperty(process,'getgid',{value:()=>1000});
 let loads=0, address=4096, scenario, errno=11;
 const memory=new Map();
 const ptr=value=>{const at=address;address+=4096;memory.set(at,value);return at;};
