@@ -880,7 +880,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 安排任务草稿
 
-当前安排统一采用本地Service所在宿主的系统时间。[Main运行器](electron/scheduled-task-runner.ts)读取系统IANA时区，在列表、保存、启禁、立即运行和每次调度前同步当前Store的任务绑定；旧绑定不同或宿主时区变化时，重算下一次未来发生，不追补转换前的时间。同一时区的重开／睡眠最新一次补跑保持。renderer的[保存DTO](src/scheduled-task-types.ts)只带频率、时分和可选星期，[IPC](electron/native-ipc.ts)拒绝调用者附带timeZone；宿主在保存时补充准确时区。DB10及manifest19保留原字段、严格格式和容量，冻结运行快照及其他Store任务不改字节。取舍见[本地时钟决定](../../.agents/notes/implemented/architecture/2026-11-01-desktop-schedule-local-clock.md)。
+当前安排统一采用本地Service所在宿主的系统时间。[Main运行器](electron/scheduled-task-runner.ts)读取系统IANA时区，在列表、保存、启禁、立即运行和每次调度前同步当前Store的任务绑定；自动调度在异步观察及前一任务派发后重新同步，领取时读取最新任务，避免沿等待前的旧时区派发，已领取运行的冻结快照保持；旧绑定不同或宿主时区变化时，重算下一次未来发生，不追补转换前的时间。同一时区的重开／睡眠最新一次补跑保持。renderer的[保存DTO](src/scheduled-task-types.ts)只带频率、时分和可选星期，[IPC](electron/native-ipc.ts)拒绝调用者附带timeZone；宿主在保存时补充准确时区。DB10及manifest19保留原字段、严格格式和容量，冻结运行快照及其他Store任务不改字节。取舍见[本地时钟决定](../../.agents/notes/implemented/architecture/2026-11-01-desktop-schedule-local-clock.md)。
 
 右栏时间行直接使用共享shadcn TimePicker／Input编辑时分，保留标签；项目、模型及思考程度的原控件和分行标签保持。安排页移除顶栏返回按钮，左栏“新对话”在准备页提交进行中只恢复同一准备／提交观察，不重复发送；选择原会话恢复未保存输入。其他忙碌门禁保持。
 

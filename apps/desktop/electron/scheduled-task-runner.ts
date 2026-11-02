@@ -341,6 +341,8 @@ export class ScheduledTaskRunner {
           .map((task) => task.id),
       ),
     );
+    // Observation yields to the host; refresh the binding before claiming due work.
+    this.syncLocalClock();
     for (const task of this.data.scheduledTasks()) {
       if (this.stopped) return;
       if (!task.enabled || task.nextRunAt === null || task.nextRunAt > this.clock.now()) continue;
@@ -348,7 +350,12 @@ export class ScheduledTaskRunner {
       const run = this.data.claimScheduledTask(task.id, this.clock.now(), {
         storeId: this.client.serverInfo?.storeId,
       });
-      if (run) await this.launch(run);
+      if (run) {
+        await this.launch(run);
+        // A launch also yields. The next claim rereads its task from storage, so
+        // rebinding here prevents the loop snapshot from authorizing stale work.
+        this.syncLocalClock();
+      }
     }
   }
   private launch(run: ScheduledTaskRun) {
