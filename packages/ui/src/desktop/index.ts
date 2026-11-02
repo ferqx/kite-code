@@ -75,6 +75,11 @@ export {
 } from './components/ui/tooltip';
 export { DesktopDiagnosticsProvider, useDesktopDiagnostics } from './diagnostics';
 export { FileChanges, FileDiff } from './FileChanges';
+export {
+  ApplicationConfirmationDialog,
+  type ApplicationConfirmationDialogProps,
+  FullPermissionConfirmationDialog,
+} from './FullPermissionConfirmationDialog';
 export { MessageAttachments } from './MessageAttachments';
 export { MessageContent } from './MessageContent';
 export { MessageCopyButton } from './MessageCopyButton';
@@ -114,7 +119,6 @@ export {
   type SessionChildTabRequest,
   type SessionChildTarget,
   SessionTabs,
-  SessionTabsChrome,
   type SessionTabsModel,
   useSessionTabs,
 } from './SessionTabs';
@@ -124,10 +128,6 @@ export { statusLabel } from './status';
 export { ToolActivity, ToolRow } from './ToolActivity';
 export type {
   Message,
-  SessionTabsChromeAction,
-  SessionTabsChromeData,
-  SessionTabsChromePresentation,
-  SessionTabsChromeTab,
   TurnActivity,
   WorkspaceSummary,
 } from './types';

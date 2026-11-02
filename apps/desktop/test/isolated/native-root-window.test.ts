@@ -67,6 +67,7 @@ class Contents extends EventEmitter {
   }
 }
 class View {
+  visible = true;
   children: View[] = [];
   bounds = { x: 0, y: 0, width: 0, height: 0 };
   boundsWrites = 0;
@@ -84,6 +85,9 @@ class View {
   setBackgroundColor(value: string) {
     this.colors.push(value);
   }
+  getVisible() {
+    return this.visible;
+  }
 }
 class ContentsView extends View {
   webContents = new Contents();
@@ -98,6 +102,7 @@ class Window extends EventEmitter {
   size = [1000, 700];
   destroyed = false;
   shows = 0;
+  inactiveShows = 0;
   closes = 0;
   full = false;
   minimizes = 0;
@@ -114,8 +119,13 @@ class Window extends EventEmitter {
     return this.destroyed;
   }
   setBackgroundColor() {}
-  show() {
+  show(...args: unknown[]) {
     this.shows++;
+    this.emit('native-show', ...args);
+  }
+  showInactive(...args: unknown[]) {
+    this.inactiveShows++;
+    this.emit('native-show-inactive', ...args);
   }
   destroy() {
     this.destroyed = true;
@@ -149,9 +159,9 @@ mock.module('electron', () => ({ BaseWindow: Window, WebContentsView: ContentsVi
 const {
   createNativeRootWindow,
   getNativeRootView,
-  setNativeRootBounds,
   onNativeRootReady,
   nativeRootWindowMenu,
+  nativeRootWillShowEvent,
 } = await import('../../electron/native-root-window');
 const tick = async () => {
   await Bun.sleep(0);
@@ -239,25 +249,17 @@ test('a superseded load cannot claim readiness and loadFile uses the same curren
   window.destroy();
 });
 
-test('unhosted Root follows native resize immediately while hosted geometry remains controller-owned', async () => {
+test('Root always follows the full native viewport immediately without a browser crop', async () => {
   const value = createNativeRootWindow({ show: false }),
     window = value as unknown as Window;
   const root = getNativeRootView(value)! as unknown as ContentsView;
   const writes = root.boundsWrites;
-  expect(setNativeRootBounds(value)).toBe(true);
+  window.emit('resize');
   expect(root.boundsWrites).toBe(writes);
-  expect(setNativeRootBounds(value, { x: 0, y: 0, width: 600, height: 700 })).toBe(true);
-  const clippedWrites = root.boundsWrites;
-  expect(setNativeRootBounds(value, { x: 0, y: 0, width: 600, height: 700 })).toBe(true);
-  expect(root.boundsWrites).toBe(clippedWrites);
   window.size[0] = 820;
   window.emit('resize');
-  expect(root.bounds.width).toBe(600);
+  expect(root.bounds.width).toBe(820);
   await new Promise<void>((resolve) => setImmediate(resolve));
-  expect(root.bounds.width).toBe(600);
-  expect(setNativeRootBounds(value, { x: 1, y: 0, width: 510, height: 700 })).toBe(false);
-  expect(setNativeRootBounds(value, { x: 0, y: 0, width: 510, height: 700 })).toBe(true);
-  expect(setNativeRootBounds(value)).toBe(true);
   expect(root.bounds.width).toBe(820);
   window.size[0] = 900;
   window.emit('resize');
@@ -278,6 +280,56 @@ test('unhosted Root follows native resize immediately while hosted geometry rema
   expect(root.bounds.width).toBe(920);
   expect(root.boundsWrites).toBe(closedWrites);
   expect(root.webContents.closes).toBe(1);
+});
+
+test('show and showInactive synchronously update Root and notify before invoking the owned native window', () => {
+  const value = createNativeRootWindow({ show: false }),
+    window = value as unknown as Window,
+    root = getNativeRootView(value)! as unknown as ContentsView;
+  const events: string[] = [],
+    argument = {};
+  window.on(nativeRootWillShowEvent, function (this: Window) {
+    expect(this).toBe(window);
+    expect(root.bounds).toEqual({ x: 0, y: 0, width: window.size[0]!, height: window.size[1]! });
+    events.push('will-show');
+  });
+  window.on('native-show', function (this: Window, ...args) {
+    expect(this).toBe(window);
+    expect(args).toEqual([argument]);
+    events.push('show');
+  });
+  window.on('native-show-inactive', function (this: Window, ...args) {
+    expect(this).toBe(window);
+    expect(args).toEqual([argument, undefined]);
+    events.push('show-inactive');
+  });
+  window.size = [840, 620];
+  Reflect.apply(value.show, window, [argument]);
+  window.size = [920, 680];
+  Reflect.apply(value.showInactive, window, [argument, undefined]);
+  expect(events).toEqual(['will-show', 'show', 'will-show', 'show-inactive']);
+  expect(window.shows).toBe(1);
+  expect(window.inactiveShows).toBe(1);
+  expect(root.webContents.captures).toBe(0);
+  window.destroy();
+});
+
+test('closed windows do not notify or invoke native showing, including closure during the pre-show notification', () => {
+  const value = createNativeRootWindow({ show: false }),
+    window = value as unknown as Window;
+  let notifications = 0;
+  window.on(nativeRootWillShowEvent, () => {
+    notifications++;
+    window.destroy();
+  });
+  value.show();
+  expect(notifications).toBe(1);
+  expect(window.shows).toBe(0);
+  value.show();
+  value.showInactive();
+  expect(notifications).toBe(1);
+  expect(window.shows).toBe(0);
+  expect(window.inactiveShows).toBe(0);
 });
 
 test('explicit instance menu targets Root zoom/reload and the actual BaseWindow close gate without global BrowserWindow lookup', () => {
@@ -331,21 +383,87 @@ test('Root title and responsiveness remain observable, and unexpected Root destr
   expect(getNativeRootView(value)).toBeUndefined();
 });
 
-test('activating the window preserves the actual focused Chrome input and restores that surface after blur', () => {
+test('a hidden modal surface cannot retain activation focus after it closes in the background', () => {
+  const value = createNativeRootWindow({ show: false });
+  const window = value as unknown as Window;
+  const root = getNativeRootView(value)! as unknown as ContentsView;
+  const overlay = new ContentsView({});
+  window.contentView.addChildView(overlay);
+  overlay.webContents.focused = true;
+  window.emit('blur');
+  overlay.visible = false;
+  window.emit('focus');
+  expect(root.webContents.focused).toBe(true);
+  expect(overlay.visible).toBe(false);
+  expect(root.webContents.isDestroyed()).toBe(false);
+  window.destroy();
+});
+
+test('activating the window preserves the actual focused page and restores that surface after blur', () => {
   const value = createNativeRootWindow({ show: false }),
     window = value as unknown as Window;
   const root = getNativeRootView(value)! as unknown as ContentsView;
-  const chrome = new ContentsView({});
-  window.contentView.addChildView(chrome);
-  chrome.webContents.focused = true;
+  const page = new ContentsView({});
+  window.contentView.addChildView(page);
+  page.webContents.focused = true;
   window.emit('focus');
-  expect(chrome.webContents.focused).toBe(true);
+  expect(page.webContents.focused).toBe(true);
   expect(root.webContents.focused).toBe(false);
   window.emit('blur');
-  chrome.webContents.focused = false;
+  page.webContents.focused = false;
   window.emit('focus');
-  expect(chrome.webContents.focused).toBe(true);
+  expect(page.webContents.focused).toBe(true);
   expect(root.webContents.focused).toBe(false);
-  chrome.webContents.close();
+  page.webContents.close();
   window.destroy();
+});
+
+test('the same explicit Root factory forwards platform window options while confining preload and WebPreferences to Root', () => {
+  for (const platform of [
+    {
+      titleBarStyle: 'hiddenInset' as const,
+      trafficLightPosition: { x: 13, y: 17 },
+      vibrancy: 'sidebar' as const,
+      visualEffectState: 'active' as const,
+    },
+    {
+      titleBarStyle: 'hidden' as const,
+      titleBarOverlay: { color: '#00000000', symbolColor: '#eeeeee', height: 32 },
+      backgroundMaterial: 'mica' as const,
+      icon: '/owned/app-icon.ico',
+    },
+    {
+      titleBarStyle: 'hidden' as const,
+      titleBarOverlay: { color: '#00000000', symbolColor: '#222222', height: 32 },
+    },
+  ]) {
+    const webPreferences = {
+      preload: '/owned/preload.cjs',
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+    };
+    const value = createNativeRootWindow({
+      ...platform,
+      webPreferences,
+      title: 'Kite',
+      show: false,
+      backgroundColor: '#191919',
+    });
+    const window = value as unknown as Window,
+      root = getNativeRootView(value)! as unknown as ContentsView;
+    expect(window.options).toEqual({
+      ...platform,
+      title: 'Kite',
+      show: false,
+      backgroundColor: '#191919',
+    });
+    expect(root.options).toEqual({ webPreferences });
+    expect(window.contentView.children).toEqual([root]);
+    expect(root.bounds).toEqual({ x: 0, y: 0, width: 1000, height: 700 });
+    expect(root.colors).toEqual(['#191919']);
+    window.destroy();
+    expect(root.webContents.closes).toBe(1);
+  }
 });

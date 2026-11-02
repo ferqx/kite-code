@@ -41,9 +41,6 @@ async function fixture(options: Parameters<typeof browserFixture>[0] = {}) {
       cancelBrowserMenu(id: string) {
         cancels.push(id);
       },
-      captureBrowserPresentation() {
-        throw Error('ordinary_menu_must_not_capture');
-      },
     },
   });
   const flush = (action: () => void = () => {}) =>

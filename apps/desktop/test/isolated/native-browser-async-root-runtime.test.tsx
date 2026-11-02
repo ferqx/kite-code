@@ -122,6 +122,7 @@ function readFixturePng(bytes: Buffer) {
 }
 
 const views: FakeView[] = [];
+const windowOwners = new WeakMap<FakeContents, BrowserWindow>();
 let focused: FakeContents | undefined;
 class FakeContents extends EventEmitter {
   destroyed = false;
@@ -131,6 +132,12 @@ class FakeContents extends EventEmitter {
   physical = 0;
   loads = 0;
   attached = false;
+  documentReady = false;
+  view?: FakeView;
+  nativeFrames = 0;
+  captureCalls = 0;
+  frameBelowRoot = false;
+  frameSubscription?: (frame: FixtureImage) => void;
   viewport = { width: 960, height: 540 };
   readonly dpr = 2;
   readonly physicalEvents: Record<string, number> = {};
@@ -187,6 +194,9 @@ class FakeContents extends EventEmitter {
   getZoomFactor() {
     return 1;
   }
+  getOSProcessId() {
+    return this.destroyed ? 0 : 1;
+  }
   getURL() {
     return this.url;
   }
@@ -198,18 +208,53 @@ class FakeContents extends EventEmitter {
     return { ...this.viewport, dpr: this.dpr, x: 0, y: 0 };
   }
   async capturePage() {
+    this.captureCalls++;
     return new FixtureImage(this.viewport.width * this.dpr, this.viewport.height * this.dpr);
+  }
+  beginFrameSubscription(onlyDirty: boolean, callback: (frame: FixtureImage) => void) {
+    expect(onlyDirty).toBe(false);
+    this.frameSubscription = callback;
+  }
+  endFrameSubscription() {
+    this.frameSubscription = undefined;
+  }
+  invalidate() {
+    const callback = this.frameSubscription;
+    queueMicrotask(() => {
+      if (
+        !callback ||
+        this.frameSubscription !== callback ||
+        this.destroyed ||
+        !this.documentReady ||
+        !this.view?.getVisible()
+      )
+        return;
+      const window = windowOwners.get(this);
+      const children = window?.contentView.children as unknown as FakeView[] | undefined;
+      const rootOwner = window?.webContents as unknown as FakeContents | undefined;
+      const root = children?.find((view) => view.webContents === rootOwner);
+      this.frameBelowRoot =
+        !!root && root.getVisible() && children!.indexOf(this.view) < children!.indexOf(root);
+      this.nativeFrames++;
+      callback(new FixtureImage(this.viewport.width * this.dpr, this.viewport.height * this.dpr));
+    });
   }
   async insertCSS() {
     return 'fixed-style';
   }
   async removeInsertedCSS(_key: string) {}
   async loadURL(url: string) {
+    this.documentReady = false;
     this.url = url;
+    this.mainFrame.url = url;
     this.loads++;
     this.emit('did-start-navigation', {}, url, false, true);
-    this.emit('did-navigate');
+    this.emit('did-start-loading');
+    this.emit('did-navigate', {}, url);
+    this.documentReady = true;
+    this.emit('dom-ready');
     this.emit('did-finish-load');
+    this.emit('did-stop-loading');
   }
   async executeJavaScriptInIsolatedWorld(_world: number, scripts: { code: string }[]) {
     for (const script of scripts)
@@ -222,6 +267,7 @@ class FakeContents extends EventEmitter {
   close() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.endFrameSubscription();
     this.emit('destroyed');
     this.page.window.close();
   }
@@ -230,13 +276,15 @@ class FakeContents extends EventEmitter {
 }
 class FakeView {
   readonly options: { webPreferences: Record<string, unknown> };
-  readonly webContents = new FakeContents();
+  readonly webContents: FakeContents;
   visible = false;
   bounds = { x: 0, y: 0, width: 0, height: 0 };
   background = '';
-  constructor(options: { webPreferences: Record<string, unknown> }) {
+  constructor(options: { webPreferences: Record<string, unknown> }, contents?: FakeContents) {
     this.options = options;
-    views.push(this);
+    this.webContents = contents ?? new FakeContents();
+    this.webContents.view = this;
+    if (!contents) views.push(this);
   }
   setVisible(value: boolean) {
     this.visible = value;
@@ -262,6 +310,9 @@ const browsing = Object.assign(new EventEmitter(), {
   webRequest: { onBeforeRequest() {} },
 });
 mock.module('electron', () => ({
+  BrowserWindow: {
+    fromWebContents: (contents: FakeContents) => windowOwners.get(contents) ?? null,
+  },
   WebContentsView: FakeView,
   nativeImage: { createFromBuffer: readFixturePng },
   session: { fromPartition: () => browsing },
@@ -485,7 +536,10 @@ for (const mode of [
     Object.assign(dom.window, { ResizeObserver: LayoutObserver });
     Object.assign(globalThis, { ResizeObserver: LayoutObserver });
     const owner = new FakeContents(),
-      children: FakeView[] = [];
+      rootView = new FakeView({ webPreferences: {} }, owner),
+      children: FakeView[] = [rootView];
+    rootView.setBounds({ x: 0, y: 0, width: windowSize.width, height: windowSize.height });
+    rootView.setVisible(true);
     const browserListeners = new Set<(state: NativeBrowserState) => void>();
     Object.assign(owner, {
       send(channel: string, value: NativeBrowserState) {
@@ -503,17 +557,20 @@ for (const mode of [
       getContentSize: () => [windowSize.width, windowSize.height],
       contentView: {
         children,
-        addChildView(view: FakeView) {
+        addChildView(view: FakeView, index?: number) {
           const i = children.indexOf(view);
           if (i >= 0) children.splice(i, 1);
-          children.push(view);
+          children.splice(index ?? children.length, 0, view);
+          windowOwners.set(view.webContents, windowPort as unknown as BrowserWindow);
         },
         removeChildView(view: FakeView) {
           const i = children.indexOf(view);
           if (i >= 0) children.splice(i, 1);
+          windowOwners.delete(view.webContents);
         },
       },
     });
+    windowOwners.set(owner, windowPort as unknown as BrowserWindow);
     let scope: NativeExtensionScope | undefined;
     let pageId = '';
     const host = new NativeBrowserPageHost();
@@ -938,6 +995,7 @@ for (const mode of [
         '[aria-label="搜索或输入网址"]',
       )!;
       await flush(() => {
+        address.focus();
         const setter = Object.getOwnPropertyDescriptor(
           dom.window.HTMLInputElement.prototype,
           'value',
@@ -957,6 +1015,10 @@ for (const mode of [
         .querySelector('button')!
         .addEventListener('click', () => pageClicks++);
       await until(() => page.visible);
+      expect(page.webContents.nativeFrames).toBe(1);
+      expect(page.webContents.frameBelowRoot).toBe(true);
+      expect(page.webContents.captureCalls).toBe(0);
+      expect(children.indexOf(page)).toBeGreaterThan(children.indexOf(rootView));
       expect(measuredPresentations.at(-1)?.layout).toMatchObject({
         windowWidth: windowSize.width,
         windowHeight: windowSize.height,

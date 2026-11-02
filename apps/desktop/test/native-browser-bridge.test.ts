@@ -1,12 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
   browserAddress,
-  isNativeBrowserClosePreparation,
   isNativeBrowserDraftRestoreResult,
-  isNativeBrowserFrozenFrame,
-  isNativeBrowserLayoutFrameAck,
-  isNativeBrowserPresentationFrame,
-  isNativeBrowserPresentationRequest,
   isNativeBrowserRestoreResult,
   isNativeBrowserState,
   type NativeBrowserLayout,
@@ -58,8 +53,11 @@ test('a draft owner is confined to manual browser requests and cannot mix sessio
   const scope = { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 2 };
   const navigate = { action: 'navigate' as const, id, draft, input: 'https://www.baidu.com/' };
   expect(parseNativeBrowserRequest(navigate)).toEqual(navigate);
-  for (const action of ['state', 'back', 'forward', 'reload', 'stop', 'close'] as const)
+  for (const action of ['state', 'back', 'forward', 'reload', 'stop'] as const)
     expect(parseNativeBrowserRequest({ action, id, draft })).toEqual({ action, id, draft });
+  expect(
+    parseNativeBrowserRequest({ action: 'close', id, draft, pageToken: 'exact-token' }),
+  ).toEqual({ action: 'close', id, draft, pageToken: 'exact-token' });
   expect(parseNativeBrowserRequest({ action: 'restoreDraft', draft })).toEqual({
     action: 'restoreDraft',
     draft,
@@ -86,192 +84,6 @@ test('a draft owner is confined to manual browser requests and cannot mix sessio
     },
   ])
     expect(() => parseNativeBrowserRequest(value)).toThrow('invalid_browser_request');
-});
-
-test('fresh presentation requests carry one exact Session or draft owner and no control or execution fields', () => {
-  const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 0 };
-  const request = { id: 'page_1-restore', key: 'a'.repeat(32), scope };
-  const draft = { id: request.id, key: 'b'.repeat(32), draft: 'c'.repeat(32) };
-  expect(isNativeBrowserPresentationRequest(request)).toBe(true);
-  expect(isNativeBrowserPresentationRequest(draft)).toBe(true);
-  for (const invalid of [
-    null,
-    [],
-    {},
-    { id: request.id, key: request.key },
-    { ...request, scope: undefined },
-    { ...request, draft: draft.draft },
-    { ...request, scope: { storeId: scope.storeId, sessionId: scope.sessionId } },
-    { ...request, scope: { ...scope, generation: 0 } },
-    { ...request, scope: { ...scope, viewSelection: -1 } },
-    { ...request, scope: { ...scope, viewSelection: 1.5 } },
-    { ...request, scope: { ...scope, extra: true } },
-    { ...draft, draft: '' },
-    { ...draft, draft: 'C'.repeat(32) },
-    { ...draft, draft: 'c'.repeat(31) },
-    { ...request, id: '' },
-    { ...request, id: 'page with spaces' },
-    { ...request, id: 'p'.repeat(65) },
-    { ...request, key: '' },
-    { ...request, key: 'A'.repeat(32) },
-    { ...request, key: 'a'.repeat(31) },
-    { ...request, key: 'a'.repeat(33) },
-    { ...request, key: 1 },
-    { ...request, url: 'https://example.com/' },
-    { ...request, bounds: { x: 0, y: 0, width: 100, height: 100 } },
-    { ...request, lease: 'private-control' },
-    { ...request, code: 'replay()' },
-    { ...request, action: 'navigate' },
-  ])
-    expect(isNativeBrowserPresentationRequest(invalid)).toBe(false);
-});
-
-test('Root close preparation and confirmation transport only one bounded marker receipt and an exact private key', () => {
-  const draft = 'a'.repeat(32),
-    id = 'page',
-    key = 'b'.repeat(32);
-  for (const request of [
-    { action: 'prepareClose', id },
-    { action: 'prepareClose', id, draft },
-    ...(['confirmClose', 'finishClose', 'cancelClose'] as const).map((action) => ({ action, key })),
-  ] as const)
-    expect(parseNativeBrowserRequest(request)).toEqual(request);
-  for (const request of [
-    { action: 'prepareClose', id, scope: {} },
-    { action: 'prepareClose', id, draft: 'invalid' },
-    { action: 'prepareClose', id, lease: 'secret' },
-    { action: 'confirmClose', key: 'bad' },
-    { action: 'finishClose', key, id },
-    { action: 'cancelClose', key, draft },
-  ])
-    expect(() => parseNativeBrowserRequest(request)).toThrow('invalid_browser_request');
-  const receipt = {
-    key,
-    witness: 'c'.repeat(24),
-    bounds: { x: 600, y: 0, width: 400, height: 96, radius: 0 },
-    width: 1000,
-    height: 700,
-  };
-  expect(isNativeBrowserClosePreparation(receipt)).toBe(true);
-  expect(
-    isNativeBrowserClosePreparation({
-      ...receipt,
-      bounds: { ...receipt.bounds, x: 600 / 1.2, width: 400 / 1.2, height: 96 / 1.2 },
-      width: 1000 / 1.2,
-      height: 700 / 1.2,
-    }),
-  ).toBe(true);
-  for (const bad of [
-    null,
-    [],
-    { ...receipt, key: 'wrong' },
-    { ...receipt, witness: 'd'.repeat(32) },
-    { ...receipt, scope: {} },
-    { ...receipt, frame: { data: 'private' } },
-    { ...receipt, width: NaN },
-    { ...receipt, bounds: { ...receipt.bounds, width: 401 } },
-    { ...receipt, bounds: { ...receipt.bounds, height: 0 } },
-    { ...receipt, bounds: { ...receipt.bounds, secret: true } },
-  ])
-    expect(isNativeBrowserClosePreparation(bad)).toBe(false);
-});
-
-test('Root draw witnesses and asynchronous frozen pixels stay finite and bound to a presentation', () => {
-  const scope = { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 2 };
-  const witness = { key: '00112233445566778899aabb', step: 1 as const };
-  const panel = (size: number) => ({
-    size,
-    min: 0,
-    minUnit: 'px' as const,
-    max: 100,
-    maxUnit: '%' as const,
-    preserve: 'relative' as const,
-    collapsible: false,
-  });
-  const request = {
-    action: 'present' as const,
-    id: 'page',
-    scope,
-    presentationRevision: 1,
-    witness,
-    bounds: { x: 201, y: 100, width: 599, height: 500, radius: 0 },
-    layout: {
-      windowWidth: 800,
-      windowHeight: 600,
-      insetLeft: 0,
-      insetRight: 0,
-      groups: [
-        {
-          left: 0,
-          right: 0,
-          gap: 1,
-          panels: [panel(200), panel(599)] as const,
-        },
-      ],
-    },
-  };
-  expect(parseNativeBrowserRequest(request)).toEqual(request);
-  const draft = 'a'.repeat(32),
-    draftRequest = { ...request, scope: undefined, draft };
-  expect(parseNativeBrowserRequest(draftRequest)).toEqual(draftRequest);
-  expect(() =>
-    parseNativeBrowserRequest({ ...draftRequest, presentationRevision: undefined }),
-  ).toThrow();
-  expect(() => parseNativeBrowserRequest({ ...draftRequest, scope })).toThrow();
-  for (const value of [
-    { ...request, witness: { ...witness, step: 0 } },
-    { ...request, witness: { ...witness, key: 'not-a-paint' } },
-    { ...request, witness: { ...witness, target: 'other' } },
-    { ...request, layout: undefined },
-    { ...request, bounds: null },
-    { ...request, scope: undefined },
-    { ...request, frozen: '/private/page.png' },
-  ])
-    expect(() => parseNativeBrowserRequest(value)).toThrow();
-  const frozen = {
-    key: '00112233445566778899aabbccddeeff',
-    mimeType: 'image/png',
-    data: 'iVBORw0KGgo=',
-    width: 1,
-    height: 1,
-    cssWidth: 320,
-    cssHeight: 500,
-    rootZoom: 1.25,
-  };
-  const ack = { id: 'page', scope, presentationRevision: 1, key: witness.key, step: 0, frozen };
-  expect(isNativeBrowserLayoutFrameAck(ack)).toBe(true);
-  expect(isNativeBrowserLayoutFrameAck({ ...ack, scope: undefined, draft })).toBe(true);
-  for (const value of [
-    { ...ack, draft },
-    { ...ack, scope: undefined },
-    { ...ack, scope: undefined, draft: 'A'.repeat(32) },
-  ])
-    expect(isNativeBrowserLayoutFrameAck(value)).toBe(false);
-  const presented = { ...ack, step: 2, frozen: undefined };
-  for (const value of [
-    { ...presented, presented: false },
-    { ...presented, presented: true },
-    { ...presented, presented: false, error: 'browser_presentation_unavailable' },
-  ])
-    expect(isNativeBrowserLayoutFrameAck(value)).toBe(true);
-  for (const value of [
-    { ...ack, presented: true },
-    { ...presented, presented: 'yes' },
-    { ...presented, error: 'browser_presentation_unavailable' },
-    { ...presented, presented: true, error: 'browser_presentation_unavailable' },
-    { ...presented, presented: false, error: 'arbitrary_error' },
-  ])
-    expect(isNativeBrowserLayoutFrameAck(value)).toBe(false);
-  for (const value of [
-    { ...ack, step: 3 },
-    { ...ack, scope: { ...scope, generation: 0 } },
-    { ...ack, witness: true },
-    { ...ack, key: 'old' },
-    { ...ack, frozen: { ...frozen, data: 'file:///secret' } },
-  ])
-    expect(isNativeBrowserLayoutFrameAck(value)).toBe(false);
-  expect(isNativeBrowserFrozenFrame({ ...frozen, width: 20000 })).toBe(false);
-  expect(isNativeBrowserFrozenFrame({ ...frozen, data: 'x'.repeat(5600001) })).toBe(false);
 });
 
 test('browser addresses accept normal websites and local development URLs; plain text becomes an explicit search', () => {
@@ -314,16 +126,40 @@ test('browser requests are closed and finite before allocating any native view',
       input: 'https://example.com',
     }),
   ).toEqual({ action: 'navigate', id: 'browser-1', input: 'https://example.com' });
-  expect(parseNativeBrowserRequest({ action: 'present', id: 'browser-1', bounds: null })).toEqual({
+  expect(
+    parseNativeBrowserRequest({
+      action: 'present',
+      id: 'browser-1',
+      bounds: null,
+      scope,
+      pageToken: 'exact-token',
+      presentationRevision: 1,
+    }),
+  ).toEqual({
     action: 'present',
     id: 'browser-1',
     bounds: null,
+    scope,
+    pageToken: 'exact-token',
+    presentationRevision: 1,
   });
   const bounds = { x: 20, y: 100, width: 400, height: 500, radius: 16 };
-  expect(parseNativeBrowserRequest({ action: 'present', id: 'browser-1', bounds })).toEqual({
+  expect(
+    parseNativeBrowserRequest({
+      action: 'present',
+      id: 'browser-1',
+      bounds,
+      scope,
+      pageToken: 'exact-token',
+      presentationRevision: 2,
+    }),
+  ).toEqual({
     action: 'present',
     id: 'browser-1',
     bounds,
+    scope,
+    pageToken: 'exact-token',
+    presentationRevision: 2,
   });
   for (const value of [
     null,
@@ -473,7 +309,15 @@ test('presentation layout accepts only the current bounded two-panel contract', 
     ],
   };
   const bounds = { x: 601, y: 92, width: 398, height: 650, radius: 8 };
-  const request = { action: 'present' as const, id: 'browser', bounds, layout };
+  const request = {
+    action: 'present' as const,
+    id: 'browser',
+    bounds,
+    layout,
+    scope: { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 2 },
+    pageToken: 'exact-token',
+    presentationRevision: 1,
+  };
   expect(parseNativeBrowserRequest(request)).toEqual(request);
   for (const bad of [
     { ...layout, secret: true },
@@ -504,50 +348,6 @@ test('presentation layout accepts only the current bounded two-panel contract', 
   expect(() => parseNativeBrowserRequest({ ...request, bounds: null })).toThrow();
   expect(projectNativeBrowserBounds(bounds, layout, Number.NaN, 800)).toBeUndefined();
   expect(projectNativeBrowserBounds(bounds, layout, 1, 800)).toBeUndefined();
-});
-
-test('private presentation capture accepts no scope/script input and only bounded PNG display replies', () => {
-  expect(parseNativeBrowserRequest({ action: 'capturePresentation', id: 'page' })).toEqual({
-    action: 'capturePresentation',
-    id: 'page',
-  });
-  for (const extra of [{ scope: {} }, { script: '1' }, { proof: 'model-image' }])
-    expect(() =>
-      parseNativeBrowserRequest({ action: 'capturePresentation', id: 'page', ...extra }),
-    ).toThrow();
-  const request = {
-    action: 'present' as const,
-    id: 'page',
-    bounds: null,
-    presentationKey: 'opaque-key',
-  };
-  expect(parseNativeBrowserRequest(request)).toEqual(request);
-  expect(() =>
-    parseNativeBrowserRequest({
-      ...request,
-      bounds: { x: 0, y: 0, width: 2, height: 2, radius: 0 },
-    }),
-  ).toThrow();
-  const value = {
-    id: 'page',
-    key: 'opaque-key',
-    scope: { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 },
-    cssX: 0,
-    cssY: 0,
-    cssWidth: 800,
-    cssHeight: 600,
-    frame: { mimeType: 'image/png', data: 'AA==', width: 1600, height: 1200 },
-  };
-  expect(isNativeBrowserPresentationFrame(value)).toBe(true);
-  for (const bad of [
-    { ...value, proof: 'imageRef' },
-    { ...value, scope: { ...value.scope, generation: 0 } },
-    { ...value, cssWidth: 0 },
-    { ...value, frame: { ...value.frame, mimeType: 'image/svg+xml' } },
-    { ...value, frame: { ...value.frame, data: 'https://remote/image' } },
-    { ...value, frame: { ...value.frame, width: 99999 } },
-  ])
-    expect(isNativeBrowserPresentationFrame(bad)).toBe(false);
 });
 
 test('native popup accepts only a bounded finite menu on one exact selection', () => {
@@ -598,7 +398,14 @@ test('native popup accepts only a bounded finite menu on one exact selection', (
 });
 
 test('internal layout revisions are positive finite integers and cannot bypass strict request fields', () => {
-  const value = { action: 'present', id: 'page', bounds: null, presentationRevision: 2 } as const;
+  const value = {
+    action: 'present',
+    id: 'page',
+    bounds: null,
+    scope: { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 2 },
+    pageToken: 'exact-token',
+    presentationRevision: 2,
+  } as const;
   expect(parseNativeBrowserRequest(value)).toEqual(value);
   for (const presentationRevision of [0, -1, 1.5, Infinity, '2'])
     expect(() => parseNativeBrowserRequest({ ...value, presentationRevision })).toThrow(
@@ -610,4 +417,103 @@ test('internal layout revisions are positive finite integers and cannot bypass s
       scope: { storeId: 'store', sessionId: 'session', generation: 0, viewSelection: 1 },
     }),
   ).toThrow('invalid_browser_request');
+});
+
+test('positive layouts and withdrawals require an exact finite page token, monotonic-sequence field and exactly one display owner', () => {
+  const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 2 };
+  const bounds = { x: 20, y: 100, width: 400, height: 500, radius: 8 };
+  for (const rectangle of [bounds, null]) {
+    const request = {
+      action: 'present' as const,
+      id: 'page',
+      scope,
+      pageToken: 'opaque-Main-object-document',
+      presentationRevision: 2,
+      bounds: rectangle,
+    };
+    expect(parseNativeBrowserRequest(request)).toEqual(request);
+    const draft = { ...request, scope: undefined, draft: 'a'.repeat(32) };
+    expect(parseNativeBrowserRequest(draft)).toEqual(draft);
+    for (const invalid of [
+      { ...request, pageToken: undefined },
+      { ...request, pageToken: '' },
+      { ...request, pageToken: 1 },
+      { ...request, pageToken: 'x'.repeat(1025) },
+      { ...request, presentationRevision: undefined },
+      { ...request, presentationRevision: 0 },
+      { ...request, presentationRevision: 1.5 },
+      { ...request, presentationRevision: Number.MAX_SAFE_INTEGER + 1 },
+      { ...request, scope: undefined },
+      { ...request, draft: 'a'.repeat(32) },
+      { ...request, scope: { ...scope, viewSelection: -1 } },
+      { ...request, witness: { key: 'a'.repeat(24), step: 1 } },
+      { ...request, frozen: { data: 'private-pixels' } },
+      { ...request, lease: 'control-is-not-display' },
+    ])
+      expect(() => parseNativeBrowserRequest(invalid)).toThrow('invalid_browser_request');
+  }
+});
+
+test('true close needs the exact current Main page token rather than a tab ID or URL alone', () => {
+  const request = {
+    action: 'close' as const,
+    id: 'page',
+    pageToken: 'opaque-Main-object-document',
+  };
+  expect(parseNativeBrowserRequest(request)).toEqual(request);
+  for (const invalid of [
+    { action: 'close', id: 'page' },
+    { ...request, pageToken: undefined },
+    { ...request, pageToken: '' },
+    { ...request, pageToken: 1 },
+    { ...request, pageToken: 'x'.repeat(1025) },
+    { ...request, url: 'https://example.test/' },
+  ])
+    expect(() => parseNativeBrowserRequest(invalid)).toThrow('invalid_browser_request');
+  for (const action of ['prepareClose', 'confirmClose', 'finishClose', 'cancelClose'])
+    expect(() => parseNativeBrowserRequest({ action, id: 'page', key: 'a'.repeat(32) })).toThrow(
+      'invalid_browser_request',
+    );
+});
+
+test('bounded display state does not turn ready or visible UI into observation or control authority', () => {
+  const base = {
+    id: 'page',
+    url: 'https://example.test/',
+    title: 'Page',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  };
+  for (const display of ['loading', 'ready', 'failed'])
+    expect(isNativeBrowserState({ ...base, display, pageToken: 'exact-Main-token' })).toBe(true);
+  for (const invalid of [
+    { ...base, display: 'first-paint-authorized-input' },
+    { ...base, pageToken: '' },
+    { ...base, pageToken: 'x'.repeat(1025) },
+    { ...base, display: 'ready', screenshot: 'private-pixels' },
+    { ...base, display: 'ready', leaseId: 'grant' },
+    { ...base, display: 'ready', coordinates: { x: 1, y: 2 } },
+  ])
+    expect(isNativeBrowserState(invalid)).toBe(false);
+});
+
+test('retired presentation snapshots and one-shot display commits are rejected rather than retained as an observation API', () => {
+  const current = {
+    action: 'present',
+    id: 'page',
+    scope: { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 2 },
+    pageToken: 'exact-token',
+    presentationRevision: 2,
+    bounds: null,
+  };
+  for (const invalid of [
+    { action: 'capturePresentation', id: 'page' },
+    { action: 'capturePresentation', id: 'page', scope: current.scope },
+    { action: 'capturePresentation', id: 'page', draft: 'a'.repeat(32) },
+    { action: 'present', id: 'page', bounds: null, presentationKey: 'old-snapshot' },
+    { ...current, presentationKey: 'old-snapshot' },
+    { ...current, snapshot: { mimeType: 'image/png', data: 'AA==' } },
+  ])
+    expect(() => parseNativeBrowserRequest(invalid)).toThrow('invalid_browser_request');
 });

@@ -2,6 +2,8 @@
 
 Status: proposed
 
+2026-11-02 已确认以[固定 Renderer 布局](../../implemented/architecture/2026-11-02-browser-fixed-renderer-layout.md)部分替代本方案的独立 Chrome 宿主、Root 物理裁剪／全窗 CDP 逻辑尺寸及仅为它们服务的呈现握手、普通切页和恢复补偿。新方案尚在实施，本篇保留已实施局部、失败候选与原始过程，不能据 proposed 或新设计反推当前源码。准确原页／incarnation、取消、真实观察与输入证明、独立生命周期和统一 Main 几何 owner 的理由继续适用；灰带及平台／发行未取得资格保持，后继实际变更与验收归 Desktop owner。
+
 ## Problem
 
 普通窗口缩放使浏览器呈现不断进入主动 hide、旧 PNG 衔接、两次 Root witness 后再显示。连续 proposal 会延长旧 viewport／黑空阶段。保留页面身份与最终恢复并不证明中间画面正确。直接提前移动 Native 则可能覆盖仍按旧布局显示的聊天。

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   type AgentBrowserObservationOwner,
   createAgentBrowserObservationOwner,
@@ -7,13 +7,9 @@ import type { AgentBrowserObservation } from './agent-browser-observer';
 import type { NativeExtensionScope } from './extensions-bridge';
 import type { NativeBridge, NativeCallerMetadata } from './native-bridge';
 import type { NativeBrowserState } from './native-browser-bridge';
-import { NativeBrowserChromeControl } from './native-browser-chrome-presentation';
-import type {
-  NativeBrowserControlAction,
-  NativeBrowserControlPort,
-  NativeBrowserControlPresentation,
-} from './native-browser-chrome-types';
 import { useNativeBrowserPopup } from './native-browser-menu';
+import { NativeBrowserControl } from './native-browser-toolbar';
+import type { NativeBrowserControlAction } from './native-browser-toolbar-types';
 
 /** Only explicit existing Extension Actions can change control; Main display state grants nothing. */
 export function NativeBrowserLeaseControls({
@@ -24,8 +20,6 @@ export function NativeBrowserLeaseControls({
   canRead,
   canInvoke,
   submissions = [],
-  chromeHosted = false,
-  onChromePresentation,
 }: {
   bridge: NativeBridge;
   scope: NativeExtensionScope;
@@ -34,8 +28,6 @@ export function NativeBrowserLeaseControls({
   canRead: boolean;
   canInvoke: boolean;
   submissions?: readonly NativeCallerMetadata[];
-  chromeHosted?: boolean;
-  onChromePresentation?: (presentation: NativeBrowserControlPort | undefined) => void;
 }) {
   const [menuIssue, setMenuIssue] = useState<string>();
   const [observation, setObservation] = useState<AgentBrowserObservation & { scopeKey?: string }>({
@@ -45,13 +37,6 @@ export function NativeBrowserLeaseControls({
     pending: false,
   });
   const observer = useRef<AgentBrowserObservationOwner | undefined>(undefined);
-  const mounted = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
   const key = JSON.stringify(scope);
   const current = useRef({ key, scope, visible, canInvoke, submissions });
   current.current = { key, scope, visible, canInvoke, submissions };
@@ -141,7 +126,7 @@ export function NativeBrowserLeaseControls({
       view?.generation,
       view?.state,
     ]),
-    hostKey: chromeHosted ? 'chrome' : 'root',
+    hostKey: 'root',
     visible,
     scope: {
       storeId: scope.storeId,
@@ -169,62 +154,23 @@ export function NativeBrowserLeaseControls({
       );
     },
   });
-  const detailsKey = JSON.stringify(details);
-  const data = useMemo<NativeBrowserControlPresentation>(
-    () => ({
-      id: page.id,
-      label,
-      detail,
-      issue: menuIssue,
-      handoffAvailable: handoff,
-      closeAvailable: close,
-      pending: observation.pending,
-      details: JSON.parse(detailsKey) as string[],
-    }),
-    [page.id, label, detail, menuIssue, handoff, close, observation.pending, detailsKey],
-  );
+  const data = { label, detail, issue: menuIssue };
   const handleControlAction = (action: NativeBrowserControlAction) => {
     if (action.type === 'show-menu' && page.control?.browserId) showMenu(action.anchor);
   };
-  const chrome = useRef({ key, pageId: page.id, visible, chromeHosted, handleControlAction });
-  chrome.current = { key, pageId: page.id, visible, chromeHosted, handleControlAction };
-  const dispatch = useCallback(
-    (action: NativeBrowserControlAction) => {
-      const current = chrome.current;
-      if (
-        mounted.current &&
-        current.key === key &&
-        current.pageId === page.id &&
-        current.visible &&
-        current.chromeHosted
-      )
-        current.handleControlAction(action);
-    },
-    [key, page.id],
-  );
-  const port = useMemo(() => ({ data, dispatch }), [data, dispatch]);
-  useEffect(() => {
-    onChromePresentation?.(visible && page.control?.browserId ? port : undefined);
-  }, [onChromePresentation, port, visible, page.control?.browserId]);
-  useEffect(() => () => onChromePresentation?.(undefined), [onChromePresentation]);
   const trigger = useRef<HTMLSpanElement>(null);
   const previousKey = useRef(key);
   useEffect(() => {
-    if (chromeHosted || !visible || previousKey.current !== key) {
+    if (!visible || previousKey.current !== key) {
       const active = document.activeElement;
       if (active instanceof HTMLElement && trigger.current?.contains(active)) active.blur();
     }
     previousKey.current = key;
-  }, [chromeHosted, visible, key]);
+  }, [visible, key]);
   if (!page.control?.browserId) return null;
   return (
-    <span
-      ref={trigger}
-      inert={chromeHosted || undefined}
-      aria-hidden={chromeHosted || undefined}
-      style={chromeHosted ? { visibility: 'hidden', pointerEvents: 'none' } : undefined}
-    >
-      <NativeBrowserChromeControl data={data} dispatch={handleControlAction} />
+    <span ref={trigger}>
+      <NativeBrowserControl data={data} dispatch={handleControlAction} />
     </span>
   );
 }

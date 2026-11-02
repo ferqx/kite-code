@@ -138,6 +138,12 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 ## 原桌面展示层
 
+`Composer.confirmFullPermission`是可选宿主确认port：提供时使用宿主异步确认及AbortSignal，只有准确当前scope／权限／回调与严格true才调用原权限变更；取消、失效与卸载退休确认，失败显示有限可重试说明。没有port的Web／共享调用保留原DOM确认及风险文案。普通模式菜单的原门控保持，仅本地完全访问确认在途禁止重复选择。[权限DOM回归](test/permissions-dom.test.tsx)核宿主与Web两条路径；Native专用自绘浮层与原有权限命令分离，实际身份／窗口和像素资格归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
+
+[ApplicationConfirmationDialog](src/desktop/FullPermissionConfirmationDialog.tsx)集中维护完全权限与移除空间两种应用确认的固定内容和相同视觉组件；Full包装继续由Composer的Web路径复用。取消保持默认焦点，Esc取消，危险操作按钮使用共享红色样式；组件只返回用户决定，不执行权限变更或空间移除；Native退出应用保留系统原生确认框。Native在独立WebContentsView渲染同一组件、CSS和主题，Main拥有原生层序及跨视图焦点；临时失败message由Native owner负责，不复用此模态组件。
+
+`SessionPage`手动动画收起准确已展示浏览器时，关闭意图立即更新，同scope原页仅保持到既有布局rAF开始，再同批撤页与折叠。立即重开、scope／active tab／host panel替换和无布局都退休pending；不为保画面恢复旧owner或延迟真正覆盖／隐藏。普通详情、导航及已有网页直接展开时序保持。[同提交与退休回归](test/isolated/desktop-session-page-render.test.tsx)只证明状态与面板目标，真实原生过程归上述Desktop owner。
+
 `useSessionTabs`把明确关闭浏览器标签与scope变化／组件卸载分开。后两者只结束界面观察，由Native Pane撤下呈现，Main继续持有网页；私有restore可交付同scope的全部存活页及activeId，保留旧单page消费形式。恢复清单不授控制权，迟到或错误scope不发布。不同网址的Agent新页保留已有标签，后台会话不因恢复清单抢占当前选择；明确Tab X交宿主核准确当前scope并关闭原页，活动操作的结果与资源清理另核，不把控制权移给替代页。实现和真实资格归[Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
 
 [SessionPage](src/desktop/SessionPage.tsx)的可选`tabsScopeKey`独立持有标签model、选中页、展开意图及已处理请求的展示身份，缺省沿原readingKey。Native以已知Store／当前选择意图提供稳定scope；正文读取、Caller generation或暂时缺少selection不应重建同一会话的标签，实际Store／会话变化仍重置展示。正文Conversation与历史readingKey、恢复准入browserRestoreKey和宿主权限均保持独立，稳定tab scope不恢复旧reader或操作资格。
@@ -283,13 +289,11 @@ Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发�
 
 拖动分隔线时，[SessionPage](src/desktop/SessionPage.tsx)通过 Group 的实时 `onLayoutChange` 投影实际折叠状态，及时撤下右栏的 `visible`／`present`；`onLayoutChanged` 只在交互完成后确认用户关闭意图。窄窗口自动折叠仍保留拉宽后恢复的意图。折叠布尔值相同直接返回，不为稳定正宽通知逐像素读取布局。[页面展示回归](test/isolated/desktop-session-page-render.test.tsx)6项83断言通过，核完成通知前隐藏、原页节点保留、显式关闭与自动折叠的恢复差异，以及同值通知不追加几何读取；测试受控发送布局通知，不替代实际指针拖动。真实开发客户端的边框收起、隐藏时缩窗、原页展开及连续画面限制归[Desktop owner](../../apps/desktop/README.md#macos-原生分栏与浏览器工具栏2026-10-31)。
 
-原生浏览器Chrome接管时，Root的本地标签header与本地地址栏一样视觉隐藏并禁用输入，保留原高度、DOM和量测；不再只依赖Main物理裁剪遮住第二套标签。[SessionTabs回归](test/isolated/desktop-session-tabs.test.tsx)23项407断言通过，先在旧实现取得`visibility:visible`红例，再核托管header隐藏、浏览器本体与唯一tab model保持，以及退出托管后原header可见并可新建标签。UI类型通过；真实resize时序与空栏边界仍以[Desktop owner](../../apps/desktop/README.md#macos-原生分栏与浏览器工具栏2026-10-31)的冻结制品证据为准。
+Native 浏览器的标签 header 与地址栏持续由同一主 Renderer 绘制；共享 UI 不再提供远端 Chrome 展示 ports、hosted 隐藏或跨 Renderer 动作转发。[SessionTabs](src/desktop/SessionTabs.tsx) 保留唯一8项模型，浏览器 Pane 保持挂载并接收可见性；切标签、收起、换 scope 与页面卸载只撤展示，真正网页寿命由宿主 Main 负责。Native 的单一网页矩形、首文档可绘制及弹层恢复归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
 
-已加载浏览器tab之间切换时，Desktop的后台Pane只保留资料和原页面，呈现effect只由当前可见页安装；离开可见状态的原effect负责一次准确隐藏。后台资料端口在layout阶段发布，Root仍只选择唯一active tab，后台或旧scope的动作继续拒绝；不让inactive effect在再次选中时撤掉新目标。真实组件发布／请求全时序及原位宿主交接的当前实现与实机资格归[Desktop owner](../../apps/desktop/README.md#macos-原生分栏与浏览器工具栏2026-10-31)。
+`useSessionTabs` 在用户点击 X 的同一调用栈发起一次宿主 `closeBrowser`，让宿主在 UI 模型变化前捕获准确原页 token；不再预备旧 Root／Chrome 交接或等待显示画布。邻页选择与最后一项收栏仍在同次更新完成。关闭失败只在原 scope、准入及意图仍相同时恢复准确标签并显示错误，结果未知不重新发送关闭。切标签不预读目标截图；已有浏览器原页展开使用最终栏宽。共享组件只交付准确 ID 与有限交互，页面、Run 与租约是否结束由宿主核实。[标签回归](test/isolated/desktop-session-tabs.test.tsx)核容量、真实关闭一次、邻居选择、scope、迟到失败、清单恢复与 reader 释放。
 
-`useSessionTabs`可接宿主`prepareBrowser`，在浏览器页之间选择或关闭当前页回退准确邻页前做有界预备；缺省宿主、后台关闭和非浏览器不申请网页预备；当前网页没有浏览器继任时可通过`prepareCloseBrowser`预备Root目标画面。新意图、scope与卸载退休未提交准备，失败／250ms超时继续正常fresh呈现，旧receipt只取消其自身准备。当前页关闭先提交继任标签，子SessionTabs发布正快照后由父layout effect在同一提交派发一次`closeBrowser`，不留跨scope微任务窗口，也不代宿主伪造销毁成功。最后一页在提交移除时立即收栏；已打开原页的自动恢复直接使用最终栏宽，不启动240ms展开动画。关闭失败只在原意图与准入仍相同时恢复准确标签并显示错误，不重新发送关闭；Native关闭预备和真实绘制资格归Desktop owner。真实hook／组件的回归核新建导航、loading、卸载全序、数组邻居选择、快速往返、重复同目标、迟到与取消；原生像素与准确资源销毁资格仍归Desktop owner。
-
-共享`SessionBrowserToolbar`的可选`interactionPending`只暂停导航按钮和form提交，暂时暂停的真实可用按钮保原透明度，避免把绑定确认误画成页面能力消失；缺省不改变Root工具栏。`addressReadOnly`与原canNavigate=false按OR收窄地址编辑，真实控制限制仍生效。Native独立Renderer按Root scope保DOM、按准确页binding隔离动作；换页清旧编辑／待提交，同页几何仍保地址选区与IME，旧页失焦input不得写到目标页。新对话未发送消息时的手动网页由Desktop独立草稿owner绑定，SessionTabs仍只有一个tab model，恢复只读已有页面、关闭带准确owner；不为展示创建Session或授Agent控制。首个网址导航的起始内容由Desktop保留到准确当前页实际呈现；Root绘制确认不再单独代表网页已出现，等待、失败与过期确认仍由宿主处理。完整实现、真实百度／知乎时序和剩余资格归Desktop owner。
+共享 `SessionBrowserToolbar` 继续交付地址、前进／后退和刷新／停止事件，`canNavigate=false` 保留可选取的只读地址并阻止导航。地址聚焦时保编辑、选区与 IME，失焦同步最后确认 URL；同一 owner 的 React Refresh 不清未提交地址，真正 scope／页面／Host／文档变化退休旧编辑。新对话的手动网页由 Desktop 的 Root-local 草稿 owner 绑定，不为展示创建 Session 或授 Agent 控制。首个网址的 loading／错误层持续在 Root 中，Main 自行证明准确新文档可绘制后显示真实页；普通显示成功不成为观察或输入证明。首次／恢复的布局在当前Root layout commit同步准入，稳定resize继续单在途异步校准；这不证明原生surface与Root像素同帧提交。冻结制品已观察到单帧暗空、重开空底及灰带，整体体验验收尚未通过，准确过程、范围与未完成工作仍归Desktop owner。
 
 原 [FileChanges／FileDiff](src/desktop/FileChanges.tsx)与 `fileChangesContent` 继续复用；只有当前可见且选中的变更或子详情标签挂载 reader，切换、覆盖或收起即卸载，其他标签不在后台读取。`renderDetail` 仍只在展开项挂载。实际网页、文件回执和编辑器目标校验归 [Desktop owner](../../apps/desktop/README.md#会话标签页与内置浏览器)。[标签生命周期回归](test/isolated/desktop-session-tabs.test.tsx)覆盖入口、reader、会话释放、窗口缩放、数量边界，以及最后一个网页／变更／子详情标签关闭后的自动收起、焦点返回和重新打开；UI 不取得文件或执行权限。同一文件新增宿主详情面板关闭与标签打开交错的回归：原实现中 `detailPanel.onClose` 先使宿主面板关闭，延迟到rAF的标签意图会被 `rightSidebarOpen=false` 的布局effect取消；仅标签开关同步保存 `tabsKey` 后，布局帧可被替换，不再丢失打开标签的操作；导航及其他面板保留原同帧提交合同。该修复恢复原标签合同，保留原reader释放、尺寸、共享复用与动画边界；合并后的实际执行结果单独核实。
 

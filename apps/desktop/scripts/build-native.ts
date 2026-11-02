@@ -84,7 +84,7 @@ async function buildNativeApp(
       .update(await readFile(join(outdir, 'profile-access.js')))
       .digest('hex'),
   };
-  for (const entry of ['main', 'preload', 'browser-chrome-preload']) {
+  for (const entry of ['main', 'preload', 'global-dialog-preload']) {
     const result = await Bun.build({
       entrypoints: [join(root, 'electron', `${entry}.ts`)],
       target: 'node',
@@ -104,32 +104,37 @@ async function buildNativeApp(
   // Retain the original desktop renderer pipeline and its compiled CSS/fonts.
   // The already built Main, preload and helpers share this destination.
   if (process.platform === 'win32') privateDirectory(join(outdir, 'assets'));
-  if (!development)
-    await buildRenderer({
-      root,
-      configFile: false,
-      plugins: [react(), tailwindcss()],
-      resolve: { alias: [desktopMarkdownDecoderAlias()] },
-      base: './',
-      clearScreen: false,
-      logLevel: 'warn',
-      // Formal renderer bytes must not inherit the invoking process's test/dev
-      // environment. Development keeps its separate Vite server.
-      esbuild: { jsxDev: false },
-      define: {
-        'process.env.NODE_ENV': JSON.stringify('production'),
-        __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics),
-      },
-      build: {
-        target: 'es2022',
-        outDir: outdir,
-        emptyOutDir: false,
-        rollupOptions: {
-          input: join(root, 'index.html'),
-          output: { entryFileNames: 'renderer.js' },
+  await buildRenderer({
+    root,
+    configFile: false,
+    plugins: [react(), tailwindcss()],
+    resolve: { alias: [desktopMarkdownDecoderAlias()] },
+    base: './',
+    clearScreen: false,
+    logLevel: 'warn',
+    // Formal renderer bytes must not inherit the invoking process's test/dev
+    // environment. Development keeps its separate Vite server.
+    esbuild: { jsxDev: false },
+    define: {
+      'process.env.NODE_ENV': JSON.stringify('production'),
+      __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics),
+    },
+    build: {
+      target: 'es2022',
+      outDir: outdir,
+      emptyOutDir: false,
+      rollupOptions: {
+        input: {
+          ...(!development ? { main: join(root, 'index.html') } : {}),
+          'global-dialog': join(root, 'global-dialog.html'),
+        },
+        output: {
+          entryFileNames: (chunk) =>
+            chunk.name === 'global-dialog' ? 'global-dialog-renderer.js' : 'renderer.js',
         },
       },
-    });
+    },
+  });
   await writeFile(
     join(outdir, 'package.json'),
     JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' }),

@@ -19,6 +19,11 @@ import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const views: FakeView[] = [];
 const windowOwners = new WeakMap<FakeContents, BrowserWindow>();
+type FakeFrame = {
+  isEmpty(): boolean;
+  getSize(): { width: number; height: number };
+  getScaleFactors(): number[];
+};
 let focused: FakeContents | undefined;
 let debuggerGate: Promise<void> | undefined;
 let commandStarted = false;
@@ -29,6 +34,13 @@ class FakeContents extends EventEmitter {
   physical = 0;
   loads = 0;
   attached = false;
+  documentReady = false;
+  view?: FakeView;
+  nativeFrames = 0;
+  captureCalls = 0;
+  frameBelowRoot = false;
+  frameSubscription?: (frame: FakeFrame) => void;
+  viewport = { width: 800, height: 600 };
   readonly styles = new Set<string>();
   readonly physicalEvents: Record<string, number> = {};
   readonly mainFrame = { url: 'http://localhost/' };
@@ -68,6 +80,9 @@ class FakeContents extends EventEmitter {
   getZoomFactor() {
     return 1;
   }
+  getOSProcessId() {
+    return this.destroyed ? 0 : 1;
+  }
   getURL() {
     return this.url;
   }
@@ -84,11 +99,57 @@ class FakeContents extends EventEmitter {
     this.styles.delete(key);
   }
   async loadURL(url: string) {
+    this.documentReady = false;
     this.url = url;
+    this.mainFrame.url = url;
     this.loads++;
     this.emit('did-start-navigation', {}, url, false, true);
-    this.emit('did-navigate');
+    this.emit('did-start-loading');
+    this.emit('did-navigate', {}, url);
+    this.documentReady = true;
+    this.emit('dom-ready');
     this.emit('did-finish-load');
+    this.emit('did-stop-loading');
+  }
+  nativeFrame(): FakeFrame {
+    const size = { ...this.viewport };
+    return {
+      isEmpty: () => size.width <= 0 || size.height <= 0,
+      getSize: () => size,
+      getScaleFactors: () => [1],
+    };
+  }
+  async capturePage() {
+    this.captureCalls++;
+    return this.nativeFrame();
+  }
+  beginFrameSubscription(onlyDirty: boolean, callback: (frame: FakeFrame) => void) {
+    expect(onlyDirty).toBe(false);
+    this.frameSubscription = callback;
+  }
+  endFrameSubscription() {
+    this.frameSubscription = undefined;
+  }
+  invalidate() {
+    const callback = this.frameSubscription;
+    queueMicrotask(() => {
+      if (
+        !callback ||
+        this.frameSubscription !== callback ||
+        this.destroyed ||
+        !this.documentReady ||
+        !this.view?.getVisible()
+      )
+        return;
+      const window = windowOwners.get(this);
+      const children = window?.contentView.children as unknown as FakeView[] | undefined;
+      const rootOwner = window?.webContents as unknown as FakeContents | undefined;
+      const root = children?.find((view) => view.webContents === rootOwner);
+      this.frameBelowRoot =
+        !!root && root.getVisible() && children!.indexOf(this.view) < children!.indexOf(root);
+      this.nativeFrames++;
+      callback(this.nativeFrame());
+    });
   }
   async executeJavaScriptInIsolatedWorld(_world: number, scripts: { code: string }[]) {
     let result: unknown;
@@ -106,6 +167,7 @@ class FakeContents extends EventEmitter {
   close() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.endFrameSubscription();
     this.emit('destroyed');
     this.page.window.close();
   }
@@ -114,13 +176,15 @@ class FakeContents extends EventEmitter {
 }
 class FakeView {
   readonly options: { webPreferences: Record<string, unknown> };
-  readonly webContents = new FakeContents();
+  readonly webContents: FakeContents;
   visible = false;
   bounds = { x: 0, y: 0, width: 0, height: 0 };
   background = '';
-  constructor(options: { webPreferences: Record<string, unknown> }) {
+  constructor(options: { webPreferences: Record<string, unknown> }, contents?: FakeContents) {
     this.options = options;
-    views.push(this);
+    this.webContents = contents ?? new FakeContents();
+    this.webContents.view = this;
+    if (!contents) views.push(this);
   }
   setVisible(value: boolean) {
     this.visible = value;
@@ -130,6 +194,7 @@ class FakeView {
   }
   setBounds(value: typeof this.bounds) {
     this.bounds = value;
+    this.webContents.viewport = { width: value.width, height: value.height };
   }
   getBounds() {
     return this.bounds;
@@ -208,7 +273,7 @@ Object.assign(globalThis, {
 });
 const { createRoot } = await import('react-dom/client');
 const { NativeBrowserPane } = await import('../../src/native-browser-pane');
-const { closeNativeBrowserTab, restoreNativeBrowserTab } = await import(
+const { closeNativeBrowserTab, nativeBrowserDisplayHint, restoreNativeBrowserTab } = await import(
   '../../src/native-browser-session'
 );
 const { NativeBrowserLeaseControls } = await import('../../src/native-browser-lease-controls');
@@ -233,7 +298,10 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
   dom.window.HTMLElement.prototype.getBoundingClientRect = () =>
     new dom.window.DOMRect(20, 80, 800, 600);
   const owner = new FakeContents(),
-    children: FakeView[] = [];
+    rootView = new FakeView({ webPreferences: {} }, owner),
+    children: FakeView[] = [rootView];
+  rootView.setBounds({ x: 0, y: 0, width: 1200, height: 900 });
+  rootView.setVisible(true);
   const listeners = new Set<(state: NativeBrowserState) => void>();
   Object.assign(owner, {
     send(channel: string, value: NativeBrowserState) {
@@ -248,10 +316,10 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
     getContentSize: () => [1200, 900],
     contentView: {
       children,
-      addChildView(view: FakeView) {
+      addChildView(view: FakeView, index?: number) {
         const i = children.indexOf(view);
         if (i >= 0) children.splice(i, 1);
-        children.push(view);
+        children.splice(index ?? children.length, 0, view);
         windowOwners.set(view.webContents, windowPort as unknown as BrowserWindow);
       },
       removeChildView(view: FakeView) {
@@ -347,8 +415,11 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
   });
   let model: ReturnType<typeof useSessionTabs> | undefined;
   function Harness({ scope }: { scope: string }) {
-    const tabs = useSessionTabs(scope, closeNativeBrowserTab, () =>
-      restoreNativeBrowserTab({ ...selected, generation: 1, viewSelection: 1 }),
+    const pageScope = { ...selected, generation: 1, viewSelection: 1 };
+    const tabs = useSessionTabs(
+      scope,
+      (id) => closeNativeBrowserTab(id, undefined, pageScope),
+      () => restoreNativeBrowserTab(pageScope),
     );
     model = tabs;
     return (
@@ -360,7 +431,8 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
           <NativeBrowserPane
             key={tab.id}
             id={tab.id}
-            scope={{ ...selected, generation: 1, viewSelection: 1 }}
+            scope={pageScope}
+            initialHint={nativeBrowserDisplayHint(tab.id, pageScope)}
             visible
             tools={null}
             onTitleChange={(value) => tabs.title(tab.id, value)}
@@ -436,6 +508,11 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
       await Bun.sleep(35);
     });
     const page = views[0]!;
+    await until(() => page.visible);
+    expect(page.webContents.nativeFrames).toBe(1);
+    expect(page.webContents.frameBelowRoot).toBe(true);
+    expect(page.webContents.captureCalls).toBe(0);
+    expect(children.indexOf(page)).toBeGreaterThan(children.indexOf(rootView));
     physical();
     physical('key');
     physical('wheel');
@@ -669,6 +746,9 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
     await request({
       action: 'present',
       id,
+      pageToken: (await request({ action: 'state', id }))!.pageToken,
+      scope: { ...selected, generation: 1, viewSelection: 1 },
+      presentationRevision: Number.MAX_SAFE_INTEGER,
       bounds: { x: 20, y: 80, width: 800, height: 600, radius: 0 },
     });
     expect(page.visible).toBe(false);

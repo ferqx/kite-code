@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { type WebContents, WebContentsView } from 'electron';
+import {
+  addNativeWindowView,
+  focusNativeWindowContent,
+  isNativeViewAboveContent,
+} from './native-overlay-layer';
 import type { NativeRootWindow as BrowserWindow } from './native-root-window';
 
 const document = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}</style><body aria-hidden="true"></body>`;
@@ -16,7 +21,7 @@ export function createBrowserInputShield(window: BrowserWindow, onFailure: () =>
   const focusApp = () => {
     if (!disposed && !window.isDestroyed() && !window.webContents.isDestroyed()) {
       try {
-        window.webContents.focus();
+        focusNativeWindowContent(window, window.webContents);
       } catch {
         fail();
       }
@@ -51,7 +56,7 @@ export function createBrowserInputShield(window: BrowserWindow, onFailure: () =>
         contents = shield.webContents;
         shield.setBackgroundColor('#00000000');
         shield.setVisible(false);
-        window.contentView.addChildView(shield);
+        addNativeWindowView(window, shield);
         contents.setWindowOpenHandler(() => ({ action: 'deny' }));
         contents.on('will-navigate', (event) => event.preventDefault());
         contents.on('will-attach-webview', (event) => event.preventDefault());
@@ -96,8 +101,7 @@ export function createBrowserInputShield(window: BrowserWindow, onFailure: () =>
         next.height !== previous.height
       )
         shield.setBounds(next);
-      const children = window.contentView.children;
-      if (children[children.length - 1] !== shield) window.contentView.addChildView(shield);
+      if (!isNativeViewAboveContent(window, shield)) addNativeWindowView(window, shield);
       if (!shield.getVisible()) shield.setVisible(true);
       if (target.webContents.isFocused()) {
         focusApp();

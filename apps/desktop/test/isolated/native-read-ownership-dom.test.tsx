@@ -130,6 +130,10 @@ function fixture(
       if (replacement !== undefined) return replacement;
       switch (request.method) {
         case 'attach':
+          // These cases exercise an explicit sidebar selection. A restored A
+          // would make startup await the deliberately held select/draft read
+          // before it can read the directory and expose that sidebar.
+          return { ...snapshot(), selection: undefined };
         case 'state':
           return snapshot();
         case 'directory':
@@ -214,8 +218,17 @@ function fixture(
           .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       });
     },
-    render: (testDiagnostics = false) =>
-      act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />)),
+    async render(testDiagnostics = false, expectStartupFailure = false) {
+      await act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />));
+      if (!expectStartupFailure)
+        await until(
+          () =>
+            calls.some((request) => request.method === 'directory') &&
+            [...dom.window.document.querySelectorAll('button.session-row')].some(
+              (button) => button.textContent === 'Original A',
+            ),
+        );
+    },
     notify: (event: NativeEvent = { generation: 1, kind: 'changed' }) =>
       act(async () => {
         for (const listener of listeners) listener(event);
@@ -230,6 +243,7 @@ function fixture(
         promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('other text');
       expect(dom.window.document.querySelector('[role="alertdialog"]') === null).toBe(true);
+      expect(dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     },
     async close() {
       await act(async () => root.unmount());
@@ -329,7 +343,8 @@ test('a current event state failure recovers in the background without a dialog 
     const priorStateReads = f.calls.filter((request) => request.method === 'state').length;
     fail = true;
     await f.notify();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     expect(f.dom.window.document.body.textContent).not.toContain('native_connection_unavailable');
     fail = false;
     await until(
@@ -354,10 +369,12 @@ test('a current select rejection retries its exact target without an external er
     await f.render();
     await f.click('Original A');
     expect(f.calls.filter((request) => request.method === 'select')).toHaveLength(1);
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     failed = true;
     await act(async () => held.reject(Error('native_connection_unavailable')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     await until(() => f.calls.filter((request) => request.method === 'select').length === 2);
     expect(
       promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
@@ -387,9 +404,10 @@ test('a global directory failure remains visible after a same-generation session
     await f.click('Other B');
     f.assertOther();
     await act(async () => held.reject(Error('session_directory_unavailable')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'session_directory_unavailable',
-    );
+    const message = f.dom.window.document.querySelector('.native-message [role="status"]');
+    expect(message?.textContent).toContain('会话列表暂时无法读取，请稍后重新读取目录。');
+    expect(message?.textContent).not.toContain('session_directory_unavailable');
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
     expect(
       promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
     ).toBe('other text');
@@ -427,7 +445,8 @@ test('a mutation transport failure automatically checks the original intent with
     });
     await f.click('发送首条消息');
     expect(submitted).toBeDefined();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));
     const lookups = f.calls.filter((request) => request.method === 'conversation.lookup');
     expect(lookups).toHaveLength(1);
@@ -449,7 +468,7 @@ test('a real initial attach failure retains startup failure and retry instead of
     return undefined;
   });
   try {
-    await f.render();
+    await f.render(false, true);
     expect(f.dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(
       '启动未完成：required_capability_missing',
     );
@@ -479,7 +498,10 @@ for (const method of ['state', 'directory'] as const)
       const callsBeforeQuit = f.calls.filter((request) => request.method === 'state').length;
       await f.notify({ kind: 'lifecycle', phase: 'quitting' });
       await act(async () => held.reject(Error('native_draining')));
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       expect(
         promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('original text');
@@ -490,7 +512,10 @@ for (const method of ['state', 'directory'] as const)
       expect(f.calls.filter((request) => request.method === 'state').length).toBeGreaterThan(
         callsBeforeQuit,
       );
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       expect(
         promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('original text');
@@ -514,7 +539,8 @@ test('a temporary native_draining observation automatically retries without a fa
     const priorStateReads = f.calls.filter((request) => request.method === 'state').length;
     fail = true;
     await f.notify();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     fail = false;
     await until(
       () => f.calls.filter((request) => request.method === 'state').length >= priorStateReads + 2,
@@ -543,13 +569,19 @@ for (const method of ['select', 'draft.read'] as const)
       ).toHaveLength(2);
       await f.notify({ kind: 'lifecycle', phase: 'quitting' });
       await act(async () => held.reject(Error('native_draining')));
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       hold = false;
       await f.notify({ kind: 'lifecycle', phase: 'active' });
       expect(
         promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('original text');
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
       expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
       expect(f.calls.filter((request) => request.method === 'draft.write')).toHaveLength(0);
@@ -590,7 +622,8 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
     expect(submitted).toBeDefined();
     await f.notify({ kind: 'lifecycle', phase: 'quitting' });
     await act(async () => held.reject(Error('network_outcome_unknown')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     expect(f.calls.filter((request) => request.method === 'conversation.lookup')).toHaveLength(0);
     await f.notify({ kind: 'lifecycle', phase: 'active' });
     await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));

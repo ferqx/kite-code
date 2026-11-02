@@ -21,155 +21,113 @@ const { createRoot } = await import('react-dom/client');
 const { NativeDesktop } = await import('../../src/native');
 bootstrap.window.close();
 
-test('prepared Native close confirms the committed Root marker then removes it before finish without replay', async () => {
-  const dom = new JSDOM('<!doctype html><main id="target">Committed target</main>', {
-      url: 'http://localhost/',
-      pretendToBeVisual: true,
-    }),
-    restoreDom = prepareDesktopDom(dom),
-    events: string[] = [];
+test('close captures the exact Main token in its invocation stack and never closes a same-ID successor', async () => {
+  const dom = new JSDOM('<!doctype html><main>Root</main>', {
+    url: 'http://localhost/',
+    pretendToBeVisual: true,
+  });
+  const restoreDom = prepareDesktopDom(dom),
+    draft = '00112233445566778899aabbccddeeff';
   Object.assign(globalThis, {
     window: dom.window,
     document: dom.window.document,
     navigator: dom.window.navigator,
   });
-  dom.window.HTMLCanvasElement.prototype.getContext = (() => ({
-    fillStyle: '',
-    fillRect() {},
-  })) as unknown as typeof dom.window.HTMLCanvasElement.prototype.getContext;
-  let confirm!: () => void, finish!: () => void;
-  const confirmed = new Promise<void>((resolve) => {
-      confirm = resolve;
-    }),
-    finished = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
+  const requests: NativeBrowserRequest[] = [];
+  const original: NativeBrowserState = {
+    id: 'page',
+    title: 'Original',
+    url: 'https://example.test',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    pageToken: 'original-main-object',
+    display: 'ready',
+  };
+  const successor = { ...original, title: 'Successor', pageToken: 'same-id-successor-object' };
+  let rejectClose!: (cause: unknown) => void;
   Object.assign(window, {
     kiteNative: {
-      async prepareBrowserClose() {
-        events.push('prepare');
-        return {
-          key: '00112233445566778899aabbccddeeff',
-          witness: '00112233445566778899aabb',
-          bounds: { x: 600, y: 0, width: 400, height: 74, radius: 0 },
-          width: 1000,
-          height: 800,
-        };
+      async restoreBrowserDraft() {
+        return { pages: [original], activeId: original.id };
       },
-      async confirmBrowserClose() {
-        events.push('confirm');
-        expect(document.querySelector('[data-native-browser-close-witness]')).not.toBeNull();
-        expect(document.getElementById('target')?.textContent).toBe('Committed target');
-        await confirmed;
+      async browserRequest(input: NativeBrowserRequest) {
+        requests.push(input);
+        if (input.action === 'close')
+          return new Promise((_resolve, reject) => {
+            rejectClose = reject;
+          });
+        return successor;
       },
-      async finishBrowserClose() {
-        events.push('finish');
-        expect(document.querySelector('[data-native-browser-close-witness]')).toBeNull();
-        await finished;
+    },
+  });
+  const session = await import('../../src/native-browser-session');
+  const cache = await import('../../src/native-browser-display-state');
+  try {
+    await session.restoreNativeBrowserDraft(draft);
+    const closing = session.closeNativeBrowserTab(original.id, draft);
+    expect(requests).toEqual([
+      { action: 'close', id: original.id, draft, pageToken: original.pageToken },
+    ]);
+    cache.rememberNativeBrowserState(successor, undefined, draft);
+    rejectClose(Error('reply unknown'));
+    await expect(closing).rejects.toThrow('未能确认网页已关闭');
+    expect(requests).toEqual([
+      { action: 'close', id: original.id, draft, pageToken: original.pageToken },
+      { action: 'state', id: original.id, draft },
+    ]);
+    expect(session.nativeBrowserDisplayHint(original.id, undefined, draft)).toEqual(successor);
+    expect(document.querySelector('canvas, img')).toBeNull();
+  } finally {
+    restoreDom();
+    dom.window.close();
+  }
+});
+
+test('an unknown close queries once without replay, while a pure empty Root tab dispatches no close', async () => {
+  const dom = new JSDOM('<!doctype html><main>Root</main>', {
+    url: 'http://localhost/',
+    pretendToBeVisual: true,
+  });
+  const restoreDom = prepareDesktopDom(dom),
+    draft = '00112233445566778899aabbccddeeff';
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+  });
+  const requests: NativeBrowserRequest[] = [];
+  const original: NativeBrowserState = {
+    id: 'page',
+    title: 'Original',
+    url: 'https://example.test',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    pageToken: 'main-object',
+    display: 'ready',
+  };
+  Object.assign(window, {
+    kiteNative: {
+      async restoreBrowserDraft() {
+        return { pages: [original], activeId: original.id };
       },
-      async cancelBrowserClose() {
-        events.push('cancel');
-      },
-      async browserRequest() {
-        events.push('ordinary-request');
+      async browserRequest(input: NativeBrowserRequest) {
+        requests.push(input);
+        if (input.action === 'close') throw Error('unknown');
         return null;
       },
     },
   });
   const session = await import('../../src/native-browser-session');
   try {
-    await session.prepareNativeBrowserClose('page', '00112233445566778899aabbccddeeff');
-    const closing = session.closeNativeBrowserTab('page', '00112233445566778899aabbccddeeff');
-    await Promise.resolve();
-    expect(events).toEqual(['prepare', 'confirm']);
-    confirm();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(events).toEqual(['prepare', 'confirm', 'finish']);
-    finish();
-    await closing;
-    expect(document.querySelector('[data-native-browser-close-witness]')).toBeNull();
-  } finally {
-    confirm();
-    finish();
-    session.cancelNativeBrowserCloses();
-    restoreDom();
-    dom.window.close();
-  }
-});
-
-test('a refused prepared close reads its original state once, refreshes retained hints and never repeats close', async () => {
-  const dom = new JSDOM('<!doctype html><main>Current Root</main>', {
-      url: 'http://localhost/',
-      pretendToBeVisual: true,
-    }),
-    restoreDom = prepareDesktopDom(dom),
-    draft = '00112233445566778899aabbccddeeff',
-    requests: NativeBrowserRequest[] = [],
-    page: NativeBrowserState = {
-      id: 'cached-page',
-      title: 'Preserved page',
-      url: 'https://example.test/current',
-      loading: false,
-      canGoBack: false,
-      canGoForward: false,
-    };
-  let confirmations = 0,
-    finishes = 0,
-    cancellations = 0;
-  Object.assign(globalThis, {
-    window: dom.window,
-    document: dom.window.document,
-    navigator: dom.window.navigator,
-  });
-  dom.window.HTMLCanvasElement.prototype.getContext = (() => ({
-    fillStyle: '',
-    fillRect() {},
-  })) as unknown as typeof dom.window.HTMLCanvasElement.prototype.getContext;
-  Object.assign(window, {
-    kiteNative: {
-      async restoreBrowserDraft() {
-        return { pages: [{ ...page, title: 'Earlier title' }], activeId: page.id };
-      },
-      async prepareBrowserClose() {
-        return {
-          key: '00112233445566778899aabbccddeeff',
-          witness: '00112233445566778899aabb',
-          bounds: { x: 600, y: 0, width: 400, height: 74, radius: 0 },
-          width: 1000,
-          height: 800,
-        };
-      },
-      async confirmBrowserClose() {
-        confirmations++;
-        throw Error('private Root proof rejected');
-      },
-      async finishBrowserClose() {
-        finishes++;
-      },
-      async cancelBrowserClose() {
-        cancellations++;
-      },
-      async browserRequest(input: NativeBrowserRequest) {
-        requests.push(input);
-        return page;
-      },
-    },
-  });
-  const session = await import('../../src/native-browser-session');
-  try {
     await session.restoreNativeBrowserDraft(draft);
-    await session.prepareNativeBrowserClose(page.id, draft);
-    await expect(session.closeNativeBrowserTab(page.id, draft)).rejects.toThrow(
-      '未能确认网页已关闭',
-    );
-    expect(confirmations).toBe(1);
-    expect(finishes).toBe(0);
-    expect(cancellations).toBe(1);
-    expect(requests).toEqual([{ action: 'state', id: page.id, draft }]);
-    expect(session.nativeBrowserDisplayHint(page.id, undefined, draft)).toEqual(page);
-    expect(document.querySelector('[data-native-browser-close-witness]')).toBeNull();
+    await session.closeNativeBrowserTab(original.id, draft);
+    expect(requests.map((request) => request.action)).toEqual(['close', 'state']);
+    requests.length = 0;
+    await session.closeNativeBrowserTab('empty', draft);
+    expect(requests).toEqual([{ action: 'state', id: 'empty', draft }]);
   } finally {
-    session.cancelNativeBrowserCloses();
     restoreDom();
     dom.window.close();
   }
@@ -221,6 +179,8 @@ test('real NativeDesktop keeps manual draft pages separate and restores the same
         page = {
           id: input.id,
           title: '草稿百度',
+          pageToken: 'draft-main-page',
+          display: 'ready',
           url: input.input,
           loading: false,
           canGoBack: false,
@@ -325,6 +285,7 @@ test('real NativeDesktop keeps manual draft pages separate and restores the same
         action: 'close',
         id: inventory.get(draft)?.[0]?.id ?? ('id' in navigation ? navigation.id : ''),
         draft,
+        pageToken: 'draft-main-page',
       },
     ]);
     expect(inventory.get(draft)).toHaveLength(0);
@@ -367,6 +328,8 @@ test('real NativeDesktop never restores A into the immediately presented B tree 
   const page = (sessionId: string): NativeBrowserState => ({
     id: `page-${sessionId}`,
     title: `RETAINED PAGE ${sessionId.toUpperCase()}`,
+    pageToken: `main-page-${sessionId}`,
+    display: 'ready',
     url: `http://localhost/${sessionId}`,
     loading: false,
     canGoBack: false,

@@ -30,7 +30,6 @@ import {
 } from './ScheduledTasks';
 import {
   type SessionBrowserPageProps,
-  type SessionBrowserPreparation,
   type SessionBrowserRestorePage,
   type SessionChildPageProps,
   type SessionChildTabRequest,
@@ -40,12 +39,7 @@ import {
   useSessionTabs,
 } from './SessionTabs';
 import { type PageActions, Sidebar } from './Sidebar';
-import type {
-  Message,
-  SessionTabsChromePresentation,
-  TurnActivity,
-  WorkspaceSummary,
-} from './types';
+import type { Message, TurnActivity, WorkspaceSummary } from './types';
 import { Button } from './ui';
 import { Workbench } from './Workbench';
 
@@ -239,15 +233,9 @@ export interface SessionPageProps {
   fileChangesContent?: ReactNode;
   renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
   closeBrowser?: ((id: string) => void) | ((id: string) => Promise<void>);
-  prepareCloseBrowser?: (id: string) => Promise<SessionBrowserPreparation | null>;
-  prepareBrowser?: (fromId: string, targetId: string) => Promise<SessionBrowserPreparation | null>;
   restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>;
   browserRestoreKey?: string;
   browserPending?: boolean;
-  /** Optional same-Root display port; all tab mutations still use the original model. */
-  onTabsChromePresentation?: (presentation: SessionTabsChromePresentation | null) => void;
-  /** Suppress only duplicate header interaction, without changing panel measurement. */
-  tabsChromeHosted?: boolean;
   childTabRequest?: SessionChildTabRequest;
   renderChildSession?: (props: SessionChildPageProps) => ReactNode;
   onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
@@ -275,8 +263,6 @@ export function SessionPage(props: SessionPageProps) {
     hasTabs ? props.restoreBrowser : undefined,
     props.browserRestoreKey,
     props.browserPending,
-    props.prepareBrowser,
-    props.prepareCloseBrowser,
   );
   return <SessionPageContent {...props} hasTabs={hasTabs} tabModel={tabModel} />;
 }
@@ -312,6 +298,7 @@ function SessionPageContent({
   const navigationAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
+  const [pendingTabsClose, setPendingTabsClose] = useState<{ scope?: string; id: string }>();
   const directDetails = useRef(false);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
   const tabsScopeKey = props.tabsScopeKey ?? props.readingKey;
@@ -405,7 +392,15 @@ function SessionPageContent({
   const rightSidebarOpen =
     hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
   const detailsPending = !!(props.loading || props.browserPending || tabModel.restoring);
-  const tabsVisible = tabsOpen && detailsCollapsed !== true;
+  const closingTabsVisible =
+    !!pendingTabsClose &&
+    pendingTabsClose.scope === tabsScopeKey &&
+    pendingTabsClose.id === tabModel.active &&
+    presentedTabsKey.current === tabsScopeKey &&
+    hasTabs &&
+    !rightSidebarOpen &&
+    !props.covered;
+  const tabsVisible = (tabsOpen || closingTabsVisible) && detailsCollapsed !== true;
   const tabsPresent =
     tabsVisible ||
     (!rightSidebarOpen && detailsAnimating && presentedTabsKey.current === tabsScopeKey);
@@ -419,6 +414,7 @@ function SessionPageContent({
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
     queueMicrotask(() => control.current?.focus());
   }, []);
+  const finishTabsClose = useCallback(() => setPendingTabsClose(undefined), []);
   const schedulePanelChange = useCallback(
     (
       frame: { current: number | undefined },
@@ -507,8 +503,8 @@ function SessionPageContent({
     [schedulePanelChange],
   );
   const collapseDetails = useCallback(
-    () => schedulePanelChange(detailsPanelFrame, detailsPanel, false),
-    [schedulePanelChange],
+    () => schedulePanelChange(detailsPanelFrame, detailsPanel, false, finishTabsClose),
+    [schedulePanelChange, finishTabsClose],
   );
   const dismissedBrowserReveals = useRef(new Set<string>());
   const stopDetailsAnimation = useCallback(() => {
@@ -517,6 +513,7 @@ function SessionPageContent({
     if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
     detailsAnimationTimer.current = undefined;
     setDetailsAnimation(undefined);
+    setPendingTabsClose(undefined);
   }, []);
   const settleDetails = useCallback(
     (open: boolean) => {
@@ -531,12 +528,71 @@ function SessionPageContent({
     (open: boolean, animate = true) => {
       // Closing a host panel can replace its pending layout frame, not this intent.
       if (!open) dismissedBrowserReveals.current.add(tabsScopeKey);
+      const group = contentGroupElement.current;
+      const keepPage =
+        !open &&
+        animate &&
+        tabsIntent.current.key === tabsScopeKey &&
+        presentedTabsKey.current === tabsScopeKey &&
+        !props.covered &&
+        !hostDetailsOpen &&
+        !scheduledEditor &&
+        tabModel.tabs.some((tab) => tab.kind === 'browser' && tab.id === tabModel.active) &&
+        detailsPanel.current &&
+        !detailsPanel.current.isCollapsed() &&
+        group &&
+        group.offsetWidth > 0 &&
+        group.getBoundingClientRect().width > 0;
+      // The library re-registers panels when this intent changes. Keep the
+      // original page until the queued layout can actually start collapsing.
+      setPendingTabsClose(keepPage ? { scope: tabsScopeKey, id: tabModel.active } : undefined);
       setTabsKey(open ? tabsScopeKey : undefined);
-      if (animate) schedulePanelChange(detailsPanelFrame, detailsPanel, open);
+      if (animate)
+        schedulePanelChange(
+          detailsPanelFrame,
+          detailsPanel,
+          open,
+          open ? undefined : finishTabsClose,
+        );
       else settleDetails(open);
     },
-    [schedulePanelChange, tabsScopeKey, setTabsKey, settleDetails],
+    [
+      schedulePanelChange,
+      tabsScopeKey,
+      setTabsKey,
+      settleDetails,
+      finishTabsClose,
+      props.covered,
+      hostDetailsOpen,
+      scheduledEditor,
+      tabModel.tabs,
+      tabModel.active,
+    ],
   );
+  useLayoutEffect(() => {
+    if (!pendingTabsClose || (closingTabsVisible && detailsCollapsed !== true)) return;
+    // Coverage withdraws the page immediately but still lets its current close
+    // finish. A replacement must also retire the old panel action.
+    if (
+      pendingTabsClose.scope !== tabsScopeKey ||
+      pendingTabsClose.id !== tabModel.active ||
+      !hasTabs ||
+      rightSidebarOpen
+    ) {
+      if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
+      detailsPanelFrame.current = undefined;
+    }
+    finishTabsClose();
+  }, [
+    pendingTabsClose,
+    closingTabsVisible,
+    detailsCollapsed,
+    finishTabsClose,
+    tabsScopeKey,
+    tabModel.active,
+    hasTabs,
+    rightSidebarOpen,
+  ]);
   const handledBrowserReveals = useRef({ scope: tabsScopeKey, ids: new Set<string>() });
   if (handledBrowserReveals.current.scope !== tabsScopeKey)
     handledBrowserReveals.current = { scope: tabsScopeKey, ids: new Set<string>() };
@@ -1331,16 +1387,13 @@ function SessionPageContent({
                 <div
                   className="collapsible-sidebar-content"
                   style={{ minWidth: workspaceDetails ? '240px' : '300px' }}
-                  aria-hidden={!rightSidebarOpen}
-                  inert={!rightSidebarOpen}
+                  aria-hidden={!rightSidebarOpen && !closingTabsVisible}
+                  inert={!rightSidebarOpen && !closingTabsVisible}
                 >
                   {hasTabs && (
                     <SessionTabs
                       key={tabsScopeKey}
-                      scopeKey={tabsScopeKey}
                       model={tabModel}
-                      chromeHosted={props.tabsChromeHosted}
-                      onChromePresentation={props.onTabsChromePresentation}
                       workspace={
                         props.workspaceTab
                           ? {

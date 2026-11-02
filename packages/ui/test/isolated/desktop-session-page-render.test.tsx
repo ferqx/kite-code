@@ -1,8 +1,7 @@
 import { afterAll, expect, mock, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act, type ComponentProps } from 'react';
+import { act, Children, type ComponentProps, isValidElement } from 'react';
 import type { SessionPageProps } from '../../src/desktop/SessionPage';
-import type { SessionTabsChromePresentation } from '../../src/desktop/types';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', {
   url: 'http://localhost',
@@ -491,7 +490,8 @@ function retainedSidebarFixture(restored = true) {
     cancel = globalThis.cancelAnimationFrame,
     rect = dom.window.HTMLElement.prototype.getBoundingClientRect,
     offset = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, 'offsetWidth')!;
-  let serial = 0;
+  let serial = 0,
+    groupWidth = 1200;
   globalThis.requestAnimationFrame = (callback) => {
     frames.set(++serial, callback);
     return serial;
@@ -499,13 +499,15 @@ function retainedSidebarFixture(restored = true) {
   globalThis.cancelAnimationFrame = (id) => frames.delete(id);
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
     return ['client-layout', 'content-layout'].includes(this.id)
-      ? new dom.window.DOMRect(0, 0, 1200, 600)
+      ? new dom.window.DOMRect(0, 0, groupWidth, 600)
       : rect.call(this);
   };
   Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
     configurable: true,
     get() {
-      return ['client-layout', 'content-layout'].includes(this.id) ? 1200 : offset.get!.call(this);
+      return ['client-layout', 'content-layout'].includes(this.id)
+        ? groupWidth
+        : offset.get!.call(this);
     },
   });
   const closed: string[] = [];
@@ -517,12 +519,21 @@ function retainedSidebarFixture(restored = true) {
       {tools}
     </div>
   );
-  const show = (options: { request?: number; child?: number; details?: boolean } = {}) =>
+  const show = (
+    options: {
+      request?: number;
+      child?: number;
+      details?: boolean;
+      scope?: string;
+      covered?: boolean;
+    } = {},
+  ) =>
     act(async () =>
       root.render(
         <SessionPage
           workspaces={[]}
-          readingKey="retained-animation"
+          readingKey={options.scope ?? 'retained-animation'}
+          covered={options.covered}
           sessionLabel="Original session"
           messages={[]}
           connected
@@ -558,12 +569,16 @@ function retainedSidebarFixture(restored = true) {
     show,
     click: (label: string) =>
       act(() => host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click()),
-    frame: () =>
+    pendingFrames: () => [...frames.values()],
+    frame: (callbacks?: FrameRequestCallback[]) =>
       act(() => {
-        const batch = [...frames.values()];
-        frames.clear();
+        const batch = callbacks ?? [...frames.values()];
+        if (!callbacks) frames.clear();
         for (const callback of batch) callback(0);
       }),
+    layout: (available: boolean) => {
+      groupWidth = available ? 1200 : 0;
+    },
     width: () => Number(host.querySelector<HTMLElement>('#details')!.style.flexGrow),
     animating: () => host.querySelector('#content-layout')!.getAttribute('data-animate-width'),
     async close() {
@@ -575,6 +590,54 @@ function retainedSidebarFixture(restored = true) {
     },
   };
 }
+
+test('retained browser collapse keeps its original page until panel motion starts', async () => {
+  const f = retainedSidebarFixture();
+  try {
+    await f.show();
+    await f.frame();
+    const page = f.host.querySelector('[data-retained-page="retained-page"]')!,
+      field = page.querySelector<HTMLInputElement>('input')!,
+      width = f.width();
+    field.value = 'User original form';
+    expect(width).toBeGreaterThan(0);
+    expect(f.animating()).toBeNull();
+
+    await f.click('标签页');
+    // The close intent is immediate, while its pending layout keeps the
+    // original page and ancestors visible until the panel can start moving.
+    expect(f.host.querySelector('[aria-label="标签页"]')!.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    expect({
+      visible: page.getAttribute('data-visible'),
+      width: f.width(),
+      animating: f.animating(),
+    }).toEqual({ visible: 'true', width, animating: null });
+    expect(page.closest('[hidden], [aria-hidden="true"], [inert]')).toBeNull();
+    expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
+    expect(page.querySelector('input')).toBe(field);
+    expect(field.value).toBe('User original form');
+
+    await f.frame();
+    expect({
+      visible: page.getAttribute('data-visible'),
+      width: f.width(),
+      animating: f.animating(),
+    }).toEqual({ visible: 'false', width: 0, animating: 'true' });
+
+    await f.click('标签页');
+    expect(f.width()).toBe(width);
+    expect(f.animating()).toBeNull();
+    expect(page.getAttribute('data-visible')).toBe('true');
+    expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
+    expect(page.querySelector('input')).toBe(field);
+    expect(field.value).toBe('User original form');
+    expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
 
 for (const closing of ['pending', 'completed'] as const)
   test(`retained browser header reopen settles final width without animation after ${closing} collapse`, async () => {
@@ -589,6 +652,7 @@ for (const closing of ['pending', 'completed'] as const)
       expect(width).toBeGreaterThan(0);
       expect(f.animating()).toBeNull();
       await f.click('标签页');
+      const pendingFrames = f.pendingFrames();
       if (closing === 'completed') {
         await f.frame();
         expect(f.width()).toBe(0);
@@ -600,6 +664,7 @@ for (const closing of ['pending', 'completed'] as const)
       expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
       expect(page.getAttribute('data-visible')).toBe('true');
       expect(field.value).toBe('User original form');
+      await f.frame(pendingFrames); // A cancelled callback cannot close the reopened page.
       await f.frame();
       expect(f.width()).toBe(width);
       expect(f.animating()).toBeNull();
@@ -611,6 +676,122 @@ for (const closing of ['pending', 'completed'] as const)
       );
     } finally {
       await f.close();
+    }
+  });
+
+for (const replacement of ['scope', 'covered', 'details', 'child'] as const)
+  test(`pending browser collapse retires before ${replacement} replaces its presentation`, async () => {
+    const f = retainedSidebarFixture();
+    try {
+      await f.show();
+      await f.frame();
+      const page = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+      await f.click('标签页');
+      expect(page.dataset.visible).toBe('true');
+      const pendingFrames = f.pendingFrames();
+      expect(pendingFrames.length).toBeGreaterThan(0);
+      await f.show(
+        replacement === 'scope'
+          ? { scope: 'replacement' }
+          : replacement === 'child'
+            ? { child: 1 }
+            : { [replacement]: true },
+      );
+      expect(page.isConnected && page.dataset.visible === 'true').toBe(false);
+      await f.frame(pendingFrames);
+      await f.frame();
+      expect(page.isConnected && page.dataset.visible === 'true').toBe(false);
+      if (replacement === 'scope') {
+        const next = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+        expect(next).not.toBe(page);
+        expect(next.dataset.visible).toBe('true');
+        expect(f.width()).toBeGreaterThan(0);
+        expect(f.animating()).toBeNull();
+      } else if (replacement === 'covered') {
+        await f.show();
+        await f.frame();
+        expect(page.dataset.visible).toBe('false');
+        expect(f.width()).toBe(0);
+        expect(f.host.querySelector('[aria-label="标签页"]')!.getAttribute('aria-expanded')).toBe(
+          'false',
+        );
+      } else {
+        expect(f.width()).toBeGreaterThan(0);
+        expect(f.host.textContent).toContain(
+          replacement === 'details' ? 'Original details reader' : 'Child reader',
+        );
+      }
+      expect(f.closed).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const unavailable of ['before-close', 'before-frame'] as const)
+  test(`browser collapse cannot retain a visible page when layout disappears ${unavailable}`, async () => {
+    const f = retainedSidebarFixture();
+    try {
+      await f.show();
+      await f.frame();
+      const page = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+      if (unavailable === 'before-close') f.layout(false);
+      await f.click('标签页');
+      expect(page.dataset.visible).toBe(unavailable === 'before-close' ? 'false' : 'true');
+      f.layout(false);
+      await f.frame();
+      expect(page.dataset.visible).toBe('false');
+      expect(page.closest('[hidden]')).not.toBeNull();
+      expect(f.animating()).toBeNull();
+      f.layout(true);
+      await f.show();
+      await f.frame();
+      expect(page.dataset.visible).toBe('false');
+      expect(f.closed).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const target of ['missing', 'collapsed'] as const)
+  test(`pending browser collapse retires when its panel target is ${target}`, async () => {
+    captureContentLayout = true;
+    const f = retainedSidebarFixture();
+    let restoreTarget: (() => void) | undefined;
+    try {
+      await f.show();
+      await f.frame();
+      const page = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+      await f.click('标签页');
+      expect(page.dataset.visible).toBe('true');
+      const pendingFrames = f.pendingFrames();
+      const details = Children.toArray(contentLayoutProps?.children).find(
+        (child) =>
+          isValidElement<ComponentProps<typeof actualResizable.ResizablePanel>>(child) &&
+          child.props.id === 'details',
+      );
+      if (!isValidElement<ComponentProps<typeof actualResizable.ResizablePanel>>(details))
+        throw Error('details_panel_missing');
+      const panelRef = details.props.panelRef;
+      if (!panelRef || typeof panelRef !== 'object' || !panelRef.current)
+        throw Error('details_handle_missing');
+      const handle = panelRef.current;
+      if (target === 'missing') {
+        panelRef.current = null;
+        restoreTarget = () => {
+          panelRef.current = handle;
+        };
+      } else await act(() => handle.collapse());
+      await f.frame(pendingFrames);
+      await f.frame();
+      expect(page.dataset.visible).toBe('false');
+      expect(page.closest('[hidden]')).not.toBeNull();
+      expect(f.animating()).toBeNull();
+      expect(f.closed).toEqual([]);
+    } finally {
+      restoreTarget?.();
+      await f.close();
+      captureContentLayout = false;
+      contentLayoutProps = undefined;
     }
   });
 
@@ -667,7 +848,6 @@ function collapseNotificationFixture() {
   const root = createRoot(host);
   let groupWidth = 0;
   let groupReads = 0;
-  let chrome: SessionTabsChromePresentation | null = null;
   const closed: string[] = [];
   const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
   const originalOffset = Object.getOwnPropertyDescriptor(
@@ -713,10 +893,6 @@ function collapseNotificationFixture() {
             connectionLabel=""
             loading={false}
             actions={{}}
-            tabsChromeHosted
-            onTabsChromePresentation={(value) => {
-              chrome = value;
-            }}
             renderBrowser={({ id, visible }) => (
               <div data-collapse-browser={id} data-visible={visible} />
             )}
@@ -753,9 +929,6 @@ function collapseNotificationFixture() {
     expanded() {
       return host.querySelector('[aria-label="标签页"]')!.getAttribute('aria-expanded');
     },
-    presentation() {
-      return chrome?.data;
-    },
     flush,
     async close() {
       await flush(() => root.unmount());
@@ -767,7 +940,7 @@ function collapseNotificationFixture() {
   };
 }
 
-test('live collapsed Group notification withdraws hosted browser presentation before a user resize completes', async () => {
+test('live collapsed Group notification withdraws browser presentation before a user resize completes', async () => {
   const f = collapseNotificationFixture();
   try {
     await f.open();
@@ -776,12 +949,10 @@ test('live collapsed Group notification withdraws hosted browser presentation be
     const browser = f.browser();
     const id = browser.dataset.collapseBrowser;
     expect(browser.dataset.visible).toBe('true');
-    expect(f.presentation()).toMatchObject({ visible: true, present: true });
     await f.notify(true); // no final pointer-release/onLayoutChanged notification yet
     expect(f.expanded()).toBe('true'); // visibility and user intent are separate
     expect(f.browser()).toBe(browser);
     expect(browser.dataset.visible).toBe('false');
-    expect(f.presentation()).toMatchObject({ visible: false, present: false });
     expect(f.closed).toEqual([]);
     await f.complete(true, true);
     expect(f.expanded()).toBe('false');
@@ -818,12 +989,10 @@ test('automatic collapse preserves open intent and repeated positive Group notic
     await f.complete(true, false); // window constraints, not an explicit user dismissal
     expect(f.expanded()).toBe('true');
     expect(browser.dataset.visible).toBe('false');
-    expect(f.presentation()).toMatchObject({ visible: false, present: false });
     await f.notify(false);
     expect(f.expanded()).toBe('true');
     expect(f.browser()).toBe(browser);
     expect(browser.dataset.visible).toBe('true');
-    expect(f.presentation()).toMatchObject({ visible: true, present: true });
     f.setWidth(0);
     await f.notify(true);
     expect(browser.dataset.visible).toBe('true'); // invalid hidden Group retains last valid result

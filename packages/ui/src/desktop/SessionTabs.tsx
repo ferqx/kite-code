@@ -13,14 +13,9 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChildAgentIcon } from './ApprovalHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
-import type {
-  SessionTabsChromeData,
-  SessionTabsChromePresentation,
-  SessionTabsChromeTab,
-} from './types';
 import { Button } from './ui';
 
 export interface SessionBrowserPageProps {
@@ -37,10 +32,6 @@ export interface SessionBrowserRestorePage {
   readonly activeId?: string;
   /** Host-confirmed page that was visible before this Renderer was replaced. */
   readonly reveal?: true;
-}
-
-export interface SessionBrowserPreparation {
-  cancel(): void;
 }
 
 export interface SessionChildTarget {
@@ -72,13 +63,29 @@ export interface SessionTabsProps {
     readonly onClose: () => void;
   };
   readonly onClose: (reason?: 'last-tab') => void;
-  readonly scopeKey?: string;
-  /** Keep the original header's geometry while another host paints its controls. */
-  readonly chromeHosted?: boolean;
-  readonly onChromePresentation?: (presentation: SessionTabsChromePresentation | null) => void;
 }
 
-type SessionTab = SessionTabsChromeTab;
+type SessionTab =
+  | {
+      readonly id: string;
+      readonly kind: 'browser' | 'changes' | 'workspace';
+      readonly title: string;
+    }
+  | {
+      readonly id: string;
+      readonly kind: 'child';
+      readonly title: string;
+      readonly sessionId: string;
+      readonly executionId?: string;
+      readonly childAgentIdentity?: string;
+    };
+type SessionTabsAction =
+  | { readonly type: 'select' | 'close'; readonly id: string }
+  | { readonly type: 'add' | 'collapse' | 'retryRestore' | 'openChanges' };
+interface SessionTabsHeaderPresentation {
+  readonly data: Pick<SessionTabsModel, 'tabs' | 'active' | 'restoring' | 'restoreIssue'>;
+  readonly dispatch: (action: SessionTabsAction) => void;
+}
 export interface SessionTabsModel {
   readonly restoredBrowserId?: string;
   readonly revealBrowserId?: string;
@@ -119,8 +126,6 @@ export interface SessionBrowserToolbarProps {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly canNavigate?: boolean;
-  readonly interactionPending?: boolean;
-  readonly addressReadOnly?: boolean;
   readonly onAddressChange: (value: string) => void;
   readonly onAddressFocus: (focused: boolean) => void;
   readonly onNavigate: () => void;
@@ -135,12 +140,7 @@ export function BrowserOptionsIcon() {
   return <HugeiconsIcon icon={MoreHorizontalIcon} />;
 }
 export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
-  // A fresh binding can pause input without changing the page's capabilities.
-  // Keep that brief pause from animating an otherwise available button's opacity.
-  const pendingAppearance = (available: boolean) =>
-    props.interactionPending && available && props.canNavigate !== false
-      ? { opacity: 1 }
-      : undefined;
+  const composing = useRef(false);
   return (
     <form
       className="native-browser-toolbar"
@@ -148,7 +148,13 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
       onSubmit={(event) => {
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
-        if (props.canNavigate !== false && !props.interactionPending) props.onNavigate();
+        const address = event.currentTarget.querySelector('input.native-browser-address');
+        if (
+          !composing.current &&
+          props.canNavigate !== false &&
+          event.currentTarget.ownerDocument.activeElement === address
+        )
+          props.onNavigate();
       }}
     >
       <Button
@@ -157,8 +163,7 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         size="icon-sm"
         aria-label="后退"
         title="后退"
-        disabled={!props.canGoBack || props.canNavigate === false || props.interactionPending}
-        style={pendingAppearance(props.canGoBack)}
+        disabled={!props.canGoBack || props.canNavigate === false}
         onClick={props.onBack}
       >
         <HugeiconsIcon icon={ArrowLeft01Icon} />
@@ -169,8 +174,7 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         size="icon-sm"
         aria-label="前进"
         title="前进"
-        disabled={!props.canGoForward || props.canNavigate === false || props.interactionPending}
-        style={pendingAppearance(props.canGoForward)}
+        disabled={!props.canGoForward || props.canNavigate === false}
         onClick={props.onForward}
       >
         <HugeiconsIcon icon={ArrowRight01Icon} />
@@ -181,8 +185,7 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         size="icon-sm"
         aria-label={props.loading ? '停止加载' : '刷新网页'}
         title={props.loading ? '停止加载' : '刷新网页'}
-        disabled={!props.hasPage || props.canNavigate === false || props.interactionPending}
-        style={pendingAppearance(props.hasPage)}
+        disabled={!props.hasPage || props.canNavigate === false}
         onClick={props.onReload}
       >
         <HugeiconsIcon icon={props.loading ? Cancel01Icon : RefreshIcon} />
@@ -192,17 +195,33 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
         aria-label="搜索或输入网址"
         placeholder="搜索或输入网址"
         value={props.address}
-        readOnly={props.canNavigate === false || props.addressReadOnly}
+        readOnly={props.canNavigate === false}
         spellCheck={false}
         autoCapitalize="off"
         autoComplete="off"
         maxLength={2048}
-        onChange={(event) => props.onAddressChange(event.currentTarget.value)}
+        onChange={(event) => {
+          if (event.currentTarget.ownerDocument.activeElement === event.currentTarget)
+            props.onAddressChange(event.currentTarget.value);
+        }}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
+        onCompositionEnd={() => {
+          composing.current = false;
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.nativeEvent.isComposing || composing.current))
+            event.preventDefault();
+        }}
         onFocus={(event) => {
           props.onAddressFocus(true);
           event.currentTarget.select();
         }}
-        onBlur={() => props.onAddressFocus(false)}
+        onBlur={() => {
+          composing.current = false;
+          props.onAddressFocus(false);
+        }}
       />
       <div className="native-browser-tools">{props.tools}</div>
     </form>
@@ -229,8 +248,6 @@ export function useSessionTabs(
   restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>,
   restoreKey?: string,
   browserPending = false,
-  prepareBrowser?: (fromId: string, targetId: string) => Promise<SessionBrowserPreparation | null>,
-  prepareCloseBrowser?: (id: string) => Promise<SessionBrowserPreparation | null>,
 ): SessionTabsModel {
   const [state, setState] = useState(() => initialTabs(scope, !!restoreBrowser));
   const [restoreAttempt, setRestoreAttempt] = useState(0);
@@ -253,16 +270,6 @@ export function useSessionTabs(
   latest.current = current;
   const close = useRef(closeBrowser);
   close.current = closeBrowser;
-  const closePrepare = useRef(prepareCloseBrowser);
-  closePrepare.current = prepareCloseBrowser;
-  const closePreparation = useRef<
-    | {
-        id: string;
-        receipt?: SessionBrowserPreparation;
-        timer?: ReturnType<typeof setTimeout>;
-      }
-    | undefined
-  >(undefined);
   const intent = useRef(0);
   const restore = useRef(restoreBrowser);
   restore.current = restoreBrowser;
@@ -345,149 +352,25 @@ export function useSessionTabs(
   const update = (
     change: (value: ReturnType<typeof initialTabs>) => ReturnType<typeof initialTabs>,
   ) => {
+    if (latest.current.scope !== scope) return;
     const next = change(latest.current);
     if (next === latest.current) return;
     latest.current = next;
     setState(next);
   };
-  const owner = useRef<{ admission: string; provider: typeof prepareBrowser }>(undefined);
-  const prepare = useRef(prepareBrowser);
-  prepare.current = prepareBrowser;
   const admission = JSON.stringify([scope, restoreKey]);
-  const preparationAdmission = useRef(admission);
-  preparationAdmission.current = admission;
-  const preparing = useRef<{
-    admission: string;
-    from: string;
-    target: string;
-    timer?: ReturnType<typeof setTimeout>;
-    receipt?: SessionBrowserPreparation | null;
-    committing?: boolean;
-  }>(undefined);
-  const closing = useRef<
-    {
-      id: string;
-      admission: string;
-      close: (id: string) => void | Promise<void>;
-      before: typeof current;
-      intent: number;
-    }[]
-  >([]);
-  const cancelPreparation = useCallback(() => {
-    intent.current++;
-    const closing = closePreparation.current;
-    closePreparation.current = undefined;
-    if (closing) {
-      clearTimeout(closing.timer);
-      closing.receipt?.cancel();
-    }
-    const previous = preparing.current;
-    preparing.current = undefined;
-    if (!previous) return;
-    clearTimeout(previous.timer);
-    try {
-      previous.receipt?.cancel();
-    } catch {}
-  }, []);
+  const currentAdmission = useRef(admission);
+  currentAdmission.current = admission;
+  const owner = useRef<object | undefined>(undefined);
   useLayoutEffect(() => {
-    const currentOwner = { admission, provider: prepareBrowser };
+    const currentOwner = { admission };
     owner.current = currentOwner;
     return () => {
       if (owner.current !== currentOwner) return;
       owner.current = undefined;
-      cancelPreparation();
-      closing.current = [];
+      intent.current++;
     };
-  }, [admission, prepareBrowser, cancelPreparation]);
-  useLayoutEffect(() => {
-    if (preparing.current?.committing) preparing.current = undefined;
-    const committed = closing.current.filter(
-      (item) => item.admission === admission && !current.tabs.some((tab) => tab.id === item.id),
-    );
-    closing.current = closing.current.filter((item) => !committed.includes(item));
-    // Child SessionTabs publishes the successor in its layout effect first.
-    // Dispatch in this same commit, before an ancestor can change the scope.
-    for (const item of committed) {
-      try {
-        void Promise.resolve(item.close(item.id)).catch(() => {
-          if (
-            !owner.current ||
-            preparationAdmission.current !== item.admission ||
-            intent.current !== item.intent
-          )
-            return;
-          const next = {
-            ...item.before,
-            closeIssue: '未能确认网页已关闭，原页面已保留，请核对页面状态。',
-            closeReveal: latest.current.closeReveal + 1,
-          };
-          latest.current = next;
-          setState(next);
-        });
-      } catch {
-        if (preparationAdmission.current === item.admission && intent.current === item.intent) {
-          const next = {
-            ...item.before,
-            closeIssue: '未能确认网页已关闭，原页面已保留，请核对页面状态。',
-            closeReveal: latest.current.closeReveal + 1,
-          };
-          latest.current = next;
-          setState(next);
-        }
-      }
-    }
-  });
-  const transition = (target: string, commit: () => void) => {
-    cancelPreparation();
-    const value = latest.current;
-    const from = value.tabs.find((tab) => tab.id === value.selected) ?? value.tabs[0];
-    const destination = value.tabs.find((tab) => tab.id === target);
-    const provider = prepare.current;
-    if (
-      !provider ||
-      from?.kind !== 'browser' ||
-      destination?.kind !== 'browser' ||
-      from.id === target
-    ) {
-      commit();
-      return;
-    }
-    const operation = { admission, from: from.id, target } as NonNullable<typeof preparing.current>;
-    preparing.current = operation;
-    let settled = false;
-    const finish = (receipt: SessionBrowserPreparation | null) => {
-      if (
-        settled ||
-        !owner.current ||
-        preparing.current !== operation ||
-        preparationAdmission.current !== operation.admission ||
-        prepare.current !== provider ||
-        (
-          latest.current.tabs.find((tab) => tab.id === latest.current.selected) ??
-          latest.current.tabs[0]
-        )?.id !== operation.from ||
-        !latest.current.tabs.some((tab) => tab.id === target && tab.kind === 'browser')
-      ) {
-        try {
-          receipt?.cancel();
-        } catch {}
-        return;
-      }
-      settled = true;
-      clearTimeout(operation.timer);
-      operation.receipt = receipt;
-      operation.committing = true;
-      commit();
-    };
-    operation.timer = setTimeout(() => finish(null), 250);
-    void Promise.resolve()
-      .then(() =>
-        preparing.current === operation && preparationAdmission.current === operation.admission
-          ? provider(operation.from, target)
-          : null,
-      )
-      .then(finish, () => finish(null));
-  };
+  }, [admission]);
   const title = (id: string, value: string) => {
     const name = value.trim().slice(0, 80) || '新标签页';
     update((value) => {
@@ -502,14 +385,14 @@ export function useSessionTabs(
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return;
     const tabs = latest.current.tabs;
     if (tabs.length >= maxTabs) return;
-    cancelPreparation();
+    intent.current++;
     const tab = newBrowserTab();
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
   };
   const openChanges = () => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return;
     const tabs = latest.current.tabs;
-    cancelPreparation();
+    intent.current++;
     const existing = tabs.find((tab) => tab.kind === 'changes');
     if (existing) {
       update((value) => ({ ...value, selected: existing.id }));
@@ -525,7 +408,7 @@ export function useSessionTabs(
     const id = `child-${JSON.stringify([target.sessionId, target.executionId ?? null])}`;
     const existing = tabs.find((tab) => tab.id === id);
     if (!tabs.some((tab) => tab.id === id) && tabs.length >= maxTabs) return false;
-    cancelPreparation();
+    intent.current++;
     const tab: SessionTab = {
       ...target,
       id,
@@ -548,7 +431,7 @@ export function useSessionTabs(
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
     const tabs = latest.current.tabs;
     if (!tabs.some((tab) => tab.kind === 'workspace') && tabs.length >= maxTabs) return false;
-    cancelPreparation();
+    intent.current++;
     update((value) => ({
       ...value,
       tabs: value.tabs.some((tab) => tab.kind === 'workspace')
@@ -559,72 +442,46 @@ export function useSessionTabs(
     return true;
   };
   const closeTab = (id: string, committed?: () => void) => {
-    const { tabs, selected } = latest.current;
+    const before = latest.current;
+    if (before.scope !== scope) return;
+    const { tabs, selected } = before;
     const active = tabs.some((tab) => tab.id === selected) ? selected : (tabs[0]?.id ?? '');
     const index = tabs.findIndex((tab) => tab.id === id);
     if (index < 0) return;
     const remaining = tabs.filter((tab) => tab.id !== id);
     const successor = active === id ? remaining[Math.min(index, remaining.length - 1)] : undefined;
-    const deferred =
-      !!prepare.current && tabs[index]?.kind === 'browser' && successor?.kind === 'browser';
-    const commit = () => {
-      const value = latest.current;
-      if (!value.tabs.some((tab) => tab.id === id)) return;
-      if (tabs[index]?.kind === 'browser' && close.current) {
-        closing.current.push({
-          id,
-          admission,
-          close: close.current,
-          before: value,
-          intent: intent.current,
-        });
-      }
-      update((value) => ({
-        ...value,
-        tabs: value.tabs.filter((tab) => tab.id !== id),
-        selected: active === id ? (successor?.id ?? '') : value.selected,
-      }));
-      committed?.();
-    };
-    if (deferred) transition(successor.id, commit);
-    else {
-      cancelPreparation();
-      const provider = closePrepare.current;
+    const closeIntent = ++intent.current;
+    const failed = () => {
       if (
-        active === id &&
-        tabs[index]?.kind === 'browser' &&
-        successor?.kind !== 'browser' &&
-        provider
-      ) {
-        const operation = { id } as NonNullable<typeof closePreparation.current>;
-        closePreparation.current = operation;
-        let settled = false;
-        const finish = (receipt: SessionBrowserPreparation | null) => {
-          if (
-            settled ||
-            closePreparation.current !== operation ||
-            preparationAdmission.current !== admission ||
-            closePrepare.current !== provider ||
-            (
-              latest.current.tabs.find((tab) => tab.id === latest.current.selected) ??
-              latest.current.tabs[0]
-            )?.id !== id
-          ) {
-            receipt?.cancel();
-            return;
-          }
-          settled = true;
-          clearTimeout(operation.timer);
-          operation.receipt = receipt ?? undefined;
-          closePreparation.current = undefined;
-          commit();
-        };
-        operation.timer = setTimeout(() => finish(null), 1500);
-        void Promise.resolve()
-          .then(() => (closePreparation.current === operation ? provider(id) : null))
-          .then(finish, () => finish(null));
-      } else commit();
+        !owner.current ||
+        currentAdmission.current !== admission ||
+        intent.current !== closeIntent
+      )
+        return;
+      const next = {
+        ...before,
+        closeIssue: '未能确认网页已关闭，原页面已保留，请核对页面状态。',
+        closeReveal: latest.current.closeReveal + 1,
+      };
+      latest.current = next;
+      setState(next);
+    };
+    let result: void | Promise<void>;
+    try {
+      // Capture and dispatch the exact Main page identity in the user's click
+      // stack. No later DOM callback may look up a same-ID successor instead.
+      result = tabs[index]?.kind === 'browser' ? close.current?.(id) : undefined;
+    } catch {
+      failed();
+      return;
     }
+    update((value) => ({
+      ...value,
+      tabs: remaining,
+      selected: active === id ? (successor?.id ?? '') : value.selected,
+    }));
+    committed?.();
+    if (result) void Promise.resolve(result).catch(failed);
   };
   return {
     restoredBrowserId: current.restoredBrowserId,
@@ -635,7 +492,7 @@ export function useSessionTabs(
     closeReveal: current.closeReveal,
     retryRestore: () => {
       if (!restore.current || latest.current.restoring) return;
-      cancelPreparation();
+      intent.current++;
       const next = { ...latest.current, restoring: true, restoreIssue: false };
       latest.current = next;
       setState(next);
@@ -651,35 +508,19 @@ export function useSessionTabs(
     closeTab,
     select: (id) => {
       if (!latest.current.tabs.some((tab) => tab.id === id)) return;
-      transition(id, () => update((value) => ({ ...value, selected: id })));
+      intent.current++;
+      update((value) => ({ ...value, selected: id }));
     },
   };
 }
 
-function SessionTabsHeader({
-  data,
-  dispatch,
-  hosted = false,
-  contentMode = 'document',
-}: SessionTabsChromePresentation & {
-  hosted?: boolean;
-  contentMode?: 'document' | 'external';
-}) {
+function SessionTabsHeader({ data, dispatch }: SessionTabsHeaderPresentation) {
   return (
-    <header
-      className="right-sidebar-heading session-tabs-heading"
-      inert={hosted || undefined}
-      aria-hidden={hosted || undefined}
-      style={hosted ? { visibility: 'hidden', pointerEvents: 'none' } : undefined}
-    >
+    <header className="right-sidebar-heading session-tabs-heading">
       <TabsList aria-label="右侧栏标签页" className="session-tabs-list">
         {data.tabs.map((tab) => (
           <div className="session-tab" data-active={tab.id === data.active} key={tab.id}>
-            <TabsTrigger
-              value={tab.id}
-              title={tab.title}
-              {...(contentMode === 'external' ? { 'aria-controls': undefined } : {})}
-            >
+            <TabsTrigger value={tab.id} title={tab.title}>
               {tab.kind === 'child' && tab.childAgentIdentity ? (
                 <ChildAgentIcon identity={tab.childAgentIdentity} />
               ) : (
@@ -734,7 +575,7 @@ function SessionTabsHeader({
   );
 }
 
-function SessionTabsRestoreStatus({ data, dispatch }: SessionTabsChromePresentation) {
+function SessionTabsRestoreStatus({ data, dispatch }: SessionTabsHeaderPresentation) {
   return (
     <>
       {data.restoring && data.tabs.length === 0 && <p role="status">正在核对保留页面…</p>}
@@ -752,7 +593,7 @@ function SessionTabsRestoreStatus({ data, dispatch }: SessionTabsChromePresentat
 
 function dispatchTabsAction(
   owner: Pick<SessionTabsProps, 'model' | 'onClose' | 'workspace'>,
-  action: Parameters<SessionTabsChromePresentation['dispatch']>[0],
+  action: Parameters<SessionTabsHeaderPresentation['dispatch']>[0],
 ) {
   switch (action.type) {
     case 'select':
@@ -782,94 +623,6 @@ function dispatchTabsAction(
   }
 }
 
-/** Controlled display only: this component creates no tab model or content readers. */
-export function SessionTabsChrome(presentation: SessionTabsChromePresentation) {
-  const { data, dispatch } = presentation;
-  return (
-    <Tabs
-      className="session-tabs-root"
-      value={data.active}
-      onValueChange={(id) => dispatch({ type: 'select', id })}
-      hidden={!data.present}
-      aria-hidden={!data.visible || undefined}
-      inert={!data.visible}
-    >
-      <SessionTabsHeader {...presentation} contentMode="external" />
-      <SessionTabsRestoreStatus {...presentation} />
-    </Tabs>
-  );
-}
-
-function useChromePresentation({
-  model,
-  visible,
-  present,
-  scopeKey,
-  onClose,
-  workspace,
-  onChromePresentation,
-}: Pick<
-  SessionTabsProps,
-  'model' | 'visible' | 'onClose' | 'workspace' | 'onChromePresentation'
-> & {
-  present: boolean;
-  scopeKey: string;
-}): SessionTabsChromePresentation {
-  const current = useRef<
-    | {
-        scopeKey: string;
-        model: SessionTabsModel;
-        visible: boolean;
-        onClose: () => void;
-        workspace: SessionTabsProps['workspace'];
-      }
-    | undefined
-  >(undefined);
-  useLayoutEffect(() => {
-    current.current = { scopeKey, model, visible, onClose, workspace };
-  });
-  useLayoutEffect(
-    () => () => {
-      current.current = undefined;
-    },
-    [],
-  );
-  const dispatch = useCallback<SessionTabsChromePresentation['dispatch']>(
-    (action) => {
-      const owner = current.current;
-      if (!owner || owner.scopeKey !== scopeKey || !owner.visible) return;
-      dispatchTabsAction(owner, action);
-    },
-    [scopeKey],
-  );
-  const data = useMemo<SessionTabsChromeData>(
-    () => ({
-      scopeKey,
-      tabs: model.tabs,
-      active: model.active,
-      visible,
-      present,
-      restoring: model.restoring === true,
-      restoreIssue: model.restoreIssue === true,
-    }),
-    [scopeKey, model.tabs, model.active, visible, present, model.restoring, model.restoreIssue],
-  );
-  const presentation = useMemo(() => ({ data, dispatch }), [data, dispatch]);
-  const published = useRef<SessionTabsProps['onChromePresentation']>(undefined);
-  useLayoutEffect(() => {
-    if (!onChromePresentation) published.current?.(null);
-    published.current = onChromePresentation;
-    onChromePresentation?.(presentation);
-  }, [onChromePresentation, presentation]);
-  useLayoutEffect(
-    () => () => {
-      published.current?.(null);
-    },
-    [],
-  );
-  return presentation;
-}
-
 /** Tool and child readers belong only to the active, visible tab. Browser lifetime belongs to the model. */
 export function SessionTabs({
   model,
@@ -881,24 +634,11 @@ export function SessionTabs({
   onChildSessionChange,
   workspace,
   onClose,
-  scopeKey = '',
-  chromeHosted = false,
-  onChromePresentation,
 }: SessionTabsProps) {
   const { tabs, active, title, openChanges } = model;
-  const chrome = useChromePresentation({
-    model,
-    visible,
-    present,
-    scopeKey,
-    onClose,
-    workspace,
-    onChromePresentation,
-  });
-  const localChrome = {
-    data: chrome.data,
-    dispatch: (action: Parameters<SessionTabsChromePresentation['dispatch']>[0]) =>
-      dispatchTabsAction({ model, onClose, workspace }, action),
+  const localChrome: SessionTabsHeaderPresentation = {
+    data: model,
+    dispatch: (action) => dispatchTabsAction({ model, onClose, workspace }, action),
   };
   const child = visible ? tabs.find((tab) => tab.id === active && tab.kind === 'child') : undefined;
   const childSessionId = child?.kind === 'child' ? child.sessionId : undefined;
@@ -939,7 +679,7 @@ export function SessionTabs({
       inert={!visible}
     >
       <Tabs className="session-tabs-root" value={active} onValueChange={model.select}>
-        <SessionTabsHeader {...localChrome} hosted={chromeHosted} />
+        <SessionTabsHeader {...localChrome} />
         <SessionTabsRestoreStatus {...localChrome} />
         {tabs.map((tab) => (
           <TabsContent className="session-tab-content" value={tab.id} key={tab.id} forceMount>

@@ -8,7 +8,7 @@ import { build } from 'vite';
 import { ensureWindowsElectronPermissions } from '../../../../scripts/development/windows-electron-permissions';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
-test('real sandboxed browser tabs preserve history and reader lifetime without exposing app authority', async () => {
+test('real sandboxed manual browser owners preserve exact pages across scope changes without exposing app authority', async () => {
   const directory = realpathSync(temporaryDirectory('kite-sidebar-browser-'));
   const desktop = resolve(import.meta.dir, '../..');
   const require = createRequire(join(desktop, 'package.json'));

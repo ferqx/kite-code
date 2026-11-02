@@ -3,7 +3,12 @@ import type { Execution } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type { NativeBridge } from '../../src/native-bridge';
-import type { NativeBrowserBridge, NativeBrowserState } from '../../src/native-browser-bridge';
+import type {
+  NativeBrowserBridge,
+  NativeBrowserMenuAction,
+  NativeBrowserMenuRequest,
+  NativeBrowserState,
+} from '../../src/native-browser-bridge';
 import { browserFixture } from '../agent-browser.fixture';
 import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 import { sessionSwitchBridge } from '../session-switch-bridge.fixture';
@@ -42,7 +47,10 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const control = sessionSwitchBridge({ active: false, protocol: 'chat-completions' }),
-    browser = browserFixture();
+    browser = browserFixture(),
+    menus: NativeBrowserMenuRequest[] = [],
+    cancelledMenus: string[] = [];
+  let resolveMenu!: (action: NativeBrowserMenuAction | null) => void;
   let executions: Execution[] = [];
   const page = (id: string): NativeBrowserState => ({
     id,
@@ -65,6 +73,15 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
   });
   const bridge: NativeBridge & NativeBrowserBridge = {
     ...control.bridge,
+    showBrowserMenu(input) {
+      menus.push(input);
+      return new Promise<NativeBrowserMenuAction | null>((resolve) => {
+        resolveMenu = resolve;
+      });
+    },
+    cancelBrowserMenu(id) {
+      cancelledMenus.push(id);
+    },
     async restoreBrowser(scope) {
       return {
         scope: { ...scope },
@@ -127,6 +144,38 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     [...dom.window.document.querySelectorAll('button')].find(
       (button) => button.textContent === text || button.getAttribute('aria-label') === text,
     )!;
+  const openControlMenu = async (handoff = true) => {
+    const end = Date.now() + 3000,
+      submitted = browser.submitted.length;
+    for (;;) {
+      const count = menus.length;
+      await flush(() => button('浏览器控制').click());
+      expect(menus).toHaveLength(count + 1);
+      const menu = menus.at(-1)!;
+      expect(menu).toMatchObject({
+        id: 'ordinary-a',
+        incarnation: 'page-a',
+        navigation: 0,
+        scope: { storeId: 'store', sessionId: 'a' },
+      });
+      if (menu.items.some((item) => item.enabled)) {
+        expect(menu.items).toEqual([
+          { action: 'handoff', enabled: handoff },
+          { action: 'close', enabled: true },
+        ]);
+        return menu;
+      }
+      // Native menus capture their opening state. Dismiss an unqualified menu
+      // and reopen after observation rather than treating a stale item as enabled.
+      expect(menu.items).toEqual([
+        { action: 'handoff', enabled: false },
+        { action: 'close', enabled: false },
+      ]);
+      await flush(() => resolveMenu(null));
+      expect(browser.submitted).toHaveLength(submitted);
+      if (Date.now() > end) throw Error('Native control menu qualification timeout');
+    }
+  };
   const panel = () => host.querySelector('section[aria-label="冻结快照注释"]');
   const job = (id: string, sessionId = 'a', originStoreId = 'store') =>
     ({
@@ -141,7 +190,16 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     }) as Execution;
   try {
     await flush(() => root.render(<NativeDesktop />));
-    await until(() => !!button('Session A'));
+    await until(
+      () =>
+        !!button('Session A') && control.requests.some((request) => request.method === 'directory'),
+    );
+    await flush();
+    // Seed the owned-page scenario with a completed foreground selection after
+    // startup has established the Store and its draft owner.
+    await flush(() => button('Session B').click());
+    await until(() => host.querySelector('.breadcrumb strong')?.textContent === 'Session B');
+    await until(() => promptValue(host.querySelector('.composer [role="textbox"]')) === 'Draft B');
     await flush(() => button('Session A').click());
     await until(
       () =>
@@ -163,9 +221,9 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
       control.publish();
     });
     await until(() => !!button('浏览器控制'));
-    await flush(() => button('浏览器控制').click());
-    await until(() => !!button('暂停并接管') && !button('暂停并接管').disabled);
-    await flush(() => button('浏览器控制').click());
+    await openControlMenu();
+    expect(button('暂停并接管')).toBeUndefined();
+    await flush(() => resolveMenu(null));
     expect(host.querySelectorAll('[aria-label="右侧栏标签页"]')).toHaveLength(1);
     expect([...host.querySelectorAll('[role="tab"]')].map((row) => row.textContent)).toContain(
       'Example page',
@@ -181,7 +239,7 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     ).length;
     await flush(() => button('指向注释').click());
     await until(() => !!panel()?.querySelector('img'));
-    expect(host.querySelector('[data-native-browser-overlay]')?.hasAttribute('hidden')).toBe(false);
+    expect(host.querySelector('.native-browser-annotations')?.hasAttribute('hidden')).toBe(false);
     expect(panel()!.querySelector('[data-control="handoff"]')).toBeNull();
     expect(panel()!.querySelector('[aria-label="打开网址"]')).toBeNull();
     const annotationTools = button('网页注释工具');
@@ -206,6 +264,9 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     expect(button('加入提示词').closest('.native-browser-surface')).toBeNull();
     expect(dom.window.document.querySelector('form form')).toBeNull();
     await flush(() => button('加入提示词').click());
+    expect(
+      [...dom.window.document.querySelectorAll('[role="status"]')].map((node) => node.textContent),
+    ).toContain('已加入注释草稿，将随下一次提示词发送。');
     expect(promptValue(host.querySelector('.composer [role="textbox"]'))).toBe('Keep my draft');
     expect(host.querySelector('.browser-note-context')?.textContent).toContain('1 条网页注释');
     expect(browser.submitted).toHaveLength(0);
@@ -215,7 +276,7 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
       ),
     ).toBe(false);
     await flush(() => button('返回网页').click());
-    expect(host.querySelector('[data-native-browser-overlay]')?.hasAttribute('hidden')).toBe(true);
+    expect(host.querySelector('.native-browser-annotations')?.hasAttribute('hidden')).toBe(true);
     await flush(() => host.querySelector<HTMLButtonElement>('[aria-label="新建标签页"]')!.click());
     await until(
       () => host.querySelector('[role="tab"][data-state="active"]')?.textContent === '新标签页',
@@ -227,9 +288,8 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
         .dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
     await flush(choosePage);
     await until(() => !!button('浏览器控制'));
-    await flush(() => button('浏览器控制').click());
-    await until(() => !button('暂停并接管').disabled);
-    await flush(() => button('浏览器控制').click());
+    await openControlMenu();
+    await flush(() => resolveMenu(null));
     await flush(() => host.querySelector<HTMLButtonElement>('[aria-label="收起标签栏"]')!.click());
     await until(() => host.querySelector('#session-tabs')?.getAttribute('aria-hidden') === 'true');
     await flush(() => control.publish(), 380);
@@ -244,20 +304,23 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     );
     expect(browser.submitted).toHaveLength(0);
     await flush(() => button('指向注释').click());
-    await flush(() => button('浏览器控制').click());
-    await until(() => !button('暂停并接管').disabled);
-    await flush(() => button('暂停并接管').click());
+    await openControlMenu();
+    await flush(() => resolveMenu('handoff'));
     await until(() => browser.submitted.length === 1);
     expect(browser.submitted[0]?.actionId).toBe('browser.handoff');
     await flush(() => button('返回网页').click());
     await flush(() => button('指向注释').click());
     expect(browser.submitted).toHaveLength(1);
     expect(host.textContent).not.toContain('正在核实原操作；不会重复提交');
+    const retiringMenu = await openControlMenu(false);
     await flush(() => button('Session B').click());
     await until(() => host.querySelector('.breadcrumb strong')?.textContent === 'Session B');
     await until(() => promptValue(host.querySelector('.composer [role="textbox"]')) === 'Draft B');
     expect(panel()).toBeNull();
     expect(host.querySelector('.browser-note-context')).toBeNull();
+    expect(cancelledMenus).toContain(retiringMenu.requestId);
+    await flush(() => resolveMenu('close'));
+    expect(browser.submitted).toHaveLength(1);
     expect(browser.submitted.some((request) => request.actionId === 'browser.close')).toBe(false);
   } finally {
     await act(async () => root.unmount());

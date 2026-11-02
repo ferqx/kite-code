@@ -60,10 +60,12 @@ try {
   await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
   const inspect = () =>
     electron!.evaluate(({ WebContentsView }) => {
-      const owner = globalThis.browserTabsHostFixture.window;
+      const { window: owner, rootView } = globalThis.browserTabsHostFixture;
+      if (rootView.webContents !== owner.webContents) throw Error('fixture_root_owner_changed');
       return owner.contentView.children
         .filter(
-          (view): view is InstanceType<typeof WebContentsView> => view instanceof WebContentsView,
+          (view): view is InstanceType<typeof WebContentsView> =>
+            view instanceof WebContentsView && view !== rootView,
         )
         .map((view) => ({
           id: view.webContents.id,
@@ -89,12 +91,16 @@ try {
   }
   assert.equal(first.visible, true);
   assert.equal(first.url, `${origin}/one`);
+  assert.equal((await inspect()).length, 1);
   assert.ok(first.bounds.width > 100 && first.bounds.height > 100);
-  const isolation = await electron.evaluate(async ({ WebContentsView }) => {
+  const isolation = await electron.evaluate(async ({ webContents }, id) => {
     const owner = globalThis.browserTabsHostFixture.window;
+    const contents = webContents.fromId(id);
+    if (!contents || contents === owner.webContents) throw Error('fixture_exact_page_missing');
     const view = owner.contentView.children.find(
-      (view) => view instanceof WebContentsView,
-    ) as InstanceType<typeof WebContentsView>;
+      (view) => 'webContents' in view && view.webContents === contents,
+    ) as typeof globalThis.browserTabsHostFixture.rootView | undefined;
+    if (!view) throw Error('fixture_exact_page_view_missing');
     await owner.webContents.session.cookies.set({
       url: globalThis.browserTabsHostFixture.origin,
       name: 'app_only',
@@ -116,7 +122,7 @@ try {
       ),
       cookies: await view.webContents.executeJavaScript('document.cookie'),
     };
-  });
+  }, first.id);
   assert.equal(isolation.preferences.sandbox, true);
   assert.equal(isolation.preferences.contextIsolation, true);
   assert.equal(isolation.preferences.nodeIntegration, false);
@@ -232,17 +238,112 @@ try {
       inactiveReaders,
     );
   }
-  await clickGuest('#popup');
-  assert.equal(
-    await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
-    1,
+  // Preserve the exact native document when the UI changes its Root-local
+  // owner. The returning inventory supplies its original tab ID, not a URL guess.
+  const retainedInventory = await page.evaluate(async () => {
+    const draft = window.browserTabsFixture.draft();
+    return window.kiteNative!.restoreBrowserDraft!(draft);
+  });
+  assert.equal(retainedInventory.pages.length, 1);
+  const retainedPage = retainedInventory.pages[0]!;
+  assert.ok(retainedPage.pageToken);
+  const readRetainedDocument = () =>
+    electron!.evaluate(async ({ webContents }) => {
+      const retained = globalThis.browserTabsHostFixture.retained!;
+      const contents = retained.contents;
+      return {
+        id: contents.id,
+        exactContents: webContents.fromId(contents.id) === contents,
+        exactFrame: contents.mainFrame === retained.frame,
+        visible: retained.view.getVisible(),
+        document: await contents.executeJavaScript(
+          `({timeOrigin:performance.timeOrigin,value:document.querySelector('#retained').value,scrollY,readingTop:document.querySelector('#reading').getBoundingClientRect().top})`,
+        ),
+      };
+    });
+  await electron.evaluate(async ({ webContents }, id) => {
+    const fixture = globalThis.browserTabsHostFixture;
+    const contents = webContents.fromId(id)!;
+    const view = fixture.window.contentView.children.find(
+      (view) => 'webContents' in view && view.webContents === contents,
+    ) as NonNullable<typeof fixture.retained>['view'];
+    if (!view) throw Error('fixture_exact_retained_view_missing');
+    fixture.retained = { contents, view, frame: contents.mainFrame };
+    await contents.executeJavaScript(
+      `document.querySelector('#retained').value='keep this exact form';scrollTo(0,420)`,
+    );
+  }, first.id);
+  const beforeScope = await readRetainedDocument();
+  assert.equal(beforeScope.exactContents, true);
+  assert.equal(beforeScope.exactFrame, true);
+  assert.equal(beforeScope.document.value, 'keep this exact form');
+  assert.equal(beforeScope.document.scrollY, 420);
+  const beforeScopeHits = await electron.evaluate(
+    () => globalThis.browserTabsHostFixture.hits['/two'],
   );
+  await page.evaluate(() => window.browserTabsFixture.setScope('session-b'));
+  await electron.evaluate(async () => {
+    const retained = globalThis.browserTabsHostFixture.retained!;
+    for (let i = 0; i < 100 && retained.view.getVisible(); i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const hiddenScope = await readRetainedDocument();
+  assert.equal(hiddenScope.id, first.id);
+  assert.equal(hiddenScope.exactContents, true);
+  assert.equal(hiddenScope.exactFrame, true);
+  assert.equal(hiddenScope.visible, false);
+  assert.deepEqual(hiddenScope.document, beforeScope.document);
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
+  await rail.getByRole('tab', { name: '新标签页', exact: true }).waitFor();
+  assert.equal(await rail.getByRole('tab').count(), 1);
+  assert.equal((await inspect()).length, 1);
+  const otherOwnerDenied = await page.evaluate(async (id) => {
+    try {
+      await window.kiteNative!.browserRequest!({
+        action: 'state',
+        id,
+        draft: window.browserTabsFixture.draft(),
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  }, retainedPage.id);
+  assert.equal(otherOwnerDenied, true);
+  await page.evaluate(() => window.browserTabsFixture.setScope('session-a'));
+  await rail.getByRole('tab', { name: 'Page Two', exact: true }).waitFor();
+  await electron.evaluate(async () => {
+    const retained = globalThis.browserTabsHostFixture.retained!;
+    for (let i = 0; i < 100 && !retained.view.getVisible(); i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const restoredScope = await readRetainedDocument();
+  assert.equal(restoredScope.id, first.id);
+  assert.equal(restoredScope.exactContents, true);
+  assert.equal(restoredScope.exactFrame, true);
+  assert.equal(restoredScope.visible, true);
+  assert.deepEqual(restoredScope.document, beforeScope.document);
+  const restoredInventory = await page.evaluate(() =>
+    window.kiteNative!.restoreBrowserDraft!(window.browserTabsFixture.draft()),
+  );
+  assert.deepEqual(
+    restoredInventory.pages.map(({ id }) => id),
+    [retainedPage.id],
+  );
+  assert.equal(restoredInventory.pages[0]!.pageToken, retainedPage.pageToken);
+  assert.equal(
+    await electron.evaluate(() => globalThis.browserTabsHostFixture.hits['/two']),
+    beforeScopeHits,
+  );
+  await clickGuest('#popup');
+  assert.equal(await electron.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
   const rejected = await page.evaluate(async () => {
     try {
       await window.kiteNative!.browserRequest!({
         action: 'navigate',
         id: 'invalid-protocol',
         input: 'file:///C:/private.txt',
+        draft: window.browserTabsFixture.draft(),
       });
       return false;
     } catch {
@@ -281,6 +382,8 @@ try {
     await electron.evaluate(({ webContents }, id) => !!webContents.fromId(id), first.id),
     false,
   );
+  // Only the explicit tab X destroyed it. A later owner change creates no
+  // replacement document and is not another destruction mechanism.
   await page.evaluate(() => window.browserTabsFixture.setScope('session-b'));
   await page.getByRole('button', { name: '标签页', exact: true }).click();
   await rail.getByRole('tab', { name: '新标签页', exact: true }).waitFor();
@@ -330,7 +433,7 @@ try {
     }
   }
   console.log(
-    'browser_electron_pass: navigation, history, readers, resize, isolation, foreign IPC, popup, download, destruction',
+    'browser_electron_pass: navigation, history, readers, resize, exact owner hide/restore, form/reading retention, isolation, foreign IPC, popup, download, explicit destruction',
   );
 } finally {
   clearTimeout(timeout);

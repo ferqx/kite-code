@@ -82,6 +82,11 @@ async function mainFixture(
   const trace: string[] = [],
     errors: unknown[] = [];
   const dialogs: unknown[][] = [];
+  const windowMessages: string[] = [];
+  let failQuitNotice = false;
+  let workInspection: Promise<boolean> | undefined;
+  let workspaceDecision: ReturnType<typeof deferred<boolean>> | undefined;
+  let confirmWorkspaceRemoval!: (label: string) => Promise<boolean>;
   const browserRegistrations: BrowserRegistration[] = [];
   let callerState = (): NativeState => ({ generation: 1 }) as NativeState;
   let browserScope: NativeCaller['browserScope'] = () => undefined;
@@ -159,8 +164,11 @@ async function mainFixture(
     webContents = Object.assign(new EventEmitter(), {
       mainFrame: { url: 'http://127.0.0.1:43219/' },
       isDestroyed: () => windowDestroyed,
-      send: (_channel: string, event: { kind: string; phase: string }) => {
-        if (event.kind === 'lifecycle') lifecyclePhases.push(event.phase);
+      send: (channel: string, event?: { kind: string; phase: string }) => {
+        windowMessages.push(channel);
+        if (failQuitNotice && channel === 'kite:native:quit-confirmation-failure')
+          throw Error('fixture_notice_delivery_failed');
+        if (event?.kind === 'lifecycle') lifecyclePhases.push(event.phase);
       },
       setWindowOpenHandler: () => {},
       setIgnoreMenuShortcuts: () => {},
@@ -266,11 +274,34 @@ async function mainFixture(
       throw Error('unexpected_fixture_port');
     },
     canonicalProtectedPath: (path: string) => path,
-    registerNativeIpc: (options: { caller: typeof open }) => {
+    registerNativeIpc: (options: {
+      caller: typeof open;
+      confirmWorkspaceRemoval: typeof confirmWorkspaceRemoval;
+    }) => {
       open = options.caller;
+      confirmWorkspaceRemoval = options.confirmWorkspaceRemoval;
       registered.resolve();
     },
     register: () => {},
+    createNativeGlobalDialogHost() {
+      return {
+        prewarm() {},
+        syncTheme() {},
+        active: () => !!workspaceDecision,
+        dismiss() {
+          trace.push('dialog:dismiss');
+          workspaceDecision?.resolve(false);
+          workspaceDecision = undefined;
+        },
+        async confirm(content: { kind: string }) {
+          if (content.kind === 'workspace-removal') {
+            workspaceDecision = deferred<boolean>();
+            return workspaceDecision.promise;
+          }
+          throw Error('unexpected_fixture_dialog_kind');
+        },
+      };
+    },
     registerNativeBrowserIpc: (options: BrowserRegistration) => {
       browserRegistrations.push(options);
       return () => {};
@@ -414,7 +445,8 @@ async function mainFixture(
         return browserScope(kind);
       }
       hasActiveWork() {
-        return holdMenu;
+        trace.push('work:inspect');
+        return workInspection ?? holdMenu;
       }
       detach() {}
       async close() {
@@ -429,7 +461,17 @@ async function mainFixture(
     prefix + names.map((name) => `export const ${name} = ${source}.${name};`).join('\n');
   const mocks: Record<string, string> = {
     electron: exports(
-      ['app', 'BrowserWindow', 'clipboard', 'dialog', 'ipcMain', 'Menu', 'nativeTheme', 'Tray'],
+      [
+        'app',
+        'BrowserWindow',
+        'WebContentsView',
+        'clipboard',
+        'dialog',
+        'ipcMain',
+        'Menu',
+        'nativeTheme',
+        'Tray',
+      ],
       'f.electron',
     ),
     '@kite-ai/agent/profile': exports(['selectProfile']),
@@ -458,6 +500,8 @@ async function mainFixture(
     './native-window-menu':
       prefix +
       'export const nativeWindowMenuShortcut = f.register, nativeWindowMenuTemplate = f.register, registerNativeWindowMenuIpc = f.register;',
+    './native-full-permission-dialog': `${prefix}export const registerNativeFullPermissionDialogIpc = f.register;`,
+    './native-global-dialog-host': exports(['createNativeGlobalDialogHost']),
     './artifact-access': `${prefix}export const acquireNodeArtifactAccess = f.unused;`,
     './node-process': `${prefix}export const spawnNodePairedChild = f.unused;`,
     './sqlite-engine': `${prefix}export const assertNativeSqliteEngine = f.unused;`,
@@ -631,6 +675,17 @@ async function mainFixture(
     activate: () => app.emit('activate'),
     readyToShow: () => windows.at(-1)?.emit('ready-to-show'),
     lifecyclePhases,
+    windowMessages,
+    failQuitNotice() {
+      failQuitNotice = true;
+    },
+    holdWorkInspection() {
+      const value = deferred<boolean>();
+      workInspection = value.promise;
+      return value;
+    },
+    confirmWorkspaceRemoval: (label: string) => confirmWorkspaceRemoval(label),
+    confirmPendingWorkspace: () => workspaceDecision?.resolve(true),
     exitCodes,
     quit: () => app.quit(),
     menuEntered: menuEntered.promise,
@@ -1120,6 +1175,52 @@ test('Main still permits an ordinary menu cancellation to retain the original Se
   }
 }, 15000);
 
+test('quit immediately retires a previous workspace confirmation before awaiting activity inspection', async () => {
+  const f = await mainFixture('none', false, true);
+  const held = f.holdWorkInspection();
+  try {
+    await f.open();
+    const workspace = f.confirmWorkspaceRemoval('Workspace');
+    f.quit();
+    f.confirmPendingWorkspace();
+    expect(await workspace).toBe(false);
+    expect(f.trace.indexOf('dialog:dismiss')).toBeLessThan(f.trace.indexOf('work:inspect'));
+    held.resolve(true);
+    await f.menuEntered;
+    f.retainService();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(f.lifecyclePhases).toEqual(['quitting', 'active']);
+    expect(f.services[0]!.closed).toBe(false);
+  } finally {
+    held.resolve(true);
+    f.retainService();
+    await f.close();
+  }
+}, 15000);
+
+for (const noticeThrows of [false, true])
+  test(`a failed native quit confirmation retains the Service when notice delivery ${noticeThrows ? 'throws' : 'succeeds'}`, async () => {
+    const f = await mainFixture('none', false, true);
+    try {
+      if (noticeThrows) f.failQuitNotice();
+      const caller = await f.open();
+      f.quit();
+      await f.menuEntered;
+      f.rejectMenu();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(f.lifecyclePhases).toEqual(['quitting', 'active']);
+      expect(await f.open()).toBe(caller);
+      expect(f.services[0]!.closed).toBe(false);
+      expect(f.exitCodes).toEqual([]);
+      expect(
+        f.windowMessages.filter((channel) => channel === 'kite:native:quit-confirmation-failure'),
+      ).toHaveLength(1);
+      expect(f.trace).not.toContain('1:service:closing');
+    } finally {
+      await f.close();
+    }
+  }, 15000);
+
 for (const rejectServiceClose of [false, true]) {
   test(`Main confirmed quit ${rejectServiceClose ? 'forces exit on rejected cleanup' : 'exits after clean cleanup'} with one prompt`, async () => {
     const f = await mainFixture('none', true, true, rejectServiceClose);
@@ -1131,6 +1232,13 @@ for (const rejectServiceClose of [false, true]) {
       await f.menuEntered;
       f.quit();
       expect(f.dialogs).toHaveLength(1);
+      expect(f.dialogs[0]).toHaveLength(2);
+      expect(f.dialogs[0]![1]).toMatchObject({
+        type: 'warning',
+        buttons: ['保留服务', '退出'],
+        defaultId: 0,
+        cancelId: 0,
+      });
       expect(f.trace).not.toContain('1:service:closing');
       f.confirmQuit();
       await f.serviceClosing;

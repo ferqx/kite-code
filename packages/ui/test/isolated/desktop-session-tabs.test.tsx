@@ -1,17 +1,12 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act, useEffect, useLayoutEffect, useState } from 'react';
+import { act, useEffect, useState } from 'react';
 import { childAgentAppearance } from '../../src/desktop/ApprovalHeader';
-import type { SessionPageProps } from '../../src/desktop/SessionPage';
 import type {
   SessionChildTabRequest,
   SessionChildTarget,
   SessionTabsModel,
 } from '../../src/desktop/SessionTabs';
-import type {
-  SessionTabsChromeAction,
-  SessionTabsChromePresentation,
-} from '../../src/desktop/types';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost',
@@ -75,7 +70,7 @@ const { SessionPage } = await import('../../src/desktop/SessionPage');
 
 const { createRoot } = await import('react-dom/client');
 const { createPortal } = await import('react-dom');
-const { SessionBrowserToolbar, SessionTabs, SessionTabsChrome, useSessionTabs } = await import(
+const { SessionBrowserToolbar, SessionTabs, useSessionTabs } = await import(
   '../../src/desktop/SessionTabs'
 );
 let root: ReturnType<typeof createRoot> | undefined;
@@ -134,7 +129,6 @@ async function render(
   covered = false,
   childTabRequest?: SessionChildTabRequest,
   workspaceTab?: { requestId: number; onClose: () => void },
-  chrome?: Pick<SessionPageProps, 'onTabsChromePresentation' | 'tabsChromeHosted'>,
 ) {
   root ??= createRoot(document.body);
   await act(() =>
@@ -149,7 +143,6 @@ async function render(
         connectionLabel=""
         loading={false}
         actions={{}}
-        {...chrome}
         covered={covered}
         workspaceTab={
           workspaceTab
@@ -195,327 +188,6 @@ function browserIds() {
   );
 }
 
-function preparationFixture(withClose = false, failClose = false) {
-  let model!: SessionTabsModel;
-  let presentation: SessionTabsChromePresentation | null = null;
-  const calls: {
-    from: string;
-    target: string;
-    cancelled: number;
-    resolve(value?: { cancel(): void } | null): void;
-    reject(): void;
-  }[] = [];
-  const closed: { id: string; visible?: string; committed?: string }[] = [];
-  const collapsed: number[] = [],
-    closePreparations: { cancelled: number; resolve(value?: { cancel(): void } | null): void }[] =
-      [];
-  const prepareClose = () =>
-    new Promise<{ cancel(): void } | null>((resolve) => {
-      const call = {
-        cancelled: 0,
-        resolve(value?: { cancel(): void } | null) {
-          resolve(value === undefined ? { cancel: () => call.cancelled++ } : value);
-        },
-      };
-      closePreparations.push(call);
-    });
-  let afterCommit: (() => void) | undefined;
-  let replaceScope!: (scope: string) => void;
-  let removeOwner!: () => void;
-  const prepare = (from: string, target: string) =>
-    new Promise<{ cancel(): void } | null>((resolve, reject) => {
-      const call = {
-        from,
-        target,
-        cancelled: 0,
-        resolve: (value?: { cancel(): void } | null) =>
-          resolve(value === undefined ? { cancel: () => call.cancelled++ } : value),
-        reject: () => reject(Error('preparation_unavailable')),
-      };
-      calls.push(call);
-    });
-  function Harness({ scope, enabled }: { scope: string; enabled: boolean }) {
-    model = useSessionTabs(
-      scope,
-      (id) => {
-        closed.push({
-          id,
-          visible: document.querySelector<HTMLElement>('[data-browser-id][data-visible="true"]')
-            ?.dataset.browserId,
-          committed: presentation?.data.active,
-        });
-        return failClose ? Promise.reject(Error('close_unconfirmed')) : undefined;
-      },
-      undefined,
-      undefined,
-      false,
-      enabled ? prepare : undefined,
-      withClose ? prepareClose : undefined,
-    );
-    useLayoutEffect(() => afterCommit?.());
-    return (
-      <SessionTabs
-        model={model}
-        visible
-        changes={null}
-        onClose={() => {
-          collapsed.push(model.tabs.length);
-        }}
-        scopeKey={scope}
-        onChromePresentation={(next) => {
-          presentation = next;
-        }}
-        renderBrowser={({ id, visible }) => <section data-browser-id={id} data-visible={visible} />}
-      />
-    );
-  }
-  function Shell({ scope, enabled }: { scope: string; enabled: boolean }) {
-    const [replacement, setReplacement] = useState<string>();
-    const [visible, setVisible] = useState(true);
-    replaceScope = setReplacement;
-    removeOwner = () => setVisible(false);
-    return visible ? <Harness scope={replacement ?? scope} enabled={enabled} /> : null;
-  }
-  return {
-    calls,
-    closed,
-    collapsed,
-    closePreparations,
-    get model() {
-      return model;
-    },
-    raceAfterCommit(id: string, boundary: 'scope' | 'unmount') {
-      afterCommit = () => {
-        if (model.tabs.some((tab) => tab.id === id)) return;
-        afterCommit = undefined;
-        if (boundary === 'scope') replaceScope('after-committed-close');
-        else removeOwner();
-      };
-    },
-    render(scope = 'original', enabled = true) {
-      root ??= createRoot(document.body);
-      return act(() => root!.render(<Shell scope={scope} enabled={enabled} />));
-    },
-    async twoPages() {
-      await this.render();
-      await act(() => model.addBrowser());
-      const first = model.active;
-      await act(() => model.addBrowser());
-      return { first, second: model.active };
-    },
-  };
-}
-
-test('last browser close keeps its UI until prepared and dispatches only after the empty DOM commit', async () => {
-  const f = preparationFixture(true);
-  await f.render();
-  await act(() => f.model.addBrowser());
-  const id = f.model.active;
-  await click('关闭标签页：新标签页');
-  expect(f.model.tabs).toHaveLength(1);
-  expect(f.closed).toHaveLength(0);
-  expect(f.collapsed).toHaveLength(0);
-  await act(() => f.closePreparations[0]!.resolve());
-  expect(f.model.tabs).toHaveLength(0);
-  expect(f.closed).toEqual([{ id, visible: undefined, committed: '' }]);
-  expect(f.collapsed).toHaveLength(1);
-});
-
-test('closing the final active browser prepares Root changes as its successor without collapsing the sidebar', async () => {
-  const f = preparationFixture(true);
-  await f.render();
-  await act(() => f.model.openChanges());
-  const changes = f.model.active;
-  await act(() => f.model.addBrowser());
-  const browser = f.model.active;
-  await click('关闭标签页：新标签页');
-  expect(f.model.active).toBe(browser);
-  expect(f.closed).toHaveLength(0);
-  await act(() => f.closePreparations[0]!.resolve());
-  expect(f.model.active).toBe(changes);
-  expect(f.closed).toEqual([{ id: browser, visible: undefined, committed: changes }]);
-  expect(f.collapsed).toHaveLength(0);
-});
-
-test('an unconfirmed browser close restores the same tab only under its original intent', async () => {
-  const f = preparationFixture(true, true);
-  await f.render();
-  await act(() => f.model.addBrowser());
-  const id = f.model.active;
-  await click('关闭标签页：新标签页');
-  await act(() => f.closePreparations[0]!.resolve());
-  expect(f.model.active).toBe(id);
-  expect(f.model.tabs).toHaveLength(1);
-  expect(f.model.closeIssue).toContain('未能确认');
-  expect(f.model.closeReveal).toBe(1);
-  expect(f.closed).toHaveLength(1);
-});
-
-test('a late last-close preparation is cancelled after its scope changes without collapsing or closing', async () => {
-  const f = preparationFixture(true);
-  await f.render();
-  await act(() => f.model.addBrowser());
-  await click('关闭标签页：新标签页');
-  await f.render('replacement');
-  await act(() => f.closePreparations[0]!.resolve());
-  expect(f.closePreparations[0]!.cancelled).toBe(1);
-  expect(f.closed).toHaveLength(0);
-  expect(f.collapsed).toHaveLength(0);
-});
-
-test('browser selection and current close await preparation; close is sent after its successor commit', async () => {
-  const f = preparationFixture();
-  const { first, second } = await f.twoPages();
-  const original = document.querySelector(`[data-browser-id="${first}"]`);
-  await act(() => f.model.select(first));
-  expect(f.calls).toHaveLength(1);
-  expect(f.calls[0]).toMatchObject({ from: second, target: first });
-  expect(f.model.active).toBe(second);
-  await act(() => f.calls[0]!.resolve());
-  expect(f.model.active).toBe(first);
-  expect(f.calls[0]!.cancelled).toBe(0);
-  expect(document.querySelector(`[data-browser-id="${first}"]`)).toBe(original);
-  await act(() => f.model.closeTab(first));
-  expect(f.calls).toHaveLength(2);
-  expect(f.closed).toEqual([]);
-  expect(f.model.active).toBe(first);
-  await act(() => f.calls[1]!.resolve());
-  expect(f.closed).toEqual([{ id: first, visible: second, committed: second }]);
-  expect(f.model.active).toBe(second);
-});
-
-test('a newer intent, target closure or scope replacement cancels late browser preparation without replay', async () => {
-  const f = preparationFixture();
-  const { first, second } = await f.twoPages();
-  await act(() => f.model.select(first));
-  expect(f.calls).toHaveLength(1);
-  await act(() => f.model.select(second));
-  await act(() => f.calls[0]!.resolve());
-  expect(f.model.active).toBe(second);
-  expect(f.calls[0]!.cancelled).toBe(1);
-  await act(() => f.model.select(first));
-  await act(() => f.model.closeTab(first));
-  expect(f.closed.map(({ id }) => id)).toEqual([first]);
-  await act(() => f.calls[1]!.resolve());
-  expect(f.calls[1]!.cancelled).toBe(1);
-  expect(f.model.active).toBe(second);
-  await act(() => f.model.addBrowser());
-  await act(() => f.model.select(second));
-  expect(f.calls).toHaveLength(3);
-  await f.render('replacement');
-  await act(() => f.calls[2]!.resolve());
-  expect(f.calls[2]!.cancelled).toBe(1);
-  expect(f.model.tabs).toEqual([]);
-  expect(f.closed.map(({ id }) => id)).toEqual([first]);
-});
-
-test('failed preparation falls back once; a late receipt after unmount is cancelled', async () => {
-  const f = preparationFixture();
-  const { first, second } = await f.twoPages();
-  await act(() => f.model.select(first));
-  expect(f.calls).toHaveLength(1);
-  await act(() => f.calls[0]!.reject());
-  expect(f.model.active).toBe(first);
-  await act(() => f.model.select(second));
-  await act(() => root!.unmount());
-  root = undefined;
-  await act(() => f.calls[1]!.resolve());
-  expect(f.calls[1]!.cancelled).toBe(1);
-  expect(f.closed).toEqual([]);
-});
-
-for (const intent of ['select', 'close'] as const)
-  for (const order of ['old-first', 'latest-first'] as const)
-    test(`repeated preparation for the same target keeps the latest ${intent} intent when receipts return ${order}`, async () => {
-      const f = preparationFixture();
-      const { first, second } = await f.twoPages();
-      await act(() => f.model.select(first));
-      await act(() => {
-        if (intent === 'select') f.model.select(first);
-        else f.model.closeTab(second);
-      });
-      expect(f.calls).toHaveLength(2);
-      expect(f.calls.map(({ from, target }) => ({ from, target }))).toEqual([
-        { from: second, target: first },
-        { from: second, target: first },
-      ]);
-      expect(f.model.active).toBe(second);
-      expect(f.closed).toEqual([]);
-      const firstReceipt = order === 'old-first' ? 0 : 1;
-      await act(() => f.calls[firstReceipt]!.resolve());
-      expect(f.model.active).toBe(order === 'old-first' ? second : first);
-      if (order === 'old-first') expect(f.closed).toEqual([]);
-      await act(() => f.calls[1 - firstReceipt]!.resolve());
-      expect(f.calls.map(({ cancelled }) => cancelled)).toEqual([1, 0]);
-      expect(f.model.active).toBe(first);
-      expect(f.closed).toEqual(
-        intent === 'close' ? [{ id: second, visible: first, committed: first }] : [],
-      );
-      expect(f.model.tabs.map((tab) => tab.id)).toEqual(
-        intent === 'close' ? [first] : [first, second],
-      );
-    });
-
-for (const boundary of ['scope', 'unmount'] as const)
-  test(`an already committed close is dispatched once before an ancestor ${boundary} change`, async () => {
-    const f = preparationFixture();
-    const { first, second } = await f.twoPages();
-    await act(() => f.model.closeTab(second));
-    expect(f.closed).toEqual([]);
-    f.raceAfterCommit(second, boundary);
-    await act(() => f.calls[0]!.resolve());
-    expect(f.closed).toEqual([{ id: second, visible: first, committed: first }]);
-    await act(() => {});
-    expect(f.closed).toHaveLength(1);
-  });
-
-test('current close chooses the next then previous array neighbor; background and final closes do not prepare', async () => {
-  const f = preparationFixture();
-  const { first, second } = await f.twoPages();
-  await act(() => f.model.addBrowser());
-  const third = f.model.active;
-  await act(() => f.model.select(second));
-  await act(() => f.calls[0]!.resolve());
-  await act(() => f.model.closeTab(second));
-  expect(f.calls[1]).toMatchObject({ from: second, target: third });
-  await act(() => f.calls[1]!.resolve());
-  expect(f.model.active).toBe(third);
-  await act(() => f.model.closeTab(third));
-  expect(f.calls[2]).toMatchObject({ from: third, target: first });
-  await act(() => f.calls[2]!.resolve());
-  expect(f.model.active).toBe(first);
-  await act(() => f.model.addBrowser());
-  const last = f.model.active;
-  const prepared = f.calls.length;
-  await act(() => f.model.closeTab(first));
-  expect(f.model.active).toBe(last);
-  expect(f.calls).toHaveLength(prepared);
-  await act(() => f.model.closeTab(last));
-  expect(f.model.tabs).toEqual([]);
-  expect(f.calls).toHaveLength(prepared);
-  expect(f.closed.map(({ id }) => id)).toEqual([second, third, first, last]);
-});
-
-test('same-event ABA never sends obsolete preparation and a timed-out late receipt cannot change the adopted target', async () => {
-  const f = preparationFixture();
-  const { first, second } = await f.twoPages();
-  await act(() => {
-    f.model.select(first);
-    f.model.select(second);
-  });
-  expect(f.calls).toEqual([]);
-  expect(f.model.active).toBe(second);
-  await act(() => f.model.select(first));
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 280));
-  });
-  expect(f.model.active).toBe(first);
-  const page = document.querySelector(`[data-browser-id="${first}"]`);
-  await act(() => f.calls[0]!.resolve());
-  expect(f.calls[0]!.cancelled).toBe(1);
-  expect(f.model.active).toBe(first);
-  expect(document.querySelector(`[data-browser-id="${first}"]`)).toBe(page);
-});
 async function selectTab(title: string) {
   const tab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
     (tab) => tab.title === title,
@@ -526,6 +198,76 @@ async function selectTab(title: string) {
     tab!.click();
   });
 }
+
+function closeFixture() {
+  let model!: SessionTabsModel;
+  const closed: { id: string; originalPresent: boolean; reject(cause: unknown): void }[] = [];
+  function Harness({ scope = 'original' }: { scope?: string }) {
+    model = useSessionTabs(scope, (id) => {
+      const originalPresent = !!document.querySelector(`[data-retained-id="${id}"]`);
+      return new Promise<void>((_resolve, reject) => closed.push({ id, originalPresent, reject }));
+    });
+    return (
+      <SessionTabs
+        model={model}
+        visible
+        changes={null}
+        onClose={() => {}}
+        renderBrowser={({ id }) => <p data-retained-id={id}>Page {id}</p>}
+      />
+    );
+  }
+  root = createRoot(document.body);
+  return {
+    closed,
+    model: () => model,
+    render: (scope = 'original') => act(() => root!.render(<Harness scope={scope} />)),
+    mutate: (action: (value: SessionTabsModel) => void) => act(() => action(model)),
+  };
+}
+
+test('a close captures its target in the click stack and immediately selects the array neighbor', async () => {
+  const f = closeFixture();
+  await f.render();
+  await f.mutate((model) => model.addBrowser());
+  await f.mutate((model) => model.addBrowser());
+  const [a, b] = f.model().tabs;
+  await f.mutate((model) => model.closeTab(b!.id));
+  expect(f.closed.map(({ id, originalPresent }) => ({ id, originalPresent }))).toEqual([
+    { id: b!.id, originalPresent: true },
+  ]);
+  expect(f.model().active).toBe(a!.id);
+  expect(f.model().tabs.map((tab) => tab.id)).toEqual([a!.id]);
+  await act(async () => {
+    f.closed[0]!.reject(Error('unknown close'));
+    await Promise.resolve();
+  });
+  expect(f.model().tabs.map((tab) => tab.id)).toEqual([a!.id, b!.id]);
+  expect(f.model().active).toBe(b!.id);
+  expect(f.model().closeIssue).toContain('未能确认网页已关闭');
+  expect(f.closed).toHaveLength(1);
+});
+
+for (const boundary of ['intent', 'scope'] as const) {
+  test(`a failed original close cannot restore a retired ${boundary}`, async () => {
+    const f = closeFixture();
+    await f.render();
+    await f.mutate((model) => model.addBrowser());
+    const a = f.model().active;
+    await f.mutate((model) => model.closeTab(a));
+    if (boundary === 'scope') await f.render('successor');
+    await f.mutate((model) => model.addBrowser());
+    const successor = f.model().active;
+    await act(async () => {
+      f.closed[0]!.reject(Error('late close result'));
+      await Promise.resolve();
+    });
+    expect(f.model().active).toBe(successor);
+    expect(f.model().tabs.some((tab) => tab.id === a)).toBe(false);
+    expect(f.closed).toHaveLength(1);
+  });
+}
+
 test('tabs replace the direct file changes action; only the visible selected tool owns a reader', async () => {
   mounted = closed = 0;
   released.length = 0;
@@ -1208,6 +950,7 @@ test('browser toolbar keeps navigation separate from portalled annotation forms 
   expect(navigated).toBe(0);
   expect(document.querySelector('form form')).toBeNull();
   await act(() => {
+    host.querySelector<HTMLInputElement>('input')!.focus();
     submit(host.querySelector('form')!);
   });
   expect(navigated).toBe(1);
@@ -1219,260 +962,6 @@ test('browser toolbar keeps navigation separate from portalled annotation forms 
   });
   expect(navigated).toBe(1);
   expect(host.querySelector<HTMLInputElement>('input')!.value).toBe('https://example.test');
-});
-
-test('the Chrome port retains one bounded tab model and visually hides only the hosted header', async () => {
-  let presentation: SessionTabsChromePresentation | null = null;
-  const port = (value: SessionTabsChromePresentation | null) => {
-    presentation = value;
-  };
-  const current = () => presentation!;
-  const options = { onTabsChromePresentation: port };
-  released.length = 0;
-  await render('original', false, false, undefined, undefined, options);
-  expect(current().data).toMatchObject({
-    scopeKey: 'original',
-    tabs: [],
-    visible: false,
-    restoring: false,
-    restoreIssue: false,
-  });
-  await click('标签页');
-  const first = current().data.active;
-  const originalDispatch = current().dispatch;
-  const header = document.querySelector<HTMLElement>('.session-tabs-heading')!;
-  const browser = document.querySelector(`[data-browser-id="${first}"]`)!;
-  const originalTabs = current().data.tabs;
-  expect(header.hasAttribute('inert')).toBe(false);
-  expect(getComputedStyle(header).visibility).toBe('visible');
-  await render('original', false, false, undefined, undefined, {
-    ...options,
-    tabsChromeHosted: true,
-  });
-  expect(document.querySelector('.session-tabs-heading')).toBe(header);
-  expect(header.hasAttribute('inert')).toBe(true);
-  expect(header.getAttribute('aria-hidden')).toBe('true');
-  expect(header.hasAttribute('hidden')).toBe(false);
-  expect(getComputedStyle(header).visibility).toBe('hidden');
-  expect(getComputedStyle(header).display).toBe('block');
-  expect(header.style.pointerEvents).toBe('none');
-  expect(document.querySelector(`[data-browser-id="${first}"]`)).toBe(browser);
-  expect(browser.closest('[inert], [aria-hidden="true"]')).toBeNull();
-  expect(getComputedStyle(browser).visibility).toBe('visible');
-  expect(current().data.tabs).toBe(originalTabs);
-  expect(current().data.active).toBe(first);
-  expect(released).toEqual([]);
-  await render('original', false, false, undefined, undefined, options);
-  expect(document.querySelector('.session-tabs-heading')).toBe(header);
-  expect(header.hasAttribute('inert')).toBe(false);
-  expect(header.hasAttribute('aria-hidden')).toBe(false);
-  expect(getComputedStyle(header).visibility).toBe('visible');
-  expect(header.style.pointerEvents).toBe('');
-  expect(current().data.tabs).toBe(originalTabs);
-  expect(current().data.active).toBe(first);
-  await click('新建标签页');
-  expect(current().data.tabs).toHaveLength(2);
-  expect(current().data.active).not.toBe(first);
-  expect(document.querySelector(`[data-browser-id="${first}"]`)).toBe(browser);
-  expect(released).toEqual([]);
-  expect(current().dispatch).toBe(originalDispatch);
-  for (let i = 0; i < 9; i++) await act(() => current().dispatch({ type: 'add' }));
-  expect(current().data.tabs).toHaveLength(8);
-  expect(browserIds()).toHaveLength(8);
-  expect(JSON.parse(JSON.stringify(current().data))).toEqual(current().data);
-  await act(() => originalDispatch({ type: 'select', id: first }));
-  expect(current().data.active).toBe(first);
-  await render('original', false, true, undefined, undefined, options);
-  expect(current().data.visible).toBe(false);
-  const ids = current().data.tabs.map((tab) => tab.id);
-  await act(() => originalDispatch({ type: 'close', id: first }));
-  expect(current().data.tabs.map((tab) => tab.id)).toEqual(ids);
-  expect(released).toEqual([]);
-  await render('next', false, false, undefined, undefined, options);
-  await click('标签页');
-  const next = current().data.active;
-  await act(() => originalDispatch({ type: 'close', id: next }));
-  expect(current().data.tabs.map((tab) => tab.id)).toEqual([next]);
-  expect(released).toEqual([]);
-  const retired = current().dispatch;
-  await act(() => root!.unmount());
-  root = undefined;
-  expect(presentation).toBeNull();
-  await act(() => retired({ type: 'add' }));
-  expect(presentation).toBeNull();
-});
-
-test('Chrome actions reuse original mixed-tab handlers, reader lifetime and final-close focus', async () => {
-  let presentation: SessionTabsChromePresentation | null = null;
-  const options = {
-    onTabsChromePresentation: (value: SessionTabsChromePresentation | null) => {
-      presentation = value;
-    },
-  };
-  const current = () => presentation!;
-  const dispatch = (action: SessionTabsChromeAction) => act(() => current().dispatch(action));
-  let workspaceClosed = 0;
-  const workspace = {
-    requestId: 1,
-    onClose: () => {
-      workspaceClosed++;
-    },
-  };
-  mounted = closed = childMounted = childClosed = 0;
-  childChanges.length = 0;
-  released.length = 0;
-  await render('scope', false, false, undefined, workspace, options);
-  await dispatch({ type: 'add' });
-  const browser = current().data.active;
-  await dispatch({ type: 'openChanges' });
-  expect(mounted - closed).toBe(1);
-  await render(
-    'scope',
-    false,
-    false,
-    {
-      requestId: 1,
-      sessionId: 'child-source',
-      executionId: 'child-task',
-      title: 'Child',
-      childAgentIdentity: 'code',
-    },
-    workspace,
-    options,
-  );
-  const child = current().data.tabs.find((tab) => tab.kind === 'child')!;
-  expect(child).toMatchObject({
-    sessionId: 'child-source',
-    executionId: 'child-task',
-    childAgentIdentity: 'code',
-  });
-  expect(current().data.tabs.map((tab) => tab.kind)).toEqual([
-    'workspace',
-    'browser',
-    'changes',
-    'child',
-  ]);
-  expect(childMounted - childClosed).toBe(1);
-  expect(mounted - closed).toBe(0);
-  await dispatch({ type: 'select', id: 'workspace' });
-  expect(childMounted - childClosed).toBe(0);
-  expect(childChanges.at(-1)).toBeUndefined();
-  await dispatch({ type: 'close', id: 'workspace' });
-  expect(workspaceClosed).toBe(1);
-  await dispatch({ type: 'select', id: 'changes' });
-  expect(mounted - closed).toBe(1);
-  await dispatch({ type: 'close', id: browser });
-  expect(released).toEqual([browser]);
-  await dispatch({ type: 'close', id: child.id });
-  await dispatch({ type: 'close', id: 'changes' });
-  expect(current().data.tabs).toEqual([]);
-  expect(current().data.visible).toBe(false);
-  expect(mounted - closed).toBe(0);
-  expect(document.activeElement?.getAttribute('aria-label')).toBe('标签页');
-});
-
-test('the controlled Chrome view emits original actions and retains Radix keyboard focus without readers', async () => {
-  const host = document.createElement('div');
-  document.body.append(host);
-  root = createRoot(host);
-  const actions: SessionTabsChromeAction[] = [];
-  const presentation: SessionTabsChromePresentation = {
-    data: {
-      scopeKey: 'display',
-      tabs: [
-        { id: 'one', kind: 'browser', title: 'Original page' },
-        { id: 'changes', kind: 'changes', title: '变更' },
-        {
-          id: 'child',
-          kind: 'child',
-          title: 'Child',
-          sessionId: 'child-source',
-          childAgentIdentity: 'code',
-        },
-        { id: 'workspace', kind: 'workspace', title: 'Managed' },
-      ],
-      active: 'one',
-      visible: true,
-      present: true,
-      restoring: false,
-      restoreIssue: false,
-    },
-    dispatch: (action) => actions.push(action),
-  };
-  await act(() => root!.render(<SessionTabsChrome {...presentation} />));
-  expect(host.querySelectorAll('[role="tab"]')).toHaveLength(4);
-  expect(host.querySelector('.session-tab-content')).toBeNull();
-  expect(host.querySelector('[role="tabpanel"]')).toBeNull();
-  expect(host.querySelector('[data-browser-id]')).toBeNull();
-  const tabs = host.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-  for (const tab of tabs) expect(tab.hasAttribute('aria-controls')).toBe(false);
-  await act(() => tabs[0]!.focus());
-  actions.length = 0;
-  await act(async () => {
-    tabs[0]!.dispatchEvent(
-      new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
-    );
-    await Bun.sleep(10);
-  });
-  expect(document.activeElement).toBe(tabs[1]!);
-  expect(actions).toContainEqual({ type: 'select', id: 'changes' });
-  expect(tabs[0]!.getAttribute('aria-selected')).toBe('true');
-  await click('关闭标签页：Managed');
-  await click('新建标签页');
-  await click('收起标签栏');
-  expect(actions.slice(-3)).toEqual([
-    { type: 'close', id: 'workspace' },
-    { type: 'add' },
-    { type: 'collapse' },
-  ]);
-});
-
-test('the Chrome port reports restore failure and retries only through the original restore owner', async () => {
-  let presentation: SessionTabsChromePresentation | null = null;
-  const reads: {
-    resolve(page: { id: string; title: string }): void;
-    reject(error: Error): void;
-  }[] = [];
-  root = createRoot(document.body);
-  await act(() =>
-    root!.render(
-      <SessionPage
-        workspaces={[]}
-        readingKey="restore"
-        sessionLabel="Restore"
-        messages={[]}
-        connected
-        connectionLabel=""
-        loading={false}
-        actions={{}}
-        onTabsChromePresentation={(value) => {
-          presentation = value;
-        }}
-        restoreBrowser={() => new Promise((resolve, reject) => reads.push({ resolve, reject }))}
-        renderBrowser={({ id }) => <section data-browser-id={id} />}
-      />,
-    ),
-  );
-  const current = () => presentation!;
-  await click('标签页');
-  expect(current().data.restoring).toBe(true);
-  expect(current().data.tabs).toEqual([]);
-  expect(reads).toHaveLength(1);
-  await act(() => reads[0]!.reject(Error('original unavailable')));
-  expect(current().data.restoreIssue).toBe(true);
-  await act(() => current().dispatch({ type: 'add' }));
-  expect(current().data.tabs).toEqual([]);
-  await act(() => current().dispatch({ type: 'retryRestore' }));
-  expect(reads).toHaveLength(2);
-  expect(current().data.restoring).toBe(true);
-  await act(() => reads[1]!.resolve({ id: 'original-page', title: 'Original retained page' }));
-  expect(current().data).toMatchObject({
-    restoring: false,
-    restoreIssue: false,
-    active: 'original-page',
-  });
-  expect(current().data.tabs).toHaveLength(1);
-  expect(browserIds()).toEqual(['original-page']);
 });
 
 test('the original tab header retains document panel associations and keyboard selection', async () => {

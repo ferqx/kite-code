@@ -1,5 +1,5 @@
-/** Plain CSS coordinates, admitted by Main before a remote Chrome event reaches Root. */
-export interface NativeBrowserChromeRect {
+/** Root CSS coordinates for a finite native menu anchor. */
+export interface NativeBrowserMenuRect {
   readonly x: number;
   readonly y: number;
   readonly width: number;
@@ -7,9 +7,7 @@ export interface NativeBrowserChromeRect {
 }
 
 export interface NativeBrowserToolbarPresentation {
-  readonly id: string;
   readonly address: string;
-  readonly readonlyURL: string;
   readonly loading: boolean;
   readonly hasPage: boolean;
   readonly canGoBack: boolean;
@@ -27,30 +25,25 @@ export type NativeBrowserToolbarAction =
   | { readonly type: 'address-change'; readonly value: string }
   | { readonly type: 'address-focus'; readonly focused: boolean }
   | { readonly type: 'navigate' | 'back' | 'forward' | 'reload' | 'toggle-notes' }
-  | { readonly type: 'show-options'; readonly anchor: NativeBrowserChromeRect };
+  | { readonly type: 'show-options'; readonly anchor: NativeBrowserMenuRect };
 
 export interface NativeBrowserControlPresentation {
-  readonly id: string;
   readonly label: string;
   readonly detail: string;
   readonly issue?: string;
-  readonly handoffAvailable: boolean;
-  readonly closeAvailable: boolean;
-  readonly pending: boolean;
-  readonly details: readonly string[];
 }
 
 export type NativeBrowserControlAction = {
   readonly type: 'show-menu';
-  readonly anchor: NativeBrowserChromeRect;
+  readonly anchor: NativeBrowserMenuRect;
 };
 
-/** Functions stay in the owning Root; only the data/action unions cross the Chrome bridge. */
-export interface NativeBrowserToolbarPort {
+/** Local presentation props; callbacks remain in the owning Root. */
+export interface NativeBrowserToolbarProps {
   readonly data: NativeBrowserToolbarPresentation;
   readonly dispatch: (action: NativeBrowserToolbarAction) => void;
 }
-export interface NativeBrowserControlPort {
+export interface NativeBrowserControlProps {
   readonly data: NativeBrowserControlPresentation;
   readonly dispatch: (action: NativeBrowserControlAction) => void;
 }

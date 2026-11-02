@@ -15,22 +15,16 @@ if (/Macintosh|Mac OS X/i.test(navigator.userAgent))
 else if (/Windows/i.test(navigator.userAgent))
   document.documentElement.dataset.platform = 'windows';
 const root = createRoot(document.getElementById('root')!);
-if (window.kiteBrowserChrome) {
-  document.documentElement.dataset.browserChrome = 'true';
-  const { NativeBrowserChromeRenderer } = await import('./native-browser-chrome-renderer');
-  root.render(<NativeBrowserChromeRenderer />);
-} else {
-  applyTheme(readThemePreference());
-  const appearance = await window.kiteNative?.getWindowAppearance?.().catch(() => undefined);
-  document.documentElement.dataset.windowMaterial = appearance?.backgroundMaterial ?? 'none';
-  const { NativeDesktop } = await import('./native');
-  root.render(
-    <NativeDesktop
-      nativeWindow
-      testDiagnostics={
-        typeof __KITE_DESKTOP_TEST_DIAGNOSTICS__ !== 'undefined' &&
-        __KITE_DESKTOP_TEST_DIAGNOSTICS__ === true
-      }
-    />,
-  );
-}
+applyTheme(readThemePreference());
+const appearance = await window.kiteNative?.getWindowAppearance?.().catch(() => undefined);
+document.documentElement.dataset.windowMaterial = appearance?.backgroundMaterial ?? 'none';
+const { NativeDesktop } = await import('./native');
+root.render(
+  <NativeDesktop
+    nativeWindow
+    testDiagnostics={
+      typeof __KITE_DESKTOP_TEST_DIAGNOSTICS__ !== 'undefined' &&
+      __KITE_DESKTOP_TEST_DIAGNOSTICS__ === true
+    }
+  />,
+);

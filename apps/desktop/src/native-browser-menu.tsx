@@ -4,7 +4,7 @@ import type {
   NativeBrowserMenuRequest,
   NativeBrowserRestoreScope,
 } from './native-browser-bridge';
-import type { NativeBrowserChromeRect } from './native-browser-chrome-types';
+import type { NativeBrowserMenuRect } from './native-browser-toolbar-types';
 
 let menuSequence = 0;
 /** Native menus remain above WebContentsView and never replace the page pixels. */
@@ -78,7 +78,7 @@ export function useNativeBrowserPopup(options: {
       cancel();
     };
   }, [cancel]);
-  return useCallback((anchor: HTMLElement | NativeBrowserChromeRect) => {
+  return useCallback((anchor: HTMLElement | NativeBrowserMenuRect) => {
     const start = current.current,
       host = window.kiteNative;
     if (

@@ -921,8 +921,9 @@ test('an accepted original proof cannot silently rebase over newer nonempty pers
     expect(f.writes().map((input) => input.revision)).toEqual([1]);
     expect(f.saved.get('a')?.content).toBe('another writer saved this');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('my later edit');
-    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'draft_revision_conflict',
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+      '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
     );
   } finally {
     await f.close();
@@ -942,8 +943,9 @@ test('an independent empty saved draft is not mistaken for committed receipt con
     expect(f.writes().map((input) => input.revision)).toEqual([1]);
     expect(f.saved.get('a')?.content).toBe('');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('my later edit');
-    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'draft_revision_conflict',
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+      '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
     );
   } finally {
     await f.close();
@@ -971,8 +973,9 @@ for (const mismatch of [
       expect(f.writes().map((input) => input.revision)).toEqual([1]);
       expect(f.saved.get('a')?.revision).toBe(2);
       expect(promptValue(f.input('当前会话私有草稿'))).toBe('newer editor text');
-      expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
-        'draft_revision_conflict',
+      expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+        '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
       );
     } finally {
       await f.close();
@@ -993,8 +996,9 @@ test('saved draft reconciliation requires the original consumed-from revision', 
     await f.click('保留草稿');
     expect(f.writes().map((input) => input.revision)).toEqual([1]);
     expect(f.saved.get('a')?.revision).toBe(2);
-    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'draft_revision_conflict',
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+      '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
     );
   } finally {
     await f.close();
@@ -1086,12 +1090,13 @@ test('a current consumed-draft read rejection reports its error and an explicit 
     });
     await f.click('保留草稿');
     expect(f.writes()).toHaveLength(0);
-    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'draft_storage_unavailable',
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+      '草稿暂时无法保存或读取，当前输入已保留。请稍后再试。',
     );
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsaved draft after accepted input');
     f.setReadOverride();
-    await f.click('确定');
+    await f.click('关闭提示');
     await f.click('保留草稿');
     expect(f.writes().map((input) => input.revision)).toEqual([2]);
     expect(f.saved.get('a')?.content).toBe('unsaved draft after accepted input');
@@ -1121,8 +1126,9 @@ test('a late draft write rejection remains a mutation error after reconciliation
     expect(f.writes().map((input) => input.revision)).toEqual([2]);
     await f.click('Other B');
     await act(async () => rejectWrite?.());
-    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'draft_storage_unavailable',
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+      '草稿暂时无法保存或读取，当前输入已保留。请稍后再试。',
     );
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
   } finally {
@@ -2757,6 +2763,21 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
 
 test('original current-Session permission menu uses the observed command, preserves drafts and scopes Full confirmation', async () => {
   const f = fixture(true, false);
+  const confirmations: {
+    request: import('../../src/native-bridge').NativeFullPermissionConfirmationRequest;
+    resolve(value: boolean): void;
+  }[] = [];
+  const cancelledConfirmations: string[] = [];
+  Object.assign(f.dom.window.kiteNative!, {
+    confirmFullPermission(
+      request: import('../../src/native-bridge').NativeFullPermissionConfirmationRequest,
+    ) {
+      return new Promise<boolean>((resolve) => confirmations.push({ request, resolve }));
+    },
+    cancelFullPermissionConfirmation(requestId: string) {
+      cancelledConfirmations.push(requestId);
+    },
+  });
   const permission = () => f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
   const mutations = () => f.calls.filter((call) => call.method === 'permission.mode');
   async function choose(index: number) {
@@ -2820,18 +2841,24 @@ test('original current-Session permission menu uses the observed command, preser
     });
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('retained current draft 雪🙂');
     await choose(2);
-    await f.click('Cancel');
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]!.request.language).toBe('en');
+    expect(f.host.querySelector('.full-permission-dialog')).toBeNull();
+    expect(permission().disabled).toBe(true);
+    await act(async () => confirmations[0]!.resolve(false));
     expect(mutations()).toHaveLength(1);
     await choose(2);
+    const staleConfirmation = confirmations[1]!;
     await f.click('Other B');
-    const staleConfirm = [...f.host.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Enable Full',
-    );
-    if (staleConfirm) await act(async () => staleConfirm.click());
+    expect(cancelledConfirmations).toContain(staleConfirmation.request.requestId);
+    await act(async () => staleConfirmation.resolve(true));
     expect(mutations()).toHaveLength(1);
     expect(permission().getAttribute('aria-label')).toBe('Permission: Auto');
     await choose(2);
-    await f.click('Enable Full');
+    const currentConfirmation = confirmations[2]!;
+    expect(currentConfirmation.request.requestId).not.toBe(staleConfirmation.request.requestId);
+    expect(f.host.querySelector('.full-permission-dialog')).toBeNull();
+    await act(async () => currentConfirmation.resolve(true));
     expect(mutations()).toHaveLength(2);
     expect(mutations()[1]).toMatchObject({ observationId: 2, mode: 'full', makeDefault: false });
     expect(permission().getAttribute('aria-label')).toBe('Permission: Full');
@@ -3233,6 +3260,18 @@ test('a pending default first space cannot override a later project entry and th
 
 test('original global/project preparation and page navigation retain independent drafts without suggestion cards or empty creation', async () => {
   const f = fixture();
+  const confirmations: {
+    request: import('../../src/native-bridge').NativeFullPermissionConfirmationRequest;
+    resolve(value: boolean): void;
+  }[] = [];
+  Object.assign(f.dom.window.kiteNative!, {
+    confirmFullPermission(
+      request: import('../../src/native-bridge').NativeFullPermissionConfirmationRequest,
+    ) {
+      return new Promise<boolean>((resolve) => confirmations.push({ request, resolve }));
+    },
+    cancelFullPermissionConfirmation() {},
+  });
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
@@ -3283,13 +3322,14 @@ test('original global/project preparation and page navigation retain independent
       });
     };
     await chooseFull();
-    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'Enable Full permission?',
-    );
-    await f.click('Cancel');
+    expect(confirmations).toHaveLength(1);
+    expect(confirmations[0]!.request.language).toBe('en');
+    expect(f.host.querySelector('.full-permission-dialog')).toBeNull();
+    await act(async () => confirmations[0]!.resolve(false));
     expect(permission().getAttribute('aria-label')).toBe('Permission: Auto');
     await chooseFull();
-    await f.click('Enable Full');
+    expect(confirmations).toHaveLength(2);
+    await act(async () => confirmations[1]!.resolve(true));
     expect(permission().getAttribute('aria-label')).toBe('Permission: Full');
     expect(
       f.calls.filter((call) =>

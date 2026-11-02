@@ -63,8 +63,17 @@ test('actual Native page retains window actions and connects Windows menus to th
     fail = false,
     menuUnsubscribed = false;
   let menuAction: ((action: NativeWindowMenuAction) => void) | undefined;
+  let quitConfirmationFailed: (() => void) | undefined;
   const menuRequests: NativeWindowMenuRequest[] = [];
   const bridge: NativeBridge & NativeWindowBridge & NativeWindowMenuBridge = {
+    confirmFullPermission: async () => false,
+    cancelFullPermissionConfirmation() {},
+    watchQuitConfirmationFailure(listener) {
+      quitConfirmationFailed = listener;
+      return () => {
+        quitConfirmationFailed = undefined;
+      };
+    },
     showWindowMenu: async (request) => {
       menuRequests.push(request);
     },
@@ -132,9 +141,17 @@ test('actual Native page retains window actions and connects Windows menus to th
     fail = true;
     await down(header, 2);
     expect(zooms).toBe(3);
-    expect(dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'native_window_failed',
+    expect(dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+      '调整窗口大小未能完成，请稍后重试。',
     );
+    expect(host.textContent).not.toContain('native_window_failed');
+    await act(async () => quitConfirmationFailed?.());
+    expect(host.querySelector('.native-message [role="status"]')?.textContent).toContain(
+      '退出确认暂时无法显示，应用仍在运行。请稍后再试。',
+    );
+    expect(host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(host.textContent).not.toContain('quit_confirmation_unavailable');
     expect(promptValue(draft)).toBe('原草稿\n雪🙂');
     expect(calls.length).toBe(before);
     expect(

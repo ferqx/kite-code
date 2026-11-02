@@ -1,77 +1,14 @@
 export const nativeBrowserChannel = 'kite:native:browser';
 export const nativeBrowserEventChannel = 'kite:native:browser-state';
 export const nativeBrowserLayoutChannel = 'kite:native:browser-layout';
-export const nativeBrowserLayoutFrameChannel = 'kite:native:browser-layout-frame';
 export const nativeBrowserPresentationChannel = 'kite:native:browser-presentation';
 export const nativeBrowserMenuChannel = 'kite:native:browser-menu';
 export const nativeBrowserMenuCancelChannel = 'kite:native:browser-menu-cancel';
-export const nativeBrowserDisplayChannel = 'kite:native:browser-display';
-export const nativeBrowserPreparationChannel = 'kite:native:browser-preparation';
-export const nativeBrowserPreparationCancelChannel = 'kite:native:browser-preparation-cancel';
-
-export interface NativeBrowserPreparation {
-  readonly fromId: string;
-  readonly targetId: string;
-}
-export function isNativeBrowserPreparation(value: unknown): value is NativeBrowserPreparation {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    Object.keys(v).length === 2 &&
-    [v.fromId, v.targetId].every(
-      (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id),
-    ) &&
-    v.fromId !== v.targetId
-  );
-}
-
-/** Read-only geometry of an existing Main surface; never a page/control capability. */
-export interface NativeBrowserDisplayIntent {
-  readonly token: string;
-  readonly id: string;
-  readonly storeId: string;
-  readonly sessionId: string;
-  readonly bounds: NativeBrowserBounds;
-  readonly width: number;
-  readonly height: number;
-  readonly zoom: number;
-}
-
-export function isNativeBrowserDisplayIntent(value: unknown): value is NativeBrowserDisplayIntent {
-  if (!value || typeof value !== 'object') return false;
-  const input = value as Record<string, unknown>,
-    bounds = input.bounds as Record<string, unknown> | undefined;
-  return (
-    Object.keys(input).length === 8 &&
-    typeof input.token === 'string' &&
-    /^[a-f0-9]{32}$/.test(input.token) &&
-    [input.id, input.storeId, input.sessionId].every(
-      (part) => typeof part === 'string' && part.length > 0 && part.length <= 128,
-    ) &&
-    !!bounds &&
-    Object.keys(bounds).length === 5 &&
-    ['x', 'y', 'width', 'height', 'radius'].every(
-      (key) =>
-        typeof bounds[key] === 'number' &&
-        Number.isFinite(bounds[key]) &&
-        Number(bounds[key]) >= 0 &&
-        Number(bounds[key]) <= 32768,
-    ) &&
-    Number(bounds.width) > 0 &&
-    Number(bounds.height) > 0 &&
-    [input.width, input.height].every(
-      (part) => Number.isSafeInteger(part) && Number(part) > 0 && Number(part) <= 32768,
-    ) &&
-    typeof input.zoom === 'number' &&
-    Number.isFinite(input.zoom) &&
-    input.zoom > 0 &&
-    input.zoom <= 10 &&
-    Number(bounds.x) + Number(bounds.width) <= Number(input.width) / input.zoom + 1 &&
-    Number(bounds.y) + Number(bounds.height) <= Number(input.height) / input.zoom + 1
-  );
-}
 
 export interface NativeBrowserState {
+  /** Opaque Main page/document and display-generation fence; never inferred from its URL. */
+  readonly pageToken?: string;
+  readonly display?: 'loading' | 'ready' | 'failed';
   readonly control?: {
     readonly phase: 'human' | 'armed' | 'acquiring' | 'agent' | 'revoking' | 'unknown';
     readonly incarnation: string;
@@ -98,158 +35,6 @@ export interface NativeBrowserBounds {
   readonly width: number;
   readonly height: number;
   readonly radius: number;
-}
-export interface NativeBrowserClosePreparation {
-  readonly key: string;
-  readonly witness: string;
-  readonly bounds: NativeBrowserBounds;
-  readonly width: number;
-  readonly height: number;
-}
-export function isNativeBrowserClosePreparation(
-  value: unknown,
-): value is NativeBrowserClosePreparation {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>,
-    b = v.bounds as Record<string, unknown> | undefined;
-  return (
-    Object.keys(v).length === 5 &&
-    Object.keys(v).every((key) => ['key', 'witness', 'bounds', 'width', 'height'].includes(key)) &&
-    typeof v.key === 'string' &&
-    /^[a-f0-9]{32}$/.test(v.key) &&
-    typeof v.witness === 'string' &&
-    /^[a-f0-9]{24}$/.test(v.witness) &&
-    [v.width, v.height].every(
-      (n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 32768,
-    ) &&
-    !!b &&
-    !Array.isArray(b) &&
-    Object.keys(b).length === 5 &&
-    ['x', 'y', 'width', 'height', 'radius'].every(
-      (key) =>
-        typeof b[key] === 'number' &&
-        Number.isFinite(b[key]) &&
-        Number(b[key]) >= 0 &&
-        Number(b[key]) <= (key === 'radius' ? 64 : 32768),
-    ) &&
-    Number(b.width) > 0 &&
-    Number(b.height) > 0 &&
-    Number(b.x) + Number(b.width) <= Number(v.width) + 0.000001 &&
-    Number(b.y) + Number(b.height) <= Number(v.height) + 0.000001
-  );
-}
-export interface NativeBrowserLayoutWitness {
-  readonly key: string;
-  readonly step: 1 | 2;
-}
-/** Main requests fresh UI geometry for the current target; carries no control authority. */
-export interface NativeBrowserPresentationRequest {
-  readonly id: string;
-  readonly key: string;
-  readonly scope?: NativeBrowserRestoreScope;
-  readonly draft?: string;
-}
-export function isNativeBrowserPresentationRequest(
-  value: unknown,
-): value is NativeBrowserPresentationRequest {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    Object.keys(v).every((key) => ['id', 'key', 'scope', 'draft'].includes(key)) &&
-    typeof v.id === 'string' &&
-    /^[A-Za-z0-9_-]{1,64}$/.test(v.id) &&
-    typeof v.key === 'string' &&
-    /^[a-f0-9]{32}$/.test(v.key) &&
-    isNativeBrowserPresentationOwner(v)
-  );
-}
-export interface NativeBrowserLayoutFrameAck {
-  readonly presented?: boolean;
-  readonly error?: 'browser_presentation_unavailable';
-  readonly id: string;
-  readonly scope?: NativeBrowserRestoreScope;
-  readonly draft?: string;
-  readonly presentationRevision: number;
-  readonly key: string;
-  readonly step: 0 | 1 | 2;
-  readonly frozen?: NativeBrowserFrozenFrame;
-}
-export interface NativeBrowserFrozenFrame {
-  readonly key: string;
-  readonly mimeType: 'image/png';
-  readonly data: string;
-  readonly width: number;
-  readonly height: number;
-  readonly cssWidth: number;
-  readonly cssHeight: number;
-  readonly rootZoom: number;
-}
-export interface NativeBrowserLayoutReceipt {
-  readonly state: NativeBrowserState | null;
-  readonly waiting: boolean;
-  readonly frozenKey?: string;
-  readonly frozenWidth?: number;
-  readonly frozenHeight?: number;
-}
-export function isNativeBrowserFrozenFrame(value: unknown): value is NativeBrowserFrozenFrame {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    Object.keys(v).length === 8 &&
-    typeof v.key === 'string' &&
-    /^[a-f0-9]{32}$/.test(v.key) &&
-    v.mimeType === 'image/png' &&
-    typeof v.data === 'string' &&
-    v.data.length <= 5600000 &&
-    /^[A-Za-z0-9+/]+={0,2}$/.test(v.data) &&
-    [v.width, v.height].every(
-      (n) => Number.isSafeInteger(n) && Number(n) > 0 && Number(n) <= 16384,
-    ) &&
-    Number(v.width) * Number(v.height) <= 64000000 &&
-    [v.cssWidth, v.cssHeight].every(
-      (n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 32768,
-    ) &&
-    typeof v.rootZoom === 'number' &&
-    Number.isFinite(v.rootZoom) &&
-    v.rootZoom >= 0.25 &&
-    v.rootZoom <= 8
-  );
-}
-/** One same-frame neutral ramp followed by all 24 nonce nibbles (96 bits).
- * Decoding uses the captured ramp, not an assumed display profile or RGB order. */
-export function nativeBrowserWitnessColors(witness: NativeBrowserLayoutWitness): number[][] {
-  const levels = [
-    ...Array.from({ length: 16 }, (_, level) => level),
-    ...[...witness.key].map((digit) => {
-      const nibble = Number.parseInt(digit, 16);
-      return witness.step === 1 ? nibble : 15 - nibble;
-    }),
-  ];
-  return levels.map((level) => Array<number>(3).fill(24 + level * 4));
-}
-export function nativeBrowserWitnessTileSize(scale = 1) {
-  return 3 / Math.min(1, scale);
-}
-export function nativeBrowserWitnessWidth(scale = 1) {
-  return 40 * nativeBrowserWitnessTileSize(scale);
-}
-export function nativeBrowserWitnessPosition(bounds: NativeBrowserBounds, scale = 1) {
-  return {
-    x: bounds.x + Math.min(bounds.radius + 2, bounds.width - nativeBrowserWitnessWidth(scale)),
-    y: bounds.y + 2,
-  };
-}
-export function nativeBrowserWitnessSamplePoints(
-  bounds: NativeBrowserBounds,
-  scaleX: number,
-  scaleY = scaleX,
-) {
-  const position = nativeBrowserWitnessPosition(bounds, scaleX),
-    tile = nativeBrowserWitnessTileSize(scaleX);
-  return Array.from({ length: 40 }, (_, index) => ({
-    x: Math.floor((position.x + (index + 0.5) * tile) * scaleX),
-    y: Math.floor((position.y + tile / 2) * scaleY),
-  }));
 }
 /** Measured state of the current two-panel horizontal Groups, outermost first. */
 export interface NativeBrowserPanelLayout {
@@ -293,21 +78,6 @@ export interface NativeBrowserDraftRestoreResult {
   readonly pages: readonly NativeBrowserState[];
   readonly activeId?: string;
 }
-export interface NativeBrowserPresentationFrame {
-  readonly id: string;
-  readonly key: string;
-  readonly scope: NativeBrowserRestoreScope;
-  readonly cssX: number;
-  readonly cssY: number;
-  readonly cssWidth: number;
-  readonly cssHeight: number;
-  readonly frame: {
-    readonly mimeType: 'image/png';
-    readonly data: string;
-    readonly width: number;
-    readonly height: number;
-  };
-}
 export type NativeBrowserRequest =
   | {
       readonly action: 'navigate';
@@ -323,13 +93,18 @@ export type NativeBrowserRequest =
       readonly scope?: NativeBrowserRestoreScope;
       readonly draft?: string;
       readonly presentationRevision?: number;
-      readonly presentationKey?: string;
-      readonly witness?: NativeBrowserLayoutWitness;
+      readonly pageToken?: string;
     }
   | {
-      readonly action: 'state' | 'back' | 'forward' | 'reload' | 'stop' | 'close';
+      readonly action: 'state' | 'back' | 'forward' | 'reload' | 'stop';
       readonly id: string;
       readonly draft?: string;
+    }
+  | {
+      readonly action: 'close';
+      readonly id: string;
+      readonly draft?: string;
+      readonly pageToken?: string;
     }
   | { readonly action: 'grant'; readonly id: string; readonly draft?: never };
 export type NativeBrowserMenuAction =
@@ -411,37 +186,20 @@ export function parseNativeBrowserMenuRequest(value: unknown): NativeBrowserMenu
 }
 
 export interface NativeBrowserBridge {
-  prepareBrowserClose?(input: {
-    readonly id: string;
-    readonly draft?: string;
-  }): Promise<NativeBrowserClosePreparation | null>;
-  confirmBrowserClose?(key: string): Promise<void>;
-  finishBrowserClose?(key: string): Promise<void>;
-  cancelBrowserClose?(key: string): Promise<void>;
-  /** Prepare one existing target's native surface; conveys no page/control authority. */
-  prepareBrowserPresentation?(input: NativeBrowserPreparation): Promise<{ key: string } | null>;
-  cancelBrowserPreparation?(key: string): Promise<void>;
-  browserDisplayIntent?(): NativeBrowserDisplayIntent | null;
-  claimBrowserDisplay?(request: Extract<NativeBrowserRequest, { action: 'present' }>): boolean;
-  cancelBrowserDisplay?(): void;
   browserRequest(request: NativeBrowserRequest): Promise<NativeBrowserState | null>;
-  /** Bounded layout admission; actual placement waits for Root draw feedback. */
+  /** Immediate withdrawal, before a DOM overlay paints above the page's area. */
   presentBrowserLayout?(
     request: Extract<NativeBrowserRequest, { action: 'present' }>,
-  ): NativeBrowserState | NativeBrowserLayoutReceipt | null;
-  /** Async calibration of an already-visible hosted page; cannot create or reveal it. */
+  ): NativeBrowserState | null;
+  /** Ordered actual DOM geometry; no UI drawing handshake or control authority. */
   presentBrowserLayoutAsync?(
     request: Extract<NativeBrowserRequest, { action: 'present' }>,
-  ): Promise<NativeBrowserState | NativeBrowserLayoutReceipt | null>;
-  watchBrowserLayoutFrame?(listener: (ack: NativeBrowserLayoutFrameAck) => void): () => void;
-  watchBrowserPresentation?(
-    listener: (request: NativeBrowserPresentationRequest) => void,
-  ): () => void;
+  ): Promise<NativeBrowserState | null>;
+  watchBrowserPresentation?(listener: () => void): () => void;
   showBrowserMenu?(request: NativeBrowserMenuRequest): Promise<NativeBrowserMenuAction | null>;
   cancelBrowserMenu?(requestId: string): void;
   restoreBrowser(scope: NativeBrowserRestoreScope): Promise<NativeBrowserRestoreResult>;
   restoreBrowserDraft?(draft: string): Promise<NativeBrowserDraftRestoreResult>;
-  captureBrowserPresentation?(id: string): Promise<NativeBrowserPresentationFrame>;
   watchBrowser(listener: (state: NativeBrowserState) => void): () => void;
 }
 export type NativeBrowserReply =
@@ -451,8 +209,6 @@ export type NativeBrowserReply =
         | NativeBrowserState
         | NativeBrowserRestoreResult
         | NativeBrowserDraftRestoreResult
-        | NativeBrowserClosePreparation
-        | NativeBrowserPresentationFrame
         | null;
     }
   | { readonly ok: false; readonly code: string };
@@ -532,39 +288,6 @@ export function isNativeBrowserDraftRestoreResult(
         result.pages.some((page) => page.id === result.activeId)))
   );
 }
-export function isNativeBrowserLayoutFrameAck(
-  value: unknown,
-): value is NativeBrowserLayoutFrameAck {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    Object.keys(v).every((key) =>
-      [
-        'id',
-        'scope',
-        'draft',
-        'presentationRevision',
-        'key',
-        'step',
-        'frozen',
-        'presented',
-        'error',
-      ].includes(key),
-    ) &&
-    typeof v.id === 'string' &&
-    /^[A-Za-z0-9_-]{1,64}$/.test(v.id) &&
-    isNativeBrowserPresentationOwner(v) &&
-    Number.isSafeInteger(v.presentationRevision) &&
-    Number(v.presentationRevision) > 0 &&
-    typeof v.key === 'string' &&
-    /^[a-f0-9]{24}$/.test(v.key) &&
-    (v.step === 0 || v.step === 1 || v.step === 2) &&
-    (v.presented === undefined || (v.step === 2 && typeof v.presented === 'boolean')) &&
-    (v.error === undefined ||
-      (v.step === 2 && v.presented === false && v.error === 'browser_presentation_unavailable')) &&
-    (v.frozen === undefined || isNativeBrowserFrozenFrame(v.frozen))
-  );
-}
 export function isNativeBrowserRestoreResult(value: unknown): value is NativeBrowserRestoreResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const result = value as Record<string, unknown>;
@@ -591,68 +314,13 @@ export function isNativeBrowserRestoreResult(value: unknown): value is NativeBro
           : result.activeId === (result.page as NativeBrowserState).id)))
   );
 }
-export function isNativeBrowserPresentationFrame(
-  value: unknown,
-): value is NativeBrowserPresentationFrame {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>,
-    frame = v.frame as Record<string, unknown> | undefined;
-  return (
-    Object.keys(v).length === 8 &&
-    typeof v.id === 'string' &&
-    /^[A-Za-z0-9_-]{1,64}$/.test(v.id) &&
-    typeof v.key === 'string' &&
-    /^[A-Za-z0-9_-]{1,128}$/.test(v.key) &&
-    isNativeBrowserRestoreScope(v.scope) &&
-    [v.cssX, v.cssY].every(
-      (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 32768,
-    ) &&
-    [v.cssWidth, v.cssHeight].every(
-      (n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 32768,
-    ) &&
-    !!frame &&
-    Object.keys(frame).length === 4 &&
-    frame.mimeType === 'image/png' &&
-    typeof frame.data === 'string' &&
-    frame.data.length <= 5592410 &&
-    /^[A-Za-z0-9+/]+=*$/.test(frame.data) &&
-    [frame.width, frame.height].every(
-      (n) => Number.isSafeInteger(n) && Number(n) > 0 && Number(n) <= 16384,
-    )
-  );
-}
 export function parseNativeBrowserRequest(
   value: unknown,
 ):
   | NativeBrowserRequest
-  | { readonly action: 'capturePresentation'; readonly id: string }
   | { readonly action: 'restoreDraft'; readonly draft: string }
-  | { readonly action: 'prepareClose'; readonly id: string; readonly draft?: string }
-  | { readonly action: 'confirmClose' | 'finishClose' | 'cancelClose'; readonly key: string }
   | { readonly action: 'restore'; readonly scope: NativeBrowserRestoreScope } {
   const input = record(value);
-  if (['confirmClose', 'finishClose', 'cancelClose'].includes(String(input.action))) {
-    if (
-      Object.keys(input).length !== 2 ||
-      typeof input.key !== 'string' ||
-      !/^[a-f0-9]{32}$/.test(input.key)
-    )
-      throw Error('invalid_browser_request');
-    return {
-      action: input.action as 'confirmClose' | 'finishClose' | 'cancelClose',
-      key: input.key,
-    };
-  }
-  if (input.action === 'prepareClose') {
-    if (
-      Object.keys(input).some((key) => !['action', 'id', 'draft'].includes(key)) ||
-      typeof input.id !== 'string' ||
-      !/^[A-Za-z0-9_-]{1,64}$/.test(input.id) ||
-      (input.draft !== undefined && !isNativeBrowserDraft(input.draft))
-    )
-      throw Error('invalid_browser_request');
-    return structuredClone(input) as { action: 'prepareClose'; id: string; draft?: string };
-  }
   if (input.action === 'restoreDraft') {
     if (Object.keys(input).length !== 2 || !isNativeBrowserDraft(input.draft))
       throw Error('invalid_browser_request');
@@ -677,53 +345,52 @@ export function parseNativeBrowserRequest(
             'scope',
             'draft',
             'presentationRevision',
-            'presentationKey',
-            'witness',
+            'pageToken',
           ]
-        : input.action === 'grant' || input.action === 'capturePresentation'
+        : input.action === 'grant'
           ? ['action', 'id']
-          : ['action', 'id', 'draft'];
+          : input.action === 'close'
+            ? ['action', 'id', 'draft', 'pageToken']
+            : ['action', 'id', 'draft'];
   if (Object.keys(input).some((key) => !fields.includes(key)))
+    throw Error('invalid_browser_request');
+  if (input.action === 'close' && typeof input.pageToken !== 'string')
+    throw Error('invalid_browser_request');
+  if (
+    input.pageToken !== undefined &&
+    (typeof input.pageToken !== 'string' ||
+      input.pageToken.length === 0 ||
+      input.pageToken.length > 1024)
+  )
     throw Error('invalid_browser_request');
   if (
     input.draft !== undefined &&
-    (!isNativeBrowserDraft(input.draft) ||
-      input.scope !== undefined ||
-      input.presentationKey !== undefined)
+    (!isNativeBrowserDraft(input.draft) || input.scope !== undefined)
   )
     throw Error('invalid_browser_request');
   if (input.action === 'navigate') {
     if (typeof input.input !== 'string') throw Error('invalid_browser_request');
     browserAddress(input.input);
   } else if (input.action === 'present') {
-    if (input.witness !== undefined) {
-      const witness = record(input.witness);
-      if (
-        Object.keys(witness).length !== 2 ||
-        typeof witness.key !== 'string' ||
-        !/^[a-f0-9]{24}$/.test(witness.key) ||
-        ![1, 2].includes(Number(witness.step)) ||
-        typeof witness.step !== 'number' ||
-        input.bounds === null ||
-        !input.layout ||
-        !isNativeBrowserPresentationOwner(input) ||
-        !input.presentationRevision
-      )
-        throw Error('invalid_browser_request');
-    }
+    if (
+      !isNativeBrowserPresentationOwner(input) ||
+      typeof input.pageToken !== 'string' ||
+      !input.presentationRevision
+    )
+      throw Error('invalid_browser_request');
+    if (
+      input.pageToken !== undefined &&
+      (typeof input.pageToken !== 'string' ||
+        input.pageToken.length === 0 ||
+        input.pageToken.length > 1024)
+    )
+      throw Error('invalid_browser_request');
     if (
       input.presentationRevision !== undefined &&
       (!Number.isSafeInteger(input.presentationRevision) || Number(input.presentationRevision) < 1)
     )
       throw Error('invalid_browser_request');
     if (input.scope !== undefined && !isNativeBrowserRestoreScope(input.scope))
-      throw Error('invalid_browser_request');
-    if (
-      input.presentationKey !== undefined &&
-      (input.bounds !== null ||
-        typeof input.presentationKey !== 'string' ||
-        !/^[A-Za-z0-9_-]{1,128}$/.test(input.presentationKey))
-    )
       throw Error('invalid_browser_request');
     if (
       input.layout !== undefined &&
@@ -745,16 +412,7 @@ export function parseNativeBrowserRequest(
         throw Error('invalid_browser_request');
     }
   } else if (
-    ![
-      'state',
-      'back',
-      'forward',
-      'reload',
-      'stop',
-      'close',
-      'grant',
-      'capturePresentation',
-    ].includes(String(input.action))
+    !['state', 'back', 'forward', 'reload', 'stop', 'close', 'grant'].includes(String(input.action))
   )
     throw Error('invalid_browser_request');
   return structuredClone(input) as NativeBrowserRequest;
@@ -899,11 +557,26 @@ export function isNativeBrowserState(value: unknown): value is NativeBrowserStat
   const state = value as Record<string, unknown>;
   return (
     Object.keys(state).every((key) =>
-      ['id', 'url', 'title', 'loading', 'canGoBack', 'canGoForward', 'error', 'control'].includes(
-        key,
-      ),
+      [
+        'id',
+        'url',
+        'title',
+        'loading',
+        'canGoBack',
+        'canGoForward',
+        'error',
+        'control',
+        'display',
+        'pageToken',
+      ].includes(key),
     ) &&
     (state.control === undefined || isBrowserControl(state.control)) &&
+    (state.pageToken === undefined ||
+      (typeof state.pageToken === 'string' &&
+        state.pageToken.length > 0 &&
+        state.pageToken.length <= 1024)) &&
+    (state.display === undefined ||
+      ['loading', 'ready', 'failed'].includes(String(state.display))) &&
     typeof state.id === 'string' &&
     /^[A-Za-z0-9_-]{1,64}$/.test(state.id) &&
     typeof state.url === 'string' &&

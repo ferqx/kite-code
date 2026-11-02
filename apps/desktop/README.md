@@ -190,7 +190,7 @@ Native 使用现有捆绑的 Geist Variable 与 Geist Mono Variable 字体资源
 
 [适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。目录状态与时间消费同快照只读 activity，缺能力或未记录的事实保持待读取／未知；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。正文未增加但准确Model或已有原Run事实结束时，将重新核验提示交给[共享reader](../../packages/ui/README.md)，不从宿主状态生成未完成警告或复制资格；原Main lease每次open沿Client读取当时snapshot，不按正文hash复用旧执行状态。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
 
-显式自动测试模式中的“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送、全局目录状态和时间排序、环境信息卡与只读子详情已迁入，空间移除已接原侧栏与 Main 原生确认；空间和单会话离线历史清理已接同一公开维护，安装版五项常用维护的 macOS 已验范围见[Native owner](docs/native-release.md#macos-安装版离线维护)，这些原主入口已有正式适配，完整行为与阶段退出仍须按[PC 主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)的动态结果及剩余资格核对。
+显式自动测试模式中的“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送、全局目录状态和时间排序、环境信息卡与只读子详情已迁入，空间移除已接原侧栏与主窗口自绘确认；空间和单会话离线历史清理已接同一公开维护，安装版五项常用维护的 macOS 已验范围见[Native owner](docs/native-release.md#macos-安装版离线维护)，这些原主入口已有正式适配，完整行为与阶段退出仍须按[PC 主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)的动态结果及剩余资格核对。
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
@@ -212,7 +212,7 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 
 [启动 DOM](test/isolated/native-startup-dom.test.tsx)沿实际 NativeDesktop 核首次等待、未核目录、空项目／无模型、两类失败、重复重试、旧响应隔离和进入后草稿保持；同轮原新对话／草稿／安排任务测试保业务断言。原[源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)核编译启动样式及首次／冷启动完成后进入原页面，保原任务、审批、冷读与退出；实际窗口不代证初始化失败矩阵。代码输入、执行结果及剩余迁移归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)，完整 PC、安装恢复及阶段退出仍按原方案核对。
 
-旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation、viewIntent 与 Main 退出生命周期 epoch，迟到拒绝已不属于当前视图时不再进入当前页面的“操作未完成”；当前读取仍抛原错误。全局目录绑定 generation 与生命周期，同代切换会话后真实目录失败仍提示。没有按错误码统一吞取消，也没有修改 mutation 的未知结果、原 commandId 查询、权限 CAS、启动失败和退出门禁。
+旧读取的失败与成功使用同一展示归属：refresh 的 state 和 select/draft.read 捕获 generation、viewIntent 与 Main 退出生命周期 epoch，迟到拒绝已不属于当前视图时不再影响当前页面；当前读取仍保留原错误与恢复路径。全局目录绑定 generation 与生命周期，同代切换会话后真实目录失败仍提示。原全局“操作未完成” AlertDialog 已移除；符合既有独立业务错误门禁的失败由 [NativeMessage](src/native-message.tsx)在 session-view 内显示非模态临时消息，不遮住整窗或隐藏网页。消息停留6秒，hover或焦点在消息内时暂停，用户可明确关闭；按准确 occurrence ID 退休，旧定时器和关闭动作不清除继任消息。有限错误码映射为通俗解释，不回显内部码；未知结果要求核对原操作，不能泛化成再次提交。设置中的原 inline 错误也使用同一可读解释。没有按错误码统一吞取消，也没有修改 mutation 的未知结果、原 commandId 查询、权限 CAS、启动失败和退出门禁。
 
 [真实页面归属回归](test/isolated/native-read-ownership-dom.test.tsx)在原源码下实际三红，修后8pass/61assert：旧选择、草稿和事件状态的拒绝不污染新会话；当前错误、全局目录错误、未知首次提交的同ID查询及启动真失败继续成立。[正式默认 Shell 整窗口](test/isolated/native-shell-lifecycle-bundle.test.ts)保全部原断言、预算与故障路径，在 firstWindow 连接后被动记录公开启动错误与操作弹窗；正常启动、真实 parent 完成、准确停止及最终冷读要求记录为空。该观察不代证此前首屏的瞬时提示，SIGKILL 后真实断线继续保留。准确 owner 全量、原失败与本地交付证据见[客户端修复进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11客户端迟到读取误报)。
 
@@ -376,7 +376,7 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 [settleDesktopQuit](electron/quit-settlement.ts)等待唯一清理 Promise，实际完成返回 clean，抛错或拒绝返回 force；没有期限、提示回调或等待循环。Main 沿现有唯一清理顺序关闭原 caller、私有数据／使用权和配对 Service，另核实际 Service 退出为零后才释放制品使用权；launcher close 返回不代证正常退出。确认或空闲直接退出后只启动一次收尾；窗口先消失，后台成功后 app.exit(0)，失败只对 Main 当前直接创建的配对 child 句柄发 SIGKILL，随后 app.exit(1)。重复退出不另开确认或清理；不从 PID／目录发现任意进程，也不把未知效果改写为成功。父通道错误等既有非零退出码保持，业务／私有格式与公共协议保持。
 
-[收尾测试](test/quit-settlement.test.ts)核正常、同步异常、异步失败、后台未完成时保持等待及迟到完成／失败，单次关闭且没有强杀定时器；[实际 caller 测试](test/native-caller.test.ts)核检查的同一 signal 传到完整目录与 View、超时撤销所属读取及零写。[默认源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)保全部原业务、冷读和双锁收尾，另在同一候选以[退出 driver](test/native-quit-electron.fixture.ts)核关闭／激活、SIGSTOP 实际 Service 时两秒未知确认与取消后保留草稿，以及确认后立即销毁窗口、重复退出／激活无新提示或界面复活、超过原二十秒仍在后台保原进程与锁、恢复 Service 后自然退出0。实际 Service SIGKILL 仍核窗口销毁、非零退出与双锁释放；生产候选／Service 字节保持。原生确认的响应来自有限 dialog port，不宣称 OS 对话框人工点击或真实 Service 全故障资格。原历史警告流程的证据保留在[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原窗口关闭与退出收尾)，不作为当前重复提示的产品要求。
+[收尾测试](test/quit-settlement.test.ts)核正常、同步异常、异步失败、后台未完成时保持等待及迟到完成／失败，单次关闭且没有强杀定时器；[实际 caller 测试](test/native-caller.test.ts)核检查的同一 signal 传到完整目录与 View、超时撤销所属读取及零写。[默认源码外 macOS 整窗口](test/isolated/native-bundle.test.ts)保全部原业务、冷读和双锁收尾，另在同一候选以[退出 driver](test/native-quit-electron.fixture.ts)核关闭／激活、SIGSTOP 实际 Service 时两秒未知确认与取消后保留草稿，以及确认后立即销毁窗口、重复退出／激活无新提示或界面复活、超过原二十秒仍在后台保原进程与锁、恢复 Service 后自然退出0。实际 Service SIGKILL 仍核窗口销毁、非零退出与双锁释放；生产候选／Service 字节保持。这轮历史OS确认的响应来自有限 dialog port，不宣称 OS 对话框人工点击或真实 Service 全故障资格。原历史警告流程的证据保留在[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原窗口关闭与退出收尾)，不作为当前重复提示的产品要求。
 
 上段整窗口结果属于此前固定制品，其立即destroy顺序不是当前候选。2026-10-29浏览器007实际退出复现：窗口及原页先销毁，Service随后revoke／release报stale，监管保unknown，正常退出未确认，最终由隔离夹具120秒后强杀；原记录不改写。现Main改为先hide、准确release／exited后destroy；原真实退出driver同步断言但未新启。真实Main模块／BrowserPageHost／DesktopTransport的agent与human顺序先红后绿，意外destroy仍unknown；完整生命周期32通过、3项Windows专用跳过、387断言，退出结算5项18断言及Desktop类型通过。新候选真实退出资格仍需随后客户端核实，不能挪用旧窗口证据。
 
@@ -386,11 +386,11 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 会话标签页与内置浏览器
 
-会话 header 的“标签页”图标打开[共享 SessionTabs](../../packages/ui/src/desktop/SessionTabs.tsx)，默认新标签页，首页仅有“变更”工具。关闭最后一个网页、变更或子详情标签会沿原收起逻辑关闭右侧栏并返回顶栏按钮，再次打开显示新的空白页。旧直接“文件变更”按钮移除；原调宽、折叠、主题与无下边框 header 保留。标签模型在响应式 Group 之外，侧栏收起与窗口缩放不销毁网页；关闭网页、换阅读 scope、页面卸载或 root renderer 导航／崩溃时释放对应 WebContents。工具与子详情 reader 仅在当前可见标签挂载，覆盖／切换／收起会释放读取。环境卡打开子 Agent 时选择原 Session／Execution 的详情标签，重复打开复用原项；全部标签共享8项上限。每次明确点击的单调请求 ID 只消费一次，等待实际阅读 scope 就绪后才打开；切会话、临时选择状态或返回原父会话不重放旧导航，不据此关闭当前任务面板。主会话始终保持显示与自身读取，子详情的准确目标、正文与操作门禁见[环境与子详情 owner](#native-当前会话环境信息与子详情)。
+会话 header 的“标签页”图标打开[共享 SessionTabs](../../packages/ui/src/desktop/SessionTabs.tsx)，默认新标签页，首页仅有“变更”工具。关闭最后一个网页、变更或子详情标签会沿原收起逻辑关闭右侧栏并返回顶栏按钮，再次打开显示新的空白页。旧直接“文件变更”按钮移除；原调宽、折叠、主题与无下边框 header 保留。标签模型在响应式 Group 之外，侧栏收起与窗口缩放不销毁网页；明确关闭网页或退出 Main 才销毁相应 WebContents；换阅读 scope、页面卸载及 Root renderer 导航／崩溃只退休展示，重建后先按 Main 清单恢复准确 ID 的原页。Main 重启不宣称原文档存活。工具与子详情 reader 仅在当前可见标签挂载，覆盖／切换／收起会释放读取。环境卡打开子 Agent 时选择原 Session／Execution 的详情标签，重复打开复用原项；全部标签共享8项上限。每次明确点击的单调请求 ID 只消费一次，等待实际阅读 scope 就绪后才打开；切会话、临时选择状态或返回原父会话不重放旧导航，不据此关闭当前任务面板。主会话始终保持显示与自身读取，子详情的准确目标、正文与操作门禁见[环境与子详情 owner](#native-当前会话环境信息与子详情)。
 
 [renderer adapter](src/native-browser-pane.tsx)通过[封闭浏览器 port](src/native-browser-bridge.ts)发送导航与可见 viewport，preload 只交付有限操作与有界显示 metadata。[Main controller](electron/native-browser.ts)复用当前主窗口、准确 mainFrame 和 renderer URL 的 sender 校验，校验地址后才分配最多8个 WebContentsView。顶层导航只支持 HTTP／HTTPS；网页的 WebSocket 子资源可使用无凭据的 ws／wss，不开放对应的顶层或子框架导航。纯文本交 Bing 搜索，localhost 默认 HTTP，普通域名默认 HTTPS。地址栏聚焦编辑期间保留输入，失焦后同步最后确认的页面地址，包含重定向结果。历史操作使用 Electron navigationHistory；网页弹窗的 HTTP 链接在当前标签打开，下载与外部协议拒绝并保留必要错误。
 
-网页使用独立非持久 session，无应用 preload，sandbox／contextIsolation／webSecurity 开启，Node、webview、DevTools 和权限申请关闭。网页不共享应用 Cookie 或 Service port；没有模型浏览接口、导入、扩展、下载或持久标签／历史。renderer 依据活动标签、窗口可见性、覆盖层和实际几何隐藏／定位 native view，网页 viewport 先与所属 ResizablePanel 的实际边界取交集，并观察该面板尺寸使原生网页随宽度动画逐帧裁切；完全折叠或收起结束后不保留可绘制内容。Main 再按 root zoom 和内容边界夹紧；重载、退出清理网页，Cookie 只留内存。取舍见[浏览器隔离决定](../../.agents/notes/implemented/architecture/2026-10-20-sidebar-browser-isolation.md)，产品操作归[桌面手册](../../docs/handbook/clients/desktop/README.md)。Main／preload 更新需要完全退出并重启。
+网页使用独立非持久 session，无应用 preload，sandbox／contextIsolation／webSecurity 开启，Node、webview、DevTools 和权限申请关闭。网页不共享应用 Cookie 或 Service port；手动网页本身不开放通用执行端口；当前普通页的受控 Agent 接入归[统一浏览器入口](#统一浏览器入口候选2026-10-28)，导入、扩展、下载和跨 Main 重启的持久标签／文档不由该手动入口提供。renderer 依据活动标签、窗口可见性、覆盖层和实际几何隐藏／定位 native view，网页 viewport 先与所属 ResizablePanel 的实际边界取交集，并观察该面板尺寸使原生网页随宽度动画逐帧裁切；完全折叠或收起结束后不保留可绘制内容。Main 再按 root zoom 和内容边界夹紧；Root 重载隐藏原页，Main 退出才清理网页，Cookie 只留内存。取舍见[浏览器隔离决定](../../.agents/notes/implemented/architecture/2026-10-20-sidebar-browser-isolation.md)，产品操作归[桌面手册](../../docs/handbook/clients/desktop/README.md)。Main／preload 更新需要完全退出并重启。
 
 [地址与 port 测试](test/native-browser-bridge.test.ts)、[共享 UI 生命周期](../../packages/ui/test/isolated/desktop-session-tabs.test.tsx)、[地址同步与面板裁切 DOM](test/isolated/native-browser-pane-dom.test.tsx)、[网络策略回归](test/isolated/native-browser-network.test.ts)、[原文件 reader DOM](test/isolated/native-file-changes-dom.test.tsx)分别核有限输入、标签资源、实际面板裁切与原文件读取合同。[隔离 Electron](test/isolated/native-browser.test.ts)使用真实 Main controller／preload／SessionPage 及 loopback 页面，测试专用入口只在 test fixture，普通构建诊断常量仍为 false。实际执行结果与平台限制在本节验证记录维护。
 
@@ -870,9 +870,9 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 空间批量移除
 
-普通客户端不显示移除的在途过程段落：本地忙碌状态与持久申请的 `submitting` 投影均不向 `SessionPage.notices` 插入文字，原操作禁用、原生确认和目录更新保留。`unknown`／`failed` 及无法核实结果继续显示必要提示；“查看结果”只查原申请，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖等待／刷新期间无额外提示、输入节点与草稿保持、原 ID 查询、成功目录更新及失败边界。
+普通客户端不显示移除的在途过程段落：本地忙碌状态与持久申请的 `submitting` 投影均不向 `SessionPage.notices` 插入文字，原操作禁用、主窗口自绘确认和目录更新保留。`unknown`／`failed` 及无法核实结果继续显示必要提示；“查看结果”只查原申请，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖等待／刷新期间无额外提示、输入节点与草稿保持、原 ID 查询、成功目录更新及失败边界。
 
-原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的空间行将移除入口收进更多菜单，新对话与更多图标均为14px并沿原悬浮／键盘焦点显示；选择“移除空间”才调用原回调。[Main](electron/main.ts) 显示原生确认，默认和取消均为「保留空间」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他空间的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
+原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的空间行将移除入口收进更多菜单，新对话与更多图标均为14px并沿原悬浮／键盘焦点显示；选择“移除空间”才调用原回调。[Main](electron/main.ts)通过主窗口所属的共享确认Overlay显示完整移除风险，默认和取消均为「保留空间」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他空间的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
 
 [Store 批量事务](../../packages/agent/src/storage/sqlite/workspace-removal.ts) 一次保存全部根及子 Session tombstone、停止边界和原 Workspace receipt，目录同时隐藏；它不逐条等待，不冒充资源停止。回复丢失／不可信则保存 unknown，重开只展示原申请，明确点击「查看结果」才用原 Store／Workspace／Command GET；其他 Store／主体在 HTTP 前拒绝，不改绑、不自动再提交。可信 4xx 显示未移除。目录状态未核实或私有申请不能保存时拒绝新移除。
 
@@ -880,7 +880,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 产品手册要求永久删除相关历史；移除受理先隐藏目录、封锁新工作和请求取消。确认框说明退出客户端后的显式离线维护：[GC](../../packages/agent/src/maintenance/README.md#显式无引用附件-gc)在宽限和全部任务终态满足后清除该Workspace历史正文；活动、未知或待核对工作保留完整证据。原删除边界、去重摘要／回执和未发送草稿保留，原receipt不变。准确旧Session的 `historyPurgedAt` 由Core标记经生成DTO进入[原SessionPage状态槽位](src/native.tsx)，不会以空列表冒充历史完整。原「删除当前会话」入口说明同一离线维护也可清理单会话执行组；活动／未知／待核对工作及存活Fork或其他未清理会话依赖的来源保留。来源tombstone不撤回存活Fork已封存的只读历史资格，仍不继承执行权。安装版常用维护的有限链已验证；DB8 原代码回退的有限范围见[Native release owner](docs/native-release.md#真实代码升级与冷回退)；全部维护恢复和完整产品资格仍待闭合。
 
-[有限 port 测试](test/native-workspace-removal.test.ts)核默认保留、先存后发、丢回复与冷 GET-only、异 Store HTTP零和闭合输入。[原源码外窗口](test/isolated/native-background-bundle.test.ts)沿真实 Main／Service／Node SQLite／原侧栏验证取消零 POST、提交后丢回复、冷查询、目录移除、同目录新身份和文件原字节；原生确认由测试回调控制，其选项仍来自生产调用，不声称人工点击 OS 弹窗。
+[有限 port 测试](test/native-workspace-removal.test.ts)核默认保留、先存后发、丢回复与冷 GET-only、异 Store HTTP零和闭合输入。[原源码外窗口](test/isolated/native-background-bundle.test.ts)沿真实 Main／Service／Node SQLite／原侧栏验证取消零 POST、提交后丢回复、冷查询、目录移除、同目录新身份和文件原字节；该历史OS确认由测试回调控制，其选项来自当时生产调用，不声称人工点击 OS 弹窗。
 
 ## Native 新对话准备与首次发送
 
@@ -1811,7 +1811,101 @@ Main针对同选择刷新增设私有grantScope，只沿NativeCaller已保存且
 
 ## 统一浏览器入口候选2026-10-28
 
+### 固定 Renderer 布局收敛（2026-11-02）
+
+**结构迁移已落地，完整过程体验验收未通过，本次目标尚未整体完成。** [Pane](src/native-browser-pane.tsx)与共享 SessionTabs 在主 Renderer 绘制标签、地址、空标签、loading及错误；[Main](electron/native-browser.ts)持有准确原网页的创建、位置、显隐与销毁。[Root工厂](electron/native-root-window.ts)在所有平台使用完整窗口尺寸的显式Root，平台菜单、托盘、标题栏和材质分支保留。Windows／Linux实机及发行资格未取得。持久取舍归[结构Note](../../.agents/notes/implemented/architecture/2026-11-02-browser-fixed-renderer-layout.md)，剩余验收归[实施计划](../../docs/plans/2026-11-02-browser-renderer-layout.md)；Note的implemented只指结构决定。
+
+当前链路是同一Pane的DOM网页矩形／panel layout → 当前owner、pageToken、Root frame、revision及窗口几何校验 → Main唯一几何应用入口。原生resize投影与Renderer校准共用计算，向内取整、同值不写；稳定校准单个异步在途、完成后重测最新DOM。首次显示与隐藏后恢复同步提交，旧scope／Root／布局不能复活旧页。Pane保留同一owner的量测effect，pageToken或visible更新不再先cleanup撤页；同次React提交的失选tab撤下在提交末尾合并，准确目标同步准入成功后取消待发旧null。Main先放置准确目标再撤旧页；不存在目标明确拒绝，不能以ok:null当成功。覆盖、真正owner替换和卸载仍立即撤下并推进revision，旧异步校准不能复活。已高于Root的drawable页保持兄弟位置，新文档从Root下完成才升层，输入屏障独立在当前页上方。正常resize不隐藏网页。
+
+Cmd+W父窗隐藏时推进visibilityEpoch与sizeEpoch，退休live展示、菜单和旧截图坐标证明；保留准确drawable原页child自身原生可见性，由已隐藏父窗遮住。Main立即发新token，隐藏Root仍用原布局端口维护当前显示意图，正向只保存intent、不授live呈现；切页、收栏、覆盖或卸载的null真正撤下。Root工厂在show／showInactive之前同步完整bounds并通知Main，只有隐藏期间新确认的准确对象、frame／文档、Root、scope、Host incarnation／导航和几何仍匹配，才建立新binding并先同步当前控制屏障。采用目标同步维护lastPresented，防隐藏时换B后立即Root reload错回A。未确认或失效则撤页；minimize及绕过该前置的system show不取得此优化。迟到hide／minimize不能撤当前可见页及shield，迟到show不能消耗当前隐藏intent。原观察owner仍按真实document.visibilityState退休，展示恢复不恢复旧freshness或lease。
+
+已删除独立Chrome host／WebContentsView／preload／renderer、远端展示与动作ACK、Root物理裁左及CDP全窗逻辑metrics、呈现witness／nonce、关闭画布和普通切页／恢复截图缓存。Root构建入口保持原名；另产出固定应用确认专用的global-dialog HTML／Renderer／preload，不恢复旧Chrome。不保留双实现或公开开关。旧captureBrowserPresentation／capturePresentation和presentationKey显示API没有生产consumer，随旧链删除；真正注释仍由[AgentBrowserPanel](src/agent-browser-panel.tsx)的observer capture经[PageHost](electron/browser-page-host.ts)及准确原页port读取。模型截图独立captureId、导航、viewport／滚动、对象及控制证明保持；显示ready不授观察或输入资格。
+
+首开为Root空标签 → 保原地址和loading → 准确网页提交主文档及DOM ready → 当前尺寸页在完整Root下绘制 → 当前完整原生帧后升层。045实机发现隐藏新页无capturePage surface，故使用beginFrameSubscription(false)＋invalidate，不复制或缓存截图；文档和首帧均有期限。核原对象、frame、文档、scope、几何、取消与迟到回调；provider先变、旧frame先回只撤自身绑定，不把原页污染为永久failed。已可绘制原文档在普通切页、收展、会话返回、窗口重开及Root重载时复用；native完整帧和几何仍不等于WindowServer像素已提交。
+
+用户随后要求移除通用浮层隐藏策略。Pane已删除dialog/menu/popover/sheet相交扫描，不再把aria-hidden／inert当作视觉隐藏；Radix菜单对旁边内容设置aria-hidden不再撤下网页。真正hidden／display／visibility／opacity隐藏、明确visible、错误状态及owner退休继续校验。显式快照注释通过准确当前注释模式退出真实页，不再借通用DOM标记；返回后重新确认当前几何。原生页面菜单继续直接位于网页上方，普通DOM浮层跨原生层覆盖暂不迁移；整页设置仍因业务页面实际opacity0和显式不可见而撤页。没有截图轮询、模糊占位或固定视觉延时。页面、展示、Run／任务与控制租约分别退休；切页、会话、收起、后台及Cmd+W隐藏不刷新／销毁准确原页，真正X才关闭。Root重载先接Main清单按准确ID／token复用，Main重启不保其原文档。工具／协议版本、免审批、Loop、取消、输入互斥、普通失败交原Loop和未知不重放未改变。
+
+全局应用确认使用同一自绘方案：[Main Host](electron/native-global-dialog-host.ts)拥有主窗口内专用global-dialog WebContentsView，[层序入口](electron/native-overlay-layer.ts)在每次网页或shield插入／升层后保持完整Root ＜ 当前Page ＜ 输入shield ＜ global-dialog Overlay。Overlay的HTML／body／root透明、尺寸覆盖全部content，只有共享遮罩和确认卡片绘制底色；不隐藏、刷新或替换准确网页。它与已删除的Chrome展示层不同，只渲染固定确认，不拥有浏览器工具栏、Service或浏览器控制。持久取舍归[应用确认层Note](../../.agents/notes/implemented/architecture/2026-11-02-native-global-dialog-layer.md)。Full与移除空间由[同一组件](../../packages/ui/src/desktop/FullPermissionConfirmationDialog.tsx)复用原危险确认CSS、主题和取消默认焦点；Full保固定中英文与两条风险，空间移除沿原中文完整文案。退出应用按用户最新要求保留原生message box；目录、文件打开／保存及系统权限选择仍走原系统入口，启动致命失败保留原系统提示兜底。
+
+[Composer](../../packages/ui/src/desktop/Composer.tsx)的可选Full宿主port仍经[Native适配](src/native-full-permission-confirmation.ts)、Root [preload](electron/preload.ts)和[原Full IPC门禁](electron/native-full-permission-dialog.ts)核准确请求ID、语言、Root主frame／URL与可见父窗口。Host只接受[固定kind状态](src/native-global-dialog-bridge.ts)，专用[overlay preload](electron/global-dialog-preload.ts)只暴露watch／ready／presented／decide，按kind拒绝多余字段；空间名称限1–256字符并按React文本显示，不接受任意HTML、文案或Service调用。Root准确应用节点在确认期间inert，且只有Root拦截before-input／before-mouse事件；Page事件不可统一preventDefault，否则授权CDP鼠标也会被吞。人工鼠标由完整原生Overlay命中，人工键盘由浮层焦点与DOM模态约束；Page已获授权的CDP键鼠保留原控制门禁。冷启动和预热未ready时立即显示完整透明原生view，遮住人工输入空档。订阅后ready，提交并经过下一rAF才presented；只接受准确当前Overlay主frame的匹配ID决定，当前false不等待presented、true仍须presented。Dialog DOM可用后Esc取消，遮罩不确认，重复和迟到决定无效。窗口隐藏／最小化、Root导航／崩溃／销毁、Overlay失败、调用signal取消均退休确认；Full还核准确会话、权限、回调及已提交上下文。退出优先取消先前确认；确认失败保留服务，并交Root显示临时可读消息。焦点操作仅在父窗仍focused时执行，后台取消不重新激活客户端；回到前台时当前Overlay接回焦点，隐藏Overlay不参与Root激活目标选择。关闭后仅恢复仍存活、原主frame且可见的原焦点对象。Native Full缺port或失败不回退DOM框；无port的共享Web调用保留原确认。只有当前明确true才回到原Controller：已有会话沿原permission.mode和新鲜观察，新对话仅改本地偏好，空间移除与退出仍由原控制器核身份和执行，Overlay决定本身不产生业务授权。
+
+Full确认的历史OS方向已撤：070在guard失败，071只验证OS sheet打开、按钮guard失败，072仅prepare未run，均不能记为通过。073改用自绘Overlay，完整静态制品冻结2065份source，source／artifact drift均为0；macOS真实主窗口三轮Full取消／Esc／启用进入UI，Root与Page实体mouse背景阻断3／3，12次Tab保持在框内，原WebContents／frame／表单／scroll保留，Main EXIT=0，模型调用累计504且本轮未增。Window39表307帧与Display33表261帧已实际审看，范围仅各自PTS 0–5秒及末尾约0.4秒稳定尾，未见撤页灰空、遮罩漏跨Page或旧框残片；5秒至尾段之间未目视，不称完整24秒逐帧验收。两路PTS独立，不硬对齐；准确默认焦点及背景输入由同轮runtime记录补证。073只授该冻结Full范围，不覆盖随后扩充的空间／退出框，也不覆盖toast错误、resize、收展或重开。
+
+本轮UI／Overlay／preload最终回归27pass／248assert，Host最终8pass／84assert与Root factory 11pass／92assert，Main生命周期最终38pass／3skip／440assert；退出前立即取消旧确认、拒绝quitting期间新确认，以及失败通知抛错仍保留服务的回归先红后绿。Main测试仅localhost监听在sandbox遇到EPERM后单独提权运行通过。[NativeMessage](test/isolated/native-message-dom.test.tsx)7pass／67assert；[NativeNewConversation](test/isolated/native-new-conversation-dom.test.tsx)与[WindowActions](test/isolated/native-window-actions-dom.test.tsx)最终87pass／1933assert，核临时消息替代旧Dialog、可读文案、草稿保留及原提交恢复；[浏览器IPC回归](test/native-browser-bridge.test.ts)15pass／209assert。UI／Desktop类型、定向Biome与适用core／workspace／生成API／test ownership检查通过。[read ownership](test/isolated/native-read-ownership-dom.test.tsx)17／18通过，旧Agent预览入口第832行断言仍失败；[native-browser](test/isolated/native-browser.test.ts)最小实际夹具的一项first.visible断言也失败，原因未定位，不能称全绿。完整客户端的新Page持续可见是独立实际证据，不覆盖该夹具失败。
+
+074已冻结并完成build，但Main退出审查发现两条竞态后在run前退役，原材料保留；075在修复后以2065份source冻结并build，静态普通客户端、固定未修改Electron44.3.0、test diagnostics关闭、无Vite／HMR。实际Full取消／Esc／新草稿启用及移除空间只取消四轮在4951ms完成，Root回执分别false／false／true及workspace.removal phase=cancelled；空间、会话行数、原草稿、WebContents／主frame／timeOrigin／表单与scroll均保持。三轮Full遮罩真实物理mouse检查均未进入Root／Page，12次Tab仍在Dialog内；最后恢复Auto。Main及launcher EXIT=0，source／artifact drift为空，模型账本209＋295＝504且hash未变。最终Window46表364帧及19张原图、Display40表317帧及8张原图已审看：各自前6秒连续动作与末尾约0.4秒稳定尾未见Page撤空、局部遮罩、长说明／按钮裁切或旧框残片，记录在075/review/window与display的REVIEW.json；6秒到尾段之间未目视，不扩称全部24秒像素验收。075后另复现首个presented之前取消被忽略，现只放行当前请求的提前false，提前true仍拒绝；随后Host还改为Root-only事件拦截、冷启动透明原生覆盖与前台焦点约束，Root factory排除隐藏焦点目标；这些输入变化须单独核真实Electron。用户要求退出改回原生message box，Main恢复准确父窗调用并保留取消／失败保留服务及已有无主窗失败退出契约；Overlay kind与共享组件已删除quit分支，preload明确拒绝旧kind。Full与workspace文案、DOM和CSS保持，按验证细则复用075正常开关画面，不称最终全部UI字节未变或授新首帧像素资格。退出原生弹框与自然message错误路径未在实机触发，Main生命周期和Root消息集成回归仅提供其各自断言资格；Windows／Linux、安装／发布与原resize／收展／重开资格未因此取得。
+
+076／076b保留旧Host的CDP鼠标红与Cancel准入失败材料，不记为通过。076c用固定未修改Electron44.3.0、实际Host／Layer／Root factory与自有受控Page补核输入边界：修复前模态中CDP鼠标返回ACK却未进入Page（计数1→1），修复后1→2；普通CDP键盘的keydown／input与末尾marker均到达，浮层仍持有native focus，marker随后恢复。准确PID／birth／CGWindow上的真实mask click使Overlay mousedown＋1、Root／Page均0；真实取消返回false，原Page ID／主frame／timeOrigin／URL／表单／scroll140／尺寸与可见性保持。修复版9项断言通过、Main／launcher退出0，四份生产source与构建快照逐字匹配，145项075历史Full UI资产运行前后hash相同，无Service或模型启动。loadURL入口和真实ready前已观察原生Overlay visible／全bounds／top；尚无DOM时的物理点击未单测，不扩大该资格。取消按钮hover期间确有background-color／color的running CSS transition；076c在原6秒准入期限内等待同一固定节点恢复实际稳定后点击，不换绑或放宽几何。076c仅授聚焦输入资格，075的Full／workspace画面按未改文案／DOM／CSS复用；退出分支删除与Main原生退出由当前回归核对。最终普通／development两种真实构建1pass／29assert，定向类型、Biome与文档检查通过。
+
+055收起先撤页、下一rAF才开始布局的额外阶段已有源码与trace依据。SessionPage保持关闭意图立即更新，只让同scope准确已展示浏览器在待折叠rAF期间维持原页及祖先可见性；该rAF同批结算pending、撤页、启动动画和折叠。立即重开、scope／active tab／host panel替换、零布局、缺失目标与已经collapsed均有退休防线；covered立即撤展示，但合法当前收起仍结算到零宽。没有提前imperative collapse后被库重注册覆盖的候选，没有新增固定等待或绘制ACK。19项208断言及共享tabs／普通详情回归通过，不能代替真实过程画面。
+
+采用VS Code固定提交[1306698e328e5e531f5e632301d30020aa994eff](https://github.com/microsoft/vscode/tree/1306698e328e5e531f5e632301d30020aa994eff/src/vs/workbench/contrib/browserView)的固定Renderer UI、量测后Main缩放取整、准确ID清单恢复、对象／序号核对、显示与销毁分离。未复制截图轮询／后台图片缓存、下一rAF暂隐、隐藏页显隐重试和所属窗口关闭即销毁。它的首开不独立证明first paint，遮挡时截图发起后也不等返回即隐藏，不能作为Kite同帧保证或本机性能证据。
+
+055阶段针对回归为[Main](test/isolated/native-browser-capture.test.ts)112项1141断言、[Root](test/isolated/native-root-window.test.ts)10项89断言、[Pane](test/isolated/native-browser-pane-dom.test.tsx)35项161断言、installed [Refresh](test/isolated/native-browser-refresh.test.ts)5项46断言、两个原Runtime／固定端口测试7项445断言，以及Main窗口／Service生命周期35项417断言（3项Windows跳过）。新旧token、隐藏意图／13种失效、控制shield、隐藏换B后立即Root替换、迟到窗口通知和缺失页均有实际先红后绿或定向证据；没有放宽取消、lease、unknown与首帧期限。bridge、共享标签／页面、PageHost及未改观察／控制按[验证规则](../../.agents/skills/document-before-commit/references/validation.md)复用原对应范围。Desktop类型、变更定向Biome及Core／workspace／生成API／测试归属检查通过；UI源码与输入未变，复用此前UI类型。保留既有any／act警告，未跑全默认、远端模型、普通安装或跨平台窗口验收。代码回归不能覆盖以下像素失败。055至061阶段的生产差异仅是迟到窗口状态防线及其测试；055实际hide(false)／show(true)路径的原生属性动作不变，复用其对应连续画面与失败，不把带私有策略的057授为普通制品资格。
+
+050冻结完整制品在macOS27.2 arm64／Electron44.3.0／Bun1.4.2、既有隔离HOME／Profile执行全部指定场景：真实Selenium HTTPS表单与example.org、切／关B、收展、会话返回从原标签入口展开、真实Cmd+W隐藏及准确实例activate重开、真正Root重载、系统标题栏双击、8段快速拖边、原生菜单／Root菜单／设置及网页刷新。A为WebContents2、B为3；16项retained检查保持准确WC／frame／文档与表单，普通切换scroll140保持。Root重载换Root document而A不变；显式网页刷新仍WC2，但frame路由与timeOrigin改变、表单清空。会话返回重建所属Pane的工具栏DOM，仍同Root宿主；不能称全程节点未重建。reading记录的my-file当时在视口下方，不作为可见文字锚点证明，scroll及画面分别核实。
+
+050有286次原生resize，动作段285次回调末Root原生bounds全窗，Page右缘距外窗1／2 DIP、底缘1 DIP，普通resize零hide及零首帧订阅。Root CSS视口与最近先行native采样存在异步差，最多22 DIP宽／11 DIP高。它排除了记录时的大物理bounds空档与主动撤页，不能排除surface绘制滞后、跨视图提交或采集差，也不能直接归因引擎。两路动作连续帧及稳定尾段均实际读图，Window固定画布之外由完整Display核边界。以下失败仍有效：
+
+| 过程 | 独立视频PTS和实际所见 | 当前范围 |
+| --- | --- | --- |
+| 系统还原 | Display1.316667–1.583333，1.441667原尺寸有圆角外框内右／下灰矩形带，Root工具栏和网页共同截止 | 内部空带，不能当窗口外背景 |
+| 快速缩边 | Window3.633333、3.650000有约30原片像素的内右灰带，下一帧补齐 | 不授全过程无灰带资格 |
+| 设置返回／网页刷新 | Window6.966667右侧暗缺块；7.141667右窄条残旧白页，后续才完整loading／新页 | 最终正常不覆盖瞬态反例 |
+| Cmd+W重开 | Window4.600000／Display4.633333首可见帧只有全窗材质底，下一采样帧完整 | 与主动Root重载的启动过程分开，仍未解决 |
+| 首A／切A | Window1.491667首A右下缺块；050切A Window2.575000残B窄条／Display2.608333全暗后恢复 | 最新052另核，不能凭布局通过改绿 |
+
+052仅补多页排序分支。Window2.516667仍有A地址已回而网页全暗；补完此前未审的Display后，也确认D143／2.533333切A暗空及D215／3.791667关闭B回A暗空。051私有observer曾追加显式undefined改变默认新增index，材料保留且不授该资格；052用原参数数组转发修正，不改产品迎合夹具。
+
+053冻结完整制品核同提交目标替换：Window366与Display291个连续动作／尾段样本全部实际审查，首A／新B、两轮A/B与关闭B回A未再捕获052两处空档，准确A的WC／frame／timeOrigin、表单与scroll140保持。055再核全部050场景，Window1078与Display910个动作／尾段样本全部逐tile审查，必要反例看原尺寸；同样未捕获052切页暗空，设置返回／刷新未采到050同型残片。它们不抹去旧失败，也不证明采样间绝无更短空档。055准确A仍WC2，Root重载换Root文档但A保持，显式网页刷新才换A文档；Main退出0且冻结输入／制品无漂移。
+
+055仍有明确当前反例：
+
+| 过程 | Window／Display自身PTS及原尺寸所见 |
+| --- | --- |
+| 收起／展开 | Display D175／3.125000 toolbar仍在而网页先暗空；展开D196／3.491667及Window W199／3.466667有宽聊天拼块和窄白页，下一采样才完整侧栏 |
+| Cmd+W重开 | Window W255／4.450000首可见仅材质与窗口灯，4.483333完整；Display D245已完整、D246／4.475000又灰空、D247完整；与后续真正Root reload启动页分开 |
+| 系统还原 | Display D65／D69／D73，1.308333／1.375000／1.450000，右及底灰矩形明确在圆角内部，toolbar与网页共同截止 |
+| 快速缩边 | Window W137／2.408333约30原像素内部右灰列；Display D143／2.716667及D146／2.766667约90原像素，下一帧恢复 |
+
+重开前的准确隐藏intent已确认，原页child没有被设为false，仍不等于实际首可见帧。只读核固定上游实现后，056只在私有夹具对Page关闭backgroundThrottling，057再对准确Root关闭；两路均仍确认首可见材质空底，未接产品。Root关闭还会使document.visibilityState保持visible，不能在没有真实窗口资格替代时用于生产观察；没有改变该安全门。058恢复默认策略，在隐藏原Root单次capturePage，39ms内取得2116×1200完整Root帧，前后对象／主frame／timeOrigin、hidden与几何相同、无未决读取；图片只存证据，未进UI。Root捕获不含独立网页View；Window W173／3.016667与Display D168／3.050000首可见仍只有材质，下一采样才完整。完整Root可复制帧不等于WindowServer已提交，该候选也未接产品。
+
+059只在私有夹具把准确重开的show路由到原showInactive，再保留Main focus，一次有限生命周期两路未采到首灰；060补回原show后又捕获首灰。061将前一候选放入普通完整静态链路，45秒生命周期与45秒几何／浮层各录Window及Display。系统只读helper核准确PID／parent／birth／CGWindow：重开后Main89446确为frontmost、isActive且窗口focused；原A文档／表单／阅读位置及Root重载后复用保持，B真实销毁，仍不能覆盖以下中间反例。Window共134张联系表1072样本、Display共110张871样本，连续0–9秒及稳定尾段全序审看，并核原尺寸：
+
+| 061过程 | Window／Display独立原片索引、PTS及实际所见 |
+| --- | --- |
+| Cmd+W重开 | W262／4.591667与D243／4.616667首可见仅全窗材质，下一采样才完整；后续W273／4.800000、D254／4.825000的Kite启动页属于另一次真实Root reload |
+| 快速缩边 | W135–136／2.391667–2.408333及D114／2.308333有圆角内右灰列，Page左界与toolbar分栏左界也不同步，后继恢复 |
+| 设置返回 | W396／6.946667与D352／6.955000明确左半聊天、右半旧VS Code设置卡片，下一采样才完整聊天／工具栏／A |
+
+061联系表中收起疑似拼块经原尺寸D172／173／174复核未确认：完整旧布局后，页与toolbar一起撤下并扩展聊天；不抹去055反例。activation helper因真实复验失败已撤回，四份候选源码另存，当前2042输入逐字恢复至060；Root10项89断言、Main生命周期35项417断言（3项Windows跳过）与Desktop类型重新通过。保留此前coalescing、隐藏意图和迟到通知修正，不把059有限绿、系统焦点正确或测试通过写成重开已修复。
+
+用户随后明确授权固定Electron44.3.0的隔离引擎诊断及补丁实验，普通依赖、工具／协议版本和发布状态保持。`engine-resize-062`复制两份自含Electron.app，普通安装270项清单未变，克隆inode彼此独立、相对symlink只在各自App内。两臂同样签名；除BCM GetResizeDeadlinePolicy入口4字节和嵌入签名区外，Framework整字节相同，新增CodeResources也相同。候选入口尾跳已有UseDefaultDeadline，保持x8间接返回与x30；不是版本升级。它作用于该隔离进程所有命中的BCM实体，不限于某一个窗口，且不控制后置force-specified覆盖或早退。
+
+062两臂使用同一完整静态应用制品、相同真实标题栏双击与边框burst，沿既有隔离Profile串行运行，不复制认证或清Profile；不是字节相同Profile种子的严格性能基准。只读NAPI核Main实际dyld路径／UUID／ASLR及内存入口分别为原`091440f9`与候选`05f75c17`；这不证明实际调用或force后的最终policy。无后台策略、show override、截图替身或调试器。两路各20秒，动作在5.679／5.312秒完成，连续0–8秒及尾0.4秒按序审完：baseline111张联系表876样本、candidate109张863样本。两臂均仍有还原窗内L形灰带和快速resize灰列／跨栏错位；candidate原尺寸D78／1.450000还确认白页上下段阶梯错接与右下暗缺块，W138／2.408333右侧宽灰列。因此该候选没有取得解决resize的资格，也不能以已加载字节代替最终policy证据。未把两路PTS硬对齐或把采样间隔、166／130次实际resize事件算成屏幕FPS。首轮私有构建在完整native编译后因package.json已存在拒绝收据，之后仅核准并完成自有制品入口，过程保留在BUILD-FINALIZATION.json；这不是产品运行失败。
+
+用户最新实机反馈确认：右灰边持续于拖动或双击缩放的运动中、停稳后消失；双击header时网页与容器绘制不同步。当前优先排查这两项，不能按固定留白解释。用户未遇到Cmd+W重开整窗材质空底，保留既有实验失败并后置，不标为用户实机复现。其他反例同样先定位具体原因，再修改产品。剩余顺序归[实施计划](../../docs/plans/2026-11-02-browser-renderer-layout.md#当前验证与未完成)。
+
+后续隔离诊断没有改变生产源码：
+
+| 证据 | 已确认事实及限制 |
+| --- | --- |
+| 063／064／065 | 063 LLDB未成功附加，0 hits；064在exact-window-class检查处停止、未安装hook；065精确窗口类只读模块已准备，尚未取得完整夹具运行证据。它们都没有取得最终deadline、原生show提交或像素资格。 |
+| 067被动完整客户端时序 | 263次父contentView bounds通知时Root仍旧尺寸，后到的真实JS resize末Root均已跟上。一次父新surface先于对应Root新surface激活13.890ms，不能据此推定屏幕帧具体引用关系。Display D73／1.375000原尺寸确认还原时圆角内L形灰带，D169／3.108333确认拖边右灰列。 |
+| 068 Root-only因果对照 | A显式Root＋JS resize、B父原生layout回调填满Root、C BrowserWindow隐式Root三臂均正常完成，表单与scroll140保持。B的287次父通知在JS resize入口前Root已是新尺寸，仍有灰带；原尺寸A D92／1.825000、B D136／2.525000、C D152／2.808333均有窗口内灰带。因此额外contentView／后到JS回调是实际结构差异，提前填满或仅换BrowserWindow不是已验证修复；灰带也不以同时存在Page为前提。066首轮因真实burst未回原宽的夹具断言失败，原材料保留，068只修正有界真实拖回，不改产品。 |
+| 069完整客户端前移因果对照 | 仅私有夹具在父bounds变化时合成调用现有resize处理，0–6秒267组Root／Page新bounds已在该调用内写入。例：相对recording-start +2600.465／2600.561ms新Root／Page embed，+2602.317ms父129激活，+2611.344ms Page129、+2615.922ms Root127才激活。新子geometry已先于父更新，但对应surface仍晚9.027／13.605ms。Display D73／1.383333还原与D119／2.341667拖边原尺寸仍有内部灰带，前移候选不进入产品。 |
+
+067与069的trace同时记录Root Panel约束修正中间态。067在Main已投影到1067px后，Root同宽rAF先测得navigation约159.5px、viewport约311px；7ms后在无新anchor IPC时回到navigation约202.1px、viewport297px，与Main目标一致。安装的react-resizable-panels 4.12.4先按旧百分比参与flex布局，再由Group ResizeObserver执行像素保持与min/max约束；Panel传入style作用于内层，不能直接当作外层约束。该机制解释了观测到的DOM中间态，但rAF先于RO／paint，不证明该样本实际上屏；现有纯投影回放也未证明Main计算错误。069仍有短暂低于200px的navigation样本，不能用提前Main回调消除这一疑点。
+
+现有trace关联已核实际Renderer PID、FrameSink／LocalSurfaceId及GPU activate；Root／Page可共享父compositor，不能称为三个独立最终compositor。069新Root／Page primary在impl侧设置也早于父commit。进一步按Graphics.Pipeline同线程receive区间的唯一CommitFrame映射frame trace ID，844／844条唯一关联：相对recording-start +2604.888ms的实际aggregation包含父129、Root126、Page128；+2615.959ms才是父130、Root127、Page129。它直接证明该次新父帧聚合了旧子帧，而非仅推定“当时最新active”；仍不证明具体屏幕PTS、quad primary／fallback选择或为何未阻塞。trace没有父frame的activation_dependencies或改写后的最终deadline；入口EmbedSurface的deadline=0早于改写，不能代证最终policy。准确激活和aggregation都不是WindowServer出像素回执，仍须继续确定具体等待分支。055展开及061设置残片仍有效，不能单凭最终bounds把Root拼块归为应用动画或网页导航。
+
+067 Window共60张联系表475样本、Display共50张395样本；068 A／B／C Display各391／394／386样本；069 Display共48张380样本，均覆盖连续动作0–8秒及约20秒稳定尾段，已逐tile审看，关键灰带另核原尺寸。联系表未导出的稳定中段不授目视资格；两路PTS与各轮操作不硬对齐。069 Window的审查范围单独以实际完成记录为准，不以Display代替。完整客户端原文档、表单与scroll140保持，退出0及冻结无漂移不覆盖过程画面失败。
+
+制品／连续原片／联系表／原尺寸异常保存在本机.cache/browser-native-clip-probe-20261031/fixed-renderer-050、052、053、055–061、engine-resize-062、engine-deadline-063、engine-show-064／065及resize-root-cause-066／068、resize-timeline-067、resize-parent-cause-069；054只构建，早期043–051全保留。2042份产品输入与fixture／artifact逐文件冻结，已完成运行无漂移；无Vite／HMR／watcher，后继启动前核先行隔离实例结束。用户原开发实例保持，普通Electron安装及062克隆hash未变，模型账本209＋295＝504且字节／hash不变。没有stage／commit／push。**当前视觉失败仍阻断全过程验收，不能直接归为既有问题或不可修引擎限制；隔离候选没有进入普通客户端，本次目标仍未整体完成。**
+
 ### macOS 原生分栏与浏览器工具栏（2026-10-31）
+
+以下记录2026-10-31制品及当时实现／失败；当前结构和资格以上一节为准，原反例不改写。
 
 用户重新提出缩窗闪烁后，已明确同意 Main 管理真实左右边界并拆分右侧工具栏。此前缩放缺口重新打开；下列旧 PNG／双 witness 记录保留其失败事实，不作为新结构的通过证据。取舍与验收要求见[原生边界方案](../../.agents/notes/proposed/architecture/2026-10-31-native-browser-native-layout.md)。
 
@@ -1887,7 +1981,7 @@ Root viewport沿原host的`syncViewport`按desired／inflight／applied及准确
 
 本次最终受影响的UI标签23项407断言、bridge11项137断言、capture98项1423断言、Pane DOM20项292断言、ChromeRoot真实组件14项148断言、Chrome host47项347断言，共213项2754断言通过，包含实际Panel比例历史、同尺寸无漂移／新量测重置、后台无呈现observer／revision、切页仅旧可见owner撤销、fresh ACK及1500ms未确认回退、scope／导航／Root环境／旧事件拒绝。UI与Desktop类型、11个变更源码／测试的Biome、Core边界和测试归属通过。产品手册页面保留与控制承诺及Native release资格已核对，预期不改；这些UI制品不新增普通发行、跨平台或真实模型资格。006八个负责源码hash执行前后无漂移；本轮所有实际客户端及录像正常退出0、模型零增量，独立账本仍209＋295＝504，旧unknown与失败保持，未暂存、提交或推送。
 
-正文交接现由[Host](electron/browser-chrome-host.ts)保存准确旧／新binding、view／token、Root frame／metrics、原viewport与单次key；[controller](electron/native-browser.ts)只有在旧页仍合格且`displayShieldReady && inputShield.available()`时保留旧live view，逻辑呈现和旧proof仍撤下。尚hidden的新页移到旧页下方，旧层不拆装，原生输入shield置顶并按旧viewport拦截人类页内输入／焦点；不增加全局keyboard或toolbar门，后台Agent输入与当前合法UI动作保原路径。新页经原fresh ACK／当前量测显示后，一次自身`capturePage()`只作为完整帧就绪依据，前后核scope、key、旧／新token、frame、导航、revision与几何；图像不编码、保存、展示或返回模型。每页最多一个未决读取，失败、1500ms期限及resize／scope／nav／close／crash／Root变化按准确key撤旧；迟到结果、ABA或第三目标不能藏掉当前页。
+正文交接现由[Host](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/electron/browser-chrome-host.ts)保存准确旧／新binding、view／token、Root frame／metrics、原viewport与单次key；[controller](electron/native-browser.ts)只有在旧页仍合格且`displayShieldReady && inputShield.available()`时保留旧live view，逻辑呈现和旧proof仍撤下。尚hidden的新页移到旧页下方，旧层不拆装，原生输入shield置顶并按旧viewport拦截人类页内输入／焦点；不增加全局keyboard或toolbar门，后台Agent输入与当前合法UI动作保原路径。新页经原fresh ACK／当前量测显示后，一次自身`capturePage()`只作为完整帧就绪依据，前后核scope、key、旧／新token、frame、导航、revision与几何；图像不编码、保存、展示或返回模型。每页最多一个未决读取，失败、1500ms期限及resize／scope／nav／close／crash／Root变化按准确key撤旧；迟到结果、ABA或第三目标不能藏掉当前页。
 
 `hosted-retained-tabs-007-live`的Main98114正常退出0，冻结源码完成4次准确目标切换。每次读取目标自身完整帧时，旧／新页实际均visible、旧live层在目标层之上、原生shield在最上层且viewport完全相同；4次读取均非空592×1406，耗时20／5／11／10ms，随后才撤旧。Root没有全宽复位，Chrome未隐藏，原页身份与百度输入保持；scrollY仍只覆盖0。该记录核实真实native层级和shield位置，不把它扩称为全部物理键鼠／IME验收。两路连续像素已完成4切与稳定尾复核：display101个、process145个导出样本中未见006正文灰空、工具栏撤下、重复标签、全宽聊天覆盖，或目标正文出现后再闪回旧页；第三次process79／1.375000为完整Example、80／1.391667为百度，第四次103／1.816667为百度、104／1.833333为Example。仍有标签／地址先换、旧live正文保留至目标就绪的短暂阶段，不能称各surface原子同帧切换。解码退出0、原片hash前后保持，当前范围只覆盖该开发制品已加载tab切换；普通发行和此前resize灰带／裁切资格不升级。原帧与逐段像素复核归该目录review，006灰空原例保留。
 
@@ -1895,7 +1989,7 @@ Root viewport沿原host的`syncViewport`按desired／inflight／applied及准确
 
 当前原生呈现把宿主几何与旧网页的可用性分开：同scope／Root环境／实际几何仍合格时，新tab绑定、同id导航换wire、旧页loading或被真实关闭不自动拆Root／Chrome；新目标仍要fresh ACK与当前量测。`prepareBrowserPresentation`仅在Root用户意图下，为准确现存目标准备一次自身当前完整帧；100ms未就绪退正常fresh路径，ready最多等1500ms采纳。目标放到原live页下方并置原生shield；内部图片不编码、保存、展示或给模型，尺寸变化先退休旧坐标依据，未采纳准备不授模型截图或控制证明。每目标最多一个在途读，每次独立意图的取消key不共享；晚到key不能撤掉后来的准备或已采纳目标，导航／Root／scope／几何变化按准确事实取消。
 
-[Root](src/native-browser-chrome-root.ts)在同一次React提交内立即撤掉旧资料端口的动作资格，只把父active尚未更新时的正负端口发布聚合到提交末，避免卸载中间的null。`useSessionTabs`的可选预备先于选择／当前页关闭；子标签先发布继任A的正快照，父layout effect在同一同步commit派发真实close(B)。Main收到close仍立即unregister、删除并销毁实际WebContents；ready目标A的保留不再依赖B存活，不伪造旧page.alive，不延迟真实关闭，也不把准备当作新控制租约。后台／最后／非浏览器关闭保原路径，未提交意图、ABA与scope变化取消准备；UI250ms外层期限只防桥悬挂，迟到receipt按精确key取消。
+[Root](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/src/native-browser-chrome-root.ts)在同一次React提交内立即撤掉旧资料端口的动作资格，只把父active尚未更新时的正负端口发布聚合到提交末，避免卸载中间的null。`useSessionTabs`的可选预备先于选择／当前页关闭；子标签先发布继任A的正快照，父layout effect在同一同步commit派发真实close(B)。Main收到close仍立即unregister、删除并销毁实际WebContents；ready目标A的保留不再依赖B存活，不伪造旧page.alive，不延迟真实关闭，也不把准备当作新控制租约。后台／最后／非浏览器关闭保原路径，未提交意图、ABA与scope变化取消准备；UI250ms外层期限只防桥悬挂，迟到receipt按精确key取消。
 
 `hosted-tab-lifecycle-009-after`的Main3563修后实测仍失败，原例完整保留：新建后返回A已未见008整栏闪空，但当前B关闭后，process116／PTS2.225000先露百度，117／2.241667正文又撤下，display89／2.266667与90／2.283333对应；稳定尾仍空白。B实际destroyed=true，A原文档／输入仍在但hidden，不能计关闭回退通过。原driver.log确认A的onReady→automation.present／paint→publish→syncInput读取已销毁来源的WebContents为空而抛TypeError，随后Root发布失败走fail/null并撤宿主；不是100／1500ms期限。普通fake仅置destroyed=true仍保对象漏测，现按真实getter清空补回归。另一次原生层级记录确认，把原已在B下方的A按旧sourceIndex重新插入，会因移除时索引左移而放到B上方；当前仅当目标原在源上方才移动，已在下层的目标不拆装。009对新B capture的首次空URL包装盲区不作“未捕获”的产品结论；下一受控制品在创建时包装准确自有view并在调用时记录。010诊断制品仅离线准备，未启动，直接验证上述原始错误闭环的修正。
 
@@ -1907,17 +2001,17 @@ Root viewport沿原host的`syncViewport`按desired／inflight／applied及准确
 
 用户随后反馈已加载tab切换时工具栏刷新闪烁，前述010对小图标透明度和工具栏DOM身份未授资格，本次只重新打开此展示切口。`hosted-toolbar-011-before`的Main13830以实际百度和知乎`signin?next=%2F`四次往返复现：header／form／input／reload每次全部换节点，刷新按钮实际computed opacity在1与0.45间变化。两页loading始终false、hasPage与canNavigate始终true，变化仅为fresh ACK／actionable；网页和Chrome宿主timeOrigin未变，没有网页或工具栏文档reload。原片和精确DOM／envelope采样保留，不把site STUN DNS日志当作Kite重新导航证据。
 
-[独立Renderer](src/native-browser-chrome-renderer.tsx)现仅以Root scope作为React key保留整条工具栏；包含page id的owner／binding仍负责动作fence，不能为保DOM删掉页面身份。换页显式退休旧地址编辑、IME、echo和提交，立即展示目标地址；迟到旧回执不能给新页写unknown，失焦后旧IME最终input也不能成为新页地址变化。同页geometry仍保草稿、选区与IME，真正scope变化和null仍撤销。共享工具栏用`interactionPending`暂停导航按钮与form提交，并仅对真实可用的按钮保持稳定透明度；`addressReadOnly`只能收窄原编辑资格，不能覆盖真实canNavigate=false。busy、uncertain、真实加载／页面存在与历史能力保留原语义，原send／Root／Main准入均未放宽。
+[独立Renderer](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/src/native-browser-chrome-renderer.tsx)现仅以Root scope作为React key保留整条工具栏；包含page id的owner／binding仍负责动作fence，不能为保DOM删掉页面身份。换页显式退休旧地址编辑、IME、echo和提交，立即展示目标地址；迟到旧回执不能给新页写unknown，失焦后旧IME最终input也不能成为新页地址变化。同页geometry仍保草稿、选区与IME，真正scope变化和null仍撤销。共享工具栏用`interactionPending`暂停导航按钮与form提交，并仅对真实可用的按钮保持稳定透明度；`addressReadOnly`只能收窄原编辑资格，不能覆盖真实canNavigate=false。busy、uncertain、真实加载／页面存在与历史能力保留原语义，原send／Root／Main准入均未放宽。
 
 `hosted-toolbar-012-after`的Main17908以同URL和同隔离Profile完成四次实际切换：四类工具栏节点分别只保留一个身份，刷新computed opacity始终1；fresh ACK前按钮仍disabled、地址仍只读，页面事实不再被临时抹成false。原两个WebContents／timeOrigin及百度输入保持，Chrome文档没有重载；14个负责源码执行前后drift为空，无verification-failed，两录像和Main正常退出0，准确制品命令路径已核absent，模型账本仍209＋295＝504。driver内站点STUN DNS和退出时macOS task_policy日志原样保留，无009的Kite handler异常。连续像素资格按该目录review核实，不因DOM断言通过提前授无闪烁。
 
-本次[Renderer回归](test/isolated/native-browser-chrome-renderer-dom.test.tsx)11项102断言、共享标签34项491断言、Pane20项292断言及[呈现回归](test/isolated/native-browser-chrome-presentation-dom.test.tsx)4项43断言，共69项928断言通过；新节点保留／旧编辑隔离及late input均先红后绿。同页geometry／IME、旧异步unknown、scope／null、实际控制限制和加载图标仍覆盖。呈现回归原有“隐藏即删除toolbar port”断言与此前已实施的后台资料保留矛盾，现核准确后台资料继续存在、旧port不能导航／刷新或开菜单，控件入口照常撤下；没有回退保后台资料的实现。UI／Desktop完整类型与五个变更源码／测试的Biome通过。Main／Host／preload及正文交接源码未变，复用前述适用证据，不重跑天气或模型。
+本次[Renderer回归](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/test/isolated/native-browser-chrome-renderer-dom.test.tsx)11项102断言、共享标签34项491断言、Pane20项292断言及[呈现回归](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/test/isolated/native-browser-chrome-presentation-dom.test.tsx)4项43断言，共69项928断言通过；新节点保留／旧编辑隔离及late input均先红后绿。同页geometry／IME、旧异步unknown、scope／null、实际控制限制和加载图标仍覆盖。呈现回归原有“隐藏即删除toolbar port”断言与此前已实施的后台资料保留矛盾，现核准确后台资料继续存在、旧port不能导航／刷新或开菜单，控件入口照常撤下；没有回退保后台资料的实现。UI／Desktop完整类型与五个变更源码／测试的Biome通过。Main／Host／preload及正文交接源码未变，复用前述适用证据，不重跑天气或模型。
 
 两路原片的594×184原生顶部条带已精确裁切复核：011在process25／PTS0.466667、51／0.925000、77／1.375000捕获刷新图标暗帧，display19／0.491667和51／1.408333也采中；process第四切未采中，不能将DOM四次重建扩称为像素四次均失败。固定刷新区域亮像素指标在旧暗样本约125.79–126.22、稳定样本约240，012全部190个process及116个display条带均在238.45–241.23，未再见额外变暗。四次关键切换和稳定尾未见整栏空白、重复工具栏、旧地址／正文闪回或009式目标出现后撤下；完整窗口只授已复核的关键四切与尾，不将全部toolbar裁切扩称全窗全片逐帧。四原片hash与字节保持，准确范围和原图归各review/REVIEW.json。此次工具栏切换切口的有限iteration_complete为ready；文档结构／影响、Core边界、测试归属和diff检查通过，普通构建、跨平台、物理IME及原resize／首次导航残留资格不升级，未stage、commit或push。
 
 用户新增首个tab输入网址后的强闪。`hosted-first-page-013-before`冻结开发制品以普通UI输入真实HTTPS百度，连续两路录像实证本地栏先撤、右栏全灰、正文先到而顶部仍灰；缺栏到恢复采样间隔166.667ms，其中全栏灰到正文出现33.333ms。Root在导航后约207ms即隐藏本地栏并裁剪，实际网页DOM-ready还要约219ms；Chrome的dom-ready并非React工具栏已绘制。原图、PTS及审查范围归该目录review，不能以012工具栏切换通过覆盖。
 
-当前[controller](electron/native-browser.ts)在原两步Root量测后返回`presented:false`，保留起始DOM和本地栏；完整Root下以准确viewport准备真实原页，复用文档ready，不申请Agent控制。Page自身完整帧与[Host](electron/browser-chrome-host.ts)当前Renderer提交、工具栏自身原生绘制帧齐备后才offer；fresh Root ACK核准确scope／frame／token／URL／revision和几何，采用原Page后才确认`presented:true`。实际准备不生成模型观察、编码或展示截图，当前Model坐标在改变sizeEpoch时失效；同exact请求重发保持等待。停止、导航、关闭、scope、resize和Root替换取消旧准备，每页单在途，fresh ACK有独立1500ms期限，准确失败保Root且不刷新／重开／重放导航。014修后未完成交接但保住Root，015单次私有诊断确认Chrome从0尺寸变成当前尺寸后直接capturePage返回`UnknownVizError`；据此首个surface等待自身真实新尺寸绘制帧；同一次准备中后继同尺寸revision已具有surface，只做单次当前帧读取，避免没有像素变化时等不到新paint。统一读取槽在旧capture完成前不释放，帧订阅结束后旧回调亦无权限。原两次失败和日志保持。
+当前[controller](electron/native-browser.ts)在原两步Root量测后返回`presented:false`，保留起始DOM和本地栏；完整Root下以准确viewport准备真实原页，复用文档ready，不申请Agent控制。Page自身完整帧与[Host](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/electron/browser-chrome-host.ts)当前Renderer提交、工具栏自身原生绘制帧齐备后才offer；fresh Root ACK核准确scope／frame／token／URL／revision和几何，采用原Page后才确认`presented:true`。实际准备不生成模型观察、编码或展示截图，当前Model坐标在改变sizeEpoch时失效；同exact请求重发保持等待。停止、导航、关闭、scope、resize和Root替换取消旧准备，每页单在途，fresh ACK有独立1500ms期限，准确失败保Root且不刷新／重开／重放导航。014修后未完成交接但保住Root，015单次私有诊断确认Chrome从0尺寸变成当前尺寸后直接capturePage返回`UnknownVizError`；据此首个surface等待自身真实新尺寸绘制帧；同一次准备中后继同尺寸revision已具有surface，只做单次当前帧读取，避免没有像素变化时等不到新paint。统一读取槽在旧capture完成前不释放，帧订阅结束后旧回调亦无权限。原两次失败和日志保持。
 
 `hosted-first-page-016-final`的冻结开发制品Main44089完成普通UI首个HTTPS百度导航、同客户端新建B并输入HTTPS Example、A/B往返及真实关闭B回A。Page自身592×1406完整帧与Chrome自身594×184非空原生帧均在完整Root下取得，Chrome首帧后10ms才采用原页并发准确`presented:true`；新B也完成相同双帧交接。两个网址各只loadURL一次，A原WebContents／timeOrigin、输入`kite first page retained`与scrollY=0保持，B实际销毁；不授非零阅读位置资格。两录像与Main正常退出0、16源码hash前后drift为空，无verification-failed，准确制品命令路径已核无残留进程，模型仍209＋295＝504。driver保留3条`browser_chrome_stale_rendered`拒绝日志，不把正常退出或读取成功写成运行时无错误。
 
@@ -1997,9 +2091,9 @@ Cmd+W重开后resize出现的`browser_chrome_stale_rendered`另已定位并修�
 
 029画面仅核两路连续0–4.5秒及末0.4秒，不扩成全片无闪。重开process136/2.500000、display101/2.533333为原页准备态，随后立即resize，视频没有独立采到resize前的正文恢复；trace的逻辑visible不代替该像素事实。process144/2.650000实见窗口内宽灰列，display108/2.708333亦有灰／半透明列，窗口外露出背景不计覆盖。process155/2.883333、display117/2.916667恢复完整原页与输入，尾部稳定；这支持旧回执未卡住新展示，不支持灰带、短空、工具栏条纹或FPS已解决。
 
-[Chrome host](electron/browser-chrome-host.ts)只接收 Root 的有界纯展示快照，向唯一 Root 业务处理器转发封闭 UI 事件。独立[受限 preload](electron/browser-chrome-preload.ts)没有 NativeBridge、Service caller、任意代码或 CDP 入口；它与普通网页使用不同 session。Root 保留唯一 tab model、observer、地址草稿及权限读取。scope、真实页对象、attachment、revision、序号与一次性确认核实后才转发，确认丢失不重发；实际导航与控制仍由原 owner 受理。混合 reader、注释或遮挡右栏的全局界面恢复 Root 完整展示并隐藏原生绘制，网页对象保留。
+[Chrome host](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/electron/browser-chrome-host.ts)只接收 Root 的有界纯展示快照，向唯一 Root 业务处理器转发封闭 UI 事件。独立[受限 preload](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/electron/browser-chrome-preload.ts)没有 NativeBridge、Service caller、任意代码或 CDP 入口；它与普通网页使用不同 session。Root 保留唯一 tab model、observer、地址草稿及权限读取。scope、真实页对象、attachment、revision、序号与一次性确认核实后才转发，确认丢失不重发；实际导航与控制仍由原 owner 受理。混合 reader、注释或遮挡右栏的全局界面恢复 Root 完整展示并隐藏原生绘制，网页对象保留。
 
-此处源码已接入，冻结生产制品的连续 OS 画面、1.25 倍缩放、跨宿主输入／菜单和正常退出仍在验收，不能仅凭原型静态图或 DOM 回归宣布缩窗闪烁已消除。受控回归分别位于 [host](test/isolated/browser-chrome-host.test.ts)、[Root 工厂](test/isolated/native-root-window.test.ts)、[Root 分派](test/isolated/native-browser-chrome-root-dom.test.tsx)、[独立 Renderer](test/isolated/native-browser-chrome-renderer-dom.test.tsx)与[原页面呈现](test/isolated/native-browser-capture.test.ts)。
+此处源码已接入，冻结生产制品的连续 OS 画面、1.25 倍缩放、跨宿主输入／菜单和正常退出仍在验收，不能仅凭原型静态图或 DOM 回归宣布缩窗闪烁已消除。受控回归分别位于 [host](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/test/isolated/browser-chrome-host.test.ts)、[Root 工厂](test/isolated/native-root-window.test.ts)、[Root 分派](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/test/isolated/native-browser-chrome-root-dom.test.tsx)、[独立 Renderer](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/test/isolated/native-browser-chrome-renderer-dom.test.tsx)与[原页面呈现](test/isolated/native-browser-capture.test.ts)。
 
 冻结组合实机的初次宿主未启用已取得反例并修正：`getPage.scope`使用准确页面本身的`tab.scope`，不等待绘制scope出现。后继实际hosted／actionable、原页身份、表单与固定段落位置均保留；新绑定不复用旧delegation ACK，迟到第二步布局也不能回退新分栏。零模型的`attempt-002`及真实系统拖拽的`attempt-004-native-display`仍分别在窗口源和真实桌面源观察到窗口内右灰带，准确原片、PTS和逐帧审查保留在本机`.cache/browser-recheck-20261030/ordinary-dev/observations/native-layout-20261031`。后置Main布局批次也已由冻结app-005-post-native及attempt-005-native-display否定其消除闪烁的结论：原页、表单、固定阅读段落和header拖窗保持，但真实桌面帧73（PTS1.825秒）及95（PTS2.233333秒）仍有窗口内部右灰带。因此缩窗仍未完成，不能用功能断言通过或最终截图授无闪烁资格。该失败制品与原片保留，不再重复等价天气任务；模型账本仍为504。
 
@@ -2105,7 +2199,7 @@ Main-owned driver的开发Main71309／新Session`c7fa13c2-07a3-4527-b950-236873b
 
 普通Main33979完整120秒影片已离线核6814帧、161导出全部11timeline／4candidate及24个精确边界帧。18.466667→18.483333→18.55秒的Agent／交还中／human过渡中正文持续；22.025秒菜单确实打开，至真末帧6813／120秒仍保原正文与回复。但1244／21.85秒在回复完成布局切换处出现一帧旧／新纵向位置混合的文字分片，1243及1245分别为完整旧／新布局；发生在菜单前，尚不能从录片区分客户端合成与采集原因，不授全过程无异常资格。旧制品、原字节raw与结果已归档至两Profile各自的`before-root-live-retention-20261031`；review目录保留原位。
 
-整页Root重载的有限候选现由[首绘制引导](electron/browser-display-bootstrap.ts)、Main和Pane共同处理：Main仅保留原准确Live页、已完成step2、无pending且窗口尺寸／zoom／原槽实际bounds不变的只读display intent；清旧展示／坐标资格并强制原生输入屏障，不携lease、refs或操作许可。preload同步核实后先隐藏真实Root树的呈现与输入而保整窗量测，在原左区域显示实际重载状态；原网页继续使用真实Native表面。新Root恢复准确原页与新Caller scope后，只在实际槽完全匹配时同步claim并揭示，再完成两次新的真实witness；沿用现有右栏展开动画的明确DOM状态等待，不加重试定时器。错误、卸载、目标销毁、大小／zoom／选择变化或屏障失败先确认Main撤页再揭示Root，准确已终止token可确认取消；丢取消确认不假造安全显示。没有恢复旧PNG、刷新网页、重开标签或重放动作。
+整页Root重载的有限候选现由[首绘制引导](https://github.com/ferqx/kite-code/blob/86cb578eb4a1d1f5e2d373a00c513dfaa31cc35c/apps/desktop/electron/browser-display-bootstrap.ts)、Main和Pane共同处理：Main仅保留原准确Live页、已完成step2、无pending且窗口尺寸／zoom／原槽实际bounds不变的只读display intent；清旧展示／坐标资格并强制原生输入屏障，不携lease、refs或操作许可。preload同步核实后先隐藏真实Root树的呈现与输入而保整窗量测，在原左区域显示实际重载状态；原网页继续使用真实Native表面。新Root恢复准确原页与新Caller scope后，只在实际槽完全匹配时同步claim并揭示，再完成两次新的真实witness；沿用现有右栏展开动画的明确DOM状态等待，不加重试定时器。错误、卸载、目标销毁、大小／zoom／选择变化或屏障失败先确认Main撤页再揭示Root，准确已终止token可确认取消；丢取消确认不假造安全显示。没有恢复旧PNG、刷新网页、重开标签或重放动作。
 
 该增量的Pane／capture／bootstrap／unified／restore／refresh／built-preload-IPC共7文件84项1363断言、Desktop类型与相关Biome通过。只为恢复后实际槽相同的Root重载提供保留条件；手调右栏宽度没有同步seed，恢复几何不同仍严格撤页并走新呈现，不授任意宽度保持或连续resize资格。旧host没有新bootstrap方法时保持原行为。上述离线证明尚不代替下述最新制品的实机过程。
 

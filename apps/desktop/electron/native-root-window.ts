@@ -2,11 +2,18 @@ import type {
   BaseWindow,
   BrowserWindowConstructorOptions,
   MenuItemConstructorOptions,
-  Rectangle,
   WebContents,
   WebContentsView,
 } from 'electron';
 import * as electron from 'electron';
+import { focusNativeWindowContent } from './native-overlay-layer';
+
+export const nativeRootWillShowEvent = 'kite:root:will-show';
+/** Internal notification before our explicit instance enters native showing. */
+export function onNativeRootWillShow(window: NativeRootWindow, receive: () => void): () => void {
+  Reflect.apply(window.on, window, [nativeRootWillShowEvent, receive]);
+  return () => Reflect.apply(window.off, window, [nativeRootWillShowEvent, receive]);
+}
 
 /** The application needs this public composition, not BrowserWindow's hidden primary View. */
 export type NativeRootWindow = BaseWindow & {
@@ -16,7 +23,7 @@ export type NativeRootWindow = BaseWindow & {
 };
 const roots = new WeakMap<
   BaseWindow,
-  { view: WebContentsView; hosted: boolean; ready: boolean; listeners: Set<() => void> }
+  { view: WebContentsView; ready: boolean; listeners: Set<() => void> }
 >();
 export function onNativeRootReady(window: NativeRootWindow, receive: () => void): () => void {
   const record = roots.get(window);
@@ -31,23 +38,12 @@ export function onNativeRootReady(window: NativeRootWindow, receive: () => void)
 export function getNativeRootView(window: NativeRootWindow): WebContentsView | undefined {
   return roots.get(window)?.view;
 }
-/** Transfer only physical geometry ownership; this never navigates or replaces Root. */
-export function setNativeRootBounds(window: NativeRootWindow, bounds?: Rectangle): boolean {
+/** Root always owns the full application viewport; browser layout never crops it. */
+function syncRootBounds(window: NativeRootWindow): boolean {
   const record = roots.get(window);
   if (!record || window.isDestroyed() || record.view.webContents.isDestroyed()) return false;
   const [width = 0, height = 0] = window.getContentSize();
-  if (
-    bounds &&
-    (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
-      bounds.x !== 0 ||
-      bounds.y !== 0 ||
-      bounds.width <= 0 ||
-      bounds.width > width ||
-      bounds.height !== height)
-  )
-    return false;
-  record.hosted = !!bounds;
-  const next = bounds ?? { x: 0, y: 0, width, height },
+  const next = { x: 0, y: 0, width, height },
     actual = record.view.getBounds();
   if ((['x', 'y', 'width', 'height'] as const).some((key) => actual[key] !== next[key]))
     record.view.setBounds(next);
@@ -91,16 +87,29 @@ export function createNativeRootWindow(options: BrowserWindowConstructorOptions)
       load(() => contents.loadFile(...args)),
   });
   try {
-    roots.set(window, { view: root, hosted: false, ready: false, listeners: new Set() });
+    roots.set(window, { view: root, ready: false, listeners: new Set() });
     window.contentView.addChildView(root);
     root.setBackgroundColor(options.backgroundColor ?? '#ffffff');
-    if (!setNativeRootBounds(window)) throw Error('native_root_view_unavailable');
+    if (!syncRootBounds(window)) throw Error('native_root_view_unavailable');
   } catch (error) {
     roots.delete(window);
     if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: false });
     if (!native.isDestroyed()) native.destroy();
     throw error;
   }
+  const show = native.show,
+    showInactive = native.showInactive;
+  const beforeShow = () => {
+    if (closed || !syncRootBounds(window)) return false;
+    window.emit(nativeRootWillShowEvent);
+    return !closed && !window.isDestroyed() && !contents.isDestroyed();
+  };
+  window.show = (...args) => {
+    if (beforeShow()) Reflect.apply(show, native, args);
+  };
+  window.showInactive = (...args) => {
+    if (beforeShow()) Reflect.apply(showInactive, native, args);
+  };
   const background = native.setBackgroundColor.bind(native);
   window.setBackgroundColor = (color) => {
     background(color);
@@ -108,9 +117,8 @@ export function createNativeRootWindow(options: BrowserWindowConstructorOptions)
   };
   let previousFocus: WebContents = contents;
   const resize = () => {
-    // Without a hosted browser, Root is the whole window. Keep its bounds in
-    // this native callback; queued work can lag AppKit's window zoom animation.
-    if (!closed && !roots.get(window)?.hosted) setNativeRootBounds(window);
+    // Keep this in the native callback, including AppKit's system titlebar zoom.
+    if (!closed) syncRootBounds(window);
   };
   // A hidden WebContentsView need not have a capture surface. Completing the
   // actual load admits showing Root; screenshots never gate application startup.
@@ -130,7 +138,7 @@ export function createNativeRootWindow(options: BrowserWindowConstructorOptions)
   const focusedSurface = () => {
     let focused: WebContents | undefined;
     for (const view of window.contentView.children) {
-      if ('webContents' in view) {
+      if (view.getVisible() && 'webContents' in view) {
         const candidate = view.webContents as WebContents | undefined;
         if (candidate && !candidate.isDestroyed() && candidate.isFocused()) focused = candidate;
       }
@@ -148,8 +156,11 @@ export function createNativeRootWindow(options: BrowserWindowConstructorOptions)
       previousFocus = focused;
       return;
     }
-    const target = previousFocus.isDestroyed() ? contents : previousFocus;
-    if (!target.isDestroyed()) target.focus();
+    const retainedFocus = window.contentView.children.some(
+      (view) => 'webContents' in view && view.webContents === previousFocus && view.getVisible(),
+    );
+    const target = previousFocus.isDestroyed() || !retainedFocus ? contents : previousFocus;
+    if (!target.isDestroyed()) focusNativeWindowContent(window, target);
   });
   contents.on('destroyed', () => {
     if (!closed && !window.isDestroyed()) window.destroy();

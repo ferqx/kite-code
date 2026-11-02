@@ -6,29 +6,25 @@ import {
 } from '@kite-ai/ui/desktop';
 import type { ReactNode } from 'react';
 import type {
-  NativeBrowserChromeRect,
-  NativeBrowserControlPort,
-  NativeBrowserToolbarPort,
-} from './native-browser-chrome-types';
+  NativeBrowserControlProps,
+  NativeBrowserMenuRect,
+  NativeBrowserToolbarProps,
+} from './native-browser-toolbar-types';
 
-function menuAnchor(element: HTMLElement): NativeBrowserChromeRect {
+function menuAnchor(element: HTMLElement): NativeBrowserMenuRect {
   const { x, y, width, height } = element.getBoundingClientRect();
   return { x, y, width, height };
 }
 
 /** Presentation only: no bridge, observer, browser state or permission owner. */
-export function NativeBrowserChromeToolbar({
+export function NativeBrowserToolbar({
   data,
   dispatch,
   tools,
   annotationTools,
-  interactionPending,
-  addressReadOnly,
-}: NativeBrowserToolbarPort & {
+}: NativeBrowserToolbarProps & {
   tools?: ReactNode;
   annotationTools?: ReactNode;
-  interactionPending?: boolean;
-  addressReadOnly?: boolean;
 }) {
   return (
     <SessionBrowserToolbar
@@ -72,8 +68,6 @@ export function NativeBrowserChromeToolbar({
       canGoBack={data.canGoBack}
       canGoForward={data.canGoForward}
       canNavigate={data.canNavigate}
-      interactionPending={interactionPending}
-      addressReadOnly={addressReadOnly}
       onAddressChange={(value) => dispatch({ type: 'address-change', value })}
       onAddressFocus={(focused) => dispatch({ type: 'address-focus', focused })}
       onNavigate={() => dispatch({ type: 'navigate' })}
@@ -84,7 +78,7 @@ export function NativeBrowserChromeToolbar({
   );
 }
 
-export function NativeBrowserChromeControl({ data, dispatch }: NativeBrowserControlPort) {
+export function NativeBrowserControl({ data, dispatch }: NativeBrowserControlProps) {
   return (
     <Button
       type="button"

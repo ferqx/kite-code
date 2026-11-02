@@ -3,41 +3,25 @@ import * as electron from 'electron';
 import { type IpcMain, session, WebContentsView } from 'electron';
 import {
   browserAddress,
-  isNativeBrowserPreparation,
-  isNativeBrowserRestoreScope,
   type NativeBrowserBounds,
-  type NativeBrowserClosePreparation,
-  type NativeBrowserDisplayIntent,
-  type NativeBrowserFrozenFrame,
   type NativeBrowserLayout,
   type NativeBrowserMenuAction,
-  type NativeBrowserPresentationFrame,
   type NativeBrowserReply,
   type NativeBrowserRequest,
   type NativeBrowserRestoreScope,
   type NativeBrowserState,
   nativeBrowserChannel,
-  nativeBrowserDisplayChannel,
   nativeBrowserEventChannel,
   nativeBrowserLayoutChannel,
-  nativeBrowserLayoutFrameChannel,
   nativeBrowserMenuCancelChannel,
   nativeBrowserMenuChannel,
-  nativeBrowserPreparationCancelChannel,
-  nativeBrowserPreparationChannel,
   nativeBrowserPresentationChannel,
-  nativeBrowserWitnessSamplePoints,
   parseNativeBrowserMenuRequest,
   parseNativeBrowserRequest,
   projectNativeBrowserBounds,
   projectNativeBrowserLayout,
 } from '../src/native-browser-bridge';
-import {
-  type NativeBrowserChromeOwner,
-  sameNativeBrowserChromeOwner,
-} from '../src/native-browser-chrome-bridge';
 import { createBrowserAnnotationStyle } from './browser-annotation-style';
-import { createNativeBrowserChromeHost } from './browser-chrome-host';
 import { browserDecorationScript } from './browser-decoration';
 import { createBrowserDocumentReady } from './browser-document-ready';
 import { createBrowserInputShield } from './browser-input-shield';
@@ -46,14 +30,15 @@ import { createBrowserNavigation } from './browser-navigation';
 import { BrowserPagePreflightError, type NativeBrowserPageHost } from './browser-page-host';
 import { browserTypingCursorScript } from './browser-typing-cursor';
 import { assertNativeSender } from './native-ipc';
-import type { NativeRootWindow as BrowserWindow } from './native-root-window';
-import { cancelNativeWindowLayout, queueNativeWindowLayout } from './native-window-layout';
+import { addNativeWindowView } from './native-overlay-layer';
+import { type NativeRootWindow as BrowserWindow, onNativeRootWillShow } from './native-root-window';
 
 type BrowserTab = {
   view: WebContentsView;
   state: NativeBrowserState;
   generation: number;
-  chromeNavigation: number;
+  documentNavigation: number;
+  documentGeneration: number;
   notification?: ReturnType<typeof setTimeout>;
   unregister?: () => void;
   disposeDocument?: () => void;
@@ -64,14 +49,10 @@ type BrowserTab = {
   bootstrapping?: boolean;
   initialization?: Promise<void>;
   sizeEpoch: number;
-  viewportSize?: { width: number; height: number };
   borderRadius?: number;
   presentation?: {
     bounds: NativeBrowserBounds;
     layout?: NativeBrowserLayout;
-    width: number;
-    height: number;
-    zoom: number;
   };
   presentationScope?: NativeBrowserRestoreScope;
   nativeProjection?: {
@@ -79,34 +60,27 @@ type BrowserTab = {
     bounds: NativeBrowserBounds;
     layout: NativeBrowserLayout;
   };
-  presentationRevision?: number;
-  presentationGeneration?: number;
-  presentationCapture?: Promise<NativeBrowserPresentationFrame>;
-  presentationReady?: { key: string; read: Promise<void> };
-  presentationFrame?: { key: string; stamp: string; scroll: string; expires: number };
-  drawnPresentation?: boolean;
-  drawnRequest?: DrawnPresentation;
-  resizeFrame?: { generation: number; url: string; size: string; frame: NativeBrowserFrozenFrame };
-  nativeFrames?: {
-    generation: number;
-    url: string;
-    scope: NativeBrowserRestoreScope;
-    width: number;
-    height: number;
-    scale: number;
-    zoom: number;
-    sent: number;
-    latest?: Electron.NativeImage;
-    timer?: ReturnType<typeof setTimeout>;
+  resume?: {
+    token: string;
+    root: Electron.WebFrameMain;
+    contents: Electron.WebContents;
+    frame: Electron.WebFrameMain;
+    document: number;
+    geometry: string;
+    presentation: NonNullable<BrowserTab['presentation']>;
+    scope?: NativeBrowserRestoreScope;
+    confirmed: boolean;
   };
-};
-type DrawnPresentation = Extract<NativeBrowserRequest, { action: 'present' }> & {
-  bounds: NativeBrowserBounds;
-  layout: NativeBrowserLayout;
-  scope?: NativeBrowserRestoreScope;
-  draft?: string;
-  presentationRevision: number;
-  witness: { key: string; step: 1 | 2 };
+  drawable?: { frame: Electron.WebFrameMain; document: number };
+  paint?: {
+    controller: AbortController;
+    token: string;
+    frame: Electron.WebFrameMain;
+    bounds: Electron.Rectangle;
+    geometry: string;
+    underlay?: boolean;
+    stopFrame?: () => void;
+  };
 };
 /** Only the current full-width two-Panel Groups may establish a resize anchor.
  * CSS handles occupy 0..1px; one CSS pixel covers measurement rounding, not gutters. */
@@ -187,398 +161,129 @@ function webSocketUrl(value: string): boolean {
   }
 }
 
-/** Isolated, memory-only browsing; no Service caller, app preload or external protocol handoff. */
+/** Fixed application UI; Main owns the exact, isolated real pages and native geometry. */
 export function registerNativeBrowserIpc(options: {
   readonly ipcMain: IpcMain;
   readonly window: BrowserWindow;
   readonly rendererUrl: string;
-  /** Product Chrome host; absent in older isolated presenters and unsupported platforms. */
-  readonly chrome?: { readonly preloadPath: string };
   readonly automation?: NativeBrowserPageHost;
   readonly selectedScope?: () =>
     | (BrowserPageScope & { generation?: number; viewSelection?: number })
     | undefined;
-  /** Main selection identity, including its verified same-selection loading projection. */
   readonly grantScope?: () =>
     | (BrowserPageScope & { generation?: number; viewSelection?: number })
     | undefined;
 }): () => void {
   const { window, ipcMain, rendererUrl, automation } = options;
   const owner = window.webContents;
-  let rootEpoch = 0;
   const browsing = session.fromPartition(`kite-sidebar-browser-${randomUUID()}`, { cache: false });
   const tabs = new Map<string, BrowserTab>();
   const lastPresented = new Map<string, string>();
   const replacedPresentation = new Map<string, string>();
-  let rendererPresented = false;
-  let displayShieldReady = false;
-  let retiredDisplayToken: string | undefined;
-  let retainedDisplay:
-    | {
-        intent: NativeBrowserDisplayIntent;
-        tab: BrowserTab;
-        incarnation: string;
-        navigation: number;
-        pageGeneration: number;
-        ready: boolean;
-        claimed?: NativeBrowserRestoreScope;
-      }
-    | undefined;
-  let heldPresentation: { tab: BrowserTab; key: string } | undefined;
-  type Preparation = {
-    key: string;
-    from: BrowserTab;
-    target: BrowserTab;
-    scope: NativeBrowserChromeOwner;
-    frame: Electron.WebFrameMain;
-    targetFrame: Electron.WebFrameMain;
-    targetToken: string;
-    sourceToken: string;
-    url: string;
-    bounds: Electron.Rectangle;
-    ready: boolean;
-    expires: number;
-    timer: ReturnType<typeof setTimeout>;
-    resolve(value: { key: string } | null): void;
-  };
-  let preparation: Preparation | undefined;
+  let active: string | undefined;
+  let disposed = false;
+  let rootEpoch = 0;
+  let visibilityEpoch = 0;
+  // A Root document has one ordered layout stream across all pages, including
+  // withdrawals. An old async positive measurement cannot beat a newer hide.
+  let layoutRevision = 0;
+  const scopeKey = (scope: BrowserPageScope) => JSON.stringify([scope.storeId, scope.sessionId]);
   const pageToken = (tab: BrowserTab) =>
     JSON.stringify([
       tab.state.id,
       tab.view.webContents.id,
       tab.generation,
-      tab.chromeNavigation,
+      tab.documentNavigation,
+      rootEpoch,
+      visibilityEpoch,
       automation?.state(tab.state.id)?.incarnation,
       automation?.state(tab.state.id)?.navigation,
     ]);
-  const scopeKey = (scope: BrowserPageScope) => JSON.stringify([scope.storeId, scope.sessionId]);
-  const chromeOwner = (tab: BrowserTab): NativeBrowserChromeOwner | undefined =>
-    tab.draft ? { draft: tab.draft.key } : tab.presentationScope;
-  const requestOwner = (request: { draft?: string; scope?: NativeBrowserRestoreScope }) =>
-    request.draft ? { draft: request.draft } : request.scope;
-  const displayOwnerCurrent = (tab: BrowserTab, scope: NativeBrowserChromeOwner) => {
-    if ('draft' in scope) return draftCurrent(tab, scope.draft);
+  const draftCurrent = (tab: BrowserTab, key: string | undefined) =>
+    !!key &&
+    tab.draft?.key === key &&
+    tab.draft.epoch === rootEpoch &&
+    tab.draft.frame === owner.mainFrame &&
+    !owner.isDestroyed() &&
+    !tab.scope &&
+    tabs.get(tab.state.id) === tab &&
+    !!tab.view.webContents &&
+    !tab.view.webContents.isDestroyed();
+  const scopeCurrent = (tab: BrowserTab, scope = tab.presentationScope) => {
+    if (tab.draft) return draftCurrent(tab, tab.draft.key);
+    const selected = (options.grantScope ?? options.selectedScope)?.();
     return (
-      !tab.draft &&
-      tab.scope?.storeId === scope.storeId &&
+      !!scope &&
+      !!selected &&
+      !!tab.scope &&
+      tab.scope.storeId === scope.storeId &&
       tab.scope.sessionId === scope.sessionId &&
-      sameNativeBrowserChromeOwner(
-        (options.grantScope ?? options.selectedScope)?.() as NativeBrowserRestoreScope | undefined,
-        scope,
+      (['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
+        (key) => selected[key] === scope[key],
       )
     );
   };
+  const inputBlocked = (id: string) => {
+    const phase = automation?.state(id)?.phase;
+    return phase !== undefined && !['human', 'armed'].includes(phase);
+  };
+  const rootView = () =>
+    window.contentView.children.find(
+      (view) => 'webContents' in view && view.webContents === owner,
+    ) as WebContentsView | undefined;
+  const coveredByRoot = (tab: BrowserTab) => {
+    const root = rootView(),
+      children = window.contentView.children,
+      [width = 0, height = 0] = window.getContentSize();
+    return (
+      !!root &&
+      root.getVisible() &&
+      sameRectangle(root.getBounds(), { x: 0, y: 0, width, height }) &&
+      children.indexOf(tab.view) >= 0 &&
+      children.indexOf(tab.view) < children.indexOf(root)
+    );
+  };
+  const promotePage = (tab: BrowserTab) => {
+    const root = rootView();
+    if (!root) throw Error('browser_presentation_unavailable');
+    const children = window.contentView.children,
+      rootIndex = children.indexOf(root),
+      pageIndex = children.indexOf(tab.view);
+    if (pageIndex < 0) throw Error('browser_presentation_unavailable');
+    // Retained pages already above Root keep their native sibling position.
+    // Only a new document prepared below Root needs an actual promotion.
+    if (pageIndex < rootIndex) addNativeWindowView(window, tab.view, rootIndex);
+  };
   const inputShield = createBrowserInputShield(window, () => {
-    cancelClosePreparation();
-    cancelRetainedDisplay();
-    cancelPreparation();
-    chromeHost?.cancelPresentationHold();
-    clearHeldPresentation();
     for (const tab of tabs.values())
       if (inputBlocked(tab.state.id)) {
-        stopNativeFrames(tab);
         tab.view.setVisible(false);
-        automation?.fail(tab.state.id);
+        automation?.present(tab.state.id, false);
       }
+    inputShield.hide();
   });
-  let active: string | undefined;
-  let disposed = false;
-  let chromeHost: ReturnType<typeof createNativeBrowserChromeHost> | undefined;
-  let pendingLayout:
-    | { tab: BrowserTab; request: DrawnPresentation; confirmed: boolean }
-    | undefined;
-  let loadingRequest:
-    | {
-        tab: BrowserTab;
-        request: DrawnPresentation;
-        frame: Electron.WebFrameMain;
-        epoch: number;
-        token: string;
-      }
-    | undefined;
-  let initialDisplay:
-    | {
-        tab: BrowserTab;
-        request: DrawnPresentation;
-        rootFrame: Electron.WebFrameMain;
-        pageFrame?: Electron.WebFrameMain;
-        pageToken?: string;
-        url?: string;
-        generation: number;
-        bounds: Electron.Rectangle;
-        controller: AbortController;
-        timer: ReturnType<typeof setTimeout>;
-        ready: boolean;
-        offered: boolean;
-        stopPageFrame?: () => void;
-      }
-    | undefined;
-  type Closing = {
-    tab: BrowserTab;
-    scope: NativeBrowserChromeOwner;
-    receipt: NativeBrowserClosePreparation;
-    frame: Electron.WebFrameMain;
-    epoch: number;
-    token: string;
-    bounds: Electron.Rectangle;
-    zoom: number;
-    timer: ReturnType<typeof setTimeout>;
-    subscribed: boolean;
-    marked: boolean;
-    cleared: boolean;
-    confirming?: (value: boolean) => void;
-    finishing?: (value: boolean) => void;
-  };
-  let closing: Closing | undefined;
-  let reconciliationQueued = false;
-  let windowAvailable = window.isVisible() && !window.isMinimized();
-  let displayAttempt:
-    | {
-        tab: BrowserTab;
-        scope: NativeBrowserChromeOwner;
-        token: string;
-        frame: Electron.WebFrameMain;
-        epoch: number;
-        geometry: string;
-        key: string;
-      }
-    | undefined;
-  function rememberDisplayAttempt(tab: BrowserTab, scope: NativeBrowserChromeOwner) {
-    const geometry = JSON.stringify([...window.getContentSize(), owner.getZoomFactor()]),
-      token = pageToken(tab);
-    if (
-      displayAttempt?.tab === tab &&
-      sameNativeBrowserChromeOwner(displayAttempt.scope, scope) &&
-      displayAttempt.token === token &&
-      displayAttempt.frame === owner.mainFrame &&
-      displayAttempt.epoch === rootEpoch &&
-      displayAttempt.geometry === geometry
-    )
-      return false;
-    displayAttempt = {
-      tab,
-      scope,
-      token,
-      frame: owner.mainFrame,
-      epoch: rootEpoch,
-      geometry,
-      key: randomUUID().replaceAll('-', ''),
-    };
-    return true;
-  }
-  function reconcileDisplay() {
-    if (disposed || window.isDestroyed() || owner.isDestroyed() || !chromeHost) return;
-    const available = window.isVisible() && !window.isMinimized();
-    if (available !== windowAvailable) {
-      windowAvailable = available;
-      displayAttempt = undefined;
-    }
-    if (
-      !available ||
-      closing ||
-      initialDisplay ||
-      pendingLayout ||
-      preparation ||
-      heldPresentation ||
-      retainedDisplay ||
-      menu
-    )
-      return;
-    // Root's current accepted intent is the target. Neither a former active
-    // Page nor a remembered URL can authorize a replacement or a new goal.
-    const desired = chromeHost.displayState();
-    if (desired.kind !== 'page') {
-      displayAttempt = undefined;
-      if (desired.kind === 'root')
-        for (const [id, tab] of tabs)
-          if (tab.view.getVisible() || tab.presentation) present(id, null);
+  const syncInput = () => {
+    const tab = active ? tabs.get(active) : undefined;
+    // A first document paints below the complete application Root. Root itself
+    // receives human input there; a shield must not rise above the loading UI.
+    if (tab?.paint?.underlay && coveredByRoot(tab)) {
+      inputShield.hide();
       return;
     }
-    const tab = tabs.get(desired.id);
-    if (
-      !tab ||
-      tab.view.webContents.isDestroyed() ||
-      tab.state.error ||
-      !displayOwnerCurrent(tab, desired.scope) ||
-      pageToken(tab) !== desired.token
-    )
-      return;
-    if (desired.presented && active === desired.id && tab.presentation) {
-      displayAttempt = undefined;
+    if (tab && inputBlocked(tab.state.id) && !inputShield.available()) {
+      tab.view.setVisible(false);
+      automation?.present(tab.state.id, false);
+      inputShield.hide();
       return;
     }
-    if (desired.busy) return;
-    // A source/target capsule owns any intentional overlapping live views.
-    // Outside one, retire an unrelated surface before asking for fresh proof.
-    for (const [id, other] of tabs)
-      if (other !== tab && (other.view.getVisible() || other.presentation)) present(id, null);
-    if (!rememberDisplayAttempt(tab, desired.scope)) return;
-    // Retire the old display proof before notifying Root. A late Host ready or
-    // resize callback must not revive it, and old screenshot coordinates must
-    // stay invalid even if the new observation measures identical bounds.
-    tab.sizeEpoch++;
-    delete tab.presentationFrame;
-    delete tab.drawnRequest;
-    delete tab.drawnPresentation;
-    if (!chromeHost.preparingPage()) present(desired.id, null, undefined, false);
-    try {
-      owner.send(nativeBrowserPresentationChannel, {
-        id: desired.id,
-        key: displayAttempt!.key,
-        ...('draft' in desired.scope ? { draft: desired.scope.draft } : { scope: desired.scope }),
-      });
-    } catch {
-      // An unconfirmed UI notification changes no Page/control authority.
-      // Keep this attempt fenced until a new target or lifecycle boundary.
-    }
-  }
-  function queueDisplayReconciliation() {
-    if (disposed || reconciliationQueued) return;
-    reconciliationQueued = true;
-    queueMicrotask(() => {
-      reconciliationQueued = false;
-      reconcileDisplay();
-    });
-  }
-  function cancelInitialDisplay(id?: string, adopted = false) {
-    const d = initialDisplay;
-    if (!d || (id && d.tab.state.id !== id)) return;
-    initialDisplay = undefined;
-    clearTimeout(d.timer);
-    d.stopPageFrame?.();
-    if (!adopted) cancelLayout(d.tab.state.id);
-    if (adopted) return;
-    d.controller.abort();
-    const contents = tabs.get(d.tab.state.id) === d.tab ? d.tab.view.webContents : undefined;
-    if (contents && !contents.isDestroyed() && active !== d.tab.state.id) {
-      d.tab.view.setVisible(false);
-      delete d.tab.presentation;
-      delete d.tab.nativeProjection;
-      automation?.present(d.tab.state.id, false);
-    }
-    chromeHost?.release(d.tab.state.id);
-  }
-  let frameSubscription = 0;
-  let subscribed = false;
-  function clearHeldPresentation(key?: string) {
-    const held = heldPresentation;
-    if (!held || (key && held.key !== key)) return;
-    if (
-      tabs.get(held.tab.state.id) === held.tab &&
-      !held.tab.view.webContents.isDestroyed() &&
-      (active !== held.tab.state.id || !held.tab.presentation) &&
-      currentPreparation()?.target !== held.tab
-    )
-      held.tab.view.setVisible(false);
-    heldPresentation = undefined;
-  }
-  const currentHeldPresentation = () => {
-    const held = heldPresentation;
-    const receipt = held && chromeHost?.holdsPresentation(held.tab.state.id);
-    if (
-      !held ||
-      receipt?.key !== held.key ||
-      !displayShieldReady ||
-      !inputShield.available() ||
-      tabs.get(held.tab.state.id) !== held.tab ||
-      held.tab.view.webContents.isDestroyed() ||
-      !held.tab.view.getVisible()
-    )
-      return undefined;
-    return held;
-  };
-  function currentPreparation() {
-    const p = preparation;
-    const target =
-      p && tabs.get(p.target.state.id) === p.target ? p.target.view.webContents : undefined;
-    if (
-      !p ||
-      performance.now() >= p.expires ||
-      disposed ||
-      owner.isDestroyed() ||
-      owner.mainFrame !== p.frame ||
-      !target ||
-      target.isDestroyed() ||
-      target.mainFrame !== p.targetFrame ||
-      pageToken(p.target) !== p.targetToken ||
-      target.getURL() !== p.url ||
-      !p.target.view.getVisible() ||
-      target.isLoadingMainFrame() ||
-      !displayShieldReady ||
-      !inputShield.available()
-    )
-      return undefined;
-    const viewport = chromeHost?.presentationViewport(p.scope);
-    const from =
-      !p.ready && tabs.get(p.from.state.id) === p.from ? p.from.view.webContents : undefined;
-    if (
-      !displayOwnerCurrent(p.target, p.scope) ||
-      (!p.ready && !displayOwnerCurrent(p.from, p.scope)) ||
-      !viewport ||
-      !sameRectangle(viewport, p.bounds) ||
-      !sameRectangle(p.target.view.getBounds(), p.bounds) ||
-      (!p.ready &&
-        (!from ||
-          from.isDestroyed() ||
-          !p.from.view.getVisible() ||
-          pageToken(p.from) !== p.sourceToken))
-    )
-      return undefined;
-    return p;
-  }
-  function cancelPreparation(key?: string, adopted = false) {
-    const p = preparation;
-    if (!p || (key && p.key !== key)) return;
-    preparation = undefined;
-    clearTimeout(p.timer);
-    p.resolve(null);
-    const target = tabs.get(p.target.state.id) === p.target ? p.target.view.webContents : undefined;
-    if (
-      !adopted &&
-      target &&
-      !target.isDestroyed() &&
-      !(active === p.target.state.id && p.target.presentation) &&
-      currentHeldPresentation()?.tab !== p.target
-    )
-      p.target.view.setVisible(false);
-  }
-  const cancelLayout = (id?: string) => {
-    if (id && pendingLayout?.tab.state.id !== id) return;
-    pendingLayout = undefined;
-    frameSubscription++;
-    if (subscribed) {
-      subscribed = false;
-      try {
-        owner.endFrameSubscription();
-      } catch {}
-    }
-  };
-  const stopNativeFrames = (tab: BrowserTab, preserve = false) => {
-    const frames = tab.nativeFrames;
-    delete tab.nativeFrames;
-    if (frames) {
-      clearTimeout(frames.timer);
-      frames.latest = undefined;
-      try {
-        tab.view.webContents.endFrameSubscription();
-      } catch {}
-    }
-    if (!preserve) delete tab.resizeFrame;
+    inputShield.sync(tab?.view, !!tab && inputBlocked(tab.state.id));
   };
   let menu: { id: string; pageId: string; current(): boolean; close(): void } | undefined;
   let menuEscapeHeld = false;
   const cancelMenu = (pageId?: string) => {
-    if (menu && (!pageId || menu.pageId === pageId)) {
-      menu.close();
-    }
+    if (menu && (!pageId || menu.pageId === pageId)) menu.close();
   };
-  // Route one Escape press to the actual pending popup, including repeats and
-  // its matching keyup. No post-close timeout may swallow the next press.
   const menuInput = (event: Electron.Event, input: Electron.Input) => {
-    if (retainedDisplay) {
-      event.preventDefault();
-      return;
-    }
     if (input.key !== 'Escape') return;
     if (input.type === 'keyUp') {
       if (menuEscapeHeld) event.preventDefault();
@@ -597,77 +302,6 @@ export function registerNativeBrowserIpc(options: {
   };
   owner.on('before-input-event', menuInput);
   window.on('blur', resetMenuInput);
-  const draftCurrent = (tab: BrowserTab, key: string | undefined) =>
-    !!key &&
-    tab.draft?.key === key &&
-    tab.draft.epoch === rootEpoch &&
-    tab.draft.frame === owner.mainFrame &&
-    !owner.isDestroyed() &&
-    !tab.scope &&
-    tabs.get(tab.state.id) === tab &&
-    !!tab.view.webContents &&
-    !tab.view.webContents.isDestroyed();
-  const inputBlocked = (id: string) => {
-    const phase = automation?.state(id)?.phase;
-    return phase !== undefined && !['human', 'armed'].includes(phase);
-  };
-  const syncInput = () => {
-    if (closing) {
-      if (closePreparationCurrent(closing)) {
-        inputShield.sync(closing.tab.view, true);
-        return;
-      }
-      cancelClosePreparation();
-    }
-    const prepared = currentPreparation();
-    if (prepared) {
-      const from =
-        tabs.get(prepared.from.state.id) === prepared.from
-          ? prepared.from.view.webContents
-          : undefined;
-      inputShield.sync(
-        from && !from.isDestroyed() && prepared.from.view.getVisible()
-          ? prepared.from.view
-          : prepared.target.view,
-        true,
-      );
-      return;
-    }
-    if (preparation) cancelPreparation();
-    const held = currentHeldPresentation();
-    if (held) {
-      inputShield.sync(held.tab.view, true);
-      return;
-    }
-    if (heldPresentation) {
-      chromeHost?.cancelPresentationHold(heldPresentation.tab.state.id);
-      clearHeldPresentation();
-    }
-    const preparingPage = chromeHost?.preparingPage();
-    if (preparingPage) {
-      inputShield.sync(preparingPage, true);
-      return;
-    }
-    const tab = active ? tabs.get(active) : undefined;
-    if (
-      tab &&
-      inputBlocked(tab.state.id) &&
-      automation?.state(tab.state.id)?.phase !== 'acquiring' &&
-      !inputShield.available()
-    ) {
-      if (tab.view.getVisible()) {
-        stopNativeFrames(tab);
-        tab.view.setVisible(false);
-        automation?.present(tab.state.id, false);
-      }
-      inputShield.hide();
-      return;
-    }
-    inputShield.sync(
-      tab?.view,
-      !!tab && (inputBlocked(tab.state.id) || retainedDisplay?.tab === tab),
-    );
-  };
   browsing.setPermissionRequestHandler((_contents, _permission, complete) => complete(false));
   browsing.setPermissionCheckHandler(() => false);
   browsing.webRequest.onBeforeRequest((details, complete) => {
@@ -678,181 +312,144 @@ export function registerNativeBrowserIpc(options: {
     complete({ cancel: !allowed });
   });
   const publish = (tab: BrowserTab) => {
-    if (disposed || tabs.get(tab.state.id) !== tab || tab.view.webContents.isDestroyed()) return;
+    if (
+      disposed ||
+      tabs.get(tab.state.id) !== tab ||
+      !tab.view.webContents ||
+      tab.view.webContents.isDestroyed()
+    )
+      return;
     tab.state = {
       ...tab.state,
+      pageToken: pageToken(tab),
       ...(tab.scope && automation?.state(tab.state.id)
         ? { control: automation.state(tab.state.id) }
         : {}),
       canGoBack: tab.view.webContents.navigationHistory.canGoBack(),
       canGoForward: tab.view.webContents.navigationHistory.canGoForward(),
     };
+    if (tab.state.error) {
+      cancelPaint(tab);
+      tab.view.setVisible(false);
+      automation?.present(tab.state.id, false);
+    }
     syncInput();
-    queueDisplayReconciliation();
-    if (
-      tab.drawnPresentation &&
-      !tab.state.loading &&
-      !pendingLayout &&
-      initialDisplay?.tab !== tab
-    )
-      startNativeFrames(tab);
     if (tab.notification !== undefined) return;
     tab.notification = setTimeout(() => {
       tab.notification = undefined;
       if (!disposed && tabs.get(tab.state.id) === tab && !window.isDestroyed())
-        window.webContents.send(nativeBrowserEventChannel, tab.state);
+        owner.send(nativeBrowserEventChannel, tab.state);
     }, 16);
   };
-  const hide = () => {
-    windowAvailable = false;
-    displayAttempt = undefined;
-    cancelClosePreparation();
-    cancelInitialDisplay();
-    cancelPreparation();
-    chromeHost?.cancelPresentationHold();
-    clearHeldPresentation();
-    cancelRetainedDisplay();
-    cancelLayout();
-    cancelMenu();
-    // Window visibility owns both pending Host preparation and active display.
-    // Retain the Page/resources, but reopen only through a fresh binding.
-    loadingRequest = undefined;
-    chromeHost?.release();
-    inputShield.hide();
+  const cancelPaint = (tab: BrowserTab) => {
+    const job = tab.paint;
+    tab.paint = undefined;
+    job?.controller.abort();
+    job?.stopFrame?.();
+  };
+  const withdraw = (tab: BrowserTab) => {
+    cancelPaint(tab);
+    cancelMenu(tab.state.id);
+    tab.sizeEpoch++;
+    delete tab.presentation;
+    delete tab.nativeProjection;
+    delete tab.presentationScope;
+    delete tab.resume;
+    if (tab.view.webContents?.isFocused() && !owner.isDestroyed()) owner.focus();
+    tab.view.setVisible(false);
+    automation?.present(tab.state.id, false);
+    if (active === tab.state.id) active = undefined;
+    syncInput();
+  };
+  const suspendWindow = () => {
+    // Native visibility notifications may outlive the ordering operation that
+    // produced them. A late hide must not retire a newly visible page/shield.
+    if (disposed || window.isDestroyed() || window.isVisible() || window.isMinimized()) return;
+    const selected = active ? tabs.get(active) : undefined;
+    visibilityEpoch++;
     for (const tab of tabs.values()) {
-      stopNativeFrames(tab);
+      const contents = tab.view.webContents;
+      if (
+        tab !== selected ||
+        !tab.presentation ||
+        !contents ||
+        contents.isDestroyed() ||
+        !tab.view.getVisible() ||
+        !scopeCurrent(tab) ||
+        tab.drawable?.frame !== contents.mainFrame ||
+        tab.drawable.document !== tab.documentGeneration
+      ) {
+        withdraw(tab);
+        continue;
+      }
+      // The hidden parent already removes this native surface from the screen.
+      // Retire the live binding and screenshot basis, preserving only an exact
+      // candidate until this hidden Root confirms its current display intent.
+      const presentation = tab.presentation,
+        scope = tab.presentationScope;
+      cancelPaint(tab);
+      cancelMenu(tab.state.id);
       tab.sizeEpoch++;
-      delete tab.presentationFrame;
-      tab.view.setVisible(false);
+      delete tab.presentation;
+      delete tab.presentationScope;
+      delete tab.nativeProjection;
+      tab.resume = {
+        token: pageToken(tab),
+        root: owner.mainFrame,
+        contents,
+        frame: contents.mainFrame,
+        document: tab.documentGeneration,
+        geometry: JSON.stringify([...window.getContentSize(), owner.getZoomFactor()]),
+        presentation,
+        scope,
+        confirmed: false,
+      };
       automation?.present(tab.state.id, false);
     }
     active = undefined;
-    queueDisplayReconciliation();
-  };
-  const replaceRenderer = (retainLive = true) => {
-    cancelClosePreparation();
-    cancelInitialDisplay();
-    cancelPreparation();
-    chromeHost?.cancelPresentationHold();
-    clearHeldPresentation();
-    // This is only a display intent. The next Root must still restore against
-    // fresh Caller scope and present a newly measured viewport before showing it.
-    if (rendererPresented) replacedPresentation.clear();
-    for (const tab of tabs.values())
-      if (tab.scope && tab.view.getVisible() && !tab.view.webContents.isDestroyed())
-        replacedPresentation.set(scopeKey(tab.scope), tab.state.id);
-    const tab = active ? tabs.get(active) : undefined;
-    const [width = 0, height = 0] = window.getContentSize();
-    const scope = tab?.scope;
-    const control = tab && automation?.state(tab.state.id);
-    const drawn = tab?.drawnRequest;
-    const qualified =
-      retainLive &&
-      typeof ipcMain.on === 'function' &&
-      !retainedDisplay &&
-      tab &&
-      control?.incarnation &&
-      displayShieldReady &&
-      inputShield.available() &&
-      !pendingLayout &&
-      drawn?.witness.step === 2 &&
-      tab.presentationRevision === drawn.presentationRevision &&
-      tab.presentationScope &&
-      scope &&
-      tab.view.getVisible() &&
-      !tab.view.webContents.isDestroyed() &&
-      electron.BrowserWindow.fromWebContents(tab.view.webContents) === window &&
-      !!tab.presentation &&
-      tab.presentation.width === width &&
-      tab.presentation.height === height &&
-      tab.presentation.zoom === owner.getZoomFactor() &&
-      JSON.stringify(tab.presentationScope) === JSON.stringify(drawn.scope) &&
-      JSON.stringify([tab.presentation.bounds, tab.presentation.layout]) ===
-        JSON.stringify([drawn.bounds, drawn.layout]);
-    rendererPresented = false;
-    if (qualified) {
-      cancelLayout();
-      cancelMenu();
-      stopNativeFrames(tab);
-      retainedDisplay = {
-        intent: {
-          token: randomUUID().replaceAll('-', ''),
-          id: tab.state.id,
-          storeId: scope.storeId,
-          sessionId: scope.sessionId,
-          bounds: { ...drawn.bounds },
-          width,
-          height,
-          zoom: owner.getZoomFactor(),
-        },
-        tab,
-        incarnation: control.incarnation,
-        navigation: control.navigation,
-        pageGeneration: tab.generation,
-        ready: false,
-      };
-      if (!displayCurrent()) {
-        cancelRetainedDisplay();
-        return;
-      }
-      tab.sizeEpoch++;
-      automation?.present(tab.state.id, false);
-      syncInput();
-    } else hide();
+    inputShield.hide();
+    // Hidden Renderer commits still maintain intent using the new token. They
+    // never grant a live display or revive the old observation/capture basis.
     for (const tab of tabs.values()) {
-      delete tab.presentation;
-      delete tab.nativeProjection;
-      delete tab.presentationScope;
-      delete tab.presentationFrame;
+      publish(tab);
+      if (!owner.isDestroyed()) owner.send(nativeBrowserEventChannel, tab.state);
     }
+  };
+  const hide = () => {
+    visibilityEpoch++;
+    for (const tab of tabs.values()) withdraw(tab);
+    inputShield.hide();
+  };
+  const minimize = () => {
+    if (!disposed && !window.isDestroyed() && window.isMinimized()) hide();
   };
   const close = (id: string, force = false) => {
-    cancelClosePreparation(undefined, id);
-    cancelInitialDisplay(id);
-    if (
-      preparation &&
-      (preparation.target.state.id === id ||
-        (!preparation.ready && preparation.from.state.id === id))
-    )
-      cancelPreparation();
-    chromeHost?.cancelPresentationHold(id);
-    if (retainedDisplay?.tab.state.id === id) cancelRetainedDisplay();
     const tab = tabs.get(id);
     if (!tab) return;
-    stopNativeFrames(tab);
-    cancelLayout(id);
-    cancelMenu(id);
-    if (!force && automation?.retained(id)) {
-      tab.presentation = undefined;
-      delete tab.nativeProjection;
-      tab.view.setVisible(false);
-      automation.present(id, false);
-      if (active === id) active = undefined;
-      syncInput();
-      return;
-    }
+    withdraw(tab);
+    if (!force && automation?.retained(id)) return;
+    // Capture the contents before Electron can clear the View's getter. All
+    // teardown callbacks continue to belong to this exact object, never an heir.
+    const contents = tab.view.webContents;
+    tabs.delete(id);
     tab.disposeDocument?.();
     tab.unregister?.();
     tab.unprotect?.();
-    tabs.delete(id);
     if (tab.scope && lastPresented.get(scopeKey(tab.scope)) === id)
       lastPresented.delete(scopeKey(tab.scope));
     if (tab.scope && replacedPresentation.get(scopeKey(tab.scope)) === id)
       replacedPresentation.delete(scopeKey(tab.scope));
     if (tab.notification !== undefined) clearTimeout(tab.notification);
-    if (active === id) active = undefined;
-    syncInput();
-    tab.view.setVisible(false);
     if (!window.isDestroyed()) window.contentView.removeChildView(tab.view);
-    if (!tab.view.webContents.isDestroyed())
-      tab.view.webContents.close({ waitForBeforeUnload: false });
+    if (contents && !contents.isDestroyed()) contents.close({ waitForBeforeUnload: false });
   };
   const navigate = (tab: BrowserTab, url: string) => {
-    cancelInitialDisplay(tab.state.id);
-    if (preparation?.target === tab || (!preparation?.ready && preparation?.from === tab))
-      cancelPreparation();
-    chromeHost?.cancelPresentationHold(tab.state.id);
-    stopNativeFrames(tab);
+    cancelPaint(tab);
+    delete tab.resume;
+    delete tab.drawable;
+    tab.view.setVisible(false);
+    automation?.present(tab.state.id, false);
+    tab.sizeEpoch++;
     const generation = ++tab.generation;
     tab.state = {
       ...tab.state,
@@ -860,14 +457,16 @@ export function registerNativeBrowserIpc(options: {
       title: new URL(url).hostname,
       loading: true,
       error: undefined,
+      display: 'loading',
     };
     publish(tab);
-    void tab.view.webContents.loadURL(url).catch(() => {
+    const contents = tab.view.webContents;
+    void contents.loadURL(url).catch(() => {
       if (
         disposed ||
         generation !== tab.generation ||
-        tab.view.webContents.isDestroyed() ||
-        !tabs.has(tab.state.id)
+        contents.isDestroyed() ||
+        tabs.get(tab.state.id) !== tab
       )
         return;
       tab.state = { ...tab.state, loading: false, error: 'load_failed' };
@@ -918,6 +517,7 @@ export function registerNativeBrowserIpc(options: {
     return pending;
   };
   const create = (id: string, grantedScope?: BrowserPageScope, draft?: string): BrowserTab => {
+    if (tabs.has(id)) throw Error('browser_page_already_exists');
     if (tabs.size >= 8) throw Error('browser_tab_limit');
     automation?.assertCanCreate();
     const view = new WebContentsView({
@@ -941,7 +541,7 @@ export function registerNativeBrowserIpc(options: {
     // A committed page can execute while its session is in the background,
     // before Renderer has ever presented it. Chromium otherwise starts at 0x0.
     view.setBounds({ x: 0, y: 0, width: 960, height: 540 });
-    window.contentView.addChildView(view);
+    addNativeWindowView(window, view);
     const tab: BrowserTab = {
       view,
       scope: (() => {
@@ -952,9 +552,9 @@ export function registerNativeBrowserIpc(options: {
       })(),
       ...(draft ? { draft: { key: draft, frame: owner.mainFrame, epoch: rootEpoch } } : {}),
       generation: 0,
-      chromeNavigation: 0,
+      documentNavigation: 0,
+      documentGeneration: 0,
       sizeEpoch: 0,
-      viewportSize: { width: 960, height: 540 },
       state: {
         id,
         url: '',
@@ -967,37 +567,23 @@ export function registerNativeBrowserIpc(options: {
     tabs.set(id, tab);
     const contents = view.webContents;
     contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
-      if (
-        mainFrame &&
-        (preparation?.target === tab || (!preparation?.ready && preparation?.from === tab))
-      )
-        cancelPreparation();
-      if (mainFrame) chromeHost?.cancelPresentationHold(id);
-      if (mainFrame && !inPlace) {
-        cancelClosePreparation(undefined, id);
-        tab.chromeNavigation++;
-        if (retainedDisplay?.tab === tab) cancelRetainedDisplay();
-        // CDP, links and same-URL reloads do not pass through navigate().
-        // Their previous document pixels and coalescing callbacks expire too.
-        stopNativeFrames(tab);
-        tab.state = { ...tab.state, loading: true };
-      }
+      if (!mainFrame || inPlace) return;
+      cancelPaint(tab);
+      delete tab.drawable;
+      tab.documentNavigation++;
+      tab.documentGeneration++;
+      tab.sizeEpoch++;
+      tab.view.setVisible(false);
+      automation?.present(id, false);
+      tab.state = { ...tab.state, loading: true, error: undefined, display: 'loading' };
+      publish(tab);
     });
     contents.on('did-navigate-in-page', (_event, _url, mainFrame) => {
-      if (mainFrame) {
-        cancelClosePreparation(undefined, id);
-        if (preparation?.target === tab || (!preparation?.ready && preparation?.from === tab))
-          cancelPreparation();
-        chromeHost?.cancelPresentationHold(id);
-        tab.chromeNavigation++;
-      }
-    });
-    contents.on('destroyed', () => {
-      cancelClosePreparation(undefined, id);
-      if (preparation?.target === tab || (!preparation?.ready && preparation?.from === tab))
-        cancelPreparation();
-      chromeHost?.cancelPresentationHold(id);
-      if (retainedDisplay?.tab === tab) cancelRetainedDisplay();
+      if (!mainFrame) return;
+      cancelPaint(tab);
+      tab.documentNavigation++;
+      tab.sizeEpoch++;
+      publish(tab);
     });
     // Electron 44.3's native dialog manager does not implement Chromium's
     // HandleJavaScriptDialog UI cleanup. Count its per-contents native openings
@@ -1005,16 +591,7 @@ export function registerNativeBrowserIpc(options: {
     let nativeDialogSequence = 0;
     contents.on('-run-dialog' as never, () => ++nativeDialogSequence);
     contents.on('before-input-event', menuInput);
-    tab.unprotect = inputShield.protect(
-      contents,
-      () =>
-        inputBlocked(id) ||
-        retainedDisplay?.tab === tab ||
-        !!heldPresentation ||
-        !!preparation ||
-        initialDisplay?.tab === tab ||
-        closing?.tab === tab,
-    );
+    tab.unprotect = inputShield.protect(contents, () => inputBlocked(id) || !!tab.paint);
     const documentReady = createBrowserDocumentReady();
     let documentEpoch = 0;
     let readyEpoch: number | undefined = 0;
@@ -1058,6 +635,7 @@ export function registerNativeBrowserIpc(options: {
       if (committedFrame === contents.mainFrame) {
         readyEpoch = documentEpoch;
         documentReady.ready(documentEpoch);
+        if (active === id && tab.presentation) applyCurrentLayout(tab);
       }
     });
     const failedDisplayDocument = (
@@ -1110,7 +688,9 @@ export function registerNativeBrowserIpc(options: {
       });
       const clearStyle = () => {
         captureMeta = null;
-        void annotationStyle.clear().catch(() => automation.fail(id));
+        void annotationStyle.clear().catch(() => {
+          if (tabs.get(id) === tab) automation.fail(id);
+        });
       };
       const paint = () => {
         dirty = true;
@@ -1145,7 +725,6 @@ export function registerNativeBrowserIpc(options: {
           if (automation.state(id)?.phase !== 'acquiring')
             throw Error('browser_page_control_denied');
           await inputShield.prepare();
-          displayShieldReady = true;
           syncInput();
           if (!inputShield.available() || automation.state(id)?.phase !== 'acquiring')
             throw Error('browser_input_shield_unavailable');
@@ -1315,15 +894,15 @@ export function registerNativeBrowserIpc(options: {
             const current = () => {
               const now = automation.state(id);
               return (
+                !disposed &&
+                tabs.get(id) === tab &&
+                tab.view.webContents === contents &&
+                !window.isDestroyed() &&
+                electron.BrowserWindow.fromWebContents(contents) === window &&
                 !contents.isDestroyed() &&
                 contents.debugger.isAttached() &&
                 sequence === captureSequence &&
                 sizeEpoch === tab.sizeEpoch &&
-                retainedDisplay?.tab !== tab &&
-                heldPresentation?.tab !== tab &&
-                preparation?.target !== tab &&
-                initialDisplay?.tab !== tab &&
-                closing?.tab !== tab &&
                 attached === attachment &&
                 !!binding &&
                 ['acquiring', 'agent'].includes(binding.phase) &&
@@ -1488,7 +1067,7 @@ export function registerNativeBrowserIpc(options: {
         },
       });
       contents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
-        if (mainFrame && !inPlace) {
+        if (tabs.get(id) === tab && mainFrame && !inPlace) {
           automation.navigate(id);
           navigation.start(documentEpoch);
           clearStyle();
@@ -1533,7 +1112,7 @@ export function registerNativeBrowserIpc(options: {
         navigation.cancel();
       });
       contents.on('did-navigate-in-page', (_event, _url, mainFrame) => {
-        if (!mainFrame) return;
+        if (tabs.get(id) !== tab || !mainFrame) return;
         automation.navigate(id);
         navigation.inPage(documentEpoch);
         // This is still the same document. Its user stylesheet remains valid;
@@ -1542,7 +1121,9 @@ export function registerNativeBrowserIpc(options: {
       contents.on('did-finish-load', () => {
         paint();
       });
-      contents.on('destroyed', () => automation.fail(id));
+      contents.on('destroyed', () => {
+        if (tabs.get(id) === tab) automation.fail(id);
+      });
     }
     contents.setWindowOpenHandler(({ url }) => {
       if (httpUrl(url)) navigate(tab, url);
@@ -1591,16 +1172,15 @@ export function registerNativeBrowserIpc(options: {
       };
       publish(tab);
     });
-    contents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
-      if (!mainFrame || code === -3) return;
+    contents.on('did-fail-load', (_event, code, _description, url, mainFrame) => {
+      if (tabs.get(id) !== tab || !mainFrame || code === -3 || url !== documentUrl) return;
       tab.state = { ...tab.state, loading: false, error: 'load_failed' };
       publish(tab);
     });
     contents.on('render-process-gone', () => {
-      if (preparation?.target === tab || (!preparation?.ready && preparation?.from === tab))
-        cancelPreparation();
-      chromeHost?.cancelPresentationHold(id);
-      stopNativeFrames(tab);
+      if (tabs.get(id) !== tab) return;
+      cancelPaint(tab);
+      delete tab.drawable;
       tab.view.setVisible(false);
       tab.state = { ...tab.state, loading: false, error: 'process_gone' };
       automation?.fail(id);
@@ -1652,90 +1232,25 @@ export function registerNativeBrowserIpc(options: {
     },
     close: (id) => close(id),
   });
-  const present = (
-    id: string,
-    bounds: NativeBrowserBounds | null,
-    layout?: NativeBrowserLayout,
-    releaseChrome = true,
-  ) => {
-    const tab = tabs.get(id);
-    if (!tab) return;
-    if (retainedDisplay && (!bounds || retainedDisplay.tab !== tab)) cancelRetainedDisplay();
-    if (tab.state.error === 'process_gone' && inputBlocked(id)) bounds = null;
-    if (!bounds) {
-      cancelInitialDisplay(id);
-      if (preparation?.target === tab) cancelPreparation();
-      const receipt = chromeHost?.holdsPresentation(id);
-      const retain =
-        !!receipt &&
-        displayShieldReady &&
-        inputShield.available() &&
-        tab.view.getVisible() &&
-        !tab.view.webContents.isDestroyed() &&
-        sameRectangle(tab.view.getBounds(), receipt.viewport);
-      if (retain) {
-        if (
-          heldPresentation &&
-          (heldPresentation.tab !== tab || heldPresentation.key !== receipt.key)
-        )
-          clearHeldPresentation();
-        heldPresentation = { tab, key: receipt.key };
-        tab.sizeEpoch++;
-        inputShield.sync(tab.view, true);
-      }
-      if (releaseChrome) chromeHost?.release(id);
-      stopNativeFrames(tab);
-      cancelLayout(id);
-      cancelMenu(id);
-      tab.presentation = undefined;
-      delete tab.nativeProjection;
-      // The exact live page can fill the old native crop until Root's new
-      // surface arrives. It stays below Root, with no presentation authority.
-      let returning = false;
-      if (
-        closing?.tab === tab &&
-        closePreparationCurrent(closing) &&
-        displayShieldReady &&
-        inputShield.available() &&
-        tab.view.getVisible()
-      ) {
-        const children = window.contentView.children,
-          rootIndex = children.findIndex(
-            (view) => view instanceof WebContentsView && view.webContents === owner,
-          ),
-          pageIndex = children.indexOf(tab.view);
-        returning = pageIndex >= 0 && pageIndex < rootIndex;
-      }
-      if ((!retain || heldPresentation?.tab !== tab) && !returning) tab.view.setVisible(false);
-      automation?.present(id, false);
-      if (active === id) active = undefined;
-      syncInput();
-      return;
-    }
-    const zoom = owner.getZoomFactor();
-    const [width = 0, height = 0] = window.getContentSize();
-    // Renderer measurements are inputs, never another native geometry writer.
-    if (!layout && tab.presentation?.layout) throw Error('invalid_browser_request');
-    if (layout) assertPanelMeasurement(bounds, layout, width / zoom, height / zoom);
-    tab.presentation = { bounds, ...(layout ? { layout } : {}), width, height, zoom };
-    delete tab.nativeProjection;
-    applyCurrentLayout(tab);
-  };
-  // Both native resize predictions and accepted Renderer corrections are
-  // computed here against the current window, then diffed at the native output.
-  const applyCurrentLayout = (tab: BrowserTab, nativeResize = false) => {
+  // The measured CSS rectangle and panel policy form the single geometry input.
+  // Native resize and Renderer corrections share this calculation and output.
+  const applyCurrentLayout = (tab: BrowserTab, beforeShow = false) => {
     const anchor = tab.presentation;
     if (
       !anchor ||
       disposed ||
       window.isDestroyed() ||
       tabs.get(tab.state.id) !== tab ||
+      !tab.view.webContents ||
       tab.view.webContents.isDestroyed()
     )
       return;
-    if (preparation && tab !== preparation.from && tab !== preparation.target) cancelPreparation();
-    const zoom = owner.getZoomFactor();
-    const [width = 0, height = 0] = window.getContentSize();
+    if (!scopeCurrent(tab)) {
+      withdraw(tab);
+      return;
+    }
+    const zoom = owner.getZoomFactor(),
+      [width = 0, height = 0] = window.getContentSize();
     const cached = tab.nativeProjection?.source === anchor ? tab.nativeProjection : undefined;
     const projected = anchor.layout
       ? cached?.layout.windowWidth === width / zoom && cached.layout.windowHeight === height / zoom
@@ -1747,1406 +1262,56 @@ export function registerNativeBrowserIpc(options: {
             height / zoom,
           )
       : undefined;
-    // Native constraints have history (a min clamp changes the relative share).
-    // Keep that history separate from the last accepted Renderer anchor/proof.
     if (projected) tab.nativeProjection = { source: anchor, ...projected };
     const bounds = anchor.layout ? projected?.bounds : anchor.bounds;
     if (!bounds) {
-      present(tab.state.id, null);
+      withdraw(tab);
       return;
     }
-    const id = tab.state.id;
-    // Round into the measured container, so fractional CSS edges cannot cover chat.
-    const x = Math.max(0, Math.min(width, Math.ceil(bounds.x * zoom)));
-    const y = Math.max(0, Math.min(height, Math.ceil(bounds.y * zoom)));
-    const right = Math.min(width, Math.floor((bounds.x + bounds.width) * zoom));
-    const bottom = Math.min(height, Math.floor((bounds.y + bounds.height) * zoom));
+    const x = Math.max(0, Math.min(width, Math.ceil(bounds.x * zoom))),
+      y = Math.max(0, Math.min(height, Math.ceil(bounds.y * zoom))),
+      right = Math.min(width, Math.floor((bounds.x + bounds.width) * zoom)),
+      bottom = Math.min(height, Math.floor((bounds.y + bounds.height) * zoom));
     if (right <= x || bottom <= y) {
-      stopNativeFrames(tab);
-      tab.view.setVisible(false);
-      automation?.present(id, false);
-      if (active === id) active = undefined;
-      syncInput();
+      withdraw(tab);
       return;
     }
-    for (const [otherId, other] of tabs)
-      if (otherId !== id) {
-        stopNativeFrames(other);
-        if (
-          currentHeldPresentation()?.tab !== other &&
-          currentPreparation()?.target !== other &&
-          other.view.getVisible()
-        )
-          other.view.setVisible(false);
-        automation?.present(otherId, false);
-      }
-    if (active !== id) cancelMenu();
-    active = id;
-    if (tab.scope) lastPresented.set(scopeKey(tab.scope), id);
-    if (tab.draft) lastPresented.set(`draft:${tab.draft.key}`, id);
-    const viewportSize = { width: right - x, height: bottom - y };
-    if (
-      tab.viewportSize?.width !== viewportSize.width ||
-      tab.viewportSize.height !== viewportSize.height
-    ) {
-      tab.sizeEpoch++;
-      tab.viewportSize = viewportSize;
-    }
-    // Crop the app Root with its own native bounds before moving the live page.
-    // A slow Root paint can no longer cover or receive input in the right column.
-    chromeHost?.syncViewport(nativeResize);
-    chromeHost?.layout(id, { x, y, ...viewportSize }, chromeOwner(tab));
+    const next = { x, y, width: right - x, height: bottom - y };
     const previous = tab.view.getBounds();
-    if (
-      previous.x !== x ||
-      previous.y !== y ||
-      previous.width !== viewportSize.width ||
-      previous.height !== viewportSize.height
-    )
-      tab.view.setBounds({ x, y, ...viewportSize });
+    if (!sameRectangle(previous, next)) {
+      if (previous.width !== next.width || previous.height !== next.height) tab.sizeEpoch++;
+      cancelPaint(tab);
+      tab.view.setBounds(next);
+    }
     const radius = Math.floor(
-      Math.min(Math.round(bounds.radius * zoom), viewportSize.width / 2, viewportSize.height / 2),
+      Math.min(Math.round(bounds.radius * zoom), next.width / 2, next.height / 2),
     );
     if (tab.borderRadius !== radius) {
       tab.view.setBorderRadius(radius);
       tab.borderRadius = radius;
     }
-    const visible = window.isVisible() && !window.isMinimized();
-    const held = currentHeldPresentation();
-    if (held && held.tab !== tab) {
-      const children = window.contentView.children,
-        sourceIndex = children.indexOf(held.tab.view),
-        targetIndex = children.indexOf(tab.view);
-      // Keep the visible source layer attached; move only its replacement below it.
-      if (targetIndex > sourceIndex) window.contentView.addChildView(tab.view, sourceIndex);
-    }
-    if (tab.view.getVisible() !== visible) tab.view.setVisible(visible);
-    rendererPresented = true;
-    if (tab.scope && replacedPresentation.get(scopeKey(tab.scope)) === id)
-      replacedPresentation.delete(scopeKey(tab.scope));
-    automation?.present(id, window.isVisible() && !window.isMinimized());
-    const prepared = currentPreparation();
-    if (
-      prepared?.target === tab &&
-      prepared.ready &&
-      chromeHost?.readyFor(id, chromeOwner(tab)) &&
-      sameRectangle(tab.view.getBounds(), prepared.bounds)
-    )
-      cancelPreparation(prepared.key, true);
-    syncInput();
-    if (visible) prepareHeldTarget(tab);
-    if (visible && !heldPresentation) chromeHost?.completePresentation(id);
-    chromeHost?.update();
-    startNativeFrames(tab);
-    if (!displayShieldReady)
-      void inputShield.prepare().then(
-        () => {
-          displayShieldReady = true;
-        },
-        () => {},
-      );
-  };
-  if (options.chrome && process.platform === 'darwin')
-    chromeHost = createNativeBrowserChromeHost({
-      window,
-      ipcMain,
-      rendererUrl,
-      preloadPath: options.chrome.preloadPath,
-      onStateChanged() {
-        syncInput();
-        queueDisplayReconciliation();
-      },
-      onDisplayCancelled(id, signal) {
-        const d = initialDisplay;
-        if (!d || d.tab.state.id !== id || d.controller.signal !== signal) return;
-        const current = initialDisplayCurrent(d);
-        cancelInitialDisplay(id);
-        if (current) acknowledgeDisplay(d.request, false, true);
-      },
-      onLoadingFailed(id) {
-        const pending = loadingRequest;
-        if (
-          !pending ||
-          pending.tab.state.id !== id ||
-          pending.frame !== owner.mainFrame ||
-          pending.epoch !== rootEpoch ||
-          tabs.get(id) !== pending.tab ||
-          pageToken(pending.tab) !== pending.token ||
-          !chromeHost?.acceptsPresentation(id, requestOwner(pending.request)!)
-        )
-          return;
-        loadingRequest = undefined;
-        acknowledgeDisplay(pending.request, false, true);
-      },
-      canProtectLivePage: () => displayShieldReady && inputShield.available(),
-      protectLivePage(view) {
-        if (!displayShieldReady || !inputShield.available()) return false;
-        inputShield.sync(view, true);
-        return inputShield.available();
-      },
-      currentScope(forInput) {
-        const scope = (
-          forInput ? options.selectedScope : (options.grantScope ?? options.selectedScope)
-        )?.();
-        return isNativeBrowserRestoreScope(scope) ? scope : undefined;
-      },
-      getPage(id) {
-        const tab = tabs.get(id),
-          contents = tab?.view.webContents;
-        if (
-          !tab ||
-          !contents ||
-          contents.isDestroyed() ||
-          (tab.draft && !draftCurrent(tab, tab.draft.key))
-        )
-          return;
-        return {
-          id,
-          view: tab.view,
-          // Page ownership exists before its first presentation. Waiting for a
-          // drawn scope here prevents the initial Chrome offer from starting.
-          scope: tab.scope,
-          ...(tab.draft ? { draft: tab.draft.key } : {}),
-          token: pageToken(tab),
-        };
-      },
-      onReady(id) {
-        const initial = initialDisplay;
-        if (initial?.tab.state.id === id) {
-          if (!initial.ready || !initial.offered || !initialDisplayCurrent(initial)) return;
-          adoptInitialDisplay(initial);
-          return;
-        }
-        const tab = tabs.get(id),
-          request = tab?.drawnRequest;
-        if (
-          !tab ||
-          !request ||
-          !requestOwner(request) ||
-          !layoutCurrent({ tab, request, confirmed: false })
-        )
-          return;
-        cancelLayout();
-        stopNativeFrames(tab);
-        tab.presentationScope = request.scope;
-        present(id, request.bounds, request.layout);
-        cancelLayout();
-      },
-      onSuspend(id) {
-        if (!disposed && tabs.has(id)) present(id, null, undefined, false);
-      },
-      preparedPresentation() {
-        const p = currentPreparation();
-        return p?.ready
-          ? { fromId: p.from.state.id, targetId: p.target.state.id, scope: p.scope }
-          : undefined;
-      },
-      onShellReleased(id) {
-        if (!id) return;
-        cancelInitialDisplay(id);
-        if (preparation?.from.state.id === id || preparation?.target.state.id === id)
-          cancelPreparation();
-        cancelClosePreparation(undefined, id);
-      },
-      onContextChanged() {
-        loadingRequest = undefined;
-        displayAttempt = undefined;
-        cancelClosePreparation();
-        cancelInitialDisplay();
-        cancelPreparation();
-        cancelLayout();
-        for (const [id, tab] of tabs) {
-          if (retainedDisplay?.tab === tab) continue;
-          stopNativeFrames(tab);
-          delete tab.drawnRequest;
-          delete tab.drawnPresentation;
-          present(id, null, undefined, false);
-        }
-      },
-      onRootReturnCancelled(id) {
-        cancelClosePreparation(undefined, id);
-      },
-      onPresentationHoldEnd(id, key) {
-        if (heldPresentation?.tab.state.id !== id || heldPresentation.key !== key) return;
-        clearHeldPresentation(key);
-        syncInput();
-      },
-    });
-  function cancelRetainedDisplay() {
-    const saved = retainedDisplay;
-    if (!saved) return;
-    retainedDisplay = undefined;
-    retiredDisplayToken = saved.intent.token;
-    present(saved.tab.state.id, null);
-    if (!owner.isDestroyed())
-      owner.send(nativeBrowserDisplayChannel, { token: saved.intent.token });
-  }
-  function prepareHeldTarget(tab: BrowserTab) {
-    const held = currentHeldPresentation();
-    if (!held || held.tab === tab) return;
-    if (chromeHost?.holdsPresentation(held.tab.state.id)?.targetId !== tab.state.id) {
-      chromeHost?.cancelPresentationHold();
-      return;
-    }
-    if (tab.presentationReady) {
-      if (tab.presentationReady.key !== held.key) chromeHost?.cancelPresentationHold(tab.state.id);
-      return;
-    }
-    const contents = tab.view.webContents,
-      frame = contents.mainFrame,
-      rootFrame = owner.mainFrame,
-      bounds = tab.view.getBounds(),
-      generation = tab.generation,
-      navigation = tab.chromeNavigation,
-      revision = tab.presentationRevision;
-    const current = () =>
-      heldPresentation === held &&
-      currentHeldPresentation() === held &&
-      active === tab.state.id &&
-      tabs.get(tab.state.id) === tab &&
-      !contents.isDestroyed() &&
-      contents.mainFrame === frame &&
-      owner.mainFrame === rootFrame &&
-      tab.generation === generation &&
-      tab.chromeNavigation === navigation &&
-      tab.presentationRevision === revision &&
-      tab.view.getVisible() &&
-      sameRectangle(tab.view.getBounds(), bounds) &&
-      sameRectangle(chromeHost!.holdsPresentation(held.tab.state.id)!.viewport, bounds);
-    // Read only this target's current full frame as readiness. No screenshot is
-    // stored, shown or returned to the model; the Host deadline bounds the hold.
-    try {
-      const read = contents
-        .capturePage()
-        .then(
-          (image) => {
-            if (!current()) {
-              if (heldPresentation === held) chromeHost?.cancelPresentationHold(tab.state.id);
-              return;
-            }
-            if (!fullFrameMatches(image, bounds)) {
-              chromeHost?.cancelPresentationHold(tab.state.id);
-              return;
-            }
-            chromeHost?.completePresentation(tab.state.id);
-          },
-          () => {
-            if (heldPresentation === held) chromeHost?.cancelPresentationHold(tab.state.id);
-          },
-        )
-        .finally(() => {
-          if (tab.presentationReady?.read === read) delete tab.presentationReady;
-        });
-      tab.presentationReady = { key: held.key, read };
-      void read.catch(() => {
-        if (heldPresentation === held) chromeHost?.cancelPresentationHold(tab.state.id);
-      });
-    } catch {
-      chromeHost?.cancelPresentationHold(tab.state.id);
-    }
-  }
-  function preparePresentation(fromId: string, targetId: string): Promise<{ key: string } | null> {
-    cancelPreparation();
-    const from = tabs.get(fromId),
-      target = tabs.get(targetId),
-      fromContents = from?.view.webContents,
-      targetContents = target?.view.webContents,
-      scope = from && chromeOwner(from);
-    if (
-      !from ||
-      !target ||
-      !fromContents ||
-      !targetContents ||
-      active !== fromId ||
-      retainedDisplay ||
-      !scope ||
-      fromContents.isDestroyed() ||
-      targetContents.isDestroyed() ||
-      !from.view.getVisible() ||
-      !httpUrl(target.view.webContents.getURL()) ||
-      !target.state.url ||
-      target.state.error ||
-      target.state.loading ||
-      target.view.webContents.isLoadingMainFrame() ||
-      target.presentationReady ||
-      !displayShieldReady ||
-      !inputShield.available() ||
-      [from, target].some((tab) => !displayOwnerCurrent(tab, scope))
-    )
-      return Promise.resolve(null);
-    const bounds = chromeHost?.presentationViewport(scope);
-    if (
-      !bounds ||
-      !sameRectangle(from.view.getBounds(), bounds) ||
-      (target.view.getVisible() && currentHeldPresentation()?.tab !== target)
-    )
-      return Promise.resolve(null);
-    let resolve!: Preparation['resolve'];
-    const promise = new Promise<{ key: string } | null>((done) => {
-      resolve = done;
-    });
-    const expire = () => {
-      if (preparation !== p) return;
-      cancelPreparation(p.key);
-      syncInput();
-      chromeHost?.update();
-    };
-    const p: Preparation = {
-      key: randomUUID().replaceAll('-', ''),
-      from,
-      target,
-      scope: { ...scope },
-      frame: owner.mainFrame,
-      targetFrame: target.view.webContents.mainFrame,
-      targetToken: pageToken(target),
-      sourceToken: pageToken(from),
-      url: target.view.webContents.getURL(),
-      bounds,
-      ready: false,
-      expires: performance.now() + 100,
-      resolve,
-      timer: setTimeout(expire, 100),
-    };
-    preparation = p;
-    try {
-      // Native preparation changes the real viewport but creates no model observation.
-      // Retire the previous coordinate basis before resizing, just as normal layout does.
-      stopNativeFrames(target);
-      target.sizeEpoch++;
-      delete target.presentationFrame;
-      target.viewportSize = { width: bounds.width, height: bounds.height };
-      if (!sameRectangle(target.view.getBounds(), bounds)) target.view.setBounds(bounds);
-      if (!target.view.getVisible()) {
-        const children = window.contentView.children,
-          sourceIndex = children.indexOf(from.view),
-          targetIndex = children.indexOf(target.view);
-        if (sourceIndex < 0 || targetIndex < 0) {
-          expire();
-          return promise;
-        }
-        if (targetIndex > sourceIndex) window.contentView.addChildView(target.view, sourceIndex);
-        target.view.setVisible(true);
-      }
-      automation?.present(targetId, false);
-      syncInput();
-      const read = target.view.webContents
-        .capturePage()
-        .then((image) => {
-          if (currentPreparation() !== p || !fullFrameMatches(image, bounds)) {
-            expire();
-            return;
-          }
-          p.ready = true;
-          p.expires = performance.now() + 1500;
-          clearTimeout(p.timer);
-          p.timer = setTimeout(expire, 1500);
-          p.resolve({ key: p.key });
-        }, expire)
-        .finally(() => {
-          if (target.presentationReady?.read === read) delete target.presentationReady;
-        });
-      target.presentationReady = { key: p.key, read };
-      void read.catch(expire);
-    } catch {
-      expire();
-    }
-    return promise;
-  }
-  const displayCurrent = () => {
-    const saved = retainedDisplay;
-    if (!saved) return false;
-    const { tab, intent } = saved;
-    const [width, height] = window.getContentSize();
-    const control = automation?.state(tab.state.id);
-    const actual = tab.view.getBounds();
-    const left = Math.ceil(intent.bounds.x * intent.zoom),
-      top = Math.ceil(intent.bounds.y * intent.zoom);
-    return (
-      !disposed &&
-      !window.isDestroyed() &&
-      window.isVisible() &&
+    const contents = tab.view.webContents;
+    const drawable =
+      tab.drawable?.frame === contents.mainFrame &&
+      tab.drawable.document === tab.documentGeneration;
+    const visible =
+      (window.isVisible() || beforeShow) &&
       !window.isMinimized() &&
-      !owner.isDestroyed() &&
-      tabs.get(tab.state.id) === tab &&
-      active === tab.state.id &&
-      !tab.view.webContents.isDestroyed() &&
-      tab.view.getVisible() &&
-      electron.BrowserWindow.fromWebContents(tab.view.webContents) === window &&
-      displayShieldReady &&
-      inputShield.available() &&
-      control?.incarnation === saved.incarnation &&
-      control.navigation === saved.navigation &&
-      tab.generation === saved.pageGeneration &&
-      width === intent.width &&
-      height === intent.height &&
-      owner.getZoomFactor() === intent.zoom &&
-      actual.x === left &&
-      actual.y === top &&
-      actual.width === Math.floor((intent.bounds.x + intent.bounds.width) * intent.zoom) - left &&
-      actual.height === Math.floor((intent.bounds.y + intent.bounds.height) * intent.zoom) - top
-    );
-  };
-  const displayBootstrap = (event: Electron.IpcMainEvent, value: unknown) => {
-    try {
-      assertNativeSender(event, disposed ? undefined : window, rendererUrl);
-      if (!value || typeof value !== 'object') throw Error('invalid_browser_request');
-      const input = value as { action: string; token?: string; request?: unknown };
-      if (input.action === 'get') {
-        if (retainedDisplay && !displayCurrent()) cancelRetainedDisplay();
-        event.returnValue = retainedDisplay ? structuredClone(retainedDisplay.intent) : null;
-        return;
-      }
-      const saved = retainedDisplay;
-      if (input.action === 'cancel' && input.token === retiredDisplayToken) {
-        event.returnValue = true;
-        return;
-      }
-      if (!saved || input.token !== saved.intent.token) {
-        event.returnValue = false;
-        return;
-      }
-      if (input.action === 'cancel') {
-        cancelRetainedDisplay();
-        event.returnValue = true;
-        return;
-      }
-      if (!displayCurrent()) {
-        cancelRetainedDisplay();
-        event.returnValue = false;
-        return;
-      }
-      if (input.action === 'ready') {
-        saved.ready = true;
-        event.returnValue = true;
-        return;
-      }
-      if (input.action !== 'claim' || !saved.ready) throw Error('invalid_browser_request');
-      const request = parseNativeBrowserRequest(input.request);
-      const selected = (options.grantScope ?? options.selectedScope)?.();
-      if (
-        request.action !== 'present' ||
-        request.id !== saved.tab.state.id ||
-        !request.scope ||
-        !request.bounds ||
-        !request.layout ||
-        !selected ||
-        request.scope.generation === saved.tab.presentationGeneration ||
-        request.scope.storeId !== saved.intent.storeId ||
-        request.scope.sessionId !== saved.intent.sessionId ||
-        !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-          (key) => request.scope![key] === selected[key],
-        ) ||
-        JSON.stringify(request.bounds) !== JSON.stringify(saved.intent.bounds) ||
-        !currentPanelMeasurement(
-          request.layout,
-          saved.intent.width / saved.intent.zoom,
-          saved.intent.height / saved.intent.zoom,
-        )
-      ) {
-        cancelRetainedDisplay();
-        event.returnValue = false;
-        return;
-      }
-      saved.claimed = { ...request.scope };
-      event.returnValue = true;
-    } catch {
-      event.returnValue = false;
-    }
-  };
-  ipcMain.on?.(nativeBrowserDisplayChannel, displayBootstrap);
-  const layoutCurrent = (pending: NonNullable<typeof pendingLayout>) => {
-    const { tab, request } = pending;
-    const selected = (options.grantScope ?? options.selectedScope)?.();
-    const [width = 0, height = 0] = window.getContentSize(),
-      zoom = owner.getZoomFactor();
-    return (
-      !disposed &&
-      (!retainedDisplay || displayCurrent()) &&
-      !window.isDestroyed() &&
-      !owner.isDestroyed() &&
-      window.isVisible() &&
-      !window.isMinimized() &&
-      tabs.get(tab.state.id) === tab &&
-      !tab.view.webContents.isDestroyed() &&
-      (request.draft
-        ? draftCurrent(tab, request.draft)
-        : !!selected &&
-          !!request.scope &&
-          (['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-            (key) => selected[key] === request.scope![key],
-          )) &&
-      tab.presentationRevision === request.presentationRevision &&
-      currentPanelMeasurement(request.layout, width / zoom, height / zoom)
-    );
-  };
-  const savedResizeFrame = (tab: BrowserTab) => {
-    const saved = tab.resizeFrame;
-    return saved &&
-      saved.generation === tab.generation &&
-      saved.url === tab.view.webContents.getURL()
-      ? saved.frame
-      : undefined;
-  };
-  const nativeFrameCurrent = (tab: BrowserTab, frames: NonNullable<BrowserTab['nativeFrames']>) => {
-    const selected = (options.grantScope ?? options.selectedScope)?.();
-    const bounds = tab.view.getBounds();
-    return (
-      !disposed &&
-      !owner.isDestroyed() &&
-      tabs.get(tab.state.id) === tab &&
-      tab.nativeFrames === frames &&
-      tab.view.getVisible() &&
-      active === tab.state.id &&
-      !tab.view.webContents.isDestroyed() &&
-      tab.generation === frames.generation &&
-      tab.view.webContents.getURL() === frames.url &&
-      owner.getZoomFactor() === frames.zoom &&
-      (electron.screen?.getDisplayMatching(window.getBounds()).scaleFactor ?? 1) === frames.scale &&
-      bounds.width === frames.width &&
-      bounds.height === frames.height &&
-      !!selected &&
-      (['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-        (key) => selected[key] === frames.scope[key],
-      )
-    );
-  };
-  const flushNativeFrame = (tab: BrowserTab) => {
-    const frames = tab.nativeFrames;
-    if (!frames?.latest || !nativeFrameCurrent(tab, frames)) return;
-    clearTimeout(frames.timer);
-    delete frames.timer;
-    const image = frames.latest;
-    frames.latest = undefined;
-    delete tab.resizeFrame;
-    try {
-      const bytes = image.toPNG();
-      if (
-        bytes.length < 24 ||
-        bytes.length > 4 * 1024 * 1024 ||
-        !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-      )
-        return;
-      const width = bytes.readUInt32BE(16),
-        height = bytes.readUInt32BE(20);
-      if (
-        !width ||
-        !height ||
-        width > 16384 ||
-        height > 16384 ||
-        width * height > 64000000 ||
-        Math.abs(width - Math.round(frames.width * frames.scale)) > 1 ||
-        Math.abs(height - Math.round(frames.height * frames.scale)) > 1
-      )
-        return;
-      const frame: NativeBrowserFrozenFrame = {
-        key: randomUUID().replaceAll('-', ''),
-        mimeType: 'image/png',
-        data: bytes.toString('base64'),
-        width,
-        height,
-        cssWidth: frames.width / frames.zoom,
-        cssHeight: frames.height / frames.zoom,
-        rootZoom: frames.zoom,
-      };
-      frames.sent = Date.now();
-      tab.resizeFrame = {
-        generation: frames.generation,
-        url: frames.url,
-        size: JSON.stringify([frames.width, frames.height]),
-        frame,
-      };
-      const request = tab.drawnRequest;
-      if (request)
-        owner.send(nativeBrowserLayoutFrameChannel, {
-          id: tab.state.id,
-          scope: request.scope,
-          presentationRevision: request.presentationRevision,
-          key: request.witness.key,
-          step: 0,
-          frozen: frame,
-        });
-    } catch {}
-  };
-  const startNativeFrames = (tab: BrowserTab) => {
-    if (chromeHost?.readyFor(tab.state.id, tab.presentationScope)) return;
-    const request = tab.drawnRequest;
-    if (
-      !request?.scope ||
-      !tab.view.getVisible() ||
-      pendingLayout ||
-      tab.state.loading ||
-      tab.view.webContents.isDestroyed()
-    )
-      return;
-    if (tab.nativeFrames && nativeFrameCurrent(tab, tab.nativeFrames)) return;
-    // A viewport handoff has not produced new page pixels yet. Retain the last
-    // actually presented frame until the new full frame arrives. Real hide,
-    // navigation, scope changes and close still discard it at their boundaries.
-    stopNativeFrames(tab, true);
-    const bounds = tab.view.getBounds();
-    const frames: NonNullable<BrowserTab['nativeFrames']> = {
-      generation: tab.generation,
-      url: tab.view.webContents.getURL(),
-      scope: request.scope,
-      width: bounds.width,
-      height: bounds.height,
-      zoom: owner.getZoomFactor(),
-      sent: 0,
-      scale: electron.screen?.getDisplayMatching(window.getBounds()).scaleFactor ?? 1,
-    };
-    tab.nativeFrames = frames;
-    try {
-      // onlyDirty=true supplies a cropped image. Keep the full presented frame,
-      // using dirtyRect only to ignore presentations that repaint no pixels.
-      tab.view.webContents.beginFrameSubscription(false, (image, dirtyRect) => {
-        if (
-          !nativeFrameCurrent(tab, frames) ||
-          pendingLayout ||
-          dirtyRect.width <= 0 ||
-          dirtyRect.height <= 0
-        )
-          return;
-        const size = image.getSize();
-        if (
-          size.width <= 0 ||
-          size.height <= 0 ||
-          size.width > 16384 ||
-          size.height > 16384 ||
-          size.width * size.height > 64000000 ||
-          Math.abs(size.width - Math.round(frames.width * frames.scale)) > 1 ||
-          Math.abs(size.height - Math.round(frames.height * frames.scale)) > 1
-        )
-          return;
-        frames.latest = image;
-        const delay = Math.max(0, 100 - (Date.now() - frames.sent));
-        if (!delay) flushNativeFrame(tab);
-        else if (!frames.timer)
-          frames.timer = setTimeout(() => {
-            delete frames.timer;
-            flushNativeFrame(tab);
-          }, delay);
-      });
-    } catch {
-      stopNativeFrames(tab);
-    }
-  };
-  const matchesDraw = (
-    image: Electron.NativeImage,
-    request: {
-      bounds: NativeBrowserBounds;
-      layout: Pick<NativeBrowserLayout, 'windowWidth' | 'windowHeight'>;
-      witness: { key: string; step: 1 | 2 };
-    },
-  ) => {
-    const { width, height } = image.getSize();
-    if (!width || !height || width * height > 64000000) return false;
-    const scaleX = width / request.layout.windowWidth,
-      scaleY = height / request.layout.windowHeight;
-    if (Math.abs(scaleX - scaleY) > 0.02 || scaleX < 0.25 || scaleX > 8) return false;
-    const bytes = image.toBitmap();
-    if (bytes.length !== width * height * 4) return false;
-    const samples: number[][] = [];
-    for (const { x, y } of nativeBrowserWitnessSamplePoints(request.bounds, scaleX, scaleY)) {
-      if (x < 0 || y < 0 || x >= width || y >= height) return false;
-      const offset = (y * width + x) * 4;
-      if (bytes[offset + 3]! < 250) return false;
-      samples.push([bytes[offset]!, bytes[offset + 1]!, bytes[offset + 2]!]);
-    }
-    const references = samples.slice(0, 16);
-    // A collapsed/ambiguous ramp is not evidence. Comparing within this frame
-    // tolerates its ICC/gamma transform without widening the nonce acceptance.
-    if (
-      references.some(
-        (sample, level) =>
-          level > 0 && sample.some((value, channel) => value <= references[level - 1]![channel]!),
-      )
-    )
-      return false;
-    return [...request.witness.key].every((digit, index) => {
-      const nibble = Number.parseInt(digit, 16),
-        level = request.witness.step === 1 ? nibble : 15 - nibble;
-      const sample = samples[index + 16]!,
-        reference = references[level]!;
-      if (!sample.every((value, channel) => Math.abs(value - reference[channel]!) <= 1))
-        return false;
-      const distance = (target: number[]) =>
-        sample.reduce((sum, value, channel) => sum + (value - target[channel]!) ** 2, 0);
-      const own = distance(reference);
-      return references.every(
-        (other, candidate) => candidate === level || own * 4 < distance(other),
-      );
-    });
-  };
-  const acknowledgeDisplay = (request: DrawnPresentation, presented: boolean, error = false) => {
-    if (owner.isDestroyed()) return;
-    owner.send(nativeBrowserLayoutFrameChannel, {
-      id: request.id,
-      ...(request.draft ? { draft: request.draft } : { scope: request.scope }),
-      presentationRevision: request.presentationRevision,
-      key: request.witness.key,
-      step: 2,
-      presented,
-      ...(error ? { error: 'browser_presentation_unavailable' } : {}),
-    });
-  };
-  function closePreparationCurrent(p: Closing) {
-    const tab = tabs.get(p.tab.state.id);
-    const [width = 0, height = 0] = window.getContentSize();
-    return (
-      closing === p &&
-      !disposed &&
-      !window.isDestroyed() &&
-      !owner.isDestroyed() &&
-      owner.mainFrame === p.frame &&
-      rootEpoch === p.epoch &&
-      tab === p.tab &&
-      !tab.view.webContents.isDestroyed() &&
-      pageToken(tab) === p.token &&
-      window.isVisible() &&
-      !window.isMinimized() &&
-      owner.getZoomFactor() === p.zoom &&
-      width === p.bounds.width &&
-      height === p.bounds.height &&
-      displayOwnerCurrent(tab, p.scope) &&
-      !!chromeHost?.rootReturnCurrent(tab.state.id, p.scope)
-    );
-  }
-  function stopCloseFrames(p: Closing) {
-    clearTimeout(p.timer);
-    if (!p.subscribed) return;
-    p.subscribed = false;
-    try {
-      owner.endFrameSubscription();
-    } catch {}
-  }
-  function cancelClosePreparation(key?: string, id?: string) {
-    const p = closing;
-    if (!p || (key && key !== p.receipt.key) || (id && id !== p.tab.state.id)) return;
-    closing = undefined;
-    stopCloseFrames(p);
-    p.confirming?.(false);
-    p.finishing?.(false);
-    const contents = tabs.get(p.tab.state.id) === p.tab ? p.tab.view.webContents : undefined;
-    if (contents && !contents.isDestroyed() && !p.tab.presentation) {
-      p.tab.view.setVisible(false);
-      automation?.present(p.tab.state.id, false);
-    }
-    chromeHost?.cancelRootReturn(p.tab.state.id);
+      !tab.state.error &&
+      drawable &&
+      (!inputBlocked(tab.state.id) || inputShield.available());
+    if (visible) promotePage(tab);
+    const preparing = !drawable && !!tab.paint?.underlay && coveredByRoot(tab);
+    if (!preparing && tab.view.getVisible() !== !!visible) tab.view.setVisible(!!visible);
+    automation?.present(tab.state.id, !!visible && window.isVisible());
     syncInput();
-  }
-  function finishClosePreparation(p: Closing) {
-    if (!p.finishing || !p.cleared || !closePreparationCurrent(p)) return;
-    closing = undefined;
-    stopCloseFrames(p);
-    try {
-      close(p.tab.state.id, true);
-      chromeHost?.finishRootReturn(p.tab.state.id);
-      p.finishing(true);
-    } catch {
-      chromeHost?.cancelRootReturn(p.tab.state.id);
-      p.finishing(false);
-    }
-  }
-  function prepareClose(id: string, draft?: string): NativeBrowserClosePreparation | null {
-    cancelClosePreparation();
-    const tab = tabs.get(id),
-      scope = tab && chromeOwner(tab);
-    if (
-      !tab ||
-      !scope ||
-      active !== id ||
-      !displayOwnerCurrent(tab, scope) ||
-      (tab.draft ? !draftCurrent(tab, draft) : !!draft) ||
-      retainedDisplay ||
-      !displayShieldReady ||
-      !inputShield.available()
-    )
-      return null;
-    cancelInitialDisplay();
-    cancelPreparation();
-    cancelLayout();
-    const layout = chromeHost?.beginRootReturn(id, scope);
-    if (!layout) return null;
-    const receipt = {
-      key: randomUUID().replaceAll('-', ''),
-      witness: randomUUID().replaceAll('-', '').slice(0, 24),
-      ...layout,
-    };
-    const [width = 0, height = 0] = window.getContentSize();
-    const p: Closing = {
-      tab,
-      scope,
-      receipt,
-      frame: owner.mainFrame,
-      epoch: rootEpoch,
-      token: pageToken(tab),
-      bounds: { x: 0, y: 0, width, height },
-      zoom: owner.getZoomFactor(),
-      timer: setTimeout(() => cancelClosePreparation(receipt.key), 5000),
-      subscribed: false,
-      marked: false,
-      cleared: false,
-    };
-    closing = p;
-    tab.sizeEpoch++;
-    delete tab.presentationFrame;
-    stopNativeFrames(tab);
-    syncInput();
-    try {
-      p.subscribed = true;
-      owner.beginFrameSubscription((image) => {
-        if (closing !== p) return;
-        if (!closePreparationCurrent(p)) {
-          cancelClosePreparation(receipt.key);
-          return;
-        }
-        try {
-          const size = image.getSize(),
-            scale = size.width / receipt.width;
-          if (
-            !fullFrameMatches(image, {
-              x: 0,
-              y: 0,
-              width: receipt.width * p.zoom,
-              height: receipt.height * p.zoom,
-            }) ||
-            scale < 0.25 ||
-            scale > 8 ||
-            Math.abs(scale - size.height / receipt.height) > 0.02
-          )
-            return;
-          const draw = {
-            bounds: receipt.bounds,
-            layout: { windowWidth: receipt.width, windowHeight: receipt.height },
-            witness: { key: receipt.witness, step: 1 as const },
-          };
-          const marked = matchesDraw(image, draw);
-          if (!p.marked) {
-            if (!p.confirming || !marked) return;
-            p.marked = true;
-            p.confirming(true);
-            delete p.confirming;
-            return;
-          }
-          if (marked) return;
-          const bytes = image.toBitmap();
-          if (bytes.length !== size.width * size.height * 4) return;
-          // Transparent/empty output cannot prove that Root has replaced the nonce.
-          const points = nativeBrowserWitnessSamplePoints(receipt.bounds, scale, scale);
-          for (const point of points) {
-            if (
-              point.x < 0 ||
-              point.y < 0 ||
-              point.x >= size.width ||
-              point.y >= size.height ||
-              bytes[(point.y * size.width + point.x) * 4 + 3]! < 250
-            )
-              return;
-          }
-          p.cleared = true;
-          finishClosePreparation(p);
-        } catch {
-          cancelClosePreparation(receipt.key);
-        }
-      });
-      owner.invalidate();
-      return receipt;
-    } catch {
-      cancelClosePreparation(receipt.key);
-      return null;
-    }
-  }
-  function confirmClose(key: string): Promise<boolean> {
-    const p = closing;
-    if (!p || p.receipt.key !== key || !closePreparationCurrent(p) || p.confirming || p.finishing)
-      return Promise.resolve(false);
-    if (p.marked) return Promise.resolve(true);
-    return new Promise((resolve) => {
-      p.confirming = resolve;
-      owner.invalidate();
-    });
-  }
-  function finishClose(key: string): Promise<boolean> {
-    const p = closing;
-    if (!p || p.receipt.key !== key || !closePreparationCurrent(p) || !p.marked || p.finishing)
-      return Promise.resolve(false);
-    return new Promise((resolve) => {
-      p.finishing = resolve;
-      finishClosePreparation(p);
-      owner.invalidate();
-    });
-  }
-  const initialDisplayCurrent = (d: NonNullable<typeof initialDisplay>) => {
-    const contents = tabs.get(d.tab.state.id) === d.tab ? d.tab.view.webContents : undefined;
-    return (
-      initialDisplay === d &&
-      !d.controller.signal.aborted &&
-      !!contents &&
-      !contents.isDestroyed() &&
-      !owner.isDestroyed() &&
-      owner.mainFrame === d.rootFrame &&
-      d.tab.generation === d.generation &&
-      (!d.pageFrame ||
-        (contents.mainFrame === d.pageFrame &&
-          pageToken(d.tab) === d.pageToken &&
-          contents.getURL() === d.url)) &&
-      d.tab.drawnRequest === d.request &&
-      layoutCurrent({ tab: d.tab, request: d.request, confirmed: true }) &&
-      sameRectangle(d.tab.view.getBounds(), d.bounds)
-    );
+    if (!drawable && !tab.state.error && tab.state.display !== 'failed') prepareDocument(tab);
   };
-  const adoptInitialDisplay = (d: NonNullable<typeof initialDisplay>) => {
-    if (!initialDisplayCurrent(d)) return;
-    const { tab, request } = d;
-    cancelInitialDisplay(tab.state.id, true);
-    tab.presentationScope = request.scope;
-    present(tab.state.id, request.bounds, request.layout);
-    cancelLayout();
-    if (active === tab.state.id && tab.view.getVisible()) acknowledgeDisplay(request, true);
-  };
-  const beginInitialDisplay = (tab: BrowserTab, request: DrawnPresentation) => {
-    cancelInitialDisplay();
-    const zoom = owner.getZoomFactor(),
-      [width = 0, height = 0] = window.getContentSize();
-    assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
-    const x = Math.ceil(request.bounds.x * zoom),
-      y = Math.ceil(request.bounds.y * zoom);
-    const bounds = {
-      x,
-      y,
-      width: Math.floor((request.bounds.x + request.bounds.width) * zoom) - x,
-      height: Math.floor((request.bounds.y + request.bounds.height) * zoom) - y,
-    };
-    const controller = new AbortController();
-    const fail = () => {
-      if (!d || initialDisplay !== d) return;
-      const current = initialDisplayCurrent(d);
-      cancelInitialDisplay(tab.state.id);
-      if (current) acknowledgeDisplay(request, false, true);
-    };
-    const d: NonNullable<typeof initialDisplay> = {
-      tab,
-      request,
-      bounds,
-      controller,
-      rootFrame: owner.mainFrame,
-      generation: tab.generation,
-      ready: false,
-      offered: false,
-      timer: setTimeout(fail, 12000),
-    };
-    initialDisplay = d;
-    // The full native loading host covers Root's private proof. Put the exact
-    // Page above Root and below that host before shrinking the host to its bar.
-    tab.sizeEpoch++;
-    tab.viewportSize = { width: bounds.width, height: bounds.height };
-    const children = window.contentView.children,
-      rootIndex = children.findIndex(
-        (view) => view instanceof WebContentsView && view.webContents === owner,
-      );
-    if (rootIndex < 0) {
-      fail();
-      return;
-    }
-    if (children.indexOf(tab.view) !== rootIndex + 1)
-      window.contentView.addChildView(tab.view, rootIndex + 1);
-    tab.view.setBounds(bounds);
-    tab.view.setVisible(true);
-    automation?.present(tab.state.id, false);
-    syncInput();
-    const chromePreparation = chromeHost!.prepareDisplay(
-      tab.state.id,
-      bounds,
-      requestOwner(request)!,
-      controller.signal,
-    );
-    void (async () => {
-      if (!(await tab.waitForDisplayDocument?.(controller.signal)) || !initialDisplayCurrent(d)) {
-        fail();
-        return;
-      }
-      const contents = tab.view.webContents,
-        frame = contents.mainFrame,
-        token = pageToken(tab),
-        url = contents.getURL();
-      d.pageFrame = frame;
-      d.pageToken = token;
-      d.url = url;
-      const current = () =>
-        initialDisplayCurrent(d) &&
-        contents.mainFrame === frame &&
-        pageToken(tab) === token &&
-        contents.getURL() === url;
-      // Never stack reads on an unresolved old presentation capture.
-      await tab.presentationReady?.read;
-      if (!current()) {
-        fail();
-        return;
-      }
-      const read = contents
-        .capturePage()
-        .then(async (image) => {
-          if (!current() || !fullFrameMatches(image, bounds))
-            throw Error('browser_presentation_unavailable');
-          // A copy request is not a native presentation event. Keep Root as
-          // the source until this exact page also delivers its current full
-          // frame; never classify page readiness from its pixel colors.
-          await new Promise<void>((resolve, reject) => {
-            let subscribed = false,
-              settled = false;
-            const finish = (error?: unknown) => {
-              if (settled) return;
-              settled = true;
-              controller.signal.removeEventListener('abort', abort);
-              if (d.stopPageFrame === abort) d.stopPageFrame = undefined;
-              if (subscribed && !contents.isDestroyed()) {
-                try {
-                  contents.endFrameSubscription();
-                } catch (cause) {
-                  error ??= cause;
-                }
-              }
-              if (error) reject(error);
-              else resolve();
-            };
-            const abort = () => finish(Error('browser_presentation_cancelled'));
-            d.stopPageFrame = abort;
-            controller.signal.addEventListener('abort', abort, { once: true });
-            if (!current()) {
-              abort();
-              return;
-            }
-            try {
-              subscribed = true;
-              contents.beginFrameSubscription(false, (frame) => {
-                if (!current()) {
-                  abort();
-                  return;
-                }
-                if (fullFrameMatches(frame, bounds)) finish();
-              });
-              contents.invalidate();
-            } catch (cause) {
-              finish(cause);
-            }
-          });
-        })
-        .finally(() => {
-          if (tab.presentationReady?.read === read) delete tab.presentationReady;
-        });
-      tab.presentationReady = { key: request.witness.key, read };
-      const [, chromeReady] = await Promise.all([read, chromePreparation]);
-      if (!chromeReady || !current()) {
-        fail();
-        return;
-      }
-      if (!requestOwner(request)) {
-        fail();
-        return;
-      }
-      // A legitimate toolbar update may have committed while the page read was
-      // pending. Reconfirm that current revision once; unchanged proof is reused.
-      if (
-        !(await chromeHost!.prepareDisplay(
-          tab.state.id,
-          bounds,
-          requestOwner(request)!,
-          controller.signal,
-        )) ||
-        !current()
-      ) {
-        fail();
-        return;
-      }
-      d.ready = true;
-      d.offered = true;
-      clearTimeout(d.timer);
-      d.timer = setTimeout(fail, 1500);
-      if (!chromeHost!.offerDisplay(tab.state.id, bounds, requestOwner(request)!)) fail();
-    })().catch(fail);
-  };
-  const proposeLayout = (tab: BrowserTab, request: DrawnPresentation) => {
-    if (closing) cancelClosePreparation();
-    const displayOwner = requestOwner(request);
-    if (displayOwner && chromeHost && !chromeHost.acceptsPresentation(tab.state.id, displayOwner))
-      throw Error('browser_page_scope_denied');
-    if (initialDisplay) {
-      const d = initialDisplay;
-      if (
-        d.tab === tab &&
-        initialDisplayCurrent(d) &&
-        JSON.stringify(d.request) === JSON.stringify(request)
-      )
-        return;
-      cancelInitialDisplay();
-    }
-    if (active && active !== tab.state.id) present(active, null);
-    if (pendingLayout && pendingLayout.tab !== tab) cancelLayout();
-    const old = pendingLayout;
-    if (!window.isVisible() || window.isMinimized()) {
-      present(tab.state.id, null);
-      return;
-    }
-    if (displayOwner && chromeHost?.readyFor(tab.state.id, displayOwner)) {
-      if (request.witness.step === 2) {
-        const previous = tab.drawnRequest;
-        if (
-          !previous ||
-          previous.witness.key !== request.witness.key ||
-          JSON.stringify([
-            previous.bounds,
-            previous.layout,
-            previous.scope,
-            previous.presentationRevision,
-          ]) !==
-            JSON.stringify([
-              request.bounds,
-              request.layout,
-              request.scope,
-              request.presentationRevision,
-            ])
-        )
-          throw Error('invalid_browser_request');
-      }
-      cancelLayout();
-      stopNativeFrames(tab);
-      tab.drawnPresentation = true;
-      tab.drawnRequest = request;
-      tab.presentationRevision = request.presentationRevision;
-      tab.presentationGeneration = request.scope?.generation;
-      tab.presentationScope = request.scope;
-      present(tab.state.id, request.bounds, request.layout);
-      return;
-    }
-    if (request.witness.step === 2) {
-      if (
-        !old ||
-        old.tab !== tab ||
-        !old.confirmed ||
-        old.request.witness.key !== request.witness.key ||
-        JSON.stringify([
-          old.request.bounds,
-          old.request.layout,
-          old.request.scope,
-          old.request.presentationRevision,
-        ]) !==
-          JSON.stringify([
-            request.bounds,
-            request.layout,
-            request.scope,
-            request.presentationRevision,
-          ])
-      )
-        throw Error('invalid_browser_request');
-      old.request = request;
-    } else {
-      const previous = tab.drawnRequest,
-        presentation = tab.presentation,
-        [width = 0, height = 0] = window.getContentSize(),
-        zoom = owner.getZoomFactor();
-      const projected = presentation?.layout
-        ? projectNativeBrowserBounds(
-            presentation.bounds,
-            presentation.layout,
-            width / zoom,
-            height / zoom,
-          )
-        : undefined;
-      const actual = tab.view.getBounds();
-      const left = projected && Math.max(0, Math.min(width, Math.ceil(projected.x * zoom))),
-        top = projected && Math.max(0, Math.min(height, Math.ceil(projected.y * zoom))),
-        right = projected && Math.min(width, Math.floor((projected.x + projected.width) * zoom)),
-        bottom = projected && Math.min(height, Math.floor((projected.y + projected.height) * zoom));
-      const retain =
-        !old &&
-        !disposed &&
-        !window.isDestroyed() &&
-        !owner.isDestroyed() &&
-        tabs.get(tab.state.id) === tab &&
-        !tab.view.webContents.isDestroyed() &&
-        electron.BrowserWindow.fromWebContents(tab.view.webContents) === window &&
-        active === tab.state.id &&
-        tab.view.getVisible() &&
-        previous?.witness.step === 2 &&
-        previous.presentationRevision === tab.presentationRevision &&
-        tab.presentationGeneration === request.scope?.generation &&
-        presentation?.width === width &&
-        presentation.height === height &&
-        presentation.zoom === zoom &&
-        JSON.stringify(tab.presentationScope) === JSON.stringify(request.scope) &&
-        JSON.stringify([previous.bounds, previous.layout, previous.scope]) ===
-          JSON.stringify([request.bounds, request.layout, request.scope]) &&
-        JSON.stringify([presentation.bounds, presentation.layout]) ===
-          JSON.stringify([request.bounds, request.layout]) &&
-        projected &&
-        left === actual.x &&
-        top === actual.y &&
-        right! - left! === actual.width &&
-        bottom! - top! === actual.height;
-      const retained =
-        retainedDisplay?.tab === tab &&
-        retainedDisplay.claimed &&
-        displayCurrent() &&
-        JSON.stringify(retainedDisplay.claimed) === JSON.stringify(request.scope) &&
-        JSON.stringify(retainedDisplay.intent.bounds) === JSON.stringify(request.bounds);
-      // One surface supplies pixels during the handoff. Resizing the live
-      // WebContentsView to an intersection would reflow and shift its page.
-      flushNativeFrame(tab);
-      stopNativeFrames(tab, true);
-      tab.sizeEpoch++;
-      // A repeated effect does not require hiding an unchanged, fully proved
-      // viewport. Its new revision still completes both real Root draws below.
-      const prepared = currentPreparation();
-      if (
-        !retain &&
-        !retained &&
-        chromeHost?.preparingPage() !== tab.view &&
-        !(prepared?.ready && prepared.target === tab)
-      ) {
-        if (retainedDisplay) cancelRetainedDisplay();
-        tab.view.setVisible(false);
-        automation?.present(tab.state.id, false);
-        syncInput();
-      }
-      tab.drawnPresentation = true;
-      pendingLayout = { tab, request, confirmed: false };
-    }
-    tab.drawnRequest = request;
-    if (subscribed) return;
-    const subscription = ++frameSubscription;
-    subscribed = true;
-    try {
-      owner.beginFrameSubscription((image) => {
-        if (subscription !== frameSubscription) return;
-        const pending = pendingLayout;
-        if (!pending) return;
-        if (!layoutCurrent(pending)) {
-          present(pending.tab.state.id, null);
-          return;
-        }
-        try {
-          if (!matchesDraw(image, pending.request)) return;
-          if (pending.request.witness.step === 1) {
-            if (!pending.confirmed) {
-              pending.confirmed = true;
-              owner.send(nativeBrowserLayoutFrameChannel, {
-                id: pending.tab.state.id,
-                ...(pending.request.draft
-                  ? { draft: pending.request.draft }
-                  : { scope: pending.request.scope }),
-                presentationRevision: pending.request.presentationRevision,
-                key: pending.request.witness.key,
-                step: 1,
-                ...(savedResizeFrame(pending.tab) ? { frozen: savedResizeFrame(pending.tab) } : {}),
-              });
-            }
-            return;
-          }
-          // A second Root draw requires the first real frame feedback to have
-          // made a full Main -> Renderer -> compositor round trip. This avoids
-          // moving the sibling in the first new Root frame's generation turn;
-          // it is not an OS-wide atomic presentation guarantee.
-          acknowledgeDisplay(pending.request, false);
-          cancelLayout();
-          const retained = retainedDisplay;
-          if (retained?.tab === pending.tab) retainedDisplay = undefined;
-          pending.tab.presentationScope = pending.request.scope;
-          if (
-            chromeHost &&
-            requestOwner(pending.request) &&
-            !chromeHost.presentationViewport(requestOwner(pending.request)!)
-          ) {
-            beginInitialDisplay(pending.tab, pending.request);
-            return;
-          }
-          present(pending.tab.state.id, pending.request.bounds, pending.request.layout);
-          cancelLayout();
-          startNativeFrames(pending.tab);
-          if (retained && !owner.isDestroyed())
-            owner.send(nativeBrowserDisplayChannel, { token: retained.intent.token });
-          owner.send(nativeBrowserLayoutFrameChannel, {
-            id: pending.tab.state.id,
-            ...(pending.request.draft
-              ? { draft: pending.request.draft }
-              : { scope: pending.request.scope }),
-            presentationRevision: pending.request.presentationRevision,
-            key: pending.request.witness.key,
-            step: 2,
-          });
-        } catch {
-          present(pending.tab.state.id, null);
-        }
-      });
-    } catch {
-      present(tab.state.id, null);
-      throw Error('browser_presentation_unavailable');
-    }
-  };
-  const download = (
-    event: Electron.Event,
-    _item: Electron.DownloadItem,
-    contents: Electron.WebContents,
-  ) => {
-    event.preventDefault();
-    for (const tab of tabs.values())
-      if (tab.view.webContents === contents) {
-        tab.state = { ...tab.state, loading: false, error: 'download_unsupported' };
-        publish(tab);
-      }
-  };
-  browsing.on('will-download', download);
-  const displayIdentity = (tab: BrowserTab) => {
-    const selected = (options.grantScope ?? options.selectedScope)?.();
-    const scope = selected && {
-      storeId: selected.storeId,
-      sessionId: selected.sessionId,
-      generation: selected.generation,
-      viewSelection: selected.viewSelection,
-    };
-    if (
-      !isNativeBrowserRestoreScope(scope) ||
-      retainedDisplay?.tab === tab ||
-      heldPresentation?.tab === tab ||
-      preparation?.target === tab ||
-      disposed ||
-      tabs.get(tab.state.id) !== tab ||
-      tab.view.webContents.isDestroyed() ||
-      active !== tab.state.id ||
-      !tab.view.getVisible() ||
-      !window.isVisible() ||
-      window.isMinimized() ||
-      !tab.presentation ||
-      JSON.stringify(scope) !== JSON.stringify(tab.presentationScope)
-    )
-      throw Error('browser_presentation_unavailable');
-    const bounds = tab.view.getBounds(),
-      zoom = owner.getZoomFactor();
-    if (bounds.width <= 0 || bounds.height <= 0) throw Error('browser_presentation_unavailable');
-    return {
-      scope,
-      cssX: bounds.x / zoom,
-      cssY: bounds.y / zoom,
-      cssWidth: bounds.width / zoom,
-      cssHeight: bounds.height / zoom,
-      stamp: JSON.stringify([
-        scope,
-        tab.generation,
-        tab.sizeEpoch,
-        bounds,
-        window.getContentSize(),
-        zoom,
-        tab.view.webContents.getURL(),
-        automation?.state(tab.state.id),
-      ]),
-    };
-  };
-  const scrollPosition = async (tab: BrowserTab) => {
-    const v = await tab.view.webContents.executeJavaScript('({x:scrollX,y:scrollY})');
-    if (!v || !Number.isFinite(v.x) || !Number.isFinite(v.y))
-      throw Error('browser_presentation_unavailable');
-    return JSON.stringify([v.x, v.y]);
-  };
-  const boundedRead = async <T>(read: Promise<T>, milliseconds: number, expired?: () => void) => {
+  const boundedRead = async <T>(
+    read: Promise<T>,
+    milliseconds: number,
+    expired?: () => void,
+  ): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -3162,305 +1327,311 @@ export function registerNativeBrowserIpc(options: {
       clearTimeout(timer);
     }
   };
-  const capturePresentation = (tab: BrowserTab): Promise<NativeBrowserPresentationFrame> => {
-    const before = displayIdentity(tab);
-    if (tab.presentationCapture) throw Error('browser_presentation_unavailable');
-    delete tab.presentationFrame;
-    let expired = false;
-    const read = (async (): Promise<NativeBrowserPresentationFrame> => {
-      const scroll = await scrollPosition(tab);
-      if (displayIdentity(tab).stamp !== before.stamp) throw Error('browser_presentation_stale');
-      const image = await tab.view.webContents.capturePage();
-      if (
-        expired ||
-        displayIdentity(tab).stamp !== before.stamp ||
-        scroll !== (await scrollPosition(tab))
-      )
-        throw Error('browser_presentation_stale');
-      const scales = image.getScaleFactors?.() ?? [1];
-      const scaleFactor = Math.max(
-        1,
-        ...scales.filter((n) => Number.isFinite(n) && n > 0 && n <= 4),
-      );
-      const bytes = image.toPNG({ scaleFactor });
-      if (
-        bytes.length > 4 * 1024 * 1024 ||
-        bytes.length < 24 ||
-        !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-      )
-        throw Error('browser_presentation_unavailable');
-      const width = bytes.readUInt32BE(16),
-        height = bytes.readUInt32BE(20);
-      if (
-        !width ||
-        !height ||
-        width > 16384 ||
-        height > 16384 ||
-        width * height > 64000000 ||
-        expired ||
-        displayIdentity(tab).stamp !== before.stamp
-      )
-        throw Error('browser_presentation_stale');
-      const key = randomUUID();
-      tab.presentationFrame = { key, stamp: before.stamp, scroll, expires: Date.now() + 1000 };
-      return {
-        id: tab.state.id,
-        key,
-        scope: before.scope,
-        cssX: before.cssX,
-        cssY: before.cssY,
-        cssWidth: before.cssWidth,
-        cssHeight: before.cssHeight,
-        frame: { mimeType: 'image/png', data: bytes.toString('base64'), width, height },
-      };
-    })();
-    tab.presentationCapture = read;
-    void read
-      .finally(() => {
-        if (tab.presentationCapture === read) delete tab.presentationCapture;
-      })
-      .catch(() => {});
-    return boundedRead(read, 120, () => {
-      expired = true;
-    });
-  };
-  const commitPresentation = async (tab: BrowserTab, key: string): Promise<NativeBrowserReply> => {
-    const saved = tab.presentationFrame;
-    try {
-      if (
-        !saved ||
-        saved.key !== key ||
-        saved.expires < Date.now() ||
-        displayIdentity(tab).stamp !== saved.stamp
-      )
-        throw Error('browser_presentation_stale');
-      const scroll = await boundedRead(scrollPosition(tab), 40);
-      if (
-        tab.presentationFrame !== saved ||
-        scroll !== saved.scroll ||
-        displayIdentity(tab).stamp !== saved.stamp
-      )
-        throw Error('browser_presentation_stale');
-      delete tab.presentationFrame;
-      present(tab.state.id, null);
-      return { ok: true, value: tab.state };
-    } catch {
-      return { ok: false, code: 'browser_presentation_stale' };
-    }
-  };
-  const presentationGeneration = (
-    tab: BrowserTab,
-    request: Extract<NativeBrowserRequest, { action: 'present' }>,
-  ) => {
-    if (request.draft) {
-      if (
-        !draftCurrent(tab, request.draft) ||
-        request.scope ||
-        (request.presentationRevision !== undefined &&
-          request.presentationRevision < (tab.presentationRevision ?? 0))
-      )
-        throw Error('browser_page_scope_denied');
-      return undefined;
-    }
-    if (!request.scope) {
-      if (tab.draft || request.presentationRevision !== undefined)
-        throw Error('browser_page_scope_denied');
-      return undefined;
-    }
-    const selected = (options.grantScope ?? options.selectedScope)?.();
+  const prepareDocument = (tab: BrowserTab) => {
     if (
-      !selected ||
-      selected.generation !== request.scope.generation ||
-      !tab.scope ||
-      tab.scope.storeId !== request.scope.storeId ||
-      tab.scope.sessionId !== request.scope.sessionId ||
-      (request.bounds &&
-        !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-          (key) => selected[key] === request.scope![key],
-        ))
+      tab.paint ||
+      !tab.presentation ||
+      active !== tab.state.id ||
+      !window.isVisible() ||
+      window.isMinimized()
+    )
+      return;
+    const contents = tab.view.webContents;
+    const job: NonNullable<BrowserTab['paint']> = {
+      controller: new AbortController(),
+      token: pageToken(tab),
+      frame: owner.mainFrame,
+      bounds: tab.view.getBounds(),
+      geometry: JSON.stringify([
+        rootEpoch,
+        visibilityEpoch,
+        ...window.getContentSize(),
+        owner.getZoomFactor(),
+      ]),
+    };
+    tab.paint = job;
+    const contextCurrent = () =>
+      !disposed &&
+      tab.paint === job &&
+      tabs.get(tab.state.id) === tab &&
+      !contents.isDestroyed() &&
+      !owner.isDestroyed() &&
+      !window.isDestroyed() &&
+      owner.mainFrame === job.frame &&
+      active === tab.state.id &&
+      !!tab.presentation &&
+      scopeCurrent(tab) &&
+      pageToken(tab) === job.token &&
+      sameRectangle(tab.view.getBounds(), job.bounds) &&
+      JSON.stringify([
+        rootEpoch,
+        visibilityEpoch,
+        ...window.getContentSize(),
+        owner.getZoomFactor(),
+      ]) === job.geometry &&
+      window.isVisible() &&
+      !window.isMinimized() &&
+      !tab.state.error;
+    const current = () => contextCurrent() && !job.controller.signal.aborted;
+    // A never-shown View has no native copy surface, even after DOM-ready.
+    // Paint the exact document under Root's opaque viewport, then promote only
+    // after its current full native frame. No screenshot is copied or cached.
+    void (async () => {
+      try {
+        const ready = await boundedRead(
+          tab.waitForDisplayDocument!(job.controller.signal),
+          12000,
+          () => job.controller.abort(),
+        );
+        if (!current()) throw Error('browser_presentation_cancelled');
+        if (!ready) throw Error('browser_presentation_unavailable');
+        const pageFrame = contents.mainFrame;
+        const root = rootView();
+        if (!root?.getVisible()) throw Error('browser_presentation_unavailable');
+        const children = window.contentView.children,
+          rootIndex = children.indexOf(root);
+        if (children.indexOf(tab.view) >= rootIndex)
+          addNativeWindowView(window, tab.view, rootIndex);
+        if (!coveredByRoot(tab)) throw Error('browser_presentation_unavailable');
+        job.underlay = true;
+        tab.view.setVisible(true);
+        automation?.present(tab.state.id, false);
+        syncInput();
+        await boundedRead(
+          new Promise<void>((resolve, reject) => {
+            let subscribed = false,
+              settled = false;
+            const finish = (error?: unknown) => {
+              if (settled) return;
+              settled = true;
+              job.controller.signal.removeEventListener('abort', abort);
+              if (job.stopFrame === abort) {
+                job.stopFrame = undefined;
+                if (subscribed && !contents.isDestroyed()) {
+                  try {
+                    contents.endFrameSubscription();
+                  } catch (cause) {
+                    error ??= cause;
+                  }
+                }
+              }
+              if (error) reject(error);
+              else resolve();
+            };
+            const abort = () => finish(Error('browser_presentation_cancelled'));
+            job.stopFrame = abort;
+            job.controller.signal.addEventListener('abort', abort, { once: true });
+            if (!current() || !coveredByRoot(tab)) {
+              abort();
+              return;
+            }
+            try {
+              subscribed = true;
+              contents.beginFrameSubscription(false, (image) => {
+                if (!current() || contents.mainFrame !== pageFrame || !coveredByRoot(tab)) {
+                  abort();
+                  return;
+                }
+                if (fullFrameMatches(image, job.bounds)) finish();
+              });
+              contents.invalidate();
+            } catch (cause) {
+              finish(cause);
+            }
+          }),
+          2000,
+          () => job.controller.abort(),
+        );
+        if (!current()) throw Error('browser_presentation_cancelled');
+        if (contents.mainFrame !== pageFrame || !coveredByRoot(tab))
+          throw Error('browser_presentation_unavailable');
+        tab.drawable = { frame: pageFrame, document: tab.documentGeneration };
+        tab.state = { ...tab.state, display: 'ready' };
+        tab.paint = undefined;
+        applyCurrentLayout(tab);
+        publish(tab);
+      } catch {
+        if (
+          tab.paint !== job ||
+          disposed ||
+          tabs.get(tab.state.id) !== tab ||
+          contents.isDestroyed() ||
+          tab.view.webContents !== contents
+        )
+          return;
+        // Scope, Root or geometry can retire before Renderer sends its hide.
+        // Retire only this job's binding; cancellation is not a failed document
+        // and must not poison the original page when its owner returns.
+        if (!contextCurrent()) {
+          withdraw(tab);
+          return;
+        }
+        tab.paint = undefined;
+        tab.view.setVisible(false);
+        automation?.present(tab.state.id, false);
+        tab.state = { ...tab.state, display: 'failed' };
+        publish(tab);
+      } finally {
+        if (tab.paint === job) tab.paint = undefined;
+      }
+    })();
+  };
+  const rememberPresentation = (tab: BrowserTab) => {
+    const id = tab.state.id;
+    if (tab.scope) lastPresented.set(scopeKey(tab.scope), id);
+    if (tab.draft) lastPresented.set(`draft:${tab.draft.key}`, id);
+    if (tab.scope && replacedPresentation.get(scopeKey(tab.scope)) === id)
+      replacedPresentation.delete(scopeKey(tab.scope));
+  };
+  const present = (
+    id: string,
+    bounds: NativeBrowserBounds | null,
+    layout?: NativeBrowserLayout,
+    scope?: NativeBrowserRestoreScope,
+  ) => {
+    const tab = tabs.get(id);
+    if (!tab) return;
+    if (!bounds) {
+      withdraw(tab);
+      return;
+    }
+    if (active !== id) cancelMenu();
+    active = id;
+    delete tab.resume;
+    tab.presentation = { bounds, layout };
+    tab.presentationScope = scope;
+    delete tab.nativeProjection;
+    rememberPresentation(tab);
+    applyCurrentLayout(tab);
+    // Place the exact replacement before withdrawing its predecessor. Both
+    // operations belong to this one admitted layout, not separate IPC turns.
+    for (const other of tabs.values()) if (other !== tab && other.presentation) withdraw(other);
+  };
+  const download = (
+    event: Electron.Event,
+    _item: Electron.DownloadItem,
+    contents: Electron.WebContents,
+  ) => {
+    event.preventDefault();
+    for (const tab of tabs.values())
+      if (tab.view.webContents === contents) {
+        tab.state = { ...tab.state, loading: false, error: 'download_unsupported' };
+        publish(tab);
+      }
+  };
+  browsing.on('will-download', download);
+  const admitLayout = (request: Extract<NativeBrowserRequest, { action: 'present' }>) => {
+    const tab = tabs.get(request.id);
+    if (!tab) {
+      if (request.bounds) throw Error('browser_page_scope_denied');
+      return null;
+    }
+    if (request.pageToken !== pageToken(tab)) throw Error('browser_page_scope_denied');
+    if (
+      request.draft
+        ? !draftCurrent(tab, request.draft) || !!request.scope
+        : tab.draft || !request.scope
     )
       throw Error('browser_page_scope_denied');
-    // Renderer revisions restart with each Root document. A cleanup may hide its
-    // old session after selection changes, but never cross the Caller generation.
+    const selected = (options.grantScope ?? options.selectedScope)?.();
+    // Cleanup from the old selection may withdraw only its exact original page.
     if (
-      request.presentationRevision !== undefined &&
-      tab.presentationGeneration === request.scope.generation &&
-      request.presentationRevision < (tab.presentationRevision ?? 0)
+      request.scope &&
+      (!tab.scope ||
+        tab.scope.storeId !== request.scope.storeId ||
+        tab.scope.sessionId !== request.scope.sessionId ||
+        !selected ||
+        selected.generation !== request.scope.generation ||
+        (request.bounds &&
+          !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
+            (key) => selected[key] === request.scope![key],
+          )))
     )
-      throw Error('invalid_browser_request');
-    return request.scope.generation;
+      throw Error('browser_page_scope_denied');
+    if (
+      !Number.isSafeInteger(request.presentationRevision) ||
+      request.presentationRevision! <= layoutRevision
+    )
+      throw Error('browser_layout_stale');
+    if (request.bounds) {
+      if (window.isMinimized()) throw Error('invalid_browser_request');
+      const zoom = owner.getZoomFactor(),
+        [width = 0, height = 0] = window.getContentSize();
+      if (request.layout) {
+        if (!currentPanelMeasurement(request.layout, width / zoom, height / zoom))
+          throw Error('browser_layout_stale');
+        assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
+      }
+      if (
+        request.bounds.width <= 0 ||
+        request.bounds.height <= 0 ||
+        request.bounds.x + request.bounds.width > width / zoom + 1 ||
+        request.bounds.y + request.bounds.height > height / zoom + 1
+      )
+        throw Error('invalid_browser_request');
+    }
+    layoutRevision = request.presentationRevision!;
+    if (request.bounds && !window.isVisible()) {
+      // An accurate hidden Root can change its intent, but cannot display or
+      // operate a page by doing so. Reopening rechecks this exact record first.
+      for (const other of tabs.values())
+        if (other !== tab && (other.presentation || other.resume)) withdraw(other);
+      cancelPaint(tab);
+      delete tab.presentation;
+      delete tab.presentationScope;
+      delete tab.nativeProjection;
+      active = undefined;
+      tab.resume = {
+        token: pageToken(tab),
+        root: owner.mainFrame,
+        contents: tab.view.webContents,
+        frame: tab.view.webContents.mainFrame,
+        document: tab.documentGeneration,
+        geometry: JSON.stringify([...window.getContentSize(), owner.getZoomFactor()]),
+        presentation: { bounds: request.bounds, layout: request.layout },
+        scope: request.scope,
+        confirmed: true,
+      };
+      automation?.present(tab.state.id, false);
+      inputShield.hide();
+      return tab.state;
+    }
+    if (
+      !request.bounds &&
+      tab.scope &&
+      replacedPresentation.get(scopeKey(tab.scope)) === request.id
+    )
+      replacedPresentation.delete(scopeKey(tab.scope));
+    present(request.id, request.bounds, request.layout, request.scope);
+    return tab.state;
   };
   const applyLayout = (
     event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
     value: unknown,
-    hostedOnly: boolean,
   ) => {
     try {
       assertNativeSender(event, disposed ? undefined : window, rendererUrl);
       const request = parseNativeBrowserRequest(value);
-      if (
-        request.action !== 'present' ||
-        !request.bounds ||
-        !request.layout ||
-        (!request.scope && !request.draft) ||
-        request.presentationKey
-      )
-        throw Error('invalid_browser_request');
-      const tab = tabs.get(request.id),
-        selected = (options.grantScope ?? options.selectedScope)?.();
-      const scope = request.scope;
-      if (
-        !tab ||
-        (request.draft
-          ? !draftCurrent(tab, request.draft)
-          : !scope ||
-            !selected ||
-            !tab.scope ||
-            tab.draft ||
-            selected.storeId !== tab.scope.storeId ||
-            selected.sessionId !== tab.scope.sessionId ||
-            !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-              (key) => selected[key] === scope[key],
-            ))
-      )
-        throw Error('browser_page_scope_denied');
-      // Async requests only calibrate an existing live native presentation.
-      // A queued request cannot bootstrap or revive a page after withdrawal.
-      const targetOwner = requestOwner(request);
-      if (targetOwner && chromeHost && !chromeHost.acceptsPresentation(request.id, targetOwner))
-        throw Error('browser_page_scope_denied');
-      if (
-        hostedOnly &&
-        (closing ||
-          active !== request.id ||
-          !window.isVisible() ||
-          window.isMinimized() ||
-          !tab.view.getVisible() ||
-          !tab.presentation?.layout ||
-          (request.draft
-            ? !draftCurrent(tab, request.draft)
-            : !scope ||
-              !tab.presentationScope ||
-              !(['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-                (key) => tab.presentationScope![key] === scope[key],
-              ) ||
-              !chromeHost?.readyFor(request.id, scope)) ||
-          !chromeHost?.readyFor(request.id, requestOwner(request)))
-      )
-        throw Error('invalid_browser_request');
-      if (hostedOnly) {
-        const [width = 0, height = 0] = window.getContentSize(),
-          zoom = owner.getZoomFactor();
-        // Reject stale queued dimensions before advancing the current witness,
-        // revision or presentation anchor used by later valid calibrations.
-        assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
-      }
-      const revisionGeneration = presentationGeneration(tab, request);
-      if (
-        !hostedOnly &&
-        request.witness &&
-        chromeHost &&
-        targetOwner &&
-        !chromeHost.readyFor(tab.state.id, targetOwner) &&
-        !chromeHost.presentationViewport(targetOwner)
-      ) {
-        const zoom = owner.getZoomFactor(),
-          [width = 0, height = 0] = window.getContentSize();
-        assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
-        const x = Math.ceil(request.bounds.x * zoom),
-          y = Math.ceil(request.bounds.y * zoom);
-        const viewport = {
-          x,
-          y,
-          width: Math.floor((request.bounds.x + request.bounds.width) * zoom) - x,
-          height: Math.floor((request.bounds.y + request.bounds.height) * zoom) - y,
-        };
-        if (!chromeHost.loadingReady(tab.state.id, viewport, targetOwner)) {
-          loadingRequest = {
-            tab,
-            request: request as DrawnPresentation,
-            frame: owner.mainFrame,
-            epoch: rootEpoch,
-            token: pageToken(tab),
-          };
-          // No Root palette may paint until the native loading surface is ready.
-          // Its readiness event requests a fresh observation; no timed retries.
-          displayAttempt = undefined;
-          throw Error('browser_presentation_unavailable');
-        }
-      }
-      // A real UI bootstrap counts as this target's one in-flight attempt too.
-      // Its own failure must not produce an automatic observe/fail loop.
-      const recoveryOwner = requestOwner(request);
-      if (!hostedOnly && chromeHost && recoveryOwner) rememberDisplayAttempt(tab, recoveryOwner);
-      if (!request.witness) {
-        cancelLayout();
-        if (hostedOnly) {
-          stopNativeFrames(tab);
-          // An admitted active-page calibration is geometry, not a new Root
-          // drawing proof. Neither its predecessor nor an invented nonce qualifies.
-          delete tab.drawnRequest;
-          delete tab.drawnPresentation;
-        }
-        present(request.id, request.bounds, request.layout);
-      }
-      if (request.witness) proposeLayout(tab, request as DrawnPresentation);
-      if (request.presentationRevision !== undefined) {
-        tab.presentationRevision = request.presentationRevision;
-        tab.presentationGeneration = revisionGeneration;
-      }
-      if (active === request.id && tab.view.getVisible()) tab.presentationScope = scope;
-      queueDisplayReconciliation();
-      delete tab.presentationFrame;
-      return {
-        ok: true,
-        value: tab.state,
-        ...(request.witness
-          ? {
-              waiting: !!pendingLayout || initialDisplay?.tab === tab,
-              ...(savedResizeFrame(tab)
-                ? {
-                    frozenKey: savedResizeFrame(tab)!.key,
-                    frozenWidth:
-                      (savedResizeFrame(tab)!.cssWidth * savedResizeFrame(tab)!.rootZoom) /
-                      owner.getZoomFactor(),
-                    frozenHeight:
-                      (savedResizeFrame(tab)!.cssHeight * savedResizeFrame(tab)!.rootZoom) /
-                      owner.getZoomFactor(),
-                  }
-                : {}),
-            }
-          : {}),
-      };
+      if (request.action !== 'present') throw Error('invalid_browser_request');
+      return { ok: true as const, value: admitLayout(request) };
     } catch (cause) {
       return {
-        ok: false,
+        ok: false as const,
         code:
-          cause instanceof Error && cause.message === 'browser_page_scope_denied'
-            ? 'browser_page_scope_denied'
+          cause instanceof Error &&
+          ['native_sender_denied', 'browser_page_scope_denied', 'browser_layout_stale'].includes(
+            cause.message,
+          )
+            ? cause.message
             : 'invalid_browser_request',
       };
     }
   };
   const layoutCommit = (event: Electron.IpcMainEvent, value: unknown) => {
-    event.returnValue = applyLayout(event, value, false);
+    event.returnValue = applyLayout(event, value);
   };
-  // Older isolated Main fakes may omit EventEmitter methods; production IpcMain has them.
-  ipcMain.handle(nativeBrowserPreparationChannel, async (event, input: unknown) => {
-    assertNativeSender(event, disposed ? undefined : window, rendererUrl);
-    if (!isNativeBrowserPreparation(input)) throw Error('invalid_browser_preparation');
-    return preparePresentation(input.fromId, input.targetId);
-  });
-  ipcMain.handle(nativeBrowserPreparationCancelChannel, async (event, input: unknown) => {
-    assertNativeSender(event, disposed ? undefined : window, rendererUrl);
-    if (typeof input !== 'string' || !/^[a-f0-9]{32}$/.test(input))
-      throw Error('invalid_browser_preparation');
-    cancelPreparation(input);
-    syncInput();
-    chromeHost?.update();
-  });
   ipcMain.on?.(nativeBrowserLayoutChannel, layoutCommit);
-  ipcMain.handle(nativeBrowserLayoutChannel, (event, value) => applyLayout(event, value, true));
+  ipcMain.handle(nativeBrowserLayoutChannel, applyLayout);
   const menuCancel = (event: Electron.IpcMainEvent, requestId: unknown) => {
     try {
       assertNativeSender(event, disposed ? undefined : window, rendererUrl);
@@ -3543,7 +1714,6 @@ export function registerNativeBrowserIpc(options: {
           settled = true;
           if (menu?.id === request.requestId) {
             menu = undefined;
-            queueDisplayReconciliation();
           }
           resolve(!cancelled && current() ? chosen : null);
         };
@@ -3601,20 +1771,6 @@ export function registerNativeBrowserIpc(options: {
       try {
         assertNativeSender(event, disposed ? undefined : window, rendererUrl);
         const request = parseNativeBrowserRequest(value);
-        if (request.action === 'prepareClose')
-          return { ok: true, value: prepareClose(request.id, request.draft) };
-        if (request.action === 'cancelClose') {
-          cancelClosePreparation(request.key);
-          return { ok: true, value: null };
-        }
-        if (request.action === 'confirmClose' || request.action === 'finishClose')
-          return (
-            request.action === 'confirmClose' ? confirmClose(request.key) : finishClose(request.key)
-          ).then(
-            (ok): NativeBrowserReply =>
-              ok ? { ok: true, value: null } : { ok: false, code: 'browser_presentation_stale' },
-          );
-        if ('key' in request) throw Error('invalid_browser_request');
         if (request.action === 'restoreDraft') {
           const pages = [...tabs.values()].filter(
             (tab) =>
@@ -3627,19 +1783,12 @@ export function registerNativeBrowserIpc(options: {
             if (tab.draft!.epoch === rootEpoch && tab.draft!.frame === owner.mainFrame) continue;
             // Exact possession restores only this manual inventory. Old Root
             // proofs retire; the actual documents are never navigated or armed.
-            cancelInitialDisplay(tab.state.id);
-            stopNativeFrames(tab);
-            tab.view.setVisible(false);
-            if (active === tab.state.id) active = undefined;
+            withdraw(tab);
             tab.draft = { key: request.draft, frame: owner.mainFrame, epoch: rootEpoch };
-            delete tab.drawnRequest;
-            delete tab.drawnPresentation;
             delete tab.presentation;
             delete tab.nativeProjection;
             delete tab.presentationScope;
-            // Draft revisions persist with the Root-local owner across reload.
-            // Keep the old floor so late old-document layout cannot win.
-            delete tab.presentationGeneration;
+            publish(tab);
           }
           const selected = pages.find(
             (tab) => tab.state.id === lastPresented.get(`draft:${request.draft}`),
@@ -3671,6 +1820,7 @@ export function registerNativeBrowserIpc(options: {
               return false;
             return true;
           });
+          for (const page of pages) publish(page);
           const retained = pages.filter((tab) => automation?.retained(tab.state.id));
           if (retained.length > 1) throw Error('browser_session_page_already_bound');
           const presented = pages.find(
@@ -3695,6 +1845,7 @@ export function registerNativeBrowserIpc(options: {
         if (request.action === 'close') {
           const tab = tabs.get(request.id);
           const selected = (options.grantScope ?? options.selectedScope)?.();
+          if (tab && request.pageToken !== pageToken(tab)) throw Error('browser_page_scope_denied');
           if (
             (request.draft && (!tab || !draftCurrent(tab, request.draft))) ||
             (tab?.draft && !draftCurrent(tab, request.draft))
@@ -3719,14 +1870,9 @@ export function registerNativeBrowserIpc(options: {
           (tab?.draft && !draftCurrent(tab, draft))
         )
           throw Error('browser_page_scope_denied');
-        if (request.action === 'capturePresentation') {
-          if (!tab) throw Error('browser_presentation_unavailable');
-          return capturePresentation(tab).then(
-            (frame): NativeBrowserReply => ({ ok: true, value: frame }),
-            (): NativeBrowserReply => ({ ok: false, code: 'browser_presentation_unavailable' }),
-          );
-        }
         const selected = options.selectedScope?.();
+        if (request.action === 'navigate' && !draft && !selected)
+          throw Error('browser_page_scope_denied');
         // Presentation conveys no navigation/control permission. Main retains this
         // exact selection identity during Core refresh; an installed provider that
         // denies must never fall back to the ready projection.
@@ -3760,45 +1906,13 @@ export function registerNativeBrowserIpc(options: {
           tab ??= create(request.id, undefined, draft);
           navigate(tab, url);
         } else if (request.action === 'present') {
-          if (request.witness) throw Error('invalid_browser_request');
-          const displayOwner = requestOwner(request);
-          if (
-            request.bounds &&
-            displayOwner &&
-            chromeHost &&
-            !chromeHost.acceptsPresentation(request.id, displayOwner)
-          )
-            throw Error('browser_page_scope_denied');
-          const revisionGeneration = tab ? presentationGeneration(tab, request) : undefined;
-          if (request.presentationKey)
-            return tab
-              ? commitPresentation(tab, request.presentationKey)
-              : { ok: false, code: 'browser_presentation_stale' };
-          if (tab && request.bounds === null) {
-            // An accepted Renderer withdrawal retires its old layout proof.
-            // Internal Chrome suspension still keeps bootstrap proof for onReady.
-            delete tab.drawnRequest;
-            delete tab.drawnPresentation;
-          }
-          present(request.id, request.bounds, request.layout);
-          if (tab && request.presentationRevision !== undefined) {
-            tab.presentationRevision = request.presentationRevision;
-            tab.presentationGeneration = revisionGeneration;
-          }
-          if (tab) delete tab.presentationFrame;
-          if (tab && request.bounds && active === request.id && tab.view.getVisible()) {
-            const scope = presentationScope && {
-              storeId: presentationScope.storeId,
-              sessionId: presentationScope.sessionId,
-              generation: presentationScope.generation,
-              viewSelection: presentationScope.viewSelection,
-            };
-            tab.presentationScope = isNativeBrowserRestoreScope(scope) ? scope : undefined;
-          }
+          admitLayout(request);
         } else if (tab) {
           const contents = tab.view.webContents;
-          if (['back', 'forward', 'reload', 'stop'].includes(request.action)) {
-            cancelInitialDisplay(tab.state.id);
+          if (['back', 'forward', 'reload'].includes(request.action)) {
+            cancelPaint(tab);
+            delete tab.drawable;
+            tab.state = { ...tab.state, display: 'loading' };
             tab.generation++;
           }
           if (request.action === 'back' && contents.navigationHistory.canGoBack())
@@ -3817,6 +1931,7 @@ export function registerNativeBrowserIpc(options: {
           code: [
             'native_sender_denied',
             'invalid_browser_request',
+            'browser_layout_stale',
             'invalid_browser_address',
             'unsupported_browser_protocol',
             'browser_tab_limit',
@@ -3832,91 +1947,108 @@ export function registerNativeBrowserIpc(options: {
       }
     },
   );
-  const navigation = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
-    if (mainFrame && !inPlace) {
-      rootEpoch++;
-      replaceRenderer();
+  const replaceRenderer = () => {
+    for (const tab of tabs.values()) {
+      if (tab.scope && tab.presentation)
+        replacedPresentation.set(scopeKey(tab.scope), tab.state.id);
+      withdraw(tab);
     }
-  };
-  const displayReady = () => {
-    if (retainedDisplay && !retainedDisplay.ready) cancelRetainedDisplay();
-  };
-  const rendererFailed = () => {
     rootEpoch++;
-    replaceRenderer(false);
+    layoutRevision = 0;
+  };
+  const navigation = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
+    if (mainFrame && !inPlace) replaceRenderer();
   };
   owner.on('did-start-navigation', navigation);
-  owner.on('render-process-gone', rendererFailed);
-  owner.on('preload-error', rendererFailed);
-  owner.on('dom-ready', displayReady);
-  // Native events and accepted Renderer corrections share the current-window
-  // calculation. Stable hosted pages follow native callbacks directly; queuing
-  // that work can starve during AppKit live resize. Bootstrap remains deferred.
-  const applyNativeResize = () => {
+  owner.on('render-process-gone', replaceRenderer);
+  owner.on('preload-error', replaceRenderer);
+  const resize = () => {
     if (disposed || window.isDestroyed()) return;
+    cancelMenu();
     const tab = active ? tabs.get(active) : undefined;
-    if (tab?.presentation?.layout && chromeHost?.readyFor(tab.state.id, chromeOwner(tab))) {
-      const scope = (options.grantScope ?? options.selectedScope)?.();
-      if (
-        draftCurrent(tab, tab.draft?.key) ||
-        (scope &&
-          tab.presentationScope &&
-          (['storeId', 'sessionId', 'generation', 'viewSelection'] as const).every(
-            (key) => scope[key] === tab.presentationScope![key],
-          ))
-      )
-        applyCurrentLayout(tab, true);
-    } else {
-      // Bootstrap and withdrawn Root still need the current logical viewport.
-      chromeHost?.syncViewport(true);
+    if (tab?.presentation) {
+      cancelPaint(tab);
+      applyCurrentLayout(tab);
     }
     syncInput();
-    queueDisplayReconciliation();
   };
-  const resize = () => {
-    if (pendingLayout) cancelLayout();
-    cancelClosePreparation();
-    cancelInitialDisplay();
-    if (retainedDisplay && !displayCurrent()) cancelRetainedDisplay();
-    cancelMenu();
-    chromeHost?.invalidateGeometry();
-    const tab = active ? tabs.get(active) : undefined;
-    if (tab?.presentation?.layout && chromeHost?.readyFor(tab.state.id, chromeOwner(tab))) {
-      // Invalidate old coordinates before changing native view bounds.
-      tab.sizeEpoch++;
-      cancelNativeWindowLayout(window, applyNativeResize);
-      applyNativeResize();
-    } else {
-      if (chromeHost) queueNativeWindowLayout(window, applyNativeResize);
-      syncInput();
+  const beforeShow = () => {
+    if (disposed || window.isDestroyed() || owner.isDestroyed() || window.isVisible()) return;
+    for (const tab of tabs.values()) {
+      const intent = tab.resume,
+        contents = tab.view.webContents;
+      if (!intent) continue;
+      const root = rootView();
+      if (
+        !intent.confirmed ||
+        !contents ||
+        contents !== intent.contents ||
+        contents.isDestroyed() ||
+        owner.mainFrame !== intent.root ||
+        pageToken(tab) !== intent.token ||
+        contents.mainFrame !== intent.frame ||
+        tab.documentGeneration !== intent.document ||
+        tab.drawable?.frame !== intent.frame ||
+        tab.drawable.document !== intent.document ||
+        !scopeCurrent(tab, intent.scope) ||
+        !root?.getVisible() ||
+        !sameRectangle(root.getBounds(), {
+          x: 0,
+          y: 0,
+          width: window.getContentSize()[0]!,
+          height: window.getContentSize()[1]!,
+        }) ||
+        JSON.stringify([...window.getContentSize(), owner.getZoomFactor()]) !== intent.geometry ||
+        tab.state.error ||
+        tab.state.display === 'failed'
+      ) {
+        withdraw(tab);
+        continue;
+      }
+      delete tab.resume;
+      active = tab.state.id;
+      tab.presentation = { ...intent.presentation };
+      tab.presentationScope = intent.scope;
+      try {
+        applyCurrentLayout(tab, true);
+        if (active === tab.state.id && tab.presentation) rememberPresentation(tab);
+      } catch {
+        withdraw(tab);
+      }
     }
   };
+  // Reopening requests a fresh Renderer measurement. It never navigates or
+  // resurrects a previous display binding from the selected URL.
+  const resume = () => {
+    if (owner.isDestroyed() || window.isDestroyed() || !window.isVisible() || window.isMinimized())
+      return;
+    // A system restore may bypass the JS show wrapper. Unconsumed hidden
+    // candidates must be withdrawn, never exposed using a stale binding.
+    for (const tab of tabs.values()) if (tab.resume) withdraw(tab);
+    const tab = active ? tabs.get(active) : undefined;
+    if (tab?.presentation) applyCurrentLayout(tab);
+    for (const tab of tabs.values()) {
+      publish(tab);
+      owner.send(nativeBrowserEventChannel, tab.state);
+    }
+    owner.send(nativeBrowserPresentationChannel, true);
+  };
   window.on('resize', resize);
-  window.on('hide', hide);
-  window.on('minimize', hide);
-  window.on('show', queueDisplayReconciliation);
-  window.on('restore', queueDisplayReconciliation);
-  window.on('focus', queueDisplayReconciliation);
+  const unwatchWillShow = onNativeRootWillShow(window, beforeShow);
+  window.on('hide', suspendWindow);
+  window.on('minimize', minimize);
+  window.on('show', resume);
+  window.on('restore', resume);
   const dispose = () => {
     if (disposed) return;
     disposed = true;
-    cancelClosePreparation();
-    cancelInitialDisplay();
-    cancelPreparation();
-    chromeHost?.cancelPresentationHold();
-    clearHeldPresentation();
-    cancelNativeWindowLayout(window, applyNativeResize);
-    chromeHost?.dispose();
-    cancelLayout();
     cancelMenu();
     unconfigureGrants?.();
-    inputShield.dispose();
     for (const id of [...tabs.keys()]) close(id, true);
+    inputShield.dispose();
     ipcMain.removeHandler(nativeBrowserChannel);
     ipcMain.removeHandler(nativeBrowserMenuChannel);
     ipcMain.removeHandler(nativeBrowserLayoutChannel);
-    ipcMain.removeHandler(nativeBrowserPreparationChannel);
-    ipcMain.removeHandler(nativeBrowserPreparationCancelChannel);
     ipcMain.off?.(nativeBrowserLayoutChannel, layoutCommit);
     ipcMain.off?.(nativeBrowserMenuCancelChannel, menuCancel);
     browsing.webRequest.onBeforeRequest(null);
@@ -3926,16 +2058,14 @@ export function registerNativeBrowserIpc(options: {
     owner.off('before-input-event', menuInput);
     window.off('blur', resetMenuInput);
     owner.off('did-start-navigation', navigation);
-    owner.off('render-process-gone', rendererFailed);
-    owner.off('preload-error', rendererFailed);
-    owner.off('dom-ready', displayReady);
-    ipcMain.off?.(nativeBrowserDisplayChannel, displayBootstrap);
+    owner.off('render-process-gone', replaceRenderer);
+    owner.off('preload-error', replaceRenderer);
     window.off('resize', resize);
-    window.off('hide', hide);
-    window.off('minimize', hide);
-    window.off('show', queueDisplayReconciliation);
-    window.off('restore', queueDisplayReconciliation);
-    window.off('focus', queueDisplayReconciliation);
+    unwatchWillShow();
+    window.off('hide', suspendWindow);
+    window.off('minimize', minimize);
+    window.off('show', resume);
+    window.off('restore', resume);
   };
   window.once('closed', dispose);
   return dispose;

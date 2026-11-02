@@ -5,8 +5,8 @@ import type {
   NativeBrowserMenuAction,
   NativeBrowserMenuRequest,
 } from '../../src/native-browser-bridge';
-import type { NativeBrowserChromeRect } from '../../src/native-browser-chrome-types';
 import { useNativeBrowserPopup } from '../../src/native-browser-menu';
+import type { NativeBrowserMenuRect } from '../../src/native-browser-toolbar-types';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true });
@@ -48,7 +48,7 @@ function Harness({
   draft?: string;
   hostKey?: string;
   generation?: number;
-  anchor?: NativeBrowserChromeRect;
+  anchor?: NativeBrowserMenuRect;
   onLayout?: () => void;
 }) {
   const popup = useNativeBrowserPopup({
