@@ -8,6 +8,7 @@ import { type AgentRuntime, createRuntime } from '../../../src';
 import {
   hostRevocationAuthorization,
   interruptsBrowserContinuation,
+  isBrowserRevocation,
 } from '../../../src/execution/host-control';
 import type { ActionDefinition, Extension, Json } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -32,7 +33,11 @@ async function until(read: () => boolean | Promise<boolean>) {
   }
 }
 
-async function fixture(waiting: 'approval' | 'question' | 'async', copied = false) {
+async function fixture(
+  waiting: 'approval' | 'question' | 'async',
+  copied = false,
+  closeGate?: Promise<void>,
+) {
   const root = mkdtempSync(join(tmpdir(), 'kite-host-revocation-'));
   const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
   const storeId = (await store.getMetadata()).storeId;
@@ -41,6 +46,7 @@ async function fixture(waiting: 'approval' | 'question' | 'async', copied = fals
     complete = resolve;
   });
 
+  let closeStarted = false;
   let closes = 0,
     handoffs = 0,
     resumes = 0;
@@ -57,6 +63,8 @@ async function fixture(waiting: 'approval' | 'question' | 'async', copied = fals
       };
     },
     async close() {
+      closeStarted = true;
+      await closeGate;
       closes++;
       complete({ confirmed: true });
       return { confirmed: true };
@@ -85,7 +93,25 @@ async function fixture(waiting: 'approval' | 'question' | 'async', copied = fals
   });
   const extension: Extension = copied
     ? { ...original, actions: original.actions!.map((action) => ({ ...action })) }
-    : original;
+    : {
+        ...original,
+        actions: [
+          ...original.actions!,
+          {
+            id: 'fixture.wait',
+            version: '1',
+            description: 'Wait for approval',
+            runControl: true,
+            inputSchema: { type: 'object' },
+            async prepare(input) {
+              return input;
+            },
+            async execute() {
+              return { outcome: 'succeeded', content: 'approved' };
+            },
+          },
+        ],
+      };
   let turns = 0;
   const model: ModelAdapter = {
     async *stream(request, streaming) {
@@ -195,11 +221,16 @@ async function fixture(waiting: 'approval' | 'question' | 'async', copied = fals
         })
       ).interactions.some((row) => row.kind === waiting),
     );
-  const invoke = async (actionId: string, input?: Json, commandId = actionId) => {
+  const invoke = async (
+    actionId: string,
+    input?: Json,
+    commandId = actionId,
+    sessionId = 'session',
+  ) => {
     const view = controller.view('session')!;
     return runtime.submitCommand({
       expectedStoreId: storeId,
-      sessionId: 'session',
+      sessionId,
       subjectId: 'owner',
       commandId,
       request: {
@@ -225,6 +256,12 @@ async function fixture(waiting: 'approval' | 'question' | 'async', copied = fals
     authorizationCalls,
     invoke,
     close,
+    get turns() {
+      return turns;
+    },
+    get closeStarted() {
+      return closeStarted;
+    },
     get closes() {
       return closes;
     },
@@ -247,6 +284,10 @@ test('only frozen registered builtin objects qualify, and a stop input cannot ch
   expect(hostRevocationAuthorization(Object.freeze({ ...handoff }), {})).toBeUndefined();
   const page = { browserId: 'original', generation: 'current' };
   const continuation = { actionId: 'browser.resume', input: page };
+  expect(isBrowserRevocation(handoff, page)).toBe(true);
+  expect(isBrowserRevocation({ ...handoff }, page)).toBe(false);
+  expect(isBrowserRevocation(handoff, { ...page, extra: true })).toBe(false);
+  expect(isBrowserRevocation(handoff, { ...page, generation: '' })).toBe(false);
   expect(interruptsBrowserContinuation(handoff, page, continuation)).toBe(true);
   expect(interruptsBrowserContinuation({ ...handoff }, page, continuation)).toBe(false);
   expect(interruptsBrowserContinuation(handoff, { ...page, generation: 'old' }, continuation)).toBe(
@@ -446,89 +487,253 @@ for (const choice of ['stop', 'continue'])
     }
   });
 
-for (const [waiting, stop] of [
-  ['approval', 'close'],
-  ['async', 'close'],
-  ['async', 'human-stop'],
-] as const)
-  test(`${stop} cancels an earlier ${waiting === 'async' ? 'human continue' : 'resume'} approval before draining the control queue`, async () => {
-    const f = await fixture(waiting);
-    try {
-      if (waiting === 'approval') {
-        await f.invoke('browser.handoff');
-        await until(() => f.controller.view('session')?.state === 'human');
-      }
-      const view = f.controller.view('session')!;
-      let input: Json = { browserId: view.browserId, generation: view.generation };
-      const action = waiting === 'async' ? 'browser.respond_human' : 'browser.resume';
-      if (waiting === 'async') {
-        const row = (
-          await f.store.listExtensionRecords({
-            extensionId: 'builtin.browser',
-            sessionId: 'session',
-            contentType: 'application/vnd.kite.browser-human-request+json',
-          })
-        )[0]!;
-        input = {
-          ...(input as object),
-          requestId: (row.value as { requestId: string }).requestId,
-          expectedRevision: row.revision,
-          choice: 'continue',
-        } as Json;
-      }
-      await f.invoke(action, input, 'waiting-continue');
-      await until(async () =>
-        (
+for (const depth of [1, 31, 32])
+  for (const [waiting, stop] of [
+    ['approval', 'close'],
+    ['async', 'close'],
+    ['async', 'human-stop'],
+  ] as const)
+    test(`${stop} cancels an earlier ${waiting === 'async' ? 'human continue' : 'resume'} approval before draining ${depth} queued controls`, async () => {
+      const f = await fixture(waiting);
+      try {
+        if (waiting === 'approval') {
+          await f.invoke('browser.handoff');
+          await until(() => f.controller.view('session')?.state === 'human');
+        }
+        const view = f.controller.view('session')!;
+        let input: Json = { browserId: view.browserId, generation: view.generation };
+        const action = waiting === 'async' ? 'browser.respond_human' : 'browser.resume';
+        if (waiting === 'async') {
+          const row = (
+            await f.store.listExtensionRecords({
+              extensionId: 'builtin.browser',
+              sessionId: 'session',
+              contentType: 'application/vnd.kite.browser-human-request+json',
+            })
+          )[0]!;
+          input = {
+            ...(input as object),
+            requestId: (row.value as { requestId: string }).requestId,
+            expectedRevision: row.revision,
+            choice: 'continue',
+          } as Json;
+        }
+        await f.invoke(action, input, 'waiting-continue');
+        await until(async () =>
+          (
+            await f.runtime.listInteractions({
+              expectedStoreId: f.storeId,
+              sessionId: 'session',
+              state: 'pending',
+            })
+          ).interactions.some((row) => row.definitionId === `builtin.browser/${action}`),
+        );
+        const approval = (
           await f.runtime.listInteractions({
             expectedStoreId: f.storeId,
             sessionId: 'session',
             state: 'pending',
           })
-        ).interactions.some((row) => row.definitionId === `builtin.browser/${action}`),
-      );
-      const approval = (
+        ).interactions.find((row) => row.definitionId === `builtin.browser/${action}`)!;
+        for (let index = 1; index < depth; index++)
+          await f.invoke(action, input, `queued-continue-${index}`);
+        if (stop === 'human-stop')
+          await f.invoke(
+            'browser.respond_human',
+            { ...(input as object), choice: 'stop' } as Json,
+            'stop-response',
+          );
+        else await f.invoke('browser.close');
+        await until(() => f.closes === 1);
+        await f.runtime.waitForCommand('waiting-continue', { timeoutMs: 4000 });
+        expect(
+          (await f.store.listExecutions('session')).find(
+            (row) => row.originCommandId === 'waiting-continue',
+          ),
+        ).toMatchObject({
+          status: 'cancelled',
+          authorization: { dispatched: false },
+        });
+        for (let index = 1; index < depth; index++) {
+          const command = await f.runtime.waitForCommand(`queued-continue-${index}`, {
+            timeoutMs: 4000,
+          });
+          expect(command.status).toBe('rejected');
+          expect(
+            (await f.store.listExecutions('session')).some(
+              (row) => row.originCommandId === command.id,
+            ),
+          ).toBe(false);
+        }
+        expect(f.resumes).toBe(0);
+        await until(() => f.controller.view('session')?.state === 'closed');
+        await f.runtime
+          .answerInteraction({
+            expectedStoreId: f.storeId,
+            subjectId: 'owner',
+            commandId: 'late-allow',
+            presentationSessionId: 'session',
+            interactionId: approval.id,
+            expectedRevision: approval.revision,
+            answer: { kind: 'approval', decision: 'approve' },
+          })
+          .catch(() => {});
+        expect(f.resumes).toBe(0);
+        expect(f.controller.view('session')?.state).toBe('closed');
+      } finally {
+        await f.close();
+      }
+    });
+
+test('a saturated stop preserves an unrelated same-owner approval and waits for its resolution', async () => {
+  const f = await fixture('async');
+  try {
+    await f.invoke('fixture.wait', undefined, 'unrelated-control');
+    await until(async () =>
+      (
         await f.runtime.listInteractions({
           expectedStoreId: f.storeId,
           sessionId: 'session',
           state: 'pending',
         })
-      ).interactions.find((row) => row.definitionId === `builtin.browser/${action}`)!;
-      if (stop === 'human-stop')
-        await f.invoke(
-          'browser.respond_human',
-          { ...(input as object), choice: 'stop' } as Json,
-          'stop-response',
-        );
-      else await f.invoke('browser.close');
-      await until(() => f.closes === 1);
-      await f.runtime.waitForCommand('waiting-continue', { timeoutMs: 4000 });
-      expect(
-        (await f.store.listExecutions('session')).find(
-          (row) => row.originCommandId === 'waiting-continue',
-        ),
-      ).toMatchObject({
-        status: 'cancelled',
-        authorization: { dispatched: false },
-      });
-      expect(f.resumes).toBe(0);
-      await until(() => f.controller.view('session')?.state === 'closed');
-      await f.runtime
-        .answerInteraction({
+      ).interactions.some((row) => row.definitionId === 'builtin.browser/fixture.wait'),
+    );
+    const approval = (
+      await f.runtime.listInteractions({
+        expectedStoreId: f.storeId,
+        sessionId: 'session',
+        state: 'pending',
+      })
+    ).interactions.find((row) => row.definitionId === 'builtin.browser/fixture.wait')!;
+    for (let index = 0; index < 31; index++)
+      await f.invoke('browser.resume', undefined, `matching-${index}`);
+    await f.invoke('browser.close');
+    const controls = (
+      f.runtime as unknown as {
+        liveControlCommands: Map<string, { controller: AbortController }>;
+      }
+    ).liveControlCommands;
+    await until(() =>
+      Array.from(
+        { length: 31 },
+        (_, index) => controls.get(`matching-${index}`)?.controller.signal.aborted === true,
+      ).every(Boolean),
+    );
+    expect(controls.get('unrelated-control')?.controller.signal.aborted).toBe(false);
+    expect(f.closes).toBe(0);
+    expect((await f.store.getCommand('browser.close'))?.status).toBe('accepted');
+    expect(
+      (
+        await f.runtime.listInteractions({
           expectedStoreId: f.storeId,
-          subjectId: 'owner',
-          commandId: 'late-allow',
-          presentationSessionId: 'session',
-          interactionId: approval.id,
-          expectedRevision: approval.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          sessionId: 'session',
+          state: 'pending',
         })
-        .catch(() => {});
-      expect(f.resumes).toBe(0);
-      expect(f.controller.view('session')?.state).toBe('closed');
-    } finally {
-      await f.close();
-    }
+      ).interactions.some((row) => row.id === approval.id),
+    ).toBe(true);
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.storeId,
+      subjectId: 'owner',
+      commandId: 'deny-unrelated',
+      presentationSessionId: 'session',
+      interactionId: approval.id,
+      expectedRevision: approval.revision,
+      answer: { kind: 'approval', decision: 'deny' },
+    });
+    await until(() => f.closes === 1);
+    expect(f.resumes).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a reserved stop survives other Session saturation and excess stops reject without cross-Session revocation', async () => {
+  let releaseClose!: () => void;
+  const closeGate = new Promise<void>((resolve) => {
+    releaseClose = resolve;
   });
+  const f = await fixture('async', false, closeGate);
+  try {
+    await f.runtime.createSession({
+      expectedStoreId: f.storeId,
+      sessionId: 'other',
+      workspaceId: 'workspace',
+      subjectId: 'owner',
+      commandId: 'create-other',
+      title: 'other',
+    });
+    await f.runtime.submitCommand({
+      expectedStoreId: f.storeId,
+      sessionId: 'other',
+      subjectId: 'owner',
+      commandId: 'work-other',
+      request: { kind: 'run.start', content: 'Keep working independently' },
+    });
+    await until(() => f.turns >= 4);
+    // Deliberately identical page identifiers: Session identity must still
+    // prevent the stop from cancelling these unrelated continuations.
+    for (let index = 0; index < 32; index++)
+      await f.invoke(
+        index === 0 ? 'fixture.wait' : 'browser.resume',
+        undefined,
+        `other-continue-${index}`,
+        'other',
+      );
+    await until(async () =>
+      (
+        await f.runtime.listInteractions({
+          expectedStoreId: f.storeId,
+          sessionId: 'other',
+          state: 'pending',
+        })
+      ).interactions.some((row) => row.definitionId === 'builtin.browser/fixture.wait'),
+    );
+    const controls = (
+      f.runtime as unknown as {
+        liveControlCommands: Map<string, { controller: AbortController }>;
+      }
+    ).liveControlCommands;
+    expect(controls.size).toBe(32);
+    await f.invoke('browser.close');
+    await until(() => f.closeStarted);
+    expect(controls.size).toBe(33);
+    // Retrying the admitted command must not consume another slot.
+    await f.invoke('browser.close');
+    expect(controls.size).toBe(33);
+    const rejected = await Promise.all(
+      Array.from({ length: 4 }, (_, index) =>
+        f.invoke('browser.close', undefined, `excess-stop-${index}`),
+      ),
+    );
+    expect(rejected.every((command) => command.status === 'rejected')).toBe(true);
+    for (let index = 0; index < 4; index++) {
+      const command = await f.runtime.waitForCommand(`excess-stop-${index}`, { timeoutMs: 4000 });
+      expect(command.status).toBe('rejected');
+      expect(JSON.stringify(command)).toContain('runtime_queue_full');
+    }
+    const retry = await f.invoke('browser.close', undefined, 'excess-stop-0');
+    expect(retry.status).toBe('rejected');
+    expect(controls.size).toBe(33);
+    for (let index = 0; index < 32; index++)
+      expect(controls.get(`other-continue-${index}`)?.controller.signal.aborted).toBe(false);
+    releaseClose();
+    await until(() => f.closes === 1);
+    await f.runtime.waitForCommand('browser.close', { timeoutMs: 4000 });
+    expect(
+      (
+        await f.runtime.listInteractions({
+          expectedStoreId: f.storeId,
+          sessionId: 'other',
+          state: 'pending',
+        })
+      ).interactions.some((row) => row.definitionId === 'builtin.browser/fixture.wait'),
+    ).toBe(true);
+    expect(f.resumes).toBe(0);
+  } finally {
+    releaseClose();
+    await f.close();
+  }
+});
 
 test('trusted Run presentation hides selected internal tools without changing nested execution or later legacy surfaces', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-run-hidden-tools-'));

@@ -65,6 +65,12 @@ type Saved = {
   receipt?: { interactionId: string; decisionRevision: string };
   dispatch?: DispatchProof;
 };
+/** Time-bound private Main request identity; persisted once and never refreshed on retry. */
+export function createBrowserGrantRequestId() {
+  const time = Date.now().toString(16).padStart(12, '0');
+  const random = randomUUID();
+  return `${time.slice(0, 8)}-${time.slice(8)}-7${random.slice(15)}`;
+}
 const recordType = 'application/vnd.kite.browser-grant+json';
 const refusalType = 'application/vnd.kite.browser-refusal+json';
 type Work = {
@@ -117,6 +123,7 @@ const prepareDenials = new Set([
   'page_request_invalid',
   'browser_page_grant_intent_conflict',
   'browser_page_grant_capacity',
+  'browser_page_grant_expired',
   'browser_page_grant_pending',
   'browser_session_page_already_bound',
   'browser_page_scope_denied',
@@ -1012,7 +1019,7 @@ export function createDesktopBrowserAuthorization(options: {
               ? { ...released.identity }
               : undefined;
         saved = {
-          requestId: randomUUID(),
+          requestId: createBrowserGrantRequestId(),
           executionId: own.id,
           sessionId: own.sessionId,
           storeId: own.originStoreId,

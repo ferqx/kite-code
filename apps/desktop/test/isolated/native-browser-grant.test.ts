@@ -1,5 +1,5 @@
 import { expect, setSystemTime, test } from 'bun:test';
-import { randomUUID } from 'node:crypto';
+import { createBrowserGrantRequestId } from '../../../service/src/desktop-browser-authorization';
 import {
   type BrowserPagePort,
   NativeBrowserPageHost,
@@ -73,7 +73,7 @@ function fixture() {
     },
   });
   const prepare = (
-    requestId: string = randomUUID(),
+    requestId: string = createBrowserGrantRequestId(),
     browserId = 'open',
     fields: Record<string, unknown> = {},
   ) =>
@@ -155,7 +155,10 @@ test('a trusted retained identity selects the original hidden page among duplica
     const other = f.add('other', scope, 'https://example.test/destination');
     f.host.present('other', true);
     f.selected = { ...f.selected, sessionId: 'background-b', viewSelection: 2 };
-    const grant = await f.prepare(randomUUID(), 'new-run', { requireExisting: true, existingPage });
+    const grant = await f.prepare(createBrowserGrantRequestId(), 'new-run', {
+      requireExisting: true,
+      existingPage,
+    });
     expect(grant.page.id).toBe('original');
     await f.commitAuthorized(grant.requestId);
     const acquired = await f.acquire(grant.requestId, 'new-run');
@@ -181,7 +184,10 @@ test('retained identity fails before prepare after closure or same-id replacemen
       const substitute = f.add('other', scope, 'https://example.test/destination');
       f.host.present('other', true);
       await expect(
-        f.prepare(randomUUID(), 'new-run', { requireExisting: true, existingPage }),
+        f.prepare(createBrowserGrantRequestId(), 'new-run', {
+          requireExisting: true,
+          existingPage,
+        }),
       ).rejects.toThrow(replaced ? 'existing_mismatch' : 'existing_missing');
       expect(substitute.attached).toBe(0);
       expect([...f.pages.values()].every((row) => row.attached === 0)).toBe(true);
@@ -197,7 +203,7 @@ test('existing-only attachment rechecks address and navigation before admitting 
   const f = fixture();
   try {
     const page = f.add('retained');
-    const grant = await f.prepare(randomUUID(), 'open', existingFields(f));
+    const grant = await f.prepare(createBrowserGrantRequestId(), 'open', existingFields(f));
     await f.commitAuthorized(grant.requestId);
     page.onAttach = () => {
       page.url = 'https://example.test/changed-during-attach';
@@ -297,10 +303,10 @@ test('existing-only requests cannot omit or forge the private identity shape', a
       null,
       {},
       { pageId: 'retained' },
-      { pageId: 'retained', incarnation: randomUUID(), extra: true },
+      { pageId: 'retained', incarnation: createBrowserGrantRequestId(), extra: true },
     ])
       await expect(
-        f.prepare(randomUUID(), 'open', { requireExisting: true, existingPage }),
+        f.prepare(createBrowserGrantRequestId(), 'open', { requireExisting: true, existingPage }),
       ).rejects.toThrow('page_request_invalid');
     expect(f.created).toEqual([]);
     expect(f.sent).toEqual([]);
@@ -379,7 +385,9 @@ test('original dispatch cannot revive changed navigation, selection, cancellatio
       const result = await f.commitAuthorized(grant.requestId);
       expect(result.state).toBe(change === 'cancel' ? 'cancelled' : 'expired');
       await expect(f.acquire(grant.requestId)).rejects.toThrow('grant');
-      await expect(f.commitAuthorized(randomUUID())).rejects.toThrow('grant_unavailable');
+      await expect(f.commitAuthorized(createBrowserGrantRequestId())).rejects.toThrow(
+        'grant_unavailable',
+      );
       expect(page.attached).toBe(0);
       expect(f.host.state('a')?.phase).toBe('human');
     } finally {
@@ -632,7 +640,7 @@ test('cancelled or new proposals never wash an actual lease unknown into manual 
     f.host.fail('a');
     await f.cancel(grant.requestId);
     expect(f.host.state('a')?.phase).toBe('unknown');
-    await expect(f.prepare(randomUUID(), 'next')).rejects.toThrow('already_bound');
+    await expect(f.prepare(createBrowserGrantRequestId(), 'next')).rejects.toThrow('already_bound');
     expect(() => f.host.arm('a', scope)).toThrow('grant_denied');
     expect(f.host.state('a')?.phase).toBe('unknown');
   } finally {
@@ -651,7 +659,7 @@ test('requireExisting pins a matching live page, echoes the intent and recovers 
         capacityChecks++;
         throw Error('existing_must_not_check_creation');
       };
-      const requestId = randomUUID(),
+      const requestId = createBrowserGrantRequestId(),
         first = await f.prepare(requestId, 'open', existingFields(f));
       expect(first).toMatchObject({
         requireExisting: true,
@@ -698,7 +706,7 @@ test('requireExisting missing, foreign and ambiguous pages reject before capacit
       f.host.assertCanCreate = () => {
         capacityChecks++;
       };
-      const requestId = randomUUID();
+      const requestId = createBrowserGrantRequestId();
       const error = await f.prepare(requestId, 'open', existingFields(f)).catch((e) => e);
       expect(error).toBeInstanceOf(Error);
       expect(error.message).toBe('browser_page_existing_missing');
@@ -731,9 +739,9 @@ test('requireExisting mismatched or blank URLs never navigate an existing page t
       f.host.assertCanCreate = () => {
         throw Error('must_not_create');
       };
-      await expect(f.prepare(randomUUID(), 'open', existingFields(f))).rejects.toThrow(
-        'browser_page_existing_mismatch',
-      );
+      await expect(
+        f.prepare(createBrowserGrantRequestId(), 'open', existingFields(f)),
+      ).rejects.toThrow('browser_page_existing_mismatch');
       expect(page.url).toBe(url);
       expect(f.host.state('retained')?.phase).toBe('human');
       expect(page.attached).toBe(0);
@@ -750,16 +758,16 @@ test('requireExisting is strict and bound to the first request; prepare, inspect
     const f = fixture();
     try {
       f.add('retained', scope, 'https://example.test/destination');
-      const requestId = randomUUID(),
+      const requestId = createBrowserGrantRequestId(),
         fields = required ? existingFields(f) : {},
         first = await f.prepare(requestId, 'open', fields);
       await expect(f.prepare(requestId, 'open', required ? {} : existingFields(f))).rejects.toThrow(
         'intent_conflict',
       );
       for (const requireExisting of [false, null, 0, 'true'])
-        await expect(f.prepare(randomUUID(), 'open', { requireExisting })).rejects.toThrow(
-          'page_request_invalid',
-        );
+        await expect(
+          f.prepare(createBrowserGrantRequestId(), 'open', { requireExisting }),
+        ).rejects.toThrow('page_request_invalid');
       for (const op of ['inspectGrant', 'commitGrant'])
         await expect(f.host.request({ op, requestId, requireExisting: true })).rejects.toThrow(
           'page_request_invalid',
@@ -785,7 +793,7 @@ test('requireExisting rechecks the original live incarnation, navigation and URL
       const f = fixture();
       try {
         const page = f.add('retained', scope, 'https://example.test/destination'),
-          requestId = randomUUID(),
+          requestId = createBrowserGrantRequestId(),
           fields = existingFields(f);
         await f.prepare(requestId, 'open', fields);
         if (stage === 'committed') await f.commitAuthorized(requestId);
@@ -830,7 +838,7 @@ test('exact retained identity survives foreground selection changes while cancel
     const f = fixture();
     try {
       const page = f.add('retained', scope, 'https://example.test/destination'),
-        grant = await f.prepare(randomUUID(), 'open', existingFields(f));
+        grant = await f.prepare(createBrowserGrantRequestId(), 'open', existingFields(f));
       if (change === 'selection') f.selected = { ...f.selected, viewSelection: 2 };
       else await f.cancel(grant.requestId);
       expect(await f.commitAuthorized(grant.requestId)).toMatchObject({
@@ -850,5 +858,69 @@ test('exact retained identity survives foreground selection changes while cancel
     } finally {
       f.dispose();
     }
+  }
+});
+
+for (const terminal of ['cancelled', 'expired', 'consumed'] as const)
+  test(`128 ${terminal} grants reclaim capacity after their fixed retry window without replay`, async () => {
+    const f = fixture();
+    const start = Date.now();
+    setSystemTime(new Date(start));
+    try {
+      const ids: string[] = [];
+      for (let index = 0; index < 128; index++) {
+        if (terminal === 'consumed') {
+          f.add('page');
+          f.host.arm('page', scope);
+        }
+        const grant = await f.prepare();
+        ids.push(grant.requestId);
+        if (terminal === 'consumed') {
+          await f.acquire(grant.requestId);
+          f.pages.get('page')!.remove();
+          f.pages.delete('page');
+        } else if (terminal === 'cancelled') await f.cancel(grant.requestId);
+        else {
+          f.selected = { ...f.selected, viewSelection: f.selected.viewSelection + 1 };
+          expect((await f.inspect(grant.requestId)).state).toBe('expired');
+        }
+      }
+      const original = await f.inspect(ids[0]!);
+      expect(await f.prepare(ids[0]!)).toEqual(original);
+      await expect(f.prepare(ids[0]!, 'changed')).rejects.toThrow('intent_conflict');
+      await expect(f.prepare()).rejects.toThrow('grant_capacity');
+      setSystemTime(new Date(start + 10 * 60 * 1000));
+      const next = await f.prepare();
+      expect(next.state).toBe('question');
+      await expect(f.inspect(ids[0]!)).rejects.toThrow('grant_unavailable');
+      await expect(f.prepare(ids[0]!)).rejects.toThrow('grant_expired');
+      await expect(f.prepare(ids[0]!, 'changed')).rejects.toThrow('grant_expired');
+      await expect(f.commit(ids[0]!)).rejects.toThrow('grant_unavailable');
+      // A backwards wall-clock jump must not reopen a reclaimed request's lifetime.
+      setSystemTime(new Date(start));
+      await expect(f.prepare(ids[0]!)).rejects.toThrow('grant_expired');
+      expect(f.created).toHaveLength(0);
+    } finally {
+      setSystemTime();
+      f.dispose();
+    }
+  });
+
+test('new grants reject legacy IDs and future timestamps before allocating or reserving', async () => {
+  const f = fixture();
+  const now = Date.now();
+  setSystemTime(new Date(now));
+  try {
+    const legacy = createBrowserGrantRequestId().replace(/-7/, '-4');
+    await expect(f.prepare(legacy)).rejects.toThrow('page_request_invalid');
+    setSystemTime(new Date(now + 1));
+    const future = createBrowserGrantRequestId();
+    setSystemTime(new Date(now));
+    await expect(f.prepare(future)).rejects.toThrow('page_request_invalid');
+    expect((await f.prepare()).state).toBe('question');
+    expect(f.created).toHaveLength(0);
+  } finally {
+    setSystemTime();
+    f.dispose();
   }
 });

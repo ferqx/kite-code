@@ -33,6 +33,7 @@ import {
   browserContinuationSource,
   inheritHostRevocation,
   interruptsBrowserContinuation,
+  isBrowserRevocation,
 } from './execution/host-control';
 import type { WorkspaceSerialLocks } from './execution/resource-port';
 import { ExecutionResources } from './execution/resources';
@@ -5040,7 +5041,8 @@ export class AgentRuntime {
     // execution ownership: a surviving legitimate owner may still advance it.
     if (this.closing) return command;
     if (command.status === 'accepted') {
-      if (this.dispatchLiveControl(command)) return command;
+      const liveControl = await this.dispatchLiveControl(command);
+      if (liveControl) return liveControl;
       this.dispatchFailures.delete(command.sessionId);
       this.pendingSessions.add(command.sessionId);
       this.schedule(command.sessionId);
@@ -5050,18 +5052,17 @@ export class AgentRuntime {
   }
   /** Explicit control responses enter through intake, not a polling dispatcher.
    * They use their own human command/permissions, never a borrowed Model Tool. */
-  private dispatchLiveControl(command: CommandRecord): boolean {
-    if (this.liveControlCommands.has(command.id)) return true;
+  private async dispatchLiveControl(command: CommandRecord): Promise<CommandRecord | undefined> {
+    if (this.liveControlCommands.has(command.id)) return command;
     const request = command.request;
     if (
       !request ||
       typeof request !== 'object' ||
       Array.isArray(request) ||
       request.kind !== 'extension.invoke' ||
-      this.liveControlCommands.size >= 32 ||
       this.hasUnconfirmedCleanup()
     )
-      return false;
+      return undefined;
     const definition = this.extensions
       .find((extension) => extension.id === request.extensionId)
       ?.actions?.find(
@@ -5070,7 +5071,7 @@ export class AgentRuntime {
           action.version === request.definitionVersion &&
           action.runControl === true,
       );
-    if (!definition || definition.resources?.slot || definition.resources?.serial) return false;
+    if (!definition || definition.resources?.slot || definition.resources?.serial) return undefined;
     const receipt = command.receipt;
     if (
       receipt &&
@@ -5078,7 +5079,7 @@ export class AgentRuntime {
       !Array.isArray(receipt) &&
       receipt.kind === 'nested_action'
     )
-      return false;
+      return undefined;
     const live = [...this.active.values()].find(
       (work) =>
         work.runId &&
@@ -5086,7 +5087,21 @@ export class AgentRuntime {
         work.originStoreId === command.originStoreId &&
         !work.controller.signal.aborted,
     );
-    if (!live) return false;
+    if (!live) return undefined;
+    if (this.liveControlCommands.size >= 32) {
+      if (!isBrowserRevocation(definition, request.input as Json)) return undefined;
+      // One reserved slot lets a trusted stop break a saturated continuation
+      // queue, including when other Sessions occupy all ordinary slots. Never
+      // queue another stop behind an occupied reserve without a visible result.
+      if (this.liveControlCommands.size >= 33) {
+        return this.options.store.rejectCommand({
+          expectedStoreId: command.originStoreId,
+          owner: live.owner,
+          commandId: command.id,
+          reason: 'runtime_queue_full',
+        });
+      }
+    }
     const key = this.ownerReleaseKey(live.owner);
     const prior = this.liveControlTasks.get(key);
     const predecessors = [...this.liveControlCommands.values()].filter(
@@ -5302,7 +5317,7 @@ export class AgentRuntime {
       });
     this.liveControlTasks.set(key, task);
     void task.catch((error) => this.stopDispatchPolling(command.sessionId, error));
-    return true;
+    return command;
   }
   /** Trusted host port for an ordinary Action requested by an exact live Model Tool.
    * It retains that Tool's permission ceiling rather than re-entering the Session pump. */

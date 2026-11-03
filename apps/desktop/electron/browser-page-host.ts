@@ -228,6 +228,12 @@ export class NativeBrowserPageHost {
   private readonly leases = new Map<string, Page>();
   private readonly retiredLeases = new Map<string, { page: Page; lease: BrowserControlLease }>();
   private readonly grants = new Map<string, Grant>();
+  // A request's UUIDv7 timestamp fixes its lifetime even after its tombstone is reclaimed.
+  private grantClock = Date.now();
+  private grantNow() {
+    this.grantClock = Math.max(this.grantClock, Date.now());
+    return this.grantClock;
+  }
   private grantContext?: BrowserGrantContext;
   configureGrantContext(context: BrowserGrantContext) {
     if (this.grantContext)
@@ -321,7 +327,7 @@ export class NativeBrowserPageHost {
         page.port.scope.sessionId === grant.sessionId,
     );
     if (
-      Date.now() >= grant.expiresAt ||
+      this.grantNow() >= grant.expiresAt ||
       selectionChanged ||
       initializationChanged ||
       otherRetained ||
@@ -400,6 +406,21 @@ export class NativeBrowserPageHost {
         return this.grantResult(grant);
       }
       if (!this.grantContext) throw hostError('browser_page_grant_unavailable');
+      const now = this.grantNow();
+      const issuedAt = Number.parseInt(input.requestId.replaceAll('-', '').slice(0, 12), 16);
+      if (input.requestId[14] !== '7' || issuedAt > now) throw hostError('page_request_invalid');
+      const expiresAt = issuedAt + 10 * 60 * 1000;
+      if (expiresAt <= now) throw hostError('browser_page_grant_expired');
+      // Keep exact results and intent conflicts for the entire retry window. Never
+      // evict an in-flight creator: its cleanup still owns the original page.
+      for (const [requestId, prior] of this.grants) {
+        if (
+          prior.expiresAt <= now &&
+          !prior.creating &&
+          (prior.consumed || ['cancelled', 'expired'].includes(prior.state))
+        )
+          this.grants.delete(requestId);
+      }
       if (this.grants.size >= 128) throw hostError('browser_page_grant_capacity');
       if (
         [...this.grants.values()].some(
@@ -490,12 +511,12 @@ export class NativeBrowserPageHost {
               },
             }
           : {}),
-        expiresAt: Date.now() + 10 * 60 * 1000,
+        expiresAt,
       };
       if (target) target.grantReservation = grant.requestId;
       this.grants.set(grant.requestId, grant);
       const pending = grant;
-      grant.timer = setTimeout(() => this.endGrant(pending, 'expired'), 10 * 60 * 1000);
+      grant.timer = setTimeout(() => this.endGrant(pending, 'expired'), expiresAt - now);
       grant.timer.unref();
       return this.grantResult(grant);
     }

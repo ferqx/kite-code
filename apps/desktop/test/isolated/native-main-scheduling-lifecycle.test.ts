@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { NativeBrowserTransport } from '@kite-ai/agent/browser';
 import type { AgentClient, SessionView } from '@kite-ai/client';
 import type { WebContents } from 'electron';
+import { createBrowserGrantRequestId } from '../../../service/src/desktop-browser-authorization';
 import type { BrowserGrantScope, NativeBrowserPageHost } from '../../electron/browser-page-host';
 import type { DevelopmentServiceReload } from '../../electron/development';
 import { createNativeCallerGenerationOwner, NativeCaller } from '../../electron/native-caller';
@@ -990,7 +991,7 @@ test('Main grant identity survives a real same-selection Caller refresh while re
     const prepare = () =>
       host.request({
         op: 'prepareGrant',
-        requestId: crypto.randomUUID(),
+        requestId: createBrowserGrantRequestId(),
         storeId: 'store',
         sessionId: 'a',
         executionId: 'tool',

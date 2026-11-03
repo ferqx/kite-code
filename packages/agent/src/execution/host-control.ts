@@ -97,13 +97,9 @@ function freezeInput(input: Json): void {
   }
 }
 
-/** Queue interruption is narrower than dispatch authority: only an exact
- * builtin revocation may cancel a not-yet-dispatched continuation of its page. */
-export function interruptsBrowserContinuation(
-  definition: ActionDefinition,
-  input: Json,
-  previous: { actionId: string; input: Json },
-): boolean {
+/** Only an exact registered revocation with a valid bounded target may use
+ * reserved control capacity. This grants neither a page nor dispatch authority. */
+export function isBrowserRevocation(definition: ActionDefinition, input: Json): boolean {
   const kind = Object.isFrozen(definition) ? registrations.get(definition) : undefined;
   if (!kind || !input || typeof input !== 'object' || Array.isArray(input)) return false;
   const keys =
@@ -122,12 +118,27 @@ export function interruptsBrowserContinuation(
       !/^[1-9][0-9]*$/.test(input.expectedRevision)
     )
       return false;
-  } else if (
+  }
+  if (
     ![input.browserId, input.generation].every(
       (value) => typeof value === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(value),
     )
   )
     return false;
+  freezeInput(input);
+  return true;
+}
+
+/** Queue interruption is narrower than dispatch authority: only an exact
+ * builtin revocation may cancel a not-yet-dispatched continuation of its page. */
+export function interruptsBrowserContinuation(
+  definition: ActionDefinition,
+  input: Json,
+  previous: { actionId: string; input: Json },
+): boolean {
+  if (!isBrowserRevocation(definition, input)) return false;
+  const kind = registrations.get(definition)!;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
   const prior = previous.input;
   if (
     !prior ||

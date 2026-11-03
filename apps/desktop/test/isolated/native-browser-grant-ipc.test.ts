@@ -1,8 +1,8 @@
 import { expect, mock, test } from 'bun:test';
-import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { AgentClient, SessionView } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { createBrowserGrantRequestId } from '../../../service/src/desktop-browser-authorization';
 import {
   type BrowserGrantScope,
   type BrowserPagePort,
@@ -228,7 +228,7 @@ function fixture(
     ...(grantScope ? { grantScope } : {}),
   });
   const prepare = async () => {
-    const requestId = randomUUID();
+    const requestId = createBrowserGrantRequestId();
     await host.request({
       op: 'prepareGrant',
       requestId,
@@ -855,7 +855,7 @@ test('explicit tab X destroys its exact page in every control phase; hiding and 
       await expect(
         f.host.request({
           op: 'prepareGrant',
-          requestId: randomUUID(),
+          requestId: createBrowserGrantRequestId(),
           storeId: f.scope.storeId,
           sessionId: f.scope.sessionId,
           executionId: 'next-tool',
@@ -1293,7 +1293,7 @@ test('Native grant context is passive until consent, initializes one blank rende
   const { host, owner, children, handlers, scope, dispose } = fixture();
   try {
     expect(views).toHaveLength(0);
-    const requestId = randomUUID();
+    const requestId = createBrowserGrantRequestId();
     expect(
       await host.request({
         op: 'prepareGrant',

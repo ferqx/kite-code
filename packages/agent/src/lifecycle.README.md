@@ -52,12 +52,12 @@ Core 从 [ExecutionResources](execution/resources.ts) 将冻结总容量注入 `
 
 ## 活动 Run 的有限控制响应
 
-可信 `ActionDefinition.runControl` 是宿主代码声明，公共命令不能添加。Runtime在已有热Run的准确Store/Session/owner下登记并保留原owner，按owner串行派发这些有限Action；最多32条本实例在途控制申请，未确认清理仍封门。每条继续原Action准备、新鲜度、权限、持久command/execution与取消流程，nested Tool不能借此伪装独立人工来源。普通Action仍进入Session pump，不是所有Action并发，也不是新的后台轮询器。
+可信 `ActionDefinition.runControl` 是宿主代码声明，公共命令不能添加。Runtime在已有热Run的准确Store/Session/owner下登记并保留原owner，按owner串行派发这些有限Action；普通控制最多32条本实例在途申请；可信、输入严格匹配的浏览器缩权另可使用1个全局预留名额，总在途上限33。预留已占用时，新的缩权Command以 `runtime_queue_full` 明确拒绝，原Command重试保持同一终态，不静默排入被阻塞的Session；未确认清理仍封门。每条继续原Action准备、新鲜度、权限、持久command/execution与取消流程，nested Tool不能借此伪装独立人工来源。普通Action仍进入Session pump，不是所有Action并发，也不是新的后台轮询器。
 
 控制Action不得申请slot/serial资源，不能 `operations.ensure`、取消/重启其它operation或发起Question；仅可读/等待已有operation和写自己的扩展记录。关闭先abort准确在途控制，再与原任务一起排空并释放owner。现有 `readWorkEligibility` 只读既有work-control证据，不取得新的派发权限。跨Runtime/peer intake的主动控制尚未取得资格。
 
 [宿主缩权接缝](execution/host-control.ts)只认可信内置代码登记并冻结的 handoff、close 或 `respond_human(choice=stop)` 对象；同名 Action、对象展开副本或公共 `runControl` 标记不能取得这项准入。Core 封存定义时继承原登记，准备输入冻结后才使用准确缩权授权，因而停止不受普通业务审批等待阻塞。原主体、Store／Session／owner、Action 输入与页面 generation 校验仍执行；continue、resume 和网页业务写入继续走原权限。
 
-同 owner 控制队列中，准确缩权可以先取消尚未派发的同页 resume／human continue，随后排空原队列再执行停止。人类 Stop 还须匹配原 requestId／revision；已派发、目标变化或身份不符不借此重放或扩大停止范围。该接缝不把既有控制 Action 变成通用并发执行入口。[真实 Runtime／SQLite 替身回归](../test/isolated/browser/host-revocation.test.ts)覆盖审批与 Question 等待中的停止、pending continue 抢占、冻结输入、同名伪装和旧 generation 拒绝。
+同 owner 控制队列中，准确缩权可以先取消尚未派发的同页 resume／human continue，随后排空原队列再执行停止。人类 Stop 还须匹配原 requestId／revision；已派发、目标变化或身份不符不借此重放或扩大停止范围。同owner队首若是目标不符或普通待审批控制，停止仍等待其明确结算，不越过或取消它；预留名额只解决容量阻塞，不保证所有停止立即执行。该接缝不把既有控制 Action 变成通用并发执行入口。[真实 Runtime／SQLite 替身回归](../test/isolated/browser/host-revocation.test.ts)覆盖审批与 Question 等待中的停止、31／32条pending continue抢占、其他Session占满普通名额时的准确停止、33满额并发拒绝及幂等、冻结输入、同名伪装和旧 generation 拒绝。
 
 [Browser 真实 Runtime mock](../test/isolated/browser/human-async-runtime.test.ts)核原模型继续无关工作时的人类回应、主动接管、普通 Action 仍串行和禁止新工作；Browser 的有限请求／Job／通知均归[Browser owner](tools/browser/README.md)，Core 不接管页面 owner 或新增 Browser 业务表。此处只说明当前代码与受控验证边界，最终实机／模型资格沿 Desktop owner 核实。

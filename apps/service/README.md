@@ -901,3 +901,5 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 同work换key／URL不能覆盖旧明确拒绝或待核实的原页面意图。授权适配在原grant首次写入确认后，先CAS保存work的pending屏障，再允许Main prepare；pending只代表原许可／证明待定，不是用户拒绝。旧refused记录继续核原Interaction、accepted receipt和第一条answer_saved Command.seq完整证明；证明不全或ACK丢失继续保留pending／原unknown，不以新路径复活。marker自身未落盘时只读本work前缀下的原grant兜底，出前缀即停止，不扫描无关Session历史。resolved仅表示准确允许或已确认非拒绝失败结束该待定，不提供新页面授权。真实新root work或经原applied业务输入完整链证明的新人工steer才可重新进入原权限链，进度、clarify、result.include与重复answer不行。旧grant字节和unknown不重写；legacy key只沿原已知父链／指针精确只读兼容。[原来源反例](test/isolated/desktop-browser-authorization.test.ts)核旧拒绝、损坏证明、新steer、pending写失败及1000条无关旧grant；实际Native／真实模型修后验收归Desktop owner。
 
 旧 Run 未包含 Browser snapshot 字段时，恢复绑定保留字段缺失，不补入 `browser: null`；新 Run 明确保存的 null 或 Browser 指纹仍精确保留并核对。该差异由[模型绑定回归](test/isolated/model-transport.test.ts)验证，避免完整 Runtime 配置匹配因升级新增字段误拒。
+
+浏览器新授权的私有请求标识由 Service 生成并持久化一次，携带固定时间范围；冷恢复沿原记录 inspect，不因超时、Main重启或记录丢失重新 prepare。旧格式申请仍按原记录只读恢复，未知结果不能重放。此调整不改变公开工具或协议版本。

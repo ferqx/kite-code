@@ -1057,3 +1057,44 @@ test('missing-page metadata survives an unconfirmed intent cancellation', async 
   expect(invalidated).toEqual([]);
   expect(f.calls.map((call) => call.op)).toEqual(['prepareGrant', 'commitGrant', 'cancelGrant']);
 });
+
+for (const legacy of [false, true])
+  test(`a cold authorization adapter only inspects a persisted ${legacy ? 'legacy' : 'time-bound'} request`, async () => {
+    const f = fixture();
+    expect(await f.adapter.prepareOpen(f.context, intent)).toBeUndefined();
+    const saved = [...f.records.values()].find(
+      (record) => record.contentType === 'application/vnd.kite.browser-grant+json',
+    )!;
+    const value = saved.value as Record<string, Json>;
+    expect(String(value.requestId)[14]).toBe('7');
+    if (legacy) {
+      const original = String(value.requestId);
+      const legacyId = original.replace(/-7/, '-4');
+      for (const record of f.records.values())
+        record.value = JSON.parse(JSON.stringify(record.value).replaceAll(original, legacyId));
+      value.requestId = legacyId;
+      f.proposal!.requestId = legacyId;
+    }
+    const calls: Record<string, unknown>[] = [];
+    const cold = createDesktopBrowserAuthorization({
+      runtime: () => f.host,
+      async call(input) {
+        calls.push(input);
+        expect(input.op).toBe('inspectGrant');
+        return structuredClone(f.proposal);
+      },
+    });
+    expect(await cold.prepareOpen(f.context, intent)).toBeUndefined();
+    expect(calls).toEqual([{ op: 'inspectGrant', requestId: value.requestId }]);
+    const lost = createDesktopBrowserAuthorization({
+      runtime: () => f.host,
+      async call(input) {
+        calls.push(input);
+        expect(input.op).toBe('inspectGrant');
+        throw Error('browser_page_grant_unavailable');
+      },
+    });
+    expect(await lost.prepareOpen(f.context, intent)).toMatchObject({ outcome: 'outcome_unknown' });
+    expect(calls.every((call) => call.op === 'inspectGrant')).toBe(true);
+    expect(f.calls.filter((call) => call.op === 'prepareGrant')).toHaveLength(1);
+  });
