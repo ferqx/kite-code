@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { AgentError } from '@kite-ai/agent';
 import type { JsonObject, ModelConfiguration } from '@kite-ai/agent/config';
+import { resolveModelTransport } from './model-transport';
 
 /** Explicit protocol families; a discovered model name never chooses a Provider. */
 export const modelProviders = [
@@ -246,7 +247,8 @@ export async function discoverProviderModels(
   if (signal?.aborted) abort();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(endpoint, {
+    const transport = await resolveModelTransport();
+    const response = await transport.fetch(endpoint, {
       headers: {
         accept: 'application/json',
         ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),

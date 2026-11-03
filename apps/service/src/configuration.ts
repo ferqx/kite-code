@@ -96,6 +96,7 @@ import {
 } from './mcp-source-configuration';
 import { parseModelPreset } from './model-options';
 import { isSupportedModelProvider, modelProtocol } from './model-providers';
+import { resolveModelTransport } from './model-transport';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import {
   planningSnapshotDigest,
@@ -725,7 +726,10 @@ export function createDefaultProcessConfiguration(options: {
     resolveModel: ({ modelId, ...input }) =>
       resolveConfigurationBinding(input, { modelId, modelOnly: true }),
   });
-  const resolveModel = async (selected: ModelConfiguration) => {
+  const resolveModel = async (
+    selected: ModelConfiguration,
+    transport: Awaited<ReturnType<typeof resolveModelTransport>>,
+  ) => {
     if (selected.provider === 'codex') {
       if (!localCodex) throw new ConfigurationError('codex_auth_required');
       if (selected.baseURL !== CODEX_BASE_URL || typeof selected.providerName !== 'string')
@@ -733,7 +737,7 @@ export function createDefaultProcessConfiguration(options: {
       const preset = parseModelPreset(selected.options);
       if (preset.maxOutputTokens !== undefined)
         throw new ConfigurationError('codex_model_options_unsupported');
-      const credentials = await localCodex.binding(selected.providerName);
+      const credentials = await localCodex.binding(selected.providerName, transport.fetch);
       const binding = createCompatibleModelBinding({
         name: 'codex',
         protocol: modelProtocol(selected.provider, selected.protocol),
@@ -756,6 +760,7 @@ export function createDefaultProcessConfiguration(options: {
       baseURL: selected.baseURL!,
       modelId: selected.model,
       apiKey,
+      fetch: transport.fetch,
     });
     return createSdkModelAdapter({
       models: new Map([[selected.id, binding]]),
@@ -783,6 +788,7 @@ export function createDefaultProcessConfiguration(options: {
       planningSnapshot: Json;
       mcpSourceSnapshot: Json;
       webSnapshot: Json;
+      modelTransportSnapshot: Json;
       runIdentity: { runId: string; sessionId: string };
     },
   ) => {
@@ -845,9 +851,10 @@ export function createDefaultProcessConfiguration(options: {
       // adapters. Skill rows are validated locally by discovery, then the exact
       // selected subset is included in the final immutable snapshot below.
       createConfigurationSnapshot({ ...effective, skills: [] });
+      const modelTransport = await resolveModelTransport();
       if (selection?.modelOnly)
         return {
-          model: await resolveModel(selected),
+          model: await resolveModel(selected, modelTransport),
           modelId: selected.id,
           toolIds: [],
           extensions: [],
@@ -873,11 +880,10 @@ export function createDefaultProcessConfiguration(options: {
                   : null,
             }),
           ),
-          snapshot: createConfigurationSnapshot({
-            ...effective,
-            tools: [],
-            skills: [],
-          }) as unknown as Json,
+          snapshot: {
+            ...createConfigurationSnapshot({ ...effective, tools: [], skills: [] }),
+            modelTransport: modelTransport.snapshot,
+          } as unknown as Json,
         } satisfies RunConfiguration;
       // Freeze the host's declared default along with this Run's actual model.
       // Core's generic configuration leaf still preserves absent metadata verbatim.
@@ -1124,6 +1130,9 @@ export function createDefaultProcessConfiguration(options: {
         if (
           recovery &&
           (snapshot.digest !== recovery.digest ||
+            (recovery.modelTransportSnapshot !== null &&
+              planningSnapshotDigest(modelTransport.snapshot) !==
+                planningSnapshotDigest(recovery.modelTransportSnapshot)) ||
             planningSnapshotDigest(
               (assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null) as unknown as Json,
             ) !== planningSnapshotDigest(recovery.webSnapshot) ||
@@ -1136,7 +1145,7 @@ export function createDefaultProcessConfiguration(options: {
               planningSnapshotDigest(recovery.mcpSourceSnapshot))
         )
           throw new AgentError('recovery_configuration_changed');
-        const model = await resolveModel(selected);
+        const model = await resolveModel(selected, modelTransport);
         const authorizationCheck = options.authorizationCheck ?? {
           id: 'builtin.auto',
           version: createHash('sha256')
@@ -1484,6 +1493,7 @@ export function createDefaultProcessConfiguration(options: {
           dispose,
           snapshot: {
             ...snapshot,
+            modelTransport: modelTransport.snapshot,
             skillSelection: {
               requested: selection
                 ? (selection.skillSelection?.requested ?? null)
@@ -1609,6 +1619,7 @@ export function createDefaultProcessConfiguration(options: {
         signal: input.signal,
         planningSnapshot: snapshot.planning ?? null,
         webSnapshot: snapshot.web ?? null,
+        modelTransportSnapshot: snapshot.modelTransport ?? null,
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
         mcpSourceSnapshot:
           snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)

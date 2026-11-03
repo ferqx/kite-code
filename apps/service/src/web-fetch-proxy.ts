@@ -90,7 +90,7 @@ export function macWebProxy(output: string): Proxy {
   if (read('ExcludeSimpleHostnames') === '1') routes.noProxy += ',<local>';
   return routes;
 }
-async function systemWebProxy(): Promise<Proxy> {
+export async function systemWebProxy(): Promise<Proxy> {
   if (!['win32', 'darwin'].includes(process.platform)) return {};
   const windows = process.platform === 'win32';
   const file = windows

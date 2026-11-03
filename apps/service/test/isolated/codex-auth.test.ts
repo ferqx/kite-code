@@ -70,6 +70,39 @@ const post = (binding: Awaited<ReturnType<ReturnType<typeof createCodexLocalSour
     body: JSON.stringify({ model: 'local-codex-model', input: [] }),
   });
 
+test('Codex binding uses the selected model transport while retaining auth, body and cancellation', async () => {
+  const f = fixture();
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  try {
+    f.setAuth(auth());
+    const controller = new AbortController();
+    const transport = fakeFetch(async (input, init) => {
+      calls.push({ url: String(input), init });
+      return new Response('ok');
+    });
+    const binding = await f.source.binding(f.source.discover()!.alias, transport);
+    await binding.fetch(`${CODEX_BASE_URL}/responses`, {
+      method: 'POST',
+      body: JSON.stringify({ model: 'fixture', input: [{ role: 'user', content: 'hello' }] }),
+      signal: controller.signal,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(`${CODEX_BASE_URL}/responses`);
+    expect(calls[0]!.init?.signal).toBe(controller.signal);
+    expect(new Headers(calls[0]!.init?.headers).get('authorization')).toBe(
+      `Bearer ${auth().tokens.access_token}`,
+    );
+    expect(new Headers(calls[0]!.init?.headers).get('chatgpt-account-id')).toBe('account-one');
+    expect(JSON.parse(String(calls[0]!.init?.body))).toMatchObject({
+      store: false,
+      stream: true,
+      input: [{ role: 'user', content: 'hello' }],
+    });
+  } finally {
+    f.close();
+  }
+});
+
 test('local discovery uses only listed cache models and explicit root model, without exposing auth', async () => {
   const f = fixture();
   try {
