@@ -60,7 +60,7 @@ class FakeContents extends EventEmitter {
   destroyed = false;
   zoom = 1;
   attached = true;
-  mainFrame = { url: 'http://localhost/' };
+  mainFrame: { url: string; processId?: number; routingId?: number } = { url: 'http://localhost/' };
   readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false };
   readMetrics: () => Promise<unknown> = async () => metrics;
   screenshot: (params: Record<string, unknown>) => Promise<unknown> = async () => image;
@@ -113,6 +113,13 @@ class FakeContents extends EventEmitter {
   invalidations = 0;
   autoPresentationFrame = true;
   nativeSurface = false;
+  backgroundThrottling = true;
+  getBackgroundThrottling() {
+    return this.backgroundThrottling;
+  }
+  setBackgroundThrottling(value: boolean) {
+    this.backgroundThrottling = value;
+  }
   nativeVisible: () => boolean = () => true;
   invalidateError?: Error;
   frameImage?: () => Electron.NativeImage;
@@ -148,6 +155,10 @@ class FakeContents extends EventEmitter {
     this.loads++;
   }
   stops = 0;
+  reloads = 0;
+  reload() {
+    this.reloads++;
+  }
   stop() {
     this.stops++;
   }
@@ -192,6 +203,7 @@ class FakePlainView {
   readonly boundsWrites: Electron.Rectangle[] = [];
   readonly radiusWrites: number[] = [];
   readonly backgrounds: string[] = [];
+  setBackgroundBlur(_radius: number) {}
   setVisible(value: boolean) {
     this.visible = value;
     this.visibility.push(value);
@@ -612,6 +624,108 @@ test('Native waits for the owned main document DOM-ready while hide and resource
     f.close();
   }
 });
+
+test('a failed navigation publishes bounded human-readable metadata without granting document readiness or copying pixels', async () => {
+  const f = fixture();
+  f.state.phase = 'human';
+  const failed = 'http://localhost/unavailable';
+  try {
+    f.contents.emit('did-start-navigation', {}, failed, false, true);
+    f.contents.actualUrl = failed;
+    f.contents.mainFrame = { url: failed, processId: 41, routingId: 7 };
+    f.present(bounds);
+    await turn();
+    f.contents.emit('did-fail-load', {}, -102, 'ERR_CONNECTION_REFUSED', failed, true, 41, 7);
+    expect(f.view.visible).toBe(false);
+    f.contents.emit('dom-ready');
+    await turn();
+    expect(f.pageState()).toMatchObject({
+      url: failed,
+      error: 'load_failed',
+      display: 'failed',
+      loading: false,
+      failure: { kind: 'connection', code: 'ERR_CONNECTION_REFUSED' },
+    });
+    expect(f.aboveRoot()).toBe(false);
+    f.state.phase = 'agent';
+    expect(await f.page.waitForDocument!(new AbortController().signal)).toBe(false);
+    expect(f.page.captureMeta()).toMatchObject({ metadata: null });
+    f.state.phase = 'human';
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(f.contents.captureCalls).toBe(0);
+    const loads = f.contents.loads;
+    f.invoke({ action: 'reload', id: 'page' });
+    expect(f.contents.reloads).toBe(1);
+    expect(f.pageState().failure).toBeUndefined();
+    f.contents.emit('did-start-navigation', {}, failed, false, true);
+    expect(f.view.visible).toBe(false);
+    f.contents.mainFrame = { url: failed, processId: 42, routingId: 8 };
+    f.completeDocument(f.view, failed, false);
+    await f.show(bounds);
+    expect(f.pageState().error).toBeUndefined();
+    expect(f.aboveRoot()).toBe(true);
+    f.state.phase = 'agent';
+    expect(await f.page.waitForDocument!(new AbortController().signal)).toBe(true);
+    expect(f.contents.loads).toBe(loads);
+  } finally {
+    f.close();
+  }
+});
+
+for (const [code, description, kind] of [
+  [-105, 'ERR_NAME_NOT_RESOLVED', 'dns'],
+  [-106, 'ERR_INTERNET_DISCONNECTED', 'offline'],
+  [-118, 'ERR_CONNECTION_TIMED_OUT', 'timeout'],
+  [-202, 'ERR_CERT_AUTHORITY_INVALID', 'certificate'],
+  [-107, 'ERR_SSL_PROTOCOL_ERROR', 'secure_connection'],
+  [-379, 'ERR_HTTP_RESPONSE_CODE_FAILURE', 'other'],
+  [-2, 'private stack\n and logs', 'other'],
+] as const)
+  test(`native load failure ${code} publishes only its bounded reason and code`, () => {
+    const f = fixture(),
+      url = 'http://localhost/failed';
+    try {
+      f.contents.emit('did-start-navigation', {}, url, false, true);
+      f.contents.mainFrame = { url, processId: 41, routingId: 7 };
+      f.contents.emit('did-fail-load', {}, code, description, url, true, 41, 7);
+      expect(f.pageState().failure).toEqual({
+        kind,
+        ...(description.startsWith('ERR_') ? { code: description } : {}),
+      });
+      expect(f.view.visible).toBe(false);
+    } finally {
+      f.close();
+    }
+  });
+
+for (const stale of ['url', 'frame', 'subframe', 'aborted'] as const)
+  test(`a ${stale} failure cannot poison the current document`, async () => {
+    const f = fixture();
+    f.state.phase = 'human';
+    const url = 'http://localhost/unavailable';
+    try {
+      f.contents.emit('did-start-navigation', {}, url, false, true);
+      f.contents.actualUrl = url;
+      f.contents.mainFrame = { url, processId: 41, routingId: 7 };
+      f.contents.emit(
+        'did-fail-load',
+        {},
+        stale === 'aborted' ? -3 : -102,
+        'failure',
+        stale === 'url' ? 'http://localhost/old' : url,
+        stale !== 'subframe',
+        stale === 'frame' ? 40 : 41,
+        7,
+      );
+      f.contents.emit('dom-ready');
+      await f.show(bounds);
+      expect(f.aboveRoot()).toBe(false);
+      expect(f.pageState().display).not.toBe('ready');
+      expect(f.pageState().error).toBeUndefined();
+    } finally {
+      f.close();
+    }
+  });
 
 test('late failures from an old URL and same-URL abort do not poison the current document', async () => {
   const f = fixture(),
@@ -1531,6 +1645,139 @@ test('Main routes only the pending native popup Escape sequence and restores ord
     f.close();
   }
 });
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows paints the seam and grip with the accepted page geometry without adding an input surface',
+  async () => {
+    const f = fixture();
+    f.state.phase = 'human';
+    const panel = {
+      size: 0,
+      min: 0,
+      minUnit: 'px',
+      max: 100,
+      maxUnit: '%',
+      preserve: 'relative',
+      collapsible: false,
+    } as const;
+    const layout: NativeBrowserLayout = {
+      windowWidth: 1600,
+      windowHeight: 1200,
+      insetLeft: 1,
+      insetRight: 1,
+      groups: [
+        {
+          left: 0,
+          right: 0,
+          gap: 1,
+          panels: [
+            { ...panel, size: 599 },
+            { ...panel, size: 1000 },
+          ],
+        },
+      ],
+      frame: {
+        top: 38,
+        bottom: 6,
+        width: 1,
+        color: [255, 255, 255, 0.08],
+        grip: {
+          left: -1,
+          width: 3,
+          height: 28,
+          color: [181, 181, 181, 0.55],
+          visible: true,
+        },
+      },
+    };
+    const bounds = { x: 601, y: 100, width: 998, height: 1094, radius: 0 };
+    const decorations = () =>
+      (f.window.contentView.children as unknown as FakePlainView[]).filter(
+        (v) => !(v instanceof FakeView),
+      );
+    try {
+      await f.show(bounds, layout);
+      const [seam, grip] = decorations();
+      expect(decorations()).toHaveLength(2);
+      expect(seam!.visible).toBe(true);
+      expect(seam!.bounds).toEqual({ x: 600, y: 38, width: 1, height: 1156 });
+      expect(grip!.bounds.x).toBe(599);
+      expect(grip!.visible).toBe(true);
+      expect(seam!.radiusWrites).toEqual([]); // Tiny native strips must not be clipped away.
+      const retired = f.layoutRequest('page', bounds, layout);
+      const nextLayout = {
+        ...layout,
+        groups: [
+          {
+            ...layout.groups[0]!,
+            panels: [
+              { ...panel, size: 549 },
+              { ...panel, size: 1050 },
+            ] as const,
+          },
+        ],
+      };
+      expect(
+        f.sync(f.layoutRequest('page', { ...bounds, x: 551, width: 1048 }, nextLayout)),
+      ).toMatchObject({ ok: true });
+      expect(Math.abs(f.view.bounds.x - 551)).toBeLessThanOrEqual(1);
+      expect([seam!.bounds.x, grip!.bounds.x]).toEqual([f.view.bounds.x - 1, f.view.bounds.x - 2]);
+      const accepted = [seam!.bounds.x, grip!.bounds.x, f.view.bounds.x];
+      f.sync(retired);
+      expect([seam!.bounds.x, grip!.bounds.x, f.view.bounds.x]).toEqual(accepted);
+      f.contentSize[0] = 1800;
+      f.window.emit('resize');
+      expect(f.view.bounds.x - seam!.bounds.x).toBeGreaterThanOrEqual(1);
+      expect(f.view.bounds.x - seam!.bounds.x).toBeLessThanOrEqual(2);
+      expect(grip!.bounds.x).toBe(seam!.bounds.x - 1);
+      expect(views).toHaveLength(1);
+      expect(f.contents.loads).toBe(1);
+      expect(f.contents.captureCalls).toBe(0);
+      f.windowEvent('hide');
+      expect(decorations().every((v) => !v.visible)).toBe(true);
+      f.sync(retired);
+      expect(decorations().every((v) => !v.visible)).toBe(true);
+    } finally {
+      f.close();
+    }
+    expect(decorations()).toEqual([]);
+  },
+);
+
+for (const previous of [true, false])
+  for (const outcome of ['ready', 'cancelled', 'failed'] as const)
+    test.skipIf(process.platform !== 'win32')(
+      `Windows first-frame preparation restores background throttling=${previous} after ${outcome}`,
+      async () => {
+        const f = fixture();
+        f.contents.backgroundThrottling = previous;
+        f.contents.autoPresentationFrame = false;
+        try {
+          f.present(bounds);
+          await turn();
+          expect(f.contents.backgroundThrottling).toBe(false);
+          expect(f.aboveRoot()).toBe(false);
+          const late = f.contents.frame!;
+          if (outcome === 'ready') {
+            late(nativeFrame(1600, 1200));
+            await turn();
+            expect(f.pageState().display).toBe('ready');
+          } else if (outcome === 'cancelled') {
+            f.present(null);
+          } else {
+            f.contents.emit('did-fail-load', {}, -105, 'failed', f.contents.getURL(), true);
+          }
+          expect(f.contents.backgroundThrottling).toBe(previous);
+          late(nativeFrame(1600, 1200));
+          await turn();
+          expect(f.contents.backgroundThrottling).toBe(previous);
+          if (outcome !== 'ready') expect(f.aboveRoot()).toBe(false);
+          expect(f.contents.captureCalls).toBe(0);
+        } finally {
+          f.close();
+        }
+      },
+    );
 
 test('a hidden new page really has no capture surface, but a full native frame under Root promotes the exact committed document', async () => {
   const f = fixture({ ready: false });
@@ -2694,6 +2941,44 @@ test('live sidebar animation accepts measured intermediate widths while rejectin
     expect(f.contents.loads).toBe(loads);
     expect(f.contents.frameCallbacks).toHaveLength(reads);
     expect(f.contents.closes).toBe(0);
+  } finally {
+    f.close();
+  }
+});
+
+test('a Windows content-frame inset remains inside the same panel through native resize without another first-frame read', async () => {
+  const f = fixture();
+  const panel = (size: number, preserve: 'relative' | 'pixel' = 'relative') => ({
+    size,
+    min: 0,
+    minUnit: 'px' as const,
+    max: 100,
+    maxUnit: '%' as const,
+    preserve,
+    collapsible: false,
+  });
+  const layout: NativeBrowserLayout = {
+    windowWidth: 1600,
+    windowHeight: 1200,
+    insetLeft: 0,
+    insetRight: 0,
+    groups: [
+      { left: 0, right: 0, gap: 1, panels: [panel(200, 'pixel'), panel(1399)] },
+      { left: 6, right: 6, gap: 1, panels: [panel(600), panel(786)] },
+    ],
+  };
+  try {
+    await f.show({ x: 808, y: 132, width: 786, height: 1061, radius: 8 }, layout);
+    expect(f.view.visible).toBe(true);
+    const frames = f.contents.frameCallbacks.length,
+      loads = f.contents.loads;
+    f.contentSize.splice(0, 2, 1700, 1300);
+    f.window.emit('resize');
+    expect(f.view.bounds.x + f.view.bounds.width).toBe(1694);
+    expect(f.view.bounds.y + f.view.bounds.height).toBe(1293);
+    expect(f.view.visible).toBe(true);
+    expect(f.contents.frameCallbacks).toHaveLength(frames);
+    expect(f.contents.loads).toBe(loads);
   } finally {
     f.close();
   }

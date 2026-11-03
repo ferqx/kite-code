@@ -32,7 +32,58 @@ const loaded = (id = 'page', token = 'page-document-1'): NativeBrowserState => (
   pageToken: token,
 });
 
-async function fixture(initial: NativeBrowserState = loaded(), panels = false) {
+test('Windows hands seam paint to Native only after admission and updates grip interaction without a resize', async () => {
+  const f = await fixture(loaded(), 'windows', true);
+  const paint = () =>
+    act(async () => {
+      await new Promise((resolve) =>
+        f.dom.window.requestAnimationFrame(() => f.dom.window.requestAnimationFrame(resolve)),
+      );
+    });
+  try {
+    await f.show();
+    expect(f.layouts.at(-1)?.layout?.frame).toMatchObject({
+      top: 38,
+      bottom: 6,
+      width: 1,
+      color: [255, 255, 255, 0.08],
+      grip: { left: -1.5, width: 3, height: 28, visible: false },
+    });
+    expect(
+      document.querySelector('.native-browser-viewport')?.getAttribute('data-native-browser-frame'),
+    ).toBe('true');
+    await f.flush(() => {
+      const handle = document.querySelector<HTMLElement>('#panel-handle')!;
+      handle.tabIndex = 0;
+      handle.focus();
+      expect(handle.matches(':focus-visible')).toBe(true);
+    });
+    await f.remeasure();
+    expect(f.layouts.at(-1)?.layout?.frame?.grip.visible).toBe(false);
+    await f.flush(() =>
+      document.querySelector('#panel-handle')!.setAttribute('data-separator', 'active'),
+    );
+    await paint();
+    expect(f.layouts.at(-1)?.layout?.frame?.grip.visible).toBe(true);
+    await f.resize(550, 444);
+    expect(f.syncLayouts.at(-1)?.bounds?.x).toBe(550);
+    expect(f.syncLayouts.at(-1)?.layout?.frame?.grip.visible).toBe(true);
+    await f.flush(() => document.querySelector('#panel-handle')!.removeAttribute('data-separator'));
+    await paint();
+    expect(f.layouts.at(-1)?.layout?.frame?.grip.visible).toBe(false);
+    await f.show({ visible: false });
+    expect(document.querySelector('[data-native-browser-frame]')).toBeNull();
+    expect(f.withdrawals.at(-1)?.bounds).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+async function fixture(
+  initial: NativeBrowserState = loaded(),
+  panels: boolean | 'windows' = false,
+  nativeFrame = false,
+) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {
     url: 'http://localhost/',
     pretendToBeVisual: true,
@@ -50,12 +101,35 @@ async function fixture(initial: NativeBrowserState = loaded(), panels = false) {
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const restore = prepareDesktopDom(dom);
+  if (nativeFrame) document.documentElement.dataset.platform = 'windows';
   Object.assign(dom.window, { innerWidth: 1000, innerHeight: 800 });
   let x = 600,
-    width = 400,
+    width = panels === 'windows' ? 394 : 400,
     clipWidth = 1000;
   let overlayRect = new dom.window.DOMRect(0, 0, 1000, 800);
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (panels === 'windows') {
+      if (this.classList.contains('right-sidebar'))
+        return new dom.window.DOMRect(x, 38, width, 756);
+      if (this.classList.contains('resizable-grip'))
+        return new dom.window.DOMRect(x - 1.5, 402, 3, 28);
+      if (this.id === 'navigation') return new dom.window.DOMRect(0, 32, 200, 768);
+      if (this.id === 'navigation-handle') return new dom.window.DOMRect(200, 32, 1, 768);
+      if (this.id === 'workspace') return new dom.window.DOMRect(201, 32, 799, 768);
+      if (
+        this.classList.contains('native-window-content') ||
+        this.classList.contains('client-panels')
+      )
+        return new dom.window.DOMRect(0, 32, 1000, 768);
+      if (
+        this.classList.contains('client-content-frame') ||
+        this.classList.contains('client-content-panels')
+      )
+        return new dom.window.DOMRect(207, 38, 787, 756);
+      if (this.id === 'panel-left') return new dom.window.DOMRect(207, 38, x - 208, 756);
+      if (this.id === 'panel-handle') return new dom.window.DOMRect(x - 1, 38, 1, 756);
+      if (this.id === 'panel-right') return new dom.window.DOMRect(x, 38, width, 756);
+    }
     if (this.classList.contains('native-browser-viewport'))
       return new dom.window.DOMRect(x, 74, width, 725);
     if (this.id === 'panel-left') return new dom.window.DOMRect(0, 0, x - 1, 800);
@@ -202,22 +276,56 @@ async function fixture(initial: NativeBrowserState = loaded(), panels = false) {
         groupResizeBehavior: 'preserve-relative-size',
         collapsible: false,
       });
+      const pane = panels ? (
+        <div
+          className={panels === 'windows' ? 'client-content-panels' : 'client-panels'}
+          data-slot="resizable-panel-group"
+          style={{ display: 'flex', flexDirection: 'row' }}
+        >
+          <div id="panel-left" data-panel data-native-browser-layout={policy} />
+          <div id="panel-handle" data-slot="resizable-handle">
+            {nativeFrame && (
+              <span className="resizable-grip" style={{ backgroundColor: 'rgb(181, 181, 181)' }} />
+            )}
+          </div>
+          <div id="panel-right" data-panel data-native-browser-layout={policy}>
+            {nativeFrame ? (
+              <aside
+                className="right-sidebar"
+                style={{ borderLeft: '1px solid rgba(255, 255, 255, 0.08)' }}
+              >
+                <NativeBrowserPane {...props} />
+              </aside>
+            ) : (
+              <NativeBrowserPane {...props} />
+            )}
+          </div>
+        </div>
+      ) : (
+        <NativeBrowserPane {...props} />
+      );
       root.render(
         <div id="clip" style={{ overflow: 'hidden' }}>
-          {panels ? (
-            <div
-              className="client-panels"
-              data-slot="resizable-panel-group"
-              style={{ display: 'flex', flexDirection: 'row' }}
-            >
-              <div id="panel-left" data-panel data-native-browser-layout={policy} />
-              <div id="panel-handle" data-slot="resizable-handle" />
-              <div id="panel-right" data-panel data-native-browser-layout={policy}>
-                <NativeBrowserPane {...props} />
+          {panels === 'windows' ? (
+            <div className="native-window-content">
+              <div
+                className="client-panels"
+                data-slot="resizable-panel-group"
+                style={{ display: 'flex', flexDirection: 'row' }}
+              >
+                <div id="navigation" data-panel data-native-browser-layout={policy} />
+                <div id="navigation-handle" data-slot="resizable-handle" />
+                <div id="workspace" data-panel data-native-browser-layout={policy}>
+                  <div>
+                    <div className="client-content-frame" style={{ margin: '6px' }}>
+                      {pane}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           ) : (
-            <NativeBrowserPane {...props} />
+            pane
           )}
         </div>,
       );
@@ -403,13 +511,93 @@ for (const failure of ['layout', 'request'] as const)
       expect(f.layouts.at(-1)?.pageToken).toBe('refresh-current');
       expect(document.querySelector('.native-browser-start')).toBeNull();
       expect(f.requests.filter((request) => request.action === 'reload')).toHaveLength(1);
-      // Real page failures remain readable after the retired request is ignored.
+      // Network failures show the browser error page; process failures remain distinct.
       await f.update({ error: 'load_failed', display: 'failed' });
-      expect(document.querySelector('[role="alert"]')?.textContent).toContain('网页未能打开');
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('无法访问此站点');
+      await f.update({ error: 'process_gone' });
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('浏览页面已停止');
     } finally {
       await f.close();
     }
   });
+
+test('failed navigation shows a browser error page, retries once and preserves the toolbar through recovery', async () => {
+  const f = await fixture();
+  try {
+    await f.show();
+    const input = f.address(),
+      viewport = document.querySelector('.native-browser-viewport');
+    const withdrawals = f.withdrawals.length;
+    await f.update({ error: 'load_failed', display: 'ready', loading: false });
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('无法访问此站点');
+    expect(document.querySelector('.native-browser-viewport')).toBe(viewport);
+    expect(f.withdrawals).toHaveLength(withdrawals + 1);
+    f.requestHook(async (request) =>
+      request.action === 'reload'
+        ? { ...f.state(), error: undefined, loading: true, display: 'loading', pageToken: 'retry' }
+        : f.state(),
+    );
+    await f.flush(() =>
+      [...document.querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent === '重新加载')!
+        .click(),
+    );
+    expect(f.requests.filter((r) => r.action === 'reload')).toHaveLength(1);
+    expect(document.querySelector('[aria-label="网页加载中"]')).not.toBeNull();
+    await f.update({ error: undefined, loading: false, display: 'ready', pageToken: 'recovered' });
+    expect(f.address()).toBe(input);
+    expect(document.querySelector('[role="alert"], .native-browser-start')).toBeNull();
+    f.requestHook(async () => {
+      throw Error('unsupported_browser_protocol');
+    });
+    await f.edit('file:///private.txt');
+    await f.flush(() =>
+      document
+        .querySelector('form')!
+        .dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true })),
+    );
+    expect(document.querySelector('.native-browser-start')).toBeNull();
+    expect(document.querySelector('[data-status="error"]')?.getAttribute('title')).toContain(
+      'HTTP',
+    );
+    expect(f.withdrawals).toHaveLength(withdrawals + 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('certificate failure remains readable and cannot retry or bypass Agent control', async () => {
+  const control = {
+    phase: 'agent' as const,
+    incarnation: 'current',
+    navigation: 1,
+    sessionId: 'session',
+    browserId: 'browser',
+  };
+  const f = await fixture({
+    ...loaded(),
+    error: 'load_failed',
+    display: 'failed',
+    failure: { kind: 'certificate', code: 'ERR_CERT_AUTHORITY_INVALID' },
+    control,
+  });
+  try {
+    await f.show();
+    const error = document.querySelector('.native-browser-error');
+    expect(error?.textContent).toContain('安全证书');
+    expect(error?.textContent).toContain('日期和时间');
+    expect(error?.querySelector('a')).toBeNull();
+    const retry = error!.querySelector<HTMLButtonElement>('button')!;
+    expect(retry.disabled).toBe(true);
+    await f.flush(() => retry.click());
+    expect(f.requests.some((r) => r.action === 'reload')).toBe(false);
+    await f.update({ control: { ...control, phase: 'human' } });
+    expect(document.querySelector('.native-browser-error')).toBe(error);
+    expect(retry.disabled).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
 
 test('calibration has one positive in flight, remeasures the latest geometry and never hides on resize', async () => {
   const f = await fixture();
@@ -790,41 +978,69 @@ test('sidebar closing publishes its intermediate measured widths before the zero
   }
 });
 
-test('an animated panel places every measured frame synchronously and retires a late asynchronous calibration', async () => {
+for (const motion of ['animated', 'dragged'] as const)
+  test(`${motion} panels place every measured frame synchronously and retire a late asynchronous calibration`, async () => {
+    const f = await fixture(loaded(), true);
+    let rejectOld!: (cause: unknown) => void;
+    try {
+      await f.show();
+      f.hold(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectOld = reject;
+          }),
+      );
+      await f.resize(550, 450);
+      expect(f.asyncLayouts).toHaveLength(1);
+      await f.flush(() => {
+        if (motion === 'animated')
+          document.querySelector<HTMLElement>('.client-panels')!.dataset.animateWidth = 'true';
+        else document.getElementById('panel-handle')!.dataset.separator = 'active';
+      });
+      for (const x of [500, 450, 400]) {
+        const before = f.syncLayouts.length;
+        await f.resize(x, 1000 - x);
+        expect(f.syncLayouts).toHaveLength(before + 1);
+        expect(f.syncLayouts.at(-1)?.bounds).toMatchObject({ x, width: 1000 - x });
+        expect(f.asyncLayouts).toHaveLength(1);
+      }
+      const count = f.layouts.length;
+      await f.flush(() => rejectOld(Error('obsolete native failure')));
+      expect(f.layouts).toHaveLength(count);
+      expect(document.querySelector('[data-status="error"], [role="alert"]')).toBeNull();
+      await f.resize(400, 600);
+      expect(f.layouts).toHaveLength(count);
+      await f.flush(() => {
+        delete document.querySelector<HTMLElement>('.client-panels')!.dataset.animateWidth;
+        document.getElementById('panel-handle')!.dataset.separator = 'hover';
+      });
+      f.hold(undefined);
+      await f.resize(350, 650);
+      expect(f.asyncLayouts).toHaveLength(2);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('hovering or focusing a separator and dragging an unrelated group keep stable calibration asynchronous', async () => {
   const f = await fixture(loaded(), true);
-  let rejectOld!: (cause: unknown) => void;
   try {
     await f.show();
-    f.hold(
-      () =>
-        new Promise((_resolve, reject) => {
-          rejectOld = reject;
-        }),
-    );
-    await f.resize(550, 450);
-    expect(f.asyncLayouts).toHaveLength(1);
+    const sync = f.syncLayouts.length;
     await f.flush(() => {
-      document.querySelector<HTMLElement>('.client-panels')!.dataset.animateWidth = 'true';
+      const unrelated = document.createElement('div');
+      unrelated.dataset.slot = 'resizable-panel-group';
+      unrelated.innerHTML = '<div data-separator="active"></div>';
+      document.body.append(unrelated);
     });
-    for (const x of [500, 450, 400]) {
-      const before = f.syncLayouts.length;
-      await f.resize(x, 1000 - x);
-      expect(f.syncLayouts).toHaveLength(before + 1);
-      expect(f.syncLayouts.at(-1)?.bounds).toMatchObject({ x, width: 1000 - x });
-      expect(f.asyncLayouts).toHaveLength(1);
+    for (const [index, state] of ['hover', 'focus', 'inactive'].entries()) {
+      await f.flush(() => {
+        document.getElementById('panel-handle')!.dataset.separator = state;
+      });
+      await f.resize(550 - index * 50, 450 + index * 50);
+      expect(f.syncLayouts).toHaveLength(sync);
+      expect(f.asyncLayouts).toHaveLength(index + 1);
     }
-    const count = f.layouts.length;
-    await f.flush(() => rejectOld(Error('obsolete native failure')));
-    expect(f.layouts).toHaveLength(count);
-    expect(document.querySelector('[data-status="error"], [role="alert"]')).toBeNull();
-    await f.resize(400, 600);
-    expect(f.layouts).toHaveLength(count);
-    await f.flush(() => {
-      delete document.querySelector<HTMLElement>('.client-panels')!.dataset.animateWidth;
-    });
-    f.hold(undefined);
-    await f.resize(350, 650);
-    expect(f.asyncLayouts).toHaveLength(2);
   } finally {
     await f.close();
   }
@@ -857,6 +1073,27 @@ test('one measured panel layout supplies the native resize projection, and unsup
     });
     expect(f.withdrawals).toHaveLength(count + 1);
     expect(f.withdrawals.at(-1)?.bounds).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('Windows titlebar and material frame margins establish a coherent layout while old DOM sizes remain deferred', async () => {
+  const f = await fixture(loaded(), 'windows');
+  try {
+    await f.show();
+    expect(f.layouts.at(-1)?.bounds).toMatchObject({ x: 600, width: 394 });
+    expect(f.layouts.at(-1)?.layout?.groups).toMatchObject([
+      { left: 0, right: 0, panels: [{ size: 200 }, { size: 799 }] },
+      { left: 6, right: 6, panels: [{ size: 392 }, { size: 394 }] },
+    ]);
+    const count = f.layouts.length;
+    await f.flush(() => Object.assign(window, { innerWidth: 1100 }));
+    await f.remeasure();
+    expect(f.layouts).toHaveLength(count);
+    await f.flush(() => Object.assign(window, { innerWidth: 1000, innerHeight: 900 }));
+    await f.remeasure();
+    expect(f.layouts).toHaveLength(count);
   } finally {
     await f.close();
   }

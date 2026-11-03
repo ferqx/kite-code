@@ -1959,9 +1959,43 @@ Main针对同选择刷新增设私有grantScope，只沿NativeCaller已保存且
 
 ## 统一浏览器入口候选2026-10-28
 
+### 浏览器加载失败页（2026-11-03）
+
+网络导航失败时，[Pane](src/native-browser-pane.tsx)在内容区显示[浏览器错误页](src/native-browser-error.tsx)：蓝色图标、站点标题、目标主机、可读排查建议、次要的单行原生错误名和“重新加载”。沿应用深浅主题和原工具栏，窄栏允许换行与区域内滚动；不把异常栈、日志或响应正文渲染为错误说明。DNS、断网、拒绝连接／中断、超时及证书／安全连接按[Main有界分类](electron/browser-load-failure.ts)提供建议，未分类失败使用通用建议；只保留格式核验的ERR_名称。分类依据固定[Chromium152 net errors](https://github.com/chromium/chromium/blob/152.0.7977.78/net/base/net_error_list.h)，普通HTTP 404等网站响应继续显示站点自己的内容，不因状态码自动换页。
+
+Main仍保留准确原WebContents与失败历史，不往网页注入应用HTML、不导航到data页，也不把错误文档当成成功。原生失败按当前URL与可用主frame process/routing身份核对，过期、子frame及取消事件不接管当前状态；正常首文档完整原生帧门、Agent文档／导航与截图证明继续保留。“重新加载”沿原id和权限门禁显式派发，开始即清旧失败详情；Agent控制中按钮禁用。输入格式或协议被拒绝时保原页；真实显示故障、进程退出与菜单故障仍沿原局部反馈。失败分类是有界展示元数据，不改变Core／Tool、工具／协议版本、控制授权或TLS验证。
+
+用户最初选择直接显示引擎结果，后明确以所附浏览器错误页为最终样式。原版Electron44.3.0对照中，连接拒绝生成空白chrome-error文档，站点404正文则保留；本机材料归.cache/engine-error-frame-e5f3a064-ee78-434a-8e3e-469e60cd18e9。当前采用Root错误页，未保留放行空错误文档的另一套显示路径。
+
+2026-11-03，本机Windows x64／原版Electron44.3.0／150%缩放，基于`884b2c036`加当前浏览器工作树，执行`bun test --parallel=1 --max-concurrency=1 apps/desktop/test/native-browser-bridge.test.ts apps/desktop/test/isolated/native-browser-pane-dom.test.tsx apps/desktop/test/isolated/native-browser-capture.test.ts`，199项1877断言通过；原生整链`bun test --parallel=1 --max-concurrency=1 apps/desktop/test/isolated/native-browser.test.ts`通过。断言覆盖有限错误详情、迟到／子frame／取消事件、重试清理、Agent控制中禁用与接管恢复、保留原WebContents／历史、网站404正文和正常页恢复。整链之后仅增加非法kind类型拒绝及证书展示断言，合法状态与实际绘制路径未变，复用其运行证据。
+
+隔离生产Main／preload／Pane的真实网络失败过程中，核对正常页→失败页→重试仍失败→后退→站点404→失败→重试恢复，审看宽／窄栏、深／浅主题四张原图及全部148编码帧；采集静态元素截图时录像出现短暂局部黑帧，另以相同流程关闭静态截图交叉采集，全部113编码帧未复现。两组均核对错误页单份、地址／工具栏、loading交接与恢复的原生正文；录像请求60fps不等于独立60fps或连续物理鼠标资格。材料归本机`.cache/browser-error-page-qa-54bd70c1-d838-4295-b201-7526e3f8d59c`和`.cache/browser-error-page-qa-986fb2c9-9071-4358-ac81-096740a8dd4c`，原生整链材料归`%TEMP%/kite-sidebar-browser-ad47b296-ada0-40f9-87fa-2ed712bd6937`。这是无Service／模型的隔离生产模块验证，未新增安装制品或其他平台资格；开发客户端须完整重启，Native制品需重新构建。
+
 ### 固定 Renderer 布局收敛（2026-11-02）
 
-**结构迁移和本轮macOS arm64缩放修正已落地；完整浏览器过程体验仍保留范围外历史反例。** [Pane](src/native-browser-pane.tsx)与共享 SessionTabs 在主 Renderer 绘制标签、地址、空标签、loading及错误；[Main](electron/native-browser.ts)持有准确原网页的创建、位置、显隐与销毁。[Root工厂](electron/native-root-window.ts)在所有平台使用完整窗口尺寸的显式Root，平台菜单、托盘、标题栏和材质分支保留。Windows／Linux实机及发行资格未取得。持久取舍归[结构Note](../../.agents/notes/implemented/architecture/2026-11-02-browser-fixed-renderer-layout.md)，剩余验收归[实施计划](../../docs/plans/2026-11-02-browser-renderer-layout.md)；Note的implemented只指结构决定。
+网页内容区在所有平台统一为直角；原生View沿Pane量测取得零圆角，不再单独保留macOS覆盖样式。
+
+2026-11-03手动拖动右栏曾沿稳定布局的异步单在途校准，前一回执未返回时新宽度等待。[Pane](src/native-browser-pane.tsx)现在识别准确祖先Group直属分隔线的`data-separator="active"`，在ResizeObserver绘制前复用现有同步布局端口，逐次提交实际矩形并退休旧异步回调；停止拖动后恢复原异步合并。hover／focus及无关Group不触发同步，缺少同步端口保原兼容路径。Main仍核原scope、文档token、revision与几何；不预测鼠标坐标、不刷新或隐藏原页，不改工具／协议版本。此前087对“仅动画期间同步”的描述在此扩到实际拖动，动画路径本身不变。
+
+Windows／44.3.0／150%缩放以真实Main、preload、生产SessionPage／Pane和无凭据loopback页核两次原生鼠标拖动，并沿现有Native夹具录制24步加宽、24步反向。选定同步候选的48步Native bounds均与DOM量测一致，同一timeOrigin、输入、scrollY700及可见阅读锚点421.0208435前后精确保持，导航一次。实际桌面合成录像124编码帧含61复制帧，全部边界条带7表及18／84原图已审看；本次采样未见原版网页落后方向、整页闪空或阅读锚点跳动，但有原生页先于Root的短暂边缘差，超出稳定3物理px间隔约-8／+7px，不授跨surface完全同帧资格。额外样式通知提前和无旧回执等待的立即异步候选没有更好画面证据，已退回所选同步实现。材料分别保留于本机`.cache/win-browser-live-{6a023c47-15a4-4bc4-ad5a-ca5d1c4e01b5,67632344-a915-4a87-8ac9-ea8d64fc3ea6,10dbed8f-03fd-4587-ad80-ba05b1cf063f,8e509ed6-cc67-4b17-85bb-f9ea1c6f19f6}`；首个窗口GDI全黑录像、两次真实静止鼠标与合成指针混入导致收栏的探针失败保留，不计画面通过。最终Pane45项310断言、原生整链通过；安装制品、其他平台和完整物理键鼠连续资格保持原范围，开发客户端需完整重启。
+
+继续优化时以独立窗口视频捕获交叉核对GDI录像，确认上述边缘差仍能在另一捕获路径中看到，不能归为GDI单一路径的撕裂。[原生夹具](test/native-browser-electron.fixture.ts)已对齐正式Windows的32px覆盖标题栏、Mica／透明背景及默认Root节流策略；旧有框／不透明窗口的证据不扩大到该配置。最终源码48步双向拖动保留原文档、输入、scrollY700与阅读锚点，窗口录像64帧的全部6张边界联系表及36／43／49／63原尺寸条带已核：中间仍有Root与原生Page边缘错位，终态回齐，没有取得完全同帧资格。层隔离、paint containment、拖动时关闭Page节流、Main invalidate及绘制后任务提交候选未稳定消除问题，均未接入；绘制后提交反而重新出现网页落后。最终材料归本机`.cache/browser-compose-plain-a91c9646-b156-41fb-a473-7167b9b37a57`。正式窗口配置的原生整链、Desktop类型及Biome通过；另在实际窗口观察loading交接、双向原生拖动和收展，输入保留、导航一次，夹具正常退出0（`.cache/win-browser-live-feb642ed-8d63-488d-904d-a5e1eac2fad0`）。该轮只补齐验证配置与结论，当时尚未彻底解决Windows跨surface错位；本轮后续处理见下文，手册预期与安全边界未降低。
+
+本轮继续排查Windows拖拽边缘：同版本44.3.0的Viz时序显示，Root可先向旧LocalSurfaceId提交新布局，而父合成帧仍等待新Root surface；Page原生几何和HTML分隔线因此不是同一提交来源。仅请求新Root surface、过滤旧surface激活的私有引擎对照仍有反例，未接入普通客户端；准确时序保留在本机`.cache/browser-surface-trace-ace26773-a779-493b-8533-0dca5c8615c0`，旧失败和前述录像结论不抹除。
+
+当前[原生装饰](electron/browser-pane-frame.ts)仅在Windows用两个普通View绘制分隔线与拖拽中的把手，和准确原页沿Main唯一布局入口更新。Root从实际侧栏／把手量测有界位置、尺寸和主题RGBA，经原layout准入后才让出对应HTML绘制；线条按网页整数边缘向侧栏内部取整，避开DOM分隔线。静止hover／focus继续用原DOM把手，只有分隔线已进入active拖拽时才绘制原生把手，结束即撤下，避免原生View遮住下一次鼠标命中；DOM仍负责pointer capture、键盘及可访问性。没有增加WebContents、网页副本、截图交接或独立浏览器UI；撤下、失选、错误、隐藏及销毁清理准确当前装饰，旧回执不能影响继任。普通View细条不应用Electron小尺寸clip path，避免实际线条被裁空。元数据不含页面操作或控制权限，旧layout及其他平台保原路径，工具／协议版本未变。
+
+2026-11-03，本机Windows x64／Electron44.3.0原版／150%缩放，正式窗口配置的冻结生产组件完成两组连续往返：5 CSS px步幅的48步录像60帧、15 CSS px步幅四段换向的48步录像62帧。主Agent审看全部11张边缘联系表及各组3张关键原尺寸条带，分隔线、拖拽把手与网页边缘未再捕获旧的跨帧拉开；两组像素间隔分别为1–3及1–4物理px，属于窄边缘与缩放取整范围，不把有损录像阈值当精确物理坐标。两组同一timeOrigin、输入、scrollY700及阅读锚点421.0208435前后保持，导航各一次。材料归本机`.cache/browser-native-frame-fd773f08-dbc6-491b-9fc6-f1fd6132df4b`与`.cache/browser-native-frame-stress-1343098c-4cd6-42ca-976a-46cae19a41e1`，录制与夹具正常退出0；两组为隔离测试驱动的连续输入与真实合成录像，不冒充连续物理鼠标过程。
+
+另在真实可见窗口从把手连续执行三次物理鼠标往返、网页输入、收起重开、A/B切页，以及百度HTTPS首页加载和两次拖动，原表单保留、本地页导航一次，未再发生原生把手挡住下一次拖拽；实际鼠标工具只给出动作前后观察，不用它替代上述连续录像。材料归本机`.cache/win-browser-live-3bafd1a3-5bf9-4cea-b45a-a9b256d889d2`，正常退出0。此前常显原生把手的命中失败和小尺寸圆角裁空反例保留在`.cache/win-browser-live-2cfdde6c-d1b7-4269-87ba-bdd28f106da7`及`.cache/browser-native-frame-1df240ca-890c-4720-a318-85a595223c7b`，未计通过。原生整链覆盖键盘、导航／历史、窗口resize、scope隐藏恢复、原表单／阅读锚点、网页隔离及明确销毁，并明确检查Windows原生装饰已准入。本轮只解决所述Windows拖拽边缘与首帧、直角要求，不授整个Root所有内容跨surface原子提交、其他平台新资格或完整安装版资格；发布链与固定引擎保持，旧开发窗口需完整重启。
+
+本轮Windows切口按`document-before-commit`完成限定`iteration_complete`：基于`884b2c036`加当前浏览器工作树，Main／Pane／Bridge184项1797断言通过，真实原生整链1项通过，Desktop typecheck、定向11文件Biome、边界、测试归属、文档结构与影响检查通过。后续颜色校验只加强拒绝稀疏数组并补回归，不改变已观察的合法RGBA、布局或绘制路径，因此复用上述真实画面与整链证据。已核Native发布说明，本轮没有引擎、资产或发布入口变化，不改其资格。手册、active与结构Note同步实际归属；本次仅解决Windows当前拖拽边缘切口，未暂存、提交或推送，隔离窗口与录制进程均已正常退出。
+
+2026-11-03 Windows网页标题已更新而正文持续loading的回归有两处原因：量测强制嵌套Group贴满父Panel，忽略内容框6px margin及应用标题栏；布局修正后，Windows遮挡状态仍可能阻止Root下的首帧。Pane现在按实际内容容器与CSS margin校验完整Group，沿已有layout的left/right记录边距；旧DOM尺寸仍延后，不把任意残差当固定边距。Main接受自洽的嵌套边距，外层横向仍贴满窗口；仅Windows当前首帧准备临时关闭该页backgroundThrottling，成功、取消、失败或超时恢复原值。当前文档、Root覆盖、frame/token/scope/revision、几何与有界首帧订阅保持，不新增截图读取、重试导航或Agent授权。依赖与工具／协议版本未变，macOS绘制策略未改。
+
+同机Windows／Electron44.3.0／150%缩放下，隔离真实Main、preload与生产Pane的297px窄栏已观察从loading交接到原生正文；本地表单在收起、展开及A/B切换后保持，真实HTTPS百度首页及刷新均显示。修前隐藏页与后继首帧超时材料保留于本机`.cache/win-browser-live-*`。现有[原生整链](test/isolated/native-browser.test.ts)已加入正式NativeWindowFrame，通过导航、历史、resize、scope隐藏／返回、表单与非零阅读锚点、隔离和明确销毁；滚动初始化先等实际绘制，阅读锚点容许1 CSS px取整，文档身份和输入仍精确核对。Main／Pane／Bridge179项1731断言通过，覆盖Windows边距、旧DOM尺寸、节流策略恢复与迟到帧。这是无Service／模型的隔离生产模块验证，未验证安装制品或授完整跨平台／连续像素同帧资格；已有macOS历史反例保持。开发客户端需完整重启，普通Native需重新构建才包含此修正。
+
+**结构迁移和本轮macOS arm64缩放修正已落地；完整浏览器过程体验仍保留范围外历史反例。** [Pane](src/native-browser-pane.tsx)与共享 SessionTabs 在主 Renderer 绘制标签、地址、空标签、loading及错误；[Main](electron/native-browser.ts)持有准确原网页的创建、位置、显隐与销毁。[Root工厂](electron/native-root-window.ts)在所有平台使用完整窗口尺寸的显式Root，平台菜单、托盘、标题栏和材质分支保留。Windows已有上述局部验证，Linux实机及整体发行资格未取得。持久取舍归[结构Note](../../.agents/notes/implemented/architecture/2026-11-02-browser-fixed-renderer-layout.md)，剩余验收归[实施计划](../../docs/plans/2026-11-02-browser-renderer-layout.md)；Note的implemented只指结构决定。
 
 2026-11-02按用户要求先提交`9b158c9ea`，既有pre-commit门禁通过，随后只继续缩放灰边与header双击绘制不同步两项。收展、设置返回及用户未遇到的Cmd+W空底保留原证据，不再作为本次收尾前置。以下077–083均为macOS arm64／固定Electron44.3.0的隔离诊断，当时未接入普通客户端；随后用户明确要求合并，当前接入与验证见下文。依赖及工具／协议版本不变，也不授发布资格。
 

@@ -26,8 +26,10 @@ import { browserDecorationScript } from './browser-decoration';
 import { createBrowserDocumentReady } from './browser-document-ready';
 import { createBrowserInputShield } from './browser-input-shield';
 import type { BrowserPageScope } from './browser-lease';
+import { browserLoadFailure } from './browser-load-failure';
 import { createBrowserNavigation } from './browser-navigation';
 import { BrowserPagePreflightError, type NativeBrowserPageHost } from './browser-page-host';
+import { createBrowserPaneFrame } from './browser-pane-frame';
 import { browserTypingCursorScript } from './browser-typing-cursor';
 import { assertNativeSender } from './native-ipc';
 import { addNativeWindowView } from './native-overlay-layer';
@@ -80,9 +82,11 @@ type BrowserTab = {
     geometry: string;
     underlay?: boolean;
     stopFrame?: () => void;
+    restoreThrottling?: () => void;
   };
 };
-/** Only the current full-width two-Panel Groups may establish a resize anchor.
+/** Only coherent current two-Panel Groups may establish a resize anchor.
+ * Nested content frames retain their measured platform-specific margins.
  * CSS handles occupy 0..1px; one CSS pixel covers measurement rounding, not gutters. */
 function currentPanelMeasurement(
   layout: NativeBrowserLayout,
@@ -94,8 +98,7 @@ function currentPanelMeasurement(
   let parentWidth = layout.windowWidth;
   for (const group of layout.groups) {
     if (
-      group.left > 1 ||
-      group.right > 1 ||
+      (group === layout.groups[0] && (group.left > 1 || group.right > 1)) ||
       group.gap > 2 ||
       Math.abs(
         group.left +
@@ -254,6 +257,7 @@ export function registerNativeBrowserIpc(options: {
     // Only a new document prepared below Root needs an actual promotion.
     if (pageIndex < rootIndex) addNativeWindowView(window, tab.view, rootIndex);
   };
+  const paneFrame = createBrowserPaneFrame(window);
   const inputShield = createBrowserInputShield(window, () => {
     for (const tab of tabs.values())
       if (inputBlocked(tab.state.id)) {
@@ -331,6 +335,7 @@ export function registerNativeBrowserIpc(options: {
     if (tab.state.error) {
       cancelPaint(tab);
       tab.view.setVisible(false);
+      if (active === tab.state.id) paneFrame.hide();
       automation?.present(tab.state.id, false);
     }
     syncInput();
@@ -346,6 +351,7 @@ export function registerNativeBrowserIpc(options: {
     tab.paint = undefined;
     job?.controller.abort();
     job?.stopFrame?.();
+    job?.restoreThrottling?.();
   };
   const withdraw = (tab: BrowserTab) => {
     cancelPaint(tab);
@@ -358,7 +364,10 @@ export function registerNativeBrowserIpc(options: {
     if (tab.view.webContents?.isFocused() && !owner.isDestroyed()) owner.focus();
     tab.view.setVisible(false);
     automation?.present(tab.state.id, false);
-    if (active === tab.state.id) active = undefined;
+    if (active === tab.state.id) {
+      active = undefined;
+      paneFrame.hide();
+    }
     syncInput();
   };
   const suspendWindow = () => {
@@ -407,6 +416,7 @@ export function registerNativeBrowserIpc(options: {
       automation?.present(tab.state.id, false);
     }
     active = undefined;
+    paneFrame.hide();
     inputShield.hide();
     // Hidden Renderer commits still maintain intent using the new token. They
     // never grant a live display or revive the old observation/capture basis.
@@ -457,11 +467,12 @@ export function registerNativeBrowserIpc(options: {
       title: new URL(url).hostname,
       loading: true,
       error: undefined,
+      failure: undefined,
       display: 'loading',
     };
     publish(tab);
     const contents = tab.view.webContents;
-    void contents.loadURL(url).catch(() => {
+    void contents.loadURL(url).catch((cause) => {
       if (
         disposed ||
         generation !== tab.generation ||
@@ -469,7 +480,14 @@ export function registerNativeBrowserIpc(options: {
         tabs.get(tab.state.id) !== tab
       )
         return;
-      tab.state = { ...tab.state, loading: false, error: 'load_failed' };
+      if (cause?.errno === -3) return;
+      tab.state = {
+        ...tab.state,
+        loading: false,
+        display: 'failed',
+        error: 'load_failed',
+        failure: tab.state.failure ?? browserLoadFailure(cause?.errno, cause?.code),
+      };
       publish(tab);
     });
   };
@@ -575,7 +593,13 @@ export function registerNativeBrowserIpc(options: {
       tab.sizeEpoch++;
       tab.view.setVisible(false);
       automation?.present(id, false);
-      tab.state = { ...tab.state, loading: true, error: undefined, display: 'loading' };
+      tab.state = {
+        ...tab.state,
+        loading: true,
+        error: undefined,
+        failure: undefined,
+        display: 'loading',
+      };
       publish(tab);
     });
     contents.on('did-navigate-in-page', (_event, _url, mainFrame) => {
@@ -638,14 +662,32 @@ export function registerNativeBrowserIpc(options: {
         if (active === id && tab.presentation) applyCurrentLayout(tab);
       }
     });
+    const currentFailure = (
+      code: number,
+      url: string,
+      mainFrame: boolean,
+      processId?: number,
+      routingId?: number,
+    ) =>
+      tabs.get(id) === tab &&
+      mainFrame &&
+      code !== -3 &&
+      url === documentUrl &&
+      ((processId === undefined && routingId === undefined) ||
+        (Number.isSafeInteger(processId) &&
+          Number.isSafeInteger(routingId) &&
+          contents.mainFrame.processId === processId &&
+          contents.mainFrame.routingId === routingId));
     const failedDisplayDocument = (
       _event: unknown,
       code: number,
       _description: string,
       url: string,
       mainFrame: boolean,
+      processId?: number,
+      routingId?: number,
     ) => {
-      if (mainFrame && code !== -3 && url === documentUrl) documentReady.stopped();
+      if (currentFailure(code, url, mainFrame, processId, routingId)) documentReady.stopped();
     };
     contents.on('did-fail-load', failedDisplayDocument);
     contents.on('did-fail-provisional-load', failedDisplayDocument);
@@ -1087,10 +1129,12 @@ export function registerNativeBrowserIpc(options: {
         _description: string,
         url: string,
         mainFrame: boolean,
+        processId?: number,
+        routingId?: number,
       ) => {
         // An aborted old loader can arrive after a new start, even at the same URL.
         // An actual stop before DOM-ready is handled by did-stop-loading below.
-        if (mainFrame && code !== -3 && url === documentUrl) {
+        if (currentFailure(code, url, mainFrame, processId, routingId)) {
           navigation.stopped(documentEpoch);
         }
       };
@@ -1139,18 +1183,23 @@ export function registerNativeBrowserIpc(options: {
         return;
       event.preventDefault();
       if (event.isMainFrame) {
-        tab.state = { ...tab.state, error: 'unsupported_navigation' };
+        tab.state = { ...tab.state, error: 'unsupported_navigation', failure: undefined };
         publish(tab);
       }
     });
     contents.on('will-redirect', (event, url) => {
       if (httpUrl(url)) return;
       event.preventDefault();
-      tab.state = { ...tab.state, loading: false, error: 'unsupported_navigation' };
+      tab.state = {
+        ...tab.state,
+        loading: false,
+        error: 'unsupported_navigation',
+        failure: undefined,
+      };
       publish(tab);
     });
     contents.on('did-start-loading', () => {
-      tab.state = { ...tab.state, loading: true, error: undefined };
+      tab.state = { ...tab.state, loading: true, error: undefined, failure: undefined };
       publish(tab);
     });
     contents.on('did-stop-loading', () => {
@@ -1172,17 +1221,27 @@ export function registerNativeBrowserIpc(options: {
       };
       publish(tab);
     });
-    contents.on('did-fail-load', (_event, code, _description, url, mainFrame) => {
-      if (tabs.get(id) !== tab || !mainFrame || code === -3 || url !== documentUrl) return;
-      tab.state = { ...tab.state, loading: false, error: 'load_failed' };
-      publish(tab);
-    });
+    contents.on(
+      'did-fail-load',
+      (_event, code, _description, url, mainFrame, processId, routingId) => {
+        if (!currentFailure(code, url, mainFrame, processId, routingId)) return;
+        tab.state = {
+          ...tab.state,
+          ...(httpUrl(url) ? { url } : {}),
+          loading: false,
+          display: 'failed',
+          error: 'load_failed',
+          failure: browserLoadFailure(code, _description),
+        };
+        publish(tab);
+      },
+    );
     contents.on('render-process-gone', () => {
       if (tabs.get(id) !== tab) return;
       cancelPaint(tab);
       delete tab.drawable;
       tab.view.setVisible(false);
-      tab.state = { ...tab.state, loading: false, error: 'process_gone' };
+      tab.state = { ...tab.state, loading: false, error: 'process_gone', failure: undefined };
       automation?.fail(id);
       publish(tab);
     });
@@ -1277,6 +1336,11 @@ export function registerNativeBrowserIpc(options: {
       return;
     }
     const next = { x, y, width: right - x, height: bottom - y };
+    paneFrame.sync(
+      bounds,
+      projected?.layout ?? anchor.layout,
+      (window.isVisible() || beforeShow) && !window.isMinimized() && !tab.state.error,
+    );
     const previous = tab.view.getBounds();
     if (!sameRectangle(previous, next)) {
       if (previous.width !== next.width || previous.height !== next.height) tab.sizeEpoch++;
@@ -1394,6 +1458,17 @@ export function registerNativeBrowserIpc(options: {
           addNativeWindowView(window, tab.view, rootIndex);
         if (!coveredByRoot(tab)) throw Error('browser_presentation_unavailable');
         job.underlay = true;
+        if (process.platform === 'win32') {
+          // Chromium otherwise occludes this BaseWindow child under Root and
+          // never produces its first frame. Only this bounded preparation may
+          // draw in the background; retained/hidden tabs keep their own policy.
+          const previous = contents.getBackgroundThrottling();
+          job.restoreThrottling = () => {
+            job.restoreThrottling = undefined;
+            if (!contents.isDestroyed()) contents.setBackgroundThrottling(previous);
+          };
+          contents.setBackgroundThrottling(false);
+        }
         tab.view.setVisible(true);
         automation?.present(tab.state.id, false);
         syncInput();
@@ -1472,6 +1547,7 @@ export function registerNativeBrowserIpc(options: {
         tab.state = { ...tab.state, display: 'failed' };
         publish(tab);
       } finally {
+        job.restoreThrottling?.();
         if (tab.paint === job) tab.paint = undefined;
       }
     })();
@@ -1515,7 +1591,12 @@ export function registerNativeBrowserIpc(options: {
     event.preventDefault();
     for (const tab of tabs.values())
       if (tab.view.webContents === contents) {
-        tab.state = { ...tab.state, loading: false, error: 'download_unsupported' };
+        tab.state = {
+          ...tab.state,
+          loading: false,
+          error: 'download_unsupported',
+          failure: undefined,
+        };
         publish(tab);
       }
   };
@@ -1581,6 +1662,7 @@ export function registerNativeBrowserIpc(options: {
       delete tab.presentationScope;
       delete tab.nativeProjection;
       active = undefined;
+      paneFrame.hide();
       tab.resume = {
         token: pageToken(tab),
         root: owner.mainFrame,
@@ -1919,7 +2001,10 @@ export function registerNativeBrowserIpc(options: {
             contents.navigationHistory.goBack();
           if (request.action === 'forward' && contents.navigationHistory.canGoForward())
             contents.navigationHistory.goForward();
-          if (request.action === 'reload') contents.reload();
+          if (request.action === 'reload') {
+            tab.state = { ...tab.state, loading: true, error: undefined, failure: undefined };
+            contents.reload();
+          }
           if (request.action === 'stop') contents.stop();
           publish(tab);
         }
@@ -2046,6 +2131,7 @@ export function registerNativeBrowserIpc(options: {
     unconfigureGrants?.();
     for (const id of [...tabs.keys()]) close(id, true);
     inputShield.dispose();
+    paneFrame.dispose();
     ipcMain.removeHandler(nativeBrowserChannel);
     ipcMain.removeHandler(nativeBrowserMenuChannel);
     ipcMain.removeHandler(nativeBrowserLayoutChannel);

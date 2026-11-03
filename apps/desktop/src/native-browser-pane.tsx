@@ -10,6 +10,7 @@ import {
 } from 'react';
 import type {
   NativeBrowserBounds,
+  NativeBrowserFrame,
   NativeBrowserGroupLayout,
   NativeBrowserLayout,
   NativeBrowserPanelLayout,
@@ -19,6 +20,7 @@ import type {
 } from './native-browser-bridge';
 import { projectNativeBrowserBounds } from './native-browser-bridge';
 import { rememberNativeBrowserState } from './native-browser-display-state';
+import { NativeBrowserError } from './native-browser-error';
 import { useNativeBrowserPopup } from './native-browser-menu';
 import { NativeBrowserToolbar } from './native-browser-toolbar';
 import type {
@@ -142,7 +144,30 @@ function measuredLayout(node: HTMLElement, bounds: NativeBrowserBounds): NativeL
         group.parentElement?.closest<HTMLElement>('[data-panel]') ?? null;
       if (!group.classList.contains(parent ? 'client-content-panels' : 'client-panels'))
         return { kind: 'unsupported' };
-      const parentBox = parent?.getBoundingClientRect() ?? new DOMRect(0, 0, width, height);
+      const nativeContent = !parent ? group.closest('.native-window-content') : null;
+      const top = nativeContent?.getBoundingClientRect().top ?? 0;
+      const parentBox = parent?.getBoundingClientRect() ?? new DOMRect(0, top, width, height - top);
+      let expected = parentBox;
+      const frame: HTMLElement | null = group.parentElement;
+      if (
+        parent &&
+        frame?.classList.contains('client-content-frame') &&
+        frame.parentElement?.closest('[data-panel]') === parent
+      ) {
+        const style = getComputedStyle(frame);
+        const [left, right, top, bottom] = [
+          style.marginLeft,
+          style.marginRight,
+          style.marginTop,
+          style.marginBottom,
+        ].map((value) => Number.parseFloat(value) || 0);
+        expected = new DOMRect(
+          parentBox.left + left!,
+          parentBox.top + top!,
+          parentBox.width - left! - right!,
+          parentBox.height - top! - bottom!,
+        );
+      }
       const box = group.getBoundingClientRect();
       const boxes = panels.map((element) => element.getBoundingClientRect());
       const handle = handles[0]!.getBoundingClientRect();
@@ -156,10 +181,12 @@ function measuredLayout(node: HTMLElement, bounds: NativeBrowserBounds): NativeL
         handle.width > 2
       )
         return { kind: 'unsupported' };
-      // SessionPage's Groups fill their viewport/parent. A newer window with old
-      // DOM boxes is a pending measurement, never a real fixed outer margin.
+      // Root fills the viewport below the native titlebar; the nested Group
+      // fills its content frame, including Windows' material margins. Compare
+      // against CSS policy, so old DOM sizes cannot masquerade as new gutters.
       if (
-        !fills(box, parentBox) ||
+        !fills(box, expected) ||
+        (nativeContent && !fills(nativeContent.getBoundingClientRect(), parentBox)) ||
         !near(boxes[0]!.left, box.left) ||
         !near(boxes[1]!.right, box.right) ||
         !near(boxes[0]!.right, handle.left) ||
@@ -209,8 +236,8 @@ function measuredLayout(node: HTMLElement, bounds: NativeBrowserBounds): NativeL
       if (!data.some((item) => item.preserve === 'relative' && item.size > 0))
         return { kind: 'unsupported' };
       groups.unshift({
-        left: 0,
-        right: 0,
+        left: Math.max(0, box.left - parentBox.left),
+        right: Math.max(0, parentBox.right - box.right),
         gap: handle.width,
         panels: data as [NativeBrowserPanelLayout, NativeBrowserPanelLayout],
       });
@@ -224,6 +251,49 @@ function measuredLayout(node: HTMLElement, bounds: NativeBrowserBounds): NativeL
       groups,
       insetLeft: bounds.x - box.left,
       insetRight: box.right - bounds.x - bounds.width,
+      ...(() => {
+        if (document.documentElement.dataset.platform !== 'windows') return {};
+        const sidebar = leaf.querySelector<HTMLElement>('.right-sidebar');
+        const separator = leaf.previousElementSibling;
+        const grip = separator?.querySelector<HTMLElement>('.resizable-grip');
+        if (!sidebar || !grip || !fills(sidebar.getBoundingClientRect(), box)) return {};
+        const color = (value: string, opacity = 1): NativeBrowserFrame['color'] | undefined => {
+          const match = /^rgba?\(([^)]+)\)$/.exec(value);
+          const channels = match?.[1]
+            ?.split(/[,\s/]+/)
+            .filter(Boolean)
+            .map(Number);
+          if (!channels || ![3, 4].includes(channels.length) || !channels.every(Number.isFinite))
+            return;
+          const [r, g, b, a = 1] = channels;
+          if ([r!, g!, b!].some((value) => value < 0 || value > 255) || a < 0 || a > 1) return;
+          return [r!, g!, b!, a * opacity];
+        };
+        const style = getComputedStyle(sidebar),
+          gripStyle = getComputedStyle(grip),
+          border = Number.parseFloat(style.borderLeftWidth),
+          borderColor = color(style.borderLeftColor),
+          gripColor = color(gripStyle.backgroundColor, 0.55),
+          gripBox = grip.getBoundingClientRect();
+        if (!borderColor || !gripColor || border < 0 || border > 4) return {};
+        const frame: NativeBrowserFrame = {
+          top: Math.max(0, box.top),
+          bottom: Math.max(0, height - box.bottom),
+          width: border,
+          color: borderColor,
+          grip: {
+            left: gripBox.left - box.left,
+            width: gripBox.width,
+            height: gripBox.height,
+            color: gripColor,
+            // A generic native View participates in hit testing. Paint the grip
+            // only once the real DOM separator has captured this drag; idle
+            // hover/focus keeps the original interactive DOM grip.
+            visible: separator?.getAttribute('data-separator') === 'active',
+          },
+        };
+        return { frame };
+      })(),
     };
     const predicted = projectNativeBrowserBounds(bounds, layout, width, height);
     if (
@@ -239,7 +309,6 @@ function measuredLayout(node: HTMLElement, bounds: NativeBrowserBounds): NativeL
 }
 
 const errors = {
-  load_failed: '网页未能打开，请检查地址或网络后重试。',
   unsupported_navigation: '暂不支持打开这种地址，请使用 HTTP 或 HTTPS 网址。',
   download_unsupported: '简易浏览器暂不支持下载文件。',
   process_gone: '浏览页面已停止，请刷新后重试。',
@@ -422,6 +491,7 @@ export function NativeBrowserPane({
       ...(draft ? { draft } : {}),
     });
     const hide = (defer = false) => {
+      delete node.dataset.nativeBrowserFrame;
       // A withdrawal bypasses the positive calibration queue. Its newer
       // revision retires every earlier asynchronous positive request in Main.
       if (pendingHide) {
@@ -506,12 +576,12 @@ export function NativeBrowserPane({
       }
       const key = JSON.stringify(measured);
       if (!hidden && last === key) return;
-      const animating = node.closest(
-        '[data-slot="resizable-panel-group"][data-animate-width="true"]',
+      const moving = node.closest(
+        '[data-slot="resizable-panel-group"]:is([data-animate-width="true"], :has(> [data-separator="active"]))',
       );
-      if ((initialPlacement || animating) && host.presentBrowserLayout) {
+      if ((initialPlacement || moving) && host.presentBrowserLayout) {
         // The original page must occupy this exact viewport before the Root
-        // commit paints its newly selected UI or animated panel boundary.
+        // commit paints its newly selected UI, animation or dragged boundary.
         // ResizeObserver runs before paint; waiting for asynchronous calibration
         // here would leave the page one frame behind the sidebar transition.
         // Stable resize calibration remains asynchronous and coalesced.
@@ -523,6 +593,8 @@ export function NativeBrowserPane({
           if (placed?.id !== id || placed.pageToken !== pageToken)
             throw Error('browser_page_scope_denied');
           committedLayout.set(originalDocument, { host, id, token: pageToken });
+          if (measured.layout?.frame) node.dataset.nativeBrowserFrame = 'true';
+          else delete node.dataset.nativeBrowserFrame;
           for (const cancel of pendingWithdrawals.get(originalDocument) ?? []) cancel();
           initialPlacement = false;
           last = key;
@@ -554,6 +626,8 @@ export function NativeBrowserPane({
         .then(send)
         .then(() => {
           if (owned() && inFlight === operation) {
+            if (measured.layout?.frame) node.dataset.nativeBrowserFrame = 'true';
+            else delete node.dataset.nativeBrowserFrame;
             initialPlacement = false;
             setPresentationIssue(undefined);
           }
@@ -604,7 +678,18 @@ export function NativeBrowserPane({
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ['style', 'class', 'data-native-browser-layout', 'data-state', 'hidden'],
+      attributeFilter: [
+        'style',
+        'class',
+        'data-native-browser-layout',
+        'data-state',
+        'data-separator',
+        'hidden',
+      ],
+    });
+    mutations.observe(originalDocument.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'class'],
     });
     window.addEventListener('resize', publish);
     window.addEventListener('scroll', schedule, true);
@@ -676,8 +761,10 @@ export function NativeBrowserPane({
     presentationIssue ||
     (state.error === 'process_gone' && state.control?.phase === 'unknown'
       ? '浏览页面已停止，控制权尚未确认，请先停止原浏览器任务。'
-      : state.error && errors[state.error]) ||
-    (state.display === 'failed' ? '网页显示尚未确认，请刷新或重新输入地址。' : undefined);
+      : state.error && state.error !== 'load_failed' && errors[state.error]) ||
+    (state.display === 'failed' && state.error !== 'load_failed'
+      ? '网页显示尚未确认，请刷新或重新输入地址。'
+      : undefined);
   const canNavigate = !state.control || ['human', 'armed'].includes(state.control.phase);
   const showOptions = useNativeBrowserPopup({
     identity: JSON.stringify([
@@ -782,7 +869,15 @@ export function NativeBrowserPane({
         />
       </div>
       <div className="native-browser-surface">
-        {(!state.url || state.display !== 'ready') && (
+        {state.error === 'load_failed' && (
+          <NativeBrowserError
+            url={state.url}
+            failure={state.failure}
+            canReload={canNavigate}
+            onReload={() => void request({ action: 'reload', id })}
+          />
+        )}
+        {state.error !== 'load_failed' && (!state.url || state.display !== 'ready') && (
           <section
             className="native-browser-start"
             aria-label={state.url || initialHint?.url ? '网页加载' : '浏览器起始页'}

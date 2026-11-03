@@ -5,6 +5,7 @@ import { join, resolve, sep } from 'node:path';
 import {
   app,
   ipcMain,
+  nativeTheme,
   shell,
   type WebContents,
   type WebContentsView,
@@ -38,6 +39,7 @@ declare global {
     hits: Record<string, number>;
     externalUrls: string[];
     forwardExternal: boolean;
+    recoverEnginePage: boolean;
     retained?: { contents: WebContents; view: WebContentsView; frame: WebFrameMain };
   };
 }
@@ -58,6 +60,17 @@ void app.whenReady().then(async () => {
       response.end(
         `<html><head><title>${title}</title></head><body><h1>${title}</h1><input id="retained" aria-label="Retained form"><a id="next" href="/two">Next</a><a id="file" href="file:///C:/private.txt">File</a><a id="popup" href="/two" target="_blank">Popup</a><a id="download" href="/download">Download</a><div style="height:1000px">Reading content</div><h2 id="reading">Retained reading position</h2><div style="height:1000px">More content</div></body></html>`,
       );
+    } else if (
+      url.pathname === '/engine-failure' &&
+      !globalThis.browserTabsHostFixture.recoverEnginePage
+    ) {
+      request.socket.destroy();
+    } else if (url.pathname === '/engine-failure' || url.pathname === '/site-404') {
+      const title = url.pathname === '/site-404' ? 'Site supplied 404' : 'Recovered engine page';
+      response.writeHead(url.pathname === '/site-404' ? 404 : 200, {
+        'content-type': 'text/html; charset=utf-8',
+      });
+      response.end(`<!doctype html><title>${title}</title><h1>${title}</h1>`);
     } else if (url.pathname === '/download') {
       response.setHeader('content-disposition', 'attachment; filename="example.txt"');
       response.end('example');
@@ -95,12 +108,31 @@ void app.whenReady().then(async () => {
     height: 800,
     show: false,
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    // Exercise the same Windows titlebar, transparent Root and material as the
+    // ordinary client. A framed, opaque fixture has a different paint path.
+    ...(process.platform === 'win32'
+      ? {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: {
+            color: '#00000000',
+            symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
+            height: 32,
+          },
+          ...(material === 'mica' ? { backgroundMaterial: 'mica' as const } : {}),
+          backgroundColor:
+            material === 'mica'
+              ? '#00000000'
+              : nativeTheme.shouldUseDarkColors
+                ? '#191919'
+                : '#fafafa',
+        }
+      : {}),
     webPreferences: {
       preload: join(directory, 'preload.cjs'),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      backgroundThrottling: false,
+      ...(process.platform !== 'win32' ? { backgroundThrottling: false } : {}),
     },
   });
   // The renderer supplies explicit Root-local draft owners. No Core selection
@@ -123,6 +155,7 @@ void app.whenReady().then(async () => {
     hits,
     externalUrls,
     forwardExternal: false,
+    recoverEnginePage: false,
   };
   await window.loadURL(`${origin}/`);
   app.once('will-quit', () => {
