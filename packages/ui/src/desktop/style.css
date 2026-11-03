@@ -3982,6 +3982,22 @@ body {
 .kite-client .turn-failure .tool-activity-marker-icon {
   color: var(--destructive);
 }
+.kite-client .turn-failure-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.kite-client .turn-failure-notice > svg {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  color: var(--destructive);
+}
 .kite-client .turn-failure-details {
   margin: 4px 0 8px 22px;
   color: var(--foreground);
@@ -3990,6 +4006,23 @@ body {
 .kite-client .turn-failure-details p {
   margin: 0 0 8px;
   white-space: pre-wrap;
+}
+.kite-client .model-connection > .tool-activity-summary,
+.kite-client
+  .model-connection
+  > .tool-activity-summary:is(:hover, :focus-visible, [aria-expanded="true"]),
+.kite-client .model-connection .turn-failure-details {
+  color: var(--destructive);
+}
+.kite-client .model-connection > .tool-activity-summary {
+  column-gap: 0;
+}
+.kite-client .model-connection .tool-activity-marker-icon {
+  margin-inline-end: 6px;
+}
+.kite-client .model-connection .tool-step-preview {
+  font-size: inherit;
+  line-height: inherit;
 }
 .kite-client .turn-failure-details dl {
   display: grid;

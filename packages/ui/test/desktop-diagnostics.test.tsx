@@ -35,6 +35,8 @@ test('dev and prod never imply diagnostics; only an explicit test provider expos
         expect(rendered).toContain('Full detail');
         expect(rendered).not.toContain('original_reason');
         expect(rendered).not.toContain('原因代码');
+        expect(rendered).not.toContain('<button');
+        expect(rendered).not.toContain('展开回复失败');
       }
       expect(draw(true)).toContain('original_reason');
     }

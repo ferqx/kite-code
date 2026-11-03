@@ -43,6 +43,17 @@ export function TurnFailure({
   const diagnostics = useDesktopDiagnostics();
   const detail = message.text || '当前记录未提供具体失败原因。';
   const outcome = message.failure?.outcome;
+  if (!diagnostics)
+    return (
+      <article
+        className="message turn-failure turn-failure-notice"
+        aria-label="回复失败"
+        role="status"
+      >
+        <HugeiconsIcon icon={TriangleAlertIcon} aria-hidden="true" />
+        <span>{(message.text || summary).replace(/\s*\n+\s*/g, ' ')}</span>
+      </article>
+    );
   return (
     <Collapsible asChild open={expanded} onOpenChange={onToggle}>
       <article

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { ModelAttemptError, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
 import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
@@ -424,10 +424,47 @@ test.each([
     expect(result.events.filter((event) => event.type === 'finish')).toHaveLength(0);
     expect(result.events.filter((event) => event.type === 'tool_call')).toHaveLength(0);
     expect(String(result.error)).not.toContain('fixture-secret');
+    expect(JSON.stringify(result.error)).not.toContain('fixture-secret');
     expect(data.calls).toBe(1);
   } finally {
     await data.close();
   }
+});
+
+test.each([
+  ['ECONNREFUSED', 'connection_refused'],
+  ['ETIMEDOUT', 'connection_timeout'],
+  ['ENOTFOUND', 'name_resolution_failed'],
+  ['ECONNRESET', 'connection_interrupted'],
+  ['UND_ERR_HEADERS_TIMEOUT', 'request_timeout'],
+])('known transport code %s becomes finite safe detail without retaining the error', async (code, detail) => {
+  let attempts = 0;
+  const model = createCompatibleModelBinding({
+    baseURL: 'http://127.0.0.1:1/v1',
+    modelId: 'fixture',
+    apiKey: 'fixture-secret',
+    fetch: Object.assign(
+      async () => {
+        attempts++;
+        throw new TypeError('private endpoint and fixture-secret', {
+          cause: Object.assign(new Error('private log'), { code }),
+        });
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  });
+  const adapter = createSdkModelAdapter({ models: new Map([['bound', model]]) });
+  const result = await collect(adapter);
+  expect(attempts).toBe(1);
+  expect(result.error).toMatchObject({ reason: 'connection_failed', detail });
+  expect(JSON.stringify(result.error)).not.toMatch(/fixture-secret|private|127\.0\.0\.1/);
+  expect(ModelAttemptError.isInstance(result.error)).toBe(true);
+});
+
+test('unrecognized error detail cannot cross the safe model attempt boundary', () => {
+  expect(() => new ModelAttemptError('connection_failed', 'raw private log' as never)).toThrow(
+    'invalid_model_failure_detail',
+  );
 });
 
 test('AbortSignal terminates the actual in-flight HTTP stream without retry or successful finish', async () => {
@@ -554,6 +591,15 @@ test.each([
     const result = await collect(data.adapter);
     expect(String(result.error)).toContain('MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable');
     expect(String(result.error)).not.toContain('fixture-secret');
+    expect(result.error).toMatchObject({
+      detail:
+        status === 429
+          ? 'rate_limited'
+          : status === 408
+            ? 'request_timeout'
+            : 'service_unavailable',
+    });
+    expect(JSON.stringify(result.error)).not.toContain('fixture-secret');
     expect(data.calls).toBe(1);
   } finally {
     await data.close();

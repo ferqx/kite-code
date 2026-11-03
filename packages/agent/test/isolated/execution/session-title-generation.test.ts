@@ -669,7 +669,7 @@ test('actual provider retry waiting preserves the first raw input title and canc
       retry: {
         previousExecutionId: first.failed[0]!.id,
         attempt: 2,
-        maxAttempts: null,
+        maxAttempts: 6,
         reason: 'provider_unavailable',
       },
     });

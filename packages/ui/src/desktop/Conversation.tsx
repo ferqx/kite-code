@@ -33,6 +33,7 @@ import { useDesktopDiagnostics } from './diagnostics';
 import { cn } from './lib/utils';
 import { MessageContent } from './MessageContent';
 import { MessageCopyButton } from './MessageCopyButton';
+import { ModelConnection } from './ModelConnection';
 import { formatMessageTime } from './message-time';
 import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
@@ -283,6 +284,15 @@ const MessageItem = memo(function MessageItem({
       />
     );
   }
+  if (message.systemKind === 'model_connection')
+    return (
+      <ModelConnection
+        message={message}
+        expanded={expanded}
+        onToggle={(open) => onToggle(message.id, open)}
+        restoredExpanded={restoredExpanded?.has(message.id)}
+      />
+    );
   if (message.systemKind === 'compaction')
     return (
       <article className={`message context-compacted ${message.status ?? ''}`}>
@@ -1117,7 +1127,7 @@ export function Conversation({
       );
       const failureGroups = entry.groups.filter(([message]) => !!message && isTurnFailure(message));
       const processGroups = entry.groups.filter(
-        (group) => group !== finalGroup && !failureGroups.includes(group) && !structural(group[0]!),
+        (group) => group !== finalGroup && !structural(group[0]!),
       );
       const activity = turnActivity?.turnId === entry.turnId ? turnActivity : undefined;
       const timing = timingByTurn.get(entry.turnId);
@@ -1157,6 +1167,9 @@ export function Conversation({
       const responding =
         lastTurnEntry &&
         !terminalStatus &&
+        !processGroups.some((group) =>
+          group.some((message) => message.systemKind === 'model_connection' && !message.settled),
+        ) &&
         (activity
           ? isLiveTurn(activity)
           : active && !completed && !failed && !cancelled && !aborted);
@@ -1305,11 +1318,6 @@ export function Conversation({
             )}
           {finalGroup && (
             <div className="agent-turn-final">{renderGroup(finalGroup, 'result')}</div>
-          )}
-          {failureGroups.length > 0 && (
-            <div className="agent-turn-failure">
-              {failureGroups.map((group) => renderGroup(group, 'result'))}
-            </div>
           )}
           {responding && (
             <small className="response-status" role="status">

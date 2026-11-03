@@ -3,6 +3,7 @@ import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import { nativeModelConnections } from './native-model-connections';
 import { desktopMessages } from './native-presentation';
 import {
   desktopToolMessage,
@@ -595,7 +596,7 @@ export function desktopTranscript({
         text:
           run.reason === 'context_source_unavailable'
             ? '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。'
-            : '本轮执行未完成。原消息已保留，请核对任务状态后重新发送。',
+            : '回复未完成，已保留本轮消息。',
         settled: true,
         status: 'failed',
         failure: {
@@ -606,12 +607,17 @@ export function desktopTranscript({
       });
     }
   }
+  nativeModelConnections(modeled, messages, executions, observed, storeId, sessionId, identity);
+  const failedConnections = new Set(
+    modeled.filter((message) => message.modelConnectionFailure).map((message) => message.turnId),
+  );
   const active = [...observed.values()].find((run) => run.isActive);
   return {
     // An old SQL running record cannot establish current execution. Only the
     // matching hot observation above may make that attempt a visible live row.
     messages: modeled.filter(
       (model) =>
+        !(model.systemKind === 'turn_failure' && failedConnections.has(model.turnId)) &&
         !(
           model.systemKind === 'compaction' &&
           model.status === 'unknown' &&

@@ -129,7 +129,12 @@ export type NativeToolExecution = Pick<
   | 'resultRevision'
   | 'authorization'
   | 'cancelRequestedAt'
-> & { target?: string; inputReady?: boolean };
+> & {
+  target?: string;
+  inputReady?: boolean;
+  modelRetry?: Execution['modelRetry'];
+  result?: Execution['result'];
+};
 
 export function nativeRunFact(run: NativeRunFact): NativeRunFact {
   const { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason } = run;

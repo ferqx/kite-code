@@ -16,7 +16,7 @@ import {
 } from 'ai';
 import type { Json, ModelAdapter, ModelRequest, ModelUsage } from './index';
 import { isModelImage } from './index';
-import { ModelAttemptError } from './model-attempt';
+import { ModelAttemptError, modelConnectionDetail } from './model-attempt';
 import {
   type ModelAdapterSnapshot,
   type ReasoningEffort,
@@ -464,20 +464,17 @@ export function createSdkModelAdapter(options: {
         if (APICallError.isInstance(error) && error.isRetryable)
           throw new ModelAttemptError(
             error.statusCode === undefined ? 'connection_failed' : 'provider_unavailable',
+            error.statusCode === 429
+              ? 'rate_limited'
+              : error.statusCode === 408
+                ? 'request_timeout'
+                : error.statusCode !== undefined
+                  ? 'service_unavailable'
+                  : modelConnectionDetail(error),
           );
         if (error instanceof TypeError) {
-          const code = (error as TypeError & { code?: unknown }).code;
-          const cause = error.cause;
-          const causeCode =
-            cause instanceof Error ? (cause as Error & { code?: unknown }).code : null;
-          if (
-            [code, causeCode].some(
-              (value) =>
-                typeof value === 'string' &&
-                ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT'].includes(value),
-            )
-          )
-            throw new ModelAttemptError('connection_failed');
+          const detail = modelConnectionDetail(error);
+          if (detail) throw new ModelAttemptError('connection_failed', detail);
         }
         // Provider errors may contain request bodies/URLs. Do not expose them at
         // this neutral boundary, include them as causes, or print them.

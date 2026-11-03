@@ -116,7 +116,7 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 可信 runless Action/Tool 的 child 仍核宿主精确角色、模型与实际父工具上限。MCP 空目录只有在真实无 Run 祖先、原 Command/准备摘要和 child carrier/manifest 闭合时，才保存 `parentRunId:null` 血缘供后代验证；它不生成 source read-set、连接或凭据许可。省略真实父 Run 不能制造这种血缘，非空来源与篡改证明继续拒绝。装配与准确拒绝证据归[Service owner](../../apps/service/README.md)。
 
-长期执行不设主 Run 总期限、累计用量、来源数量、隐式 Shell 总超时或暂时性模型失败的次数额度。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。公共重试上界以 `maxAttempts:null` 表达，Client schema 与 TUI 保实际 attempt 和原失败前驱。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。
+长期执行不设主 Run 总期限、累计用量、来源数量或隐式 Shell 总超时。暂时性模型故障只在已确认关闭的原失败之后退避重连，同串故障最多5次，首次请求另计；新事实以`maxAttempts:6`和实际attempt／原失败前驱表达，第5次重连失败结束原Run，不新增请求。冷恢复保留原计数；旧历史的`maxAttempts:null`仍可读，不改写为新上限。AI只提供有限错误分类，Execution保存脱敏枚举，Desktop将其映射为原Turn内可展开的易读原因和建议，不发送原日志、地址或错误对象。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。实现与验证归[Agent](../../packages/agent/README.md)、[AI](../../packages/ai/README.md)和[Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 
 原 Run 的冷恢复将持久意图、可替换 Model 尝试、已确认结果与进程监督分开。纯 Model 无派生效果时可关闭旧 running/failed 尝试并重试；压缩 pending 重建摘要、已发布点保持。所选父子树在同一 root lease 下准备全部绑定并原子交接，只有提前封存的可信 Tool continuation 可接回原操作；普通外部未知效果仍需核实。原 ID、结果、审批、子期限与失败序列事实保持，失败序列不再作为 Run 取消条件。正常 Store 事务以闭合增量迁移维护恢复证明，首次冷读只核前沿/增量和必要来源；旧库一次升级及失效协议完整审计回退。全部迁移资产进入包内构建和 Service 文件保护，公开 HTTP 与 format major 1 保持；协议、真实强杀与成本边界归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
 

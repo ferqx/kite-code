@@ -856,7 +856,7 @@ for (const ending of ['eof', 'partial_call', 'partial_completed'] as const)
       expect(models[1]?.modelRetry).toMatchObject({
         previousExecutionId: models[0]!.id,
         attempt: 2,
-        maxAttempts: null,
+        maxAttempts: 6,
         reason: 'stream_incomplete',
       });
       expect(view.executions.filter((e) => e.kind === 'tool')).toHaveLength(0);
@@ -921,7 +921,7 @@ for (const failure of [
           expect(models[index]!.modelRetry).toEqual({
             previousExecutionId: models[index - 1]!.id,
             attempt: index + 1,
-            maxAttempts: null,
+            maxAttempts: 6,
             reason: failure === 'http500' ? 'provider_unavailable' : 'stream_incomplete',
           });
       expect(view.executions.filter((e) => e.kind === 'tool')).toHaveLength(0);
@@ -1084,10 +1084,15 @@ test('Responses manual approval waits with zero effects then continues the origi
   }
 }, 15_000);
 
-test('Responses unknown tool effect stops without model continuation or duplicate side effects', async () => {
+test('Responses unknown tool effect reaches one model explanation without duplicate side effects', async () => {
   const counter = { effects: 0 };
   const provider = endpoint(
-    () => ({ id: 'unknown', calls: [call('unknown')] }),
+    (body, index) => {
+      if (index === 0) return { id: 'unknown', calls: [call('unknown')] };
+      expect(index).toBe(1);
+      validateHistory(body, [{ id: 'unknown', output: 'effect:1' }], []);
+      return { id: 'unknown-explanation', text: ['原工具结果未知，需要核实，不重复执行。'] };
+    },
     () => counter.effects,
   );
   let f = await fixture(provider.baseURL, { tools: [tool(counter, 'outcome_unknown')] });
@@ -1095,9 +1100,11 @@ test('Responses unknown tool effect stops without model continuation or duplicat
     await start(f);
     const view = await finished(f.client);
     expect(counter.effects).toBe(1);
-    expect(provider.records).toHaveLength(1);
+    expect(provider.errors).toEqual([]);
+    expect(provider.records).toHaveLength(2);
+    expect(provider.records.map((record) => record.effectsAtRequest)).toEqual([0, 1]);
     expect(view.executions.find((e) => e.kind === 'tool')?.status).toBe('outcome_unknown');
-    expect(view.runs[0]?.status).not.toBe('completed');
+    expect(view.runs[0]?.status).toBe('completed');
     await f.client.getView('s');
     expect(counter.effects).toBe(1);
     const root = f.root;
@@ -1105,7 +1112,7 @@ test('Responses unknown tool effect stops without model continuation or duplicat
     f = await fixture(provider.baseURL, { root, tools: [tool(counter, 'outcome_unknown')] });
     const coldView = await f.client.getView('s');
     expect(counter.effects).toBe(1);
-    expect(provider.records).toHaveLength(1);
+    expect(provider.records).toHaveLength(2);
     expect(coldView.executions.find((e) => e.kind === 'tool')?.status).toBe('outcome_unknown');
     saveEvidence('unknown-tool-effect', {
       coldView,
@@ -1172,7 +1179,7 @@ test('Responses next-step retry never repeats a previously completed tool side e
   }
 }, 15_000);
 
-test('Responses physical socket loss continues beyond five attempts without dispatching unfinished tools', async () => {
+test('Responses physical socket loss stops after five reconnections without dispatching unfinished tools', async () => {
   const counter = { effects: 0 };
   const requests: Body[] = [];
   let destroyed = 0;
@@ -1204,16 +1211,19 @@ test('Responses physical socket loss continues beyond five attempts without disp
     await start(f);
     const view = await finished(f.client);
     expect(counter.effects).toBe(0);
-    expect(view.runs[0]?.status).toBe('completed');
+    expect(view.runs[0]).toMatchObject({
+      status: 'failed',
+      reason: 'model_reconnect_exhausted',
+      isActive: false,
+    });
     expect(view.executions.filter((e) => e.kind === 'tool')).toHaveLength(0);
     expect(destroyed).toBe(6);
-    expect(requests).toHaveLength(7);
+    expect(requests).toHaveLength(6);
     const executions = await f.store.listExecutions('s');
     expect(executions.map((e) => e.status)).toEqual([
       ...Array.from({ length: 6 }, () => 'failed' as const),
-      'succeeded',
     ]);
-    expect(executions.slice(0, -1).map((e) => e.result)).toEqual(
+    expect(executions.map((e) => e.result)).toEqual(
       Array.from({ length: 6 }, () =>
         expect.objectContaining({
           code: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:connection_failed',
@@ -1221,7 +1231,7 @@ test('Responses physical socket loss continues beyond five attempts without disp
         }),
       ),
     );
-    expect(view.executions.at(-1)?.modelRetry).toMatchObject({ attempt: 7, maxAttempts: null });
+    expect(view.executions.at(-1)?.modelRetry).toMatchObject({ attempt: 6, maxAttempts: 6 });
     saveEvidence('physical-socket-loss', {
       requests,
       destroyed,

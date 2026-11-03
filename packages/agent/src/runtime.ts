@@ -72,7 +72,12 @@ import {
   recordToolOutcome,
   type ToolFailureStreak,
 } from './loop';
-import { type ModelRetrySource, modelRetryReason, waitForModelRetry } from './model-attempt';
+import {
+  type ModelRetrySource,
+  modelMaxAttempts,
+  modelRetryReason,
+  waitForModelRetry,
+} from './model-attempt';
 import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './model-body';
 import { semanticDigestBytes } from './model-body/digest';
 import { assembleModelContext, modelHistory } from './model-context';
@@ -3908,10 +3913,12 @@ export class AgentRuntime {
               (!Number.isSafeInteger(previousRetry.maxAttempts) || previousRetry.maxAttempts < 1)))
         )
           throw new AgentError('run_continuation_invalid');
+        if ((previousRetry?.attempt ?? 1) >= modelMaxAttempts)
+          throw new AgentError('model_reconnect_exhausted');
         result.modelRetry = {
           previousExecutionId: last.id,
           attempt: (previousRetry?.attempt ?? 1) + 1,
-          maxAttempts: null,
+          maxAttempts: modelMaxAttempts,
           reason: 'stream_incomplete',
         };
       }
@@ -7544,11 +7551,13 @@ export class AgentRuntime {
                   previous.result.incomplete !== true
                 )
                   throw error;
+                if (providerAttempt >= modelMaxAttempts)
+                  throw new AgentError('model_reconnect_exhausted');
                 providerAttempt++;
                 modelRetry = {
                   previousExecutionId: previous.id,
                   attempt: providerAttempt,
-                  maxAttempts: null,
+                  maxAttempts: modelMaxAttempts,
                   reason: retryReason,
                 };
                 await waitForModelRetry(providerAttempt, controller.signal);

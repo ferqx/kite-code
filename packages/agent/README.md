@@ -1,5 +1,7 @@
 # 通用 Agent
 
+[模型重连](src/model-attempt.ts)由 Runtime 在原已确认失败、关闭和来源资格保持的 Model Execution 之后退避重试，同一连续故障最多重连5次（首次请求另计，共6次尝试）。新重试事实持久记录`maxAttempts:6`，第5次重连仍失败时以`model_reconnect_exhausted`结束原Run，不创建第7次请求；原部分正文、用量和工具事实保留，明确新任务独立计数。冷恢复沿原attempt继续计数，不扩大剩余次数；旧历史的`maxAttempts:null`仍按原值可读。Execution只保存AI边界核实的有限`modelFailure.detail`，客户端自行映射可读原因，不记录或转发远端日志。[模型回归](test/isolated/execution/model-attempt.test.ts)核最后一次成功、耗尽后新任务、原前驱与部分工具零效果；物理断流和公开投影归[Service回归](../../apps/service/test/isolated/responses-loop.test.ts)。
+
 2026-10-26，本轮失败修复已通过12份受影响 Agent 完整测试文件。普通输入的 Run、Model 和来源直接绑定原 Command；内部权限模型使用 `authorization.check`，不再把它算作子 Agent／业务 Run。原 Action 来源继承用当前 ensure／prepare／dispatch 检查链核对目标、输入、策略与模型身份，损坏后仍要求零派发事件；Files 协作从实际模型文本回执读取完整 baseline，保留真实 CAS 冲突、结果未知、取消、串行资源与恢复不重放断言。真实恢复 PTY 已核原 Session 和准确历史。此为受影响范围的定向资格，不代表全仓或跨平台验收。
 
 会话附件、输出文件和 Plan 当前文件已接入；机制与验证见 [Files](src/tools/files/README.md)、[Planning](src/business/planning/README.md)和[维护](src/maintenance/README.md)。客户端过程与发行资格分别归 [Desktop](../../apps/desktop/README.md)和 [Terminal](../../apps/cli/docs/terminal-release.md)，不从单项测试推定完整安装或其他平台资格。
@@ -190,7 +192,7 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 扩展completion条件可等待准确Job的结果接纳；Job本身终态不等于原Run已收到该结果。nested Tool登记要求时沿可信实际父链定位原Run，Runtime与Store在等待事务重核同Store／Session／root work、namespace、记录revision与selection；不能拿当前active Run补绑。自定义业务记录不恢复已退役Task的operation_result消费，等待沿原change cursor／取消／期限，不新增Loop或公共字段。当前[Browser人工receipt](src/tools/browser/README.md#异步人工交接候选未发布)按此保持原任务直到实际相关回应接纳；当前Task默认仍沿 `agent_completion` 邮箱交付，不登记旧专用结果义务。本次合并的[准确receipt等待](test/isolated/storage/condition-result-wait.test.ts)与[人工交接Runtime](test/isolated/browser/human-async-runtime.test.ts)分别核不可变等待证明和同Run实际回应、取消与未知边界，真实Native范围另核。
 
-唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败不设尝试次数上限，按原失败 Execution 血缘退避且响应取消；公开重试 `maxAttempts=null`。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
+唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败沿本页模型重连边界最多重连5次，保留原失败 Execution 血缘并响应取消。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
 
 长度续写请求遇到可重试 Provider 失败时，Runtime 仍从当前持久历史、真实人类补充、权限、工具和 Host Sources 重新准备，只恢复 Loop 的准确临时续写尾项。该尾项须绑定同 Store/Session/Run/工作/原 Command 的成功纯文本 length Execution；完整原输出与新历史中的唯一原 assistant 正文一致才允许追加。若当前已发布压缩已准确覆盖该原 assistant，则验证同 selection 的覆盖上界、原正文或完整 descriptor 及当前真实摘要后退役旧尾项，沿新摘要继续，不把旧正文灌回窗口。无效证明拒绝继续，普通重试不增加尾项，也不把失败尝试的部分文本加入上下文。[长度后重试回归](test/isolated/execution/model-length-retry.test.ts)核超过64KiB原 Artifact、真实 Tool、人类补充及 Source/权限刷新和错工作反例。
 

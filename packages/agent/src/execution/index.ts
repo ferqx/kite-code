@@ -1310,6 +1310,9 @@ export class UnifiedExecution {
                   ? error.message
                   : 'model_failed',
             incomplete: true,
+            ...(ModelAttemptError.isInstance(error) && error.detail
+              ? { modelFailure: { detail: error.detail } }
+              : {}),
             // Core-local dispatch proof, never a field supplied by the Adapter.
             ...(error instanceof InputProcessingDecidedAdmission && !dispatched
               ? { dispatchCommitted: false }

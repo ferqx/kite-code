@@ -33,6 +33,7 @@ export interface Message {
     | 'agent_result'
     | 'turn_timing'
     | 'turn_terminal'
+    | 'model_connection'
     | 'turn_failure';
   /** Core-confirmed ordinary Agent mail in its receiving parent's Turn. */
   readonly agentMessage?: {
@@ -69,6 +70,8 @@ export interface Message {
       readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
     };
   };
+  /** Human-readable terminal transport facts; never raw Provider errors or logs. */
+  readonly modelConnectionFailure?: { readonly description: string; readonly suggestion: string };
   /** Exact terminal fact for a hidden Turn marker; independent of message status. */
   readonly turnTerminalStatus?: 'completed' | 'failed' | 'cancelled' | 'aborted';
   readonly approval?: {

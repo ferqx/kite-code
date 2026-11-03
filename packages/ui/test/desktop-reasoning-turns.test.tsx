@@ -201,7 +201,7 @@ test('late Native terminal markers anchor a no-output turn after its exact origi
   expect(render([firstUser]).document.querySelector('.agent-turn') === null).toBe(true);
 });
 
-test('hidden reasoning does not split adjacent exploration calls and failure receipts remain visible', () => {
+test('hidden reasoning does not split adjacent exploration calls and failure receipts stay in their Turn process', () => {
   const tool = (id: string): Message => ({
     id,
     turnId: 'run',
@@ -245,7 +245,29 @@ test('hidden reasoning does not split adjacent exploration calls and failure rec
   expect(failed.document.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe(
     'failed',
   );
-  expect(failed.html).toContain('Actual failure');
+  expect(failed.document.querySelector('.agent-turn-summary')?.textContent).toBe('本轮失败');
+  expect(failed.document.querySelector('.agent-turn-failure')).toBeNull();
+  expect(failed.html).not.toContain('Actual failure');
+  const expanded = new JSDOM(
+    renderToStaticMarkup(
+      <Conversation
+        messages={[user('first'), thinking('run'), failure]}
+        loading={false}
+        selected
+        connected
+        initialReading={{ top: 0, follow: false, expanded: { 'turn:run:complete': true } }}
+        saveReading={() => {}}
+      />,
+    ),
+  );
+  try {
+    expect(
+      expanded.window.document.querySelector('.agent-turn-process-messages .turn-failure')
+        ?.textContent,
+    ).toBe('Actual failure');
+  } finally {
+    expanded.window.close();
+  }
 });
 
 test('cold and restored active processes start fully expanded without replaying an opening animation', () => {

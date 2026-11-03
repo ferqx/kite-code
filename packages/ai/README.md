@@ -38,7 +38,7 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 
 2026-10-16 在 Windows x64／Bun 1.4.2 的本次修复工作树，经用户明确授权向 DeepSeek 官方 deepseek-v4-flash 发送两次对照，均仅“你好”及原失败请求中的八个工具定义，不含原系统／项目上下文或 reasoning_effort。两份实际请求只有函数名不同：六个旧名称不合语法时返回400／invalid_request_error，转换后返回200且完整流结束；不执行工具，不改用户配置。该有限实测确认工具名缺陷和修复效果，不证明真实文件工具执行、其他模型或全部 Provider 兼容性；详细计数和证据限制见上述决定。
 
-[ModelAttemptError](src/model-attempt.ts)仅归一化已知传输中断、SDK 明确标记可重试的 HTTP 故障（含 408／429／5xx）和流不完整的有限公开原因；不按远端正文猜失败或重试资格。SDK 每次仍是零内部重试；Agent 在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，不设本地次数上限，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。
+[ModelAttemptError](src/model-attempt.ts)仅归一化已知传输中断、SDK 明确标记可重试的 HTTP 故障（含 408／429／5xx）和流不完整的有限公开原因；不按远端正文猜失败或重试资格。可选`detail`只接受固定枚举，从真实HTTP状态或有界cause链的已知系统code提取超时、拒绝连接、域名解析、传输中断、频率受限及服务不可用；不保存远端message、body、URL、headers或原错误对象。SDK 每次仍是零内部重试；[Agent](../agent/README.md)在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，同串故障最多重连5次，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。
 
 验证：`bun test packages/ai/test/` 和 `bun run --cwd packages/ai typecheck`。
 
@@ -63,7 +63,7 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 
 完整 finish 的 SDK assistant content（包括 encrypted reasoning、summary 和 function call 的原 call ID）成为 `ModelEvent.finish.continuation`；[Agent 私有输出](../agent/src/model-output/README.md)以现有分段 Artifact 链保存并在多轮及冷恢复后回传。该 JSON 带协议、版本、路由 ID 和 endpoint/provider/model/凭据/header 绑定 SHA-256，不包含原始连接数据。Codex 的可信私有工厂另接纳认证来源与完整账户／主体身份的稳定摘要，代替会轮换的 bearer；同账户新 token 与冷重建保留原 encrypted reasoning，endpoint、模型、账户 header 或来源变化仍隔离。此选项仅供明确的 Codex Responses 绑定，普通 Provider 保持原凭据绑定。绑定变化不回放旧 opaque state，仍映射普通 assistant/tool 历史。私有 envelope 保持 version 1；回放其中 tool-call 时按准确 call ID 从原 Core toolCalls 取内部名称，再用当前请求映射编码，避免工具集合变化后旧 wire 名碰撞。encrypted reasoning、summary 和 Provider metadata 保持原值，不重写既有 Artifact；缺少匹配原调用在网络前拒绝。取消、错误、截断工具批次和未完成工具输入不发布可执行调用或私有 continuation；非空纯文本 `length` 由 Core 沿原 Run 续接，并保留该次封存的 reasoning。SDK 不执行工具。自定义 Runtime 必须提供 Artifact port 才能保存 continuation。公开 Inspector 和消息正文不展示此状态。
 
-[Responses HTTP 测试](test/responses.test.ts)覆盖流式文本/推理、usage、工具结果配对、三轮历史、无可见 summary 的 encrypted reasoning、绑定隔离、取消、错误与未完成调用，以及旧 v1 continuation/新碰撞集合、原 Artifact 不变和八档 effort（含 ultar）的别名 wire；[Service 完整 wire](../../apps/service/test/isolated/responses-loop.test.ts)以真实 SQLite/Client/HTTP 核三轮工具、并行分片、冷 continuation 与新增合法工具名碰撞、六次物理断流后的第七次成功、永久断流明确取消、纯文本 length 续接与零重复工具效果；[默认配置](../../apps/service/test/isolated/configuration.test.ts)验证 JSONC 路由；[定时任务集成](../../apps/desktop/test/scheduled-task-runner.test.ts)验证固定模型与 Responses mock 都复用普通 Service 运行链。所有 Provider 请求均为本地模拟服务，未验证真实付费调用。
+[Responses HTTP 测试](test/responses.test.ts)覆盖流式文本/推理、usage、工具结果配对、三轮历史、无可见 summary 的 encrypted reasoning、绑定隔离、取消、错误与未完成调用，以及旧 v1 continuation/新碰撞集合、原 Artifact 不变和八档 effort（含 ultar）的别名 wire；[Service 完整 wire](../../apps/service/test/isolated/responses-loop.test.ts)以真实 SQLite/Client/HTTP 核三轮工具、并行分片、冷 continuation 与新增合法工具名碰撞、六次物理断流（首次请求加5次重连）后失败收敛、永久断流明确取消、纯文本 length 续接与零重复工具效果；[默认配置](../../apps/service/test/isolated/configuration.test.ts)验证 JSONC 路由；[定时任务集成](../../apps/desktop/test/scheduled-task-runner.test.ts)验证固定模型与 Responses mock 都复用普通 Service 运行链。所有 Provider 请求均为本地模拟服务，未验证真实付费调用。
 
 官方语义参考：[OpenAI Responses](https://developers.openai.com/api/reference/resources/responses/methods/create)、[stateless reasoning](https://developers.openai.com/api/docs/guides/reasoning)、[AI SDK OpenAI provider](https://ai-sdk.dev/providers/ai-sdk-providers/openai)。
 

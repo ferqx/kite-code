@@ -801,7 +801,7 @@ Provider 设置保留四个手动协议族和自动发现的 codex family，连�
 
 [Provider owner](src/model-providers.ts)声明五类准确协议、默认 endpoint 和必需凭据；OpenAI/DeepSeek 要求 key，compatible/Ollama 允许明确无 key。认证 `GET/POST /v1/config/user/providers` 复用 `configuration_management`，保存只接受原 Store/command/readSet 与闭合 Provider 操作，不接受路径、主体或 Workspace authority。用户范围连接按稳定 alias/connectionId 分组，旧 Assembly 未持久化身份时才沿 protocol/endpoint/credential reference 摘要分组；保留其他连接、模型 options、enabled 和无关注释。既有用户格式的新模型采用稳定 alias/name route ID（显式中立格式保留随机 ID）、默认 disabled；完整候选仍核默认模型有效性。手动名称不访问模型列表，留空只在这次显式保存调用该 endpoint 的 `/models`，严格 EOF/UTF8/结构与 2MiB 响应边界，完整保存超过512模型的目录。
 
-[Responses 完整 wire](test/isolated/responses-loop.test.ts)沿真实 Client/Service/SQLite 验证三轮并行工具、精确 call ID 与输出配对、私有 encrypted reasoning 冷恢复和绑定隔离、人工批准及 unknown 零重放。新增合法名称与原命名空间工具碰撞后，真实 SQLite 冷历史按原 call ID 重新编码，只执行原内部工具，Inspector 仍不公开密文。失败尝试沿 Core 原资格继续，不恢复旧五次上限；六次物理断流后第七次成功、永久断流的明确取消，以及纯文本 length 的封存续接分别核验。截断工具批次和失败 opaque state 不进入下一请求，已有成功工具不会因后继模型重试再次执行。这些都是本机模拟 Provider 证据，不代证真实账户或付费模型。
+[Responses 完整 wire](test/isolated/responses-loop.test.ts)沿真实 Client/Service/SQLite 验证三轮并行工具、精确 call ID 与输出配对、私有 encrypted reasoning 冷恢复和绑定隔离、人工批准及 unknown 零重放。已保存的工具 unknown 只交回下一 Model 解释，允许解释 Run 完成，但原工具状态继续为 unknown；热读和冷重开都不重复效果。新增合法名称与原命名空间工具碰撞后，真实 SQLite 冷历史按原 call ID 重新编码，只执行原内部工具，Inspector 仍不公开密文。失败尝试沿Core原资格继续，同串故障最多重连5次，首次请求另计；六次物理断流后以明确失败收敛、第5次重连成功、永久断流的明确取消，以及纯文本length的封存续接分别核验。截断工具批次和失败 opaque state 不进入下一请求，已有成功工具不会因后继模型重试再次执行。这些都是本机模拟 Provider 证据，不代证真实账户或付费模型。
 
 Service 在任何 vault 效果前核完整原 readSet，发现后和 JSONC 短 CAS 再核。秘密仅供这次热请求并参与私有 HMAC，不进入 Core safeRequest/receipt。vault 与 JSONC 是两个介质：receipt 分别记录 `credentialState` 和 `configurationState`；已存而未发布的凭据向认证 SDK 保留准确 opaque revoke handle，未知不自动回滚或重做。原 Command GET 只核查原 durable HostMutation，不重复发现、vault 写入或配置发布。
 
