@@ -1,4 +1,4 @@
-import type { BrowserWindow, Input, IpcMain, MenuItemConstructorOptions } from 'electron';
+import type { Input, IpcMain, MenuItemConstructorOptions } from 'electron';
 import type { NativeReply } from '../src/native-bridge';
 import {
   type NativeWindowMenuAction,
@@ -6,6 +6,7 @@ import {
   nativeWindowMenuChannel,
 } from '../src/native-menu-bridge';
 import { assertNativeSender } from './native-ipc';
+import type { NativeRootWindow as BrowserWindow } from './native-root-window';
 
 export function nativeWindowMenuTemplate(options: {
   applicationEnabled: boolean;

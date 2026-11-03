@@ -2,14 +2,21 @@ import { expect, test } from 'bun:test';
 import type { Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { nativeDraftProof } from '../../electron/caller-journal';
+import { NativeInputImages } from '../../electron/input-images';
+import type { BrowserSavedAnnotation } from '../../src/browser-annotation-content';
 import type {
   NativeBridge,
+  NativeCallerMetadata,
   NativeDirectory,
   NativeEvent,
   NativeRequest,
   NativeResult,
   NativeState,
 } from '../../src/native-bridge';
+import type { NativeBrowserBridge, NativeBrowserState } from '../../src/native-browser-bridge';
+import { browserFixture } from '../agent-browser.fixture';
+import { annotationFixture } from '../browser-annotation.fixture';
 import {
   nextDesktopPresentation,
   prepareDesktopDom,
@@ -70,6 +77,8 @@ const directory: NativeDirectory = {
 
 function fixture(
   override: (request: NativeRequest) => NativeResult | Promise<NativeResult> | undefined,
+  browser = false,
+  callers: () => readonly NativeCallerMetadata[] = () => [],
 ) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
@@ -92,6 +101,7 @@ function fixture(
   const listeners = new Set<(event: NativeEvent) => void>();
   const snapshot = (): NativeState => ({
     generation: 1,
+    callerSubmissions: callers(),
     creationSubmissions: [],
     inputSubmissions: [],
     permissionSubmissions: [],
@@ -99,6 +109,8 @@ function fixture(
     selection: {
       viewGeneration: selected === 'a' ? 1 : 2,
       viewSelection: selected === 'a' ? 1 : 2,
+      canReadExtensions: browser,
+      canInvokeExtensions: browser,
       canReadModelOutput: false,
       storeId: 'store',
       session: sessions.find((session) => session.id === selected)!,
@@ -119,6 +131,10 @@ function fixture(
       if (replacement !== undefined) return replacement;
       switch (request.method) {
         case 'attach':
+          // These cases exercise an explicit sidebar selection. A restored A
+          // would make startup await the deliberately held select/draft read
+          // before it can read the directory and expose that sidebar.
+          return { ...snapshot(), selection: undefined };
         case 'state':
           return snapshot();
         case 'directory':
@@ -203,8 +219,17 @@ function fixture(
           .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       });
     },
-    render: (testDiagnostics = false) =>
-      act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />)),
+    async render(testDiagnostics = false, expectStartupFailure = false) {
+      await act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />));
+      if (!expectStartupFailure)
+        await until(
+          () =>
+            calls.some((request) => request.method === 'directory') &&
+            [...dom.window.document.querySelectorAll('button.session-row')].some(
+              (button) => button.textContent === 'Original A',
+            ),
+        );
+    },
     notify: (event: NativeEvent = { generation: 1, kind: 'changed' }) =>
       act(async () => {
         for (const listener of listeners) listener(event);
@@ -219,6 +244,7 @@ function fixture(
         promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('other text');
       expect(dom.window.document.querySelector('[role="alertdialog"]') === null).toBe(true);
+      expect(dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     },
     async close() {
       await act(async () => root.unmount());
@@ -318,7 +344,8 @@ test('a current event state failure recovers in the background without a dialog 
     const priorStateReads = f.calls.filter((request) => request.method === 'state').length;
     fail = true;
     await f.notify();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     expect(f.dom.window.document.body.textContent).not.toContain('native_connection_unavailable');
     fail = false;
     await until(
@@ -343,10 +370,12 @@ test('a current select rejection retries its exact target without an external er
     await f.render();
     await f.click('Original A');
     expect(f.calls.filter((request) => request.method === 'select')).toHaveLength(1);
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     failed = true;
     await act(async () => held.reject(Error('native_connection_unavailable')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     await until(() => f.calls.filter((request) => request.method === 'select').length === 2);
     expect(
       promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
@@ -376,9 +405,10 @@ test('a global directory failure remains visible after a same-generation session
     await f.click('Other B');
     f.assertOther();
     await act(async () => held.reject(Error('session_directory_unavailable')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'session_directory_unavailable',
-    );
+    const message = f.dom.window.document.querySelector('.native-message [role="status"]');
+    expect(message?.textContent).toContain('会话列表暂时无法读取，请稍后重新读取目录。');
+    expect(message?.textContent).not.toContain('session_directory_unavailable');
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
     expect(
       promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
     ).toBe('other text');
@@ -416,7 +446,8 @@ test('a mutation transport failure automatically checks the original intent with
     });
     await f.click('发送首条消息');
     expect(submitted).toBeDefined();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));
     const lookups = f.calls.filter((request) => request.method === 'conversation.lookup');
     expect(lookups).toHaveLength(1);
@@ -438,7 +469,7 @@ test('a real initial attach failure retains startup failure and retry instead of
     return undefined;
   });
   try {
-    await f.render();
+    await f.render(false, true);
     expect(f.dom.window.document.querySelector('[role="alert"]')?.textContent).toContain(
       '启动未完成：required_capability_missing',
     );
@@ -468,7 +499,10 @@ for (const method of ['state', 'directory'] as const)
       const callsBeforeQuit = f.calls.filter((request) => request.method === 'state').length;
       await f.notify({ kind: 'lifecycle', phase: 'quitting' });
       await act(async () => held.reject(Error('native_draining')));
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       expect(
         promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('original text');
@@ -479,7 +513,10 @@ for (const method of ['state', 'directory'] as const)
       expect(f.calls.filter((request) => request.method === 'state').length).toBeGreaterThan(
         callsBeforeQuit,
       );
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       expect(
         promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('original text');
@@ -503,7 +540,8 @@ test('a temporary native_draining observation automatically retries without a fa
     const priorStateReads = f.calls.filter((request) => request.method === 'state').length;
     fail = true;
     await f.notify();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     fail = false;
     await until(
       () => f.calls.filter((request) => request.method === 'state').length >= priorStateReads + 2,
@@ -532,13 +570,19 @@ for (const method of ['select', 'draft.read'] as const)
       ).toHaveLength(2);
       await f.notify({ kind: 'lifecycle', phase: 'quitting' });
       await act(async () => held.reject(Error('native_draining')));
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       hold = false;
       await f.notify({ kind: 'lifecycle', phase: 'active' });
       expect(
         promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
       ).toBe('original text');
-      expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(
+        f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
+      ).toBeNull();
+      expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
       expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
       expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
       expect(f.calls.filter((request) => request.method === 'draft.write')).toHaveLength(0);
@@ -579,7 +623,8 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
     expect(submitted).toBeDefined();
     await f.notify({ kind: 'lifecycle', phase: 'quitting' });
     await act(async () => held.reject(Error('network_outcome_unknown')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('.native-message [role="status"]')).toBeNull();
     expect(f.calls.filter((request) => request.method === 'conversation.lookup')).toHaveLength(0);
     await f.notify({ kind: 'lifecycle', phase: 'active' });
     await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));
@@ -694,6 +739,301 @@ test('private draft save is test-only and retains its original scope and CAS whi
       revision: 8,
       content: raw,
     });
+    await f.close();
+  }
+});
+
+test('actual Native page keeps prompt separate, saves annotation metadata, scopes cards across sessions and seals one unknown send', async () => {
+  const browser = browserFixture();
+  browser.scope = {
+    generation: 1,
+    viewSelection: 1,
+    historyEpoch: 0,
+    storeId: 'store',
+    workspaceId: 'w',
+    sessionId: 'a',
+    contextSelectionId: 'context-a',
+  };
+  const images = new NativeInputImages();
+  const drafts = new Map<
+    string,
+    {
+      revision: number;
+      content: string;
+      browserAnnotations?: readonly BrowserSavedAnnotation[];
+      annotationImageOffset?: number;
+    }
+  >([
+    ['a', { revision: 1, content: 'original text' }],
+    ['b', { revision: 1, content: 'other text' }],
+  ]);
+  const submitted: Extract<NativeRequest, { method: 'submit' }>[] = [];
+  const f = fixture((request) => {
+    if (request.method.startsWith('extensions.')) return browser.bridge.request(request);
+    if (request.method === 'input.images.begin') {
+      images.begin(request);
+      return null;
+    }
+    if (request.method === 'input.images.append') {
+      images.append(request.id, request.offset, request.data);
+      return null;
+    }
+    if (request.method === 'input.images.finish') {
+      images.finish(request.id);
+      return null;
+    }
+    if (request.method === 'input.images.release') {
+      images.release(request.id);
+      return null;
+    }
+    if (request.method === 'draft.read')
+      return {
+        id: 'a'.repeat(64),
+        storeId: 'store',
+        workspaceId: 'w',
+        rootSessionId: request.sessionId,
+        ...drafts.get(request.sessionId)!,
+      };
+    if (request.method === 'draft.write') {
+      const previous = drafts.get(request.sessionId)!;
+      if (previous.revision !== request.revision) throw Error('draft_revision_conflict');
+      const saved = {
+        content: request.content,
+        revision: request.revision + 1,
+        browserAnnotations: request.browserAnnotations,
+        annotationImageOffset: request.annotationImageOffset,
+      };
+      drafts.set(request.sessionId, saved);
+      return {
+        id: 'a'.repeat(64),
+        storeId: 'store',
+        workspaceId: 'w',
+        rootSessionId: request.sessionId,
+        ...saved,
+      };
+    }
+    if (request.method === 'submit') {
+      submitted.push(request);
+      return {
+        sessionId: request.sessionId,
+        intent: {
+          kind: request.intent.kind,
+          commandId: request.intent.commandId,
+          expectedStoreId: request.intent.expectedStoreId,
+        },
+        phase: submitted.length === 1 ? 'failed' : 'unknown',
+      };
+    }
+    return undefined;
+  }, true);
+  const page: NativeBrowserState = {
+    id: 'ordinary-a',
+    title: 'Example page',
+    url: 'https://example.test/',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    control: {
+      phase: 'agent',
+      sessionId: 'a',
+      incarnation: 'page-a',
+      browserId: 'browser',
+      navigation: 0,
+    },
+  };
+  Object.assign(f.dom.window.kiteNative!, {
+    async restoreBrowser(scope) {
+      return { scope: { ...scope }, page: scope.sessionId === 'a' ? page : null };
+    },
+    async browserRequest(request) {
+      return request.action === 'state' ? page : null;
+    },
+    watchBrowser() {
+      return () => {};
+    },
+  } satisfies NativeBrowserBridge);
+  try {
+    await f.render();
+    await f.click('Original A');
+    await f.chooseModel();
+    await f.click('标签页');
+    await until(() => !!f.dom.window.document.querySelector('[aria-label="指向注释"]'));
+    await f.click('指向注释');
+    await until(() => !!f.dom.window.document.querySelector('.agent-browser-frame img'));
+    const image = f.dom.window.document.querySelector<HTMLImageElement>(
+      '.agent-browser-frame img',
+    )!;
+    image.getBoundingClientRect = () => new f.dom.window.DOMRect(0, 0, 400, 300);
+    await act(async () => image.dispatchEvent(new f.dom.window.Event('load')));
+    await until(() => !!f.dom.window.document.querySelector('.agent-browser-frame.is-pointing'));
+    await act(async () =>
+      f.dom.window.document
+        .querySelector('.agent-browser-frame')!
+        .dispatchEvent(
+          new f.dom.window.MouseEvent('click', { bubbles: true, clientX: 100, clientY: 70 }),
+        ),
+    );
+    const note =
+      f.dom.window.document.querySelector<HTMLTextAreaElement>('[aria-label="注释说明"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        f.dom.window.HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!.call(note, '关注按钮的具体说明');
+      note.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
+    });
+    await f.click('加入提示词');
+    await until(() => !!drafts.get('a')?.browserAnnotations?.length);
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('original text');
+    expect(f.dom.window.document.querySelector('.browser-note-context')?.textContent).toContain(
+      '1 条网页注释',
+    );
+    expect(JSON.stringify(drafts.get('a'))).not.toContain('/9j/2Q==');
+    const prepares = f.calls.filter((request) => request.method === 'input.images.begin').length;
+    await f.click('编辑');
+    const editor =
+      f.dom.window.document.querySelector<HTMLTextAreaElement>('[aria-label="编辑注释"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        f.dom.window.HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!.call(editor, '编辑后注释全文');
+      editor.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
+    });
+    await f.click('保存');
+    await until(() => drafts.get('a')?.browserAnnotations?.[0]?.version === 2);
+    expect(f.calls.filter((request) => request.method === 'input.images.begin')).toHaveLength(
+      prepares,
+    );
+    await f.click('Other B');
+    expect(f.dom.window.document.querySelector('.browser-note-context')).toBeNull();
+    await f.click('Original A');
+    expect(f.dom.window.document.querySelector('.browser-note-context')?.textContent).toContain(
+      '编辑后注释全文',
+    );
+    await f.click('发送明确的新轮次');
+    await until(() => submitted.length === 1);
+    expect(submitted[0]!.intent.content).toContain('original text');
+    expect(submitted[0]!.intent.content).toContain('编辑后注释全文');
+    expect(submitted[0]!.imageIds).toHaveLength(1);
+    await until(
+      () =>
+        !f.dom.window.document
+          .querySelector('.browser-note-context')
+          ?.textContent?.includes('正在提交'),
+    );
+    expect(f.dom.window.document.querySelector('.browser-note-context')?.textContent).toContain(
+      '编辑后注释全文',
+    );
+    await act(async () =>
+      setPromptText(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')!, ''),
+    );
+    await f.click('发送明确的新轮次');
+    await until(() => submitted.length === 2);
+    expect(submitted[1]!.intent.content).toContain('编辑后注释全文');
+    expect(submitted[1]!.intent.content).not.toContain('original text');
+    await until(
+      () =>
+        f.dom.window.document
+          .querySelector('.browser-note-context')
+          ?.textContent?.includes('原发送结果待核实') === true,
+    );
+    const send = [...f.dom.window.document.querySelectorAll('button')].find(
+      (button) => button.getAttribute('aria-label') === '发送明确的新轮次',
+    )!;
+    expect(send.disabled).toBe(true);
+    send.click();
+    expect(submitted).toHaveLength(2);
+    expect(browser.submitted).toHaveLength(0); // Pointer never pauses or clicks the webpage.
+    expect(f.dom.window.document.querySelector('.browser-note-context')?.textContent).toContain(
+      '编辑后注释全文',
+    );
+  } finally {
+    await f.close();
+    images.close();
+  }
+});
+
+test('cold unknown annotation keeps missing pixels and locks cards; accepted original receipt preserves and saves newer prompt', async () => {
+  const { saved: note } = annotationFixture();
+  let phase: 'unknown' | 'accepted' = 'unknown',
+    revision = 1;
+  const saved = {
+    id: 'a'.repeat(64),
+    storeId: 'store',
+    workspaceId: 'w',
+    rootSessionId: 'a',
+    revision: 1,
+    content: 'cold original',
+    browserAnnotations: [note],
+    annotationImageOffset: 0,
+  };
+  const proof = nativeDraftProof(saved),
+    writes: Extract<NativeRequest, { method: 'draft.write' }>[] = [];
+  const f = fixture(
+    (request) => {
+      if (request.method === 'draft.read' && request.sessionId === 'a') return saved;
+      if (request.method === 'draft.write') {
+        expect(request.revision).toBe(revision);
+        revision++;
+        writes.push(request);
+        return {
+          ...saved,
+          content: request.content,
+          browserAnnotations: request.browserAnnotations,
+          annotationImageOffset: request.annotationImageOffset,
+          revision,
+        };
+      }
+      return undefined;
+    },
+    false,
+    () => [
+      {
+        scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+        request: { kind: 'run.start', expectedStoreId: 'store', commandId: 'cold-original' },
+        subjectId: 'owner',
+        target: { kind: 'session', id: 'a' },
+        bodyDigest: 'b'.repeat(64),
+        requestDigest: 'c'.repeat(64),
+        draft: proof,
+        phase,
+      },
+    ],
+  );
+  try {
+    await f.render();
+    await f.click('Original A');
+    expect(f.dom.window.document.querySelector('.browser-note-context')?.textContent).toContain(
+      '快照未恢复',
+    );
+    expect(f.dom.window.document.querySelector('.browser-note-context')?.textContent).toContain(
+      '原发送结果待核实',
+    );
+    const remove = [...f.dom.window.document.querySelectorAll('button')].find(
+      (button) => button.textContent === '删除',
+    )!;
+    expect(remove.disabled).toBe(true);
+    expect(f.calls.filter((request) => request.method.startsWith('input.images.'))).toHaveLength(0);
+    await act(async () =>
+      setPromptText(
+        f.dom.window.document.querySelector('[role="textbox"][contenteditable]')!,
+        'newer edit',
+      ),
+    );
+    phase = 'accepted';
+    revision = 2;
+    await f.notify();
+    await until(() => writes.some((write) => write.content === 'newer edit'));
+    expect(f.dom.window.document.querySelector('.browser-note-card')).toBeNull();
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('newer edit');
+    expect(writes.at(-1)!.browserAnnotations).toEqual([]);
+    expect(f.calls.filter((request) => request.method === 'submit')).toHaveLength(0);
+  } finally {
     await f.close();
   }
 });

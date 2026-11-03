@@ -27,6 +27,10 @@ import type {
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
 import type { NativeBackgroundRequest, NativeBackgroundResult } from './background-bridge';
 import type {
+  BrowserAnnotationReceiptRef,
+  BrowserSavedAnnotation,
+} from './browser-annotation-content';
+import type {
   ContextSubmission,
   DesktopPermissionFacts,
   InteractionAnswerSubmission,
@@ -92,6 +96,10 @@ export const nativeThemeChannel = 'kite:native:theme';
 export const nativeClipboardChannel = 'kite:native:clipboard';
 export const nativeWindowMaximizeChannel = 'kite:native:window-maximize';
 export const nativeWindowAppearanceChannel = 'kite:native:window-appearance';
+export const nativeFullPermissionConfirmationChannel = 'kite:native:full-permission-confirmation';
+export const nativeFullPermissionConfirmationCancelChannel =
+  'kite:native:full-permission-confirmation-cancel';
+export const nativeQuitConfirmationFailureChannel = 'kite:native:quit-confirmation-failure';
 export const nativeStartupStatusChannel = 'kite:native:startup-status';
 export const nativeStartupDiagnosticSaveChannel = 'kite:native:startup-diagnostic-save';
 export type NativeStartupStatus = { readonly diagnosticAvailable: boolean };
@@ -111,7 +119,17 @@ export interface NativeWindowBridge {
   writeClipboardText(text: string): Promise<void>;
   toggleWindowMaximize(): Promise<void>;
   getWindowAppearance(): Promise<NativeWindowAppearance>;
+  confirmFullPermission(input: NativeFullPermissionConfirmationRequest): Promise<boolean>;
+  cancelFullPermissionConfirmation(requestId: string): void;
+  watchQuitConfirmationFailure(listener: () => void): () => void;
 }
+export type NativeFullPermissionConfirmationRequest = {
+  requestId: string;
+  language: 'zh' | 'en';
+};
+export type NativeFullPermissionConfirmationReply =
+  | { ok: true; value: boolean }
+  | { ok: false; code: string };
 export type NativeWindowAppearance = { readonly backgroundMaterial: 'mica' | 'vibrancy' | 'none' };
 export type NativeWindowAppearanceReply =
   | { ok: true; value: NativeWindowAppearance }
@@ -128,7 +146,13 @@ export type NativeCallerIntent = {
   };
   bodyDigest: string;
   requestDigest: string;
-  draft?: { id: string; revision: string; textDigest: string };
+  draft?: {
+    id: string;
+    revision: string;
+    textDigest: string;
+    browserAnnotations?: readonly BrowserAnnotationReceiptRef[];
+    promptTextDigest?: string;
+  };
 };
 export type NativeCallerRecord = {
   intent: NativeCallerIntent;
@@ -187,6 +211,8 @@ export type NativeDraft = {
   rootSessionId: string;
   revision: number;
   content: string;
+  browserAnnotations?: readonly BrowserSavedAnnotation[];
+  annotationImageOffset?: number;
   /** Current-process proof of the committed receipt that cleared this exact revision. */
   consumedFrom?: { commandId: string; revision: number };
   association?: 'current' | 'unavailable';
@@ -544,6 +570,11 @@ export type NativeRequest =
       intent: StartCommandRequest;
       /** Private preparation only; appended to intent.content when retaining the original draft. */
       draftLineEndings?: string;
+      draftDocument?: {
+        content: string;
+        browserAnnotations?: readonly BrowserSavedAnnotation[];
+        annotationImageOffset?: number;
+      };
       permissionMode?: 'accept_edits' | 'auto' | 'full';
       imageIds?: readonly string[];
       fileIds?: readonly string[];
@@ -781,6 +812,8 @@ export type NativeRequest =
       sessionId: string;
       revision: number;
       content: string;
+      browserAnnotations?: readonly BrowserSavedAnnotation[];
+      annotationImageOffset?: number;
     }
   | {
       method: 'permission.mode';

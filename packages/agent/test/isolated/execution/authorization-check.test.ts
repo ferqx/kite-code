@@ -423,7 +423,62 @@ test('durable checker uses one actual Model call with zero tools and grants only
   }
 });
 
-test('failed actual checker is never replayed by duplicate original command and falls back to a real card', async () => {
+async function verifyTechnicalCheckFailure(
+  f: Awaited<ReturnType<typeof fixture>>,
+  checkerCode: string,
+) {
+  await f.runtime.waitForCommand('work');
+  const rows = await f.store.listExecutions('s');
+  const target = rows.find((entry) => entry.kind === 'tool')!;
+  const carrier = rows.find((entry) => entry.kind === 'model' && entry.runId === null)!;
+  const feedbackContent = (target.result as { content: string }).content;
+  expect(carrier).toMatchObject({
+    status: 'failed',
+    parentExecutionId: target.id,
+    result: { code: checkerCode },
+  });
+  expect(target).toMatchObject({
+    status: 'failed',
+    result: {
+      outcome: 'failed',
+      content: expect.stringContaining('No approval or rejection decision was made'),
+      details: {
+        code: 'authorization_check_unavailable',
+        dispatchCommitted: false,
+        adapterAttempted: false,
+        authorizationCheck: {
+          decision: 'unavailable',
+          executionId: carrier.id,
+          failureCode: checkerCode,
+        },
+      },
+    },
+  });
+  expect(
+    (
+      await f.runtime.listInteractions({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+      })
+    ).interactions,
+  ).toEqual([]);
+  expect(f.effects()).toBe(0);
+  expect(f.model.requests).toHaveLength(2);
+  expect(
+    f.model.requests[1]!.messages.find(
+      (entry) => entry.role === 'tool' && entry.toolCallId === 'call',
+    ),
+  ).toMatchObject({
+    content: expect.stringContaining(`check failure: ${checkerCode}`),
+    sourceIds: [target.id],
+  });
+  expect(feedbackContent).toContain('This tool was not executed');
+  expect(feedbackContent).not.toContain('Do not bypass');
+  expect(await f.runtime.getRun(target.runId!)).toMatchObject({ status: 'completed' });
+  return { target, carrier };
+}
+
+test('failed actual checker is never replayed by duplicate original command and returns failure to the next Model', async () => {
   let reviews = 0;
   const f = await fixture({
     async *stream() {
@@ -433,16 +488,8 @@ test('failed actual checker is never replayed by duplicate original command and 
     },
   });
   try {
-    const interaction = await eventually(
-      async () =>
-        (
-          await f.runtime.listInteractions({
-            expectedStoreId: f.expectedStoreId,
-            sessionId: 's',
-            state: 'pending',
-          })
-        ).interactions[0] ?? null,
-    );
+    const { carrier } = await verifyTechnicalCheckFailure(f, 'model_failed');
+    expect(carrier.result).toMatchObject({ content: '{"decision":' });
     expect(reviews).toBe(1);
     expect(f.effects()).toBe(0);
     const original = await f.store.getCommand('work');
@@ -459,15 +506,6 @@ test('failed actual checker is never replayed by duplicate original command and 
         (value) => value.kind === 'model' && value.runId === null,
       ),
     ).toHaveLength(1);
-    await f.runtime.answerInteraction({
-      expectedStoreId: f.expectedStoreId,
-      commandId: 'deny',
-      presentationSessionId: 's',
-      interactionId: interaction.id,
-      expectedRevision: interaction.revision,
-      subjectId: 'owner',
-      answer: { kind: 'approval', decision: 'deny' },
-    });
     await f.runtime.waitForCommand('work');
     expect(reviews).toBe(1);
     expect(f.effects()).toBe(0);
@@ -476,14 +514,247 @@ test('failed actual checker is never replayed by duplicate original command and 
   }
 });
 
-test('invalid checker output preserves zero effects until real human approval', async () => {
+for (const [name, text, checkerCode] of [
+  ['empty completed output', '', 'authorization_check_output_empty'],
+  ['whitespace output', ' \n ', 'authorization_check_output_empty'],
+  ['invalid JSON', '{"decision":', 'authorization_check_output_invalid'],
+  [
+    'forged identity field',
+    '{"decision":"approve_once","reason":"claim","executionId":"forged"}',
+    'authorization_check_output_invalid',
+  ],
+] as const)
+  test(`${name} is a saved technical failure, creates no approval and reaches the next Model`, async () => {
+    let reviews = 0;
+    const f = await fixture({
+      async *stream() {
+        reviews++;
+        if (text) yield { type: 'text_delta', text };
+        yield { type: 'reasoning_delta', text: 'retained diagnostic' };
+        yield finish;
+      },
+    });
+    try {
+      const { carrier } = await verifyTechnicalCheckFailure(f, checkerCode);
+      expect(carrier.result).toMatchObject({
+        content: text,
+        reasoning: 'retained diagnostic',
+        usage: { inputTokens: 1, outputTokens: 1 },
+      });
+      expect(reviews).toBe(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const decision of ['approve_once', 'reject'] as const)
+  test(`a technical checker failure reaches the next Model and a fresh ${decision} decision governs only the later call`, async () => {
+    const ordinary = createFixedModel([
+      ...['first', 'later'].map((value): ModelEvent[] => [
+        {
+          type: 'tool_call',
+          id: value,
+          name: 'fixture.effect',
+          arguments: JSON.stringify({ value }),
+        },
+        { ...finish, reason: 'tool_calls' },
+      ]),
+      [{ type: 'text_delta', text: 'Finished with the actual permission results.' }, finish],
+    ]);
+    let checks = 0;
+    const f = await fixture(
+      {
+        async *stream(request) {
+          checks++;
+          expect(request.tools).toEqual([]);
+          const instructions = request.messages.find((message) => message.role === 'system');
+          expect(instructions?.content).toContain('no approval or rejection decision was obtained');
+          expect(instructions?.content).toContain('Assess this operation independently');
+          expect(instructions?.content).toContain('Respect actual user or policy refusals');
+          if (checks === 1) throw new Error('PRIVATE_CHECKER_TRANSPORT_FAILURE');
+          const payload = JSON.parse(
+            request.messages.find((message) => message.role === 'user')!.content,
+          );
+          expect(payload.target.input).toEqual({ value: 'later' });
+          const previous = payload.decisionContext.messages.find(
+            (message: { role: string; toolCallId?: string }) =>
+              message.role === 'tool' && message.toolCallId === 'first',
+          );
+          expect(previous.content).toContain(
+            'This technical failure is not a user or policy refusal',
+          );
+          expect(previous.content).not.toContain('PRIVATE_CHECKER_TRANSPORT_FAILURE');
+          expect(previous.content).not.toContain('Do not bypass this refusal');
+          yield {
+            type: 'text_delta',
+            text: JSON.stringify({ decision, reason: 'Independent decision for the later call' }),
+          };
+          yield finish;
+        },
+      },
+      undefined,
+      { model: ordinary },
+    );
+    try {
+      await f.runtime.waitForCommand('work');
+      expect(checks).toBe(2);
+      expect(ordinary.requests).toHaveLength(3);
+      expect(f.effects()).toBe(decision === 'approve_once' ? 1 : 0);
+      const tools = (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool');
+      const first = tools.find((entry) => entry.callId === 'first')!;
+      const later = tools.find((entry) => entry.callId === 'later')!;
+      expect(first).toMatchObject({
+        status: 'failed',
+        authorization: { dispatched: false, check: { decision: 'unavailable' } },
+        result: {
+          details: { code: 'authorization_check_unavailable', adapterAttempted: false },
+        },
+      });
+      expect(later).toMatchObject({
+        status: decision === 'approve_once' ? 'succeeded' : 'failed',
+        authorization: { dispatched: decision === 'approve_once', check: { decision } },
+      });
+      expect(
+        (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+          .interactions,
+      ).toEqual([]);
+      expect(await f.runtime.getRun(first.runId!)).toMatchObject({ status: 'completed' });
+    } finally {
+      await f.close();
+    }
+  });
+
+test('a nested Job denied dispatch by checker unavailability returns the same readable technical failure', async () => {
+  let starts = 0;
+  let checks = 0;
+  const f = await fixture(
+    {
+      async *stream() {
+        checks++;
+        yield { type: 'reasoning_delta', text: 'PRIVATE_PARTIAL_JOB_CHECKER_OUTPUT' };
+        throw new Error('PRIVATE_JOB_CHECKER_FAILURE');
+      },
+    },
+    {
+      async authorize(request) {
+        return request.definitionId === 'fixture.job'
+          ? { allowed: false, revision: 'p1', check: { request: { task: 'exact nested job' } } }
+          : { allowed: true, revision: 'p1' };
+      },
+    },
+    {
+      model: createFixedModel([[finish]]),
+      extensions: [
+        {
+          id: 'fixture',
+          version: '1',
+          apiMajor: 1,
+          actions: [
+            {
+              id: 'bridge',
+              version: '1',
+              description: 'Invoke the exact owned job',
+              inputSchema: { type: 'object' },
+              async prepare() {
+                return {};
+              },
+              async execute(_input, context) {
+                const operation = await context.operations.ensure({
+                  key: 'checked-job',
+                  request: {
+                    kind: 'job',
+                    definitionId: 'fixture.job',
+                    definitionVersion: '1',
+                    input: {},
+                  },
+                });
+                const result = await context.operations.wait(operation, { timeoutMs: 4000 });
+                expect(result.status).toBe('failed');
+                return {
+                  outcome: 'failed',
+                  content: (result.result as { content: string }).content,
+                };
+              },
+            },
+          ],
+          jobs: [
+            {
+              id: 'fixture.job',
+              version: '1',
+              description: 'Must never start without approval',
+              inputSchema: { type: 'object' },
+              async start() {
+                starts++;
+                throw new Error('unexpected job start');
+              },
+              observe() {
+                throw new Error('unexpected job observation');
+              },
+              async cancel() {
+                throw new Error('unexpected job cancellation');
+              },
+              async dispose() {
+                throw new Error('unexpected job disposal');
+              },
+            },
+          ],
+        },
+      ],
+    },
+  );
+  try {
+    await f.runtime.waitForCommand('work');
+    await f.runtime.submitCommand({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'nested-job',
+      sessionId: 's',
+      subjectId: 'owner',
+      request: {
+        kind: 'extension.invoke',
+        extensionId: 'fixture',
+        actionId: 'bridge',
+        definitionVersion: '1',
+        input: {},
+      },
+    });
+    await f.runtime.waitForCommand('nested-job');
+    const job = (await f.store.listExecutions('s')).find(
+      (entry) => entry.definitionId === 'fixture.job',
+    )!;
+    const content = (job.result as { content: string }).content;
+    expect(content).toContain('No approval or rejection decision was made');
+    expect(content).not.toContain('PRIVATE_JOB_CHECKER_FAILURE');
+    expect(content).not.toContain('PRIVATE_PARTIAL_JOB_CHECKER_OUTPUT');
+    expect(job).toMatchObject({
+      status: 'failed',
+      authorization: { dispatched: false, check: { decision: 'unavailable' } },
+      result: {
+        details: {
+          adapterAttempted: false,
+          code: 'authorization_check_unavailable',
+          authorizationCheck: { decision: 'unavailable', failureCode: 'model_failed' },
+        },
+      },
+    });
+    expect(starts).toBe(0);
+    expect(checks).toBe(1);
+    expect(
+      (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+        .interactions,
+    ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a valid ask_user checker decision still requires actual human approval', async () => {
   let reviews = 0;
   const f = await fixture({
     async *stream() {
       reviews++;
       yield {
         type: 'text_delta',
-        text: '{"decision":"approve_once","reason":"claim","executionId":"forged"}',
+        text: '{"decision":"ask_user","reason":"A material choice needs the user"}',
       };
       yield finish;
     },
@@ -499,8 +770,13 @@ test('invalid checker output preserves zero effects until real human approval', 
           })
         ).interactions[0] ?? null,
     );
-    expect(f.effects()).toBe(0);
     expect(reviews).toBe(1);
+    expect(f.effects()).toBe(0);
+    const checker = (await f.store.listExecutions('s')).find(
+      (entry) => entry.kind === 'model' && entry.runId === null,
+    )!;
+    expect(checker).toMatchObject({ status: 'succeeded' });
+    expect(f.model.requests).toHaveLength(1);
     await f.runtime.answerInteraction({
       expectedStoreId: f.expectedStoreId,
       commandId: 'answer',
@@ -513,6 +789,53 @@ test('invalid checker output preserves zero effects until real human approval', 
     await f.runtime.waitForCommand('work');
     expect(f.effects()).toBe(1);
     expect(reviews).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an unconfigured checker retains the existing human fallback without dispatching effects', async () => {
+  let reviews = 0;
+  const f = await fixture(
+    {
+      async *stream() {
+        reviews++;
+        yield finish;
+      },
+    },
+    undefined,
+    { authorizationCheck: undefined },
+  );
+  try {
+    const interaction = await eventually(
+      async () =>
+        (
+          await f.runtime.listInteractions({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            state: 'pending',
+          })
+        ).interactions[0] ?? null,
+    );
+    expect(reviews).toBe(0);
+    expect(f.effects()).toBe(0);
+    expect(
+      (await f.store.listExecutions('s')).filter(
+        (entry) => entry.kind === 'model' && entry.runId === null,
+      ),
+    ).toEqual([]);
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'deny',
+      presentationSessionId: 's',
+      interactionId: interaction.id,
+      expectedRevision: interaction.revision,
+      subjectId: 'owner',
+      answer: { kind: 'approval', decision: 'deny' },
+    });
+    await f.runtime.waitForCommand('work');
+    expect(f.effects()).toBe(0);
+    expect(reviews).toBe(0);
   } finally {
     await f.close();
   }
@@ -791,9 +1114,9 @@ test('an automatic refusal settles ordered admission before an authorized read s
   }
 });
 
-test('repeated identical checker refusals retain the existing bounded Tool failure limit without I/O', async () => {
-  const ordinary = createFixedModel(
-    Array.from({ length: 5 }, (_, index) => [
+test('repeated identical checker refusals remain Tool results and allow a final explanation without I/O', async () => {
+  const ordinary = createFixedModel([
+    ...Array.from({ length: 5 }, (_, index): ModelEvent[] => [
       {
         type: 'tool_call' as const,
         id: `refused-${index}`,
@@ -802,7 +1125,8 @@ test('repeated identical checker refusals retain the existing bounded Tool failu
       },
       { ...finish, type: 'finish' as const, reason: 'tool_calls' },
     ]),
-  );
+    [{ type: 'text_delta', text: 'The checker refused all requested effects.' }, finish],
+  ]);
   let checks = 0;
   const f = await fixture(
     {
@@ -819,13 +1143,15 @@ test('repeated identical checker refusals retain the existing bounded Tool failu
     await f.runtime.waitForCommand('work');
     expect(f.effects()).toBe(0);
     expect(checks).toBe(5);
-    expect(ordinary.requests).toHaveLength(5);
+    expect(ordinary.requests).toHaveLength(6);
     const targets = (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool');
     expect(targets).toHaveLength(5);
     expect(await f.runtime.getRun(targets[0]!.runId!)).toMatchObject({
-      status: 'cancelled',
-      reason: 'repeated_tool_failure',
+      status: 'completed',
     });
+    expect(
+      ordinary.requests.at(-1)!.messages.filter((entry) => entry.role === 'tool'),
+    ).toHaveLength(5);
     expect(
       targets.every(
         (entry) => entry.status === 'failed' && entry.authorization?.dispatched === false,
@@ -1318,7 +1644,7 @@ test('actual source changes during check invalidate the old target and reach the
   }
 });
 
-test('review decisionContext is derived from the actual succeeded Model input after steer', async () => {
+test('queued steer preserves the in-flight Tool and the next review uses the actual updated Model input', async () => {
   let release!: () => void;
   let reviews = 0;
   const gate = new Promise<void>((resolve) => {
@@ -1383,9 +1709,9 @@ test('review decisionContext is derived from the actual succeeded Model input af
     });
     release();
     await f.runtime.waitForCommand('work');
-    expect(f.effects()).toBe(1);
+    expect(f.effects()).toBe(2);
     expect(reviews).toBe(2);
-    expect((await f.store.getExecution(target.id))?.status).not.toBe('succeeded');
+    expect((await f.store.getExecution(target.id))?.status).toBe('succeeded');
   } finally {
     release();
     await f.close();

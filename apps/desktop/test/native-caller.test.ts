@@ -15,7 +15,7 @@ import type {
 import { ClientError, canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
-import { NativeCaller } from '../electron/native-caller';
+import { createNativeCallerGenerationOwner, NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { inspectNativeQuitWork } from '../electron/quit-settlement';
 import type {
@@ -24,6 +24,7 @@ import type {
   NativeBackgroundPage,
 } from '../src/background-bridge';
 import { type NativeRequest, type NativeState, nativeChannel } from '../src/native-bridge';
+import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
@@ -81,6 +82,270 @@ async function waitForCallerState(
     await Bun.sleep(1);
   }
 }
+// The original Main predicates are the authority baseline for the narrow accessor.
+function legacyBrowserScope(
+  state: NativeState,
+  kind: 'presentation' | 'input',
+): NativeBrowserRestoreScope | undefined {
+  const view = state.selection;
+  if (
+    !view ||
+    view.session.parentSessionId ||
+    (kind === 'presentation'
+      ? state.backgroundUnavailable ||
+        view.session.deletedAt !== null ||
+        (view.permissionUnavailable && view.viewLoading !== true)
+      : view.permissionUnavailable || view.viewLoading)
+  )
+    return undefined;
+  return {
+    storeId: view.storeId,
+    sessionId: view.session.id,
+    generation: state.generation,
+    viewSelection: view.viewSelection ?? view.viewGeneration,
+  };
+}
+function expectLegacyBrowserScope(caller: NativeCaller) {
+  const state = caller.state();
+  for (const kind of ['presentation', 'input'] as const)
+    expect(caller.browserScope(kind)).toEqual(legacyBrowserScope(state, kind));
+}
+for (const boundary of [
+  'refresh',
+  'permission-failure',
+  'observation-loss',
+  'selection-ABA',
+] as const)
+  test(`browser scope preserves original admission across ${boundary}`, async () => {
+    const connection = client();
+    const getView = connection.getView.bind(connection);
+    let observer!: Parameters<AgentClient['observe']>[0];
+    connection.observe = async (options) => {
+      observer = options;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    };
+    let hold = false,
+      entered!: () => void,
+      release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    connection.getView = async (id) => {
+      if (hold && id === 'root') {
+        entered();
+        await gate;
+        if (boundary === 'permission-failure') throw Error('browser_scope_permission_failed');
+      }
+      return getView(id);
+    };
+    const caller = new NativeCaller(connection, () => {});
+    try {
+      expectLegacyBrowserScope(caller); // no selection before or after attach
+      await caller.invoke({ method: 'attach' });
+      expectLegacyBrowserScope(caller);
+      await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+      const original = caller.browserScope('presentation')!;
+      expect(original).toEqual({
+        storeId: 'store',
+        sessionId: 'root',
+        generation: 1,
+        viewSelection: 2,
+      });
+      expect(caller.browserScope('input')).toEqual(original);
+      expectLegacyBrowserScope(caller);
+      hold = true;
+      await observer.onChange?.(sessionChange('root'));
+      await started;
+      expect(caller.browserScope('presentation')).toEqual(original);
+      expect(caller.browserScope('input')).toBeUndefined();
+      expectLegacyBrowserScope(caller);
+      if (boundary === 'observation-loss') {
+        await observer.onReset?.({} as never);
+        expect(caller.state().backgroundUnavailable).toBe(true);
+        expect(caller.browserScope('presentation')).toBeUndefined();
+        expect(caller.browserScope('input')).toBeUndefined();
+      } else if (boundary === 'selection-ABA') {
+        hold = false;
+        await caller.invoke({ method: 'select', generation: 1, sessionId: 'other' });
+        const other = caller.browserScope('input')!;
+        expect(other.sessionId).toBe('other');
+        await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+        const returned = caller.browserScope('input')!;
+        expect(returned.sessionId).toBe(original.sessionId);
+        expect(returned.viewSelection).toBeGreaterThan(other.viewSelection);
+        release();
+        await Bun.sleep(0);
+        expect(caller.browserScope('presentation')).toEqual(returned);
+      } else {
+        release();
+        await waitForCallerState(caller, (state) => state.selection?.viewLoading === false);
+        if (boundary === 'permission-failure') {
+          expect(caller.browserScope('presentation')).toBeUndefined();
+          expect(caller.browserScope('input')).toBeUndefined();
+        } else expect(caller.browserScope('input')).toEqual(original);
+      }
+      expectLegacyBrowserScope(caller);
+      caller.detach();
+      expect(caller.browserScope('presentation')).toBeUndefined();
+      expect(caller.browserScope('input')).toBeUndefined();
+      expectLegacyBrowserScope(caller);
+      expect(connection.writes).toBe(0);
+    } finally {
+      release();
+      await caller.close();
+    }
+  });
+for (const boundary of ['deleted', 'child'] as const)
+  test(`browser scope preserves the original presentation/input distinction for ${boundary}`, async () => {
+    const connection = client(),
+      getView = connection.getView.bind(connection);
+    connection.getView = async (id) => {
+      const view = await getView(id);
+      return {
+        ...view,
+        session: {
+          ...view.session,
+          parentSessionId: boundary === 'child' ? 'parent' : null,
+          deletedAt: boundary === 'deleted' ? 1793452800000 : null,
+        },
+      };
+    };
+    const caller = new NativeCaller(connection, () => {});
+    try {
+      await caller.invoke({ method: 'attach' });
+      await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+      expect(caller.browserScope('presentation')).toBeUndefined();
+      if (boundary === 'child') expect(caller.browserScope('input')).toBeUndefined();
+      else expect(caller.browserScope('input')).toMatchObject({ sessionId: 'root' });
+      expectLegacyBrowserScope(caller);
+    } finally {
+      await caller.close();
+    }
+  });
+test('browser scope records fresh observed facts without full state and retains them during the next refresh', async () => {
+  const connection = client(),
+    getView = connection.getView.bind(connection);
+  let observer!: Parameters<AgentClient['observe']>[0],
+    deleted = false,
+    hold = false,
+    entered!: () => void,
+    release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  connection.observe = async (options) => {
+    observer = options;
+    await new Promise<void>((resolve) =>
+      options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  connection.getView = async (id) => {
+    if (hold) {
+      entered();
+      await gate;
+    }
+    const view = await getView(id);
+    return {
+      ...view,
+      session: { ...view.session, deletedAt: deleted ? 1793452800000 : null },
+    };
+  };
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+    expect(caller.browserScope('presentation')).toBeDefined();
+    deleted = true;
+    await observer.onChange?.(sessionChange('root'));
+    const deadline = Date.now() + 1000;
+    while (!caller.browserScope('input')) {
+      if (Date.now() >= deadline) throw Error('browser_scope_refresh_deadline');
+      await Bun.sleep(1);
+    }
+    expect(caller.browserScope('presentation')).toBeUndefined();
+    hold = true;
+    await observer.onChange?.(sessionChange('root'));
+    await started;
+    // No full state read observed the deleted fresh View before this refresh.
+    expect(caller.browserScope('presentation')).toBeUndefined();
+    expect(caller.browserScope('input')).toBeUndefined();
+  } finally {
+    release();
+    await caller.close();
+  }
+});
+test('browser scope denies a mismatched fresh snapshot rather than treating it as a loading retained View', async () => {
+  const caller = new NativeCaller(client(), () => {});
+  const controller = Reflect.get(caller, 'controller') as { readonly snapshot: unknown };
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+    const fresh = controller.snapshot as { sessionId: string };
+    Object.defineProperty(controller, 'snapshot', {
+      configurable: true,
+      get: () => ({ ...fresh, sessionId: 'foreign' }),
+    });
+    expect(caller.browserScope('presentation')).toBeUndefined();
+    expect(caller.browserScope('input')).toBeUndefined();
+    expectLegacyBrowserScope(caller);
+  } finally {
+    Reflect.deleteProperty(controller, 'snapshot');
+    await caller.close();
+  }
+});
+test('browser scope never reads full state, journals or unrelated submission getters', async () => {
+  const connection = client(),
+    data = memoryPrivateData(),
+    reads: string[] = [];
+  const caller = new NativeCaller(connection, () => {}, data);
+  const state = caller.state.bind(caller);
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+    const expected = legacyBrowserScope(state(), 'presentation');
+    for (const key of ['callers', 'answers', 'workspaceRemovals'] as const)
+      data[key] = () => {
+        reads.push(key);
+        throw Error('unexpected_browser_journal_read');
+      };
+    expect(state()).toMatchObject({
+      callerUnavailable: true,
+      answerUnavailable: true,
+      workspaceRemovalUnavailable: true,
+    });
+    expect(reads).toEqual(['workspaceRemovals', 'callers', 'answers']);
+    reads.length = 0;
+    const grants = Reflect.get(caller, 'grants') as object;
+    Object.defineProperty(grants, 'submissions', {
+      get() {
+        reads.push('submissions');
+        throw Error('unexpected_browser_submissions');
+      },
+    });
+    expect(() => state()).toThrow('unexpected_browser_submissions');
+    reads.length = 0;
+    caller.state = () => {
+      reads.push('state');
+      throw Error('unexpected_browser_full_state');
+    };
+    for (let index = 0; index < 8; index++) {
+      expect(caller.browserScope('presentation')).toEqual(expected);
+      expect(caller.browserScope('input')).toEqual(expected);
+    }
+    expect(reads).toEqual([]);
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
 for (const outcome of ['ready', 'read_failure', 'selection_changed'] as const) {
   test(`Native ready reconciliation joins the pending selection and preserves ${outcome}`, async () => {
     function gate() {
@@ -1775,6 +2040,180 @@ test('main-private drafts require exact selection/revision; detached or late gen
       await caller.invoke({ method: 'draft.read', generation: next.generation, sessionId: 's' }),
     ).toMatchObject({ content: 'private body', revision: 1 });
     await caller.disposeNetwork();
+    expect(port.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
+for (const detach of [false, true])
+  test(`Renderer reattachment rebuilds the original selection with fresh reads (${detach ? 'document reload' : 'effect restart'})`, async () => {
+    const port = client(),
+      caller = new NativeCaller(port, () => {}),
+      originalRead = port.getView.bind(port);
+    let reads = 0,
+      release!: () => void,
+      entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+      reading = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+    port.getView = async (...args) => {
+      reads++;
+      if (reads === 2) {
+        entered();
+        await gate;
+      }
+      return originalRead(...args);
+    };
+    try {
+      const first = (await caller.invoke({ method: 'attach' })) as NativeState;
+      await caller.invoke({ method: 'select', generation: first.generation, sessionId: 's' });
+      expect(reads).toBe(1);
+      if (detach) caller.detach();
+      const attaching = caller.invoke({ method: 'attach' });
+      await reading;
+      expect(caller.state().generation).toBeGreaterThan(first.generation);
+      expect(caller.state().selection).toBeUndefined();
+      expect(await code(caller.invoke({ method: 'state', generation: first.generation }))).toBe(
+        'native_generation_changed',
+      );
+      release();
+      const next = (await attaching) as NativeState;
+      expect(next.selection?.session.id).toBe('s');
+      expect(next.selection?.permissionUnavailable).toBe(false);
+      expect(reads).toBe(2);
+      expect(port.writes).toBe(0);
+    } finally {
+      release();
+      await caller.close();
+    }
+  });
+
+test('replacement Callers sharing one Main cannot reuse an old Renderer generation', async () => {
+  const nextGeneration = createNativeCallerGenerationOwner(),
+    first = new NativeCaller(
+      client(),
+      () => {},
+      undefined,
+      [],
+      undefined,
+      undefined,
+      nextGeneration,
+    ),
+    second = new NativeCaller(
+      client(),
+      () => {},
+      undefined,
+      [],
+      undefined,
+      undefined,
+      nextGeneration,
+    );
+  try {
+    const old = (await first.invoke({ method: 'attach' })) as NativeState;
+    first.detach();
+    const fresh = (await second.invoke({ method: 'attach' })) as NativeState;
+    expect(fresh.generation).toBeGreaterThan(first.state().generation);
+    expect(fresh.generation).toBeGreaterThan(old.generation);
+    expect(await code(second.invoke({ method: 'state', generation: old.generation }))).toBe(
+      'native_generation_changed',
+    );
+    expect(await code(second.invoke({ method: 'detach', generation: old.generation }))).toBe(
+      'native_generation_changed',
+    );
+    expect(second.state().generation).toBe(fresh.generation);
+    expect(await second.invoke({ method: 'state', generation: fresh.generation })).toMatchObject({
+      generation: fresh.generation,
+    });
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test('reattachment drops a confirmed missing conversation and keeps other fresh-read failures unavailable', async () => {
+  for (const failure of ['session_not_found', 'controlled_view_unavailable']) {
+    const port = client(),
+      caller = new NativeCaller(port, () => {});
+    try {
+      const first = (await caller.invoke({ method: 'attach' })) as NativeState;
+      await caller.invoke({ method: 'select', generation: first.generation, sessionId: 's' });
+      caller.detach();
+      port.getView = async () => {
+        throw new ClientError(failure);
+      };
+      if (failure === 'session_not_found') {
+        const next = (await caller.invoke({ method: 'attach' })) as NativeState;
+        expect(next.selection).toBeUndefined();
+        // The absent candidate is not retried indefinitely on later attachments.
+        expect((await caller.invoke({ method: 'attach' })) as NativeState).toMatchObject({
+          selection: undefined,
+        });
+      } else {
+        expect(await code(caller.invoke({ method: 'attach' }))).toBe(failure);
+        expect(caller.state().selection).toBeUndefined();
+      }
+      expect(port.writes).toBe(0);
+    } finally {
+      await caller.close();
+    }
+  }
+});
+
+test('a replacement Caller accepts a display hint only after matching the fresh Store identity', async () => {
+  for (const storeId of ['store', 'foreign-store']) {
+    const port = client();
+    let reads = 0;
+    const getView = port.getView.bind(port);
+    port.getView = async (...args) => {
+      reads++;
+      return getView(...args);
+    };
+    const caller = new NativeCaller(
+      port,
+      () => {},
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      { storeId, sessionId: 's' },
+    );
+    try {
+      const attached = (await caller.invoke({ method: 'attach' })) as NativeState;
+      expect(attached.selection?.session.id).toBe(storeId === 'store' ? 's' : undefined);
+      expect(reads).toBe(storeId === 'store' ? 1 : 0);
+      expect(port.writes).toBe(0);
+    } finally {
+      await caller.close();
+    }
+  }
+});
+
+test('a detached selection cannot bind to the same session ID after the Store changes', async () => {
+  const port = client(),
+    caller = new NativeCaller(port, () => {});
+  try {
+    const first = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation: first.generation, sessionId: 's' });
+    caller.detach();
+    await caller.disposeNetwork();
+    port.connect = async () => {
+      port.serverInfo!.storeId = 'replacement-store';
+      return port.serverInfo!;
+    };
+    let reads = 0;
+    port.getView = async () => {
+      reads++;
+      throw Error('old_selection_must_not_be_read_in_replacement_store');
+    };
+    expect((await caller.invoke({ method: 'attach' })) as NativeState).toMatchObject({
+      selection: undefined,
+    });
+    expect(reads).toBe(0);
     expect(port.writes).toBe(0);
   } finally {
     await caller.close();

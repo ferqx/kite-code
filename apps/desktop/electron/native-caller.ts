@@ -8,6 +8,7 @@ import {
   requiresInteractionAttachment,
   type Workspace,
 } from '@kite-ai/client';
+import { browserDraftMatches } from '../src/browser-annotation-content';
 import {
   createDesktopController,
   type DesktopController,
@@ -24,7 +25,7 @@ import type {
   NativeResult,
   NativeState,
 } from '../src/native-bridge';
-import { promptTextForSend } from '../src/prompt-text';
+import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
 import { NativeAnswerJournal } from './answer-journal';
 import { NativeBackground } from './background';
 import {
@@ -32,6 +33,7 @@ import {
   callerMetadata,
   callerTextDigest,
   NativeCallerJournal,
+  nativeDraftProof,
 } from './caller-journal';
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
@@ -62,11 +64,21 @@ import { NativeToolMessages } from './tool-messages';
 import { NativeUserMcpSettings } from './user-mcp-settings';
 import { NativeWorkspaceRemovalPort } from './workspace-removal';
 
+/** Share this allocator across replacement Callers owned by the same Main. */
+export function createNativeCallerGenerationOwner(): () => number {
+  let generation = 0;
+  return () => ++generation;
+}
+
 export class NativeCaller {
   private generation = 0;
   private selection = 0;
   private activation: { id: number; sessionId: string; selection: number } | undefined;
   private selected: string | undefined;
+  // A Renderer replacement loses its observation, not the user's selected
+  // conversation. This is only an in-process display candidate; attach must
+  // acquire a new selection and permissions before returning it.
+  private detachedSelection: Readonly<{ storeId: string; sessionId: string }> | undefined;
   private lastView: { selection: number; snapshot: DesktopSnapshot } | undefined;
   private contextWorkspace:
     | { sessionId: string; selection: number; workspaceId: string }
@@ -169,6 +181,8 @@ export class NativeCaller {
   private readonly privateData: PrivateData | undefined;
   private initialAdmission: (() => boolean) | undefined;
   private readonly processes: NativeProcessOwner;
+  private readonly nextGeneration: () => number;
+  private initialSelectionHint: Readonly<{ storeId: string; sessionId: string }> | undefined;
   constructor(
     client: AgentClient,
     emit: (event: NativeEvent) => void,
@@ -176,7 +190,11 @@ export class NativeCaller {
     protectedRoots: readonly string[] = [],
     initialAdmission?: { readonly client: AgentClient; consume(): boolean },
     processes = new NativeProcessOwner(),
+    nextGeneration = createNativeCallerGenerationOwner(),
+    initialSelectionHint?: Readonly<{ storeId: string; sessionId: string }>,
   ) {
+    this.nextGeneration = nextGeneration;
+    this.initialSelectionHint = initialSelectionHint;
     this.processes = processes;
     this.client = client;
     this.emit = emit;
@@ -1049,7 +1067,7 @@ export class NativeCaller {
       return { callerSubmissions: [], callerUnavailable: true };
     }
   }
-  state(): NativeState {
+  private observedSelection() {
     const fresh = this.controller.snapshot;
     if (fresh && fresh.sessionId === this.selected)
       this.lastView = { selection: this.selection, snapshot: fresh };
@@ -1065,6 +1083,31 @@ export class NativeCaller {
       this.permissionUnavailable ||
       !fresh ||
       fresh.sessionId !== this.selected;
+    return { snapshot, unavailable, viewLoading: !fresh && !this.permissionUnavailable };
+  }
+  /** Main-only presentation/input identity; never projects unrelated durable submissions. */
+  browserScope(kind: 'presentation' | 'input'): NativeBrowserRestoreScope | undefined {
+    const { snapshot, unavailable, viewLoading } = this.observedSelection();
+    if (
+      !snapshot ||
+      snapshot.sessionId !== this.selected ||
+      snapshot.view.session.parentSessionId ||
+      (kind === 'presentation'
+        ? this.observationUnavailable ||
+          snapshot.view.session.deletedAt !== null ||
+          (unavailable && !viewLoading)
+        : unavailable || viewLoading)
+    )
+      return undefined;
+    return {
+      storeId: snapshot.view.storeId,
+      sessionId: snapshot.view.session.id,
+      generation: this.generation,
+      viewSelection: this.selection,
+    };
+  }
+  state(): NativeState {
+    const { snapshot, unavailable, viewLoading } = this.observedSelection();
     const selection =
       snapshot && this.selected === snapshot.sessionId
         ? {
@@ -1121,7 +1164,7 @@ export class NativeCaller {
             interactionsAfterId: snapshot.interactionsAfterId,
             permissions: unavailable ? undefined : snapshot.permissions,
             permissionUnavailable: unavailable,
-            viewLoading: !fresh && !this.permissionUnavailable,
+            viewLoading,
           }
         : undefined;
     return {
@@ -1277,6 +1320,10 @@ export class NativeCaller {
   async invoke(request: NativeRequest): Promise<NativeResult> {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
+      const previousSelection =
+        this.selected && this.client.serverInfo?.storeId
+          ? { storeId: this.client.serverInfo.storeId, sessionId: this.selected }
+          : this.detachedSelection;
       this.images.reset();
       this.inputFiles.reset();
       this.releaseReads();
@@ -1284,11 +1331,30 @@ export class NativeCaller {
       this.invalidateDirectory(true);
       this.directoryEnabled = true;
       this.selection++;
-      const generation = ++this.generation;
+      const generation = this.nextGeneration();
+      this.generation = generation;
       this.selected = undefined;
       this.activation = undefined;
       await this.startObservation();
       this.check(generation);
+      const initialSelectionHint = this.initialSelectionHint;
+      this.initialSelectionHint = undefined;
+      const selectionHint = previousSelection ?? initialSelectionHint;
+      const restoreSelection =
+        selectionHint && selectionHint.storeId === this.client.serverInfo?.storeId
+          ? selectionHint.sessionId
+          : undefined;
+      if (!restoreSelection) this.detachedSelection = undefined;
+      if (restoreSelection) {
+        try {
+          return await this.invoke({ method: 'select', generation, sessionId: restoreSelection });
+        } catch (error) {
+          this.check(generation);
+          if (!(error instanceof ClientError) || error.code !== 'session_not_found') throw error;
+          this.selected = undefined;
+          this.detachedSelection = undefined;
+        }
+      }
       return this.state();
     }
     if (
@@ -2062,6 +2128,9 @@ export class NativeCaller {
                 ...(origin ? { originStoreId: origin.storeId } : {}),
                 runId: runId!,
                 body: message.outputBody!,
+                ...(!origin && message.status === 'incomplete' && !message.toolCalls?.length
+                  ? { livePreview: message.content }
+                  : {}),
               }
             : undefined,
         );
@@ -2381,14 +2450,12 @@ export class NativeCaller {
             rootSessionId: request.sessionId,
           });
           if (
-            saved.content === request.intent.content ||
-            promptTextForSend(saved.content) === request.intent.content
+            saved.browserAnnotations?.length &&
+            !browserDraftMatches(saved, request.intent.content)
           )
-            draftProof = {
-              id: saved.id,
-              revision: String(saved.revision),
-              textDigest: callerTextDigest(saved.content),
-            };
+            throw new ClientError('caller_draft_unavailable');
+          if (browserDraftMatches(saved, request.intent.content))
+            draftProof = nativeDraftProof(saved);
         }
         const prepared = await this.requireCaller().prepare(request.sessionId, intent, draftProof);
         if (intent.kind !== 'input.steer' && intent.modelId)
@@ -2570,7 +2637,13 @@ export class NativeCaller {
         result =
           request.method === 'draft.read'
             ? this.requirePrivateData().read(scope)
-            : this.requirePrivateData().save(scope, request.revision, request.content);
+            : this.requirePrivateData().save(
+                scope,
+                request.revision,
+                request.content,
+                request.browserAnnotations,
+                request.annotationImageOffset,
+              );
         break;
       }
       case 'grants.read':
@@ -2589,6 +2662,11 @@ export class NativeCaller {
     return result;
   }
   detach() {
+    if (this.selected && this.client.serverInfo?.storeId)
+      this.detachedSelection = {
+        storeId: this.client.serverInfo.storeId,
+        sessionId: this.selected,
+      };
     this.initialAdmission = undefined;
     this.directoryEnabled = false;
     this.releaseReads();
@@ -2597,7 +2675,7 @@ export class NativeCaller {
     this.preparationConfiguration.release();
     this.workspaceObservation = undefined;
     this.selection++;
-    this.generation++;
+    this.generation = this.nextGeneration();
     this.images.reset();
     this.inputFiles.reset();
     this.selected = undefined;

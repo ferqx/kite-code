@@ -93,6 +93,10 @@ export function binding(directory: string, mode: string): RunConfiguration {
           message.content.startsWith('Context summary (untrusted data;'),
         ) ||
         mode.startsWith('retry_') ||
+        (mode === 'repeat_failure' &&
+          readFileSync(`${directory}/ledger`, 'utf8')
+            .split('\n')
+            .filter((line) => line.startsWith('effect:')).length >= 8) ||
         (mode !== 'repeat_failure' && request.messages.at(-1)?.role === 'tool')
       ) {
         yield { type: 'text_delta', text: 'done' };

@@ -2296,7 +2296,121 @@ export class SqliteOperations {
           return this.rollback(error);
         }
       }
-
+      case 'setRunResultWait':
+        return this.tx(() => {
+          this.identity(input.expectedStoreId);
+          const ids = (args[0] as Parameters<Store['setRunResultWait']>[0]).executionIds;
+          if (
+            !Array.isArray(ids) ||
+            new Set(ids).size !== ids.length ||
+            ids.some((id) => typeof id !== 'string' || !id || id.length > 256)
+          )
+            throw new AgentError('invalid_wait_targets');
+          const run = this.row('SELECT * FROM run WHERE id=?', input.runId);
+          if (!run?.is_active) throw new AgentError('run_not_active');
+          this.active(input.owner, String(run.origin_command_id), String(run.id));
+          const refs = parse(run.requirements_json) as unknown as RequirementRef[];
+          for (const id of ids) {
+            const execution = this.row(
+              'SELECT * FROM execution WHERE id=? AND session_id=?',
+              id,
+              run.session_id!,
+            );
+            const parent =
+              execution?.parent_execution_id &&
+              this.row('SELECT * FROM execution WHERE id=?', execution.parent_execution_id);
+            let ancestor = parent;
+            const seen = new Set<string>();
+            while (ancestor && ancestor.run_id === null) {
+              if (seen.has(String(ancestor.id)) || seen.size >= 32)
+                throw new AgentError('required_result_unverifiable');
+              seen.add(String(ancestor.id));
+              if (
+                ancestor.kind !== 'tool' ||
+                ancestor.origin_store_id !== input.expectedStoreId ||
+                ancestor.session_id !== run.session_id ||
+                ancestor.cancel_requested ||
+                ancestor.root_work_command_id !== run.root_work_command_id ||
+                String(ancestor.root_work_seq) !== String(run.root_work_seq)
+              )
+                throw new AgentError('required_result_unverifiable');
+              ancestor =
+                ancestor.parent_execution_id &&
+                this.row('SELECT * FROM execution WHERE id=?', ancestor.parent_execution_id);
+            }
+            if (
+              execution?.kind !== 'job' ||
+              !parent ||
+              !ancestor ||
+              ancestor.run_id !== run.id ||
+              ancestor.kind !== 'tool' ||
+              ancestor.origin_store_id !== input.expectedStoreId ||
+              ancestor.session_id !== run.session_id ||
+              ancestor.cancel_requested ||
+              ancestor.origin_command_id !== run.origin_command_id ||
+              ancestor.root_work_command_id !== run.root_work_command_id ||
+              String(ancestor.root_work_seq) !== String(run.root_work_seq) ||
+              execution.origin_store_id !== input.expectedStoreId ||
+              execution.root_work_command_id !== run.root_work_command_id ||
+              String(execution.root_work_seq) !== String(run.root_work_seq)
+            )
+              throw new AgentError('result_wait_changed');
+            const session = this.row(
+              'SELECT context_selection_id FROM session WHERE id=?',
+              run.session_id!,
+            );
+            if (execution.context_selection_id !== session?.context_selection_id)
+              throw new AgentError('context_rewound');
+            const match = refs.some((ref) => {
+              if (
+                ref.runId !== run.id ||
+                ref.phase === 'dispatch' ||
+                ref.originStoreId !== input.expectedStoreId
+              )
+                return false;
+              const record = this.row(
+                "SELECT * FROM extension_record WHERE extension_id=? AND scope_kind='session' AND scope_id=? AND key=?",
+                ref.extensionId,
+                ref.sessionId,
+                ref.recordKey,
+              );
+              if (
+                !record ||
+                String(record.revision) !== ref.revision ||
+                record.origin_store_id !== input.expectedStoreId
+              )
+                return false;
+              const value = parse(record.json) as Record<string, Json>;
+              return (
+                value.executionId === id &&
+                value.runId === run.id &&
+                value.sessionId === run.session_id &&
+                value.originStoreId === input.expectedStoreId &&
+                value.originCommandId === execution.origin_command_id &&
+                value.parentExecutionId === execution.parent_execution_id &&
+                value.rootWorkCommandId === execution.root_work_command_id &&
+                value.rootWorkSeq === String(execution.root_work_seq) &&
+                this.row(
+                  'SELECT extension_id FROM command WHERE id=?',
+                  execution.origin_command_id!,
+                )?.extension_id === ref.extensionId &&
+                value.contextSelectionId === session?.context_selection_id
+              );
+            });
+            if (!match) throw new AgentError('required_result_unverifiable');
+          }
+          const json = canonicalJson(ids);
+          if (run.waiting_results_json !== json) {
+            this.run(
+              "UPDATE run SET waiting_results_json=?,status=CASE WHEN ?<>'[]' THEN 'waiting_execution' WHEN status='waiting_execution' THEN 'running' ELSE status END WHERE id=?",
+              json,
+              json,
+              run.id!,
+            );
+            this.event(String(run.session_id), String(run.id), 'run.result_wait_changed');
+          }
+          return this.runRecord(this.row('SELECT * FROM run WHERE id=?', run.id!)!);
+        });
       case 'finishRun':
         return this.tx(() => this.finishRun(input as Parameters<Store['finishRun']>[0]));
       case 'cancelCommand':
@@ -2373,9 +2487,12 @@ export class SqliteOperations {
         : undefined;
       assertInputBoundary(this, String(input.runId), handoffInputId);
       this.active(input.owner, String(run.origin_command_id), input.runId);
+      // A recorded Tool outcome_unknown can be explained by a completed reply.
+      // It remains unknown in the original Execution; completion never resolves
+      // its external effect or releases resources still owned by a Job.
       if (
         this.row(
-          "SELECT id FROM execution WHERE run_id=? AND state IN ('planned','dispatching','running','outcome_unknown')",
+          "SELECT id FROM execution WHERE run_id=? AND (state IN ('planned','dispatching','running') OR (state='outcome_unknown' AND kind!='tool'))",
           input.runId,
         )
       )

@@ -113,6 +113,45 @@ function fixture() {
   };
 }
 
+test('saved browser purposes survive large code and sealed Model calls through the Main reader', async () => {
+  const f = fixture();
+  const purposes = ['打开天气网页', '读取北京天气', '核对更新时间'];
+  const ids = purposes.map((_, index) => `browser-${index}`);
+  for (const [index, id] of ids.entries()) {
+    f.add(id, 'succeeded', id, 'browser.execute');
+    const call = f.messages.get(`call-${id}`)!;
+    call.toolCalls = [];
+    call.sourceIds = [`model-${id}`];
+    call.outputBody = {
+      kind: 'model_output',
+      executionId: `model-${id}`,
+      complete: true,
+      contentBytes: '0',
+      reasoningBytes: '0',
+      toolCallCount: 1,
+    };
+    Object.assign(f.executions.get(`execution-${id}`)!, {
+      parentExecutionId: null,
+      toolCallId: 'repeated',
+      toolInput: { code: `void 0; //${'x'.repeat(16000)}`, description: purposes[index] },
+    });
+  }
+  try {
+    const result = await f.list(ids);
+    expect(result.entries.map((entry) => entry.target)).toEqual(purposes);
+    expect(result.entries.every((entry) => entry.inputPending !== true)).toBe(true);
+    // A visible conflicting call must still withdraw the purpose.
+    f.messages.get(`call-${ids[1]}`)!.toolCalls = [
+      { id: 'repeated', name: 'files.read', arguments: '{}' },
+    ];
+    const conflict = await f.list([ids[1]!]);
+    expect(conflict.entries[0]?.target).toBeUndefined();
+    expect(conflict.entries[0]?.inputPending).toBe(true);
+  } finally {
+    f.manager.release();
+  }
+});
+
 test('current and saved workspace write versions retain their known Native presentation', () => {
   for (const definitionVersion of ['2', '3'])
     expect(

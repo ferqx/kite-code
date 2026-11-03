@@ -121,6 +121,9 @@ for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const)
     ])
       inspect([assistant('unfinished'), terminal(status)], activity, (document) => {
         expect(document.querySelector('.response-status')).toBeNull();
+        expect(
+          document.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded'),
+        ).toBe('false');
       });
   });
 
@@ -128,6 +131,9 @@ for (const status of ['completed', 'failed', 'cancelled'] as const)
   test(`terminal activity ${status} suppresses unfinished model fallback`, () => {
     inspect([assistant('unfinished')], { turnId: 'run', status }, (document) => {
       expect(document.querySelector('.response-status')).toBeNull();
+      expect(
+        document.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded'),
+      ).toBe('false');
     });
   });
 
@@ -158,7 +164,7 @@ test('unscoped legacy streaming keeps its original message response fallback', (
   );
 });
 
-test('manual process collapse, model completion, tools, approval wait and later model retain the same bottom response until actual termination', async () => {
+test('the unfinished process stays expanded through models, tools and waits; only actual termination unlocks collapse', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -209,14 +215,21 @@ test('manual process collapse, model completion, tools, approval wait and later 
     expect(host.querySelector('.response-status')).toBe(response);
     expect(response.textContent).toBe('正在回复…');
     expect(host.querySelector('.agent-turn-status-label')?.textContent).toBe('处理过程');
-    const toggle = host.querySelector<HTMLButtonElement>('.agent-turn-summary[aria-expanded]')!;
-    expect(toggle).not.toBeNull();
-    await act(async () => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    const process = host.querySelector('.agent-turn-process')!;
+    const locked = () => {
+      expect(host.querySelector('.agent-turn-process')).toBe(process);
+      expect(process.getAttribute('data-state')).toBe('open');
+      expect(host.querySelector('button.agent-turn-summary')).toBeNull();
+      expect(host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBeNull();
+      expect(host.querySelector('.agent-turn-chevron')).toBeNull();
+    };
+    locked();
+    await act(async () => (host.querySelector('.agent-turn-summary') as HTMLElement).click());
+    locked();
     await render([user, assistant('first', true), thinking]);
     expect(host.querySelector('.response-status')).toBe(response);
     expect(response.textContent).toBe('正在思考…');
-    expect(host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('false');
+    locked();
     expect(host.textContent).not.toContain('PRIVATE_REASONING');
     await render([
       user,
@@ -244,12 +257,37 @@ test('manual process collapse, model completion, tools, approval wait and later 
       expect(host.querySelectorAll('.response-status')).toHaveLength(1);
       expect(host.querySelector('.response-status')).toBe(response);
       expect(response.closest('.agent-turn')!.lastElementChild).toBe(response);
-      expect(host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
-        'false',
-      );
+      locked();
     }
+    await render(
+      [
+        user,
+        assistant('first', true),
+        { ...tool, toolName: 'fixture.lookup', title: '查询工具', text: 'INDEPENDENT_TOOL_RESULT' },
+      ],
+      'waiting',
+    );
+    const toolToggle = host.querySelector<HTMLButtonElement>(
+      '.tool-activity-summary[aria-expanded]',
+    )!;
+    expect(toolToggle.disabled).toBe(false);
+    await act(async () => toolToggle.click());
+    expect(toolToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelector('.tool-activity-content')?.textContent).toContain(
+      'INDEPENDENT_TOOL_RESULT',
+    );
+    await act(async () => toolToggle.click());
+    expect(toolToggle.getAttribute('aria-expanded')).toBe('false');
+    locked();
     await render([user, assistant('first', true), tool, assistant('later'), terminal('aborted')]);
     expect(host.querySelector('.response-status')).toBeNull();
+    const finished = host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+    expect(finished.disabled).toBe(false);
+    expect(finished.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => finished.click());
+    expect(finished.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => finished.click());
+    expect(finished.getAttribute('aria-expanded')).toBe('false');
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
@@ -258,6 +296,50 @@ test('manual process collapse, model completion, tools, approval wait and later 
       else Reflect.deleteProperty(globalThis, key);
     }
   }
+});
+
+test('unfinished host Turn phases remain non-collapsible despite settled replies and unavailable observations', () => {
+  for (const status of activeStatuses)
+    for (const observation of [{}, { unavailable: true }, { executionUnconfirmed: true }])
+      inspect(
+        [assistant('process', true), tool, { ...assistant('model-final', true), finalReply: true }],
+        { turnId: 'run', status, ...observation },
+        (document) => {
+          expect(document.querySelector('.agent-turn-process')?.getAttribute('data-state')).toBe(
+            'open',
+          );
+          expect(document.querySelector('button.agent-turn-summary')).toBeNull();
+          expect(document.querySelector('.agent-turn-chevron')).toBeNull();
+          expect(document.querySelector('.agent-turn-process-messages')?.textContent).toContain(
+            'process content',
+          );
+          expect(document.querySelector('.agent-turn-status-label')?.textContent).not.toBe(
+            '已完成',
+          );
+        },
+      );
+});
+
+test('a different completed Turn retains its own collapsed reading while the current Turn is locked open', () => {
+  inspect(
+    [
+      { ...assistant('old-process', true), turnId: 'old' },
+      { ...assistant('old-final', true), turnId: 'old', finalReply: true },
+      assistant('current'),
+    ],
+    { turnId: 'run', status: 'running' },
+    (document) => {
+      const turns = document.querySelectorAll('.agent-turn');
+      expect(turns).toHaveLength(2);
+      expect(
+        turns[0]!.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded'),
+      ).toBe('false');
+      expect(turns[1]!.querySelector('button.agent-turn-summary')).toBeNull();
+      expect(turns[1]!.querySelector('.agent-turn-process')?.getAttribute('data-state')).toBe(
+        'open',
+      );
+    },
+  );
 });
 
 test('unconfirmed execution hides live response and busy state while a held observation restores them', () => {

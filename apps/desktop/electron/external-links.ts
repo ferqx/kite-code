@@ -1,7 +1,8 @@
-import { type BrowserWindow, dialog, shell } from 'electron';
+import { dialog, shell } from 'electron';
+import type { NativeRootWindow } from './native-root-window';
 
 /** Hand web links to the OS without allowing a new privileged app window. */
-export function registerNativeExternalLinks(window: BrowserWindow, rendererUrl: string): void {
+export function registerNativeExternalLinks(window: NativeRootWindow, rendererUrl: string): void {
   const current = () =>
     !window.isDestroyed() && window.webContents.mainFrame.url.split('#')[0] === rendererUrl;
   window.webContents.setWindowOpenHandler(({ url }) => {

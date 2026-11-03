@@ -766,7 +766,8 @@ body {
   .conversation-viewport {
     /* SessionPage measures the native reserved space, including overlay tracks. */
     scrollbar-width: auto;
-    -webkit-app-region: no-drag;
+    /* The overlay viewport extends behind the header. Its default client region
+       preserves text input without subtracting the native header's drag area. */
   }
   /* Keep the reading column's track space before its viewport is mounted. */
   .conversation-footer,
@@ -5943,4 +5944,13 @@ body {
 .pill-select-trigger[aria-expanded="true"],
 .kite-client .pill-select-trigger[aria-expanded="true"] {
   background: var(--control-selected);
+}
+
+.kite-client .session-tab-workspace {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }

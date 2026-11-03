@@ -11,13 +11,6 @@ import {
   questionDraftKey,
 } from '@kite-ai/ui';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
   Button as DesktopButton,
   Dialog,
   DialogContent,
@@ -39,12 +32,26 @@ import {
   type CSSProperties,
   Fragment,
   type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
+import { AgentBrowserPanel } from './agent-browser-panel';
+import {
+  AgentBrowserPresentation,
+  agentBrowserPresentationKeys,
+} from './agent-browser-presentation';
+import { BrowserAnnotationCards } from './browser-annotation-cards';
+import {
+  annotationReceiptRefs,
+  type BrowserDraftDocument,
+  composeBrowserDraft,
+} from './browser-annotation-content';
+import { BrowserAnnotationDrafts } from './browser-annotation-drafts';
 import type { DesktopEditor } from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
@@ -64,7 +71,15 @@ import type {
   NativeResult,
   NativeState,
 } from './native-bridge';
-import { closeNativeBrowserTab, renderNativeBrowser } from './native-browser-pane';
+import type { NativeBrowserBridge } from './native-browser-bridge';
+import { NativeBrowserLeaseControls } from './native-browser-lease-controls';
+import { NativeBrowserPane } from './native-browser-pane';
+import {
+  closeNativeBrowserTab,
+  nativeBrowserDisplayHint,
+  restoreNativeBrowserDraft,
+  restoreNativeBrowserTab,
+} from './native-browser-session';
 import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
 import { NativeChildDetail } from './native-child-detail';
@@ -81,6 +96,7 @@ import { NativeExtensions } from './native-extensions';
 import { NativeFileChanges, NativeOutputFile } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { useNativeFileTargets } from './native-file-targets';
+import { confirmNativeFullPermission } from './native-full-permission-confirmation';
 import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeInputFailureMessage, nativeTextIntent } from './native-input';
@@ -90,6 +106,7 @@ import { readNativeInteractionAttachment } from './native-interaction-attachment
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
+import { humanReadableOperationError, NativeMessage } from './native-message';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
 import { NativeModelOutputMessage } from './native-model-output-message';
@@ -133,6 +150,7 @@ import { NativeTranscriptDisplay } from './native-transcript-display';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
 import { promptTextForSend } from './prompt-text';
+import { useNativePermissionChange } from './use-native-permission-change';
 
 const imageScope = (storeId: string | undefined, sessionId: string) =>
   JSON.stringify([storeId, sessionId]);
@@ -216,10 +234,21 @@ function NativeDesktopContent({
   bridge,
   nativeWindow,
 }: {
-  bridge: NativeBridge & Partial<import('./native-bridge').NativeStartupBridge>;
+  bridge: NativeBridge &
+    Partial<import('./native-bridge').NativeStartupBridge> &
+    Partial<import('./native-bridge').NativeWindowBridge> &
+    Partial<NativeBrowserBridge>;
   nativeWindow: boolean;
 }) {
   const diagnostics = useNativeDiagnostics();
+  const confirmFullPermission = useCallback(
+    (options: { language: 'zh' | 'en'; signal: AbortSignal }) =>
+      confirmNativeFullPermission(bridge, options),
+    [bridge],
+  );
+  const changeCurrentPermission = useNativePermissionChange(
+    (mode) => void write(() => setPermissionMode(mode, false)),
+  );
   const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
   const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [startupError, setStartupError] = useState('');
@@ -236,6 +265,11 @@ function NativeDesktopContent({
   const [settingsEditorHost, setSettingsEditorHost] = useState<HTMLDivElement | null>(null);
   const settingsEditorControl = useRef<{ close: () => void } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
+  const [agentBrowserRequest, setAgentBrowserRequest] = useState(0);
+  const [browserLeaseRestore, setBrowserLeaseRestore] = useState(0);
+  const browserDrafts = useRef(new Map<string, string>());
+  const agentBrowserPresentation = useRef(new AgentBrowserPresentation());
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [newDraft, setNewDraft] = useState('');
@@ -294,6 +328,32 @@ function NativeDesktopContent({
   const [directory, setDirectory] = useState<NativeDirectory>();
   const [directoryProjection] = useState(() => new NativeDirectoryProjection());
   const imageDrafts = useNativeInputImages(bridge, state?.generation, directory?.storeId);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Prepared bytes must not cross a Store boundary.
+  const browserNotes = useMemo(
+    () => new BrowserAnnotationDrafts(bridge, state?.generation),
+    [bridge, state?.generation, directory?.storeId],
+  );
+  const browserNotesRef = useRef(browserNotes);
+  browserNotesRef.current = browserNotes;
+  const noteReceipts = useRef<readonly NativeCallerMetadata[]>([]);
+  const noteRevision = useSyncExternalStore(browserNotes.subscribe, browserNotes.snapshot);
+  useEffect(() => () => browserNotes.close(), [browserNotes]);
+  const noteDraftStates = useRef(
+    new Map<
+      string,
+      { revision: number; signature?: string; uncertain?: boolean; managed?: boolean }
+    >(),
+  );
+  const noteSaveQueue = useRef(Promise.resolve());
+  const [noteSaveError, setNoteSaveErrorState] = useState({ key: '', message: '' });
+  function setNoteSaveError(message: string, key = draftOwner.current ?? '') {
+    setNoteSaveErrorState({ key, message });
+  }
+  const noteStateOwner = useRef(browserNotes);
+  if (noteStateOwner.current !== browserNotes) {
+    noteStateOwner.current = browserNotes;
+    noteDraftStates.current.clear();
+  }
   const newImageScope = imageScope(directory?.storeId, 'new-conversation');
   const [messages, setMessages] = useState<Message[]>([]);
   const childTabSequence = useRef(0);
@@ -336,8 +396,28 @@ function NativeDesktopContent({
     ready: boolean;
   }>();
   const planModes = useRef(new Map<string, boolean>());
-  const [error, setError] = useState('');
+  const errorSequence = useRef(0);
+  const [operationFailure, setOperationFailure] = useState<{
+    id: number;
+    message: string;
+    operation?: string;
+  }>();
+  const error = operationFailure?.message ?? '';
+  const setError = useCallback((message: string, operation?: string) => {
+    setOperationFailure(message ? { id: ++errorSequence.current, message, operation } : undefined);
+  }, []);
+  const dismissOperationFailure = useCallback((id: number) => {
+    setOperationFailure((current) => (current?.id === id ? undefined : current));
+  }, []);
   const [businessError, setBusinessError] = useState(false);
+  useEffect(
+    () =>
+      bridge.watchQuitConfirmationFailure?.(() => {
+        setBusinessError(true);
+        setError('quit_confirmation_unavailable');
+      }),
+    [bridge, setError],
+  );
   const [failedReads, setFailedReads] = useState<{
     state?: string;
     directory?: string;
@@ -456,6 +536,18 @@ function NativeDesktopContent({
       // Global failures and directory facts still publish while the current
       // reading stays paused until the target footer can be painted coherently.
       const value: NativeState = hold ? { ...result, selection: undefined } : result;
+      noteReceipts.current = value.callerSubmissions ?? [];
+      for (const caller of value.callerSubmissions ?? []) {
+        const key = imageScope(caller.scope.storeId, caller.scope.sessionId);
+        if (caller.draft?.browserAnnotations)
+          browserNotesRef.current.restoreBinding(
+            caller.request.commandId,
+            key,
+            caller.draft.browserAnnotations,
+            caller.phase,
+          );
+        browserNotesRef.current.settle(caller.request.commandId, caller.phase, key);
+      }
       for (const input of value.inputSubmissions)
         if (['accepted', 'applied', 'terminal'].includes(input.phase))
           consumeInputDraft(input.intent.commandId, input.intent.expectedStoreId, input.sessionId);
@@ -530,19 +622,26 @@ function NativeDesktopContent({
       });
     }
   }
-  async function report(action: () => Promise<unknown>, clearError = true, business = false) {
+  async function report(
+    action: () => Promise<unknown>,
+    clearError = true,
+    business: boolean | string = false,
+  ) {
     try {
       if (clearError) {
         setError('');
-        setBusinessError(business);
+        setBusinessError(!!business);
       }
       return await action();
     } catch (cause) {
       const code =
         (cause as { code?: string; message?: string }).code ??
         (cause as { message?: string }).message;
-      setBusinessError(business);
-      setError(code && /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : '结果待核实；请查询原命令。');
+      setBusinessError(!!business);
+      setError(
+        code && /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : '结果待核实；请查询原命令。',
+        typeof business === 'string' ? business : undefined,
+      );
       return undefined;
     }
   }
@@ -679,6 +778,7 @@ function NativeDesktopContent({
   }
   async function select(sessionId: string, keepCurrentDraft = true, keepTaskPage = false) {
     if (!bridge || readLifecycle.current.quitting) return;
+    setAgentBrowserOpen(false);
     if (keepCurrentDraft) rememberDraft();
     const firstHandoff =
       preparing && !keepCurrentDraft && firstRef.current?.creation.sessionId === sessionId;
@@ -787,6 +887,49 @@ function NativeDesktopContent({
           setDraft(
             draftCache.current.get(imageScope(saved.storeId, sessionId))?.content ?? saved.content,
           );
+          const key = imageScope(saved.storeId, sessionId);
+          browserNotesRef.current.restore(key, saved.browserAnnotations);
+          for (const caller of noteReceipts.current)
+            if (
+              imageScope(caller.scope.storeId, caller.scope.sessionId) === key &&
+              caller.draft?.browserAnnotations
+            )
+              browserNotesRef.current.restoreBinding(
+                caller.request.commandId,
+                key,
+                caller.draft.browserAnnotations,
+                caller.phase,
+              );
+          const known = noteDraftStates.current.get(key);
+          let signature = known?.revision === saved.revision ? known.signature : undefined;
+          for (const caller of noteReceipts.current)
+            if (
+              caller.scope.storeId === saved.storeId &&
+              caller.scope.sessionId === sessionId &&
+              caller.draft?.id === saved.id &&
+              caller.draft.revision === String(saved.revision) &&
+              caller.draft.browserAnnotations &&
+              JSON.stringify(caller.draft.browserAnnotations) ===
+                JSON.stringify(annotationReceiptRefs(saved))
+            ) {
+              const restored = draftCache.current.get(key) ?? { content: saved.content };
+              if (!draftCache.current.has(key)) draftCache.current.set(key, restored);
+              submittedDrafts.current.set(caller.request.commandId, {
+                storeId: saved.storeId,
+                sessionId,
+                draft: restored.content === saved.content ? restored : { content: saved.content },
+              });
+              signature = JSON.stringify({
+                content: saved.content,
+                browserAnnotations: saved.browserAnnotations,
+                annotationImageOffset: saved.annotationImageOffset ?? 0,
+              });
+            }
+          noteDraftStates.current.set(key, {
+            revision: saved.revision,
+            signature,
+            managed: !!saved.browserAnnotations?.length || known?.managed,
+          });
           draftRevision.current = saved.revision;
         }
       }
@@ -866,6 +1009,9 @@ function NativeDesktopContent({
     });
     void (async () => {
       const page = pageIntent.current;
+      const keepPreparation = startupPhase.current === 'ready' && preparing;
+      const previousSelection =
+        selected.current === state?.selection?.session.id ? state?.selection : undefined;
       const value = await bridge.request({ method: 'attach' });
       if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
       if (
@@ -877,17 +1023,51 @@ function NativeDesktopContent({
         throw Error('native_initialization_unavailable');
       generation.current = value.generation;
       apply(value);
-      if (!value.selection) setPreparing(true);
+      let restoredSelection =
+        !keepPreparation && !!value.selection && !value.selection.session.deletedAt;
+      if (restoredSelection && value.selection) {
+        // A new Root/Caller generation has no usable history or model facts.
+        // Rebuild those reads through the normal selection path before enabling
+        // the restored conversation and its retained browser presentation.
+        await select(value.selection.session.id, false);
+        if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
+      } else {
+        setPreparing(true);
+      }
       const initialDirectory = await readDirectory();
       if (
         alive &&
         startupEpoch === readLifecycle.current.epoch &&
         pageIntent.current === page &&
+        !keepPreparation &&
         !value.selection &&
+        previousSelection &&
+        initialDirectory?.storeId === previousSelection.storeId &&
+        !initialDirectory.unavailable &&
+        initialDirectory.sessions.some(
+          (session) =>
+            session.id === previousSelection.session.id &&
+            !session.deletedAt &&
+            !session.parentSessionId,
+        )
+      ) {
+        await select(previousSelection.session.id, false);
+        restoredSelection = true;
+      }
+      if (
+        alive &&
+        startupEpoch === readLifecycle.current.epoch &&
+        pageIntent.current === page &&
+        !restoredSelection &&
         !initialDirectory?.unavailable &&
         initialDirectory?.workspaces[0]
       )
-        await chooseWorkspace(initialDirectory.workspaces[0].id, initialDirectory);
+        await chooseWorkspace(
+          keepPreparation && initialDirectory.workspaces.some((row) => row.id === newWorkspace)
+            ? newWorkspace
+            : initialDirectory.workspaces[0].id,
+          initialDirectory,
+        );
     })().catch(async (cause) => {
       if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
       const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
@@ -940,6 +1120,33 @@ function NativeDesktopContent({
         : undefined,
     [state?.selection, historyState.phase],
   );
+  useEffect(() => {
+    if (preparing || scheduledTasksView || settingsOpen) return;
+    const keys = agentBrowserPresentationKeys(selection, selected.current);
+    if (agentBrowserPresentation.current.observe(keys)) {
+      setAgentBrowserRequest((value) => value + 1);
+      setToolsOpen(false);
+      setAgentBrowserOpen(true);
+    }
+  }, [selection, preparing, scheduledTasksView, settingsOpen]);
+  useEffect(() => {
+    const seen = new Map<string, string>();
+    return bridge.watchBrowser?.((page) => {
+      const control = page.control;
+      if (
+        control?.sessionId !== selected.current ||
+        !control?.browserId ||
+        !['acquiring', 'agent'].includes(control.phase) ||
+        seen.get(page.id) === control.browserId
+      )
+        return;
+      if (!seen.has(page.id) && seen.size >= 8) seen.delete(seen.keys().next().value!);
+      seen.set(page.id, control.browserId);
+      // The Job can be observed before Main acquires its page. Recheck only
+      // after a real new lease appears; this read never opens the observation.
+      setBrowserLeaseRestore((value) => value + 1);
+    });
+  }, [bridge]);
   // Selection counters govern IO, not the identity of an already observed display label.
   const selectionHandoff =
     !!selectionRead.current && selected.current !== state?.selection?.session.id;
@@ -956,6 +1163,64 @@ function NativeDesktopContent({
     pendingSession && directory
       ? { storeId: directory.storeId, sessionId: pendingSession.id }
       : undefined;
+  const verifiedBrowserRestore = useRef('');
+  const freshBrowserRestore = useRef('');
+  const browserRestoreCandidate =
+    state &&
+    !state.callerUnavailable &&
+    !state.backgroundUnavailable &&
+    selection &&
+    !selection.session.parentSessionId &&
+    !selectionHandoff &&
+    !preparing &&
+    !scheduledTasksView
+      ? {
+          storeId: selection.storeId,
+          sessionId: selection.session.id,
+          generation: state.generation,
+          viewSelection: selection.viewSelection ?? selection.viewGeneration,
+        }
+      : undefined;
+  const browserRestoreCandidateKey = browserRestoreCandidate
+    ? JSON.stringify([browserRestoreCandidate, agentBrowserRequest, browserLeaseRestore])
+    : '';
+  const browserRestoreFresh =
+    !!browserRestoreCandidate && !selection?.viewLoading && !selection?.permissionUnavailable;
+  freshBrowserRestore.current = browserRestoreFresh ? browserRestoreCandidateKey : '';
+  if (
+    verifiedBrowserRestore.current !== browserRestoreCandidateKey ||
+    (!selection?.viewLoading && !browserRestoreFresh)
+  )
+    verifiedBrowserRestore.current = '';
+  // Only retain the identity of an already verified read during a background
+  // refresh. Fresh selection and permission checks still govern all writes.
+  const browserRestoreScope =
+    browserRestoreFresh ||
+    (selection?.viewLoading && verifiedBrowserRestore.current === browserRestoreCandidateKey)
+      ? browserRestoreCandidate
+      : undefined;
+  let browserDraft: string | undefined;
+  if (preparing && !scheduledTasksView && directory?.storeId && !directory.unavailable) {
+    browserDraft = browserDrafts.current.get(directory.storeId);
+    if (!browserDraft) {
+      const key = `kite.browserDraft:${JSON.stringify(directory.storeId)}`;
+      try {
+        const saved = window.sessionStorage.getItem(key);
+        if (saved && /^[a-f0-9]{32}$/.test(saved)) browserDraft = saved;
+      } catch {}
+      browserDraft ??= crypto.randomUUID().replaceAll('-', '');
+      browserDrafts.current.set(directory.storeId, browserDraft);
+      try {
+        window.sessionStorage.setItem(key, browserDraft);
+      } catch {}
+    }
+  }
+  const browserHandlers = useMemo(
+    () => ({
+      close: (id: string) => closeNativeBrowserTab(id, browserDraft, browserRestoreScope),
+    }),
+    [browserDraft, browserRestoreScope],
+  );
   const sessionLoading =
     selectionHandoff ||
     (!state?.callerUnavailable &&
@@ -1436,7 +1701,11 @@ function NativeDesktopContent({
     selection?.storeId,
     selection?.session.id,
   ]);
-  async function write(action: () => Promise<unknown>, requiresHistory = true, business = false) {
+  async function write(
+    action: () => Promise<unknown>,
+    requiresHistory = true,
+    business: boolean | string = false,
+  ) {
     if (
       writing.current ||
       (requiresHistory && state?.selection && historyState.phase !== 'complete')
@@ -1516,6 +1785,12 @@ function NativeDesktopContent({
     if (!submitted || submitted.storeId !== storeId || submitted.sessionId !== sessionId) return;
     submittedDrafts.current.delete(commandId);
     const key = imageScope(storeId, sessionId);
+    browserNotesRef.current.settle(commandId, 'accepted', key);
+    const savedState = noteDraftStates.current.get(key);
+    if (savedState?.signature) {
+      savedState.revision++;
+      savedState.signature = undefined;
+    }
     if (draftCache.current.get(key) !== submitted.draft) return;
     draftCache.current.set(key, { content: '' });
     if (draftOwner.current === key && selected.current === sessionId) setDraft('');
@@ -1607,6 +1882,7 @@ function NativeDesktopContent({
     pageIntent.current++;
     setScheduledTasksView(false);
     setToolsOpen(false);
+    setAgentBrowserOpen(false);
     setPreparing(true);
     if (newPermission === undefined && selection?.permissions)
       setNewPermission(selection.permissions.mode.mode);
@@ -1618,7 +1894,7 @@ function NativeDesktopContent({
     if (target !== newWorkspace || newBranch?.storeId !== directory?.storeId)
       setNewBranch(undefined);
     setTargetBranch(undefined);
-    if (target) void report(() => chooseWorkspace(target), true, true);
+    if (target) void report(() => chooseWorkspace(target), true, '读取项目分支');
     else {
       contextIntent.current++;
       setContextBusy(false);
@@ -1649,6 +1925,7 @@ function NativeDesktopContent({
       setPreparing(true);
       setScheduledTasksView(false);
       setToolsOpen(false);
+      setAgentBrowserOpen(false);
       setNewWorkspace('');
       setNewBranch(undefined);
       setTargetBranch(undefined);
@@ -1706,6 +1983,7 @@ function NativeDesktopContent({
         setPreparing(true);
         setScheduledTasksView(false);
         setToolsOpen(false);
+        setAgentBrowserOpen(false);
         // The host returns the actual registered identity, never a guessed new directory item.
         const value = await bridge.request({
           method: 'conversation.branch',
@@ -1726,7 +2004,7 @@ function NativeDesktopContent({
         }
       },
       false,
-      true,
+      '添加空间',
     );
   }
   function firstIntent(
@@ -1912,22 +2190,140 @@ function NativeDesktopContent({
       }
     }, false);
   }
+  function saveBrowserDraft(
+    key: string,
+    sessionId: string,
+    document: BrowserDraftDocument,
+  ): Promise<void> {
+    const serialized = JSON.stringify(document),
+      currentGeneration = generation.current;
+    const task = async () => {
+      if (
+        !bridge ||
+        generation.current !== currentGeneration ||
+        selected.current !== sessionId ||
+        draftOwner.current !== key
+      )
+        throw Error('native_selection_changed');
+      const saved = noteDraftStates.current.get(key);
+      if (!saved || saved.uncertain) throw Error('browser_draft_save_unconfirmed');
+      if (saved.signature === serialized) return;
+      let result: NativeResult;
+      try {
+        result = await bridge.request({
+          method: 'draft.write',
+          generation: currentGeneration,
+          sessionId,
+          revision: saved.revision,
+          ...document,
+          browserAnnotations: document.browserAnnotations ?? [],
+        });
+      } catch (cause) {
+        saved.uncertain = true;
+        throw cause;
+      }
+      if (
+        !result ||
+        !('revision' in result) ||
+        !('content' in result) ||
+        result.revision !== saved.revision + 1
+      ) {
+        saved.uncertain = true;
+        throw Error('browser_draft_save_unconfirmed');
+      }
+      saved.revision = result.revision;
+      saved.managed = true;
+      saved.signature = serialized;
+      if (generation.current === currentGeneration && selected.current === sessionId)
+        draftRevision.current = result.revision;
+    };
+    const pendingSave = noteSaveQueue.current.then(task, task);
+    noteSaveQueue.current = pendingSave.catch(() => {});
+    return pendingSave;
+  }
+  const persistNoteDraft = useRef(() => {});
+  persistNoteDraft.current = () => {
+    if (!selection || !bridge) return;
+    const key = imageScope(selection.storeId, selection.session.id);
+    if (
+      selected.current !== selection.session.id ||
+      browserNotes.blocked(key) ||
+      (!browserNotes.get(key).length && !noteDraftStates.current.get(key)?.managed)
+    )
+      return;
+    try {
+      const document = {
+        content: draftCache.current.get(key)?.content ?? draft,
+        browserAnnotations: browserNotes.document(key),
+        annotationImageOffset: imageDrafts.get(key).length,
+      };
+      void saveBrowserDraft(key, selection.session.id, document).then(
+        () => setNoteSaveError('', key),
+        () => setNoteSaveError('注释草稿尚未确认保存；保留当前内容，请重新打开会话核对。', key),
+      );
+    } catch {
+      /* The next image-owner revision supplies its first verified hash. */
+    }
+  };
+  const noteSaveSignal = selection
+    ? JSON.stringify([
+        imageScope(selection.storeId, selection.session.id),
+        noteRevision,
+        draft,
+        imageDrafts.get(imageScope(selection.storeId, selection.session.id)).length,
+      ])
+    : '';
+  useEffect(() => {
+    if (!noteSaveSignal) return;
+    const timer = setTimeout(() => persistNoteDraft.current(), 500);
+    return () => clearTimeout(timer);
+  }, [noteSaveSignal]);
   function sendInput() {
     if (!bridge || !selection) return;
     const images = imageDrafts.get(imageScope(selection.storeId, selection.session.id));
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
     const draftKey = imageScope(selection.storeId, selection.session.id);
     const submittedDraft = draftCache.current.get(draftKey) ?? { content: draft };
-    const submittedText = promptTextForSend(submittedDraft.content);
+    let noteBatch: ReturnType<BrowserAnnotationDrafts['capture']>,
+      noteDocument: BrowserDraftDocument,
+      submittedText: string;
+    try {
+      noteBatch = browserNotes.capture(draftKey);
+      noteDocument = {
+        content: submittedDraft.content,
+        browserAnnotations: browserNotes.document(draftKey),
+        annotationImageOffset: images.length,
+      };
+      submittedText = composeBrowserDraft(noteDocument);
+    } catch {
+      setNoteSaveError('注释快照尚未就绪或原发送结果待核实。');
+      return;
+    }
     if (!submittedText.trim() && !images.length && !files.length) return;
     if (images.some((image) => image.loading || image.error)) return;
-    const imageIds = images.map((image) => image.id);
+    const imageIds = [
+      ...images.map((image) => image.id),
+      ...noteBatch.entries.map((item) => item.imageId),
+    ];
+    if (imageIds.length > inputImageCount) {
+      setNoteSaveError('图片与注释快照合计不能超过10张。');
+      return;
+    }
     void writeInput(async () => {
       const current = state?.generation ?? 0,
         nonce = viewIntent.current,
         sessionId = selection.session.id,
-        commandId = crypto.randomUUID(),
-        submittedRevision = draftRevision.current;
+        commandId = crypto.randomUUID();
+      if (noteBatch.entries.length || noteDraftStates.current.get(draftKey)?.managed)
+        await saveBrowserDraft(draftKey, sessionId, noteDocument);
+      const submittedRevision = draftRevision.current;
+      if (
+        current !== generation.current ||
+        nonce !== viewIntent.current ||
+        selected.current !== sessionId ||
+        (draftCache.current.get(draftKey) !== submittedDraft && draftCache.current.has(draftKey))
+      )
+        throw Error('native_selection_changed');
       draftCache.current.set(draftKey, submittedDraft);
       const intent = {
         ...nativeTextIntent(
@@ -1959,6 +2355,13 @@ function NativeDesktopContent({
           plan: planMode,
           result: undefined,
         };
+        browserNotes.bind(commandId, noteBatch);
+        if (noteBatch.entries.length)
+          submittedDrafts.current.set(commandId, {
+            storeId: selection.storeId,
+            sessionId,
+            draft: submittedDraft,
+          });
         firstRef.current = original;
         setFirstSubmission(original);
         setDraft('');
@@ -1969,7 +2372,8 @@ function NativeDesktopContent({
             generation: current,
             creation: original.creation,
             intent,
-            ...(submittedDraft.content.length > submittedText.length
+            ...(noteBatch.entries.length ? { draftDocument: noteDocument } : {}),
+            ...(!noteBatch.entries.length && submittedDraft.content.length > submittedText.length
               ? { draftLineEndings: submittedDraft.content.slice(submittedText.length) }
               : {}),
             permissionMode: original.permissionMode,
@@ -1978,9 +2382,21 @@ function NativeDesktopContent({
           });
           if (!value || !('kind' in value) || value.kind !== 'conversation' || !('stage' in value))
             throw Error('conversation_response_unknown');
+          browserNotes.settle(commandId, value.phase, draftKey);
+          if (value.phase === 'accepted')
+            consumeInputDraft(commandId, selection.storeId, sessionId);
           await acceptFirstResult(value, original, current, page);
         } catch (cause) {
           const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+          browserNotes.settle(
+            commandId,
+            ['invalid_native_request', 'native_request_too_large', 'native_sender_denied'].includes(
+              code,
+            )
+              ? 'failed'
+              : 'unknown',
+            draftKey,
+          );
           if (firstRef.current?.commandId === original.commandId) {
             setFirstSubmission({
               ...original,
@@ -2010,6 +2426,7 @@ function NativeDesktopContent({
         }
         return;
       }
+      browserNotes.bind(commandId, noteBatch);
       submittedDrafts.current.set(commandId, {
         storeId: selection.storeId,
         sessionId,
@@ -2047,6 +2464,15 @@ function NativeDesktopContent({
       } catch (cause) {
         const code =
           (cause as { code?: string; message?: string })?.code ?? (cause as Error)?.message;
+        browserNotes.settle(
+          commandId,
+          ['invalid_native_request', 'native_request_too_large', 'native_sender_denied'].includes(
+            code,
+          )
+            ? 'failed'
+            : 'unknown',
+          draftKey,
+        );
         setInputDeliveries((previous) => {
           const next = new Map(previous),
             original = next.get(commandId);
@@ -2080,6 +2506,7 @@ function NativeDesktopContent({
           });
         return next;
       });
+      browserNotes.settle(commandId, value && 'phase' in value ? value.phase : 'unknown', draftKey);
       const accepted =
         value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase);
       if (accepted) imageDrafts.removeIds([...imageIds, ...files.map((file) => file.id)]);
@@ -3795,7 +4222,7 @@ function NativeDesktopContent({
                 throw cause;
               },
               false,
-              true,
+              '调整窗口大小',
             ),
           );
       }}
@@ -3830,6 +4257,16 @@ function NativeDesktopContent({
                 pendingReading?.storeId ?? selection?.storeId,
                 pendingReading?.sessionId ?? selection?.session.id,
               ])
+      }
+      tabsScopeKey={
+        firstVisible && !firstSaved
+          ? JSON.stringify([
+              firstSubmission.creation.expectedStoreId,
+              firstSubmission.creation.sessionId,
+            ])
+          : preparing
+            ? JSON.stringify([directory?.storeId, 'new-conversation'])
+            : JSON.stringify([directory?.storeId, selected.current])
       }
       conversationCache={{
         interactive: !!selection && selected.current === selection.session.id,
@@ -3914,7 +4351,11 @@ function NativeDesktopContent({
                 {r.phase === 'unknown' && r.commandId && (
                   <DesktopButton
                     onClick={() =>
-                      void report(() => lookupWorkspaceRemoval(r.commandId!), true, true)
+                      void report(
+                        () => lookupWorkspaceRemoval(r.commandId!),
+                        true,
+                        '查询移除空间的结果',
+                      )
                     }
                   >
                     查看结果
@@ -3924,6 +4365,22 @@ function NativeDesktopContent({
             ))}
         </>
       }
+      beforeConversation={
+        <NativeMessage
+          message={
+            operationFailure && (diagnostics || businessError)
+              ? {
+                  id: operationFailure.id,
+                  text: humanReadableOperationError(
+                    operationFailure.message,
+                    operationFailure.operation,
+                  ),
+                }
+              : undefined
+          }
+          onDismiss={dismissOperationFailure}
+        />
+      }
       loading={
         !preparing &&
         !(firstVisible && !firstSaved) &&
@@ -3931,8 +4388,116 @@ function NativeDesktopContent({
           (selectionHandoff && !messages.length) ||
           (!!selection && historyState.phase === 'loading' && !messages.length))
       }
-      renderBrowser={renderNativeBrowser}
-      closeBrowser={closeNativeBrowserTab}
+      renderBrowser={(props) => (
+        <NativeBrowserPane
+          {...props}
+          scope={browserRestoreScope}
+          draft={browserDraft}
+          initialHint={nativeBrowserDisplayHint(props.id, browserRestoreScope, browserDraft)}
+          annotate={
+            !browserDraft && state && selection
+              ? (page, noteVisible, annotationToolbarHost) => (
+                  <AgentBrowserPanel
+                    key={JSON.stringify([
+                      state.generation,
+                      selection.storeId,
+                      selection.session.id,
+                      page.id,
+                    ])}
+                    annotationOnly
+                    annotationToolbarHost={annotationToolbarHost}
+                    expectedBrowserId={page.control?.browserId}
+                    bridge={bridge}
+                    scope={{
+                      generation: state.generation,
+                      viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                      historyEpoch: state.historyEpoch ?? 0,
+                      storeId: selection.storeId,
+                      sessionId: selection.session.id,
+                      workspaceId: selection.session.workspaceId,
+                      contextSelectionId: selection.session.contextSelectionId,
+                    }}
+                    visible={noteVisible && !settingsOpen}
+                    canRead={selection.canReadExtensions === true}
+                    canInvoke={selection.canInvokeExtensions === true}
+                    submissions={state.callerSubmissions}
+                    onAnnotate={(capture) => {
+                      if (
+                        generation.current !== state.generation ||
+                        selected.current !== selection.session.id ||
+                        capture.source.browserId !== page.control?.browserId
+                      )
+                        return;
+                      const key = imageScope(selection.storeId, selection.session.id);
+                      if (draftOwner.current !== key) return;
+                      if (!noteDraftStates.current.has(key))
+                        throw Error('browser_draft_not_loaded');
+                      browserNotes.add(key, capture);
+                    }}
+                  />
+                )
+              : undefined
+          }
+          controlTools={(page) =>
+            !browserDraft && state && selection ? (
+              <NativeBrowserLeaseControls
+                bridge={bridge}
+                scope={{
+                  generation: state.generation,
+                  viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                  historyEpoch: state.historyEpoch ?? 0,
+                  storeId: selection.storeId,
+                  sessionId: selection.session.id,
+                  workspaceId: selection.session.workspaceId,
+                  contextSelectionId: selection.session.contextSelectionId,
+                }}
+                page={page}
+                visible={props.visible && !settingsOpen}
+                canRead={selection.canReadExtensions === true}
+                canInvoke={selection.canInvokeExtensions === true}
+                submissions={state.callerSubmissions}
+              />
+            ) : null
+          }
+        />
+      )}
+      closeBrowser={browserHandlers.close}
+      restoreBrowser={
+        browserDraft && window.kiteNative?.restoreBrowserDraft
+          ? () => restoreNativeBrowserDraft(browserDraft)
+          : browserRestoreScope && window.kiteNative?.restoreBrowser
+            ? async () => {
+                const key = JSON.stringify([
+                  browserRestoreScope,
+                  agentBrowserRequest,
+                  browserLeaseRestore,
+                ]);
+                try {
+                  const page = await restoreNativeBrowserTab(browserRestoreScope);
+                  if (freshBrowserRestore.current === key) verifiedBrowserRestore.current = key;
+                  return page;
+                } catch (error) {
+                  if (verifiedBrowserRestore.current === key) verifiedBrowserRestore.current = '';
+                  throw error;
+                }
+              }
+            : undefined
+      }
+      browserRestoreKey={
+        browserDraft
+          ? JSON.stringify(['draft', browserDraft])
+          : browserRestoreScope
+            ? JSON.stringify([browserRestoreScope, agentBrowserRequest, browserLeaseRestore])
+            : undefined
+      }
+      browserPending={
+        !!pendingReading ||
+        (!!selected.current &&
+          !selection?.session.parentSessionId &&
+          !browserRestoreScope &&
+          !preparing &&
+          !scheduledTasksView)
+      }
       childTabRequest={
         !preparing && !scheduledTasksView && childTabRequest?.parent === childParent
           ? childTabRequest
@@ -3995,12 +4560,13 @@ function NativeDesktopContent({
         addWorkspace: () => void addWorkspace(),
         removeWorkspace: directory?.unavailable
           ? undefined
-          : (id) => void report(() => removeWorkspace(id), true, true),
+          : (id) => void report(() => removeWorkspace(id), true, '移除空间'),
         settings: () => setSettingsOpen(true),
         scheduledTasks: () => {
           pageIntent.current++;
           setPreparedModels(undefined);
           setToolsOpen(false);
+          setAgentBrowserOpen(false);
           setScheduledTasksView(true);
         },
         theme,
@@ -4036,10 +4602,11 @@ function NativeDesktopContent({
                   }
                 : undefined,
               busy: contextBusy || pending,
-              onProject: (id) => void report(() => chooseWorkspace(id), true, true),
+              onProject: (id) => void report(() => chooseWorkspace(id), true, '读取项目分支'),
               onAddProject: () => void addWorkspace(),
               onBranch: setTargetBranch,
-              onRefreshBranch: () => void report(() => chooseWorkspace(newWorkspace), true, true),
+              onRefreshBranch: () =>
+                void report(() => chooseWorkspace(newWorkspace), true, '刷新分支'),
             }
           : undefined
       }
@@ -4051,7 +4618,10 @@ function NativeDesktopContent({
               <DesktopButton
                 variant="ghost"
                 aria-expanded={toolsOpen}
-                onClick={() => setToolsOpen(!toolsOpen)}
+                onClick={() => {
+                  setAgentBrowserOpen(false);
+                  setToolsOpen(!toolsOpen);
+                }}
               >
                 会话工具
               </DesktopButton>
@@ -4187,7 +4757,8 @@ function NativeDesktopContent({
               sendLabel: '发送首条消息',
               permission: preparedPermission,
               fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
-              onPermissionChange: (mode) => setNewPermission(mode),
+              confirmFullPermission,
+              onPermissionChange: setNewPermission,
               permissionDisabled: pending,
               options: (
                 <>
@@ -4226,6 +4797,19 @@ function NativeDesktopContent({
           : canCompose && selection && state
             ? {
                 draft,
+                contextHasInput:
+                  browserNotes.get(imageScope(selection.storeId, selection.session.id)).length > 0,
+                context: (
+                  <BrowserAnnotationCards
+                    owner={browserNotes}
+                    scope={imageScope(selection.storeId, selection.session.id)}
+                    error={
+                      noteSaveError.key === imageScope(selection.storeId, selection.session.id)
+                        ? noteSaveError.message
+                        : undefined
+                    }
+                  />
+                ),
                 queue: inputQueue.queue,
                 queueFocusKey,
                 scopeKey: imageScope(selection.storeId, selection.session.id),
@@ -4263,6 +4847,7 @@ function NativeDesktopContent({
                   selection.viewSelection,
                   state.historyEpoch ?? 0,
                 ]),
+                confirmFullPermission,
                 permissionDisabled:
                   pending ||
                   historyState.phase !== 'complete' ||
@@ -4276,8 +4861,12 @@ function NativeDesktopContent({
                     value.sessionId === selection.session.id &&
                     ['saved', 'submitting', 'unknown'].includes(value.phase),
                 ),
-                onPermissionChange: (mode) => void write(() => setPermissionMode(mode, false)),
+                onPermissionChange: changeCurrentPermission,
                 sendDisabled:
+                  browserNotes.blocked(imageScope(selection.storeId, selection.session.id)) ||
+                  browserNotes
+                    .get(imageScope(selection.storeId, selection.session.id))
+                    .some((note) => note.status !== 'ready') ||
                   historyState.phase !== 'complete' ||
                   selection.permissionUnavailable ||
                   (firstSubmission?.creation.sessionId === selection.session.id &&
@@ -4415,6 +5004,21 @@ function NativeDesktopContent({
                               sessionId: original.sessionId,
                               revision,
                               content: draft,
+                              ...(browserNotes.get(
+                                imageScope(selection.storeId, selection.session.id),
+                              ).length ||
+                              noteDraftStates.current.get(
+                                imageScope(selection.storeId, selection.session.id),
+                              )?.signature
+                                ? {
+                                    browserAnnotations: browserNotes.document(
+                                      imageScope(selection.storeId, selection.session.id),
+                                    ),
+                                    annotationImageOffset: imageDrafts.get(
+                                      imageScope(selection.storeId, selection.session.id),
+                                    ).length,
+                                  }
+                                : {}),
                             });
                             if (
                               saved &&
@@ -4437,6 +5041,14 @@ function NativeDesktopContent({
             : undefined
       }
       readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
+      browserTabRequest={
+        agentBrowserOpen && selection && !preparing && !scheduledTasksView
+          ? {
+              requestId: agentBrowserRequest,
+              createIfMissing: false,
+            }
+          : undefined
+      }
       detailPanel={
         diagnostics && toolsOpen
           ? {
@@ -4476,172 +5088,155 @@ function NativeDesktopContent({
           : undefined
       }
       overlays={
-        <>
-          <AlertDialog
-            open={!!error && !settingsOpen && (diagnostics || businessError)}
-            onOpenChange={(open) => {
-              if (!open) setError('');
+        <Dialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
+        >
+          <DialogContent
+            portalled={false}
+            className="desktop-settings-dialog translate-x-0 translate-y-0"
+            style={
+              {
+                '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
+                '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
+              } as CSSProperties
+            }
+            showCloseButton={false}
+            showOverlay={false}
+            onEscapeKeyDown={(event) => {
+              if (settingsEditorControl.current) {
+                event.preventDefault();
+                settingsEditorControl.current.close();
+              }
+            }}
+            onInteractOutside={(event) => {
+              // Full-page settings closes through navigation or Escape. A nested
+              // Select can temporarily retarget a double-click or focus to the document.
+              event.preventDefault();
+              if (event.detail.originalEvent.type === 'pointerdown')
+                event.detail.originalEvent.preventDefault();
             }}
           >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>操作未完成</AlertDialogTitle>
-                <AlertDialogDescription>{error}</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogAction onClick={() => setError('')}>确定</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <Dialog
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-            modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
-          >
-            <DialogContent
-              portalled={false}
-              className="desktop-settings-dialog translate-x-0 translate-y-0"
-              style={
-                {
-                  '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
-                  '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
-                } as CSSProperties
-              }
-              showCloseButton={false}
-              showOverlay={false}
-              onEscapeKeyDown={(event) => {
-                if (settingsEditorControl.current) {
-                  event.preventDefault();
-                  settingsEditorControl.current.close();
-                }
-              }}
-              onInteractOutside={(event) => {
-                // Full-page settings closes through navigation or Escape. A nested
-                // Select can temporarily retarget a double-click or focus to the document.
-                event.preventDefault();
-                if (event.detail.originalEvent.type === 'pointerdown')
-                  event.detail.originalEvent.preventDefault();
-              }}
-            >
-              <DialogHeader className="desktop-settings-header">
-                <DialogTitle>设置</DialogTitle>
-                <DialogDescription className="sr-only">
-                  配置模型、提供商与扩展能力
-                </DialogDescription>
-              </DialogHeader>
-              <div className="settings settings-layout desktop-settings">
-                <aside className="settings-sidebar">
-                  <nav aria-label="设置分类">
-                    <DesktopButton
-                      type="button"
-                      variant="ghost"
-                      className="settings-back"
-                      onClick={() => setSettingsOpen(false)}
-                    >
-                      <SettingsNavigationIcon name="back" />
-                      <span>返回应用</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'general'}
-                      onClick={() => setSettingsPage('general')}
-                    >
-                      <SettingsNavigationIcon name="general" />
-                      <span>常规</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'providers'}
-                      onClick={() => setSettingsPage('providers')}
-                    >
-                      <SettingsNavigationIcon name="providers" />
-                      <span>提供商与模型</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'mcp'}
-                      onClick={() => setSettingsPage('mcp')}
-                    >
-                      <SettingsNavigationIcon name="mcp" />
-                      <span>MCP</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'skills'}
-                      onClick={() => setSettingsPage('skills')}
-                    >
-                      <SettingsNavigationIcon name="skills" />
-                      <span>Skills</span>
-                    </DesktopButton>
-                  </nav>{' '}
-                </aside>
-                <div className="client-content-frame settings-content-frame">
-                  <div className="settings-content-panels">
-                    <div className="settings-content">
-                      {error && (
-                        <p className="notice error" role="alert">
-                          {error}
-                        </p>
-                      )}
+            <DialogHeader className="desktop-settings-header">
+              <DialogTitle>设置</DialogTitle>
+              <DialogDescription className="sr-only">配置模型、提供商与扩展能力</DialogDescription>
+            </DialogHeader>
+            <div className="settings settings-layout desktop-settings">
+              <aside className="settings-sidebar">
+                <nav aria-label="设置分类">
+                  <DesktopButton
+                    type="button"
+                    variant="ghost"
+                    className="settings-back"
+                    onClick={() => setSettingsOpen(false)}
+                  >
+                    <SettingsNavigationIcon name="back" />
+                    <span>返回应用</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'general'}
+                    onClick={() => setSettingsPage('general')}
+                  >
+                    <SettingsNavigationIcon name="general" />
+                    <span>常规</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'providers'}
+                    onClick={() => setSettingsPage('providers')}
+                  >
+                    <SettingsNavigationIcon name="providers" />
+                    <span>提供商与模型</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'mcp'}
+                    onClick={() => setSettingsPage('mcp')}
+                  >
+                    <SettingsNavigationIcon name="mcp" />
+                    <span>MCP</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'skills'}
+                    onClick={() => setSettingsPage('skills')}
+                  >
+                    <SettingsNavigationIcon name="skills" />
+                    <span>Skills</span>
+                  </DesktopButton>
+                </nav>{' '}
+              </aside>
+              <div className="client-content-frame settings-content-frame">
+                <div className="settings-content-panels">
+                  <div className="settings-content">
+                    {error && (
+                      <p className="notice error" role="alert">
+                        {humanReadableOperationError(
+                          error,
+                          operationFailure?.operation ?? '设置操作',
+                        )}
+                      </p>
+                    )}
 
-                      {settingsPage === 'general' ? (
-                        <NativeGeneralSettings
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory?.storeId}
-                          selection={!preparing ? selection : undefined}
-                          revision={settingsRevision}
-                          editor={editor}
-                          onEditorChange={setEditor}
-                        />
-                      ) : settingsPage === 'skills' ? (
-                        <NativeSkillsSettings
-                          panelHost={settingsEditorHost}
-                          editorControl={settingsEditorControl}
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory?.storeId}
-                        />
-                      ) : settingsPage === 'mcp' ? (
-                        <NativeMcpSettings
-                          panelHost={settingsEditorHost}
-                          editorControl={settingsEditorControl}
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory?.storeId}
-                          submissions={state?.userMcpSubmissions ?? []}
-                        />
-                      ) : (
-                        <NativeProviderModelSettings
-                          key={JSON.stringify([
-                            generation.current,
-                            directory?.storeId,
-                            selection?.session.id,
-                            selection?.viewSelection,
-                          ])}
-                          panelHost={settingsEditorHost}
-                          editorControl={settingsEditorControl}
-                          bridge={bridge}
-                          generation={generation.current}
-                          selection={selection}
-                          storeId={directory?.storeId}
-                          providerSubmissions={state?.providerSettingsSubmissions ?? []}
-                          modelSubmissions={state?.modelSettingsSubmissions ?? []}
-                          onSaved={() => setSettingsRevision((value) => value + 1)}
-                        />
-                      )}
-                    </div>
-                    <div className="settings-editor-panel" ref={setSettingsEditorHost} />
+                    {settingsPage === 'general' ? (
+                      <NativeGeneralSettings
+                        bridge={bridge}
+                        generation={generation.current}
+                        storeId={directory?.storeId}
+                        selection={!preparing ? selection : undefined}
+                        revision={settingsRevision}
+                        editor={editor}
+                        onEditorChange={setEditor}
+                      />
+                    ) : settingsPage === 'skills' ? (
+                      <NativeSkillsSettings
+                        panelHost={settingsEditorHost}
+                        editorControl={settingsEditorControl}
+                        bridge={bridge}
+                        generation={generation.current}
+                        storeId={directory?.storeId}
+                      />
+                    ) : settingsPage === 'mcp' ? (
+                      <NativeMcpSettings
+                        panelHost={settingsEditorHost}
+                        editorControl={settingsEditorControl}
+                        bridge={bridge}
+                        generation={generation.current}
+                        storeId={directory?.storeId}
+                        submissions={state?.userMcpSubmissions ?? []}
+                      />
+                    ) : (
+                      <NativeProviderModelSettings
+                        key={JSON.stringify([
+                          generation.current,
+                          directory?.storeId,
+                          selection?.session.id,
+                          selection?.viewSelection,
+                        ])}
+                        panelHost={settingsEditorHost}
+                        editorControl={settingsEditorControl}
+                        bridge={bridge}
+                        generation={generation.current}
+                        selection={selection}
+                        storeId={directory?.storeId}
+                        providerSubmissions={state?.providerSettingsSubmissions ?? []}
+                        modelSubmissions={state?.modelSettingsSubmissions ?? []}
+                        onSaved={() => setSettingsRevision((value) => value + 1)}
+                      />
+                    )}
                   </div>
+                  <div className="settings-editor-panel" ref={setSettingsEditorHost} />
                 </div>
               </div>
-            </DialogContent>
-          </Dialog>
-        </>
+            </div>
+          </DialogContent>
+        </Dialog>
       }
     />,
   );

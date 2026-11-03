@@ -39,11 +39,13 @@ import {
 } from '../storage/types';
 import { toolImages } from '../tool-images';
 import { runInternalModelCall } from './authorization-check';
+import { AuthorizationCheckUnavailableError } from './authorization-check-feedback';
 import {
   type AuthorizationChangeWait,
   AuthorizationRefreshRequired,
   modeControlsChanged,
 } from './authorization-refresh';
+import { hostRevocationAuthorization } from './host-control';
 import {
   type AcceptedAuthorization,
   AuthorizationCheckRejectedError,
@@ -66,6 +68,56 @@ export interface ModelResponse {
 export interface ToolExecutionResult {
   result: ToolResult;
   dispatched?: boolean;
+}
+/** Detach adapter-owned values before validation or persistence can inspect them. */
+function toolResultSnapshot(value: unknown): ToolResult {
+  const ancestors = new WeakSet<object>();
+  const copy = (value: unknown): Json => {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (!value || typeof value !== 'object' || ancestors.has(value)) throw Error();
+    const array = Array.isArray(value);
+    if (!array && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw Error();
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    // Never run adapter getters or toJSON, including nonenumerable hooks.
+    if (
+      Object.values(descriptors).some((entry) => !('value' in entry)) ||
+      typeof descriptors.toJSON?.value === 'function'
+    )
+      throw Error();
+    ancestors.add(value);
+    let result: Json;
+    if (array) {
+      const entries: Json[] = [];
+      for (let index = 0; index < descriptors.length!.value; index++) {
+        const entry = descriptors[index];
+        if (!entry) throw Error();
+        entries.push(copy(entry.value));
+      }
+      result = entries;
+    } else {
+      const entries: Record<string, Json> = Object.create(null);
+      for (const [key, entry] of Object.entries(descriptors))
+        if (entry.enumerable && entry.value !== undefined) entries[key] = copy(entry.value);
+      result = entries;
+    }
+    ancestors.delete(value);
+    return result;
+  };
+  try {
+    // Serialize only detached data. Every later read uses this one pure JSON snapshot.
+    const result = JSON.parse(JSON.stringify(copy(value))) as ToolResult | null;
+    if (
+      !result ||
+      Array.isArray(result) ||
+      !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(result.outcome) ||
+      typeof result.content !== 'string'
+    )
+      throw Error();
+    return result;
+  } catch {
+    throw new AgentError('invalid_tool_result');
+  }
 }
 /** Core-observed metadata, kept separate from an evaluator's claimed proof. */
 interface RequirementObservation {
@@ -118,6 +170,8 @@ export interface ScopedBindings {
   retain(): () => Promise<void>;
 }
 export interface StandaloneScope {
+  /** Trusted host dispatch class, never supplied in an Action input. */
+  controlOnly?: true;
   command: CommandRecord;
   owner: OwnerRef;
   workspaceId: string;
@@ -692,6 +746,7 @@ export class UnifiedExecution {
     kind: AuthorizationRequest['kind'] = 'tool',
     onStoreCancellation?: () => void,
     admit?: (signal: AbortSignal) => Promise<(() => void) | undefined>,
+    hostAuthorization?: AcceptedAuthorization,
   ) {
     const work = identity(scope);
     for (;;) {
@@ -706,7 +761,7 @@ export class UnifiedExecution {
         input,
         signal: scope.signal,
       };
-      const decision = await this.authorize(scope, request, source);
+      const decision = hostAuthorization ?? (await this.authorize(scope, request, source));
       let releaseAdmission: (() => void) | undefined;
       let releaseResources: (() => void) | undefined;
       const release = () => {
@@ -743,12 +798,16 @@ export class UnifiedExecution {
               release();
               throw error;
             }),
-            gate.policyChanged(
-              { ...this.interactionScope(scope, executionId), signal: controller.signal },
-              { ...request, signal: controller.signal },
-              decision,
-              cursor,
-            ),
+            ...(hostAuthorization
+              ? []
+              : [
+                  gate.policyChanged(
+                    { ...this.interactionScope(scope, executionId), signal: controller.signal },
+                    { ...request, signal: controller.signal },
+                    decision,
+                    cursor,
+                  ),
+                ]),
           ]);
         } finally {
           controller.abort();
@@ -763,6 +822,7 @@ export class UnifiedExecution {
           source,
           kind,
           onStoreCancellation,
+          hostAuthorization,
         );
         return { release, authorization };
       } catch (error) {
@@ -846,6 +906,7 @@ export class UnifiedExecution {
     source: Json,
     kind: AuthorizationRequest['kind'] = 'tool',
     onStoreCancellation?: () => void,
+    hostAuthorization?: AcceptedAuthorization,
   ) {
     const work = identity(scope);
     scope.signal.throwIfAborted();
@@ -862,7 +923,7 @@ export class UnifiedExecution {
           : input,
       signal: scope.signal,
     };
-    const decision = await this.authorize(scope, request, source, true);
+    const decision = hostAuthorization ?? (await this.authorize(scope, request, source, true));
     const controlReads =
       decision.controlReads === undefined ? undefined : structuredClone(decision.controlReads);
     const requirements = await this.requirements(scope, 'dispatch', executionId);
@@ -1520,20 +1581,18 @@ export class UnifiedExecution {
         const { answer } = await requestInteractionWithReceipt(input);
         return answer.kind === 'question' ? answer.answers : (answer as unknown as Json);
       };
-      result = await (resuming ? definition.resume! : definition.execute).call(definition, input, {
-        ...context,
-        dispatchAuthorization,
-        runId: work.runId,
-        reportProgress: progress.report,
-        requestInput: (request) => requestInteraction({ kind: 'question', request }),
-        requestInteraction,
-        requestInteractionWithReceipt,
-      });
-      if (
-        !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(result.outcome) ||
-        typeof result.content !== 'string'
-      )
-        throw new AgentError('invalid_tool_result');
+      result = toolResultSnapshot(
+        await (resuming ? definition.resume! : definition.execute).call(definition, input, {
+          ...context,
+          resourceCapacity: this.options.resources.capacity,
+          dispatchAuthorization,
+          runId: work.runId,
+          reportProgress: progress.report,
+          requestInput: (request) => requestInteraction({ kind: 'question', request }),
+          requestInteraction,
+          requestInteractionWithReceipt,
+        }),
+      );
       if (result.modelImages !== undefined) {
         if (!this.options.validateArtifacts)
           throw new AgentError('artifact_references_unavailable');
@@ -1565,18 +1624,20 @@ export class UnifiedExecution {
                 ? 'cancelled'
                 : 'failed',
         content:
-          !attempted && !dispatched && error instanceof AuthorizationCheckRejectedError
-            ? `Automatic approval did not authorize this tool; it was not executed. Reason: ${error.reason}\nContinue only the originally authorized work. Do not bypass this refusal through another tool or path.`
-            : !attempted &&
-                !dispatched &&
-                error instanceof AuthorizationDeniedError &&
-                error.reason === 'plan_approval_required'
-              ? 'Plan mode is read-only. This Tool was not dispatched. No file was written by this call.'
-              : error instanceof ToolDispatchCancelledError
-                ? error.code
-                : error instanceof AgentError
+          !attempted && !dispatched && error instanceof AuthorizationCheckUnavailableError
+            ? error.message
+            : !attempted && !dispatched && error instanceof AuthorizationCheckRejectedError
+              ? `Automatic approval did not authorize this tool; it was not executed. Reason: ${error.reason}\nContinue only the originally authorized work. Do not bypass this refusal through another tool or path.`
+              : !attempted &&
+                  !dispatched &&
+                  error instanceof AuthorizationDeniedError &&
+                  error.reason === 'plan_approval_required'
+                ? 'Plan mode is read-only. This Tool was not dispatched. No file was written by this call.'
+                : error instanceof ToolDispatchCancelledError
                   ? error.code
-                  : 'tool_failed',
+                  : error instanceof AgentError
+                    ? error.code
+                    : 'tool_failed',
         details: {
           code:
             error instanceof AgentError || error instanceof ToolDispatchCancelledError
@@ -1584,6 +1645,9 @@ export class UnifiedExecution {
               : 'tool_failed',
           dispatchCommitted: dispatched,
           adapterAttempted: attempted,
+          ...(error instanceof AuthorizationCheckUnavailableError
+            ? { authorizationCheck: error.check }
+            : {}),
           ...(error instanceof AuthorizationDeniedError ? { reason: error.reason } : {}),
         },
       };
@@ -1615,11 +1679,11 @@ export class UnifiedExecution {
         executionId,
         status: result.outcome,
         result: {
-          ...JSON.parse(JSON.stringify(result)),
+          ...result,
           ...(progressFailure
             ? { progressPersistence: { state: 'failed', code: progressFailure } }
             : {}),
-        } as Json,
+        } as unknown as Json,
         ...(work.runId
           ? {
               message: {
@@ -1957,13 +2021,18 @@ export class UnifiedExecution {
         result = {
           outcome: attempted ? 'outcome_unknown' : scope.signal.aborted ? 'cancelled' : 'failed',
           content:
-            error instanceof AgentError
-              ? error.code
-              : error instanceof JobStartError
-                ? error.message
-                : 'job_failed',
+            !attempted && error instanceof AuthorizationCheckUnavailableError
+              ? error.message
+              : error instanceof AgentError
+                ? error.code
+                : error instanceof JobStartError
+                  ? error.message
+                  : 'job_failed',
           details: {
             adapterAttempted: attempted,
+            ...(error instanceof AuthorizationCheckUnavailableError
+              ? { code: error.code, authorizationCheck: error.check }
+              : {}),
             stopConfirmation: confirmation
               ? (JSON.parse(JSON.stringify(confirmation)) as Json)
               : null,
@@ -2114,6 +2183,7 @@ export class UnifiedExecution {
     },
   ): Promise<ToolResult> {
     const definitionId = `${input.extensionId}/${input.definition.id}`;
+    const hostAuthorization = hostRevocationAuthorization(input.definition, input.prepared);
     await this.options.store.planAction({
       expectedStoreId: scope.command.originStoreId,
       owner: scope.owner,
@@ -2142,6 +2212,9 @@ export class UnifiedExecution {
         input.decisionSource,
         input.definition.resources,
         'job',
+        undefined,
+        undefined,
+        hostAuthorization,
       );
       release = acquired.release;
       scope.signal.throwIfAborted();
@@ -2170,10 +2243,18 @@ export class UnifiedExecution {
     } catch (error) {
       result = {
         outcome: attempted ? 'outcome_unknown' : scope.signal.aborted ? 'cancelled' : 'failed',
-        content: error instanceof AgentError ? error.code : 'action_failed',
+        content:
+          !attempted && error instanceof AuthorizationCheckUnavailableError
+            ? error.message
+            : error instanceof AgentError
+              ? error.code
+              : 'action_failed',
         details: {
           code: error instanceof AgentError ? error.code : 'action_failed',
           adapterAttempted: attempted,
+          ...(error instanceof AuthorizationCheckUnavailableError
+            ? { authorizationCheck: error.check }
+            : {}),
         },
       };
     }

@@ -1,0 +1,315 @@
+.agent-browser-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  font-size: 13px;
+  container: agent-browser / inline-size;
+}
+.agent-browser-panel p,
+.agent-browser-more p {
+  margin: 0;
+}
+.agent-browser-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  min-height: 42px;
+  flex: none;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.agent-browser-toolbar > button {
+  flex: none;
+  min-height: 28px;
+  padding: 4px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.agent-browser-location {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  gap: 2px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+}
+.agent-browser-location input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+}
+.agent-browser-location button {
+  flex: none;
+}
+.agent-browser-viewport {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  background: var(--muted);
+}
+.agent-browser-canvas {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.agent-browser-frame {
+  display: block;
+  position: relative;
+  width: 100%;
+  margin-inline: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--muted);
+  cursor: default;
+}
+.agent-browser-frame:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.agent-browser-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.agent-browser-frame.is-pointing {
+  cursor: crosshair;
+}
+.agent-browser-region {
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.agent-browser-region.is-selected {
+  border: 2px solid #3b82f6;
+  background: #3b82f61a;
+  box-shadow: 0 0 0 1px #fff8;
+}
+.agent-browser-help {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.agent-browser-frozen-hint {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 4px;
+  width: fit-content;
+  max-width: calc(100% - 12px);
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--background);
+  font-size: 10px;
+  pointer-events: none;
+}
+.agent-browser-note {
+  position: absolute;
+  z-index: 2;
+  bottom: 28px;
+  width: min(320px, 94%);
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  background: var(--background);
+  box-shadow: 0 8px 28px #0003;
+}
+.agent-browser-note > strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.agent-browser-note > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.agent-browser-note textarea,
+.agent-browser-more input,
+.agent-browser-more select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+.agent-browser-note textarea {
+  resize: vertical;
+  max-height: 180px;
+}
+.agent-browser-more {
+  display: grid;
+  gap: 10px;
+  width: min(320px, 94vw);
+  max-height: calc(100dvh - 120px);
+  overflow: auto;
+}
+.agent-browser-more label,
+.agent-browser-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-browser-selection {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}
+.agent-browser-more .agent-browser-toolbar {
+  border: 0;
+  padding: 0;
+}
+.agent-browser-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+@container agent-browser (max-width: 520px) {
+  .agent-browser-control-label {
+    display: none;
+  }
+  .agent-browser-control[data-control="handoff"]::before {
+    content: "Ⅱ";
+  }
+  .agent-browser-control[data-control="resume"]::before {
+    content: "▶";
+  }
+  .agent-browser-toolbar > button {
+    width: 28px;
+    padding: 4px;
+  }
+  .agent-browser-pointer {
+    font-size: 18px;
+  }
+}
+.browser-note-context {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+.browser-note-context summary {
+  cursor: pointer;
+  width: fit-content;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.browser-note-list {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 8px;
+}
+.browser-note-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+}
+.browser-note-thumb {
+  position: relative;
+  align-self: start;
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.browser-note-thumb img {
+  display: block;
+  width: 100%;
+}
+.browser-note-card strong,
+.browser-note-card small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-note-card small,
+.browser-note-context > p {
+  color: var(--muted-foreground);
+}
+.browser-note-card textarea {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+.browser-note-card p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.browser-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.browser-note-actions button {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+@container (max-width: 280px) {
+  .browser-note-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+.agent-browser-status:not(.sr-only) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+
+.agent-browser-annotation-tools {
+  display: grid;
+  gap: 10px;
+  width: min(320px, calc(100vw - 24px));
+  max-height: calc(100dvh - 96px);
+  overflow: auto;
+}
+.agent-browser-annotation-tools p {
+  margin: 0;
+}
+.agent-browser-note.agent-browser-note-tools {
+  position: static;
+  width: 100%;
+  max-height: none;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}

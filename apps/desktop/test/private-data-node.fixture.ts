@@ -11,11 +11,14 @@ import {
   callerDigest,
   callerTarget,
   callerTextDigest,
+  nativeDraftProof,
   validateCallerRecord,
 } from '../electron/caller-journal';
 import { parseConfigurationRecord } from '../electron/configuration-journal';
 import { openPrivateData } from '../electron/private-data';
 import { acquireDesktopProfileAccess } from '../electron/profile-access';
+import { composeBrowserDraft } from '../src/browser-annotation-content';
+import { annotationFixture } from './browser-annotation.fixture';
 
 const scope = {
   storeId: 'original-store',
@@ -521,6 +524,88 @@ if (mode === 'denied') {
     );
     configurationDb.close();
     data = await open();
+    data.close();
+    // Annotation envelopes remain Native-only metadata; legacy JSON strings above are unchanged.
+    data = await open();
+    const { saved: note } = annotationFixture();
+    const noteScope = { ...scope, rootSessionId: 'note-only' };
+    let noteDraft = data.save(noteScope, 0, '', [note], 0);
+    data.close();
+    data = await open();
+    assert.deepEqual(data.read(noteScope), noteDraft);
+    assert(!JSON.stringify(noteDraft).includes('/9j/2Q=='));
+    assert.throws(() => data.save(noteScope, 0, 'stale', [note]), /draft_revision_conflict/);
+    assert.throws(
+      () => data.save(noteScope, noteDraft.revision, 'older writer'),
+      /browser_annotation_draft_required/,
+    );
+    const noteCaller = (commandId: string, original: typeof noteDraft) => {
+      const request: CallerCommandRequest = {
+        kind: 'run.start',
+        commandId,
+        expectedStoreId: original.storeId,
+        content: composeBrowserDraft(original),
+        images: original.browserAnnotations!.map((note) => ({
+          name: 'snapshot.jpg',
+          reference: {
+            id: note.id,
+            storeId: original.storeId,
+            sessionId: original.rootSessionId,
+            subjectId: 'local-user',
+            scope: { kind: 'session' as const, id: original.rootSessionId },
+            hash: note.imageHash,
+            size: String(note.frame.byteLength),
+            mediaType: note.frame.mimeType,
+          },
+        })),
+      };
+      const callerScope = {
+        storeId: original.storeId,
+        workspaceId: original.workspaceId,
+        sessionId: original.rootSessionId,
+      };
+      return validateCallerRecord({
+        intent: {
+          scope: callerScope,
+          request,
+          subjectId: 'local-user',
+          target: callerTarget(callerScope, request),
+          bodyDigest: callerDigest(request),
+          requestDigest: callerTextDigest(canonicalCallerCommandRequest(request)),
+          draft: nativeDraftProof(original),
+        },
+        phase: 'submitting',
+      });
+    };
+    data.beginCaller(noteCaller('notes-only-command', noteDraft));
+    data.finishCaller('notes-only-command', 'unknown');
+    data.close();
+    data = await open();
+    assert.deepEqual(data.read(noteScope), noteDraft); // Unknown does not consume or retry.
+    data.finishCaller('notes-only-command', 'accepted');
+    assert.equal(data.read(noteScope).content, '');
+    assert.equal(data.read(noteScope).browserAnnotations, undefined);
+    assert.equal(data.read(noteScope).revision, noteDraft.revision + 1);
+    // A later prompt edit survives; only the exact submitted note version is consumed.
+    const editScope = { ...scope, rootSessionId: 'note-new-edit' };
+    noteDraft = data.save(editScope, 0, 'old prompt', [note], 0);
+    data.beginCaller(noteCaller('old-note-command', noteDraft));
+    const editedNote = { ...note, id: 'new-note', version: 2, note: 'new note' };
+    data.save(editScope, noteDraft.revision, 'new prompt', [note, editedNote], 0);
+    data.finishCaller('old-note-command', 'accepted');
+    assert.equal(data.read(editScope).content, 'new prompt');
+    assert.deepEqual(data.read(editScope).browserAnnotations, [editedNote]);
+    const modifiedScope = { ...scope, rootSessionId: 'note-new-version' };
+    noteDraft = data.save(modifiedScope, 0, 'original', [note], 0);
+    data.beginCaller(noteCaller('old-version-command', noteDraft));
+    const editedVersion = { ...note, version: 2, note: 'version two' };
+    data.save(modifiedScope, noteDraft.revision, 'edited', [editedVersion], 0);
+    data.finishCaller('old-version-command', 'accepted');
+    assert.deepEqual(data.read(modifiedScope).browserAnnotations, [editedVersion]);
+    data.close();
+    data = await open();
+    assert.equal(data.read(editScope).content, 'new prompt');
+    assert.deepEqual(data.read(modifiedScope).browserAnnotations, [editedVersion]);
     data.close();
     let corrupt = new DatabaseSync(privatePath);
     const intact = String(

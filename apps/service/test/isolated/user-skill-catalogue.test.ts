@@ -119,7 +119,17 @@ test('global Skills reads only merged user configuration and trusted user/Profil
       });
       all.push(...page.entries);
     }
-    expect(all).toHaveLength(306);
+    expect(all).toHaveLength(307);
+    expect(all.filter((row) => row.id !== 'computer-use')).toHaveLength(306);
+    expect(all.find((row) => row.id === 'computer-use')).toMatchObject({
+      name: 'computer-use',
+      source: null,
+      enabled: true,
+      state: 'unavailable',
+      reason: 'skill_capability_missing',
+      requiredCapabilities: ['browser.execute'],
+      missingCapabilities: ['browser.execute'],
+    });
     expect(new Set(all.map((row) => row.id)).size).toBe(all.length);
     expect(first.scope).toBe('user');
     expect('workspaceId' in first || 'sessionId' in first).toBe(false);
@@ -169,7 +179,7 @@ test('global Skills reads only merged user configuration and trusted user/Profil
   }
 });
 
-test('global user source has stable empty reads without creating a missing configuration directory', async () => {
+test('global user source lists the installed builtin without creating a missing configuration directory', async () => {
   const f = fixture();
   rmSync(f.userRoot, { recursive: true });
   const source = f.source();
@@ -179,7 +189,16 @@ test('global user source has stable empty reads without creating a missing confi
       scope: 'user',
       availability: 'available',
       reason: null,
-      entries: [],
+      entries: [
+        {
+          id: 'computer-use',
+          name: 'computer-use',
+          state: 'unavailable',
+          reason: 'skill_capability_missing',
+          requiredCapabilities: ['browser.execute'],
+          missingCapabilities: ['browser.execute'],
+        },
+      ],
       complete: true,
       nextAfterId: null,
     });

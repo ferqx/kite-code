@@ -262,8 +262,10 @@ for (const [initiallyOpen, lazyHistory] of [
       }
       if (!initiallyOpen) await f.render({ messages, turnActivity });
       const process = f.host.querySelector('.agent-turn-process')!;
-      const summary = process.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
-      expect(summary.getAttribute('aria-expanded')).toBe('true');
+      const summary = process.querySelector<HTMLElement>('.agent-turn-summary')!;
+      expect(process.getAttribute('data-state')).toBe('open');
+      expect(summary.tagName).toBe('DIV');
+      expect(summary.getAttribute('aria-expanded')).toBeNull();
       expect(process.hasAttribute('data-restored-expanded')).toBe(initiallyOpen);
       // The first render can add its own marker; settle that signature before
       // measuring whether an already-restored projection is reused.
@@ -274,7 +276,7 @@ for (const [initiallyOpen, lazyHistory] of [
       await resume();
       expect(f.host.querySelector('.agent-turn-process')).toBe(process);
       expect(process.getAttribute('data-restored-expanded')).toBe('true');
-      expect(summary.getAttribute('aria-expanded')).toBe('true');
+      expect(process.getAttribute('data-state')).toBe('open');
       expect(toolCalls).toBe(beforeResume + (initiallyOpen ? 0 : 1));
       const restoredCalls = toolCalls;
       for (let index = 0; index < 2; index++) {
@@ -287,23 +289,28 @@ for (const [initiallyOpen, lazyHistory] of [
       await refresh();
       await act(async () => summary.click());
       await f.render();
-      expect(summary.getAttribute('aria-expanded')).toBe('false');
-      expect(process.hasAttribute('data-restored-expanded')).toBe(false);
-      const closedCalls = toolCalls;
+      expect(process.getAttribute('data-state')).toBe('open');
+      expect(summary.getAttribute('aria-expanded')).toBeNull();
+      expect(process.hasAttribute('data-restored-expanded')).toBe(true);
+      const ongoingCalls = toolCalls;
       await leave();
       await resume();
-      expect(summary.getAttribute('aria-expanded')).toBe('false');
-      expect(process.hasAttribute('data-restored-expanded')).toBe(false);
-      expect(toolCalls).toBe(closedCalls);
-      await refresh();
-      await act(async () => summary.click());
-      await f.render();
-      expect(summary.getAttribute('aria-expanded')).toBe('true');
-      expect(process.hasAttribute('data-restored-expanded')).toBe(false);
-      await leave();
-      await resume();
-      expect(f.host.querySelector('.agent-turn-process')).toBe(process);
-      expect(process.getAttribute('data-restored-expanded')).toBe('true');
+      expect(process.getAttribute('data-state')).toBe('open');
+      expect(process.hasAttribute('data-restored-expanded')).toBe(true);
+      expect(toolCalls).toBe(ongoingCalls);
+      await f.render({
+        cacheLoading: false,
+        readActive: true,
+        messages: messages.map((message) => ({ ...message, settled: true })),
+        turnActivity: { turnId: 'run', status: 'completed' },
+      });
+      const finished = f.host.querySelector('.agent-turn-process')!;
+      const toggle = finished.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+      expect(finished).not.toBe(process);
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => toggle.click());
+      expect(toggle.getAttribute('aria-expanded')).toBe('true');
+      expect(finished.hasAttribute('data-restored-expanded')).toBe(false);
     } finally {
       await f.close();
     }

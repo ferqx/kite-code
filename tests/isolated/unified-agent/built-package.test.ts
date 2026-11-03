@@ -151,6 +151,7 @@ nativeTest(
       expect(existsSync(join(agentPath, 'mcp/schema-worker.sha256'))).toBe(true);
       expect(existsSync(join(agentPath, 'skills/workflow-contract/worker.js'))).toBe(false);
       expect(existsSync(join(agentPath, 'skills/workflow-contract/worker.sha256'))).toBe(false);
+      expect(existsSync(join(agentPath, 'tools/browser/executor/worker.js'))).toBe(true);
       expect(exports).toEqual({
         '.': './index.js',
         './extensions': './extensions/index.js',
@@ -164,9 +165,12 @@ nativeTest(
         './resources': './resources.js',
         './context-estimate': './context-estimate.js',
         './session-title': './business/session-title/index.js',
+        './browser': './tools/browser/index.js',
+        './browser/executor': './tools/browser/executor/index.js',
         './process-observation': './process-observation.js',
         './jobs/shell': './jobs/shell.js',
         './config': './config/index.js',
+        './mcp-entry': './config/mcp-entry.js',
         './files': './files.js',
         './artifacts': './artifacts.js',
         './skills': './skills/index.js',
@@ -231,6 +235,7 @@ assert.equal(AgentError,StorageAgentError,'public entries must share their actua
 const {defineExtension}=await import('@kite-ai/agent/extensions');
 const {openSqliteStore}=await import('@kite-ai/agent/sqlite');
 const {createShellJob,shellSupervisorAsset}=await import('@kite-ai/agent/jobs/shell');
+const {browserExecutorWorkerAsset,createBrowserExecutor,BrowserExecutorStartupError}=await import('@kite-ai/agent/browser/executor');
 const {createSkillSource}=await import('@kite-ai/agent/skills');
 const {createWorkspaceFiles}=await import('@kite-ai/agent/files');
 const {createConfigurationSnapshot}=await import('@kite-ai/agent/config');
@@ -268,6 +273,24 @@ writeFileSync(join(working,'packaged.ts'),'one\\ntwo\\n');
 const files=createWorkspaceFiles({root:working});const filePage=await files.read('packaged.ts',{offset:2,limit:1});assert.equal(filePage.content,'two\\n');assert.equal(filePage.baseline.size,8);assert.deepEqual((await files.glob({pattern:'**/*.ts'})).paths,['packaged.ts']);
 const skills=join(working,'knowledge');mkdirSync(skills);writeFileSync(join(skills,'SKILL.md'),'---\\nname: packaged\\ndescription: artifact knowledge\\n---\\nRead [note](note.txt)');writeFileSync(join(skills,'note.txt'),'packaged reference');
 const source=createSkillSource({trustedRoots:[skills],locations:[skills]});const summary=(await source.list()).entries[0];const body=await source.load({id:summary.id,version:summary.version});assert.equal(body.resources.length,1);assert.equal((await source.readResource({skillId:summary.id,version:summary.version,path:'note.txt'})).body,'packaged reference');
+assert.equal(shellSupervisorAsset(),join(packageRoot,'platform/process/shell-supervisor.js'));
+assert.equal(mcpStdioGuardianAsset(),join(packageRoot,'mcp/stdio-guardian.js'));
+const browserWorker=browserExecutorWorkerAsset();assert.equal(browserWorker,join(packageRoot,'tools/browser/executor/worker.js'));assert(existsSync(browserWorker));
+const browserExecutorCalls=[];let browserExecutorQualified=false,browserExecutorClosed=false,browserExecutorUnavailable=false;
+const browserExecutorOptions={scope:'packaged-browser-code',workerPath:browserWorker,guardianPath:mcpStdioGuardianAsset(),bunExecutable:process.execPath};
+if(process.platform==='darwin'){
+ const deniedFile=join(working,'executor-denied.txt');writeFileSync(deniedFile,'PACKAGED_EXECUTOR_FIXTURE_ONLY');
+ let observations=0,filled='',clicked=0;
+ const call=async(method,args)=>{browserExecutorCalls.push([method,args]);if(method==='open'){assert.deepEqual(args,{url:'http://localhost/packaged-only'});return 'packaged-page';}if(method==='snapshot'){assert.deepEqual(args,{page:'packaged-page',args:[]});observations++;return {elements:[{ref:'name-'+observations,role:'textbox',name:'Name'},{ref:'submit-'+observations,role:'button',name:'Submit'}],filled,clicked};}if(method==='fill'){assert.deepEqual(args,{page:'packaged-page',args:['name-1','Ada']});filled='Ada';return null;}if(method==='click'){assert.deepEqual(args,{page:'packaged-page',args:['submit-2']});clicked++;return null;}throw new Error('unexpected_packaged_browser_api');};
+ const executor=await createBrowserExecutor(browserExecutorOptions);
+ try{
+  assert.deepEqual(await executor.execute({code:'var p=await browser.open("http://localhost/packaged-only"); var count=4; const signature="built"; let mutable=1; var first=await p.snapshot(); await p.fill(first.elements.find(e=>e.role==="textbox").ref,"Ada"); var fresh=await p.snapshot(); await p.click(fresh.elements.find(e=>e.role==="button").ref); var verified=await p.snapshot(); ({filled:verified.filled,clicked:verified.clicked})',signal:new AbortController().signal,call}),{value:{filled:'Ada',clicked:1},output:''});
+  assert.deepEqual(await executor.execute({code:'count+=mutable; var denied=false; try{await Bun.file('+JSON.stringify(deniedFile)+').text();}catch{denied=true;} console.log(signature,p.id); ({count,denied})',signal:new AbortController().signal,call}),{value:{count:5,denied:true},output:'built packaged-page\\n'});
+  assert.deepEqual(browserExecutorCalls,[['open',{url:'http://localhost/packaged-only'}],['snapshot',{page:'packaged-page',args:[]}],['fill',{page:'packaged-page',args:['name-1','Ada']}],['snapshot',{page:'packaged-page',args:[]}],['click',{page:'packaged-page',args:['submit-2']}],['snapshot',{page:'packaged-page',args:[]}]]);assert.equal(readFileSync(deniedFile,'utf8'),'PACKAGED_EXECUTOR_FIXTURE_ONLY');browserExecutorQualified=true;
+ }finally{assert.deepEqual(await executor.close(),{confirmed:true});browserExecutorClosed=true;}
+}else{
+ await assert.rejects(createBrowserExecutor(browserExecutorOptions),error=>error instanceof BrowserExecutorStartupError&&error.message==='browser_executor_unavailable'&&error.cleanupConfirmed===true);browserExecutorUnavailable=true;
+}
 const compilerAssets=[mcpSchemaWorkerAssets()];
 assert.equal(compilerAssets[0].worker,join(packageRoot,'mcp/schema-worker.js'));
 for(const assets of compilerAssets){assert.equal(readFileSync(assets.checksum,'utf8'),createHash('sha256').update(readFileSync(assets.worker)).digest('hex')+String.fromCharCode(10));for(const file of [assets.preload,...assets.observerModules])assert(file.startsWith(packageRoot+'/')&&existsSync(file));}
@@ -403,7 +426,7 @@ try{
 
  }finally{await restoredReader.close();}
  assert.deepEqual({provider:providerRequests.length,effects,stdioEffects},beforeBackup);
- process.stdout.write(JSON.stringify({entries:Object.keys(manifest.exports).length,worker:true,guardian:true,mcpGuardian:true,service:true,client:true,httpPort:true,stdioQualified:process.platform==='darwin',stdioAdmissions,stdioEffects,stdioStopped,skillVersion:body.version,mcpEffects:effects,shellStatus:job.status,sourceFallback:false,filePaging:true,glob:true,webWorker:true,parserHash,webArtifactBytes:binary.content.byteLength,webArtifactScope:reference.scope.kind,webRequests,webAdmissions,webStatus:webExecution.status,webMissingAssetRejected:true,pairedMain,pairedStopped,lifecycleStopped,gatewayRead,nativeSecretHidden,backupVerified:true,restoreVerified:true})+'\\n');
+ process.stdout.write(JSON.stringify({entries:Object.keys(manifest.exports).length,worker:true,guardian:true,mcpGuardian:true,browserExecutorWorker:true,browserExecutorQualified,browserExecutorClosed,browserExecutorUnavailable,browserExecutorApiCalls:browserExecutorCalls.length,service:true,client:true,httpPort:true,stdioQualified:process.platform==='darwin',stdioAdmissions,stdioEffects,stdioStopped,skillVersion:body.version,mcpEffects:effects,shellStatus:job.status,sourceFallback:false,filePaging:true,glob:true,webWorker:true,parserHash,webArtifactBytes:binary.content.byteLength,webArtifactScope:reference.scope.kind,webRequests,webAdmissions,webStatus:webExecution.status,webMissingAssetRejected:true,pairedMain,pairedStopped,lifecycleStopped,gatewayRead,nativeSecretHidden,backupVerified:true,restoreVerified:true})+'\\n');
 }finally{await files.close();await service?.close();await runtime?.close();if(!runtime)await store?.close();await lifecycle.close();await adapter.close();server.stop(true);web.stop(true);provider.stop(true);}
 `,
       );
@@ -412,6 +435,11 @@ try{
         worker: boolean;
         guardian: boolean;
         mcpGuardian: boolean;
+        browserExecutorWorker: boolean;
+        browserExecutorQualified: boolean;
+        browserExecutorClosed: boolean;
+        browserExecutorUnavailable: boolean;
+        browserExecutorApiCalls: number;
         service: boolean;
         client: boolean;
         httpPort: boolean;
@@ -446,6 +474,11 @@ try{
         worker: true,
         guardian: true,
         mcpGuardian: true,
+        browserExecutorWorker: true,
+        browserExecutorQualified: process.platform === 'darwin',
+        browserExecutorClosed: process.platform === 'darwin',
+        browserExecutorUnavailable: process.platform !== 'darwin',
+        browserExecutorApiCalls: process.platform === 'darwin' ? 6 : 0,
         service: true,
         client: true,
         httpPort: true,

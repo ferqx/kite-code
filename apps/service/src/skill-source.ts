@@ -3,7 +3,13 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { AgentError } from '@kite-ai/agent';
 import type { JsonObject } from '@kite-ai/agent/config';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
-import { createSkillSource, SkillError, type SkillSummary } from '@kite-ai/agent/skills';
+import {
+  builtinComputerUseSkillId,
+  createBuiltinComputerUseSkillSource,
+  createSkillSource,
+  SkillError,
+  type SkillSummary,
+} from '@kite-ai/agent/skills';
 import {
   createKnowledgeReadScope,
   KnowledgeReadCleanupError,
@@ -57,7 +63,9 @@ export function createConfiguredSkillSource(
   const allowed = [...(options.allowedCapabilities ?? [])].filter((id) =>
     options.toolIds.includes(id),
   );
-  let sources = new Map<string, ReturnType<typeof createSkillSource>>();
+  const builtin = createBuiltinComputerUseSkillSource();
+  type KnowledgeSource = ReturnType<typeof createSkillSource> | typeof builtin;
+  let sources = new Map<string, KnowledgeSource>();
   let configuredIds = new Map<string, string>();
   const knowledgeScope = options.knowledgeScope ?? createKnowledgeReadScope();
   const pending = new Set<Promise<unknown>>();
@@ -78,7 +86,10 @@ export function createConfiguredSkillSource(
     dispose() {
       if (disposal) return disposal;
       sealed = true;
-      disposal = Promise.allSettled([...pending]).then(() => knowledgeScope.dispose());
+      disposal = Promise.allSettled([...pending]).then(async () => {
+        await builtin.dispose();
+        await knowledgeScope.dispose();
+      });
       void disposal.catch(() => {});
       return disposal;
     },
@@ -87,11 +98,42 @@ export function createConfiguredSkillSource(
     },
     list() {
       return admitted(async () => {
-        if (userScope && configured.length === 0) {
-          sources = new Map();
-          configuredIds = new Map();
-          return { entries: [], states: [] };
-        }
+        const states = new Map<string, ConfiguredSkillState>();
+        const summaries = new Map<string, SkillSummary>();
+        const nextSources = new Map<string, KnowledgeSource>();
+        const nextIds = new Map<string, string>();
+        const entry = (await builtin.list()).entries[0]!;
+        const missingCapabilities = entry.requiredCapabilities.filter(
+          (id) => !allowed.includes(id),
+        );
+        states.set(builtinComputerUseSkillId, {
+          id: builtinComputerUseSkillId,
+          source: null,
+          name: entry.name,
+          description: entry.description,
+          version: entry.version,
+          enabled: true,
+          state: missingCapabilities.length ? 'unavailable' : 'available',
+          reason: missingCapabilities.length ? 'skill_capability_missing' : null,
+          requiredCapabilities: [...entry.requiredCapabilities],
+          missingCapabilities,
+        });
+        nextIds.set(entry.id, builtinComputerUseSkillId);
+        // Installation is global and independent of a workspace path or Tool selection.
+        // Keeping its reader does not grant dependencies; load rechecks the host's allowed set.
+        nextSources.set(entry.id, builtin);
+        if (!missingCapabilities.length) summaries.set(entry.id, entry);
+        const publish = () => {
+          sources = nextSources;
+          configuredIds = nextIds;
+          return {
+            entries: [...summaries.values()].sort((a, b) =>
+              this.configuredId(a) < this.configuredId(b) ? -1 : 1,
+            ),
+            states: [...states.values()].sort((a, b) => (a.id < b.id ? -1 : 1)),
+          };
+        };
+        if (configured.length === 0) return publish();
         const root = await realpath(configurationRoot);
         const stat = await lstat(configurationRoot);
         if (!stat.isDirectory() || stat.isSymbolicLink())
@@ -106,10 +148,6 @@ export function createConfiguredSkillSource(
           if ((error as { code?: string }).code !== 'ENOENT') throw error;
         }
         const trustedRoots = [root, ...(profileRootAvailable ? [profileRoot] : [])];
-        const states = new Map<string, ConfiguredSkillState>();
-        const summaries = new Map<string, SkillSummary>();
-        const nextSources = new Map<string, ReturnType<typeof createSkillSource>>();
-        const nextIds = new Map<string, string>();
         const locations = configured.map((skill) => {
           if (typeof skill.id !== 'string' || !skill.id || states.has(skill.id))
             throw new AgentError('invalid_skill_configuration');
@@ -233,25 +271,40 @@ export function createConfiguredSkillSource(
             nextSources.set(summary.id, source);
           }
         }
-        sources = nextSources;
-        configuredIds = nextIds;
-        return {
-          entries: [...summaries.values()].sort((a, b) =>
-            this.configuredId(a) < this.configuredId(b) ? -1 : 1,
-          ),
-          states: [...states.values()].sort((a, b) => (a.id < b.id ? -1 : 1)),
-        };
+        return publish();
       });
     },
     load(input: Parameters<ReturnType<typeof createSkillSource>['load']>[0]) {
       const source = sources.get(input.id);
       if (!source) throw new SkillError('skill_not_discovered');
-      return admitted(() => source.load(input));
+      return admitted(() =>
+        source.load(
+          source === builtin
+            ? {
+                ...input,
+                availableCapabilities: input.availableCapabilities?.filter((id) =>
+                  allowed.includes(id),
+                ),
+              }
+            : input,
+        ),
+      );
     },
     readResource(input: Parameters<ReturnType<typeof createSkillSource>['readResource']>[0]) {
       const source = sources.get(input.skillId);
       if (!source) throw new SkillError('skill_not_discovered');
-      return admitted(() => source.readResource(input));
+      return admitted(() =>
+        source.readResource(
+          source === builtin
+            ? {
+                ...input,
+                availableCapabilities: input.availableCapabilities?.filter((id) =>
+                  allowed.includes(id),
+                ),
+              }
+            : input,
+        ),
+      );
     },
   };
 }

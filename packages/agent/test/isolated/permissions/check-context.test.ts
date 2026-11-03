@@ -189,6 +189,52 @@ test('foreign subject/Store/Session and runless callers receive no task, plan or
   }
 });
 
+test('a real runless operation reads its verified parent task without changing its own Run ID', async () => {
+  const f = fixture();
+  const parent = { ...f.execution, id: 'parent' };
+  const operation = { ...f.command, id: 'operation-command' };
+  Object.assign(f.execution, {
+    runId: null,
+    parentExecutionId: parent.id,
+    originCommandId: operation.id,
+  });
+  f.request.runId = null as unknown as string;
+  f.runtime.getExecution = async (id?: string) => (id === parent.id ? parent : f.execution);
+  f.runtime.getCommand = async (id: string) => (id === operation.id ? operation : f.command);
+  expect((await f.read(f.request)).task).toMatchObject({
+    availability: 'available',
+    currentRun: { id: 'run' },
+    rootUserTask: 'Fix the user problem',
+  });
+  expect(f.execution.runId).toBeNull();
+});
+
+for (const damage of ['session', 'store', 'work', 'subject', 'cycle'] as const)
+  test(`a nested operation with a foreign or cyclic ${damage} parent discloses no task`, async () => {
+    const f = fixture();
+    const parent = { ...f.execution, id: 'parent', parentExecutionId: null as string | null };
+    const operation = { ...f.command, id: 'operation-command' };
+    Object.assign(f.execution, {
+      runId: null,
+      parentExecutionId: parent.id,
+      originCommandId: operation.id,
+    });
+    f.request.runId = null as unknown as string;
+    if (damage === 'session') parent.sessionId = 'other';
+    if (damage === 'store') parent.originStoreId = 'other';
+    if (damage === 'work') parent.rootWorkSeq = 'other';
+    if (damage === 'subject') operation.subjectId = 'other';
+    if (damage === 'cycle')
+      Object.assign(parent, { runId: null, parentExecutionId: f.execution.id });
+    f.runtime.getExecution = async (id?: string) => (id === parent.id ? parent : f.execution);
+    f.runtime.getCommand = async (id: string) => (id === operation.id ? operation : f.command);
+    expect(await f.read(f.request)).toMatchObject({
+      task: { availability: 'unknown' },
+      plan: null,
+      rejectionReasons: [],
+    });
+  });
+
 test('abort during readonly source wait stops before reading further context', async () => {
   const f = fixture();
   const controller = new AbortController();

@@ -77,6 +77,33 @@ function validateSnapshot(
 ) {
   const body = message.outputBody;
   const origin = message.originMessage;
+  const exactBody =
+    body &&
+    snapshot.output.complete === body.complete &&
+    snapshot.contentBytes === body.contentBytes &&
+    snapshot.reasoningBytes === body.reasoningBytes &&
+    (body.complete
+      ? snapshot.status === 'succeeded' && snapshot.output.toolCalls.length === body.toolCallCount
+      : snapshot.output.toolCalls.length === 0);
+  // The full-body GET observes a later Store snapshot than a live message's
+  // history projection. Only that original unfinished message may advance;
+  // sealed origins and completed bodies still require the exact saved summary.
+  const advancedBody =
+    body &&
+    !origin &&
+    message.status === 'incomplete' &&
+    !body.complete &&
+    body.toolCallCount === 0 &&
+    !message.toolCalls?.length &&
+    BigInt(snapshot.contentBytes) >= BigInt(body.contentBytes) &&
+    BigInt(snapshot.reasoningBytes) >= BigInt(body.reasoningBytes) &&
+    snapshot.output.content.startsWith(message.content) &&
+    (snapshot.output.complete ||
+      BigInt(snapshot.contentBytes) > BigInt(body.contentBytes) ||
+      BigInt(snapshot.reasoningBytes) > BigInt(body.reasoningBytes)) &&
+    (snapshot.output.complete
+      ? snapshot.status === 'succeeded'
+      : snapshot.output.toolCalls.length === 0);
   if (
     !body ||
     (origin && (origin.runId === null || (origin.storeId !== storeId && !canReadRestoredOrigin))) ||
@@ -84,16 +111,11 @@ function validateSnapshot(
     snapshot.sessionId !== (origin?.sessionId ?? message.sessionId) ||
     snapshot.executionId !== body.executionId ||
     snapshot.runId !== (origin?.runId ?? message.runId) ||
-    (body.complete && snapshot.status !== 'succeeded') ||
-    snapshot.output.complete !== body.complete ||
-    snapshot.contentBytes !== body.contentBytes ||
-    snapshot.reasoningBytes !== body.reasoningBytes ||
-    String(new TextEncoder().encode(snapshot.output.content).byteLength) !== body.contentBytes ||
+    (!exactBody && !advancedBody) ||
+    String(new TextEncoder().encode(snapshot.output.content).byteLength) !==
+      snapshot.contentBytes ||
     String(new TextEncoder().encode(snapshot.output.reasoning).byteLength) !==
-      body.reasoningBytes ||
-    (body.complete
-      ? snapshot.output.toolCalls.length !== body.toolCallCount
-      : snapshot.output.toolCalls.length !== 0)
+      snapshot.reasoningBytes
   )
     throw new ClientError('model_output_identity_conflict');
 }
@@ -341,7 +363,9 @@ export function ModelOutputMessage({
               : '回复预览（回复未完成）'}
         </p>
       )}
-      {autoRead && !body.complete && full && terminalOutput(full.status) && <p>回复未完成</p>}
+      {autoRead && full && !full.output.complete && terminalOutput(full.status) && (
+        <p>回复未完成</p>
+      )}
       {render(full?.output.content ?? message.content)}
       {!autoRead && !full && (
         <button

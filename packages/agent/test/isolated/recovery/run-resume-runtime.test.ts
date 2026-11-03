@@ -388,7 +388,7 @@ for (const mode of [
       const ledger = readFileSync(join(directory, 'ledger'), 'utf8').trim().split('\n');
       expect(ledger.filter((v) => v.startsWith('effect:')).length).toBe(
         seedMode === 'repeat_failure'
-          ? 5
+          ? 8
           : [
                 'completion',
                 'length_response',
@@ -414,7 +414,7 @@ for (const mode of [
                 : seedMode === 'length_history'
                   ? 3
                   : seedMode === 'repeat_failure'
-                    ? 5
+                    ? 9
                     : ['steer', 'follow_up'].includes(mode)
                       ? 2
                       : seedMode === 'completion'
@@ -443,12 +443,7 @@ for (const mode of [
           expect(JSON.stringify(snapshot)).not.toContain('opaqueopaque');
         }
       }
-      if (mode === 'repeat_failure')
-        expect(await store.getRun(ready.runId)).toMatchObject({
-          status: 'cancelled',
-          reason: 'repeated_tool_failure',
-        });
-      else expect((await store.getRun(ready.runId))!.status).toBe('completed');
+      expect((await store.getRun(ready.runId))!.status).toBe('completed');
       const after = (await store.getView('s')).executions;
       if (mode === 'retry_lineage') {
         expect(
@@ -639,11 +634,7 @@ for (const mode of [
       expect(receipt.receipt).toMatchObject({ outcome: 'run_resumed', runId: ready.runId });
       await until(async () => !(await store!.getRun(ready.runId))!.isActive);
       const run = await store.getRun(ready.runId);
-      expect(run).toMatchObject(
-        mode.includes('preserve')
-          ? { status: 'cancelled', reason: 'repeated_tool_failure' }
-          : { status: 'completed' },
-      );
+      expect(run).toMatchObject({ status: 'completed' });
       const effects = readFileSync(join(directory, 'ledger'), 'utf8')
         .split('\n')
         .filter((line) => line.startsWith('effect:'));

@@ -1,5 +1,4 @@
 import { createRoot } from 'react-dom/client';
-import { NativeDesktop } from './native';
 import { installNativeInputModality } from './native-input-modality';
 
 import { applyTheme, readThemePreference } from './native-theme';
@@ -15,10 +14,12 @@ if (/Macintosh|Mac OS X/i.test(navigator.userAgent))
   document.documentElement.dataset.platform = 'macos';
 else if (/Windows/i.test(navigator.userAgent))
   document.documentElement.dataset.platform = 'windows';
+const root = createRoot(document.getElementById('root')!);
 applyTheme(readThemePreference());
 const appearance = await window.kiteNative?.getWindowAppearance?.().catch(() => undefined);
 document.documentElement.dataset.windowMaterial = appearance?.backgroundMaterial ?? 'none';
-createRoot(document.getElementById('root')!).render(
+const { NativeDesktop } = await import('./native');
+root.render(
   <NativeDesktop
     nativeWindow
     testDiagnostics={

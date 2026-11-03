@@ -45,6 +45,7 @@ export interface PairedServiceOptions {
   requiredCapabilities: readonly string[];
   capabilities?: string[];
   hostConfiguration?: Json;
+  desktopBrowser?: { readonly endpoint: string; readonly token: string };
   runtimeProtection?: RuntimeProtection;
   startupTimeoutMs?: number;
   /** Explicit hard stop for this owned child; ordinary close otherwise waits for durable drain. */
@@ -129,6 +130,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
     token,
     capabilities: options.capabilities,
     hostConfiguration: options.hostConfiguration,
+    desktopBrowser: options.desktopBrowser,
     ...(options.runtimeProtection ? { runtimeProtection: options.runtimeProtection } : {}),
   });
   if (!parsed.success) throw new PairedServiceError('invalid_startup');

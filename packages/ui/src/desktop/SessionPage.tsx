@@ -30,6 +30,7 @@ import {
 } from './ScheduledTasks';
 import {
   type SessionBrowserPageProps,
+  type SessionBrowserRestorePage,
   type SessionChildPageProps,
   type SessionChildTabRequest,
   type SessionChildTarget,
@@ -180,6 +181,8 @@ export interface SessionPageProps {
   selected?: string;
   sessionLabel: string;
   readingKey: string;
+  /** Stable conversation identity for tab display; fresh reads keep their own readingKey. */
+  tabsScopeKey?: string;
   /** Optional bounded retention; hosts still own fresh read and operation admission. */
   conversationCache?: ConversationCacheScope;
   messages: readonly Message[];
@@ -214,6 +217,15 @@ export interface SessionPageProps {
   beforeConversation?: ReactNode;
   environmentInformation?: ReactNode;
   detailPanel?: { label: string; content: ReactNode; onClose: () => void };
+  /** A host-owned workspace tab uses the existing tab strip and bounded tab model. */
+  workspaceTab?: {
+    label: string;
+    requestId: number;
+    render: (visible: boolean) => ReactNode;
+    onClose: () => void;
+  };
+  /** Reveal the ordinary browser, using a verified retained page when present. */
+  browserTabRequest?: { requestId: number; createIfMissing: boolean };
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
   historyError?: { title: string; detail: string; retry: () => void };
@@ -224,7 +236,10 @@ export interface SessionPageProps {
   /** Host receipt reader rendered within the retained FileChanges sidebar. */
   fileChangesContent?: ReactNode;
   renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
-  closeBrowser?: (id: string) => void;
+  closeBrowser?: ((id: string) => void) | ((id: string) => Promise<void>);
+  restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>;
+  browserRestoreKey?: string;
+  browserPending?: boolean;
   childTabRequest?: SessionChildTabRequest;
   renderChildSession?: (props: SessionChildPageProps) => ReactNode;
   onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
@@ -241,11 +256,18 @@ export function SessionPage(props: SessionPageProps) {
   const hasTabs =
     !props.workbench &&
     !props.scheduledTasks &&
-    (props.renderBrowser !== undefined ||
+    (props.workspaceTab !== undefined ||
+      props.renderBrowser !== undefined ||
       props.fileChanges !== undefined ||
       props.fileChangesContent !== undefined ||
       props.renderChildSession !== undefined);
-  const tabModel = useSessionTabs(hasTabs ? props.readingKey : 'inactive', props.closeBrowser);
+  const tabModel = useSessionTabs(
+    hasTabs ? (props.tabsScopeKey ?? props.readingKey) : 'inactive',
+    props.closeBrowser,
+    hasTabs ? props.restoreBrowser : undefined,
+    props.browserRestoreKey,
+    props.browserPending,
+  );
   return <SessionPageContent {...props} hasTabs={hasTabs} tabModel={tabModel} />;
 }
 
@@ -269,21 +291,26 @@ function SessionPageContent({
     else queueMicrotask(focus);
   }, []);
   const [sidebarOpen, setSidebarOpenIntent] = useState(true);
-  const [panelsAnimating, setPanelsAnimating] = useState(false);
+  const [navigationAnimating, setNavigationAnimating] = useState(false);
+  const [detailsAnimation, setDetailsAnimation] = useState<{ scope?: string }>();
   const navigationWidth = useRef(savedNavigationWidth());
   const navigationPanel = useRef<PanelImperativeHandle>(null);
   const detailsPanel = useRef<PanelImperativeHandle>(null);
   const panelGroupElement = useRef<HTMLDivElement>(null);
   const contentGroupElement = useRef<HTMLDivElement>(null);
   const navigationPanelFrame = useRef<number | undefined>(undefined);
-  const panelAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const navigationAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const detailsAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
+  const [pendingTabsClose, setPendingTabsClose] = useState<{ scope?: string; id: string }>();
+  const directDetails = useRef(false);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
+  const tabsScopeKey = props.tabsScopeKey ?? props.readingKey;
+  const committedDetailsIntent = useRef({ scope: tabsScopeKey, open: false });
   const tabsIntent = useRef<{ scope?: string; key?: string }>({});
-  const retireTabsPanel = useRef(false);
-  if (tabsIntent.current.scope !== props.readingKey) {
-    retireTabsPanel.current = tabsIntent.current.key !== undefined;
-    tabsIntent.current = { scope: props.readingKey };
+  const detailsScope = useRef({ scope: tabsScopeKey, settling: false });
+  if (tabsIntent.current.scope !== tabsScopeKey) {
+    tabsIntent.current = { scope: tabsScopeKey };
   }
   const [, tabsChanged] = useState(0);
   const setTabsKey = useCallback((key: string | undefined) => {
@@ -297,7 +324,7 @@ function SessionPageContent({
   const childTabOpener = useRef(tabModel.openChild);
   childTabOpener.current = tabModel.openChild;
   const [tabLimitKey, setTabLimitKey] = useState<string>();
-  const tabsOpen = tabsKey === props.readingKey && hasTabs;
+  const tabsOpen = tabsKey === tabsScopeKey && hasTabs;
   const scheduledEditorGeneration = useRef(0);
   const detailsOpeningWidth = useRef<number | undefined>(undefined);
   const [scheduledEditor, setScheduledEditor] = useState<{
@@ -341,23 +368,88 @@ function SessionPageContent({
   }, [hostDetailsOpen, setTabsKey]);
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
+  const workspaceDetails = !!props.workspaceTab;
+  // Native child views use the same actual Panel constraints during window resize.
+  const navigationSizing = {
+    minSize: sidebarOpen ? `${NAVIGATION_MIN_WIDTH}px` : '0px',
+    maxSize: sidebarOpen ? `${NAVIGATION_MAX_WIDTH}px` : '0px',
+    groupResizeBehavior: 'preserve-pixel-size' as const,
+    collapsible: false,
+  };
+  const workspaceSizing = {
+    minSize: '200px',
+    maxSize: '100%',
+    groupResizeBehavior: 'preserve-relative-size' as const,
+    collapsible: false,
+  };
+  const contentSizing = {
+    minSize: '360px',
+    maxSize: '100%',
+    groupResizeBehavior: 'preserve-relative-size' as const,
+    collapsible: false,
+  };
+  const detailsSizing = {
+    minSize: workspaceDetails ? '240px' : '300px',
+    maxSize: workspaceDetails ? '85%' : '640px',
+    groupResizeBehavior: props.scheduledTasks
+      ? ('preserve-pixel-size' as const)
+      : ('preserve-relative-size' as const),
+    collapsible: true,
+  };
   const rightSidebarOpen =
     hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
   const rightSidebarFormOpen = !!scheduledEditor && !!props.scheduledTasks && !hostDetailsOpen;
-  const tabsVisible = tabsOpen && detailsCollapsed !== true;
+  const startDetailsAnimation = useCallback((scope: string | undefined) => {
+    setDetailsAnimation({ scope });
+    if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
+    detailsAnimationTimer.current = setTimeout(() => {
+      detailsAnimationTimer.current = undefined;
+      setDetailsAnimation(undefined);
+    }, 240);
+  }, []);
+  // Re-registering the enabled separator can expand the Group before our RAF.
+  // Put the transition on that first commit, then retain it for the full motion.
+  const openingDetails =
+    rightSidebarOpen &&
+    !committedDetailsIntent.current.open &&
+    committedDetailsIntent.current.scope === tabsScopeKey &&
+    detailsScope.current.scope === tabsScopeKey &&
+    !detailsScope.current.settling &&
+    !directDetails.current &&
+    detailsPanel.current?.isCollapsed() === true &&
+    !!contentGroupElement.current &&
+    contentGroupElement.current.offsetWidth > 0 &&
+    contentGroupElement.current.getBoundingClientRect().width > 0;
+  const detailsAnimating =
+    openingDetails || (!!detailsAnimation && detailsAnimation.scope === tabsScopeKey);
+  useLayoutEffect(() => {
+    committedDetailsIntent.current = { scope: tabsScopeKey, open: rightSidebarOpen };
+    if (openingDetails) startDetailsAnimation(tabsScopeKey);
+  }, [tabsScopeKey, rightSidebarOpen, openingDetails, startDetailsAnimation]);
+  const detailsPending = !!(props.loading || props.browserPending || tabModel.restoring);
+  const closingTabsVisible =
+    !!pendingTabsClose &&
+    pendingTabsClose.scope === tabsScopeKey &&
+    pendingTabsClose.id === tabModel.active &&
+    presentedTabsKey.current === tabsScopeKey &&
+    hasTabs &&
+    !rightSidebarOpen &&
+    !props.covered;
+  const tabsVisible = (tabsOpen || closingTabsVisible) && detailsCollapsed !== true;
   const tabsPresent =
     tabsVisible ||
-    (!rightSidebarOpen && panelsAnimating && presentedTabsKey.current === props.readingKey);
+    (!rightSidebarOpen && detailsAnimating && presentedTabsKey.current === tabsScopeKey);
   useLayoutEffect(() => {
-    if (tabsVisible) presentedTabsKey.current = props.readingKey;
-    else if (!panelsAnimating || hostDetailsOpen || props.covered)
+    if (tabsVisible) presentedTabsKey.current = tabsScopeKey;
+    else if (!detailsAnimating || hostDetailsOpen || props.covered)
       presentedTabsKey.current = undefined;
-  }, [tabsVisible, panelsAnimating, hostDetailsOpen, props.covered, props.readingKey]);
+  }, [tabsVisible, detailsAnimating, hostDetailsOpen, props.covered, tabsScopeKey]);
   const tabsToggle = useRef<HTMLButtonElement>(null);
   const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
     queueMicrotask(() => control.current?.focus());
   }, []);
+  const finishTabsClose = useCallback(() => setPendingTabsClose(undefined), []);
   const schedulePanelChange = useCallback(
     (
       frame: { current: number | undefined },
@@ -378,8 +470,11 @@ function SessionPageContent({
         commit();
         return;
       }
-      frame.current = requestAnimationFrame(() => {
+      const scope = tabsIntent.current.scope;
+      const scheduled = requestAnimationFrame(() => {
+        if (frame.current !== scheduled) return;
         frame.current = undefined;
+        if (panel === detailsPanel && tabsIntent.current.scope !== scope) return;
         // The header affordance and the panel layout must start in one commit.
         commit?.();
         const group = groupElement.current;
@@ -394,14 +489,18 @@ function SessionPageContent({
           openingWidth === undefined
         )
           return;
-        setPanelsAnimating(true);
-        if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
-        panelAnimationTimer.current = setTimeout(() => {
-          panelAnimationTimer.current = undefined;
-          setPanelsAnimating(false);
-        }, 240);
         // Navigation uses explicit size constraints; only its button changes them.
-        if (panel === navigationPanel) return;
+        if (panel === navigationPanel) {
+          setNavigationAnimating(true);
+          if (navigationAnimationTimer.current !== undefined)
+            clearTimeout(navigationAnimationTimer.current);
+          navigationAnimationTimer.current = setTimeout(() => {
+            navigationAnimationTimer.current = undefined;
+            setNavigationAnimating(false);
+          }, 240);
+          return;
+        }
+        startDetailsAnimation(scope);
         // Keep the form's requested default while it is a narrow overlay, then
         // acquire the same docked width once the main pane can also fit.
         if (openingWidth !== undefined && group.getBoundingClientRect().width >= 800) {
@@ -410,8 +509,9 @@ function SessionPageContent({
         } else if (open) target.expand();
         else target.collapse();
       });
+      frame.current = scheduled;
     },
-    [],
+    [startDetailsAnimation],
   );
   const setSidebarOpen = useCallback(
     (open: boolean) => {
@@ -432,9 +532,13 @@ function SessionPageContent({
       !event.target.closest('[data-slot="resizable-handle"]')
     )
       return;
-    if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
-    panelAnimationTimer.current = undefined;
-    setPanelsAnimating(false);
+    if (navigationAnimationTimer.current !== undefined)
+      clearTimeout(navigationAnimationTimer.current);
+    navigationAnimationTimer.current = undefined;
+    if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
+    detailsAnimationTimer.current = undefined;
+    setNavigationAnimating(false);
+    setDetailsAnimation(undefined);
   }, []);
   const expandDetails = useCallback(
     () => schedulePanelChange(detailsPanelFrame, detailsPanel, true),
@@ -442,8 +546,8 @@ function SessionPageContent({
   );
   const collapseDetails = useCallback(() => {
     detailsOpeningWidth.current = undefined;
-    schedulePanelChange(detailsPanelFrame, detailsPanel, false);
-  }, [schedulePanelChange]);
+    schedulePanelChange(detailsPanelFrame, detailsPanel, false, finishTabsClose);
+  }, [schedulePanelChange, finishTabsClose]);
   useLayoutEffect(() => {
     if (!scheduledEditor || !props.scheduledTasks) return;
     const group = contentGroupElement.current;
@@ -460,18 +564,218 @@ function SessionPageContent({
     observer.observe(group);
     return () => observer.disconnect();
   }, [scheduledEditor, props.scheduledTasks, expandDetails]);
-  const changeTabsOpen = useCallback(
+  const dismissedBrowserReveals = useRef(new Set<string>());
+  const stopDetailsAnimation = useCallback(() => {
+    if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
+    detailsPanelFrame.current = undefined;
+    if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
+    detailsAnimationTimer.current = undefined;
+    setDetailsAnimation(undefined);
+    setPendingTabsClose(undefined);
+  }, []);
+  const settleDetails = useCallback(
     (open: boolean) => {
-      // Closing a host panel can replace its pending layout frame, not this intent.
-      setTabsKey(open ? props.readingKey : undefined);
-      schedulePanelChange(detailsPanelFrame, detailsPanel, open);
+      directDetails.current = true;
+      stopDetailsAnimation();
+      if (open) detailsPanel.current?.expand();
+      else detailsPanel.current?.collapse();
     },
-    [schedulePanelChange, props.readingKey, setTabsKey],
+    [stopDetailsAnimation],
   );
+  const changeTabsOpen = useCallback(
+    (open: boolean, animate = true) => {
+      // Closing a host panel can replace its pending layout frame, not this intent.
+      if (open) dismissedBrowserReveals.current.delete(tabsScopeKey);
+      else dismissedBrowserReveals.current.add(tabsScopeKey);
+      const group = contentGroupElement.current;
+      const keepPage =
+        !open &&
+        animate &&
+        tabsIntent.current.key === tabsScopeKey &&
+        presentedTabsKey.current === tabsScopeKey &&
+        !props.covered &&
+        !hostDetailsOpen &&
+        !scheduledEditor &&
+        tabModel.tabs.some((tab) => tab.kind === 'browser' && tab.id === tabModel.active) &&
+        detailsPanel.current &&
+        !detailsPanel.current.isCollapsed() &&
+        group &&
+        group.offsetWidth > 0 &&
+        group.getBoundingClientRect().width > 0;
+      // The library re-registers panels when this intent changes. Keep the
+      // original page until the queued layout can actually start collapsing.
+      setPendingTabsClose(keepPage ? { scope: tabsScopeKey, id: tabModel.active } : undefined);
+      setTabsKey(open ? tabsScopeKey : undefined);
+      if (animate)
+        schedulePanelChange(
+          detailsPanelFrame,
+          detailsPanel,
+          open,
+          open ? undefined : finishTabsClose,
+        );
+      else settleDetails(open);
+    },
+    [
+      schedulePanelChange,
+      tabsScopeKey,
+      setTabsKey,
+      settleDetails,
+      finishTabsClose,
+      props.covered,
+      hostDetailsOpen,
+      scheduledEditor,
+      tabModel.tabs,
+      tabModel.active,
+    ],
+  );
+  useLayoutEffect(() => {
+    if (!pendingTabsClose || (closingTabsVisible && detailsCollapsed !== true)) return;
+    // Coverage withdraws the page immediately but still lets its current close
+    // finish. A replacement must also retire the old panel action.
+    if (
+      pendingTabsClose.scope !== tabsScopeKey ||
+      pendingTabsClose.id !== tabModel.active ||
+      !hasTabs ||
+      rightSidebarOpen
+    ) {
+      if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
+      detailsPanelFrame.current = undefined;
+    }
+    finishTabsClose();
+  }, [
+    pendingTabsClose,
+    closingTabsVisible,
+    detailsCollapsed,
+    finishTabsClose,
+    tabsScopeKey,
+    tabModel.active,
+    hasTabs,
+    rightSidebarOpen,
+  ]);
+  const handledBrowserReveals = useRef({ scope: tabsScopeKey, ids: new Set<string>() });
+  if (handledBrowserReveals.current.scope !== tabsScopeKey)
+    handledBrowserReveals.current = { scope: tabsScopeKey, ids: new Set<string>() };
+  useLayoutEffect(() => {
+    const id = tabModel.revealBrowserId;
+    if (
+      !id ||
+      !hasTabs ||
+      props.loading ||
+      props.covered ||
+      hostDetailsOpen ||
+      dismissedBrowserReveals.current.has(tabsScopeKey) ||
+      tabModel.restoring ||
+      tabModel.restoreIssue ||
+      !tabModel.tabs.some((tab) => tab.kind === 'browser' && tab.id === id)
+    )
+      return;
+    if (handledBrowserReveals.current.ids.has(id)) return;
+    handledBrowserReveals.current.ids.add(id);
+    tabModel.select(id);
+    changeTabsOpen(true, false);
+  }, [
+    tabModel.revealBrowserId,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+    tabModel.select,
+    tabModel.tabs,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    props.covered,
+    hostDetailsOpen,
+    changeTabsOpen,
+  ]);
+  useEffect(() => {
+    if (tabModel.closeReveal) changeTabsOpen(true, false);
+  }, [tabModel.closeReveal, changeTabsOpen]);
+  const workspaceOperations = useRef(tabModel);
+  workspaceOperations.current = tabModel;
+  const workspaceRequest = useRef<string | undefined>(undefined);
+  const workspaceContent = useRef(props.workspaceTab);
+  workspaceContent.current = props.workspaceTab;
+  const workspaceRequestId = props.workspaceTab?.requestId;
+  const browserRequest = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    const request = props.browserTabRequest;
+    if (
+      !request ||
+      !hasTabs ||
+      !tabsScopeKey ||
+      props.loading ||
+      tabModel.restoring ||
+      tabModel.restoreIssue
+    )
+      return;
+    const key = JSON.stringify([tabsScopeKey, request.requestId]);
+    if (browserRequest.current === key) return;
+    const page =
+      tabModel.tabs.find(
+        (tab) => tab.kind === 'browser' && tab.id === tabModel.restoredBrowserId,
+      ) ?? tabModel.tabs.find((tab) => tab.kind === 'browser');
+    if (!page && !request.createIfMissing) return;
+    browserRequest.current = key;
+    if (page) tabModel.select(page.id);
+    else tabModel.addBrowser();
+    detailClose.current?.();
+    changeTabsOpen(true);
+  }, [
+    props.browserTabRequest,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+    tabModel.tabs,
+    tabModel.restoredBrowserId,
+    changeTabsOpen,
+    tabModel.select,
+    tabModel.addBrowser,
+  ]);
+  useEffect(() => {
+    const request = workspaceContent.current;
+    if (!request) {
+      workspaceRequest.current = undefined;
+      if (workspaceOperations.current.tabs.some((tab) => tab.kind === 'workspace'))
+        workspaceOperations.current.closeTab('workspace');
+      return;
+    }
+    if (!hasTabs || !tabsScopeKey || props.loading || tabModel.restoring || tabModel.restoreIssue)
+      return;
+    const key = JSON.stringify([tabsScopeKey, workspaceRequestId]);
+    if (workspaceRequest.current === key) return;
+    workspaceRequest.current = key;
+    const opened = workspaceOperations.current.openWorkspace(request.label);
+    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    if (!opened) {
+      request.onClose();
+      return;
+    }
+    detailClose.current?.();
+    changeTabsOpen(true);
+    const frame = requestAnimationFrame(() => detailsPanel.current?.resize('62%'));
+    return () => cancelAnimationFrame(frame);
+  }, [
+    workspaceRequestId,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    changeTabsOpen,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+  ]);
   const handledChildRequest = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     const request = props.childTabRequest;
-    if (!hasTabs || !request || !props.readingKey || props.loading) return;
+    if (
+      !hasTabs ||
+      !request ||
+      !tabsScopeKey ||
+      props.loading ||
+      tabModel.restoring ||
+      tabModel.restoreIssue
+    )
+      return;
     // A retained request is one navigation intent. Temporary selection scopes
     // and returning to its parent must not reopen it or close the current panel.
     const key = request.requestId;
@@ -482,10 +786,18 @@ function SessionPageContent({
       request.childAgentIdentity,
     );
     handledChildRequest.current = key;
-    setTabLimitKey(opened ? undefined : props.readingKey);
+    setTabLimitKey(opened ? undefined : tabsScopeKey);
     detailClose.current?.();
     changeTabsOpen(true);
-  }, [props.childTabRequest, hasTabs, props.readingKey, props.loading, changeTabsOpen]);
+  }, [
+    props.childTabRequest,
+    hasTabs,
+    tabsScopeKey,
+    props.loading,
+    changeTabsOpen,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+  ]);
   const closeScheduledEditor = useCallback(
     (generation: number) => {
       if (scheduledEditorGeneration.current !== generation) return;
@@ -501,7 +813,9 @@ function SessionPageContent({
       scheduledEditorGeneration.current++;
       if (navigationPanelFrame.current !== undefined)
         cancelAnimationFrame(navigationPanelFrame.current);
-      if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
+      if (navigationAnimationTimer.current !== undefined)
+        clearTimeout(navigationAnimationTimer.current);
+      if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
       if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
       if (environmentAnimationTimer.current !== undefined)
         clearTimeout(environmentAnimationTimer.current);
@@ -517,30 +831,50 @@ function SessionPageContent({
     if (environmentAnimationKey !== undefined) setEnvironmentAnimationKey(undefined);
   }, [props.readingKey, environmentAnimationKey]);
   useLayoutEffect(() => {
-    if (retireTabsPanel.current && tabsIntent.current.scope === props.readingKey) {
-      retireTabsPanel.current = false;
-      if (!hostDetailsOpen) collapseDetails();
+    if (detailsScope.current.scope !== tabsScopeKey) {
+      detailsScope.current = { scope: tabsScopeKey, settling: true };
+      stopDetailsAnimation();
     }
-  }, [props.readingKey, hostDetailsOpen, collapseDetails]);
+    if (!detailsScope.current.settling) return;
+    // The old owner's queued panel action must never run on the new owner.
+    // Pending selection/restore is not an empty target or a user-close intent.
+    const open = rightSidebarOpen || (tabsIntent.current.key === tabsScopeKey && hasTabs);
+    if (!open && detailsPending) return;
+    settleDetails(open);
+    detailsScope.current.settling = false;
+  }, [
+    tabsScopeKey,
+    rightSidebarOpen,
+    hasTabs,
+    detailsPending,
+    stopDetailsAnimation,
+    settleDetails,
+  ]);
   useEffect(() => {
     if (!props.scheduledTasks) {
-      collapseDetails();
       scheduledEditorGeneration.current++;
       setScheduledEditor(undefined);
     }
-  }, [props.scheduledTasks, collapseDetails]);
+  }, [props.scheduledTasks]);
   useEffect(() => {
+    if (
+      detailsScope.current.scope !== tabsScopeKey ||
+      (detailsScope.current.settling && detailsPending)
+    )
+      return;
+    const direct = directDetails.current;
+    directDetails.current = false;
     if (!rightSidebarOpen) {
-      collapseDetails();
+      if (!direct) collapseDetails();
       return;
     }
-    expandDetails();
+    if (!direct) expandDetails();
     const group = contentGroupElement.current;
     if (!group || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(expandDetails);
     observer.observe(group);
     return () => observer.disconnect();
-  }, [rightSidebarOpen, expandDetails, collapseDetails]);
+  }, [tabsScopeKey, rightSidebarOpen, detailsPending, expandDetails, collapseDetails]);
   useEffect(() => {
     const group = panelGroupElement.current;
     if (!sidebarOpen || !group || typeof ResizeObserver === 'undefined') return;
@@ -698,12 +1032,12 @@ function SessionPageContent({
       </aside>
     </div>
   );
-  const closeRightSidebar = () => {
+  const closeRightSidebar = (reason?: 'last-tab') => {
     if (props.detailPanel) {
       collapseDetails();
       props.detailPanel.onClose();
     } else if (tabsOpen) {
-      changeTabsOpen(false);
+      changeTabsOpen(false, reason !== 'last-tab');
       focusControlAfterCommit(tabsToggle);
     } else if (scheduledEditor && props.scheduledTasks) {
       closeScheduledEditor(scheduledEditor.generation);
@@ -812,7 +1146,7 @@ function SessionPageContent({
         orientation="horizontal"
         elementRef={panelGroupElement}
         className="client-panels"
-        data-animate-width={panelsAnimating ? 'true' : undefined}
+        data-animate-width={navigationAnimating ? 'true' : undefined}
         onPointerDownCapture={stopPanelAnimationOnResize}
         onKeyDownCapture={stopPanelAnimationOnResize}
         aria-hidden={props.covered || undefined}
@@ -839,9 +1173,8 @@ function SessionPageContent({
           style={{ overflow: 'hidden' }}
           panelRef={navigationPanel}
           defaultSize={`${navigationWidth.current}px`}
-          groupResizeBehavior="preserve-pixel-size"
-          minSize={sidebarOpen ? `${NAVIGATION_MIN_WIDTH}px` : '0px'}
-          maxSize={sidebarOpen ? `${NAVIGATION_MAX_WIDTH}px` : '0px'}
+          {...navigationSizing}
+          data-native-browser-layout={JSON.stringify(navigationSizing)}
         >
           <div
             className="collapsible-sidebar-content"
@@ -875,7 +1208,12 @@ function SessionPageContent({
             <HugeiconsIcon icon={sidebarOpen ? PanelLeftCloseIcon : PanelLeftOpenIcon} />
           </Button>
         </div>
-        <ResizablePanel id="workspace" minSize="200px" style={{ overflow: 'visible' }}>
+        <ResizablePanel
+          id="workspace"
+          {...workspaceSizing}
+          data-native-browser-layout={JSON.stringify(workspaceSizing)}
+          style={{ overflow: 'visible' }}
+        >
           <div
             className="client-content-frame"
             data-scheduled-editor={scheduledEditor && props.scheduledTasks ? 'true' : undefined}
@@ -885,20 +1223,25 @@ function SessionPageContent({
               orientation="horizontal"
               elementRef={contentGroupElement}
               className="client-content-panels"
-              data-animate-width={panelsAnimating ? 'true' : undefined}
-              onLayoutChanged={(layout, meta) => {
+              data-animate-width={detailsAnimating ? 'true' : undefined}
+              onLayoutChange={(layout) => {
+                const collapsed = (layout.details ?? 0) === 0;
+                if (collapsed === detailsCollapsed) return;
                 const group = contentGroupElement.current;
                 if (group && group.offsetWidth > 0 && group.getBoundingClientRect().width > 0)
-                  setDetailsCollapsed((layout.details ?? 0) === 0);
-                if (
-                  meta.isUserInteraction &&
-                  rightSidebarOpen &&
-                  detailsPanel.current?.isCollapsed()
-                )
+                  setDetailsCollapsed(collapsed);
+              }}
+              onLayoutChanged={(layout, meta) => {
+                if (meta.isUserInteraction && rightSidebarOpen && (layout.details ?? 0) === 0)
                   closeRightSidebar();
               }}
             >
-              <ResizablePanel id="content" minSize="360px" style={{ overflow: 'hidden' }}>
+              <ResizablePanel
+                id="content"
+                {...contentSizing}
+                data-native-browser-layout={JSON.stringify(contentSizing)}
+                style={{ overflow: 'hidden' }}
+              >
                 <div className="client-main-panel" data-header-overlay={headerOverlay || undefined}>
                   {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
                   <header
@@ -975,7 +1318,12 @@ function SessionPageContent({
                     }
                   >
                     {props.notices}
-                    {tabLimitKey === props.readingKey && tabModel.tabs.length >= 8 && (
+                    {tabModel.closeIssue && (
+                      <p role="alert" className="notice error">
+                        {tabModel.closeIssue}
+                      </p>
+                    )}
+                    {tabLimitKey === tabsScopeKey && tabModel.tabs.length >= 8 && (
                       <p role="status">标签页已满，请关闭一个标签页后重试。</p>
                     )}
                     <div className="session-body">
@@ -1105,28 +1453,36 @@ function SessionPageContent({
                 style={{ overflow: 'hidden' }}
                 panelRef={detailsPanel}
                 disabled={!rightSidebarOpen || rightSidebarFormOpen}
-                collapsible
+                {...detailsSizing}
+                data-native-browser-layout={JSON.stringify(detailsSizing)}
                 collapsedSize="0px"
                 defaultSize="0px"
-                minSize="300px"
-                maxSize="640px"
-                groupResizeBehavior={
-                  props.scheduledTasks ? 'preserve-pixel-size' : 'preserve-relative-size'
-                }
               >
                 <div
                   className="collapsible-sidebar-content"
                   style={{
                     minWidth:
-                      scheduledEditor && props.scheduledTasks ? 'min(300px, 100cqi)' : '300px',
+                      scheduledEditor && props.scheduledTasks
+                        ? 'min(300px, 100cqi)'
+                        : workspaceDetails
+                          ? '240px'
+                          : '300px',
                   }}
-                  aria-hidden={!rightSidebarOpen}
-                  inert={!rightSidebarOpen}
+                  aria-hidden={!rightSidebarOpen && !closingTabsVisible}
+                  inert={!rightSidebarOpen && !closingTabsVisible}
                 >
                   {hasTabs && (
                     <SessionTabs
-                      key={props.readingKey}
+                      key={tabsScopeKey}
                       model={tabModel}
+                      workspace={
+                        props.workspaceTab
+                          ? {
+                              render: props.workspaceTab.render,
+                              onClose: props.workspaceTab.onClose,
+                            }
+                          : undefined
+                      }
                       visible={tabsVisible && !props.covered && !props.detailPanel}
                       present={tabsPresent && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}

@@ -1,7 +1,8 @@
 import { fileURLToPath } from 'node:url';
+import { resolveExecutionRun } from '../execution/task-origin';
 import type { AuthorizationRequest } from '../extensions';
 import type { AgentRuntime } from '../runtime';
-import type { Json } from '../storage';
+import { AgentError, type Json } from '../storage';
 import type { AuthorizationCheckContext } from './index';
 
 type CheckRuntime = Pick<
@@ -44,26 +45,28 @@ export function createPermissionCheckContextReader(options: {
     });
     signal.throwIfAborted();
     const runtime = options.readRuntime();
-    if (!runtime || !request.runId) return unknown('check_run_unavailable');
+    if (!runtime) return unknown('check_run_unavailable');
     const execution = await read(() => runtime.getExecution(request.executionId));
-    const run = await read(() => runtime.getRun(request.runId!));
     if (
       !execution ||
-      !run ||
       execution.id !== request.executionId ||
       execution.sessionId !== request.sessionId ||
-      run.sessionId !== request.sessionId ||
-      execution.runId !== run.id ||
+      execution.runId !== request.runId ||
       execution.originStoreId !== options.originStoreId ||
-      run.originStoreId !== options.originStoreId ||
-      execution.originCommandId !== run.originCommandId ||
-      execution.rootWorkCommandId !== run.rootWorkCommandId ||
-      execution.rootWorkSeq !== run.rootWorkSeq ||
       execution.kind !== request.kind ||
       execution.definitionId !== request.definitionId ||
       execution.definitionVersion !== request.definitionVersion
     )
       return unknown('check_scope_unavailable');
+    let run: Awaited<ReturnType<CheckRuntime['getRun']>>;
+    try {
+      ({ run } = await resolveExecutionRun(runtime, execution, signal));
+    } catch (error) {
+      if (error instanceof AgentError && error.code === 'invalid_child_parent')
+        return unknown('check_scope_unavailable');
+      throw error;
+    }
+    if (!run) return unknown('check_run_unavailable');
     const command = await read(() => runtime.getCommand(run.originCommandId));
     const session = await read(() => runtime.getSession(request.sessionId));
     if (

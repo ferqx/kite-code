@@ -54,6 +54,8 @@ export interface ToolResult {
 }
 export interface ToolContext extends ActionContext {
   readonly runId: string | null;
+  /** Frozen total host capacities, not free slots or dispatch permission. */
+  readonly resourceCapacity: ResourceCapacity;
   /** Final Store-accepted dispatch evidence; this metadata never grants permission itself. */
   readonly dispatchAuthorization?: JobContext['dispatchAuthorization'];
   reportProgress(update: Json): void;
@@ -61,6 +63,10 @@ export interface ToolContext extends ActionContext {
   requestInput(request: Json): Promise<Json>;
   /** Information from the exact live attempt; plan review is not a Tool permission grant. */
   requestInteraction(input: { kind: 'question' | 'plan_review'; request: Json }): Promise<Json>;
+}
+export interface ResourceCapacity {
+  readonly model: number;
+  readonly process: number;
 }
 export interface ResourceRequest {
   serial?: { scope: 'runtime' | 'workspace' | 'session'; key: string };
@@ -457,6 +463,10 @@ export interface ActionDefinition {
   readonly description: string;
   readonly inputSchema: JsonSchema;
   readonly resources?: ResourceRequest;
+  /** Trusted definition of a finite response controlling existing work. Intake
+   * may serialize it under the live Session owner while a Run waits. Normal
+   * Action authorization remains; starting new operations is forbidden. */
+  readonly runControl?: true;
   /** Preparation has only read projections. The prepared description is bound to this attempt. */
   prepare(input: Json, context: ReadContext): Promise<Json>;
   execute(prepared: Json, context: ActionContext): Promise<ToolResult>;

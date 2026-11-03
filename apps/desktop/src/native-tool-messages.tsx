@@ -53,6 +53,9 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'mcp.tools.search': [['1'], '搜索 MCP 工具'],
   'mcp.resources.list': [['1'], '列出 MCP 资源'],
   'mcp.resources.read': [['1'], '读取 MCP 资源'],
+  'skills.load': [['1'], '加载技能'],
+  'skills.resource': [['1'], '读取技能资料'],
+  'browser.execute': [['1'], '浏览器操作'],
 };
 const exploration = new Set([
   'files.read',
@@ -86,6 +89,9 @@ export function desktopToolPresentation(
             'task.events': 'wait_agent_events',
             'task.list': 'list_agents',
             'task.interrupt': 'interrupt_agent',
+            'skills.load': 'load_skill',
+            'skills.resource': 'read_skill_resource',
+            'browser.execute': 'browser_execute',
           } as Record<string, string>
         )[fact.definitionId] ?? fact.definitionId)
       : undefined,

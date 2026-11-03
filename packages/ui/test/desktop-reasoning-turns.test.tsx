@@ -228,7 +228,9 @@ test('hidden reasoning does not split adjacent exploration calls and failure rec
     />,
   );
   expect(grouped).toEqual([2]);
-  expect(new JSDOM(html).window.document.querySelector('.agent-turn button')).not.toBeNull();
+  const document = new JSDOM(html).window.document;
+  expect(document.querySelector('.agent-turn button')).toBeNull();
+  expect(document.querySelector('.agent-turn-process')?.getAttribute('data-state')).toBe('open');
   expect(html).not.toContain('PRIVATE REASONING');
   const failure: Message = {
     id: 'failure:run',
@@ -264,15 +266,19 @@ test('cold and restored active processes start fully expanded without replaying 
         selected
         connected
         turnActivity={{ turnId: 'run', status: 'running' }}
-        initialReading={restored ? { top: 42, follow: false, expanded: {} } : undefined}
+        initialReading={
+          restored ? { top: 42, follow: false, expanded: { 'turn:run:process': false } } : undefined
+        }
         saveReading={() => {}}
       />,
     );
     const dom = new JSDOM(html);
     try {
       expect(
-        dom.window.document.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded'),
-      ).toBe('true');
+        dom.window.document.querySelector('.agent-turn-process')?.getAttribute('data-state'),
+      ).toBe('open');
+      expect(dom.window.document.querySelector('button.agent-turn-summary')).toBeNull();
+      expect(dom.window.document.querySelector('.agent-turn-chevron')).toBeNull();
       expect(
         dom.window.document
           .querySelector('.agent-turn-process')

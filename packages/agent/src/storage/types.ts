@@ -278,6 +278,8 @@ export interface RequirementEvaluation {
   /** Related executable records read by this evaluator, in the requirement's namespace/scope. */
   recordReads?: RequirementRecordRead[];
   executionSafetyReads?: RequirementExecutionSafetyRead[];
+  /** Completion advice; Core verifies each original Job and immutable obligation before waiting. */
+  wait?: { executionIds: string[] };
 }
 export interface RequirementRecordRead {
   key: string;

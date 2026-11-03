@@ -1,7 +1,12 @@
 import { MessageContent, SessionPage } from '@kite-ai/ui/desktop';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { closeNativeBrowserTab, renderNativeBrowser } from '../src/native-browser-pane';
+import { NativeBrowserPane } from '../src/native-browser-pane';
+import {
+  closeNativeBrowserTab,
+  nativeBrowserDisplayHint,
+  restoreNativeBrowserDraft,
+} from '../src/native-browser-session';
 import '../src/native-tailwind.css';
 import '@kite-ai/ui/desktop/style.css';
 
@@ -20,14 +25,19 @@ declare global {
   interface Window {
     browserTabsFixture: {
       setScope(scope: string): void;
+      draft(): string;
       readers(): { mounted: number; closed: number };
     };
   }
 }
 function Fixture() {
   const [scope, setScope] = useState('session-a');
+  // This isolated UI has no Core Caller. Each displayed Session owns a distinct
+  // Root-local manual inventory; changing selection only withdraws its display.
+  const draft = scope === 'session-a' ? 'a'.repeat(32) : 'b'.repeat(32);
   window.browserTabsFixture = {
     setScope,
+    draft: () => draft,
     readers: () => ({ mounted: mountedReaders, closed: closedReaders }),
   };
   return (
@@ -50,8 +60,16 @@ function Fixture() {
       connectionLabel=""
       actions={{}}
       renderMessageContent={(message) => <MessageContent text={message.text} />}
-      renderBrowser={renderNativeBrowser}
-      closeBrowser={closeNativeBrowserTab}
+      renderBrowser={(props) => (
+        <NativeBrowserPane
+          {...props}
+          draft={draft}
+          initialHint={nativeBrowserDisplayHint(props.id, undefined, draft)}
+        />
+      )}
+      closeBrowser={(id) => closeNativeBrowserTab(id, draft)}
+      restoreBrowser={() => restoreNativeBrowserDraft(draft)}
+      browserRestoreKey={draft}
       fileChangesContent={<Changes />}
     />
   );

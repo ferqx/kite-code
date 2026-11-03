@@ -3,6 +3,7 @@ import { inputFileReference } from '../src/input-file-reference';
 import {
   decodeNativeEvent,
   type NativeBridge,
+  type NativeFullPermissionConfirmationReply,
   type NativeReply,
   type NativeRequest,
   type NativeStartupBridge,
@@ -13,6 +14,9 @@ import {
   nativeChannel,
   nativeClipboardChannel,
   nativeEventChannel,
+  nativeFullPermissionConfirmationCancelChannel,
+  nativeFullPermissionConfirmationChannel,
+  nativeQuitConfirmationFailureChannel,
   nativeStartupDiagnosticSaveChannel,
   nativeStartupStatusChannel,
   nativeThemeChannel,
@@ -20,18 +24,53 @@ import {
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 import {
+  isNativeBrowserDraft,
+  isNativeBrowserDraftRestoreResult,
+  isNativeBrowserMenuAction,
+  isNativeBrowserRestoreResult,
   isNativeBrowserState,
   type NativeBrowserBridge,
   type NativeBrowserReply,
   nativeBrowserChannel,
   nativeBrowserEventChannel,
+  nativeBrowserLayoutChannel,
+  nativeBrowserMenuCancelChannel,
+  nativeBrowserMenuChannel,
+  nativeBrowserPresentationChannel,
 } from '../src/native-browser-bridge';
+import { nativeGlobalDialogActiveChannel } from '../src/native-global-dialog-bridge';
+
 import {
   isNativeWindowMenuAction,
   type NativeWindowMenuBridge,
   nativeWindowMenuActionChannel,
   nativeWindowMenuChannel,
 } from '../src/native-menu-bridge';
+
+type BrowserLayoutReply = NativeBrowserReply;
+let modalRoot: HTMLElement | undefined;
+let rootWasInert = false;
+ipcRenderer.on(nativeGlobalDialogActiveChannel, (_event, active: unknown) => {
+  if (typeof active !== 'boolean') return;
+  if (active) {
+    const root = document.getElementById('root');
+    if (!root) return;
+    if (root !== modalRoot) {
+      modalRoot = root;
+      rootWasInert = root.inert;
+    }
+    root.inert = true;
+  } else if (modalRoot) {
+    modalRoot.inert = rootWasInert;
+    modalRoot = undefined;
+  }
+});
+function readBrowserLayoutReply(reply: BrowserLayoutReply) {
+  if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+  if (reply.value !== null && !isNativeBrowserState(reply.value))
+    throw Error('invalid_browser_state');
+  return reply.value;
+}
 
 const bridge: NativeBridge &
   NativeBrowserBridge &
@@ -44,6 +83,50 @@ const bridge: NativeBridge &
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
     if (reply.value !== null && !isNativeBrowserState(reply.value))
       throw Error('invalid_browser_state');
+    return reply.value;
+  },
+  presentBrowserLayout(input) {
+    return readBrowserLayoutReply(
+      ipcRenderer.sendSync(nativeBrowserLayoutChannel, input) as BrowserLayoutReply,
+    );
+  },
+  async presentBrowserLayoutAsync(input) {
+    return readBrowserLayoutReply(
+      (await ipcRenderer.invoke(nativeBrowserLayoutChannel, input)) as BrowserLayoutReply,
+    );
+  },
+  watchBrowserPresentation(listener) {
+    const receive = (_event: unknown, value: unknown) => {
+      if (value === true) listener();
+    };
+    ipcRenderer.on(nativeBrowserPresentationChannel, receive);
+    return () => ipcRenderer.removeListener(nativeBrowserPresentationChannel, receive);
+  },
+  async showBrowserMenu(input) {
+    const action: unknown = await ipcRenderer.invoke(nativeBrowserMenuChannel, input);
+    if (action !== null && !isNativeBrowserMenuAction(action)) throw Error('invalid_browser_menu');
+    return action;
+  },
+  cancelBrowserMenu(requestId) {
+    ipcRenderer.send(nativeBrowserMenuCancelChannel, requestId);
+  },
+  async restoreBrowser(scope) {
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, {
+      action: 'restore',
+      scope,
+    })) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (!isNativeBrowserRestoreResult(reply.value)) throw Error('invalid_browser_restore');
+    return reply.value;
+  },
+  async restoreBrowserDraft(draft) {
+    if (!isNativeBrowserDraft(draft)) throw Error('invalid_browser_request');
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, {
+      action: 'restoreDraft',
+      draft,
+    })) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (!isNativeBrowserDraftRestoreResult(reply.value)) throw Error('invalid_browser_restore');
     return reply.value;
   },
   watchBrowser(listener) {
@@ -98,6 +181,26 @@ const bridge: NativeBridge &
     if (!['mica', 'vibrancy', 'none'].includes(reply.value?.backgroundMaterial))
       throw Error('invalid_native_window_appearance');
     return reply.value;
+  },
+  async confirmFullPermission(input) {
+    const reply = (await ipcRenderer.invoke(
+      nativeFullPermissionConfirmationChannel,
+      input,
+    )) as NativeFullPermissionConfirmationReply;
+    if (!reply.ok) {
+      if (reply.code === 'native_full_permission_confirmation_cancelled') return false;
+      throw Object.assign(Error(reply.code), { code: reply.code });
+    }
+    if (typeof reply.value !== 'boolean') throw Error('invalid_native_confirmation_result');
+    return reply.value;
+  },
+  cancelFullPermissionConfirmation(requestId) {
+    ipcRenderer.send(nativeFullPermissionConfirmationCancelChannel, { requestId });
+  },
+  watchQuitConfirmationFailure(listener) {
+    const receive = () => listener();
+    ipcRenderer.on(nativeQuitConfirmationFailureChannel, receive);
+    return () => ipcRenderer.off(nativeQuitConfirmationFailureChannel, receive);
   },
   async setTheme(theme) {
     const reply = (await ipcRenderer.invoke(nativeThemeChannel, { theme })) as NativeReply;

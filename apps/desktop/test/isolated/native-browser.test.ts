@@ -1,21 +1,43 @@
 import { expect, test } from 'bun:test';
-import { realpathSync } from 'node:fs';
+import { realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import tailwind from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'vite';
 import { ensureWindowsElectronPermissions } from '../../../../scripts/development/windows-electron-permissions';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { prepareMacosElectronRuntime } from '../../scripts/macos-electron-runtime';
 
-test('real sandboxed browser tabs preserve history and reader lifetime without exposing app authority', async () => {
+test('real sandboxed manual browser owners preserve exact pages across scope changes without exposing app authority', async () => {
   const directory = realpathSync(temporaryDirectory('kite-sidebar-browser-'));
   const desktop = resolve(import.meta.dir, '../..');
   const require = createRequire(join(desktop, 'package.json'));
+  const installed = realpathSync(require('electron') as string);
   ensureWindowsElectronPermissions({
-    executable: require('electron'),
+    executable: installed,
     packageDirectory: resolve(require.resolve('electron/package.json'), '..'),
   });
+  const runtime =
+    process.platform === 'darwin' && process.arch === 'arm64'
+      ? await prepareMacosElectronRuntime({
+          sourceDist: join(dirname(realpathSync(require.resolve('electron/package.json'))), 'dist'),
+          outdir: join(directory, 'electron-runtime'),
+        })
+      : { executable: installed, resize: null };
+  const mainEntry = join(directory, 'browser-main.ts');
+  writeFileSync(
+    mainEntry,
+    [
+      "import { app } from 'electron';",
+      `import { configureMacosElectronResize } from ${JSON.stringify(join(desktop, 'electron/macos-electron-resize.ts'))};`,
+      `configureMacosElectronResize(app, ${JSON.stringify(runtime.resize)});`,
+      // A runtime require keeps the original fixture's app.whenReady after the
+      // same engine admission and feature selection used by production Main.
+      `require(${JSON.stringify(join(desktop, 'test/native-browser-electron.fixture.ts'))});`,
+    ].join('\n'),
+    { flag: 'wx' },
+  );
   await build({
     configFile: false,
     root: desktop,
@@ -37,12 +59,12 @@ test('real sandboxed browser tabs preserve history and reader lifetime without e
     },
   });
   for (const [input, output, format] of [
-    ['electron/preload.ts', 'preload.cjs', 'cjs'],
-    ['test/native-browser-electron.fixture.ts', 'main.cjs', 'cjs'],
-    ['test/native-browser-driver.fixture.ts', 'driver.mjs', 'esm'],
+    [join(desktop, 'electron/preload.ts'), 'preload.cjs', 'cjs'],
+    [mainEntry, 'main.cjs', 'cjs'],
+    [join(desktop, 'test/native-browser-driver.fixture.ts'), 'driver.mjs', 'esm'],
   ] as const) {
     const built = await Bun.build({
-      entrypoints: [join(desktop, input)],
+      entrypoints: [input],
       outdir: directory,
       naming: output,
       target: 'node',
@@ -57,6 +79,8 @@ test('real sandboxed browser tabs preserve history and reader lifetime without e
       join(directory, 'driver.mjs'),
       join(desktop, 'package.json'),
       directory,
+      runtime.executable,
+      runtime.resize ? 'macos-resize' : 'stock',
     ],
     { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' },
   );

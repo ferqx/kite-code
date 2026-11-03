@@ -175,6 +175,7 @@ test('built preload and Main file IPC retry failed Artifact writes and preserve 
   expect(built.success).toBe(true);
   let bridge!: NativeBridge;
   runInNewContext(await built.outputs[0]!.text(), {
+    document: { defaultView: null },
     exports: {},
     module: { exports: {} },
     require: (name: string) => {
@@ -186,6 +187,11 @@ test('built preload and Main file IPC retry failed Artifact writes and preserve 
           },
         },
         ipcRenderer: {
+          sendSync(channel: string, input: unknown) {
+            expect(channel).toBe('kite:native:browser-display');
+            expect(input).toEqual({ action: 'get' });
+            return null;
+          },
           invoke: (key: string, payload: unknown) => handlers.get(key)!(event, payload),
           on() {},
           removeListener() {},

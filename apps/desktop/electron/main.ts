@@ -12,10 +12,26 @@ import {
   PairedServiceError,
   type ServiceStartupDiagnostic,
 } from '@kite-ai/service/paired';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, Tray } from 'electron';
-import { type NativeWindowAppearance, nativeEventChannel } from '../src/native-bridge';
+import {
+  app,
+  type BrowserWindowConstructorOptions,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  Tray,
+  WebContentsView,
+} from 'electron';
+import {
+  type NativeWindowAppearance,
+  nativeEventChannel,
+  nativeQuitConfirmationFailureChannel,
+} from '../src/native-bridge';
 import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
+import { listenBrowserPageHost } from './browser-page-channel';
+import { NativeBrowserPageHost } from './browser-page-host';
 import {
   type DevelopmentServiceReload,
   desktopContentSecurityPolicy,
@@ -23,15 +39,24 @@ import {
   serveDevelopmentReload,
 } from './development';
 import { registerNativeExternalLinks } from './external-links';
+import { configureMacosElectronResize, type MacosElectronResize } from './macos-electron-resize';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { registerNativeBrowserIpc } from './native-browser';
-import { NativeCaller } from './native-caller';
+import { createNativeCallerGenerationOwner, NativeCaller } from './native-caller';
+import { registerNativeFullPermissionDialogIpc } from './native-full-permission-dialog';
+import { createNativeGlobalDialogHost } from './native-global-dialog-host';
 import {
   registerNativeIpc,
   registerNativeStartupIpc,
   registerNativeThemeIpc,
   registerNativeWindowIpc,
 } from './native-ipc';
+import {
+  createNativeRootWindow,
+  type NativeRootWindow,
+  nativeRootWindowMenu,
+  onNativeRootReady,
+} from './native-root-window';
 import {
   nativeWindowMenuShortcut,
   nativeWindowMenuTemplate,
@@ -62,6 +87,11 @@ declare const __KITE_DESKTOP_WINDOWS_ACCESS__: {
   relativePath: 'windows-access.node';
   sha256: string;
 } | null;
+declare const __KITE_DESKTOP_MACOS_RESIZE__: MacosElectronResize | null;
+configureMacosElectronResize(
+  app,
+  typeof __KITE_DESKTOP_MACOS_RESIZE__ === 'undefined' ? null : __KITE_DESKTOP_MACOS_RESIZE__,
+);
 const inputAssets = __KITE_DESKTOP_NATIVE_ASSETS__;
 const candidate =
   !!inputAssets &&
@@ -80,6 +110,8 @@ const development = parseDesktopDevelopment(
   !candidate && assets.kind === 'development',
 );
 let activeAssets = assets;
+const nextCallerGeneration = createNativeCallerGenerationOwner();
+let callerSelectionHint: Readonly<{ storeId: string; sessionId: string }> | undefined;
 const windowsAsset =
   formalAssets?.windowsAsset ??
   (__KITE_DESKTOP_WINDOWS_ACCESS__
@@ -96,11 +128,14 @@ const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
   : process.platform === 'darwin'
     ? 'vibrancy'
     : 'none';
-let window: BrowserWindow | undefined, caller: NativeCaller | undefined;
+let window: NativeRootWindow | undefined, caller: NativeCaller | undefined;
+let globalDialogOwner: ReturnType<typeof createNativeGlobalDialogHost> | undefined;
 let tray: Tray | undefined;
 let opening: Promise<NativeCaller> | undefined;
 let closingNativeResources: Promise<void> | undefined;
 let stoppingNativeProcess: Promise<void> | undefined;
+const browserPages = new NativeBrowserPageHost();
+let browserPageChannel: Awaited<ReturnType<typeof listenBrowserPageHost>> | undefined;
 let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
@@ -219,7 +254,10 @@ async function openCaller(): Promise<NativeCaller> {
       });
     // Windows Main holds its own native Profile SH before the independent Service starts.
     if (process.platform === 'win32') privateAccess = await acquirePrivateAccess();
+    if (process.platform !== 'win32')
+      browserPageChannel ??= await listenBrowserPageHost(browserPages);
     paired = await launchPairedService({
+      desktopBrowser: browserPageChannel?.startup,
       profile,
       entrypoint: activeAssets.serviceEntrypoint,
       executable: activeAssets.bunExecutable,
@@ -277,6 +315,9 @@ async function openCaller(): Promise<NativeCaller> {
           return available && paired === admittedService && !quitting;
         },
       },
+      undefined,
+      nextCallerGeneration,
+      callerSelectionHint,
     );
     scheduledTasks = new ScheduledTaskRunner(paired.client, privateData);
     caller.setScheduledTasks(scheduledTasks);
@@ -288,6 +329,8 @@ async function openCaller(): Promise<NativeCaller> {
       privateData?.close();
       privateAccess?.close();
       await paired?.close();
+      await browserPageChannel?.close();
+      browserPageChannel = undefined;
       for (const lease of artifactAccess.reverse()) lease.close();
     } catch (cleanup) {
       // Keep the rejected opening and every original owner. A cleanup error
@@ -307,11 +350,16 @@ function closeNativeResources(): Promise<void> {
     await opening?.catch(() => {});
     await scheduledTasks?.stop();
     scheduledTasks = undefined;
+    const selected = caller?.state().selection;
+    if (selected && !selected.session.deletedAt)
+      callerSelectionHint = { storeId: selected.storeId, sessionId: selected.session.id };
     await caller?.close();
     privateData?.close();
     privateAccess?.close();
     await paired?.close();
     if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
+    await browserPageChannel?.close();
+    browserPageChannel = undefined;
     for (const lease of artifactAccess.reverse()) lease.close();
     artifactAccess = [];
     windowsArtifactAccess = undefined;
@@ -337,13 +385,13 @@ function stopNativeProcess(code = 0): void {
   finishQuitDecision();
   stoppingNativeProcess = Promise.resolve()
     .then(async () => {
-      // Commit the stop owner before destroying the last window. Its close
-      // events must not quit Main while it still owns the background drain.
+      // Close visible UI immediately, but retain the original page/lease owner
+      // until Service can revoke, detach and confirm its actual resource drain.
       const closingWindow = window;
       window = undefined;
       tray?.destroy();
       tray = undefined;
-      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.destroy();
+      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.hide();
       if (process.platform === 'darwin') {
         app.hide();
         app.dock?.hide();
@@ -358,6 +406,7 @@ function stopNativeProcess(code = 0): void {
         forceExit();
         return;
       }
+      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.destroy();
       exitAllowed = true;
       app.exit(code);
     })
@@ -381,7 +430,7 @@ async function reloadDevelopmentService(request: DevelopmentServiceReload) {
   verifyNativeAsset(next.serviceEntrypoint, next.serviceSha256);
   switchingService = true;
   sendLifecycle(true);
-  developmentReload = (async () => {
+  const reloading = (async () => {
     await closeNativeResources();
     if (quitDecision) await quitDecision;
     if (quitting) throw Error('native_draining');
@@ -391,8 +440,15 @@ async function reloadDevelopmentService(request: DevelopmentServiceReload) {
     if (!window || window.isDestroyed()) throw Error('native_window_unavailable');
     await window.loadURL(development.rendererUrl);
   })();
-  await developmentReload;
-  developmentReload = undefined;
+  developmentReload = reloading;
+  try {
+    await reloading;
+  } finally {
+    // The latch describes this in-flight reload, not its settled outcome.
+    // Failed cleanup remains sticky in closeNativeResources; a later save
+    // still has to confirm that original drain before opening another Caller.
+    if (developmentReload === reloading) developmentReload = undefined;
+  }
 }
 let reportDevelopmentStartup: (error?: unknown) => void = () => {};
 if (development) {
@@ -460,7 +516,7 @@ void app
     }
     const rendererPath = join(app.getAppPath(), 'index.html'),
       rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
-    window = new BrowserWindow({
+    const windowOptions: BrowserWindowConstructorOptions = {
       title: 'Kite',
       ...(process.platform === 'win32' ? { icon: join(app.getAppPath(), 'app-icon.ico') } : {}),
       width: 1100,
@@ -494,7 +550,60 @@ void app
         sandbox: true,
         webSecurity: true,
       },
+    };
+    window = createNativeRootWindow(windowOptions);
+    const globalDialog = createNativeGlobalDialogHost({
+      window,
+      ipcMain,
+      url: new URL('global-dialog.html', rendererUrl).href,
+      theme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+      createView() {
+        const view = new WebContentsView({
+          webPreferences: {
+            preload: join(app.getAppPath(), 'global-dialog-preload.cjs'),
+            partition: `kite-global-dialog-${randomUUID()}`,
+            contextIsolation: true,
+            sandbox: true,
+            nodeIntegration: false,
+            nodeIntegrationInSubFrames: false,
+            webSecurity: true,
+            webviewTag: false,
+            devTools: false,
+            navigateOnDragDrop: false,
+            disableDialogs: true,
+          },
+        });
+        const session = view.webContents.session;
+        session.setPermissionCheckHandler(() => false);
+        session.setPermissionRequestHandler((_contents, _permission, complete) => complete(false));
+        session.webRequest.onHeadersReceived((details, complete) =>
+          complete({
+            responseHeaders: {
+              ...details.responseHeaders,
+              'Content-Security-Policy': [desktopContentSecurityPolicy(development)],
+            },
+          }),
+        );
+        const base = new URL('.', rendererUrl);
+        session.webRequest.onBeforeRequest((details, complete) => {
+          let allowed = false;
+          try {
+            const target = new URL(details.url);
+            allowed =
+              base.protocol === 'file:'
+                ? target.protocol === 'file:' && target.href.startsWith(base.href)
+                : target.origin === base.origin ||
+                  (target.protocol === 'ws:' && target.host === base.host);
+          } catch {}
+          complete({ cancel: !allowed });
+        });
+        return view;
+      },
     });
+    globalDialogOwner = globalDialog;
+    globalDialog.prewarm();
+    if (process.platform === 'darwin')
+      Menu.setApplicationMenu(Menu.buildFromTemplate(nativeRootWindowMenu(window)));
     if (process.platform === 'win32') {
       tray = new Tray(join(app.getAppPath(), 'app-icon.ico'));
       tray.setToolTip('Kite');
@@ -512,6 +621,7 @@ void app
         dispatch(action: import('../src/native-menu-bridge').NativeWindowMenuAction) {
           if (
             !quitting &&
+            !globalDialog.active() &&
             window &&
             !window.isDestroyed() &&
             window.webContents.mainFrame.url.split('#')[0] === rendererUrl
@@ -540,7 +650,7 @@ void app
           const menu = Menu.buildFromTemplate(
             nativeWindowMenuTemplate({
               ...menuOptions,
-              applicationEnabled: request.applicationEnabled && !quitting,
+              applicationEnabled: request.applicationEnabled && !quitting && !globalDialog.active(),
             }),
           ).getMenuItemById(request.menu)!.submenu!;
           return new Promise<void>((resolve) =>
@@ -555,6 +665,7 @@ void app
       });
     } else if (process.platform !== 'darwin') window.removeMenu();
     const updateSystemBackground = () => {
+      globalDialog.syncTheme();
       if (window && !window.isDestroyed()) {
         window.setBackgroundColor(
           windowMaterial !== 'none'
@@ -592,7 +703,20 @@ void app
         },
       }),
     );
-    registerNativeBrowserIpc({ ipcMain, window, rendererUrl });
+    registerNativeBrowserIpc({
+      ipcMain,
+      window,
+      rendererUrl,
+      // Renderer attachment opens the paired Service/channel lazily, after this
+      // registration. Bind the existing Main owner rather than its future listener.
+      automation: process.platform !== 'win32' ? browserPages : undefined,
+      grantScope() {
+        return caller?.browserScope('presentation');
+      },
+      selectedScope() {
+        return caller?.browserScope('input');
+      },
+    });
     registerNativeThemeIpc({
       ipcMain,
       window: () => window,
@@ -600,6 +724,15 @@ void app
       setTheme(theme) {
         nativeTheme.themeSource = theme;
         updateSystemBackground();
+      },
+    });
+    registerNativeFullPermissionDialogIpc({
+      ipcMain,
+      window: () => window,
+      rendererUrl,
+      async showDialog(parent, language, signal) {
+        if (parent !== window || quitting || stoppingNativeProcess || exitAllowed) return false;
+        return globalDialog.confirm({ kind: 'full-permission', language }, signal);
       },
     });
     registerNativeWindowIpc({
@@ -632,18 +765,11 @@ void app
       rendererUrl,
       caller: openCaller,
       async confirmWorkspaceRemoval(label) {
-        const result = await dialog.showMessageBox(window!, {
-          type: 'warning',
-          title: `移除空间“${label}”？`,
-          message: `移除空间“${label}”？`,
-          detail:
-            '将移除本地项目登记及全部会话列表，并请求停止运行中的任务。历史先保留；任务结束并过宽限期后，可在退出客户端后通过离线维护清理。未结束或结果未知的执行证据会继续保留。不会删除工作目录中的文件。',
-          buttons: ['保留空间', '移除空间'],
-          defaultId: 0,
-          cancelId: 0,
-          noLink: true,
-        });
-        return result.response === 1;
+        if (quitting || stoppingNativeProcess || exitAllowed) return false;
+        return globalDialog.confirm(
+          { kind: 'workspace-removal', language: 'zh', label },
+          new AbortController().signal,
+        );
       },
       async pickWorkspace(generation, host) {
         await host.invoke({ method: 'state', generation });
@@ -666,9 +792,10 @@ void app
         window?.hide();
       }
     });
-    window.once('ready-to-show', () => {
+    const showReadyWindow = () => {
       if (!stoppingNativeProcess && !exitAllowed && window && !window.isDestroyed()) window.show();
-    });
+    };
+    onNativeRootReady(window, showReadyWindow);
     if (development) {
       await window.loadURL(rendererUrl);
       try {
@@ -709,6 +836,7 @@ app.on('before-quit', (event) => {
     resolveQuitDecision = resolve;
   });
   setQuitting(true);
+  globalDialogOwner?.dismiss();
   const ownsQuit = () => !stoppingNativeProcess && !exitAllowed;
   void (async () => {
     if (window && !window.isDestroyed()) {
@@ -730,12 +858,27 @@ app.on('before-quit', (event) => {
         defaultId: 0,
         cancelId: 0,
       };
-      const result =
-        window && !window.isDestroyed()
-          ? await dialog.showMessageBox(window, options)
-          : await dialog.showMessageBox(options);
+      let confirmed: boolean;
+      try {
+        const result =
+          window && !window.isDestroyed()
+            ? await dialog.showMessageBox(window, options)
+            : await dialog.showMessageBox(options);
+        confirmed = result.response === 1;
+      } catch (error) {
+        if (!ownsQuit()) return;
+        if (!window || window.isDestroyed()) throw error;
+        setQuitting(false);
+        try {
+          if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
+            window.webContents.send(nativeQuitConfirmationFailureChannel);
+        } catch {
+          // Notification delivery cannot reverse the decision to retain the Service.
+        }
+        return;
+      }
       if (!ownsQuit()) return;
-      if (result.response !== 1) {
+      if (!confirmed) {
         setQuitting(false);
         return;
       }

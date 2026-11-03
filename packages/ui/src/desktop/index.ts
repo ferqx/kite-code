@@ -87,6 +87,11 @@ export {
 } from './components/ui/tooltip';
 export { DesktopDiagnosticsProvider, useDesktopDiagnostics } from './diagnostics';
 export { FileChanges, FileDiff } from './FileChanges';
+export {
+  ApplicationConfirmationDialog,
+  type ApplicationConfirmationDialogProps,
+  FullPermissionConfirmationDialog,
+} from './FullPermissionConfirmationDialog';
 export { MessageAttachments } from './MessageAttachments';
 export { MessageContent } from './MessageContent';
 export { MessageCopyButton } from './MessageCopyButton';
@@ -122,6 +127,8 @@ export {
 } from './ScheduledTasks';
 export { NAVIGATION_MIN_WIDTH, SessionPage, type SessionPageProps } from './SessionPage';
 export {
+  BrowserAnnotationIcon,
+  BrowserOptionsIcon,
   type SessionBrowserPageProps,
   SessionBrowserToolbar,
   type SessionBrowserToolbarProps,
@@ -137,5 +144,9 @@ export { SettingsNavigationIcon } from './SettingsNavigationIcon';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';
 export { ToolActivity, ToolRow } from './ToolActivity';
-export type { Message, TurnActivity, WorkspaceSummary } from './types';
+export type {
+  Message,
+  TurnActivity,
+  WorkspaceSummary,
+} from './types';
 export { Button } from './ui';

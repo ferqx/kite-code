@@ -9,7 +9,6 @@ import {
   Shield01Icon,
   ShieldAlertIcon,
   StopIcon,
-  TriangleAlertIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
@@ -23,16 +22,6 @@ import {
   useState,
 } from 'react';
 import { AttachmentFileCard } from './AttachmentFileCard';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from './components/ui/alert-dialog';
 import { Button as ShadcnButton } from './components/ui/button';
 import {
   DropdownMenu,
@@ -46,6 +35,10 @@ import {
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
+import {
+  FullPermissionConfirmationDialog,
+  fullPermissionConfirmationCopy,
+} from './FullPermissionConfirmationDialog';
 import { cn } from './lib/utils';
 import { ModelEffortSelector, type ModelOption, type ThinkingEffort } from './ModelEffortSelector';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
@@ -99,13 +92,6 @@ const permissionCopy = {
       menuLabel: '完全访问',
       detail: '允许外部写入和联网；极危险操作仍拒绝',
     },
-    fullWarning: {
-      title: '开启完全权限？',
-      description: '执行命令、读写文件和联网时，将不再逐项询问。',
-      risks: ['文件可能被覆盖或删除', '敏感数据可能外泄，后果难以撤销'],
-      cancel: '取消',
-      confirm: '启用完全权限',
-    },
   },
   en: {
     name: 'Permission',
@@ -126,17 +112,6 @@ const permissionCopy = {
       label: 'Full',
       menuLabel: 'Full permission',
       detail: 'Allow external writes and internet access; extreme dangers remain denied',
-    },
-    fullWarning: {
-      title: 'Enable Full permission?',
-      description:
-        'Commands, file access and internet use will no longer require individual approval.',
-      risks: [
-        'Files may be overwritten or deleted',
-        'Sensitive data may be exposed, with consequences that are hard to undo',
-      ],
-      cancel: 'Cancel',
-      confirm: 'Enable Full',
     },
   },
 } as const;
@@ -168,6 +143,8 @@ export interface ComposerProps {
   onRemoveImage?: (id: string) => void;
   imageError?: string;
   context?: ReactNode;
+  /** Explicit prepared context is input even when the text editor is empty. */
+  contextHasInput?: boolean;
   options?: ReactNode;
   inputLabel?: string;
   sendLabel?: string;
@@ -190,6 +167,10 @@ export interface ComposerProps {
   permission?: 'accept_edits' | 'auto' | 'full';
   fullPermissionScope?: string;
   onPermissionChange?: (permission: 'accept_edits' | 'auto' | 'full') => void;
+  confirmFullPermission?: (options: {
+    language: 'zh' | 'en';
+    signal: AbortSignal;
+  }) => Promise<boolean>;
   permissionDisabled?: boolean;
   permissionPending?: boolean;
   sessionLoading?: boolean;
@@ -204,6 +185,29 @@ export interface ComposerProps {
   submitStatus?: string;
   sending?: boolean;
   promptHidden?: boolean;
+}
+function canConfirmFull(props: ComposerProps) {
+  return (
+    !!props.permission &&
+    props.permission !== 'full' &&
+    !!props.onPermissionChange &&
+    !props.disabled &&
+    !props.permissionDisabled &&
+    !props.permissionPending &&
+    !props.promptHidden
+  );
+}
+function samePermissionContext(original: ComposerProps, latest: ComposerProps) {
+  return (
+    latest.permission === original.permission &&
+    latest.scopeKey === original.scopeKey &&
+    latest.fullPermissionScope === original.fullPermissionScope &&
+    latest.onPermissionChange === original.onPermissionChange &&
+    latest.confirmFullPermission === original.confirmFullPermission
+  );
+}
+function currentFullPermission(original: ComposerProps, latest: ComposerProps) {
+  return canConfirmFull(latest) && samePermissionContext(original, latest);
 }
 export function Composer(props: ComposerProps) {
   const editor = useRef<PromptEditorHandle>(null);
@@ -224,6 +228,9 @@ export function Composer(props: ComposerProps) {
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [confirmingFullScope, setConfirmingFullScope] = useState<string | null>(null);
+  const fullConfirmation = useRef<AbortController | null>(null);
+  const [confirmingFull, setConfirmingFull] = useState(false);
+  const [fullPermissionError, setFullPermissionError] = useState(false);
   const [attachmentMenuLayout, setAttachmentMenuLayout] = useState({
     width: 0,
     alignOffset: 0,
@@ -247,15 +254,22 @@ export function Composer(props: ComposerProps) {
     }
     if (current.current.scopeKey !== props.scopeKey || props.disabled || props.promptHidden)
       setAttachmentMenuOpen(false);
+    if (!canConfirmFull(props) || !samePermissionContext(current.current, props)) {
+      const wasConfirming = !!fullConfirmation.current || confirmingFullScope !== null;
+      fullConfirmation.current?.abort();
+      fullConfirmation.current = null;
+      setConfirmingFull(false);
+      setFullPermissionError(false);
+      if (wasConfirming) setPermissionMenuOpen(false);
+      setConfirmingFullScope(null);
+    }
     if (
       current.current.scopeKey !== props.scopeKey ||
       current.current.fullPermissionScope !== props.fullPermissionScope ||
       props.permissionDisabled ||
       props.promptHidden
-    ) {
+    )
       setPermissionMenuOpen(false);
-      setConfirmingFullScope(null);
-    }
     current.current = props;
   });
   useLayoutEffect(() => {
@@ -292,6 +306,8 @@ export function Composer(props: ComposerProps) {
       filePick.current?.abort();
       filePick.current = null;
       fileDialog.current = null;
+      fullConfirmation.current?.abort();
+      fullConfirmation.current = null;
     },
     [],
   );
@@ -388,6 +404,37 @@ export function Composer(props: ComposerProps) {
       ? 'zh'
       : 'en';
   const permissionText = permissionCopy[permissionLanguage];
+  async function confirmFullPermission() {
+    const original = current.current;
+    if (fullConfirmation.current || !currentFullPermission(original, original)) return;
+    setFullPermissionError(false);
+    if (!original.confirmFullPermission) {
+      setConfirmingFullScope(original.fullPermissionScope ?? '');
+      return;
+    }
+    const confirmation = new AbortController();
+    fullConfirmation.current = confirmation;
+    setConfirmingFull(true);
+    setPermissionMenuOpen(false);
+    const owned = () =>
+      fullConfirmation.current === confirmation &&
+      !confirmation.signal.aborted &&
+      currentFullPermission(original, current.current);
+    try {
+      const accepted = await original.confirmFullPermission({
+        language: permissionLanguage,
+        signal: confirmation.signal,
+      });
+      if (accepted === true && owned()) original.onPermissionChange?.('full');
+    } catch {
+      if (owned()) setFullPermissionError(true);
+    } finally {
+      if (fullConfirmation.current === confirmation) {
+        fullConfirmation.current = null;
+        setConfirmingFull(false);
+      }
+    }
+  }
   const permissionLabel = props.permission
     ? permissionText[props.permission].label
     : permissionText.placeholder;
@@ -415,12 +462,19 @@ export function Composer(props: ComposerProps) {
     !props.sending &&
     !pickingFiles &&
     !props.images?.some((image) => image.loading || image.error) &&
-    (!!props.draft.trim() || !!props.images?.length || !!props.files?.length);
+    (!!props.draft.trim() ||
+      !!props.images?.length ||
+      !!props.files?.length ||
+      !!props.contextHasInput);
   const showStop =
     !props.sending &&
     props.active &&
     !!props.onCancel &&
-    ((!props.draft.trim() && !props.images?.length && !props.files?.length) || props.stopping);
+    ((!props.draft.trim() &&
+      !props.images?.length &&
+      !props.files?.length &&
+      !props.contextHasInput) ||
+      props.stopping);
   // Preserve only previously enabled presentation during a routine read gate. Business
   // disabled states (empty draft, sending, stopping, file preparation) remain visible.
   const presentation = useRef(
@@ -583,6 +637,11 @@ export function Composer(props: ComposerProps) {
             {props.imageError || fileError}
           </p>
         )}
+        {fullPermissionError && (
+          <p className="composer-input-error" role="alert">
+            {fullPermissionConfirmationCopy[permissionLanguage].failed}
+          </p>
+        )}
         {preparingFiles && (
           <div
             className="flex items-center gap-2 px-3 py-1 text-sm text-muted-foreground"
@@ -675,7 +734,12 @@ export function Composer(props: ComposerProps) {
               <DropdownMenu
                 open={permissionMenuOpen}
                 onOpenChange={(open) => {
-                  if (!open || (!current.current.permissionDisabled && current.current.permission))
+                  if (
+                    !open ||
+                    (!fullConfirmation.current &&
+                      !current.current.permissionDisabled &&
+                      current.current.permission)
+                  )
                     setPermissionMenuOpen(open);
                 }}
               >
@@ -689,9 +753,11 @@ export function Composer(props: ComposerProps) {
                     )}
                     data-permission-trigger
                     data-preserve-enabled={previousPresentation?.permission || undefined}
-                    aria-busy={props.permissionPending || props.sessionLoading || undefined}
+                    aria-busy={
+                      confirmingFull || props.permissionPending || props.sessionLoading || undefined
+                    }
                     aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionLabel}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
-                    disabled={props.permissionDisabled || !props.permission}
+                    disabled={confirmingFull || props.permissionDisabled || !props.permission}
                   >
                     <HugeiconsIcon
                       data-icon="inline-start"
@@ -720,17 +786,20 @@ export function Composer(props: ComposerProps) {
                     value={props.permission}
                     onValueChange={(value) => {
                       if (
+                        fullConfirmation.current ||
                         current.current.permissionDisabled ||
                         !current.current.permission ||
                         value === current.current.permission
                       )
                         return;
                       if (value === 'full') {
-                        setConfirmingFullScope(props.fullPermissionScope ?? '');
-                      } else
-                        props.onPermissionChange?.(
+                        void confirmFullPermission();
+                      } else {
+                        setFullPermissionError(false);
+                        current.current.onPermissionChange?.(
                           value as NonNullable<ComposerProps['permission']>,
                         );
+                      }
                     }}
                   >
                     <DropdownMenuGroup>
@@ -870,7 +939,10 @@ export function Composer(props: ComposerProps) {
                       !props.sending &&
                       !pickingFiles &&
                       !props.images?.some((image) => image.loading || image.error) &&
-                      (!!props.draft.trim() || !!props.images?.length || !!props.files?.length)) ||
+                      (!!props.draft.trim() ||
+                        !!props.images?.length ||
+                        !!props.files?.length ||
+                        !!props.contextHasInput)) ||
                     undefined
                   }
                 >
@@ -885,52 +957,24 @@ export function Composer(props: ComposerProps) {
           </div>
         </div>
       </form>
-      <AlertDialog
-        open={confirmingFullScope !== null}
-        onOpenChange={(open) => {
-          if (!open) setConfirmingFullScope(null);
-        }}
-      >
-        <AlertDialogContent className="full-permission-dialog">
-          <AlertDialogHeader className="full-permission-header">
-            <AlertDialogTitle className="full-permission-title">
-              <HugeiconsIcon
-                className="full-permission-title-icon"
-                icon={TriangleAlertIcon}
-                aria-hidden="true"
-              />
-              {permissionText.fullWarning.title}
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild className="full-permission-description">
-              <div>
-                <p className="full-permission-intro">{permissionText.fullWarning.description}</p>
-                <ul className="full-permission-risks">
-                  {permissionText.fullWarning.risks.map((risk) => (
-                    <li key={risk}>{risk}</li>
-                  ))}
-                </ul>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="full-permission-footer">
-            <AlertDialogCancel>{permissionText.fullWarning.cancel}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={props.permissionDisabled}
-              onClick={() => {
-                if (
-                  current.current.permissionDisabled ||
-                  confirmingFullScope !== (current.current.fullPermissionScope ?? '')
-                )
-                  return;
-                props.onPermissionChange?.('full');
-              }}
-            >
-              {permissionText.fullWarning.confirm}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {!props.confirmFullPermission && (
+        <FullPermissionConfirmationDialog
+          language={permissionLanguage}
+          open={confirmingFullScope !== null}
+          onOpenChange={(open) => {
+            if (!open) setConfirmingFullScope(null);
+          }}
+          confirmDisabled={!canConfirmFull(props)}
+          onConfirm={() => {
+            if (
+              !canConfirmFull(current.current) ||
+              confirmingFullScope !== (current.current.fullPermissionScope ?? '')
+            )
+              return;
+            current.current.onPermissionChange?.('full');
+          }}
+        />
+      )}
       {props.submitStatus && (
         <span className="sr-only" aria-live="polite">
           {props.submitStatus}

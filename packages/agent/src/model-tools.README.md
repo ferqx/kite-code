@@ -26,6 +26,8 @@
 
 `shell_stop` 的 `shell_id` 使用原返回句柄，`command_id` 则由调用方为本次取消创建唯一意图 ID；不能复制 launch／Job 返回的旧 Command ID。只有准确重试同一次取消才复用该 ID。说明与字段描述都表达这一区别，工具版本、输入形状和原去重／权限行为保持。
 
+可信 `RunConfiguration.modelHiddenToolIds` 只收窄该 Run 的模型目录：Runtime 冻结工具副本并设置模型隐藏，内部原定义、版本和每次派发权限保持。Service 在新 Native 统一浏览器配置中用它隐藏原子依赖，同时公开 `browser_execute`；子任务继承与恢复依据原冻结配置，不从今天的默认目录改写旧 Run。调用者的普通 Tool 参数不能声明这个宿主配置。回归见[浏览器配置](../../../apps/service/test/isolated/browser-execution-configuration.test.ts)。
+
 ## 字段转换规则
 
 `snakeCase:true` 只转换 JSON Schema 明确声明的 `properties`，并同步该节点的 `required`；组合分支按本次实际实参选择，仅保留激活且存在的字段规则。`parameterNames` 使用内部字段点路径指定公开 key，例如 `offset → start_line`、`limit → max_lines`，数组元素配置路径用 `*`，实际调用记录具体元素索引，避免改变 opaque 兄弟元素。记录的路径是输入字段位置，不是对象内容的搜索替换。
@@ -51,10 +53,13 @@
 | `task.spawn/message/follow_up/interrupt` | `spawn_agent`、`send_agent_message`、`follow_up_agent`、`interrupt_agent` | 创建使用 `prompt/task_name/preset`；后续协作使用稳定 `agent_id`，消息可明确 `target:parent`；不接受内部操作键、Provider 或 Run 身份 |
 | `task.events/list` | `wait_agent_events`、`list_agents` | 事件使用 `after_seq/wait_ms`；列表使用 `agent_ids/after_seq/upper_seq/limit` |
 | `planning.read/write/review/update` | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 只改模型名称和声明字段，原计划批准与版本 CAS 保持 |
-| `skills.load/resource` | `load_skill`、`read_skill_resource` | `id → skill_id` |
+| `browser.execute` | `browser_execute` | `code` 与简短动作 `description`；页面句柄、引用和操作 key 由 [Browser owner](tools/browser/README.md)核实，原子依赖在新 Native 默认目录中隐藏 |
+| `skills.load/resource` | `load_skill`、`read_skill_resource` | `id → skill_id`，可选 `version`；资源读取另含 `path`，不接受 `description` |
 | MCP 来源／连接／刷新／搜索 | `list_mcp_sources`、`connect_mcp_server`、`refresh_mcp_catalogue`、`search_mcp_tools` | 内置声明字段转 snake_case；来源目录与当前选中工具搜索分开 |
 | MCP 资源／提示 | `list_mcp_resources`、`read_mcp_resource`、`list_mcp_prompts`、`get_mcp_prompt` | 绑定字段转 snake_case，远端 `arguments` 保持 |
 | 动态 MCP Tool | `mcp_<server>_<remote>_<hash8>` | 来源和远端名称清理、转小写并限制片段长度，摘要绑定完整原身份；原远端 schema 与 RPC 名称/参数完全保留 |
+
+只有浏览器执行入口声明动作 `description`，沿既有 `model.requiredParameters` 对新模型调用必填，内部 schema 可选；长度为1–10个Unicode字符且不能全为空白，说明本次动作目的，不宣称成功。原输入与公开历史保留该字段，旧记录不补造，页面业务代码不消费它。两个 Skill 读取入口不再声明或要求执行描述；旧历史与封存请求保持原文。该字段不向 MCP／自定义工具注入或改写其业务参数，不升级 Tool／Protocol 版本。
 
 文件、Shell、Task 和 MCP 的完整参数、输出与生命周期分别归各 leaf README；本表不是另一份执行 schema。目录查看、文件查找与正文搜索由 Shell 完成，搜索使用内置 rg；原三个文件检索模型工具和五个验证工具已删除，历史记录不会重新开放它们。MCP 搜索范围不因改名扩大。
 
@@ -62,7 +67,7 @@ Files 的目录与检索 API 仍服务客户端文件候选等内部读取，不
 
 ## 工具选择与职责
 
-普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：具备合格 Shell 时为16项；不具备时为11项，包括 Files 三项、问题、网页及协作六项；其中 read_file 支持准确工作区外只读路径。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留内部兼容入口。
+普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：不含可选 Browser 的基础目录在具备合格 Shell 时为16项，不具备时为11项，包括 Files 三项、问题、网页及协作六项；其中 read_file 支持准确工作区外只读路径。宿主允许 Browser 时另选择对应浏览器能力；新 Native 默认对模型提供 `browser_execute` 与两个 Skill 读取入口，原子依赖保持内部隐藏。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留内部兼容入口。
 
 工具按独立操作及可观察结果划分，不把模型填写的结论包装成事实来源。研究状态工具及其 records/context、权限例外和导出入口已撤回。计划工具管理步骤、批准和版本；专用验证工具已移除，检查通过普通 Shell 执行并如实报告。
 

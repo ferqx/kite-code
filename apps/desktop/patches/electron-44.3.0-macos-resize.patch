@@ -1,0 +1,50 @@
+--- a/content/browser/renderer_host/browser_compositor_view_mac.mm
++++ b/content/browser/renderer_host/browser_compositor_view_mac.mm
+@@ -314,16 +314,5 @@ bool BrowserCompositorMac::ShouldShowStaleContentOnEviction() {
+   return false;
+ }
+ cc::DeadlinePolicy BrowserCompositorMac::GetResizeDeadlinePolicy() const {
+-  // For remote windows (PWA app shim), use the default deadline to give the
+-  // renderer time to produce a correctly-sized frame. With deadline=0, the
+-  // compositor immediately shows stale content, which is highly visible
+-  // because the entire window area is web content.
+-  // https://crbug.com/493708175
+-  //
+-  // For in-process windows (regular browser tabs, content shell, popups),
+-  // use deadline=0 to produce new content as quickly as possible.
+-  if (client_->ShouldUseDefaultDeadlineOnResize()) {
+-    return cc::DeadlinePolicy::UseDefaultDeadline();
+-  }
+-  return cc::DeadlinePolicy::UseSpecifiedDeadline(0u);
++  return cc::DeadlinePolicy::UseDefaultDeadline();
+ }
+--- a/ui/accelerated_widget_mac/ca_transaction_observer.mm
++++ b/ui/accelerated_widget_mac/ca_transaction_observer.mm
+@@ -156,22 +156,9 @@ void CATransactionCoordinator::Synchronize() {
+   if (disabled_for_testing_)
+     return;
+-
++
+-  if (base::FeatureList::IsEnabled(features::kCATransactionV2)) {
+-    // If we are in a nested run loop (e.g, during zoom), the we do not want
+-    // keep a CATransaction open across the animation, because it will cause
+-    // the animation to not be seen.
+-    if (NSRunLoop.currentRunLoop.currentMode &&
+-        ![NSRunLoop.currentRunLoop.currentMode
+-            isEqualToString:NSDefaultRunLoopMode]) {
+-      ca_action_disabler_.reset();
+-      return;
+-    }
+-
+-    if (!ca_action_disabler_) {
+-      ca_action_disabler_ = std::make_unique<ScopedCAActionDisabler>();
+-    }
+-    return;
+-  }
++  // Retain the feature lookup and testing guard. GPU V2 remains enabled;
++  // Main keeps the existing PreCommit/PostCommit and resize message pump.
++  (void)base::FeatureList::IsEnabled(features::kCATransactionV2);
+-
++
+   SynchronizeImpl();
+ }

@@ -1,8 +1,8 @@
-import type { ResourceRequest } from '../extensions';
+import type { ResourceCapacity, ResourceRequest } from '../extensions';
 import { AgentError } from '../storage/types';
 import type { WorkspaceSerialLocks } from './resource-port';
 
-class Semaphore {
+export class Semaphore {
   private used = 0;
   private readonly waiters: {
     resolve: (release: () => void) => void;
@@ -54,6 +54,7 @@ class Semaphore {
 
 /** The supported leaf set is one serial key, then one slot category. */
 export class ExecutionResources {
+  readonly capacity: ResourceCapacity;
   private readonly serial = new Map<string, Semaphore>();
   private readonly model: Semaphore;
   private readonly process: Semaphore;
@@ -66,6 +67,7 @@ export class ExecutionResources {
       processSlots < 1
     )
       throw new AgentError('invalid_capacity');
+    this.capacity = Object.freeze({ model: modelSlots, process: processSlots });
     this.model = new Semaphore(modelSlots);
     this.process = new Semaphore(processSlots);
     this.workspace = workspace;

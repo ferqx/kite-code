@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AuthorizationRequest, PermissionDecision, Permissions } from '../extensions';
 import type { Json } from '../storage';
+import { isBuiltinBrowserApprovalExempt } from './capabilities';
 
 export type PermissionMode = 'accept_edits' | 'auto' | 'full';
 export type CapabilityEffect =
@@ -43,6 +44,8 @@ export interface CapabilityDescription extends CapabilityIdentity {
   readonly safeRead: boolean;
   /** Trusted builtin record-only operation; never applies to arbitrary/custom Task effects. */
   readonly internalRecordOnly?: true;
+  /** Host-registered builtin browser operations need no review or approval in any mode. */
+  readonly approvalExempt?: 'builtin.browser';
 }
 export interface AuthorizationCheckContext {
   readonly task: Json;
@@ -118,6 +121,13 @@ function validDescription(description: CapabilityDescription) {
     typeof description.hardAllowed === 'boolean' &&
     typeof description.safeRead === 'boolean' &&
     (description.denialReason === undefined || text(description.denialReason)) &&
+    (description.approvalExempt === undefined ||
+      (description.approvalExempt === 'builtin.browser' &&
+        isBuiltinBrowserApprovalExempt(
+          description.definitionId,
+          description.kind,
+          description.definitionVersion,
+        ))) &&
     (description.executionScope === undefined ||
       (description.executionScope !== null &&
         typeof description.executionScope === 'object' &&
@@ -166,6 +176,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.executionScope ?? null,
           description.denialReason ?? null,
           description.internalRecordOnly ?? null,
+          ...(description.approvalExempt ? [description.approvalExempt] : []),
         ],
       }),
     )
@@ -215,6 +226,9 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
                   hardAllowed: description.hardAllowed,
                   safeRead: description.safeRead,
                   ...(description.internalRecordOnly ? { internalRecordOnly: true } : {}),
+                  ...(description.approvalExempt
+                    ? { approvalExempt: description.approvalExempt }
+                    : {}),
                   ...(description.executionScope
                     ? { executionScope: description.executionScope }
                     : {}),
@@ -241,6 +255,8 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       if (request.kind === 'model')
         return { ...controlProof, allowed: true, revision: boundRevision };
       if (!policy.workspaceTrust) return deny('workspace_untrusted');
+      if (description.approvalExempt === 'builtin.browser')
+        return { ...controlProof, allowed: true, revision: boundRevision };
       if (policy.mode === 'full')
         return { ...controlProof, allowed: true, revision: boundRevision };
       const safeRead =
@@ -336,4 +352,5 @@ export {
   createPlanningPermissionPolicy,
   requireFileRestoreApproval,
 } from './constraints';
+export { dispatchScopeLeaves } from './dispatch-scope';
 export { intersectPermissionPolicies } from './inheritance';

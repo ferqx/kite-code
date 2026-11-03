@@ -2,6 +2,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type AgentClient, ClientError, type Workspace } from '@kite-ai/client';
+import { composeBrowserDraft } from '../src/browser-annotation-content';
 import { createDesktopController, type DesktopController } from '../src/controller';
 import { type DesktopInput, inputMetadata } from '../src/input';
 import type {
@@ -11,7 +12,7 @@ import type {
   NativeRequest,
 } from '../src/native-bridge';
 import { promptTextForSend } from '../src/prompt-text';
-import { callerDigest, callerTextDigest, type NativeCallerJournal } from './caller-journal';
+import { callerDigest, type NativeCallerJournal, nativeDraftProof } from './caller-journal';
 import { queryBranch, switchBranch } from './git';
 import type { NativeProcessOwner } from './native-processes';
 import type { PrivateData } from './private-data';
@@ -292,11 +293,25 @@ export class NativeConversation {
         rootSessionId: request.creation.sessionId,
       };
       const original = this.data().read(draftScope);
-      const draft = this.data().save(
-        draftScope,
-        original.revision,
-        request.intent.content + (request.draftLineEndings ?? ''),
-      );
+      if (
+        request.draftDocument &&
+        (request.draftLineEndings !== undefined ||
+          composeBrowserDraft(request.draftDocument) !== request.intent.content)
+      )
+        throw new ClientError('draft_content_mismatch');
+      if (
+        request.draftDocument &&
+        (original.content !== request.draftDocument.content ||
+          composeBrowserDraft(original) !== request.intent.content)
+      )
+        throw new ClientError('draft_content_mismatch');
+      const draft = request.draftDocument
+        ? original
+        : this.data().save(
+            draftScope,
+            original.revision,
+            request.intent.content + (request.draftLineEndings ?? ''),
+          );
       let first = false;
       const creation =
         savedCreation ??
@@ -368,11 +383,11 @@ export class NativeConversation {
         ...(images?.length ? { images } : {}),
         ...(files?.length ? { files } : {}),
       };
-      const prepared = await this.journal().prepare(creation.input.sessionId, intent, {
-        id: draft.id,
-        revision: String(draft.revision),
-        textDigest: callerTextDigest(draft.content),
-      });
+      const prepared = await this.journal().prepare(
+        creation.input.sessionId,
+        intent,
+        nativeDraftProof(draft),
+      );
       this.check(scope);
       if (request.intent.modelId)
         this.data().rememberModelRoute(

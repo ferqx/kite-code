@@ -45,6 +45,29 @@ Windows daemon 在本进程首次完整准入后，把原 live artifact owner �
 
 HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core 原命令；Service 不按正文判别引导、不改写原队列申请，也不增加协议或工具版本。Store 核准确 pending follow-up、原主体／Session／前驱／selection／正文／附件并原子转换；完整前台工具批次先收尾，随后新模型输入接收独立引导。真实 HTTP 的转换、失败回滚、旧目标拒绝及丢回执原 ID 查询由[输入回归](../../tests/isolated/unified-agent/client-inputs.test.ts)与[Store 回归](../../packages/agent/test/isolated/storage/inputs.test.ts)覆盖。自动压缩继续使用原标准摘要器，真实模型交错范围见[模型验收](../../tests/e2e/live/model/README.md#运行中引导与自动压缩)。
 
+## 受管 Browser 默认装配
+
+[Browser 装配](src/browser-configuration.ts)把固定 `agent-browser@0.39.4` 后端接入现有 `builtin.browser` Extension。[普通默认选择](src/configuration-defaults.ts)在后端可用时，为接入 Main 普通页通道的 Native 新 Run 默认选择一个 `browser.execute`（模型名称 `browser_execute`），并选入原 `skills.load/resource` 读取入口；CLI／TUI 的独立浏览器兼容路径保留原 `browser.open/navigate/snapshot/click/fill/scroll/close`。最小嵌入宿主仍只默认选择 `ask_user`。JSONC 只选择既有 Tool ID，不能提供 executable、启动参数、CDP、普通浏览器 Profile 或认证路径；用户／Workspace 的 `browser` 配置与非空 Tool options 拒绝。可信宿主的 `browser:false` 是实际权限上限，JSONC 和 Full 模式不能解除。
+
+[每 Run 装配](src/configuration.ts)把统一入口依赖的原子 Tool 留在真实执行允许集及 `actualCapabilities`，经原 Operations、权限和执行记录逐 API 派发；`modelHiddenToolIds` 只收敛模型目录，不移除内部定义或授予权限。显式旧工具选择继续使用旧目录；冻结旧 Run 的配置、定义版本、宿主指纹和呈现选择在恢复时复核，默认迁移不改写旧记录。用户明确禁用统一入口的必要内部依赖时返回 `browser_dependency_disabled`，不能为凑齐能力静默解除禁用。
+
+[固定能力分类](../../packages/agent/src/permissions/capabilities.ts)保留真实Tool／Job／Action的network、process及输入effects，并仅对准确注册的builtin.browser@1提供审批豁免；三种模式均不调用审核模型、创建审批或页面Question。实际能力、任务／页面／控制权、取消与未知不重放仍核。Service的实际Tool和Job投影透传该准确标记，不把browser.session伪装read，也不以审核结果复用做第二准入。页面prepare／commit只绑定实际已派发来源及当前准确页面；旧Question／refusal／unknown保守保留。
+
+准确 `builtin.browser@1` 的 `browser.close`／`browser.request_human` Tool 只关闭或交还既有准确目标，`browser.human_wait` Job只编排原请求的有限结果收据，三者分类为没有新增外部效果，缩权不再叠加Auto审核。原已选能力、hardAllowed、Session／页面generation和原请求来源检查保持，legacy也不能借缩权操作控制其他页面。真正的人工Continue／resume恢复控制和后续网页业务操作仍独立鉴权；该分类不适用于同名外部定义、其他版本或普通process操作。
+
+启动、配置准备和 `browser.view` Query 不启动或安装浏览器。默认只定位固定版本包内程序与系统标准位置的 Chrome／Chromium；旧后端的 Linux 边界要求原生 init 与 bubblewrap，macOS 要求 stdio guardian 与固定 Bun，使用独立 Browser launchd coalition。共用被动宿主检查继续拒绝会使上游关闭 Chrome sandbox 的 root／container／CI 环境及不可核实的系统信息。后端不可用时不默认选择依赖它的工具；已显式选择仍由实际 host capability 给出准确原因，不能使整个 Service 启动失败。统一解释器的 `executionAvailable` 另核 macOS、同包已构建 worker 和 guardian；缺资产或平台不支持时，已选统一入口准确 `browser_executor_unavailable`，不自动改选原子工具，内置技能的依赖也不可用。源码宿主定位已构建 worker，不能把未构建 TypeScript 文件当成已具备解释器。
+
+一个 Service 共享原 controller；普通页面与自动化 daemon 仍由 `browser.session` Job、取消和 Runtime 关闭管理，不随客户端面板卸载销毁。统一代码环境另由 `browser.code_session` Job 及原绑定 disposer 收束，退出时沿原controller关闭自己持有的自动化，不销毁用户已有普通页面；它要求所属 Runtime 的总 process 容量至少为2，活跃代码环境以 `floor(totalProcess / 2)` 张票据准入，超出时沿可取消队列等待，为同一环境的解释器与页面 Job 留出容量。票据不借用或释放 Core 的真实 process permit；实际 Job 仍独立申请原资源，代码环境只有确认关闭才归还票据，网页 Job 的原业务 unknown 不因此改写。全局 Extension Query／Action 直接使用现有入口供 Native 面板观察与控制，不新增 SQL、Core 循环或 HTTP 协议。程序资产与私有目录继续进入原 Files／Shell 保护集合，不读取用户日常 Profile／Cookie。底层执行、隔离、动作来源、图像及资源证明归 [Agent Browser](../../packages/agent/src/tools/browser/README.md)。
+
+[原装配回归](test/isolated/browser-configuration.test.ts)覆盖宿主关闭、无副作用 Query、版本、不可信配置与私有目录保护。[统一入口配置测试](test/isolated/browser-execution-configuration.test.ts)以真实 resolver／Runtime／SQLite、固定模型和隔离执行边界替身核新 Run 的单入口、正式 Skill 正文／资源读取、隐藏原子定义实际派发、显式旧目录与原 snapshot 恢复、缺执行器和宿主关闭；不启动真实 Native、解释器或外部 Provider，不能据此宣称页面操作或发布验收通过。
+
+统一入口的失败、拒绝、取消、陈旧或 unknown API 结果会阻断本批代码的后继调用，包括被 JavaScript `catch` 捕获后的调用。结果落定后，原 Loop 可把 Tool 失败或异常结果交回下一次模型继续原任务；这不清除原 unknown、不授权换路径重放，也不把审批拒绝变成用户取消整轮。原落定失败仍停止推进，规则与[Loop 回归](../../packages/agent/test/isolated/execution/loop-tool-results.test.ts)归 Agent；[统一入口 Runtime 测试](../../packages/agent/test/isolated/browser/execute.test.ts)核实际代码批次闩锁、资源容量、可取消准入及 Job 来源。
+
+当前共享普通页面路径不装配异步人工协调器、request_human、human_wait、respond_human、Resume或人工完成条件。自动化完成或需用户处理时释放控制并正常final；下一条用户消息在新Run重开准确页面与快照，不等待旧人工回执。旧显式standalone装配仅保其兼容记录及安全收口。[Controller](../../packages/agent/src/tools/browser/controller.ts)接同一受信Runtime getter，校验原Run父链并自行监督结束／取消；新Run的prepareRun在VM准入前等待旧BrowserJob真实stop／dispose，旧引用和租约不能跨Run。异常代码环境停止不再取消已绑定BrowserJob，真实错误proof和精确新lease由[单页transport](src/desktop-browser.ts)保存。
+
+[旧显式人工协调器矩阵](../../packages/agent/test/isolated/browser/human-async-runtime.test.ts)只负责兼容装配；不代表Native默认拥有人工等待入口。浏览器固定能力在各模式下均不触发checker或人工审批，错误目标、失效来源和硬能力拒绝仍须阻止页面操作。该受控矩阵不代证真实登录、验证码或实体人工输入过程。
+
+
 ## 默认装配与业务规则归属
 
 普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含 Files 六项、问答、网页与六个协作工具；具备 Shell 时为19项，否则14项。`read_file` 统一读取工作区内文件和准确外部用户文件，专用外部读写工具已移除。外部读取复用统一权限和路径保护，不再附加基线、单链接限制或重复授权证明检查，不加载外部项目说明；外部写入使用 Shell。[真实 paired 回归](test/isolated/configuration.test.ts)核实际模型目录、外部完整正文、独立项目指令及显式禁用，[退役回归](test/isolated/tool-retirement.test.ts)核旧配置与激活在模型调用前拒绝。
@@ -365,7 +388,7 @@ Service 的权限职责限于 HTTP 接口与主体/Store/Session 身份校验、
 
 Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 Model 操作先核对当前 Workspace trust、准确注册版本、allowlist 与硬可用性，失败不会生成可扩大该边界的人工卡。请求批准允许可信 Workspace 内的 read/edit；正式 Shell 使用 Workspace 可写且无网络的默认范围，外部写入或联网请求分别取得准确单次审批。Full 跳过普通逐项风险审批，但不跳过这些硬约束或取消；不确定 effect 仍由真实宿主执行能力限制。所有审批的最终参数、执行身份和重新校验由现有 Core Interaction/UnifiedExecution 负责。
 
-Auto 分类只返回准确 invocation、effects 与 `readCheckContext` 的只读 task/plan/拒绝理由，不执行 Provider。Core 使用 `authorizationCheck` 创建 `authorization.check` 与原会话的唯一无 Run Model，执行一次无工具检查；不创建 child/carrier，也不占子 Agent 槽。默认绑定沿原 Run 封存的 SDK route/options，宿主可显式覆盖；runless Action 没有默认绑定时继续真实人工回退。原 input/source/attempt/policy/controlReads、准确 prepared 请求、完整输出与完成结果摘要进入最终 proof，强制人工 ceiling 保留双 proof；失败或 ask_user 回原卡，reject 保留原因。旧 child 审核记录只读保留、冷读零重跑。大请求继续由[完整正文](../../packages/agent/src/model-body/README.md)封存与展开。
+Auto 分类只返回准确 invocation、effects 与 `readCheckContext` 的只读 task/plan/拒绝理由，不执行 Provider。Core 使用 `authorizationCheck` 创建 `authorization.check` 与原会话的唯一无 Run Model，执行一次无工具检查；不创建 child/carrier，也不占子 Agent 槽。默认绑定沿原 Run 封存的 SDK route/options，宿主可显式覆盖；runless Action 没有默认绑定时继续真实人工回退。原 input/source/attempt/policy/controlReads、准确 prepared 请求、完整输出与完成结果摘要进入最终 proof，强制人工 ceiling 保留双 proof；有效 ask_user 回原卡，已配置审核器的技术失败返回未派发的工具结果并交回下一 Model，reject 保留原因。新请求携带独立 system 指引，区分技术失败与真实拒绝，后续调用仍独立审核，细则归[权限 owner](../../packages/agent/src/permissions/README.md)。旧 child 审核记录只读保留、冷读零重跑。大请求继续由[完整正文](../../packages/agent/src/model-body/README.md)封存与展开。
 
 [真实权限测试](../../packages/agent/test/isolated/permissions/policy.test.ts) 用临时 SQLite Worker、同 Core Loop 和固定 Model 验证：准确单次批准与原命令重复零重放；等待中 trust/allowlist/注册可用性/模式变化后的旧批准零 Tool 效果；可信 read/edit 与 Full 普通风险跳过；同名 Model/Tool 隔离；Full 硬约束和版本拒绝；未装配 Core reviewer 时 Auto 准确人工回退；默认 SDK reviewer 的真实证据见下段。有限无 I/O 校验另验证 capability 数量和取消，不以策略真值表代替派发证据。
 
@@ -378,7 +401,7 @@ Auto 分类只返回准确 invocation、effects 与 `readCheckContext` 的只读
 
 旧 Run 保留原 manifest/definitions 与文件绑定，单纯禁用后续 Tool 配置不等于全局撤权；当前 mode/trust/allowlist 的变化仍会在派发前生效。新 Run 重读配置并封存新目录。默认每次授权允许集合包含实际已选中的静态能力和纯缓存 MCP 动态 Tool/Task Job 目录，不为未注册定义补授权；读取该集合不打开连接。非 Run Action 根据原 Execution/Command 取得准确 Store、Session 与宿主主体，再读取同一控制事实，不采用当前 UI 选择或全局猜测。
 
-[默认权限配置测试](test/isolated/permission-configuration.test.ts) 使用实际默认 resolver、SDK、Service HTTP、SQLite Worker、安全文件 leaf 和本机兼容 Model 端点，证明真实 Auto 的 ask_user 回退后单次批准写入、请求批准的工作区无卡写入、Full/default trust 拒绝、旧 manifest 与当前撤权区别、新 Run 目录变化、可信 Permissions 上限以及错误 builtin version 在 Provider I/O 前拒绝。早期与 default configuration 和 assembly HTTP 的组合记录为 12 项测试、105 条断言通过；当前三策略消费者的原完整回归见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11shell-三策略与旧模式退役)；未调用付费模型、用户 keychain 或旧数据。[默认 Auto 测试](test/isolated/auto-configuration.test.ts)与 policy 组合 11/137 通过：单模型槽、完整 task、新旧 SDK route、单次批准、Provider/闭合输出失败与 ask_user 原卡回退、拒绝以及撤权/取消零文件效果。测试按正式 main 装配真实 ArtifactStore，避免把缺内容能力的人工回退误判为 reviewer 成功。会话 same_command 与原 epoch 清除已接入下述授权目录；正式入口切换仍按完整客户端资格核对。
+[默认权限配置测试](test/isolated/permission-configuration.test.ts) 使用实际默认 resolver、SDK、Service HTTP、SQLite Worker、安全文件 leaf 和本机兼容 Model 端点，证明真实 Auto 的 ask_user 回退后单次批准写入、请求批准的工作区无卡写入、Full/default trust 拒绝、旧 manifest 与当前撤权区别、新 Run 目录变化、可信 Permissions 上限以及错误 builtin version 在 Provider I/O 前拒绝。早期与 default configuration 和 assembly HTTP 的组合记录为 12 项测试、105 条断言通过；当前三策略消费者的原完整回归见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11shell-三策略与旧模式退役)；未调用付费模型、用户 keychain 或旧数据。2026-10-30 macOS／Bun 1.4.2 当前工作树，[默认 Auto 测试](test/isolated/auto-configuration.test.ts)6 项、86 断言通过：单模型槽、完整 task、新旧 SDK route、system 指引实际传入 SDK、单次批准、有效 ask_user 原卡回退、Provider/闭合输出失败交回下一 Model且无卡／零文件效果、真实拒绝以及撤权/取消；默认权限配置完整文件 11 项、150 断言通过。测试使用受控本地 Model 端点，按正式 main 装配真实 ArtifactStore，避免把缺内容能力的人工回退误判为 reviewer 成功，不替代真实模型语义或客户端体验验收。会话 same_command 与原 epoch 清除已接入下述授权目录；正式入口切换仍按完整客户端资格核对。
 
 默认进程装配唯一全局 `@kite-ai/agent/planning` 业务 Extension，其目录、空闲 Action 与只读 Query 不依赖前台 Run。JSONC `tools` 只选择明确注册的 planning/validation Tool ID 和准确支持版本，不能启用 requirements、允许 waiver 或授予权限。只有可信 `createDefaultProcessConfiguration({planning: PlanningOptions})` 提供 `requirePlan`、`requiredValidation`、`allowWaiver`、required receipt definitions 和允许执行模式。选中的业务定义取得真实保守权限描述：`planning.read` 是 safe read；planning write/update/review 与 validation define/check/rebind/waiver 是 `record_write`，`safeRead:false`；显式宿主 Permissions 保留额外硬拒绝或明确人工上限。空闲 Action 使用相同 programmatic `readPolicy`，准确身份为 `kind:job`、`builtin.planning/<action>` 和实际 version；默认未信任策略拒绝，可信请求批准产生普通审批，显式 Permissions 仍与根当前模式和信任相交。`record_write` 修改封存治理记录，不等于 Workspace 文件写入或执行结果，Accept Edits 不自动允许它。Auto 使用当前 Run 封存的同一持久 Core reviewer，独立无 Run Action 要求显式可信 reviewer，否则准确人工回退。目录可见不授予权限。每个新 Run 保存工厂 conditions、启用的纯 metadata initializer 和实际非秘密 option/definition snapshot。不启用治理 flag 时，普通会话保持不受这些要求约束。[Planning 默认配置测试](test/isolated/planning-configuration.test.ts)用本机 compatible 端点与 SQLite/Core，验证首次 Provider 请求前初始化、准确用户 plan review、真实私有文件 receipt 完成 progress、无额外 Model/Run 的空闲 Action/Query、错误版本在 Provider I/O 前拒绝。这证明默认装配与便携业务路径，不等于正式 UI、外部 validator 或平台发行资格。
 
@@ -592,7 +615,13 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 ## 同源 Skill 知识目录
 
-[skill-source.ts](src/skill-source.ts) 为目录读取和 Run 装配提供同一真实配置解析。禁用项不读文件；缺文件、路径越界、重复物理位置、digest 变化、不支持 options 与缺能力按配置 ID 标记局部不可用。默认 Run 只绑定实际可用项并保存相同配置子集，显式名称/ID选择基于全部已知条目消歧，不能因坏项而悄悄改选同名可用项。child 继承准确原 ID；原项失效必须拒绝。绑定后的 canonical 文件目标变化同样拒绝，不能静默删掉原选择。单命令 requested 最多256项保持公开契约，默认解析出的 resolvedIds 不套此请求数量限制。
+[assembly](src/assembly.ts) 的 `skills.load/resource` 只声明知识身份、可选版本及资源路径，不声明或要求 `description`；公开参数继续将 `id` 映射为 `skill_id`。多余字段沿闭合 schema 返回准确校验失败，未进入 SkillSource；后续调用使用当前 schema 继续。已有历史输入及封存请求保留原记录，不因字段移除而改写或重发，Tool／Protocol 版本保持。执行描述仅由 [Browser 工具](../../packages/agent/src/tools/browser/README.md)声明。
+
+2026-10-31 参数收窄验证：[装配](test/isolated/assembly.test.ts)与[paired SDK／HTTP](test/isolated/assembly-http.test.ts)核公开及内部 schema 均无该字段、无描述正常读取、多余字段零派发失败后继续，以及原输入在存储、后续模型历史和公开 GET 中保留。相关 Service／CLI／Builtin 8文件38项通过，Service／Agent／CLI类型、定向格式与文档检查通过；这些是本地受控 Provider 及真实 Service HTTP 证据，本轮未调用真实模型或操作用户客户端。
+
+[skill-source.ts](src/skill-source.ts)为 Workspace、全局用户目录和 Run 装配组合原配置知识与产品全局内置 `computer-use`。内置正文／资源来自 [Agent 不可变资产](../../packages/agent/src/skills/builtin.ts)，安装元数据始终存在，不以当前 Tool 选择作为是否安装的判断，也不依赖项目或用户 Skill 目录。没有配置项时，即使配置根尚不存在也不读取或创建它；不写用户配置、不扫描 home。安装事实不授予页面或代码执行权限：未选、禁用或缺少可用 `browser.execute` 时保留内置元数据，状态为 `unavailable`／`skill_capability_missing`；正文和资源加载仍交叉检查宿主允许集、实际 Tool 选择及调用者本次能力。可用项才进入默认 Run 知识绑定，显式选择缺依赖的内置项准确失败。
+
+配置 Skill 继续沿原真实配置解析。禁用项不读文件；缺文件、路径越界、重复物理位置、digest 变化、不支持 options 与缺能力按配置 ID 标记局部不可用。默认 Run 只绑定实际可用项并保存相同配置子集，显式名称/ID选择基于全部已知条目消歧，不能因坏项而悄悄改选同名可用项。child 继承准确原 ID；原项失效必须拒绝。绑定后的 canonical 文件目标变化同样拒绝，不能静默删掉原选择。单命令 requested 最多256项保持公开契约，默认解析出的 resolvedIds 不套此请求数量限制。
 
 每次发现仍重新读取全部启用位置及内容版本；独立位置的 I/O 每批最多四项并发，结果按原配置顺序汇总后才发布绑定。完成顺序不决定重复物理位置的配置身份，原首项即使 digest 不匹配也保留其 ID，并将双方标为重复不可用。分页不缓存发现结果，后续页仍核当前字节与完整 revision。[目录测试](test/isolated/skill-catalogue.test.ts)覆盖同批别名、跨批重复、禁用项及新版本拒绝旧绑定；[Run 选择测试](test/isolated/skill-selection.test.ts)核准确 root/child 继承。
 
@@ -600,17 +629,15 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 默认装配提供 [skillCatalogue source](src/skill-catalogue.ts)，Service 仅在实际 source 存在时发布 `skill_catalogue`。`GET /v1/workspaces/:id/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 在原 Store、实际 Workspace 和持久信任范围下返回闭合 `SkillCataloguePage`：可用性、revision、metadata/status entries、nextAfterId 与 complete。没有source明确unavailable；坏配置不是空目录。响应没有正文、路径、凭据、任意宿主配置或 Workflow 契约，不构造 Run 或调用 Model/vault/Shell/MCP。
 
-Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_skill_catalogue` capability。`GET /v1/config/user/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 返回闭合 `UserSkillCataloguePage`：固定 `scope:user`，不含 Session／Workspace 身份或 Workflow 投影，`source.scope` 也只接受 user。它仅合并 defaults、同一用户配置适配器与可信宿主 explicit，读取用户配置文件所在根及已有 Profile `skills` root 中明确配置的位置；不读取项目 JSONC、Workspace、trust 或项目指令，不扫描 home，也不创建隐藏 Session／Workspace。相对路径按用户配置目录解析，越界或 symlink 目标局部不可用。缺少配置且无 Skill 项时返回可用空目录，不创建目录；坏用户 JSONC 明确 unavailable。原 Workspace API 与 Run 的项目 Skill 选择、可信来源和执行规则保持。
+Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_skill_catalogue` capability。`GET /v1/config/user/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 返回闭合 `UserSkillCataloguePage`：固定 `scope:user`，不含 Session／Workspace 身份或 Workflow 投影，`source.scope` 也只接受 user。它仅合并 defaults、同一用户配置适配器与可信宿主 explicit，读取用户配置文件所在根及已有 Profile `skills` root 中明确配置的位置；不读取项目 JSONC、Workspace、trust 或项目指令，不扫描 home，也不创建隐藏 Session／Workspace。相对路径按用户配置目录解析，越界或 symlink 目标局部不可用。缺少配置且无用户 Skill 项时仍返回全局内置元数据，不创建目录；坏用户 JSONC 继续明确 unavailable。原 Workspace API 与 Run 的项目 Skill 选择、可信来源和执行规则保持。
 
-该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的用户／Workspace list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。关闭前的临时 Workflow 装配同时保原工作错误和清理错误。知识作用域与目录保留集合报告同一错误对象时，目录dispose按对象身份去重并原样抛出，保留原unknown错误码；不同错误仍以Aggregate保全部原因，不合并独立失败或释放未确认的资源。
+该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的用户／Workspace list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。知识作用域与目录保留集合报告同一错误对象时，目录dispose按对象身份去重并原样抛出，保留原unknown错误码；不同错误仍以Aggregate保全部原因，不合并独立失败或释放未确认的资源。
 
-默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。越界、非法或不能确定的位置为 null；旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。
+默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。全局内置项没有用户／项目配置位置，`source:null`；越界、非法或不能确定的配置位置也为 null。旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。
 
 目录按配置ID排序，默认128KiB单页字节预算、可选正安全整数limit与不超过1MiB的byteLimit；预算只分页，不截总目录或单项字段，单项放不下明确413。revision涵盖原主体/Store/Workspace、信任身份与revision、Skill配置、能力及完整目录版本状态；后续页必须携原revision，实际变化（包括配置变坏）409，不将新目录拼进旧页。未见afterId拒绝，不猜下一位置。读取不提供与外部文件写者的原子事务，也不预订未来执行版本。
 
-用户目录复用相同排序、revision／cursor 和字节分页合同；其 revision 仅含用户主体、Store、用户 Skill 配置、能力及完整目录版本状态，不绑定当前 Session、Workspace 或信任观察。用户来源分类沿用户根的 `.agents/skills`、`.kite-code/skills`、其他配置位置与 Profile 分别返回 user/.agents、user/.kite-code、user/configured、user/profile，绝不输出项目行。[用户源反例](test/isolated/user-skill-catalogue.test.ts)核无 Workspace／permission 访问、306 条完整分页、项目路径和 symlink 越界、零正文／路径泄漏、坏用户配置恢复及关闭后拒绝；[全局设置 HTTP](test/isolated/user-settings-global.test.ts)核默认 Service／Client 在无 Workspace／Session 时读取同一用户目录。
-
-目录与 Run 绑定共用 `compileConfiguredWorkflows` 的真实源前后复核，以及 `workflowCapabilitiesFor` 的实际 Tool/Job/role 版本。投影另核 profile flags、完整输入 schema、fork 角色和脚本核验资产；关闭、坏契约、缺依赖或缺实现只改变相应 Workflow 资格。投影不包含指令、路径或完整契约，不选择模型、读取 vault、连接 MCP 或启动 Job；临时装配释放所属文件资源。flags、来源、依赖及宿主绑定参与 manual 分页 revision，变化拒绝续页。无 `workflow` 的旧知识请求不承担这次装配，也不因只改 Workflow flags 而换 revision。
+用户目录复用相同排序、revision／cursor 和字节分页合同；其 revision 仅含用户主体、Store、用户 Skill 配置、能力及完整目录版本状态，不绑定当前 Session、Workspace 或信任观察。用户来源分类沿用户根的 `.agents/skills`、`.kite-code/skills`、其他配置位置与 Profile 分别返回 user/.agents、user/.kite-code、user/configured、user/profile，绝不输出项目行。[用户源反例](test/isolated/user-skill-catalogue.test.ts)核无 Workspace／permission 访问、306 条原用户行加全局内置行的完整分页、项目路径和 symlink 越界、零正文／路径泄漏、坏用户配置恢复及关闭后拒绝；[全局设置 HTTP](test/isolated/user-settings-global.test.ts)核默认 Service／Client 在无 Workspace／Session 时读取同一用户目录。
 
 [完整关闭未知调用者](test/isolated/knowledge-cleanup-ownership.test.ts)沿正式 Service／Client 验证必选 Skill 准备、实际 Tool 取消、普通目录、在途目录关闭。故障只在实际原资源 close 边界拒绝；活进程公开维护拒绝，自有 child 实际0和双 EOF 后才备份并完整冷读零 Model。原正常项目指令、目录、配置、取消与完整包回归保持。具体原红、准确输入及有限平台资格归[知识收尾进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13同源知识读取与正式目录收尾)，不提升为全资源／RSS或阶段退出。
 
@@ -821,3 +848,46 @@ SQLite 增量恢复证明由 Agent Store 的正常事务维护，公开 HTTP 保
 Service 将原公共 `run.start/input.steer/input.follow_up` 交给普通 Runtime。新消息不创建额外分类模型请求或派生业务 Command，当前所选配置用于新的普通轮次；引导和队列保原目标、附件及命令 ID。客户端正常接收实际 Agent 回复，必要澄清也是普通回复。
 
 旧 `human_input_processing` Run 仅可读取。原 Store/主体/Session/Run 与恢复 checkpoint 先验证，Runtime 随后以 `input_processing_removed` 拒绝恢复，早于 Service recovery resolver、凭据读取和模型绑定。旧历史不自动改写。[实际 HTTP 回归](test/isolated/human-input-processing-recovery.test.ts)使用合成旧记录及默认 Service 装配，核只读 cursor 不变、恢复拒绝及旧 Model 仍未派发；[普通命令 HTTP](../cli/test/ordinary-command-http.test.ts)核直接输入、真实回复和冷 GET-only 观察零新 Model。
+## Native 单页控制租约候选
+
+已释放页面的准入由准确原pageId／incarnation核实。`prepareGrant`在创建意图前可信拒绝原页缺失，或`commitGrant`确认缺页且准确原意图取消已确认后，[授权适配器](src/desktop-browser-authorization.ts)才通知Controller退役该准确候选；先保存原失败并结算原意图，再更新被动元数据。同一次调用不重发或创建替代页。后续当前明确任务与网址可走新的普通open，取得新身份与观察；变址／歧义、失联、取消未确认和业务unknown不取得此恢复资格。[准入回归](test/isolated/desktop-browser-authorization.test.ts)核精确身份、原失败重读零请求、commit取消确认与取消unknown负例。
+
+真实Tab X销毁原页后，Main会为准确原lease保留最多128条有限关闭记录。只有原port已实际不可用、原lease／pageId／incarnation仍匹配且原在途操作已收束，既有revoke／release才返回正向`page_destroyed`回执；重复清理不恢复页面或租约。普通调用可获准确`browser_page_closed`原因，读取中／输入中关闭仍保原Host的read_failed／effect_unknown及派发事实。注销但尚存活、替代页、foreign／旧lease或记录被逐出均不能取得这种证明。
+
+Service遇准确Host的未派发闭页／stale事件失败只进入待核销毁路径，仍关闭并核实原daemon、socket、server与在途请求，最后必须核回执的完整原身份才可确认资源结束。任意stale文案、未配对失败、错误或缺失回执、网络错误和已经锁定的业务unknown均不能清洗为confirmed。这只修“原页确已销毁却误判清理未知”，不修改旧Tool／Job结果、不重放业务、不为另一页继承权限；真实页面关闭、下一消息缺页与原B继续资格归Desktop owner。
+
+私有Main→Service成功HTTP响应按完整JSON信封的UTF-8字节限额流式读取：`Accessibility.getFullAXTree`最多2MiB，其他方法512KiB，截图6MiB；超限取消响应body且不重试。Main自产限额失败保留准确请求的read_failed／effect_unknown及op、lease、method证明；收到未认证的限额文字或丢失响应，不能补造未派发或读取失败事实。原始AX限额与最后语义快照／模型输出限额独立；真实HTTPS失败及修后资格归[Desktop owner](../desktop/README.md#统一浏览器入口候选2026-10-28)。
+
+[Native共享页面transport](src/desktop-browser.ts)通过paired启动的私有stdin获得Main loopback端点和临时认证，不向renderer或Tool暴露。Store取自Runtime保存的准确Job Execution，再由Main与准确页面的Store/Session校验；Job只监督自己的daemon/provider，Main继续拥有原WebContentsView。释放控制须等待通道撤销、在途排空、daemon整树停止与Main detach，unknown不宣称释放成功。新用户消息在新Run建立新租约与引用，不延长旧租约期限。Service此处维护通道与来源合同；普通页面UI、实体人工输入互斥、真实模型和最终Native资格归[Desktop owner](../desktop/README.md#统一浏览器入口候选2026-10-28)，设计理由归[租约提案](../../.agents/notes/proposed/architecture/2026-10-27-native-page-control-lease.md)。
+
+CDP请求沿准确attachment的pollStop信号等待；原Native请求期限或取消关闭transport并中止该代在途／排队请求，不额外叠加短HTTP超时。缺owner信号时派发前拒绝，普通管理RPC仍为原10秒短界。此区别避免已派发导航在原期限前被私有桥切断；未知网页效果与未确认清理仍保留，HTTP中止或debugger分离不构成成功证明。[真实loopback回归](test/isolated/desktop-browser-transport.test.ts)核跨10秒一次回复、管理短界、取消后零迟到派发以及认证／响应字节限制；五项36断言通过，另有原共享transport十四项181断言通过，不能代替修后真实模型后台流程。
+
+Main自产失败proof沿单个准确Native请求保存，防固定daemon压平错误后丢失未派发／只读失败／未知区别。只在`launch(headless:true,engine:chrome,webmcp:false)`内，对空参`WebMCP.enable`且准确Host证明`not_dispatched/browser_page_method_denied`的可选探测不设置整条操作失败闩锁；原CDP拒绝仍返回给后端，Main方法集不扩大。依据是[固定0.39.4的enable_domains_direct](https://github.com/vercel-labs/agent-browser/blob/04ba5264dade678062c3cdcce0f4f293e748249f/cli/src/native/browser.rs#L1248)明确忽略该探测失败。必需方法、普通业务调用、错误租约、参数／proof不匹配及未配对或网络未知均不获此例外；原失败后继派发屏障保持。真实dev曾在此把可选拒绝扩大成startup_failed，准确记录由[Desktop owner](../desktop/README.md#统一浏览器入口候选2026-10-28)保存。
+
+handoff/resume登记为完整控制权转换；close、原context取消与实际10分钟timer均先禁止新转换，再等待在途转换，收下已知迟到新租约后准确撤销。停止期间不会再开始新daemon/WS，已创建但ready未到的资源也由同一关闭路径收口；丢失新租约回执仍unknown，不重发resume。Service截图返回前再次核控制/租约状态，拒绝关闭后迟到响应。[内存回归](../desktop/test/isolated/native-browser-shared-transport.test.ts)覆盖上述三种停止来源、回执/ready边界、重复close与丢回执；mock不证明真实网页重新控制或Native实机资格。
+
+2026-10-28实机首次导航未确认后，静态核固定上游0.39.4（commit `04ba5264dade678062c3cdcce0f4f293e748249f`）：[direct_page与导航等待](https://github.com/vercel-labs/agent-browser/blob/04ba5264dade678062c3cdcce0f4f293e748249f/cli/src/native/browser.rs)以空字符串标识唯一页面，生命周期匹配要求`Some("")`；[CDP client](https://github.com/vercel-labs/agent-browser/blob/04ba5264dade678062c3cdcce0f4f293e748249f/cli/src/native/cdp/client.rs)却会在出站命令省略空sessionId，入站事件不自行补齐。现仅在私有单页事件转发时显式发送`sessionId:''`；非空target/session继续拒绝，不扩大Main方法或renderer输入，不改上游脚本或工具/协议版本。
+
+原[共享transport回归](../desktop/test/isolated/native-browser-shared-transport.test.ts)核真实Host→内存HTTP→Service poll→WS的生命周期等待，CDP回复前/后的Page.domContentEventFired都必须按该空标识匹配才确认；另核foreign target与异常非空事件批次不能被归一成根页。该受控证据只证明适配合同修正，不能推定完整CDP实机或其他平台资格。原Job unknown、有限清理范围及真实页面过程证据归[Desktop候选](../desktop/README.md#普通页面控制租约候选2026-10-27未发布)。
+
+Native页面准入由[desktop-browser-authorization](src/desktop-browser-authorization.ts)在 `browser.open` 原Tool内、`operations.ensure` 之前绑定原最终 `dispatchAuthorization`。它同时核真实Execution已派发、活跃Run、Store／Session／work、准确原始input摘要及Main保留的具体页面，不从模型或renderer读取权限模式。三种模式均直接通过固定浏览器能力的审批豁免，不运行自动审核器、不请求用户审批，也不追加页面Question；硬能力、可信Workspace和准确来源仍核实。需要登录、验证码等人工处理时释放控制并正常回复，由用户处理后发新消息。Main私有prepare/commit/inspect/cancel保持短请求；commit收据绑定原Tool Execution及派发证明摘要。旧Interaction收据、明确拒绝及unknown仅沿原历史兼容读取，不转成新的许可。ACK未知只inspect同requestId，不能重投或用别页arm补全。
+
+010、012历史实机曾因自动审核器丢失或返回空结果而使浏览器流程进入人工审批；原失败及记录保留。当前浏览器路径已免审核，不再依赖该审核器，也不装配Continue／Resume。通用工具的技术审核失败作为原Tool失败回到下一Model，不伪造用户决定；准确范围见[权限owner](../../packages/agent/src/permissions/README.md)。
+
+原 `browser.session` Job再核准确 `browser.open` 父链、同Session记录、原输入及页面绑定。Tool、Job和Action均保留真实effects与独立硬能力核对，以固定注册身份豁免审批；没有把Job伪标为safeRead，也没有按当前mode复用一次审核的旁路。额外权限叶、未知和旧记录不能取得该豁免。Controller在新VM准入前等待上一终态Run的Job真实stop／dispose；无法确认清理则保留原unknown，不能用新Job覆盖。
+
+[真实Runtime／SQLite矩阵](test/isolated/desktop-browser-authorization-runtime.test.ts)使用正式能力分类、固定模型与transport／executor替身，核三模式零checker／零审批／零Question、硬能力拒绝、准确来源、取消及ACK未知。[正式Service装配测试](test/isolated/browser-permission-composition.test.ts)保留真实配置resolver、持久mode／trust、Operations和SQLite，仅替换代码／页面效果边界，核模式变化不产生浏览器审批、硬能力拒绝先于Main页面请求。[来源与回执反例](test/isolated/desktop-browser-authorization.test.ts)核原input摘要、直属来源、旧拒绝屏障和未知证明，Main收据闭合与失效范围由[grant测试](../desktop/test/isolated/native-browser-grant.test.ts)覆盖；这些受控证据不授予真实Native或远端模型资格。
+
+Main在arm／lease前明确返回grant_create_failed、initialization_failed或grant_changed时，确认取消原未消费intent后保留该原失败码，不以随后inspect到的expired掩盖原因。取消未确认继续unknown并保留cause；网络丢回执仍只查询原requestId，确认committed才继续，不重投。[授权Runtime矩阵](test/isolated/desktop-browser-authorization-runtime.test.ts)核创建失败的原Tool结果和零页面Job；固定模型与私有RPC替身不代证真实远端模型／Native资格。
+
+新Run重新绑定已释放的同URL共享页时，授权适配在真实来源／最终派发证明通过后，只为首次Saved按规范化目标URL读取Controller的releasedPage(sessionId,url)，并耐久保存`requireExisting:true`与原`pageId／incarnation`。身份只来自真实Main acquire，经transport私有`sharedPageIdentity()`交给Controller；URL不提供目标身份，缺少可信身份的继续请求在Main前明确失败。A后释放B不会覆盖A的原身份查询；同URL多个已知身份的被动lookup在远端意图创建前返回明确歧义，不能退化为fresh创建。普通新URL不附加该要求；旧记录只沿原申请inspect，不追溯补身份或取得新热控制。私有prepareGrant回执及inspect必须保留同一flag、原身份、existing类型和URL，不能改投新页面；Main在prepare、commit及acquire核原Page对象／id／incarnation／navigation和URL。缺页或变址准确返回`browser_page_existing_missing/mismatch`，不进入创建、导航或刷新路径。该收紧沿原open子调用，不增加公开Tool输入或worker协议。[正式装配回归](test/isolated/browser-permission-composition.test.ts)连接真实Main grant与Runtime／SQLite，核既有页成功及missing／mismatch的零创建、零CDP、零审核／Question。
+
+首次Native导航结果未知时，只有原transport真实stop／dispose、原WebSocket close、server关闭、daemon及在途请求收口都确认后，才可从Main release回执提供`releasedSharedPage()`。回执严格闭合原leaseId、pageId、incarnation与无凭据HTTP(S)实际URL／有界标题；closed或矛盾回执、捕获确认前已取消、错误身份、坏URL和真实通道unknown不提供恢复描述。已经确认并缓存的释放回执在完整dispose后是只读事实，不因随后Job signal结束丢失；getter不做新I/O或授予控制，旧通道仍拒绝输入。此被动描述不确认旧导航成功，也不授权新建页。Agent须再核原owner终态，新Run经existing-only重绑原actualURL并成功取得新snapshot后才能输入或导航。其它URL在新观察前返回`browser_page_recovery_required`，不创建远端intent。完整恢复边界与反例归[Browser owner](../../packages/agent/src/tools/browser/README.md)，旧Job／Tool的unknown保持。
+
+Native的navigate／url／title现在由同一个transport沿私有Main `navigate/pageState`处理，使用原nativeResult互斥与inflight，不调用daemon的导航后Runtime metadata读取。Main成功回执精确闭合leaseId、pageId、incarnation、navigation、url、title；Service核原三身份、navigation不倒退、无凭据HTTP(S)／状态空白及128字符标题。共享Native内部url结果同时携同一receipt的title，供Controller现有初始化消费；避免同页重绑的空初值在释放时覆盖当前标题，不额外读取、拼接不同瞬间或兜底旧标题，真实空标题仍保空。title单项及standalone保持原合同。错误／缺失／foreign回执保完整性fence并排空原资源，不靠URL、当前tab或daemon文字补成功。Native capture内部前后metadata经可信attachment回调共用同一Main事实，回调不序列化到provider／daemon／模型；standalone及现有语义读取后端保持。
+
+owned navigate沿原35秒默认／既有配置请求预算，不再被普通私有RPC的10秒截断；close先中止本地owned HTTP，再沿原revoke、inflight、daemon、release收口。Main raw CDP未结算仍占原pending，停止本地等待不证明网页效果结束。direct导航也记入原nativeCommand的possibleEffects，仅该条Main准确not_dispatched回执可撤回自身计数；并行桥接拒绝不能把已派发导航unknown降级。2026-10-30完整transport文件80项476断言通过，含真实Main HTTP Host接线、唯一原页导航、同URL另一页、错误回执、取消和迟到回复，以及实际跨10秒期限；Native真实owner替身回归另核capture只从Main读取metadata。均为离线合同证据，不授予最新客户端实机资格。
+
+2026-10-30此链与实际Main／WebSocket五文件联合回归106项1260断言通过，Service类型和Biome通过。包括缺身份零Main请求、回显身份变化拒绝、legacy只inspect不升级、不同URL新页，以及WS断开后同id换incarnation或owner再连旧代理时零CDP／零重新acquire。代理连接仅为原lease的通信，不自动恢复或重放旧操作；每次Main请求重核真实目标／控制权。真实daemon和Native画面仍按Desktop owner单独验收。
+
+同work换key／URL不能覆盖旧明确拒绝或待核实的原页面意图。授权适配在原grant首次写入确认后，先CAS保存work的pending屏障，再允许Main prepare；pending只代表原许可／证明待定，不是用户拒绝。旧refused记录继续核原Interaction、accepted receipt和第一条answer_saved Command.seq完整证明；证明不全或ACK丢失继续保留pending／原unknown，不以新路径复活。marker自身未落盘时只读本work前缀下的原grant兜底，出前缀即停止，不扫描无关Session历史。resolved仅表示准确允许或已确认非拒绝失败结束该待定，不提供新页面授权。真实新root work或经原applied业务输入完整链证明的新人工steer才可重新进入原权限链，进度、clarify、result.include与重复answer不行。旧grant字节和unknown不重写；legacy key只沿原已知父链／指针精确只读兼容。[原来源反例](test/isolated/desktop-browser-authorization.test.ts)核旧拒绝、损坏证明、新steer、pending写失败及1000条无关旧grant；实际Native／真实模型修后验收归Desktop owner。

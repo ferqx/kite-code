@@ -32,27 +32,40 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build as buildRenderer } from 'vite';
 import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/development';
+import type { MacosElectronResize } from '../electron/macos-electron-resize';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
 import { buildWindowsAccess } from './build-windows-access';
+import { patchMacosElectronRuntime } from './macos-electron-runtime';
 import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 import { probeNativeSqliteEngine } from './sqlite-engine';
 export async function buildNativeDesktop(
   input: NativeAssets,
   outdir: string,
-  options: { readonly development?: DesktopDevelopment; readonly testDiagnostics?: boolean } = {},
+  options: {
+    readonly development?: DesktopDevelopment;
+    readonly testDiagnostics?: boolean;
+    readonly macosResize?: MacosElectronResize | null;
+  } = {},
 ) {
   const assets = parseNativeAssets(input);
   const prepared = parseDesktopDevelopment(options.development, assets.kind === 'development');
   if (!isAbsolute(outdir)) throw Error('native_outdir_must_be_absolute');
   verifyNativeAsset(assets.serviceEntrypoint, assets.serviceSha256);
   verifyNativeAsset(assets.bunExecutable, assets.bunSha256);
-  await buildNativeApp(assets, outdir, options.testDiagnostics === true, prepared);
+  await buildNativeApp(
+    assets,
+    outdir,
+    options.testDiagnostics === true,
+    prepared,
+    options.macosResize ?? null,
+  );
 }
 async function buildNativeApp(
   assets: NativeAssets | { kind: 'candidate' },
   outdir: string,
   testDiagnostics = false,
   development: DesktopDevelopment | null = null,
+  macosResize: MacosElectronResize | null = null,
 ) {
   if (process.platform === 'win32') privateDirectory(outdir);
   else await mkdir(outdir, { recursive: true });
@@ -84,7 +97,7 @@ async function buildNativeApp(
       .update(await readFile(join(outdir, 'profile-access.js')))
       .digest('hex'),
   };
-  for (const entry of ['main', 'preload']) {
+  for (const entry of ['main', 'preload', 'global-dialog-preload']) {
     const result = await Bun.build({
       entrypoints: [join(root, 'electron', `${entry}.ts`)],
       target: 'node',
@@ -97,6 +110,7 @@ async function buildNativeApp(
         __KITE_DESKTOP_DEVELOPMENT__: JSON.stringify(development),
         __KITE_DESKTOP_PROFILE_ACCESS__: JSON.stringify(profileAccessAsset),
         __KITE_DESKTOP_WINDOWS_ACCESS__: JSON.stringify(windowsAccessAsset),
+        __KITE_DESKTOP_MACOS_RESIZE__: JSON.stringify(macosResize),
       },
     });
     if (!result.success) throw new AggregateError(result.logs, 'native_build_failed');
@@ -104,32 +118,37 @@ async function buildNativeApp(
   // Retain the original desktop renderer pipeline and its compiled CSS/fonts.
   // The already built Main, preload and helpers share this destination.
   if (process.platform === 'win32') privateDirectory(join(outdir, 'assets'));
-  if (!development)
-    await buildRenderer({
-      root,
-      configFile: false,
-      plugins: [react(), tailwindcss()],
-      resolve: { alias: [desktopMarkdownDecoderAlias()] },
-      base: './',
-      clearScreen: false,
-      logLevel: 'warn',
-      // Formal renderer bytes must not inherit the invoking process's test/dev
-      // environment. Development keeps its separate Vite server.
-      esbuild: { jsxDev: false },
-      define: {
-        'process.env.NODE_ENV': JSON.stringify('production'),
-        __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics),
-      },
-      build: {
-        target: 'es2022',
-        outDir: outdir,
-        emptyOutDir: false,
-        rollupOptions: {
-          input: join(root, 'index.html'),
-          output: { entryFileNames: 'renderer.js' },
+  await buildRenderer({
+    root,
+    configFile: false,
+    plugins: [react(), tailwindcss()],
+    resolve: { alias: [desktopMarkdownDecoderAlias()] },
+    base: './',
+    clearScreen: false,
+    logLevel: 'warn',
+    // Formal renderer bytes must not inherit the invoking process's test/dev
+    // environment. Development keeps its separate Vite server.
+    esbuild: { jsxDev: false },
+    define: {
+      'process.env.NODE_ENV': JSON.stringify('production'),
+      __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics),
+    },
+    build: {
+      target: 'es2022',
+      outDir: outdir,
+      emptyOutDir: false,
+      rollupOptions: {
+        input: {
+          ...(!development ? { main: join(root, 'index.html') } : {}),
+          'global-dialog': join(root, 'global-dialog.html'),
+        },
+        output: {
+          entryFileNames: (chunk) =>
+            chunk.name === 'global-dialog' ? 'global-dialog-renderer.js' : 'renderer.js',
         },
       },
-    });
+    },
+  });
   await writeFile(
     join(outdir, 'package.json'),
     JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' }),
@@ -258,6 +277,10 @@ export async function buildNativeCandidate(input: {
       ]);
     } else copy(terminal.root, join(root, 'terminal'));
     copy(electron, join(root, 'electron'));
+    const macosResize =
+      process.platform === 'darwin' && process.arch === 'arm64'
+        ? patchMacosElectronRuntime({ sourceDist: electron, targetDist: join(root, 'electron') })
+        : null;
     const electronVersion = readFileSync(join(electron, 'version'), 'utf8').trim();
     const entries = nativeBundleEntries(process.platform);
     const sqlite = await probeNativeSqliteEngine({
@@ -267,7 +290,13 @@ export async function buildNativeCandidate(input: {
     });
     if (verifyTerminalRuntimeBundle(join(root, 'terminal')).digest !== terminal.digest)
       throw Error('native_terminal_copy_mismatch');
-    await buildNativeApp({ kind: 'candidate' }, join(root, 'app'), input.testDiagnostics === true);
+    await buildNativeApp(
+      { kind: 'candidate' },
+      join(root, 'app'),
+      input.testDiagnostics === true,
+      null,
+      macosResize,
+    );
     if (process.platform === 'win32') {
       await input.windowsBuildPort!.buildFrontdoors(
         root,

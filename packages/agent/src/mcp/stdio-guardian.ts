@@ -24,12 +24,16 @@ interface Start {
   graceMs: number;
   stderrBytes: number;
   frameBytes: number;
+  /** Optional stricter combined output stopguard for raw owned-program consumers. */
+  outputBytes?: number;
 }
 const launchdOwned = process.argv[2] === '--launchd-owned';
+// Same sealed raw-program guardian; Browser keeps its own launchd identity.
+const purpose = process.argv.includes('--browser-owner') ? 'browser' : 'mcp';
 // The Service's direct child only brokers the private launchd channel.
 const coalition = launchdOwned ? claimDarwinOwnedCoalition() : undefined;
 const control = launchdOwned
-  ? await connectLaunchdControl(process.argv[3]!, 'mcp', async (registration) => {
+  ? await connectLaunchdControl(process.argv[3]!, purpose, async (registration) => {
       // A broker can die between bootstrap and authentication. No business
       // child exists here; only the original exclusive guardian may clean up.
       if (!(await coalition!.stopTree(0)).confirmed) return;
@@ -127,7 +131,7 @@ async function run() {
   if (!launchdOwned) {
     bridgeStarting = (async () => {
       bridge = await startLaunchdSupervisor({
-        kind: 'mcp',
+        kind: purpose,
         frame: input as unknown as Record<string, unknown>,
         controlBase: input.controlBase,
         cancelled: () => cancelling || parentGone,
@@ -182,11 +186,17 @@ async function run() {
       exit: serverExit,
       kernelState: 'unavailable',
     };
-    let stderrBytes = 0;
+    let stderrBytes = 0,
+      outputBytes = 0;
     drained = Promise.all([
       (async () => {
         for await (const raw of current.stdout!) {
           const chunk = raw as Buffer;
+          outputBytes += chunk.length;
+          if (input.outputBytes !== undefined && outputBytes > input.outputBytes) {
+            void stop();
+            return;
+          }
           for (let offset = 0; offset < chunk.length; offset += 16384)
             await send({
               type: 'rpc',
@@ -197,6 +207,11 @@ async function run() {
       (async () => {
         for await (const raw of current.stderr!) {
           stderrBytes += (raw as Buffer).length;
+          outputBytes += (raw as Buffer).length;
+          if (input.outputBytes !== undefined && outputBytes > input.outputBytes) {
+            void stop();
+            return;
+          }
           if (stderrBytes > input.stderrBytes) {
             void stop();
             return;
@@ -262,6 +277,10 @@ incoming.on('data', (chunk: Buffer) => {
           frame.stderrBytes < 1 ||
           !Number.isSafeInteger(frame.frameBytes) ||
           frame.frameBytes < 1 ||
+          (frame.outputBytes !== undefined &&
+            (!Number.isSafeInteger(frame.outputBytes) ||
+              frame.outputBytes < 1 ||
+              frame.outputBytes > 65536)) ||
           process.platform !== 'darwin'
         )
           throw new Error('start_invalid');

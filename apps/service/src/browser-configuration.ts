@@ -1,0 +1,380 @@
+import { createHash } from 'node:crypto';
+import { accessSync, constants, realpathSync, statSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
+import type { AgentRuntime } from '@kite-ai/agent';
+import {
+  agentBrowserExecutableAsset,
+  agentBrowserRuntimeAssets,
+  type BrowserController,
+  createAgentBrowserController,
+  createBrowserController,
+  createBrowserExecution,
+  createBrowserExtension,
+  createBrowserHumanCoordinator,
+  createUnavailableBrowserController,
+  type NativeBrowserTransportOptions,
+  nativeBrowserUnavailableReason,
+} from '@kite-ai/agent/browser';
+import {
+  BrowserExecutorStartupError,
+  browserExecutorWorkerAsset,
+  createBrowserExecutor,
+} from '@kite-ai/agent/browser/executor';
+import type { JobContext, Json, ReadContext } from '@kite-ai/agent/extensions';
+import { linuxShellInitAsset } from '@kite-ai/agent/jobs/shell';
+import { mcpStdioGuardianAsset } from '@kite-ai/agent/mcp';
+import { builtinCapability, type CapabilityDescription } from '@kite-ai/agent/permissions';
+import {
+  createDesktopBrowserClient,
+  createDesktopBrowserTransport,
+  type DesktopBrowserEndpoint,
+} from './desktop-browser';
+import { createDesktopBrowserAuthorization } from './desktop-browser-authorization';
+
+/** Programmatic host policy only. Never read these assets, limits or private roots from JSONC. */
+export type BrowserConfigurationOptions = NativeBrowserTransportOptions;
+
+function executable(path: string, execute = true): string | null {
+  if (!isAbsolute(path) || path.includes('\0')) return null;
+  try {
+    const resolved = realpathSync.native(path);
+    if (!statSync(resolved).isFile()) return null;
+    accessSync(
+      resolved,
+      !execute || process.platform === 'win32' ? constants.F_OK : constants.X_OK,
+    );
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+function installedBrowser(): string | null {
+  // Fixed vendor locations only: no PATH, environment browser flags, user profile or download.
+  const candidates =
+    process.platform === 'linux'
+      ? [
+          '/opt/google/chrome/chrome',
+          '/usr/lib/chromium/chromium',
+          '/usr/lib64/chromium-browser/chromium-browser',
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium',
+          '/usr/bin/chromium-browser',
+        ]
+      : process.platform === 'darwin'
+        ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+        : [];
+  return candidates.map((path) => executable(path)).find((path) => path !== null) ?? null;
+}
+
+/** One inert Service-scoped controller; the ordinary browser.session Job owns all live resources. */
+export function createBrowserConfiguration(options: {
+  readonly configuration?: BrowserConfigurationOptions | false;
+  readonly desktopBrowser?: DesktopBrowserEndpoint;
+  readonly resolveDesktopStoreId?: (context: JobContext) => Promise<string>;
+  readonly runtime?: () => AgentRuntime;
+  readonly privateDirectory: string;
+}) {
+  const enabled = options.configuration !== false;
+  let transport: NativeBrowserTransportOptions | undefined;
+  let unavailableReason: string | undefined;
+  let runtimeAssets: readonly string[] = [];
+  if (!enabled) unavailableReason = 'browser_disabled_by_host';
+  else if (options.configuration) {
+    const configured = structuredClone(options.configuration);
+    const platformAssets = process.platform === 'darwin' ? configured.darwin : configured.linux;
+    const paths = [
+      configured.executable,
+      configured.browserPath,
+      ...(process.platform === 'darwin' && configured.darwin
+        ? [configured.darwin.guardianPath, configured.darwin.bunExecutable]
+        : configured.linux
+          ? [configured.linux.bubblewrapPath, configured.linux.initExecutable]
+          : []),
+    ];
+    const resolved = paths.map((path, index) =>
+      executable(path, !(process.platform === 'darwin' && index === 2)),
+    );
+    runtimeAssets = resolved.filter((path): path is string => path !== null);
+    if (!platformAssets || runtimeAssets.length !== 4)
+      unavailableReason = 'browser_runtime_unavailable';
+    else
+      transport = {
+        ...configured,
+        executable: resolved[0]!,
+        browserPath: resolved[1]!,
+        ...(process.platform === 'darwin'
+          ? { darwin: { guardianPath: resolved[2]!, bunExecutable: resolved[3]! } }
+          : { linux: { bubblewrapPath: resolved[2]!, initExecutable: resolved[3]! } }),
+        runtimeDirectory: configured.runtimeDirectory ?? options.privateDirectory,
+      };
+  } else if (process.platform === 'darwin') {
+    try {
+      const native = agentBrowserExecutableAsset(),
+        browserPath = options.desktopBrowser ? native : installedBrowser();
+      const guardianPath = executable(mcpStdioGuardianAsset(), false),
+        bunExecutable = executable(process.execPath);
+      if (!browserPath) unavailableReason = 'browser_executable_unavailable';
+      else if (!guardianPath || !bunExecutable)
+        unavailableReason = 'browser_process_boundary_unavailable';
+      else {
+        transport = {
+          executable: native,
+          browserPath,
+          darwin: { guardianPath, bunExecutable },
+          runtimeDirectory: options.privateDirectory,
+        };
+        runtimeAssets = [...agentBrowserRuntimeAssets(), browserPath, guardianPath, bunExecutable];
+      }
+    } catch {
+      unavailableReason = 'browser_runtime_unavailable';
+    }
+  } else if (process.platform !== 'linux')
+    unavailableReason = nativeBrowserUnavailableReason() ?? 'browser_native_platform_unavailable';
+  else {
+    try {
+      const native = agentBrowserExecutableAsset();
+      runtimeAssets = agentBrowserRuntimeAssets();
+      const browserPath = options.desktopBrowser ? native : installedBrowser();
+      if (!browserPath) unavailableReason = 'browser_executable_unavailable';
+      else {
+        const bubblewrapPath = ['/usr/bin/bwrap', '/bin/bwrap']
+          .map((path) => executable(path))
+          .find((path) => path !== null);
+        if (!bubblewrapPath) unavailableReason = 'browser_process_boundary_unavailable';
+        else {
+          let initExecutable: string | undefined;
+          try {
+            initExecutable = linuxShellInitAsset();
+          } catch {
+            unavailableReason = 'browser_process_boundary_unavailable';
+          }
+          if (initExecutable)
+            transport = {
+              executable: native,
+              browserPath,
+              linux: { bubblewrapPath, initExecutable },
+              runtimeDirectory: options.privateDirectory,
+            };
+          runtimeAssets = [
+            ...runtimeAssets,
+            browserPath,
+            bubblewrapPath,
+            ...(initExecutable ? [initExecutable] : []),
+          ];
+        }
+      }
+    } catch {
+      unavailableReason = 'browser_runtime_unavailable';
+    }
+  }
+  const privateDirectory = transport?.runtimeDirectory ?? options.privateDirectory;
+  if (!isAbsolute(privateDirectory) || privateDirectory.includes('\0')) {
+    unavailableReason = 'browser_private_directory_unavailable';
+    transport = undefined;
+  }
+  // The same passive guard is repeated at actual native dispatch. It never launches a probe.
+  if (!unavailableReason) unavailableReason = nativeBrowserUnavailableReason();
+  const available = transport !== undefined && unavailableReason === undefined;
+  let controller: BrowserController | undefined;
+  const authorization =
+    options.desktopBrowser && options.runtime
+      ? createDesktopBrowserAuthorization({
+          runtime: options.runtime,
+          call: createDesktopBrowserClient(options.desktopBrowser),
+          releasedPage: (sessionId, url) => controller?.releasedPage?.(sessionId, url),
+          invalidateMissingReleasedPage: (sessionId, identity) => {
+            controller?.invalidateMissingReleasedPage?.(sessionId, identity);
+          },
+        })
+      : undefined;
+  async function unifiedJob(context: JobContext): Promise<boolean> {
+    const runtime = options.runtime?.();
+    const job = await runtime?.getExecution(context.executionId);
+    const open = job?.parentExecutionId
+      ? await runtime?.getExecution(job.parentExecutionId)
+      : undefined;
+    const code = open?.parentExecutionId
+      ? await runtime?.getExecution(open.parentExecutionId)
+      : undefined;
+    return !!(
+      code?.definitionId === 'browser.execute' &&
+      code.definitionVersion === '1' &&
+      code.runId &&
+      code.sessionId === context.sessionId &&
+      code.originStoreId === job?.originStoreId &&
+      code.rootWorkCommandId === job?.rootWorkCommandId &&
+      code.rootWorkSeq === job?.rootWorkSeq
+    );
+  }
+  controller =
+    transport && !unavailableReason
+      ? options.desktopBrowser
+        ? createBrowserController({
+            sharedPage: true,
+            ...(options.runtime ? { runtime: options.runtime } : {}),
+            async observationMode(context) {
+              return (await unifiedJob(context)) ? 'on-demand' : 'preview';
+            },
+            createTransport: (context, binding) =>
+              createDesktopBrowserTransport(transport!, options.desktopBrowser!, context, {
+                ...binding,
+                manualDialogs: () => unifiedJob(context),
+                grant: () => {
+                  if (!authorization) throw Error('browser_page_authorization_unavailable');
+                  return authorization.grantForJob(context, binding.browserId);
+                },
+                storeId: () => {
+                  if (!options.resolveDesktopStoreId) throw Error('desktop_browser_store_unbound');
+                  return options.resolveDesktopStoreId(context);
+                },
+              }),
+          })
+        : createAgentBrowserController(transport)
+      : createUnavailableBrowserController(unavailableReason ?? 'browser_runtime_unavailable');
+  const baseExtension = createBrowserExtension({
+    controller,
+    ...(authorization
+      ? { prepareOpen: authorization.prepareOpen, cancelOpen: authorization.cancelOpen }
+      : {}),
+    ...(!options.desktopBrowser && options.runtime
+      ? { human: createBrowserHumanCoordinator({ controller, runtime: options.runtime }) }
+      : {}),
+  });
+  let workerPath: string | undefined, guardianPath: string | undefined;
+  try {
+    workerPath = browserExecutorWorkerAsset();
+    guardianPath = mcpStdioGuardianAsset();
+  } catch {
+    /* accurate unavailable at leaf dispatch */
+  }
+  const executionAvailable =
+    available && process.platform === 'darwin' && !!workerPath && !!guardianPath;
+  const execution = createBrowserExecution({
+    controller,
+    createExecutor(scope) {
+      let pending: ReturnType<typeof createBrowserExecutor> | undefined;
+      const obtain = () => {
+        if (!enabled || !executionAvailable || !workerPath || !guardianPath)
+          throw new BrowserExecutorStartupError('browser_executor_unavailable', true);
+        pending ??= createBrowserExecutor({ scope, workerPath, guardianPath });
+        return pending;
+      };
+      return {
+        async execute(input) {
+          return (await obtain()).execute(input);
+        },
+        async close() {
+          if (!pending) return { confirmed: true };
+          try {
+            return (await pending).close();
+          } catch (error) {
+            return {
+              confirmed: error instanceof BrowserExecutorStartupError && error.cleanupConfirmed,
+            };
+          }
+        },
+      };
+    },
+  });
+  const extension = {
+    ...baseExtension,
+    tools: [
+      ...(baseExtension.tools ?? []).filter(
+        (tool) => !options.desktopBrowser || tool.id !== 'browser.request_human',
+      ),
+      ...execution.tools,
+    ],
+    jobs: [...(baseExtension.jobs ?? []), ...execution.jobs],
+    ...(options.desktopBrowser
+      ? {
+          actions: baseExtension.actions?.filter(
+            (action) => !['browser.resume', 'browser.respond_human'].includes(action.id),
+          ),
+          queries: baseExtension.queries?.map((query) => ({
+            ...query,
+            async execute(input: Json, context: ReadContext) {
+              return (await query.execute(input, context)).map((view) => ({
+                ...view,
+                actions: view.actions.filter(
+                  (action) =>
+                    !['browser.resume', 'browser.respond_human'].includes(action.actionId),
+                ),
+              }));
+            },
+          })),
+        }
+      : {}),
+    records: [
+      ...(baseExtension.records ?? []),
+      {
+        contentType: 'application/vnd.kite.browser-code+json',
+        contentVersion: 1,
+        schema: { type: 'object' as const },
+      },
+    ],
+  };
+  const capabilities: CapabilityDescription[] = [
+    ...(extension.tools ?? []).map((tool) => ({
+      kind: 'tool' as const,
+      definitionId: tool.id,
+      definitionVersion: tool.version,
+      revision: `${extension.id}:${extension.version}:${tool.version}`,
+      hardAllowed: enabled && available && (tool.id !== 'browser.execute' || executionAvailable),
+      ...(unavailableReason
+        ? { denialReason: unavailableReason }
+        : tool.id === 'browser.execute' && !executionAvailable
+          ? { denialReason: 'browser_executor_unavailable' }
+          : {}),
+      ...builtinCapability(extension.id, tool.id, 'tool', '', tool.version),
+    })),
+    ...(extension.jobs ?? []).map((job) => ({
+      kind: 'job' as const,
+      definitionId: job.id,
+      definitionVersion: job.version,
+      revision: `${extension.id}:${extension.version}:${job.version}`,
+      hardAllowed:
+        enabled && available && (job.id !== 'browser.code_session' || executionAvailable),
+      ...(unavailableReason
+        ? { denialReason: unavailableReason }
+        : job.id === 'browser.code_session' && !executionAvailable
+          ? { denialReason: 'browser_executor_unavailable' }
+          : {}),
+      ...builtinCapability(extension.id, job.id, 'job', '', job.version),
+    })),
+    ...(extension.actions ?? []).map((action) => ({
+      kind: 'job' as const,
+      definitionId: `${extension.id}/${action.id}`,
+      definitionVersion: action.version,
+      revision: `${extension.id}:${extension.version}:${action.version}`,
+      hardAllowed: enabled && available,
+      ...(unavailableReason ? { denialReason: unavailableReason } : {}),
+      ...builtinCapability(extension.id, action.id, 'action', '', action.version),
+    })),
+  ];
+  return {
+    extension,
+    available,
+    executionAvailable,
+    capabilities,
+    toolIds: extension.tools.map((tool) => tool.id),
+    disposeCommand: execution.disposeCommand,
+    runtimeAssets: [...new Set([...runtimeAssets, ...(workerPath ? [workerPath] : [])])],
+    // Protect the entire private base, including future ephemeral profiles and sockets.
+    privateDirectory:
+      isAbsolute(privateDirectory) && !privateDirectory.includes('\0')
+        ? privateDirectory
+        : options.privateDirectory,
+    snapshot: {
+      definition: { id: extension.id, version: extension.version },
+      enabled,
+      available,
+      runtime: 'agent-browser-0.39.4',
+      ownership: 'browser.session-job',
+      configurationDigest: createHash('sha256')
+        .update(JSON.stringify(transport ?? null))
+        .digest('hex'),
+      ...(unavailableReason ? { unavailableReason } : {}),
+    },
+  };
+}

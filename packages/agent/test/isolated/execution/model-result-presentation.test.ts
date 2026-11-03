@@ -280,7 +280,8 @@ test('unsupported, throwing or mutating formatters preserve the exact original a
       request: { kind: 'run.start', content: 'Observe outcomes.' },
     });
     await runtime.waitForCommand('start', { timeoutMs: 15000 });
-    expect(formatted).toEqual(['throw', 'mutate', 'unsupported']);
+    expect(requestIndex).toBe(3);
+    expect(formatted).toEqual(['throw', 'mutate', 'unsupported', 'throw', 'mutate', 'unsupported']);
     for (const message of (await runtime.listMessages('s')).filter((m) => m.role === 'tool')) {
       expect(message.content).toBe(`original ${message.toolCallId}`);
     }

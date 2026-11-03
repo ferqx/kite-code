@@ -846,6 +846,9 @@ export interface Store {
     },
   ): Promise<RecoveryReport>;
 
+  setRunResultWait(
+    input: OwnedWrite & { runId: string; executionIds: string[] },
+  ): Promise<RunRecord>;
   finishRun(
     input: OwnedWrite & {
       runId: string;

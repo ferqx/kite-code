@@ -1,6 +1,6 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, expect, mock, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, Children, type ComponentProps, isValidElement } from 'react';
 import type { SessionPageProps } from '../../src/desktop/SessionPage';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', {
@@ -43,6 +43,18 @@ for (const [key, value] of Object.entries(globals)) {
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 }
 const { createRoot } = await import('react-dom/client');
+const actualResizable = await import('../../src/desktop/components/ui/resizable');
+const OriginalPanelGroup = actualResizable.ResizablePanelGroup;
+const resizableExports = { ...actualResizable };
+let captureContentLayout = false;
+let contentLayoutProps: ComponentProps<typeof OriginalPanelGroup> | undefined;
+mock.module('../../src/desktop/components/ui/resizable', () => ({
+  ...resizableExports,
+  ResizablePanelGroup(props: ComponentProps<typeof OriginalPanelGroup>) {
+    if (captureContentLayout && props.id === 'content-layout') contentLayoutProps = props;
+    return <OriginalPanelGroup {...props} />;
+  },
+}));
 const { SessionPage } = await import('../../src/desktop/SessionPage');
 afterAll(() => {
   dom.window.close();
@@ -52,7 +64,7 @@ afterAll(() => {
   }
 });
 
-test('tab scope reconciliation does not repeat the retained page render or replace its shell and closes the original browser once', async () => {
+test('tab scope reconciliation preserves the page shell without closing native browser pages', async () => {
   const host = document.getElementById('root')!;
   const root = createRoot(host);
   let directoryEvaluations = 0;
@@ -113,27 +125,25 @@ test('tab scope reconciliation does not repeat the retained page render or repla
     expect(host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded')).toBe('true');
     const header = host.querySelector('.session-header');
     const sidebar = host.querySelector('.sidebar');
-    const originalBrowser = [...browsers][0]!;
     directoryEvaluations = 0;
     await show('b');
     expect(directoryEvaluations).toBe(1);
     expect(host.querySelector('.session-header')).toBe(header);
     expect(host.querySelector('.sidebar')).toBe(sidebar);
-    expect(closed).toEqual([originalBrowser]);
+    expect(closed).toEqual([]);
     await openBrowser();
     expect(browsers.size).toBe(2);
-    const secondBrowser = [...browsers][1]!;
     directoryEvaluations = 0;
     await show('c');
     expect(directoryEvaluations).toBe(1);
     expect(host.querySelector('.session-header')).toBe(header);
     expect(host.querySelector('.sidebar')).toBe(sidebar);
-    expect(closed).toEqual([originalBrowser, secondBrowser]);
+    expect(closed).toEqual([]);
     await openBrowser();
     expect(browsers.size).toBe(3);
     await act(async () => root.unmount());
     unmounted = true;
-    expect(closed).toEqual([...browsers]);
+    expect(closed).toEqual([]);
   } finally {
     if (!unmounted) await act(async () => root.unmount());
   }
@@ -189,5 +199,829 @@ test('a consumed child navigation never reopens on selection handoff, while a fr
     expect(closes).toBe(2);
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+test('tab presentation survives fresh reading identities while actual conversation scope changes retire it', async () => {
+  const host = document.getElementById('root')!,
+    root = createRoot(host);
+  const closed: string[] = [],
+    restored: string[] = [];
+  const show = (
+    readingKey: string,
+    tabsScopeKey: string,
+    generation: number,
+    loading = false,
+    requestId?: number,
+  ) =>
+    act(async () =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="Session"
+          readingKey={readingKey}
+          tabsScopeKey={tabsScopeKey}
+          messages={[]}
+          connected
+          connectionLabel=""
+          loading={loading}
+          actions={{}}
+          renderBrowser={({ id, visible }) => <div data-browser={id} data-visible={visible} />}
+          closeBrowser={(id) => closed.push(id)}
+          restoreBrowser={async () => {
+            restored.push(`${tabsScopeKey}/${generation}`);
+            return { id: `page-${tabsScopeKey}`, title: `Page ${tabsScopeKey}` };
+          }}
+          browserRestoreKey={`${tabsScopeKey}/${generation}`}
+          browserPending={loading}
+          browserTabRequest={
+            requestId === undefined ? undefined : { requestId, createIfMissing: false }
+          }
+        />,
+      ),
+    );
+  const expanded = () => host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded');
+  try {
+    await show('reading-a/1', 'store/a', 1, false, 1);
+    expect(expanded()).toBe('true');
+    const page = host.querySelector('[data-browser="page-store/a"]'),
+      tabs = host.querySelector('.session-tabs');
+    expect(page).not.toBeNull();
+    await show('reading-unavailable', 'store/a', 2, true, 1);
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-browser="page-store/a"]')).toBe(page);
+    expect(host.querySelector('.session-tabs')).toBe(tabs);
+    await show('reading-a/2', 'store/a', 2, false, 1);
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-browser="page-store/a"]')).toBe(page);
+    expect(host.querySelector('.session-tabs')).toBe(tabs);
+    expect(restored).toEqual(['store/a/1', 'store/a/2']);
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    expect(expanded()).toBe('false');
+    await show('reading-a/3', 'store/a', 3, false, 1);
+    expect(expanded()).toBe('false');
+    await show('reading-b/3', 'store/b', 3);
+    expect(expanded()).toBe('false');
+    expect(host.querySelector('[data-browser="page-store/a"]')).toBeNull();
+    await show('reading-other-store/3', 'other-store/b', 3);
+    expect(host.querySelector('[data-browser="page-store/b"]')).toBeNull();
+    expect(closed).toEqual([]);
+  } finally {
+    await act(() => root.unmount());
+  }
+});
+
+test('only a fresh host reveal restores the exact visible page once, without overriding later user closure or another panel', async () => {
+  const host = document.getElementById('root')!,
+    root = createRoot(host);
+  let release!: () => void,
+    detailCloses = 0;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const show = (key: string, reveal: boolean, wait = false, details = false, scope = 'store/a') =>
+    act(async () =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="Session"
+          readingKey={scope}
+          messages={[]}
+          connected
+          connectionLabel=""
+          loading={false}
+          actions={{}}
+          renderBrowser={({ id, visible }) => <div data-browser={id} data-visible={visible} />}
+          restoreBrowser={async () => {
+            if (wait) await pending;
+            return {
+              id: 'page-one',
+              title: 'Page one',
+              pages: [
+                { id: 'page-one', title: 'Page one' },
+                { id: 'page-two', title: 'Page two' },
+              ],
+              activeId: 'page-two',
+              ...(reveal ? { reveal: true as const } : {}),
+            };
+          }}
+          browserRestoreKey={key}
+          detailPanel={
+            details
+              ? {
+                  label: 'Current task',
+                  content: <div>Current task details</div>,
+                  onClose: () => {
+                    detailCloses++;
+                  },
+                }
+              : undefined
+          }
+        />,
+      ),
+    );
+  const expanded = () => host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded');
+  try {
+    await show('initial', false);
+    expect(expanded()).toBe('false');
+    await show('fresh-replacement', true, true, true);
+    expect(expanded()).toBe('false');
+    await act(async () => {
+      release();
+      await Bun.sleep(0);
+    });
+    expect(expanded()).toBe('false');
+    expect(detailCloses).toBe(0);
+    await show('fresh-replacement', true);
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-browser="page-two"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    );
+    expect(host.querySelector('[data-browser="page-one"]')?.getAttribute('data-visible')).toBe(
+      'false',
+    );
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    expect(expanded()).toBe('false');
+    await show('same-pending-reveal-again', true);
+    expect(expanded()).toBe('false');
+    await show('other-conversation', false, false, false, 'store/b');
+    expect(expanded()).toBe('false');
+    await show('original-conversation-again', true);
+    expect(expanded()).toBe('false');
+    expect(detailCloses).toBe(0);
+    // A later explicit reopen replaces the old user-close intent. Returning
+    // from another scope must restore that latest visible original page.
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    expect(expanded()).toBe('true');
+    await show('other-after-reopen', false, false, false, 'store/b');
+    expect(expanded()).toBe('false');
+    await show('original-after-reopen', true);
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-browser="page-two"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    );
+    expect(detailCloses).toBe(0);
+  } finally {
+    release();
+    await act(() => root.unmount());
+  }
+});
+
+test('scope retirement settles before a frame, cancels old panel work and preserves pending original-page reveal', async () => {
+  const host = document.getElementById('root')!,
+    root = createRoot(host);
+  const raf = globalThis.requestAnimationFrame,
+    cancel = globalThis.cancelAnimationFrame,
+    rect = dom.window.HTMLElement.prototype.getBoundingClientRect,
+    offset = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, 'offsetWidth')!;
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 0;
+  globalThis.requestAnimationFrame = (callback) => {
+    frames.set(++nextFrame, callback);
+    return nextFrame;
+  };
+  globalThis.cancelAnimationFrame = (id) => frames.delete(id);
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return this.id === 'client-layout' || this.id === 'content-layout'
+      ? new dom.window.DOMRect(0, 0, 1200, 600)
+      : rect.call(this);
+  };
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get() {
+      return this.id === 'client-layout' || this.id === 'content-layout'
+        ? 1200
+        : offset.get!.call(this);
+    },
+  });
+  const closed: string[] = [];
+  let release!: (value: { id: string; title: string; reveal: true } | null) => void;
+  const pending = new Promise<{ id: string; title: string; reveal: true } | null>((resolve) => {
+    release = resolve;
+  });
+  const show = (scope: string, wait = false, details = false, empty = false) =>
+    act(() =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          readingKey={scope}
+          sessionLabel="Session"
+          messages={[]}
+          connected
+          connectionLabel=""
+          loading={false}
+          actions={{}}
+          renderBrowser={({ id, visible }) => <div data-original={id} data-visible={visible} />}
+          closeBrowser={(id) => closed.push(id)}
+          restoreBrowser={() =>
+            wait
+              ? pending
+              : Promise.resolve(empty ? null : { id: `page-${scope}`, title: scope, reveal: true })
+          }
+          browserRestoreKey={scope}
+          detailPanel={
+            details
+              ? { label: 'Target details', content: 'Target details', onClose() {} }
+              : undefined
+          }
+        />,
+      ),
+    );
+  const flushFrame = () =>
+    act(() => {
+      const batch = [...frames];
+      frames.clear();
+      for (const [, callback] of batch) callback(0);
+    });
+  const expanded = () => host.querySelector('[aria-label="标签页"]')?.getAttribute('aria-expanded');
+  const animating = () => host.querySelector('#content-layout')?.getAttribute('data-animate-width');
+  try {
+    await show('a');
+    expect(expanded()).toBe('true');
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    // Leave while the previous owner's manual close is still queued.
+    expect(frames.size).toBeGreaterThan(0);
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!.click());
+    await show('b', true);
+    expect(animating()).toBeNull();
+    expect(host.querySelector('[data-original="page-a"]')).toBeNull();
+    await flushFrame();
+    expect(animating()).toBeNull();
+    expect(host.querySelector('#client-layout')?.getAttribute('data-animate-width')).toBe('true');
+    await act(() => release({ id: 'page-b', title: 'Original B', reveal: true }));
+    expect(expanded()).toBe('true');
+    expect(animating()).toBeNull();
+    expect(host.querySelector('[data-original="page-b"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    );
+    await flushFrame();
+    expect(expanded()).toBe('true');
+    expect(animating()).toBeNull();
+    await show('c', false, true);
+    expect(Number(host.querySelector<HTMLElement>('#details')!.style.flexGrow)).toBeGreaterThan(0);
+    await flushFrame();
+    expect(host.textContent).toContain('Target details');
+    expect(animating()).toBeNull();
+    // B was not recorded as user-dismissed by the scope retirement.
+    await show('b');
+    expect(expanded()).toBe('true');
+    expect(host.querySelector('[data-original="page-b"]')?.getAttribute('data-visible')).toBe(
+      'true',
+    );
+    await show('empty', false, false, true);
+    expect(expanded()).toBe('false');
+    expect(Number(host.querySelector<HTMLElement>('#details')!.style.flexGrow)).toBe(0);
+    expect(animating()).toBeNull();
+    await flushFrame();
+    expect(animating()).toBeNull();
+    await show('b');
+    expect(expanded()).toBe('true');
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    await flushFrame();
+    expect(animating()).toBe('true');
+    await show('c', false, true);
+    expect(animating()).toBeNull();
+    await show('b');
+    expect(expanded()).toBe('false');
+    expect(closed).toEqual([]);
+  } finally {
+    release(null);
+    await act(() => root.unmount());
+    globalThis.requestAnimationFrame = raf;
+    globalThis.cancelAnimationFrame = cancel;
+    dom.window.HTMLElement.prototype.getBoundingClientRect = rect;
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', offset);
+  }
+});
+
+function retainedSidebarFixture(restored = true) {
+  const host = document.getElementById('root')!,
+    root = createRoot(host),
+    frames = new Map<number, FrameRequestCallback>(),
+    raf = globalThis.requestAnimationFrame,
+    cancel = globalThis.cancelAnimationFrame,
+    rect = dom.window.HTMLElement.prototype.getBoundingClientRect,
+    offset = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, 'offsetWidth')!;
+  let serial = 0,
+    groupWidth = 1200;
+  globalThis.requestAnimationFrame = (callback) => {
+    frames.set(++serial, callback);
+    return serial;
+  };
+  globalThis.cancelAnimationFrame = (id) => frames.delete(id);
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return ['client-layout', 'content-layout'].includes(this.id)
+      ? new dom.window.DOMRect(0, 0, groupWidth, 600)
+      : rect.call(this);
+  };
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get() {
+      return ['client-layout', 'content-layout'].includes(this.id)
+        ? groupWidth
+        : offset.get!.call(this);
+    },
+  });
+  const closed: string[] = [];
+  const restoreBrowser: SessionPageProps['restoreBrowser'] = async () =>
+    restored ? { id: 'retained-page', title: 'Original browser', reveal: true } : null;
+  const renderBrowser: SessionPageProps['renderBrowser'] = ({ id, visible, tools }) => (
+    <div data-retained-page={id} data-visible={visible}>
+      <input aria-label="Original field" defaultValue="Original form" />
+      {tools}
+    </div>
+  );
+  const show = (
+    options: {
+      request?: number;
+      child?: number;
+      details?: boolean;
+      scope?: string;
+      covered?: boolean;
+    } = {},
+  ) =>
+    act(async () =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          readingKey={options.scope ?? 'retained-animation'}
+          covered={options.covered}
+          sessionLabel="Original session"
+          messages={[]}
+          connected
+          connectionLabel=""
+          loading={false}
+          actions={{}}
+          renderBrowser={renderBrowser}
+          closeBrowser={(id) => closed.push(id)}
+          restoreBrowser={restoreBrowser}
+          browserRestoreKey="original"
+          browserTabRequest={
+            options.request === undefined
+              ? undefined
+              : { requestId: options.request, createIfMissing: true }
+          }
+          childTabRequest={
+            options.child === undefined
+              ? undefined
+              : { requestId: options.child, sessionId: 'child', title: 'Child details' }
+          }
+          renderChildSession={() => <div>Child reader</div>}
+          detailPanel={
+            options.details
+              ? { label: 'Ordinary details', content: 'Original details reader', onClose() {} }
+              : undefined
+          }
+        />,
+      ),
+    );
+  return {
+    host,
+    closed,
+    show,
+    click: (label: string) =>
+      act(() => host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click()),
+    pendingFrames: () => [...frames.values()],
+    frame: (callbacks?: FrameRequestCallback[]) =>
+      act(() => {
+        const batch = callbacks ?? [...frames.values()];
+        if (!callbacks) frames.clear();
+        for (const callback of batch) callback(0);
+      }),
+    layout: (available: boolean) => {
+      groupWidth = available ? 1200 : 0;
+    },
+    width: () => Number(host.querySelector<HTMLElement>('#details')!.style.flexGrow),
+    animating: () => host.querySelector('#content-layout')!.getAttribute('data-animate-width'),
+    async close() {
+      await act(() => root.unmount());
+      globalThis.requestAnimationFrame = raf;
+      globalThis.cancelAnimationFrame = cancel;
+      dom.window.HTMLElement.prototype.getBoundingClientRect = rect;
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', offset);
+    },
+  };
+}
+
+test('retained browser collapse keeps its original page until panel motion starts', async () => {
+  const f = retainedSidebarFixture();
+  try {
+    await f.show();
+    await f.frame();
+    const page = f.host.querySelector('[data-retained-page="retained-page"]')!,
+      field = page.querySelector<HTMLInputElement>('input')!,
+      width = f.width();
+    field.value = 'User original form';
+    expect(width).toBeGreaterThan(0);
+    expect(f.animating()).toBeNull();
+
+    await f.click('标签页');
+    // The close intent is immediate, while its pending layout keeps the
+    // original page and ancestors visible until the panel can start moving.
+    expect(f.host.querySelector('[aria-label="标签页"]')!.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    expect({
+      visible: page.getAttribute('data-visible'),
+      width: f.width(),
+      animating: f.animating(),
+    }).toEqual({ visible: 'true', width, animating: null });
+    expect(page.closest('[hidden], [aria-hidden="true"], [inert]')).toBeNull();
+    expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
+    expect(page.querySelector('input')).toBe(field);
+    expect(field.value).toBe('User original form');
+
+    await f.frame();
+    expect({
+      visible: page.getAttribute('data-visible'),
+      width: f.width(),
+      animating: f.animating(),
+    }).toEqual({ visible: 'false', width: 0, animating: 'true' });
+
+    await f.click('标签页');
+    expect(f.animating()).toBe('true');
+    await f.frame();
+    expect(f.width()).toBe(width);
+    expect(f.animating()).toBe('true');
+    expect(page.getAttribute('data-visible')).toBe('true');
+    expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
+    expect(page.querySelector('input')).toBe(field);
+    expect(field.value).toBe('User original form');
+    expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const closing of ['pending', 'completed', 'settled'] as const)
+  test(`retained browser header reopen preserves animation after ${closing} collapse`, async () => {
+    const f = retainedSidebarFixture();
+    try {
+      await f.show();
+      await f.frame();
+      const page = f.host.querySelector('[data-retained-page="retained-page"]')!,
+        field = page.querySelector<HTMLInputElement>('input')!,
+        width = f.width();
+      field.value = 'User original form';
+      expect(width).toBeGreaterThan(0);
+      expect(f.animating()).toBeNull();
+      await f.click('标签页');
+      const pendingFrames = f.pendingFrames();
+      if (closing !== 'pending') {
+        await f.frame();
+        expect(f.width()).toBe(0);
+        expect(f.animating()).toBe('true');
+      }
+      if (closing === 'settled') {
+        await act(() => Bun.sleep(260));
+        expect(f.animating()).toBeNull();
+        expect(f.width()).toBe(0);
+      }
+      await f.click('标签页');
+      if (closing === 'pending') expect(f.width()).toBe(width);
+      expect(f.animating()).toBe(closing === 'pending' ? null : 'true');
+      expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(page);
+      expect(field.value).toBe('User original form');
+      await f.frame(pendingFrames); // A cancelled callback cannot close the reopened page.
+      await f.frame();
+      expect(f.width()).toBe(width);
+      expect(f.animating()).toBe(closing === 'pending' ? null : 'true');
+      expect(page.getAttribute('data-visible')).toBe('true');
+      expect(f.closed).toEqual([]);
+      await f.click('收起侧栏');
+      await f.frame();
+      expect(f.host.querySelector('#client-layout')!.getAttribute('data-animate-width')).toBe(
+        'true',
+      );
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const replacement of ['scope', 'covered', 'details', 'child'] as const)
+  test(`pending browser collapse retires before ${replacement} replaces its presentation`, async () => {
+    const f = retainedSidebarFixture();
+    try {
+      await f.show();
+      await f.frame();
+      const page = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+      await f.click('标签页');
+      expect(page.dataset.visible).toBe('true');
+      const pendingFrames = f.pendingFrames();
+      expect(pendingFrames.length).toBeGreaterThan(0);
+      await f.show(
+        replacement === 'scope'
+          ? { scope: 'replacement' }
+          : replacement === 'child'
+            ? { child: 1 }
+            : { [replacement]: true },
+      );
+      expect(page.isConnected && page.dataset.visible === 'true').toBe(false);
+      await f.frame(pendingFrames);
+      await f.frame();
+      expect(page.isConnected && page.dataset.visible === 'true').toBe(false);
+      if (replacement === 'scope') {
+        const next = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+        expect(next).not.toBe(page);
+        expect(next.dataset.visible).toBe('true');
+        expect(f.width()).toBeGreaterThan(0);
+        expect(f.animating()).toBeNull();
+      } else if (replacement === 'covered') {
+        await f.show();
+        await f.frame();
+        expect(page.dataset.visible).toBe('false');
+        expect(f.width()).toBe(0);
+        expect(f.host.querySelector('[aria-label="标签页"]')!.getAttribute('aria-expanded')).toBe(
+          'false',
+        );
+      } else {
+        expect(f.width()).toBeGreaterThan(0);
+        expect(f.host.textContent).toContain(
+          replacement === 'details' ? 'Original details reader' : 'Child reader',
+        );
+      }
+      expect(f.closed).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const unavailable of ['before-close', 'before-frame'] as const)
+  test(`browser collapse cannot retain a visible page when layout disappears ${unavailable}`, async () => {
+    const f = retainedSidebarFixture();
+    try {
+      await f.show();
+      await f.frame();
+      const page = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+      if (unavailable === 'before-close') f.layout(false);
+      await f.click('标签页');
+      expect(page.dataset.visible).toBe(unavailable === 'before-close' ? 'false' : 'true');
+      f.layout(false);
+      await f.frame();
+      expect(page.dataset.visible).toBe('false');
+      expect(page.closest('[hidden]')).not.toBeNull();
+      expect(f.animating()).toBeNull();
+      f.layout(true);
+      await f.show();
+      await f.frame();
+      expect(page.dataset.visible).toBe('false');
+      expect(f.closed).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+for (const target of ['missing', 'collapsed'] as const)
+  test(`pending browser collapse retires when its panel target is ${target}`, async () => {
+    captureContentLayout = true;
+    const f = retainedSidebarFixture();
+    let restoreTarget: (() => void) | undefined;
+    try {
+      await f.show();
+      await f.frame();
+      const page = f.host.querySelector<HTMLElement>('[data-retained-page="retained-page"]')!;
+      await f.click('标签页');
+      expect(page.dataset.visible).toBe('true');
+      const pendingFrames = f.pendingFrames();
+      const details = Children.toArray(contentLayoutProps?.children).find(
+        (child) =>
+          isValidElement<ComponentProps<typeof actualResizable.ResizablePanel>>(child) &&
+          child.props.id === 'details',
+      );
+      if (!isValidElement<ComponentProps<typeof actualResizable.ResizablePanel>>(details))
+        throw Error('details_panel_missing');
+      const panelRef = details.props.panelRef;
+      if (!panelRef || typeof panelRef !== 'object' || !panelRef.current)
+        throw Error('details_handle_missing');
+      const handle = panelRef.current;
+      if (target === 'missing') {
+        panelRef.current = null;
+        restoreTarget = () => {
+          panelRef.current = handle;
+        };
+      } else await act(() => handle.collapse());
+      await f.frame(pendingFrames);
+      await f.frame();
+      expect(page.dataset.visible).toBe('false');
+      expect(page.closest('[hidden]')).not.toBeNull();
+      expect(f.animating()).toBeNull();
+      expect(f.closed).toEqual([]);
+    } finally {
+      restoreTarget?.();
+      await f.close();
+      captureContentLayout = false;
+      contentLayoutProps = undefined;
+    }
+  });
+
+test('retained browser requests, new browser and ordinary detail opens keep their animation', async () => {
+  const f = retainedSidebarFixture();
+  try {
+    await f.show();
+    await f.frame();
+    const original = f.host.querySelector('[data-retained-page="retained-page"]'),
+      width = f.width();
+    await f.click('标签页');
+    await f.frame();
+    await f.show({ request: 1 });
+    expect(f.animating()).toBe('true');
+    await f.frame();
+    expect(f.width()).toBe(width);
+    expect(f.animating()).toBe('true');
+    expect(f.host.querySelector('[data-retained-page="retained-page"]')).toBe(original);
+    await f.click('标签页');
+    await f.frame();
+    await f.show({ child: 1 }); // background browser must not bypass child-reader animation
+    expect(f.animating()).toBe('true');
+    await f.frame();
+    expect(f.animating()).toBe('true');
+    expect(f.host.textContent).toContain('Child reader');
+    await f.click('标签页');
+    await f.frame();
+    await f.click('标签页'); // selected child remains an ordinary animated open
+    await f.frame();
+    expect(f.animating()).toBe('true');
+    await f.click('标签页');
+    await f.frame();
+    await f.show({ details: true });
+    expect(f.animating()).toBe('true');
+    await f.frame();
+    expect(f.animating()).toBe('true');
+    expect(f.host.textContent).toContain('Original details reader');
+    expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
+  }
+  const fresh = retainedSidebarFixture(false);
+  try {
+    await fresh.show();
+    await fresh.frame();
+    await fresh.click('标签页');
+    expect(fresh.animating()).toBe('true');
+    await fresh.frame();
+    expect(fresh.animating()).toBe('true');
+    expect(fresh.host.querySelectorAll('[data-retained-page]')).toHaveLength(1);
+  } finally {
+    await fresh.close();
+  }
+});
+
+/** Real Group/Panel rendering with controlled notifications, not a pointer-drag simulation. */
+function collapseNotificationFixture() {
+  const host = document.getElementById('root')!;
+  const root = createRoot(host);
+  let groupWidth = 0;
+  let groupReads = 0;
+  const closed: string[] = [];
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  const originalOffset = Object.getOwnPropertyDescriptor(
+    dom.window.HTMLElement.prototype,
+    'offsetWidth',
+  )!;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.id === 'content-layout') {
+      groupReads++;
+      return new dom.window.DOMRect(0, 0, groupWidth, 600);
+    }
+    return originalRect.call(this);
+  };
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get() {
+      return this.id === 'content-layout' ? groupWidth : originalOffset.get!.call(this);
+    },
+  });
+  captureContentLayout = true;
+  contentLayoutProps = undefined;
+  const flush = (action: () => void = () => {}) =>
+    act(async () => {
+      action();
+      await Bun.sleep(30);
+    });
+  const layout = (collapsed: boolean) => ({
+    content: collapsed ? 100 : 50,
+    details: collapsed ? 0 : 50,
+  });
+  return {
+    host,
+    closed,
+    async open() {
+      await flush(() =>
+        root.render(
+          <SessionPage
+            workspaces={[]}
+            readingKey="controlled-collapse"
+            sessionLabel="Controlled collapse"
+            messages={[]}
+            connected
+            connectionLabel=""
+            loading={false}
+            actions={{}}
+            renderBrowser={({ id, visible }) => (
+              <div data-collapse-browser={id} data-visible={visible} />
+            )}
+            closeBrowser={(id) => closed.push(id)}
+          />,
+        ),
+      );
+      await flush(() => host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    },
+    setWidth(width: number) {
+      groupWidth = width;
+    },
+    reads() {
+      return groupReads;
+    },
+    resetReads() {
+      groupReads = 0;
+    },
+    notify(collapsed: boolean, count = 1) {
+      return flush(() => {
+        const callback = contentLayoutProps?.onLayoutChange;
+        expect(typeof callback).toBe('function');
+        for (let index = 0; index < count; index++) callback!(layout(collapsed));
+      });
+    },
+    complete(collapsed: boolean, isUserInteraction: boolean) {
+      return flush(() =>
+        contentLayoutProps?.onLayoutChanged?.(layout(collapsed), { isUserInteraction }),
+      );
+    },
+    browser() {
+      return host.querySelector<HTMLElement>('[data-collapse-browser]')!;
+    },
+    expanded() {
+      return host.querySelector('[aria-label="标签页"]')!.getAttribute('aria-expanded');
+    },
+    flush,
+    async close() {
+      await flush(() => root.unmount());
+      captureContentLayout = false;
+      contentLayoutProps = undefined;
+      dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', originalOffset);
+    },
+  };
+}
+
+test('live collapsed Group notification withdraws browser presentation before a user resize completes', async () => {
+  const f = collapseNotificationFixture();
+  try {
+    await f.open();
+    f.setWidth(1000);
+    await f.notify(false);
+    const browser = f.browser();
+    const id = browser.dataset.collapseBrowser;
+    expect(browser.dataset.visible).toBe('true');
+    await f.notify(true); // no final pointer-release/onLayoutChanged notification yet
+    expect(f.expanded()).toBe('true'); // visibility and user intent are separate
+    expect(f.browser()).toBe(browser);
+    expect(browser.dataset.visible).toBe('false');
+    expect(f.closed).toEqual([]);
+    await f.complete(true, true);
+    expect(f.expanded()).toBe('false');
+    f.setWidth(1400);
+    await f.notify(false);
+    expect(f.expanded()).toBe('false');
+    expect(browser.dataset.visible).toBe('false');
+    await f.flush(() => f.host.querySelector<HTMLButtonElement>('[aria-label="标签页"]')!.click());
+    await f.notify(false);
+    expect(f.browser()).toBe(browser);
+    expect(f.browser().dataset.collapseBrowser).toBe(id);
+    expect(f.browser().dataset.visible).toBe('true');
+    expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('automatic collapse preserves open intent and repeated positive Group notices do not reread geometry', async () => {
+  const f = collapseNotificationFixture();
+  try {
+    await f.open();
+    const browser = f.browser();
+    expect(browser.dataset.visible).toBe('true');
+    await f.notify(true); // zero-width hidden Group cannot replace the initial unknown state
+    expect(browser.dataset.visible).toBe('true');
+    f.setWidth(1000);
+    await f.notify(false);
+    expect(browser.dataset.visible).toBe('true');
+    f.resetReads();
+    await f.notify(false, 25);
+    expect(f.reads()).toBe(0);
+    await f.notify(true);
+    await f.complete(true, false); // window constraints, not an explicit user dismissal
+    expect(f.expanded()).toBe('true');
+    expect(browser.dataset.visible).toBe('false');
+    await f.notify(false);
+    expect(f.expanded()).toBe('true');
+    expect(f.browser()).toBe(browser);
+    expect(browser.dataset.visible).toBe('true');
+    f.setWidth(0);
+    await f.notify(true);
+    expect(browser.dataset.visible).toBe('true'); // invalid hidden Group retains last valid result
+    expect(f.closed).toEqual([]);
+  } finally {
+    await f.close();
   }
 });

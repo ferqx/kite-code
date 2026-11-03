@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -74,6 +76,10 @@ import {
 import { createWorkspaceAssembly } from './assembly';
 import type { ProcessHostConfiguration } from './bootstrap';
 import {
+  type BrowserConfigurationOptions,
+  createBrowserConfiguration,
+} from './browser-configuration';
+import {
   type ChildRole,
   createChildConfiguration,
   readSkillSelection,
@@ -86,6 +92,7 @@ import {
 } from './compression-configuration';
 import { defaultConfiguration, ordinaryHostConfigurationDefaults } from './configuration-defaults';
 import { createConfigurationManagement } from './configuration-management';
+import type { DesktopBrowserEndpoint } from './desktop-browser';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
 import { createDefaultHostStatusSource } from './host-status';
 import { createMcpConfiguration } from './mcp-configuration';
@@ -117,6 +124,7 @@ import {
 import { resolveWebTransport } from './web-fetch-proxy';
 
 export type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
+export type { BrowserConfigurationOptions } from './browser-configuration';
 export type { ChildRole } from './child-configuration';
 export type { SummaryCompressionOptions } from './compression-configuration';
 export { createSummaryCompressor } from './compression-configuration';
@@ -227,6 +235,9 @@ export function createDefaultProcessConfiguration(options: {
   shell?: ShellConfigurationOptions;
   /** Trusted per-hop network policy/admission; JSONC can only select the ordinary Tool. */
   webFetch?: WebFetchConfigurationOptions;
+  /** Trusted browser assets and host ceiling; JSONC may only select existing Tool IDs. */
+  browser?: BrowserConfigurationOptions | false;
+  desktopBrowser?: DesktopBrowserEndpoint;
   knownToolIds?: readonly string[];
   allowedToolCapabilities?: readonly string[];
 }): ProcessHostConfiguration {
@@ -244,6 +255,30 @@ export function createDefaultProcessConfiguration(options: {
   const planningOptions = structuredClone({ completionGuidance: true, ...options.planning });
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
   const describeDefaultTask = createDefaultTaskRequestClassifier(options.child ? [] : childRoles);
+  const browser = createBrowserConfiguration({
+    runtime: () => {
+      if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+      return policyRuntime;
+    },
+    configuration: options.browser,
+    desktopBrowser: options.desktopBrowser,
+    resolveDesktopStoreId: async (context) => {
+      if (!policyRuntime) throw Error('desktop_browser_store_unbound');
+      const execution = await policyRuntime.getExecution(context.executionId);
+      if (!execution || execution.sessionId !== context.sessionId || !execution.originStoreId)
+        throw Error('desktop_browser_store_unbound');
+      return execution.originStoreId;
+    },
+    privateDirectory: join(
+      process.platform === 'win32'
+        ? tmpdir()
+        : process.platform === 'darwin'
+          ? realpathSync('/tmp')
+          : '/tmp',
+      `kite-ab-${process.getuid?.() ?? 'user'}-${options.profile.profileAccessKey.slice(0, 16)}`,
+    ),
+  });
+  const browserTools = new Map((browser.extension.tools ?? []).map((tool) => [tool.id, tool]));
   let shellOptions = options.shell ? structuredClone(options.shell) : undefined;
   if (shellOptions?.host)
     shellOptions = {
@@ -253,9 +288,15 @@ export function createDefaultProcessConfiguration(options: {
         protectedRoots: [
           ...new Set([...shellOptions.host.protectedRoots, dirname(userConfiguration.path)]),
         ],
+        readonlyAssets: [
+          ...new Set([...shellOptions.host.readonlyAssets, ...browser.runtimeAssets]),
+        ],
         protectedFiles: [
           ...new Set([
             ...(shellOptions.host.protectedFiles ?? []),
+            // Linux masks this exact private parent, even before the first Browser Job.
+            join(browser.privateDirectory, 'private'),
+            ...(shellOptions.platform === 'darwin' ? [browser.privateDirectory] : []),
             ...(codexProtectionPath === undefined ? [] : [codexProtectionPath]),
           ]),
         ],
@@ -321,7 +362,12 @@ export function createDefaultProcessConfiguration(options: {
     });
   const task = createTaskConfiguration(childRoles);
   const configurationDefaults = options.ordinaryHostTools
-    ? ordinaryHostConfigurationDefaults(options.shell !== undefined, task.extension !== undefined)
+    ? ordinaryHostConfigurationDefaults(
+        options.shell !== undefined,
+        task.extension !== undefined,
+        browser.available,
+        options.desktopBrowser !== undefined,
+      )
     : defaultConfiguration;
   const planning = createPlanningValidation(
     planningOptions,
@@ -422,6 +468,8 @@ export function createDefaultProcessConfiguration(options: {
       pdf.worker,
       pdf.checksum,
       ...pdf.dependencies,
+      browser.privateDirectory,
+      ...browser.runtimeAssets,
       ...(options.runtimeAssets ?? []),
     ];
   };
@@ -438,6 +486,7 @@ export function createDefaultProcessConfiguration(options: {
     askUser,
     planning.extension,
     files.extension,
+    browser.extension,
     ...(task.extension ? [task.extension] : []),
   ];
   const sourceOptions = options.mcpSources;
@@ -693,6 +742,12 @@ export function createDefaultProcessConfiguration(options: {
         safeRead: capability.safeRead,
       });
     }
+  for (const capability of browser.capabilities)
+    if (capability.kind === 'job')
+      globalCapabilities.set(
+        JSON.stringify([capability.kind, capability.definitionId, capability.definitionVersion]),
+        capability,
+      );
   const globalDefaultPolicy = createPermissionPolicy({
     readPolicy: (request) =>
       currentPolicy(
@@ -708,13 +763,17 @@ export function createDefaultProcessConfiguration(options: {
           definitionVersion,
         })),
       ),
-    describeCapability: (request) =>
-      globalCapabilities.get(
+    describeCapability: async (request) => {
+      const description = globalCapabilities.get(
         JSON.stringify([request.kind, request.definitionId, request.definitionVersion]),
-      ) ??
-      mcp.describe(request) ??
-      mcpSources.describe(request) ??
-      mcpManagement.describe(request),
+      );
+      return (
+        description ??
+        mcp.describe(request) ??
+        mcpSources.describe(request) ??
+        mcpManagement.describe(request)
+      );
+    },
   });
   const globalPermissions = withInjectedCeiling(globalDefaultPolicy);
   const titles = createSessionTitleExtension({
@@ -769,6 +828,7 @@ export function createDefaultProcessConfiguration(options: {
       modelId: string;
       modelOnly?: boolean;
       toolIds?: readonly string[];
+      inheritedModelHiddenToolIds?: readonly string[];
       skillSelection?: SkillSelection;
       mcpParent?: Parameters<typeof mcpSources.deriveChildSelection>[0];
       parentTools?: Parameters<
@@ -783,6 +843,7 @@ export function createDefaultProcessConfiguration(options: {
       planningSnapshot: Json;
       mcpSourceSnapshot: Json;
       webSnapshot: Json;
+      browserSnapshot: Json;
       runIdentity: { runId: string; sessionId: string };
     },
   ) => {
@@ -811,12 +872,41 @@ export function createDefaultProcessConfiguration(options: {
       const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
       if (project.webFetch !== undefined)
         throw new ConfigurationError('web_configuration_user_only');
+      if (user.browser !== undefined || project.browser !== undefined)
+        throw new ConfigurationError('browser_configuration_host_owned');
       const current = explicitConfiguration(explicit);
       const request = command.request as { modelId?: string; reasoningEffort?: ReasoningEffort };
       if (selection) current.modelId = selection.modelId;
       else if (request.modelId !== undefined) current.modelId = request.modelId;
+      const explicitBrowser = [user, project, current]
+        .flatMap((layer) => (Array.isArray(layer.tools) ? layer.tools : []))
+        .filter((tool) => tool && typeof tool === 'object' && !Array.isArray(tool)) as JsonObject[];
+      const legacyBrowser =
+        explicitBrowser.some(
+          (tool) =>
+            typeof tool.id === 'string' &&
+            browser.toolIds.includes(tool.id) &&
+            tool.id !== 'browser.execute' &&
+            tool.enabled !== false,
+        ) &&
+        !explicitBrowser.some((tool) => tool.id === 'browser.execute' && tool.enabled !== false);
+      const legacyRecovery =
+        recovery &&
+        recovery.browserSnapshot &&
+        typeof recovery.browserSnapshot === 'object' &&
+        !Array.isArray(recovery.browserSnapshot) &&
+        recovery.browserSnapshot.execution === undefined;
+      const runDefaults =
+        options.ordinaryHostTools && options.desktopBrowser && (legacyBrowser || legacyRecovery)
+          ? ordinaryHostConfigurationDefaults(
+              options.shell !== undefined,
+              task.extension !== undefined,
+              browser.available,
+              false,
+            )
+          : configurationDefaults;
       const effective = resolveConfiguration({
-        defaults: configurationDefaults,
+        defaults: runDefaults,
         user,
         workspace: withoutProjectModels(project),
         explicit: current,
@@ -962,6 +1052,23 @@ export function createDefaultProcessConfiguration(options: {
           if (!toolIds.includes(id)) toolIds.push(id);
         }
       }
+      const unifiedBrowser = toolIds.includes('browser.execute');
+      const browserRunSnapshot = unifiedBrowser
+        ? { ...browser.snapshot, execution: 'isolated-browser-code-1' }
+        : browser.snapshot;
+      const browserInternalTools = browser.toolIds.filter((id) => id !== 'browser.execute');
+      const modelHiddenToolIds = unifiedBrowser
+        ? browserInternalTools.filter(
+            (id) => !toolIds.includes(id) || selection?.inheritedModelHiddenToolIds?.includes(id),
+          )
+        : [];
+      if (unifiedBrowser) {
+        for (const id of browserInternalTools) {
+          if (effective.tools?.some((tool) => tool.id === id && tool.enabled === false))
+            throw new AgentError('browser_dependency_disabled');
+          if (!toolIds.includes(id)) toolIds.push(id);
+        }
+      }
       task.validateSelection(toolIds);
       const sourceSelection = {
         present: [user, project, current].some((layer) => Object.hasOwn(layer, 'mcp')),
@@ -1008,13 +1115,14 @@ export function createDefaultProcessConfiguration(options: {
         task.tools.values(),
         shellTools.values(),
         webTools.values(),
+        browserTools.values(),
         mcp.tools.values(),
       ]);
       const assembly = await createWorkspaceAssembly({
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser],
+        externallyRegisteredExtensions: [askUser, browser.extension],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
@@ -1026,10 +1134,14 @@ export function createDefaultProcessConfiguration(options: {
           ...task.tools.keys(),
           ...shellToolIds,
           ...web.toolIds,
+          ...browser.toolIds,
           ...mcp.tools.keys(),
           selectedSources.directoryToolId,
         ],
-        allowedCapabilities: options.allowedToolCapabilities,
+        allowedCapabilities: [
+          ...(options.allowedToolCapabilities ?? []),
+          ...(unifiedBrowser && browser.executionAvailable ? ['browser.execute'] : []),
+        ],
       });
       let webBinding: ReturnType<typeof web.bind> | undefined;
       let runWeb = web;
@@ -1040,6 +1152,7 @@ export function createDefaultProcessConfiguration(options: {
             await assembly.dispose();
           }),
           Promise.resolve().then(() => webBinding?.dispose()),
+          Promise.resolve().then(() => browser.disposeCommand(session.id, command.id)),
         ]).then((results) => {
           const failures = results.flatMap((result) =>
             result.status === 'rejected' ? [result.reason] : [],
@@ -1127,6 +1240,11 @@ export function createDefaultProcessConfiguration(options: {
             planningSnapshotDigest(
               (assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null) as unknown as Json,
             ) !== planningSnapshotDigest(recovery.webSnapshot) ||
+            planningSnapshotDigest(
+              (assembly.toolIds.some((id) => browserTools.has(id))
+                ? browserRunSnapshot
+                : null) as Json,
+            ) !== planningSnapshotDigest(recovery.browserSnapshot) ||
             !recovery.planningSnapshot ||
             typeof recovery.planningSnapshot !== 'object' ||
             Array.isArray(recovery.planningSnapshot) ||
@@ -1186,7 +1304,14 @@ export function createDefaultProcessConfiguration(options: {
                       capability.definitionId === tool.id &&
                       capability.definitionVersion === tool.version,
                   )
-                : undefined;
+                : extension.id === browser.extension.id
+                  ? browser.capabilities.find(
+                      (capability) =>
+                        capability.kind === 'tool' &&
+                        capability.definitionId === tool.id &&
+                        capability.definitionVersion === tool.version,
+                    )
+                  : undefined;
             actual.set(
               key('tool', tool.id, tool.version),
               hostCapability ?? {
@@ -1213,15 +1338,27 @@ export function createDefaultProcessConfiguration(options: {
               planning.extension.id,
               job.version,
             );
-            actual.set(key('job', job.id, job.version), {
-              kind: 'job',
-              definitionId: job.id,
-              definitionVersion: job.version,
-              revision: `${extension.id}:${extension.version}:${job.version}`,
-              effects: capability.effects,
-              hardAllowed: true,
-              safeRead: capability.safeRead,
-            });
+            const hostCapability =
+              extension.id === browser.extension.id
+                ? browser.capabilities.find(
+                    (description) =>
+                      description.kind === 'job' &&
+                      description.definitionId === job.id &&
+                      description.definitionVersion === job.version,
+                  )
+                : undefined;
+            actual.set(
+              key('job', job.id, job.version),
+              hostCapability ?? {
+                kind: 'job',
+                definitionId: job.id,
+                definitionVersion: job.version,
+                revision: `${extension.id}:${extension.version}:${job.version}`,
+                effects: capability.effects,
+                hardAllowed: true,
+                safeRead: capability.safeRead,
+              },
+            );
           }
         }
         // The exact file adapter may invoke the selected Planning owner's existing Action.
@@ -1411,6 +1548,7 @@ export function createDefaultProcessConfiguration(options: {
           model,
           modelId: selected.id,
           toolIds: assembly.toolIds,
+          modelHiddenToolIds,
           extensions: assembly.extensions,
           readStepCapabilities: async (
             input: Parameters<NonNullable<RunConfiguration['readStepCapabilities']>>[0],
@@ -1491,9 +1629,13 @@ export function createDefaultProcessConfiguration(options: {
               resolvedIds: assembly.snapshotFacts.skills.map((entry) => entry.id),
             },
             actualCapabilities: assembly.snapshotFacts,
+            ...(modelHiddenToolIds.length ? { modelHiddenToolIds } : {}),
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
             web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null,
+            browser: assembly.toolIds.some((id) => browserTools.has(id))
+              ? browserRunSnapshot
+              : null,
             task: {
               ...task.snapshot,
               tools: task.snapshot.tools.filter((tool) => assembly.toolIds.includes(tool.id)),
@@ -1609,6 +1751,7 @@ export function createDefaultProcessConfiguration(options: {
         signal: input.signal,
         planningSnapshot: snapshot.planning ?? null,
         webSnapshot: snapshot.web ?? null,
+        browserSnapshot: snapshot.browser ?? null,
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
         mcpSourceSnapshot:
           snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)
@@ -1628,6 +1771,26 @@ export function createDefaultProcessConfiguration(options: {
             toolIds: selection.role.toolIds,
             readOnlyTask: selection.role.toolPolicy === 'read_only',
             parentTools: input.parentTools,
+            inheritedModelHiddenToolIds: (() => {
+              if (!selection.role.toolPolicy) return undefined;
+              const original = input.parentRun?.configuration;
+              if (!original || typeof original !== 'object' || Array.isArray(original))
+                return undefined;
+              const snapshot = original.snapshot;
+              if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot))
+                return undefined;
+              const hidden = snapshot.modelHiddenToolIds;
+              if (hidden === undefined) return undefined;
+              if (
+                !Array.isArray(hidden) ||
+                hidden.some(
+                  (id) =>
+                    typeof id !== 'string' || !input.parentTools.some((tool) => tool.id === id),
+                )
+              )
+                throw new AgentError('child_tool_source_unavailable');
+              return hidden as string[];
+            })(),
             inheritDynamicMcp: selection.inheritDynamicMcp,
             mcpParent: {
               parentExecution: input.parentExecution,

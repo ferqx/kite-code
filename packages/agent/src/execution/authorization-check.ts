@@ -166,26 +166,32 @@ export async function runInternalModelCall(options: {
     }
     if (!finished) throw new AgentError('model_response_incomplete');
     signal.throwIfAborted();
-    const descriptor = output?.descriptor(true);
-    let receipt: AuthorizationCheckOutput | undefined;
-    if (descriptor && permissionCheck) {
-      let answer: ReturnType<typeof authorizationCheckAnswer> = null;
+    let answer: ReturnType<typeof authorizationCheckAnswer> = null;
+    if (permissionCheck) {
       try {
         answer = authorizationCheckAnswer(JSON.parse(content));
       } catch {
-        /* Invalid text cannot authorize. */
+        /* Invalid text cannot authorize or become a request for human approval. */
       }
-      if (answer) {
-        receipt = {
-          kind: 'authorization_check_output',
-          version: 1,
-          modelExecutionId: execution.id,
-          modelOutputDigest: await semanticDigest(descriptor as unknown as Json),
-          contentHash: await semanticDigestBytes(Buffer.from(content), signal),
-          answer,
-        };
-        await options.publishReceipt!(receipt, signal);
-      }
+      if (!answer)
+        throw new AgentError(
+          content.trim()
+            ? 'authorization_check_output_invalid'
+            : 'authorization_check_output_empty',
+        );
+    }
+    const descriptor = output?.descriptor(true);
+    let receipt: AuthorizationCheckOutput | undefined;
+    if (descriptor && permissionCheck) {
+      receipt = {
+        kind: 'authorization_check_output',
+        version: 1,
+        modelExecutionId: execution.id,
+        modelOutputDigest: await semanticDigest(descriptor as unknown as Json),
+        contentHash: await semanticDigestBytes(Buffer.from(content), signal),
+        answer: answer!,
+      };
+      await options.publishReceipt!(receipt, signal);
     }
     const input = prepared.input as Record<string, Json>;
     const body = bodyReference(input.body);

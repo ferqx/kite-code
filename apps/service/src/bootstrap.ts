@@ -31,6 +31,13 @@ export const privateStartupSchema = z.strictObject({
   token: z.string().min(32).max(256),
   capabilities: z.array(z.string().min(1).max(128)).max(64).optional(),
   hostConfiguration: z.json().optional(),
+  /** Main-owned ephemeral page endpoint; private paired stdin only, never JSONC/HTTP/model input. */
+  desktopBrowser: z
+    .strictObject({
+      endpoint: z.string().url().max(256),
+      token: z.string().regex(/^[a-f0-9-]{72}$/),
+    })
+    .optional(),
   /** Host-only selected candidate proof; absent from HTTP, JSONC and Model configuration. */
   runtimeProtection: runtimeProtectionSchema.optional(),
 });

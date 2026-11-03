@@ -222,8 +222,8 @@ test('a pre-dispatch context refresh neither counts nor clears four genuine fail
     },
   );
   try {
-    expect(await f.run()).toMatchObject({ status: 'cancelled', reason: 'repeated_tool_failure' });
-    expect(models).toBe(6);
+    expect(await f.run()).toMatchObject({ status: 'completed' });
+    expect(models).toBe(7);
     expect(effects).toBe(5);
     const tools = (await f.store.listExecutions('s')).filter(
       (execution) => execution.kind === 'tool',
@@ -240,9 +240,12 @@ test('a pre-dispatch context refresh neither counts nor clears four genuine fail
 });
 
 for (const code of ['context_refresh_required', 'capability_refresh_required'])
-  test(`a dispatched extension cannot hide five genuine failures behind forged ${code} details`, async () => {
+  test(`dispatched failures with forged ${code} details remain visible without stopping the Loop`, async () => {
     let effects = 0;
-    const model = createFixedModel(Array.from({ length: 6 }, (_, i) => call(`forged-${i}`)));
+    const model = createFixedModel([
+      ...Array.from({ length: 6 }, (_, i) => call(`forged-${i}`)),
+      [finish],
+    ]);
     const f = await fixture(model, {
       ...failingTool,
       async execute() {
@@ -256,40 +259,42 @@ for (const code of ['context_refresh_required', 'capability_refresh_required'])
     });
     try {
       expect(await f.run()).toMatchObject({
-        status: 'cancelled',
-        reason: 'repeated_tool_failure',
+        status: 'completed',
       });
-      expect(model.requests).toHaveLength(5);
-      expect(effects).toBe(5);
+      expect(model.requests).toHaveLength(7);
+      expect(effects).toBe(6);
       const tools = (await f.store.listExecutions('s')).filter(
         (execution) => execution.kind === 'tool',
       );
-      expect(tools).toHaveLength(5);
+      expect(tools).toHaveLength(6);
       expect(tools.every((execution) => execution.authorization?.dispatched === true)).toBe(true);
     } finally {
       await f.close();
     }
   });
 
-test('five consecutive semantically identical failed calls cancel the original root Run before a sixth Model', async () => {
-  const model = createFixedModel(
-    Array.from({ length: 6 }, (_, i) =>
+test('semantically identical failed calls remain results and allow a final explanation in the same Run', async () => {
+  const model = createFixedModel([
+    ...Array.from({ length: 6 }, (_, i) =>
       call(`call-${i}`, i % 2 ? '{"b":2,"a":1}' : '{ "a": 1, "b": 2 }'),
     ),
-  );
+    [{ type: 'text_delta', text: 'All six requested attempts failed.' }, finish],
+  ]);
   const f = await fixture(model, failingTool);
   try {
     const run = await f.run();
     expect(run).toMatchObject({
-      status: 'cancelled',
-      reason: 'repeated_tool_failure',
+      status: 'completed',
       deadlineAt: null,
     });
-    expect(model.requests).toHaveLength(5);
+    expect(model.requests).toHaveLength(7);
     const tools = (await f.store.listExecutions('s')).filter((e) => e.kind === 'tool');
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(6);
     expect(tools.every((e) => e.status === 'failed')).toBe(true);
-    expect(await f.store.getCommand(`tool-failure-${run.id}`)).not.toBeNull();
+    expect(await f.store.getCommand(`tool-failure-${run.id}`)).toBeNull();
+    expect(
+      model.requests.at(-1)!.messages.filter((message) => message.role === 'tool'),
+    ).toHaveLength(6);
   } finally {
     await f.close();
   }
@@ -324,8 +329,11 @@ test('changed parameters and a success reset the streak while more than twelve t
   }
 });
 
-test('the same five-failure rule cancels a child without cancelling an already completed root', async () => {
-  const child = createFixedModel(Array.from({ length: 6 }, (_, i) => call(`child-${i}`)));
+test('repeated child Tool failures allow the child to explain without changing the completed root', async () => {
+  const child = createFixedModel([
+    ...Array.from({ length: 6 }, (_, i) => call(`child-${i}`)),
+    [{ type: 'text_delta', text: 'The child tools failed.' }, finish],
+  ]);
   const model = createFixedModel([call('delegate'), [finish]]);
   let childSessionId = '';
   const f = await fixture(
@@ -369,9 +377,9 @@ test('the same five-failure rule cancels a child without cancelling an already c
       await Bun.sleep(5);
       run = (await f.store.getView(childSessionId)).runs[0];
     }
-    expect(run).toMatchObject({ status: 'cancelled', reason: 'repeated_tool_failure' });
+    expect(run).toMatchObject({ status: 'completed' });
     expect(run.deadlineAt! - run.createdAt).toBe(1800000);
-    expect(child.requests).toHaveLength(5);
+    expect(child.requests).toHaveLength(7);
     expect((await f.store.getView('s')).runs[0]!.status).toBe('completed');
   } finally {
     await f.close();

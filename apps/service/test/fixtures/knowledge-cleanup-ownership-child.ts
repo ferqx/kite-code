@@ -182,7 +182,12 @@ const provider = Bun.serve({
               index: 0,
               id: 'original-load',
               type: 'function',
-              function: { name: 'load_skill', arguments: JSON.stringify({ skill_id: 'original' }) },
+              function: {
+                name: 'load_skill',
+                arguments: JSON.stringify({
+                  skill_id: 'original',
+                }),
+              },
             },
           ],
         }

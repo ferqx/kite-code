@@ -10,7 +10,7 @@ Status: implemented
 
 共享 UI 只拥有标签模型、导航展示与工具 slot；Native Main 使用独立内存 session 的 WebContentsView，应用主 frame 经有限 IPC 指挥 HTTP／HTTPS 导航，网页本身没有应用 preload。禁用 Node、webview、DevTools、权限申请和下载；外部协议不分发，HTTP 弹窗留在当前标签。最多8个标签，浏览器 Cookie 不落盘。
 
-标签模型置于响应式 Group 之上，避免宽窄切换卸载 UI 后丢失网页历史。网页组件卸载只隐藏 native view，模型负责关闭；切会话／root 重载／崩溃／窗口关闭真正销毁。变更工具仅在活动可见时挂载，关闭或切换结束所属 GET。显示 metadata 和浏览器状态不能成为业务操作 authority。完整实现与验证归[Desktop owner](../../../../apps/desktop/README.md#会话标签页与内置浏览器)；[Electron WebContentsView](https://www.electronjs.org/docs/latest/api/web-contents-view)与[navigationHistory](https://www.electronjs.org/docs/latest/api/navigation-history)定义宿主能力。
+标签模型置于响应式 Group 之上，避免宽窄切换卸载 UI 后丢失网页历史。网页组件卸载与展示解绑只隐藏 native view，明确关闭标签才销毁原页。最初随切会话／Root 重载销毁的策略已被后续准确原页保留替代：当前切会话、收起与 Cmd+W 隐藏不刷新或销毁网页，Root 重载先重新核准确 Main 页面清单、展示与操作范围。Main 重启或原 WebContents 确实销毁时不能声称原文档仍在；原生网页崩溃和真实窗口退出按实际资源状态处理。[固定 Renderer 布局提案](2026-11-02-browser-fixed-renderer-layout.md)继续这一页面／展示分离，尚未完成的新展示结构不改变本段原页边界。变更工具仅在活动可见时挂载，关闭或切换结束所属 GET。显示 metadata 和浏览器状态不能成为业务操作 authority。完整实现与验证归[Desktop owner](../../../../apps/desktop/README.md#会话标签页与内置浏览器)；[Electron WebContentsView](https://www.electronjs.org/docs/latest/api/web-contents-view)与[navigationHistory](https://www.electronjs.org/docs/latest/api/navigation-history)定义宿主能力。
 
 ## Alternatives considered
 
@@ -20,4 +20,4 @@ Status: implemented
 
 ## Consequences
 
-此实现是简易用户浏览器，工具首页只有变更，不提供导入、扩展、下载或模型自动浏览。Main／preload 改动必须完全重启客户端；网页不随应用主题重写。真实窗口夹具与 DOM 测试分别核隔离／导航和 reader／响应式生命周期，不能代证所有外部网站或跨平台原生合成。
+最初交付是简易用户浏览器，工具首页只有变更，当时未接入模型自动浏览；后续统一浏览器入口和控制租约的实际能力以 Desktop owner 与产品手册为准，不由本篇历史范围推断。Main／preload 改动必须完全重启客户端；网页不随应用主题重写。真实窗口夹具与 DOM 测试分别核隔离／导航和 reader／响应式生命周期，不能代证所有外部网站或跨平台原生合成。

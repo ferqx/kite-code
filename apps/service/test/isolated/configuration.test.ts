@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { browserToolIds } from '@kite-ai/agent/browser';
 import {
   createCredentialVault,
   createTemporaryCredentialBackend,
@@ -328,12 +329,25 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     async fetch(request) {
       const body = (await request.json()) as Record<string, unknown>;
       if (!Array.isArray(body.tools)) {
+        const messages = body.messages as { role: string; content: string }[];
+        let authorizationCheck = false;
+        try {
+          authorizationCheck =
+            JSON.parse(
+              messages
+                .slice()
+                .reverse()
+                .find((message) => message.role === 'user')?.content ?? '{}',
+            ).purpose === 'authorization_check';
+        } catch {}
+        const content = authorizationCheck
+          ? JSON.stringify({ decision: 'ask_user', reason: 'Confirm this exact file edit.' })
+          : 'Project read';
         const chunk = (delta: unknown, finish: string | null) =>
           `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
-        return new Response(
-          `${chunk({ content: 'Project read' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`,
-          { headers: { 'content-type': 'text/event-stream' } },
-        );
+        return new Response(`${chunk({ content }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`, {
+          headers: { 'content-type': 'text/event-stream' },
+        });
       }
       requests.push(body);
       const tools = body.tools as {
@@ -478,7 +492,22 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     const names = (requests[0]!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );
-    expect(names).toHaveLength(11);
+    const browserViews = await child.handle.client.queryExtension(
+      'session',
+      'builtin.browser',
+      'browser.view',
+      {},
+    );
+    expect(browserViews.length).toBeLessThanOrEqual(1);
+    if (browserViews.length)
+      expect(browserViews[0]!.payload).toMatchObject({
+        state: 'unavailable',
+        error: expect.any(String),
+      });
+    const browserNames = browserViews.length
+      ? []
+      : browserToolIds.map((id) => id.replace('.', '_'));
+    expect(names).toHaveLength(11 + browserNames.length);
     expect([...names].sort()).toEqual(
       [
         'ask_user',
@@ -492,10 +521,11 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
         'wait_agent_events',
         'list_agents',
         'interrupt_agent',
+        ...browserNames,
       ].sort(),
     );
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
-    expect(new Set(names).size).toBe(11);
+    expect(new Set(names).size).toBe(11 + browserNames.length);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
       (

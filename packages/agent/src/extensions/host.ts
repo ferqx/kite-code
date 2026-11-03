@@ -9,6 +9,7 @@ import {
   type SourceRequest,
 } from '../context';
 import type { StandaloneScope, ToolScope, UnifiedExecution } from '../execution';
+import { browserContinuationSource } from '../execution/host-control';
 import { canonicalJson, semanticDigest } from '../json';
 import type { Store } from '../storage/port';
 import {
@@ -142,6 +143,9 @@ export interface ExtensionHostOptions {
     configuration: ChildConfiguration,
   ): Promise<import('../storage/types').AfterTurnAuthorization>;
   onJobSettled?(scope: StandaloneScope, executionId: string): Promise<void>;
+  requirementRun?(
+    execution: import('../storage/types').ExecutionRecord,
+  ): Promise<import('../storage/types').RunRecord | null>;
   waitForChange?(
     cursor: string,
     signal: AbortSignal,
@@ -226,12 +230,20 @@ export class ExtensionHost {
     subjectId?: string,
     expectedStoreId?: string,
     dispatch?: DispatchCapture,
+    continuationRunId?: string,
   ): Promise<ReadContext> {
     const session = await this.options.store.getSession(sessionId);
     if (!session || session.deletedAt !== null) throw new AgentError('session_not_found');
-    const read = async <T>(load: () => Promise<T>): Promise<T> => {
+    const read = async <T>(
+      load: () => Promise<T>,
+      observation?: (value: T) => unknown,
+    ): Promise<T> => {
       const value = await load();
-      if (stamps) stamps.push({ read: load, digest: await semanticDigest(json(value)) });
+      if (stamps)
+        stamps.push({
+          read: observation ? async () => observation(await load()) : load,
+          digest: await semanticDigest(json(observation ? observation(value) : value)),
+        });
       return value;
     };
     let forkReaderOpen = true;
@@ -487,11 +499,24 @@ export class ExtensionHost {
         return result;
       },
       getRun: (id) =>
-        read(async () => {
-          const run = await this.options.store.getRun(id);
-          if (run && run.sessionId !== sessionId) throw new AgentError('permission_denied');
-          return publicRun(run);
-        }),
+        read(
+          async () => {
+            const run = await this.options.store.getRun(id);
+            if (run && run.sessionId !== sessionId) throw new AgentError('permission_denied');
+            return publicRun(run);
+          },
+          id === continuationRunId
+            ? (run) =>
+                run && {
+                  // This exact builtin reads active identity, not Loop/result-wait progress.
+                  // Core separately rechecks cancellation, work, selection and original Job.
+                  id: run.id,
+                  sessionId: run.sessionId,
+                  originStoreId: run.originStoreId,
+                  isActive: run.isActive,
+                }
+            : undefined,
+        ),
       getExecution: (id) =>
         read(async () => {
           const execution = await this.options.store.getExecution(id);
@@ -859,6 +884,15 @@ export class ExtensionHost {
       bindings: NonNullable<StandaloneScope['bindings']>;
       assertFresh(): Promise<void>;
     },
+    mode?: 'live-control',
+    reviewer?: {
+      readonly runId: string;
+      readonly context: Json;
+      readonly authorizationCheck: NonNullable<StandaloneScope['bindings']>['authorizationCheck'];
+      retain(): () => Promise<void>;
+      assertFresh(): Promise<void>;
+      dispatched(): void;
+    },
   ): Promise<void> {
     const request = command.request as {
       extensionId: string;
@@ -871,8 +905,17 @@ export class ExtensionHost {
       (action) => action.id === request.actionId && action.version === request.definitionVersion,
     );
     if (!extension || !definition) throw new AgentError('action_not_found');
+    if (
+      (reviewer && mode !== 'live-control') ||
+      (mode === 'live-control' && definition.runControl !== true) ||
+      (definition.runControl === true &&
+        (definition.resources?.slot || definition.resources?.serial))
+    )
+      throw new AgentError('control_action_invalid');
     if (!this.validator.compile(definition.inputSchema)(request.input))
       throw new AgentError('invalid_action_arguments');
+    if (!reviewer && !parent && (await browserContinuationSource(definition, command)))
+      throw new AgentError('browser_continuation_run_unavailable');
     const session = await this.options.store.getSession(command.sessionId);
     if (!session) throw new AgentError('session_not_found');
     const sourceRequest: SourceRequest = {
@@ -902,6 +945,7 @@ export class ExtensionHost {
           command.subjectId,
           command.originStoreId,
           dispatch,
+          reviewer?.runId,
         );
         const captured = (await this.options.sources?.capture(sourceRequest)) ?? [];
         let prepared: Json;
@@ -938,6 +982,7 @@ export class ExtensionHost {
           preparedDigest: await semanticDigest(prepared),
           sources: json(captured),
           reads: stamps.map((stamp) => stamp.digest),
+          ...(reviewer ? { continuation: structuredClone(reviewer.context) } : {}),
           recordReads: recordReads as unknown as Json,
           recordListReads: recordListReads as unknown as Json,
           ...(forkSourceBindings.length
@@ -948,15 +993,25 @@ export class ExtensionHost {
           ...(contextRevision === undefined ? {} : { contextRevision }),
         };
         const scope: StandaloneScope = {
+          ...(definition.runControl === true ? { controlOnly: true as const } : {}),
           command,
           owner,
           workspaceId: session.workspaceId,
           signal: controller.signal,
           checkFreshness: async () => {
             await parent?.assertFresh();
+            await reviewer?.assertFresh();
             await this.checkFreshness(stamps, sourceRequest, captured);
           },
-          bindings: parent?.bindings ?? this.options.actionBindings,
+          bindings:
+            parent?.bindings ??
+            (reviewer
+              ? {
+                  ...this.options.actionBindings!,
+                  authorizationCheck: reviewer.authorizationCheck,
+                  retain: reviewer.retain,
+                }
+              : this.options.actionBindings),
           ...(parent ? { parentExecutionId: parent.executionId, cancelWithParent: true } : {}),
           captureDispatchReadSet: async (actualExecutionId) => {
             if (actualExecutionId !== executionId)
@@ -1003,6 +1058,9 @@ export class ExtensionHost {
           reprepareOnFreshness: preparation === 0,
           ...(predecessorExecutionId ? { predecessorExecutionId, attempt } : {}),
           execute: async (signal) => {
+            // The admitted Action now owns its original finite transition and
+            // compensation; a receipt's own settlement must not cancel that cleanup.
+            reviewer?.dispatched();
             const read = await this.readContext(
               command.sessionId,
               request.extensionId,
@@ -1011,25 +1069,44 @@ export class ExtensionHost {
               command.originStoreId,
             );
             try {
-              return await definition.execute(
-                prepared,
-                this.actionContext(
-                  read,
-                  {
-                    ...scope,
-                    signal,
-                    // Dispatch consumed preparation record preconditions; child effects still authorize independently.
-                    checkFreshness: async () => {
-                      await parent?.assertFresh();
-                      await this.checkFreshness([], sourceRequest, captured);
-                    },
+              const action = this.actionContext(
+                read,
+                {
+                  ...scope,
+                  signal,
+                  // Dispatch consumed preparation record preconditions; child effects still authorize independently.
+                  checkFreshness: async () => {
+                    await parent?.assertFresh();
+                    await reviewer?.assertFresh();
+                    await this.checkFreshness([], sourceRequest, captured);
                   },
-                  extension,
-                  definition,
-                  executionId,
-                  source,
-                ),
+                },
+                extension,
+                definition,
+                executionId,
+                source,
               );
+              if (scope.controlOnly) {
+                const blocked = async () => {
+                  throw new AgentError('control_action_new_work_denied');
+                };
+                const reads = new Set(['get', 'readOutput', 'wait', 'waitAny']);
+                return await definition.execute(prepared, {
+                  ...action,
+                  operations: Object.freeze(
+                    Object.fromEntries(
+                      Object.entries(action.operations).map(([id, value]) => [
+                        id,
+                        reads.has(id) ? value : blocked,
+                      ]),
+                    ),
+                  ) as unknown as ActionContext['operations'],
+                  requestInput: blocked,
+                  requestInteraction: blocked,
+                  requestInteractionWithReceipt: blocked,
+                });
+              }
+              return await definition.execute(prepared, action);
             } finally {
               this.forkReaderClosers.get(read)?.();
             }
@@ -1404,12 +1481,14 @@ export class ExtensionHost {
         register: async (references) => {
           scope.signal.throwIfAborted();
           const current = await this.options.store.getExecution(executionId);
-          if (!current?.runId) throw new AgentError('requirement_run_required');
+          const actualRunId =
+            current?.runId ?? (current && (await this.options.requirementRun?.(current)))?.id;
+          if (!actualRunId) throw new AgentError('requirement_run_required');
           if (!Array.isArray(references)) throw new AgentError('invalid_requirement');
           const run = await this.options.store.registerRunRequirements({
             expectedStoreId: scope.command.originStoreId,
             owner: scope.owner,
-            runId: current.runId,
+            runId: actualRunId,
             requirements: references.map((reference) => {
               if (
                 Object.keys(reference).some(
@@ -1431,7 +1510,7 @@ export class ExtensionHost {
                 ...(extension.conditions ? { evaluationProvider: 'extension' as const } : {}),
                 extensionId: extension.id,
                 sessionId: scope.command.sessionId,
-                runId: current.runId!,
+                runId: actualRunId,
               };
             }),
           });
@@ -1506,6 +1585,7 @@ export class ExtensionHost {
       records: { ...read.records, write },
       operations: {
         ensure: async (options) => {
+          if (scope.controlOnly) throw new AgentError('control_action_new_work_denied');
           this.options.assertAcceptingWork?.();
           scope.signal.throwIfAborted();
           if ('resultRequirement' in options) throw new AgentError('invalid_operation_options');

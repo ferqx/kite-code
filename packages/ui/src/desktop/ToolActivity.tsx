@@ -49,13 +49,16 @@ import { Button } from './ui';
 
 const TOOL_LABELS: Record<string, string> = {
   ask_user: '询问用户',
+  browser_execute: '浏览器操作',
   edit_file: '修改',
   glob: '查找文件',
   list_mcp_resources: '列出 MCP 资源',
   list_mcp_tools: '列出 MCP 工具',
+  load_skill: '加载技能',
   mcp_tool: '运行 MCP 工具',
   read_file: '读取',
   read_mcp_resource: '读取 MCP 资源',
+  read_skill_resource: '读取技能资料',
   request_plan_review: '请求计划审阅',
   search_content: '搜索内容',
   search_files: '搜索文件',
@@ -258,6 +261,16 @@ function toolTarget(message: Message): string | undefined {
     typeof message.arguments?.[name] === 'string' ? message.arguments[name] : undefined;
   if (message.changedFile) return message.changedFile;
   switch (message.toolName) {
+    case 'load_skill':
+      return argument('skill_id');
+    case 'read_skill_resource':
+      return [argument('skill_id'), argument('path')].filter(Boolean).join(' · ') || undefined;
+    case 'browser_execute': {
+      const description = argument('description');
+      return description && [...description].length <= 10
+        ? description.replace(/\s+/gu, ' ').trim() || undefined
+        : undefined;
+    }
     case 'read_file':
     case 'edit_file':
     case 'write_file':
@@ -336,6 +349,8 @@ function toolIcon(message: Message) {
   switch (message.toolName) {
     case 'read_file':
     case 'read_mcp_resource':
+    case 'load_skill':
+    case 'read_skill_resource':
       return BookOpen01Icon;
     case 'search_content':
     case 'tool_search':
@@ -355,6 +370,7 @@ function toolIcon(message: Message) {
     case 'files.write_path':
     case 'files.edit_path':
       return Edit02Icon;
+    case 'browser_execute':
     case 'web_fetch':
       return Globe02Icon;
     case 'task':
@@ -986,8 +1002,11 @@ export function ToolActivity({
   );
   const childIssue = childProcess && issues.length > 0;
   const itemIssue = !grouped && (hasToolIssue(message) || childIssue);
-  const webSuccess =
-    !grouped && message.toolName === 'web_fetch' && message.status === 'completed' && !itemIssue;
+  const summaryOnly =
+    !grouped &&
+    !itemIssue &&
+    ((message.toolName === 'web_fetch' && message.status === 'completed') ||
+      (message.toolName === 'browser_execute' && !unverified));
   const detailLabel = itemIssue ? '工具异常详情' : '工具详情';
   // A failed original Tool receipt always keeps its own failure presentation.
   const agent = !grouped && !itemIssue && message.status !== 'cancelled' ? childAgent : undefined;
@@ -995,7 +1014,7 @@ export function ToolActivity({
   let projectedChildren: ReactNode[] | undefined;
   const getChildren = () => {
     projectedChildren ??=
-      agent || grouped || webSuccess
+      agent || grouped || summaryOnly
         ? []
         : messages.map((item) => renderChildren(item.id.slice(5), true));
     return projectedChildren;
@@ -1015,7 +1034,7 @@ export function ToolActivity({
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
     !agent &&
-    !webSuccess &&
+    !summaryOnly &&
     (grouped || itemIssue || message.status !== 'not_executed') &&
     (!read || itemIssue) &&
     (!edit || hasDiff || itemIssue) &&
@@ -1242,7 +1261,7 @@ export function ToolActivity({
             <div>{heading}</div>
           </TraceLine>
         )}
-        {!agent && !webSuccess && (
+        {!agent && !summaryOnly && (
           <DeferredProcessContent
             component={TraceCollapsibleContent}
             className="tool-activity-content"

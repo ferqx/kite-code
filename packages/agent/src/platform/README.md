@@ -58,6 +58,8 @@ Windows 的 attached 与无 attachment 锁都只在原 `CloseHandle` 成功后�
 
 这些端口与源码／mock 邻接验证只是当前实现边界，不能声明原生 Windows 安装或完整资源退出资格；Windows Native、Daemon、GC、PTY 及跨代码版本完整链仍待对应原生验收。metadata 的纯 Node／POSIX 读取与显式 Windows acquire 分离；[locks](locks.ts) 仅在实际 POSIX／Windows acquire 内加载 Bun FFI，Node target bundle 的冷 import 不带顶层 `bun:ffi`。这不提供 Node 的 Bun 文件锁执行后端，Windows 系统 DLL 仍在实际端口调用时才加载。
 
+[Darwin Browser owner](../tools/browser/README.md)复用以下launchd／coalition原语及同包guardian资产，以独立Browser label／nonce监督原daemon和Chrome；不借用Shell或MCP能力，不从PID枚举或注册移除推导完整停止。Darwin目录扫描另以持有父FD的原生相对接口实现。
+
 ## Shell guardian 与 macOS confinement
 
 [Shell Job owner](../jobs/README.md)负责固定 launcher、Seatbelt、资产/目录新鲜度及 macOS 运行范围。私有 [owned-child port](process/darwin-owned-child.ts)保留准确原根直到真实停止证明与精确回收，所有结束入口加入同一次 closing。普通 POSIX 只监督原组、confined 固定拒绝 fork；默认宿主另由[launchd broker](process/darwin-launchd-supervisor.ts)创建独占 resource coalition，[coalition port](process/darwin-owned-coalition.ts)以原 guardian 身份、内核 task count 和原 pidversion 信号核允许 fork/setsid 的完整后代。控制秘密、父 EOF/SIGKILL、准确注册清理与实际测试范围归 Jobs owner；数值 PGID、PID 枚举或 bootout 本身不构成全树证明。冷 import 不加载 native 库，不从持久 reference 重建旧执行。
@@ -74,3 +76,5 @@ owned-child的非阻塞pipe每轮通过 `readSync` 读取最多32KiB，使用同
 观察身份与停止所有权分别由 [Jobs owner](../jobs/README.md)和[MCP owner](../mcp/README.md)定义。各纯 decoder 只核有限历史数据和原 binding，冷读取不调用 native observer，也不把 PID 重新构造成控制句柄。完整构建的每个公开 leaf 由[源码树外 consumer](../../../../tests/isolated/unified-agent/built-package.test.ts)解析实际产物；运行证据仍只覆盖本机平台和对应 owner 的原流程。
 
 Windows 私有 [owned-child](process/windows-owned-child.ts)新增 `retainMembers()`，只从自己的原Job有界读取成员，逐个持原QUERY／SYNC HANDLE并核FILETIME、Job成员资格与完整映像；Toolhelp的parentPid只定位这些已证成员，不提供创建证明或停止权。获取／关闭失败保同一原owner，parent关闭后成员inspect为uncertain。`readEvidence().job.terminationRequested`记录实际请求TerminateJobObject，供[Native正式安装caller](../../../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)把普通退出与fixture清理区分；原stop／I/O／unknown合同保持。[原完整Job文件](../../test/isolated/jobs/windows-owned-child.test.ts)保既有断言／预算，新增原成员与自然退出要求；本机mock通过、实际Windows case尚未执行。这不补齐整个Runtime descendant census、activeResources／handles、RSS或平台资格。
+
+2026-10-27共享 [launchd broker](process/darwin-launchd-supervisor.ts) 的guardian输入改为完整NDJSON／严格UTF-8：唯一terminal后仍保留串行处理链，收到EOF并关闭后才移除注册和转发终态；额外／截断帧、异常关闭和错误均sticky失败。terminal后2秒未见完整EOF／close即unknown，避免等待无期限。Shell及MCP guardian均发送terminal后自行退出，broker仅在对端EOF后关闭写半部；[三目的fake通道回归](../../test/isolated/jobs/darwin-launchd-channel.test.ts)覆盖延迟回调、半关闭、缺EOF／close和损坏尾部，不启动launchctl、socket监听或业务进程。修正后的真实Shell／MCP／Browser资格尚未复验，旧MCP间歇失败不据此归因。
