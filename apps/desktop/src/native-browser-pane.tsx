@@ -244,12 +244,12 @@ const errors = {
   download_unsupported: '简易浏览器暂不支持下载文件。',
   process_gone: '浏览页面已停止，请刷新后重试。',
 };
-function requestError(cause: unknown): string {
+function requestError(cause: unknown): string | undefined {
   const code = cause instanceof Error ? cause.message : '';
   if (code === 'unsupported_browser_protocol') return errors.unsupported_navigation;
   if (code === 'invalid_browser_address') return '请输入有效的网址或搜索内容。';
   if (code === 'browser_page_control_required') return 'Agent 正在控制此页，请先明确暂停并接管。';
-  if (code === 'browser_page_scope_denied') return '会话已变化，原页面操作未发送。';
+  if (code === 'browser_page_scope_denied') return;
   if (code === 'browser_page_grant_denied' || code === 'browser_session_page_already_bound')
     return '已有页面正在接管或保留控制，请先核对原任务。';
   if (code === 'browser_tab_limit') return '最多打开8个浏览标签页，请先关闭一些标签。';
@@ -560,7 +560,10 @@ export function NativeBrowserPane({
         })
         .catch((cause) => {
           if (owned() && inFlight === operation && !hidden) {
-            if (cause instanceof Error && cause.message === 'browser_layout_stale') {
+            if (
+              cause instanceof Error &&
+              ['browser_layout_stale', 'browser_page_scope_denied'].includes(cause.message)
+            ) {
               const latest = measure();
               if (latest?.bounds && JSON.stringify(latest) !== key) {
                 last = '';
@@ -710,7 +713,7 @@ export function NativeBrowserPane({
     onError(cause) {
       setMenuIssue(
         cause instanceof Error && cause.message === 'browser_menu_state_changed'
-          ? '状态已变化，原操作未发送，请核对后重试。'
+          ? undefined
           : '页面选项暂不可用，请重试。',
       );
     },

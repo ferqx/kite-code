@@ -184,7 +184,7 @@ test('lost original action exposes accurate lookup details without a duplicate a
   }
 });
 
-test('freshness recheck leaves the native popup open but selection still requires current admission', async () => {
+test('freshness recheck quietly retires a native popup selection that no longer has admission', async () => {
   const f = await fixture();
   let release!: () => void;
   try {
@@ -199,8 +199,11 @@ test('freshness recheck leaves the native popup open but selection still require
     expect(f.cancels).toHaveLength(0);
     await f.choose('handoff');
     expect(f.browser.submitted).toHaveLength(0);
-    expect(f.trigger().title).toContain('状态已变化，原操作未发送');
-    expect(f.trigger().dataset.status).toBe('error');
+    expect(f.trigger().title).toBe('Agent 正在操作');
+    expect(f.trigger().dataset.status).toBeUndefined();
+    await f.flush();
+    expect(f.browser.submitted).toHaveLength(0);
+    expect(f.menus).toHaveLength(1);
   } finally {
     release?.();
     f.browser.queryGate = undefined;

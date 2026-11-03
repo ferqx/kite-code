@@ -368,6 +368,49 @@ test('the same Root toolbar owns empty, navigation loading, drawable content and
   }
 });
 
+for (const failure of ['layout', 'request'] as const)
+  test(`refresh ${failure} scope retirement stays quiet and the current page can recover`, async () => {
+    const f = await fixture();
+    try {
+      await f.show();
+      const input = f.address(),
+        toolbar = document.querySelector('form'),
+        present = f.host.presentBrowserLayout;
+      f.host.presentBrowserLayout = (request) => {
+        if (request.bounds && request.pageToken === 'refresh-intermediate')
+          throw Error('browser_page_scope_denied');
+        return present(request);
+      };
+      f.requestHook(async (request) => {
+        if (request.action !== 'reload') return f.state();
+        if (failure === 'request') throw Error('browser_page_scope_denied');
+        return {
+          ...f.state(),
+          loading: true,
+          display: 'loading',
+          pageToken: 'refresh-intermediate',
+        };
+      });
+      await f.click('刷新网页');
+      await f.flush();
+      expect(f.requests.filter((request) => request.action === 'reload')).toHaveLength(1);
+      expect(document.querySelector('[role="alert"], [data-status="error"]') !== null).toBe(false);
+      if (failure === 'layout')
+        expect(document.querySelector('[aria-label="网页加载中"]')).not.toBeNull();
+      expect(f.address()).toBe(input);
+      expect(document.querySelector('form')).toBe(toolbar);
+      await f.update({ loading: false, display: 'ready', pageToken: 'refresh-current' });
+      expect(f.layouts.at(-1)?.pageToken).toBe('refresh-current');
+      expect(document.querySelector('.native-browser-start')).toBeNull();
+      expect(f.requests.filter((request) => request.action === 'reload')).toHaveLength(1);
+      // Real page failures remain readable after the retired request is ignored.
+      await f.update({ error: 'load_failed', display: 'failed' });
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('网页未能打开');
+    } finally {
+      await f.close();
+    }
+  });
+
 test('calibration has one positive in flight, remeasures the latest geometry and never hides on resize', async () => {
   const f = await fixture();
   let release!: (value: NativeBrowserState | null) => void;
@@ -608,6 +651,27 @@ test('native options leave page pixels alone; a local failure is readable and do
     await f.show({ visible: false });
     await f.choose('back');
     expect(f.requests.filter((request) => request.action === 'back')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('retired page menu actions stay quiet without being dispatched or retried', async () => {
+  const f = await fixture();
+  try {
+    await f.show();
+    const input = f.address(),
+      hides = f.withdrawals.length;
+    await f.click('页面选项');
+    await f.choose('forward'); // The current page has no forward history.
+    expect(f.requests.filter((request) => request.action === 'forward')).toHaveLength(0);
+    expect(document.querySelector('[data-status="error"], [role="alert"]') !== null).toBe(false);
+    expect(f.menus).toHaveLength(1);
+    expect(f.address()).toBe(input);
+    expect(f.withdrawals).toHaveLength(hides);
+    await f.click('页面选项');
+    await f.choose('back');
+    expect(f.requests.filter((request) => request.action === 'back')).toHaveLength(1);
   } finally {
     await f.close();
   }
@@ -904,25 +968,27 @@ test('a retired asynchronous resize reports no page or toolbar error and remeasu
   }
 });
 
-test('a stale layout with unchanged DOM waits for a real notification instead of retrying itself', async () => {
-  const f = await fixture();
-  try {
-    f.hold(async () => {
-      throw Error('browser_layout_stale');
-    });
-    await f.show();
-    await f.resize(550, 450);
-    await f.flush();
-    expect(f.layouts).toHaveLength(2);
-    expect(document.querySelector('[data-status="error"]')).toBeNull();
-    f.hold(undefined);
-    await f.resize(500, 500);
-    expect(f.layouts).toHaveLength(3);
-    expect(f.syncLayouts).toHaveLength(1);
-  } finally {
-    await f.close();
-  }
-});
+for (const code of ['browser_layout_stale', 'browser_page_scope_denied'])
+  test(`retired ${code} layout waits quietly for a real notification instead of retrying itself`, async () => {
+    const f = await fixture();
+    try {
+      f.hold(async () => {
+        throw Error(code);
+      });
+      await f.show();
+      await f.resize(550, 450);
+      await f.flush();
+      expect(f.layouts).toHaveLength(2);
+      expect(document.querySelector('[data-status="error"], [role="alert"]') !== null).toBe(false);
+      f.hold(undefined);
+      await f.resize(500, 500);
+      expect(f.layouts).toHaveLength(3);
+      expect(f.syncLayouts).toHaveLength(1);
+      expect(f.requests.some((request) => request.action === 'reload')).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
 
 test('first display and retained pair switches finish native placement in the same Root layout commit', async () => {
   const f = await fixture();

@@ -149,7 +149,7 @@ export function NativeBrowserLeaseControls({
     onError(cause) {
       setMenuIssue(
         cause instanceof Error && cause.message === 'browser_menu_state_changed'
-          ? '状态已变化，原操作未发送，请核对后重试。'
+          ? undefined
           : '控制菜单暂不可用，请重试。',
       );
     },
