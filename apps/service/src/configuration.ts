@@ -849,6 +849,7 @@ export function createDefaultProcessConfiguration(options: {
       mcpSourceSnapshot: Json;
       webSnapshot: Json;
       browserSnapshot: Json;
+      browserSnapshotPresent: boolean;
       modelTransportSnapshot: Json;
       runIdentity: { runId: string; sessionId: string };
     },
@@ -1643,9 +1644,13 @@ export function createDefaultProcessConfiguration(options: {
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
             web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null,
-            browser: assembly.toolIds.some((id) => browserTools.has(id))
-              ? browserRunSnapshot
-              : null,
+            ...(recovery && !recovery.browserSnapshotPresent
+              ? {}
+              : {
+                  browser: assembly.toolIds.some((id) => browserTools.has(id))
+                    ? browserRunSnapshot
+                    : null,
+                }),
             task: {
               ...task.snapshot,
               tools: task.snapshot.tools.filter((tool) => assembly.toolIds.includes(tool.id)),
@@ -1762,6 +1767,7 @@ export function createDefaultProcessConfiguration(options: {
         planningSnapshot: snapshot.planning ?? null,
         webSnapshot: snapshot.web ?? null,
         browserSnapshot: snapshot.browser ?? null,
+        browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
         modelTransportSnapshot: snapshot.modelTransport ?? null,
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
         mcpSourceSnapshot:

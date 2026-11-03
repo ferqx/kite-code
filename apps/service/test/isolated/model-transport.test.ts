@@ -332,6 +332,19 @@ test('default Service model binding uses system proxy without proxy environment 
       };
       const reopened = await host.resolveRecoveryRunConfiguration!(recovery);
       await reopened.dispose?.();
+      const originalConfiguration = JSON.parse(JSON.stringify(recovery.run.configuration));
+      expect(originalConfiguration.snapshot.browser).toBeNull();
+      const legacyConfiguration = structuredClone(originalConfiguration);
+      delete legacyConfiguration.snapshot.browser;
+      const legacyReopened = await host.resolveRecoveryRunConfiguration!({
+        ...recovery,
+        run: { ...recovery.run, configuration: legacyConfiguration },
+      });
+      expect(legacyReopened.snapshot).not.toHaveProperty('browser');
+      const { authorizationCheck: _check, ...legacySnapshot } = legacyConfiguration.snapshot;
+      expect(legacyReopened.snapshot).toEqual(legacySnapshot);
+      await legacyReopened.dispose?.();
+      expect(reopened.snapshot).toHaveProperty('browser', null);
       selectedProxy = 'http://127.0.0.1:1';
       await expect(host.resolveRecoveryRunConfiguration!(recovery)).rejects.toMatchObject({
         code: 'recovery_configuration_changed',

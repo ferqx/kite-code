@@ -54,6 +54,8 @@ worker用私有求值来源隔离批次：旧timer／Promise不能借后续批�
 
 `browser.code_session` 复用原 process slot、Job 取消与绑定保留；独立 Bun 由[原 Darwin owner](darwin-owner.ts)及同一 stdio guardian／coalition 监督，不新增 Agent Loop 或进程监督引擎。代码环境close只终止VM及当前在途子调用，不取消已绑定Browser Job。Browser Job通过受信Runtime来源沿有限父链绑定原Run，自己监督原任务结束／取消并准确stop／dispose；预览间隔不延迟该监督，on-demand不因此增加捕获。新Run在任何VM／process准入前调用Controller.prepareRun，等待旧终态Job的真实stop／dispose再复核，避免旧lease／引用和容量2自等待；原unknown拒绝替换。明确close／用户接管后，同Run不能重新acquire，新消息的新Run才可复用同页；纯VM故障不等于页面释放。代码停止不能把原网页unknown改成成功，也不靠只读onRunEnd补造资源释放。Main 原页面是否保留及真实租约状态归[Desktop owner](../../../../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
 
+PNG 与 JPEG 采集共用在途 capture 集合；关闭证明等待截图读取、文件关闭和删除完成，取消后不交付迟到图片，文件关闭未知继续拒绝释放资源。
+
 正式视觉观察使用 `page.screenshot()`：内部 `browser.image` 取得 PNG 并发布原 child Artifact，外层执行器读取准确来源、重新发布到自身 Execution scope，经[原 Tool 图片校验](../../tool-images.ts)返回 `artifactRefs/modelImages`。文字路径、Base64 和 UI JPEG 预览不算模型视觉输入；图像宽高、CSS viewport、导航基准及 Main 的 capture proof 单独核实，有限坐标操作只接受准确图像引用。`ModelMessage.images` 与 Responses／Chat Completions 的 wire 配对继续归[AI owner](../../../../ai/README.md#图片消息)，不新增用户 Command、批准或 Run。
 
 2026-10-28 macOS／Bun 的[包外制品回归](../../../../../tests/isolated/unified-agent/built-package.test.ts)实际按 manifest 构建全部入口，从源码外导入 locator 并用包内 worker／guardian 启动隔离执行器；两批顶层 await 保留 var／let／const 与页面句柄，受限宿主在一次代码调用内只收到准确的 open／snapshot／fill／snapshot／click／snapshot，第二批仍保留变量与句柄。直接读取合成外部文件被 OS 拒绝，实际 close 返回 confirmed:true；整个文件1项76条 Bun 断言通过，另有真实 Runtime 单批开页／观察／填写／验证／关闭回归核每项独立原权限与父执行来源。此证据没有客户端 Main 或外部模型，不代替修后 Native 流程。

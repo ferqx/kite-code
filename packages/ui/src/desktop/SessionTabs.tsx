@@ -271,6 +271,7 @@ export function useSessionTabs(
   const close = useRef(closeBrowser);
   close.current = closeBrowser;
   const intent = useRef(0);
+  const closing = useRef(new Map<string, object>());
   const restore = useRef(restoreBrowser);
   restore.current = restoreBrowser;
   useEffect(() => {
@@ -365,6 +366,7 @@ export function useSessionTabs(
   useLayoutEffect(() => {
     const currentOwner = { admission };
     owner.current = currentOwner;
+    closing.current.clear();
     return () => {
       if (owner.current !== currentOwner) return;
       owner.current = undefined;
@@ -381,10 +383,14 @@ export function useSessionTabs(
       };
     });
   };
+  // An unconfirmed close still owns a slot: failure must restore that exact page.
+  const occupiedSlots = () =>
+    latest.current.tabs.length +
+    [...closing.current.keys()].filter((id) => !latest.current.tabs.some((tab) => tab.id === id))
+      .length;
   const addBrowser = () => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return;
-    const tabs = latest.current.tabs;
-    if (tabs.length >= maxTabs) return;
+    if (occupiedSlots() >= maxTabs) return;
     intent.current++;
     const tab = newBrowserTab();
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
@@ -398,7 +404,7 @@ export function useSessionTabs(
       update((value) => ({ ...value, selected: existing.id }));
       return;
     }
-    if (tabs.length >= maxTabs) return;
+    if (occupiedSlots() >= maxTabs) return;
     const tab: SessionTab = { id: 'changes', kind: 'changes', title: '变更' };
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
   };
@@ -407,7 +413,7 @@ export function useSessionTabs(
     const tabs = latest.current.tabs;
     const id = `child-${JSON.stringify([target.sessionId, target.executionId ?? null])}`;
     const existing = tabs.find((tab) => tab.id === id);
-    if (!tabs.some((tab) => tab.id === id) && tabs.length >= maxTabs) return false;
+    if (!tabs.some((tab) => tab.id === id) && occupiedSlots() >= maxTabs) return false;
     intent.current++;
     const tab: SessionTab = {
       ...target,
@@ -430,7 +436,7 @@ export function useSessionTabs(
   const openWorkspace = (title: string) => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
     const tabs = latest.current.tabs;
-    if (!tabs.some((tab) => tab.kind === 'workspace') && tabs.length >= maxTabs) return false;
+    if (!tabs.some((tab) => tab.kind === 'workspace') && occupiedSlots() >= maxTabs) return false;
     intent.current++;
     update((value) => ({
       ...value,
@@ -451,17 +457,27 @@ export function useSessionTabs(
     const remaining = tabs.filter((tab) => tab.id !== id);
     const successor = active === id ? remaining[Math.min(index, remaining.length - 1)] : undefined;
     const closeIntent = ++intent.current;
+    const closeOwner = owner.current;
+    const closedTab = tabs[index]!;
+    const operation = {};
+    const release = () => {
+      if (closing.current.get(id) === operation) closing.current.delete(id);
+    };
     const failed = () => {
-      if (
-        !owner.current ||
-        currentAdmission.current !== admission ||
-        intent.current !== closeIntent
-      )
+      release();
+      if (!closeOwner || owner.current !== closeOwner || currentAdmission.current !== admission)
         return;
+      const value = latest.current;
+      const unchangedIntent = intent.current === closeIntent;
+      const restored = [...value.tabs];
+      if (!restored.some((tab) => tab.id === id))
+        restored.splice(Math.min(index, restored.length), 0, closedTab);
       const next = {
-        ...before,
+        ...value,
+        tabs: restored,
+        selected: unchangedIntent ? before.selected : value.selected,
         closeIssue: '未能确认网页已关闭，原页面已保留，请核对页面状态。',
-        closeReveal: latest.current.closeReveal + 1,
+        closeReveal: value.closeReveal + (unchangedIntent ? 1 : 0),
       };
       latest.current = next;
       setState(next);
@@ -475,13 +491,14 @@ export function useSessionTabs(
       failed();
       return;
     }
+    if (result) closing.current.set(id, operation);
     update((value) => ({
       ...value,
       tabs: remaining,
       selected: active === id ? (successor?.id ?? '') : value.selected,
     }));
     committed?.();
-    if (result) void Promise.resolve(result).catch(failed);
+    if (result) void Promise.resolve(result).then(release, failed);
   };
   return {
     restoredBrowserId: current.restoredBrowserId,

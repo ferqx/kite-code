@@ -201,11 +201,18 @@ async function selectTab(title: string) {
 
 function closeFixture() {
   let model!: SessionTabsModel;
-  const closed: { id: string; originalPresent: boolean; reject(cause: unknown): void }[] = [];
+  const closed: {
+    id: string;
+    originalPresent: boolean;
+    resolve(): void;
+    reject(cause: unknown): void;
+  }[] = [];
   function Harness({ scope = 'original' }: { scope?: string }) {
     model = useSessionTabs(scope, (id) => {
       const originalPresent = !!document.querySelector(`[data-retained-id="${id}"]`);
-      return new Promise<void>((_resolve, reject) => closed.push({ id, originalPresent, reject }));
+      return new Promise<void>((resolve, reject) =>
+        closed.push({ id, originalPresent, resolve, reject }),
+      );
     });
     return (
       <SessionTabs
@@ -248,14 +255,15 @@ test('a close captures its target in the click stack and immediately selects the
   expect(f.closed).toHaveLength(1);
 });
 
-for (const boundary of ['intent', 'scope'] as const) {
-  test(`a failed original close cannot restore a retired ${boundary}`, async () => {
+for (const boundary of ['intent', 'scope', 'scope-return'] as const) {
+  test(`a failed close preserves newer selection and only restores its current owner: ${boundary}`, async () => {
     const f = closeFixture();
     await f.render();
     await f.mutate((model) => model.addBrowser());
     const a = f.model().active;
     await f.mutate((model) => model.closeTab(a));
-    if (boundary === 'scope') await f.render('successor');
+    if (boundary !== 'intent') await f.render('successor');
+    if (boundary === 'scope-return') await f.render('original');
     await f.mutate((model) => model.addBrowser());
     const successor = f.model().active;
     await act(async () => {
@@ -263,8 +271,75 @@ for (const boundary of ['intent', 'scope'] as const) {
       await Promise.resolve();
     });
     expect(f.model().active).toBe(successor);
-    expect(f.model().tabs.some((tab) => tab.id === a)).toBe(false);
+    expect(f.model().tabs.some((tab) => tab.id === a)).toBe(boundary === 'intent');
+    expect(!!f.model().closeIssue).toBe(boundary === 'intent');
+    expect(f.model().closeReveal).toBe(0);
     expect(f.closed).toHaveLength(1);
+  });
+}
+
+test('a failed close after selecting another existing tab restores only its page without stealing focus', async () => {
+  const f = closeFixture();
+  await f.render();
+  await f.mutate((model) => model.addBrowser());
+  await f.mutate((model) => model.addBrowser());
+  const [a, b] = f.model().tabs;
+  await f.mutate((model) => model.closeTab(b!.id));
+  await f.mutate((model) => model.select(a!.id));
+  await f.mutate((model) => model.title(a!.id, 'Updated page'));
+  await act(async () => {
+    f.closed[0]!.reject(Error('close failed'));
+    await Promise.resolve();
+  });
+  expect(f.model().tabs.map((tab) => tab.id)).toEqual([a!.id, b!.id]);
+  expect(f.model().tabs[0]!.title).toBe('Updated page');
+  expect(f.model().active).toBe(a!.id);
+  expect(f.model().closeIssue).toContain('未能确认网页已关闭');
+  expect(f.model().closeReveal).toBe(0);
+});
+
+test('concurrent close failures merge exact pages without resurrecting a successful close', async () => {
+  const f = closeFixture();
+  await f.render();
+  for (let index = 0; index < 3; index++) await f.mutate((model) => model.addBrowser());
+  const [a, b, c] = f.model().tabs;
+  await f.mutate((model) => model.closeTab(a!.id));
+  await f.mutate((model) => model.closeTab(b!.id));
+  await f.mutate((model) => model.addBrowser());
+  const latest = f.model().active;
+  await act(async () => {
+    f.closed[1]!.resolve();
+    f.closed[0]!.reject(Error('original close failed'));
+    await Promise.resolve();
+  });
+  expect(f.model().tabs.map((tab) => tab.id)).toEqual([a!.id, c!.id, latest]);
+  expect(f.model().active).toBe(latest);
+  expect(f.model().closeReveal).toBe(0);
+});
+
+for (const outcome of ['success', 'failure'] as const) {
+  test(`pending close reserves its eighth slot until ${outcome}`, async () => {
+    const f = closeFixture();
+    await f.render();
+    for (let index = 0; index < 8; index++) await f.mutate((model) => model.addBrowser());
+    const original = f.model().active;
+    await f.mutate((model) => model.closeTab(original));
+    await f.mutate((model) => model.addBrowser());
+    expect(f.model().tabs).toHaveLength(7);
+    await f.mutate((model) => {
+      expect(model.openChild({ sessionId: 'child' }, 'Child')).toBe(false);
+      expect(model.openWorkspace('Workspace')).toBe(false);
+      model.openChanges();
+    });
+    expect(f.model().tabs).toHaveLength(7);
+    await act(async () => {
+      if (outcome === 'success') f.closed[0]!.resolve();
+      else f.closed[0]!.reject(Error('close failed'));
+      await Promise.resolve();
+    });
+    await f.mutate((model) => model.addBrowser());
+    expect(f.model().tabs).toHaveLength(8);
+    expect(f.model().tabs.some((tab) => tab.id === original)).toBe(outcome === 'failure');
   });
 }
 

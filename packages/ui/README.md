@@ -162,7 +162,7 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 `SessionPage`手动动画收起准确已展示浏览器时，关闭意图立即更新，同scope原页仅保持到既有布局rAF开始，再同批撤页与折叠。立即重开、scope／active tab／host panel替换和无布局都退休pending；不为保画面恢复旧owner或延迟真正覆盖／隐藏。普通详情、导航及已有网页直接展开时序保持。[同提交与退休回归](test/isolated/desktop-session-page-render.test.tsx)只证明状态与面板目标，真实原生过程归上述Desktop owner。
 
-`useSessionTabs`把明确关闭浏览器标签与scope变化／组件卸载分开。后两者只结束界面观察，由Native Pane撤下呈现，Main继续持有网页；私有restore可交付同scope的全部存活页及activeId，保留旧单page消费形式。恢复清单不授控制权，迟到或错误scope不发布。不同网址的Agent新页保留已有标签，后台会话不因恢复清单抢占当前选择；明确Tab X交宿主核准确当前scope并关闭原页，活动操作的结果与资源清理另核，不把控制权移给替代页。实现和真实资格归[Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
+`useSessionTabs`把明确关闭浏览器标签与scope变化／组件卸载分开。关闭回执失败时只合并回准确原标签，保留后来选择、标题及其他标签改动；同 scope 往返也不能接纳旧 owner 回执。未确认关闭继续占一个容量，成功后释放，避免失败恢复突破八项上限。后两者只结束界面观察，由Native Pane撤下呈现，Main继续持有网页；私有restore可交付同scope的全部存活页及activeId，保留旧单page消费形式。恢复清单不授控制权，迟到或错误scope不发布。不同网址的Agent新页保留已有标签，后台会话不因恢复清单抢占当前选择；明确Tab X交宿主核准确当前scope并关闭原页，活动操作的结果与资源清理另核，不把控制权移给替代页。实现和真实资格归[Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
 
 [SessionPage](src/desktop/SessionPage.tsx)的可选`tabsScopeKey`独立持有标签model、选中页、展开意图及已处理请求的展示身份，缺省沿原readingKey。Native以已知Store／当前选择意图提供稳定scope；正文读取、Caller generation或暂时缺少selection不应重建同一会话的标签，实际Store／会话变化仍重置展示。正文Conversation与历史readingKey、恢复准入browserRestoreKey和宿主权限均保持独立，稳定tab scope不恢复旧reader或操作资格。
 

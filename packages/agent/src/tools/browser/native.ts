@@ -979,66 +979,76 @@ export function createNativeBrowserTransport(
       });
     }
   }
+  async function capturePng(
+    signal: AbortSignal,
+  ): Promise<{ data: string; width: number; height: number }> {
+    const path = join(directory, `model-${randomUUID()}.png`);
+    try {
+      const reply = await request(
+        { action: 'screenshot', path, format: 'png', annotate: false, fullPage: false },
+        signal,
+      );
+      if (
+        !object(reply) ||
+        reply.success !== true ||
+        !object(reply.data) ||
+        reply.data.path !== path
+      )
+        throw failure('browser_capture_failed');
+      const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      let result: { data: string; width: number; height: number } | undefined;
+      let readCause: unknown;
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.nlink !== 1 || stat.size < 24 || stat.size > 4 * 1024 * 1024)
+          throw failure('browser_capture_limit');
+        const bytes = await file.readFile();
+        if (
+          bytes.length !== stat.size ||
+          (await file.stat()).size !== stat.size ||
+          bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a'
+        )
+          throw failure('browser_capture_invalid');
+        result = {
+          data: bytes.toString('base64'),
+          width: bytes.readUInt32BE(16),
+          height: bytes.readUInt32BE(20),
+        };
+      } catch (error) {
+        readCause = error;
+      }
+      try {
+        await file.close();
+      } catch (error) {
+        localCleanupUnknown = true;
+        retained.add({ file, owner, directory });
+        throw new AggregateError(
+          readCause ? [readCause, error] : [error],
+          'browser_capture_close_unknown',
+        );
+      }
+      if (readCause) throw readCause;
+      if (!result) throw failure('browser_capture_invalid');
+      if (signal.aborted || lifetime.signal.aborted) throw failure('browser_native_aborted');
+      return result;
+    } finally {
+      await unlink(path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    }
+  }
   return {
     readProcessEvidence: () => owner.readProcessEvidence(),
     ready,
     completion,
     request,
     close,
-    async capturePng(signal) {
-      const path = join(directory, `model-${randomUUID()}.png`);
-      try {
-        const reply = await request(
-          { action: 'screenshot', path, format: 'png', annotate: false, fullPage: false },
-          signal,
-        );
-        if (
-          !object(reply) ||
-          reply.success !== true ||
-          !object(reply.data) ||
-          reply.data.path !== path
-        )
-          throw failure('browser_capture_failed');
-        const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-        let result: { data: string; width: number; height: number } | undefined;
-        let readCause: unknown;
-        try {
-          const stat = await file.stat();
-          if (!stat.isFile() || stat.nlink !== 1 || stat.size < 24 || stat.size > 4 * 1024 * 1024)
-            throw failure('browser_capture_limit');
-          const bytes = await file.readFile();
-          if (
-            bytes.length !== stat.size ||
-            (await file.stat()).size !== stat.size ||
-            bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a'
-          )
-            throw failure('browser_capture_invalid');
-          result = {
-            data: bytes.toString('base64'),
-            width: bytes.readUInt32BE(16),
-            height: bytes.readUInt32BE(20),
-          };
-        } catch (error) {
-          readCause = error;
-        }
-        try {
-          await file.close();
-        } catch (error) {
-          localCleanupUnknown = true;
-          retained.add({ file, owner, directory });
-          throw new AggregateError(
-            readCause ? [readCause, error] : [error],
-            'browser_capture_close_unknown',
-          );
-        }
-        if (readCause) throw readCause;
-        if (!result) throw failure('browser_capture_invalid');
-        return result;
-      } finally {
-        await unlink(path).catch((error: NodeJS.ErrnoException) => {
-          if (error.code !== 'ENOENT') throw error;
-        });
-      }
+    capturePng(signal) {
+      if (captures.size) return Promise.reject(failure('browser_native_capture_busy'));
+      const pending = capturePng(signal);
+      captures.add(pending);
+      void pending.finally(() => captures.delete(pending)).catch(() => {});
+      return pending;
     },
     capture(signal) {
       if (captures.size) return Promise.reject(failure('browser_native_capture_busy'));

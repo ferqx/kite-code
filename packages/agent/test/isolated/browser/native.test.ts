@@ -163,6 +163,13 @@ mock.module(${JSON.stringify(owned)}, () => ({
           current.replyLate=()=>send({executed:true});return;
         }
         if(command.action==='hold')return;
+        if(command.action==='screenshot'&&command.format==='png'){
+          assert.equal(command.annotate,false);assert.equal(command.fullPage,false);
+          assert.ok(command.path.startsWith(options.cwd+'/model-'));
+          const image=Buffer.alloc(24);Buffer.from('89504e470d0a1a0a','hex').copy(image);
+          image.writeUInt32BE(3,16);image.writeUInt32BE(2,20);writeFileSync(command.path,image);
+          return send({path:command.path});
+        }
         if(command.action==='screenshot'){
           assert.equal(command.format,'jpeg');assert.equal(command.quality,35);assert.equal(command.annotate,true);
           assert.equal(command.fullPage,false);assert.ok(command.path.startsWith(options.cwd+'/capture-'));
@@ -198,6 +205,16 @@ mock.module(${JSON.stringify(owned)}, () => ({
     return owner;
   },
 }));
+// Pause only the real PNG read: process/socket ownership remains the fixture above.
+let releasePngRead, enteredPngRead;
+const originalPromiseOpen=actualPromises.open;
+mock.module('node:fs/promises',()=>({...actualPromises,async open(path,...args){
+  const file=await originalPromiseOpen(path,...args);
+  if(!path.includes('/model-')||!scenario.pausePng)return file;
+  return {stat:()=>file.stat(),async close(){await file.close();if(scenario.pngCloseUnknown)throw Error('injected PNG close uncertainty');},async readFile(){
+    enteredPngRead();await new Promise(resolve=>releasePngRead=resolve);return file.readFile();
+  }};
+}}));
 const {createNativeBrowserTransport,BrowserTransportError,nativeBrowserUnavailableReason}=await import(${JSON.stringify(native)});
 assert.equal(starts,0,'cold import must not spawn');
 assert.equal(nativeBrowserUnavailableReason(),undefined,'eligible passive probe');
@@ -211,6 +228,18 @@ const options={executable:process.execPath,browserPath:process.execPath,linux:{b
 const context=()=>({sessionId:'session',executionId:'execution',signal:new AbortController().signal});
 const signal=()=>new AbortController().signal;
 async function start(mode={}){scenario=mode;const transport=createNativeBrowserTransport(options,context());await transport.ready;return transport;}
+if(process.env.KITE_FIXTURE_PNG_CLOSE_FAIL==='1'){
+  const transport=await start({pausePng:true,pngCloseUnknown:true});
+  const entered=new Promise(resolve=>enteredPngRead=resolve);
+  const pending=transport.capturePng(signal());void pending.catch(()=>{});await entered;
+  const closing=transport.close();releasePngRead();
+  await assert.rejects(pending,/browser_capture_close_unknown/);
+  assert.deepEqual(await closing,{confirmed:false},'PNG close uncertainty must veto cleanup proof');
+  await assert.rejects(transport.dispose(),/cleanup_unknown/);
+  assert.equal(existsSync(current.directory),true);
+  rmSync(base,{recursive:true,force:true});console.log('browser-png-close-unknown-ok');process.exit(0);
+}
+
 for(const platform of ['win32']){
   Object.defineProperty(process,'platform',{value:platform});
   assert.throws(()=>createNativeBrowserTransport(options,context()),/browser_native_platform_unavailable/);
@@ -345,6 +374,27 @@ transport=createNativeBrowserTransport(options,{...context(),signal:lifetime.sig
 const held=transport.request({action:'hold'},signal());await new Promise(resolve=>setTimeout(resolve,5));
 lifetime.abort();await assert.rejects(held,e=>e.dispatched);assert.deepEqual(await transport.close(),{confirmed:true});
 assert.equal(current.cancels,1,'close re-entry from context abort uses the same owner cancellation');await transport.dispose();
+transport=await start();
+const png=await transport.capturePng(signal());assert.equal(png.width,3);assert.equal(png.height,2);
+assert.equal(readdirSync(current.directory).filter(name=>name.startsWith('model-')).length,0);
+await transport.dispose();
+transport=await start({pausePng:true});
+const pngReadEntered=new Promise(resolve=>enteredPngRead=resolve);
+const pngPending=transport.capturePng(signal());void pngPending.catch(()=>{});
+await pngReadEntered;
+await assert.rejects(transport.capturePng(signal()),/capture_busy/);
+await assert.rejects(transport.capture(signal()),/capture_busy/);
+let pngClosed=false,pngDisposed=false;
+const pngClosing=transport.close().then(value=>{pngClosed=true;return value;});
+const pngDisposing=transport.dispose().then(()=>pngDisposed=true);
+await new Promise(resolve=>realTimeout(resolve,30));
+assert.equal(pngClosed,false,'close must join the pending PNG file read');
+assert.equal(pngDisposed,false,'dispose must not release pending PNG storage');
+assert.equal(existsSync(current.directory),true);
+releasePngRead();
+await assert.rejects(pngPending,/browser_native_aborted/,'a cancelled PNG cannot return late success');
+assert.deepEqual(await pngClosing,{confirmed:true});await pngDisposing;
+assert.equal(existsSync(current.directory),false);
 transport=await start({largeImage:true});await assert.rejects(transport.capture(signal()),/capture_limit/);await transport.dispose();
 transport=await start({navigationChanged:true});await assert.rejects(transport.capture(signal()),/navigation_changed/);await transport.dispose();
 const first=await start(), second=await start();
@@ -397,4 +447,11 @@ console.log('browser-native-fixture-ok assertions='+assertions+' fake-daemon-sta
   console.info(result.stdout.trim());
   expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
   expect(result.stdout).toContain('browser-native-fixture-ok');
+  const pngClose = spawnSync(process.execPath, ['--eval', source], {
+    encoding: 'utf8',
+    timeout: 15000,
+    env: { ...process.env, KITE_FIXTURE_PNG_CLOSE_FAIL: '1' },
+  });
+  expect(pngClose.status, `${pngClose.stdout}\n${pngClose.stderr}`).toBe(0);
+  expect(pngClose.stdout).toContain('browser-png-close-unknown-ok');
 }, 20000);
