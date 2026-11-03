@@ -988,6 +988,8 @@ test('default permissions admit Model kind and deny an actual registered Tool wi
 test('explicit recovery resolver preserves the persisted model selection and refuses changed configuration before credentials or Provider', async () => {
   const f = fixture();
   const endpoint = fakeEndpoint();
+  const allProxyKeys = ['ALL_PROXY', 'all_proxy'] as const;
+  const originalAllProxy = allProxyKeys.map((key) => [key, process.env[key]] as const);
   let child: Awaited<ReturnType<typeof launch>> | undefined;
   let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let recoveryRuntime: ReturnType<typeof createRuntime> | undefined;
@@ -1006,6 +1008,9 @@ test('explicit recovery resolver preserves the persisted model selection and ref
     models: [model('a', endpoint.baseURL), model('b', endpoint.baseURL)],
   };
   try {
+    // Paired hosts inherit HTTP(S)/NO_PROXY only. Match that exact environment
+    // when the embedded recovery host freezes its own model transport.
+    for (const key of allProxyKeys) delete process.env[key];
     writeFileSync(f.file, JSON.stringify(original));
     // Both sides use the same explicit embedded host; ordinary process hosts
     // additionally select native tools and require their exact assets on recovery.
@@ -1045,9 +1050,12 @@ test('explicit recovery resolver preserves the persisted model selection and ref
     writeFileSync(f.file, JSON.stringify({ ...original, modelId: 'b' }));
     binding = await host.resolveRecoveryRunConfiguration!(input);
     expect(binding.modelId).toBe('a');
-    const saved = run.configuration as { snapshot: { digest: string; skillSelection: unknown } };
+    const saved = run.configuration as {
+      snapshot: { digest: string; skillSelection: unknown; modelTransport: { digest: string } };
+    };
     expect(binding.snapshot).toMatchObject({
       digest: saved.snapshot.digest,
+      modelTransport: saved.snapshot.modelTransport,
       skillSelection: saved.snapshot.skillSelection,
       planning: {
         binding: {
@@ -1096,6 +1104,10 @@ test('explicit recovery resolver preserves the persisted model selection and ref
     expect(endpoint.requests).toHaveLength(1);
     expect(credentialReads).toBe(0);
   } finally {
+    for (const [key, value] of originalAllProxy) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     await binding?.dispose?.();
     if (recoveryRuntime) await recoveryRuntime.close();
     else await reader?.close();

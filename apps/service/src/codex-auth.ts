@@ -230,7 +230,6 @@ export function createCodexLocalSource(
     if (!validHome) throw new AgentError('codex_auth_unavailable');
     return readAuth(authPath);
   };
-  const transportFetch = options.fetch ?? globalThis.fetch;
   return {
     get authPath() {
       return authPath;
@@ -309,12 +308,16 @@ export function createCodexLocalSource(
         ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
       };
     },
-    async binding(alias: string): Promise<{
+    async binding(
+      alias: string,
+      modelFetch?: typeof fetch,
+    ): Promise<{
       apiKey: string;
       headers: Record<string, string>;
       fetch: typeof fetch;
       continuationIdentity: { kind: 'codex-local-auth'; value: string };
     }> {
+      const transportFetch = options.fetch ?? modelFetch ?? globalThis.fetch;
       const current = () => {
         const auth = read();
         if (auth.alias !== alias) throw new AgentError('codex_auth_required');
