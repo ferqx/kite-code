@@ -108,8 +108,14 @@ export function patchMacosElectronRuntime(input: {
   sourceDist: string;
   targetDist: string;
 }): MacosElectronResize {
-  const { source, snapshot } = sourceInput(input.sourceDist),
-    target = canonical(input.targetDist);
+  return patchCopiedRuntime(sourceInput(input.sourceDist), input.targetDist);
+}
+
+function patchCopiedRuntime(
+  { source, snapshot }: ReturnType<typeof sourceInput>,
+  targetDist: string,
+): MacosElectronResize {
+  const target = canonical(targetDist);
   separate(source, target);
   const copiedInventory = inventory(target);
   equalInventory(snapshot, copiedInventory, true);
@@ -169,7 +175,8 @@ export function prepareMacosElectronRuntime(input: { sourceDist: string; outdir:
   executable: string;
   resize: MacosElectronResize;
 } {
-  const { source, snapshot } = sourceInput(input.sourceDist);
+  const prepared = sourceInput(input.sourceDist);
+  const { source } = prepared;
   if (!isAbsolute(input.outdir) || existsSync(input.outdir)) fail();
   const target = resolve(input.outdir),
     parent = canonical(dirname(target));
@@ -181,8 +188,11 @@ export function prepareMacosElectronRuntime(input: { sourceDist: string; outdir:
     verbatimSymlinks: true,
     errorOnExist: true,
     force: false,
+    // APFS can clone independent files; unsupported filesystems use the normal copy.
+    mode: constants.COPYFILE_FICLONE,
   });
-  equalInventory(snapshot, inventory(source));
-  const resize = patchMacosElectronRuntime({ sourceDist: source, targetDist: target });
+  // Keep the initial source snapshot through the copied inventory and final source
+  // check rather than taking another baseline after copying.
+  const resize = patchCopiedRuntime(prepared, target);
   return { executable: join(target, macosElectronResize.executable), resize };
 }

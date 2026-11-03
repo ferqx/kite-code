@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -77,6 +78,13 @@ test.skipIf(!supported)(
         outdir: join(root, 'electron'),
       });
       const patched = readFileSync(join(root, 'electron', macosElectronResize.framework));
+      const sourceFramework = lstatSync(join(source, macosElectronResize.framework));
+      const copiedFramework = lstatSync(join(root, 'electron', macosElectronResize.framework));
+      expect(sourceFramework.nlink).toBe(1);
+      expect(copiedFramework.nlink).toBe(1);
+      expect(`${copiedFramework.dev}:${copiedFramework.ino}`).not.toBe(
+        `${sourceFramework.dev}:${sourceFramework.ino}`,
+      );
       expect(runtime.resize.frameworkSha256).toBe(
         createHash('sha256').update(patched).digest('hex'),
       );
@@ -146,6 +154,19 @@ test.skipIf(!supported)(
       expect(() => patchMacosElectronRuntime({ sourceDist: source, targetDist: invalid })).toThrow(
         'runtime_input_invalid',
       );
+      // A normal copied resource must also remain independent after writes, whether
+      // the filesystem used copy-on-write cloning or its fallback copy mechanism.
+      const sourceVersion = readFileSync(join(source, 'version'));
+      const sourceVersionStat = lstatSync(join(source, 'version'));
+      const copiedVersion = join(root, 'electron', 'version');
+      const copiedVersionStat = lstatSync(copiedVersion);
+      expect(copiedVersionStat.nlink).toBe(1);
+      expect(`${copiedVersionStat.dev}:${copiedVersionStat.ino}`).not.toBe(
+        `${sourceVersionStat.dev}:${sourceVersionStat.ino}`,
+      );
+      writeFileSync(copiedVersion, 'independent copy changed');
+      expect(readFileSync(copiedVersion, 'utf8')).toBe('independent copy changed');
+      expect(readFileSync(join(source, 'version'))).toEqual(sourceVersion);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

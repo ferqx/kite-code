@@ -11,7 +11,7 @@ import {
 import { join, resolve } from 'node:path';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
-test('the actual native build retains Root entry names and emits an isolated static dialog in ordinary and development builds', async () => {
+test('native builds retain fixed renderer entries while development uses only Vite renderer assets', async () => {
   const temporary = mkdtempSync(
     join(resolve(import.meta.dir, '../../../..'), '.cache/native-global-dialog-build-'),
   );
@@ -40,14 +40,22 @@ test('the actual native build retains Root entry names and emits an isolated sta
     ]) {
       const output = join(temporary, development ? 'development' : 'ordinary');
       await buildNativeDesktop(assets, output, { development });
-      for (const file of [
-        'main.cjs',
-        'preload.cjs',
-        'global-dialog-preload.cjs',
-        'global-dialog.html',
-        'global-dialog-renderer.js',
-      ])
+      for (const file of ['main.cjs', 'preload.cjs', 'global-dialog-preload.cjs'])
         expect(existsSync(join(output, file))).toBe(true);
+      const preload = readFileSync(join(output, 'global-dialog-preload.cjs'), 'utf8');
+      expect(preload).toContain('kiteGlobalDialog');
+      expect(preload).not.toContain('kiteNative');
+      expect(JSON.parse(readFileSync(join(output, 'package.json'), 'utf8')).main).toBe('main.cjs');
+      if (development) {
+        for (const file of [
+          'index.html',
+          'renderer.js',
+          'global-dialog.html',
+          'global-dialog-renderer.js',
+        ])
+          expect(existsSync(join(output, file))).toBe(false);
+        continue;
+      }
       const html = readFileSync(join(output, 'global-dialog.html'), 'utf8');
       expect(html).toContain('./global-dialog-renderer.js');
       expect(html).not.toContain('src/native-global-dialog-main.tsx');
@@ -56,14 +64,13 @@ test('the actual native build retains Root entry names and emits an isolated sta
       const css = styleFiles.map((file) => readFileSync(join(output, file), 'utf8')).join('\n');
       expect(css).toContain('.full-permission-dialog');
       expect(css).toContain('background:transparent');
-      const preload = readFileSync(join(output, 'global-dialog-preload.cjs'), 'utf8');
-      expect(preload).toContain('kiteGlobalDialog');
-      expect(preload).not.toContain('kiteNative');
-      expect(JSON.parse(readFileSync(join(output, 'package.json'), 'utf8')).main).toBe('main.cjs');
-      if (!development) {
-        expect(readFileSync(join(output, 'index.html'), 'utf8')).toContain('./renderer.js');
-        expect(existsSync(join(output, 'renderer.js'))).toBe(true);
-      } else expect(existsSync(join(output, 'index.html'))).toBe(false);
+      expect(readFileSync(join(output, 'index.html'), 'utf8')).toContain('./renderer.js');
+      expect(existsSync(join(output, 'renderer.js'))).toBe(true);
+      // Fixed confirmations also avoid the unrelated conversation parser closure.
+      const dialog = readFileSync(join(output, 'global-dialog-renderer.js'), 'utf8');
+      expect(Buffer.byteLength(dialog)).toBeLessThan(500_000);
+      expect(dialog).not.toContain('katex');
+      expect(dialog).not.toContain('mermaid');
     }
   } finally {
     rmSync(temporary, { recursive: true, force: true });

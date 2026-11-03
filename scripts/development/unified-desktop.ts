@@ -46,6 +46,11 @@ export async function runDevelopmentDesktop(
     return 0;
   }
   if (argv.length) throw Error('desktop_development_arguments_invalid');
+  const startedAt = performance.now();
+  const reportTiming = (step: string, since: number) =>
+    process.stdout.write(
+      `[desktop:dev] ${step} (${((performance.now() - since) / 1000).toFixed(2)}s).\n`,
+    );
   const root = input.root ?? repositoryRoot;
   const artifact = selectDevelopmentServiceArtifact(root, input.executable);
   let electron: string, electronPackageDirectory: string;
@@ -100,6 +105,7 @@ export async function runDevelopmentDesktop(
   let watchError: Error | undefined;
   let sourceChanged = false;
   try {
+    const runtimeStartedAt = performance.now();
     const macosRuntime =
       process.platform === 'darwin' && process.arch === 'arm64'
         ? (
@@ -109,7 +115,11 @@ export async function runDevelopmentDesktop(
             outdir: join(outdir, 'electron'),
           })
         : null;
-    if (macosRuntime) electron = macosRuntime.executable;
+    if (macosRuntime) {
+      electron = macosRuntime.executable;
+      reportTiming('Electron runtime prepared', runtimeStartedAt);
+    }
+    const rendererStartedAt = performance.now();
     renderer = await startDesktopRenderer(root);
     control = await startDesktopControl();
     sourceWatcher = await startDevelopmentServiceWatcher({
@@ -128,9 +138,13 @@ export async function runDevelopmentDesktop(
     });
     if (requested) return requested === 'SIGINT' ? 130 : 143;
     if (watchError) throw watchError;
+    reportTiming('Renderer and source watcher ready', rendererStartedAt);
+    const serviceStartedAt = performance.now();
     const service = await buildDevelopmentService(root, outdir);
     if (watchError) throw watchError;
+    reportTiming('Service built and checked', serviceStartedAt);
     let sourceSha256 = service.sourceSha256;
+    const nativeStartedAt = performance.now();
     await buildNativeDesktop(
       {
         kind: 'development',
@@ -154,6 +168,7 @@ export async function runDevelopmentDesktop(
     );
     if (watchError) throw watchError;
     if (requested) return requested === 'SIGINT' ? 130 : 143;
+    reportTiming('Main and preloads built', nativeStartedAt);
     const env = { ...process.env };
     for (const name of ['NODE_PATH', 'NODE_OPTIONS', 'BUN_OPTIONS', 'ELECTRON_RUN_AS_NODE'])
       delete env[name];
@@ -188,6 +203,7 @@ export async function runDevelopmentDesktop(
     process.stdout.write(
       `[desktop:dev] Service ready; UI hot update: ${renderer.configuration.rendererUrl}\n`,
     );
+    reportTiming('Startup completed', startedAt);
     const code = await child.exited;
     if (watchError) throw watchError;
     return requested ? (requested === 'SIGINT' ? 130 : 143) : code;

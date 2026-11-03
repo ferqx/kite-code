@@ -154,6 +154,14 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 ## 开发热更新与服务重载
 
+本次定向验证沿原隔离运行器逐文件执行 macOS runtime、普通／开发 renderer 构建、确认框 DOM、诊断构建、开发启动与开发重载六个完整文件，30项／373断言通过；最小夹具仅预热存在的页面，不引入缺文件预处理错误。UI 构建并实际导入新 compiled 确认出口，根／Desktop／UI类型、定向Biome、边界、测试归属与文档检查通过。普通生产主页面仍有原大chunk提示，不计为开发启动警告；本轮未取得Windows／Linux实机或安装发布资格。
+
+2026-11-03，macOS arm64／Bun1.4.2／Electron44.3.0，`6719ed84e` 加本次启动优化：同机按原准备顺序、独立数据目录测得基线 Service 就绪16106ms，其中 Electron 准备1899ms、Service 构建与加载343ms、Native 构建10747ms、Electron 到真实握手2929ms；最终普通开发函数的隔离 HOME／Profile 实测就绪5140ms，Main／preload 构建200ms，首个完整新对话正文／输入样本在6488ms。中间多次启动的就绪范围约5.1–6.6秒，属于本机现有依赖缓存状态，不是跨机器或首次安装性能承诺。连续20个Root样本、4个确认框样本与取消后画面核对无重复输入区或挂起，Full默认焦点为取消，取消保留自动审核及原未发送草稿；未请求模型。原加载动画实际名称正确且opacity变化，renderer无pageerror；SIGTERM沿原流程返回143，所属应用目录已清理。过程、终端日志及准确退出结果位于本机`.cache/desktop-startup-check-20261103-final4/`；早期私有观察脚本误选隐藏页／错误菜单筛选的失败保留，不计为通过。
+
+开发 Main 的 Root 与全局确认框均沿同一受限 Vite 地址加载，builder 不再生产构建这条路径不会使用的静态 HTML／renderer；Main、两个 preload、私有权限 helper 与运行资产校验仍每次构建。普通固定 renderer 继续生成完整页面与确认框。Vite 在启动期间预热两个 HTML 入口及动态加载的 NativeDesktop，提前转换依赖；这不执行页面或业务请求，也不提前宣告 Service 就绪。终端逐项报告 Electron 准备、renderer／监听、Service 构建与加载检查、Main／preload 构建及真实就绪总耗时。
+
+确认框经 [UI 专用出口](../../packages/ui/src/desktop/confirmation.ts)只导入原确认组件，避免从会话展示总出口带入 Markdown、公式及高亮初始化。macOS arm64 的独立引擎副本请求文件系统写时复制，不支持时沿普通复制；首次源库存贯穿目标完整等价／独立 inode 校验与最终源不变校验，保留原两处补丁、签名前后完整 payload、签名及 Main 实际加载准入。准备期间只合并重复源扫描，不跨启动复用已修改 runtime 或改动已安装 Electron。
+
 Renderer模块热更新与整页重载分别处理。`NativeBrowserPane`的展示revision归当前Root document持有，模块重求值继续递增；新document使用新序列，Main仍按当前Caller generation及完整scope拒绝旧展示／cleanup。Root重新attach后从同Main保留的准确会话展示意图重新执行select、历史和模型事实读取，不把旧selection或截图当授权。Main为其生命周期内的全部Caller分配不重复的generation，Service重载后的新Caller只接收原Store／Session展示候选并重新核实；Main实际重启没有进程内网页保留承诺。原网页由Main独立持有，Renderer重挂载不导航、不刷新、不重开网页；模型观察仍由实际页面／文档／控制身份及新Run边界判断有效性。
 
 [Native Root](src/native.tsx)与[Caller](electron/native-caller.ts)将展示恢复和读取资格分开：同Main保留的Store／Session只作候选，attach取得新generation后沿原select重读权限、历史、模型与草稿；准确缺失的会话清候选，其他读取失败保留失败，不能恢复旧权限。Fast Refresh仍保留React状态时，新会话准备页及未发送草稿沿原边界保留；整页重建不新增未发送草稿持久化承诺。`SessionPage.tabsScopeKey`只按已知Store与当前选择意图保持tab model、选中页和展开状态，selection暂不可见不会清空标签；真实Store／会话变化仍换scope，读取未核实时新建标签和控制操作保持禁用。正文与历史读取继续沿自己的readingKey，恢复仍核新的browserRestoreKey及完整Main scope；共享契约归[UI owner](../../packages/ui/README.md#原桌面展示层)。

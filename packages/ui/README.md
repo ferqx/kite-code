@@ -2,6 +2,8 @@
 
 # UI
 
+应用确认框另有公开的 `@kite-ai/ui/desktop/confirmation` [专用入口](src/desktop/confirmation.ts)，只重新导出原 `ApplicationConfirmationDialog` 与 Full 确认组件；[Desktop 构建](scripts/build-desktop.ts)同步产出 `confirmation.js`。固定确认页面无需通过桌面总出口加载会话 Markdown／公式／高亮初始化，确认文案、样式、焦点与决定准入仍由原组件和宿主负责。共享加载动画 `conversation-loading-shimmer` 的关键帧位于顶层，保留原动画参数与减少动态效果覆盖，避免生产 CSS 优化器拒绝嵌套关键帧。
+
 表单样式按职责分类：主题提供`--card`、`--input`与8px的`--form-control-radius`；公共Input／Textarea／SelectTrigger共用[form-control](src/desktop/components/ui/form-control.ts)的背景、边框、文字、焦点、禁用和无效状态，控件自身只补尺寸及各自语义。`ui-form-control`标记使旧原生控件兜底避开这些组件，因此脱离设置页容器仍保持相同外观；Native不再为它们另设错误边框或禁用透明度。公共Select的浮层选项直接消费同一圆角token。右栏表单与底栏沿用RightSidebar背景，容器只提供布局和表单内选择器形态变量，PillSelectTrigger在表单内使用常规圆角。
 
 [Switch](src/desktop/components/ui/switch.tsx)自行管理36×20px轨道、16px滑块和两端2px留白，显式设置border-box、起始对齐及零padding，避免原生button内边距将圆点推偏或推出轨道；开关两态及切换中保持垂直居中，颜色与滑动过渡遵循系统减少动态效果设置。业务层继续只传入受控状态、禁用状态和变更回调。

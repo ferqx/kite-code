@@ -1,4 +1,4 @@
-import { ApplicationConfirmationDialog } from '@kite-ai/ui/desktop';
+import { ApplicationConfirmationDialog } from '@kite-ai/ui/desktop/confirmation';
 import { useLayoutEffect, useRef, useState } from 'react';
 import type {
   NativeGlobalDialogBridge,

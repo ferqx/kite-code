@@ -741,12 +741,6 @@ body {
     opacity: 0.2;
     animation: conversation-loading-shimmer 1.6s ease-in-out infinite;
   }
-  @keyframes conversation-loading-shimmer {
-    50% {
-      opacity: 0.55;
-      filter: drop-shadow(0 0 5px currentColor);
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
     .conversation-loading svg {
       opacity: 0.28;
@@ -3217,6 +3211,12 @@ body {
 [data-slot="sheet-content"][data-state="closed"] {
   animation: sidebar-sheet-out var(--sidebar-motion-duration) var(--sidebar-motion-easing);
   pointer-events: none;
+}
+@keyframes conversation-loading-shimmer {
+  50% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 5px currentColor);
+  }
 }
 @keyframes jump-latest-bounce {
   0%,

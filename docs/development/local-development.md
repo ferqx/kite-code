@@ -41,6 +41,8 @@ npm run desktop:dev
 
 四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
 
+Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预热页面模块，不另做这两页的生产构建。终端会分项输出准备／构建耗时，并在真实 Service 就绪后输出总耗时；初次依赖优化与本机文件系统状态仍会影响耗时。具体构建边界及本机前后对照归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+
 Windows 数据目录若被其他程序增加授权（例如 Agent 沙箱读取组），Desktop 会在启动 Service／SQLite 前显示准确路径和处理选项，默认退出；符合有限安全条件时可主动备份并修复该对象，操作见[桌面手册](../handbook/clients/desktop/README.md)。取消后开发命令返回 `native_profile_permissions_cancelled`，不删除 Profile。验证权限错误须使用测试自有的数据根，不在真实用户目录制造故障；正式 Native 默认数据根 `~/.kite-code/unified-agent` 与开发入口保持独立。
 
 `desktop:dev` 在启动 Electron 前，用独立 Bun 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。

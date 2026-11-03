@@ -115,40 +115,41 @@ async function buildNativeApp(
     });
     if (!result.success) throw new AggregateError(result.logs, 'native_build_failed');
   }
-  // Retain the original desktop renderer pipeline and its compiled CSS/fonts.
-  // The already built Main, preload and helpers share this destination.
+  // Development loads both Root and global-dialog.html from its Vite server.
+  // Only fixed renderers need production HTML, CSS/fonts and JavaScript here.
   if (process.platform === 'win32') privateDirectory(join(outdir, 'assets'));
-  await buildRenderer({
-    root,
-    configFile: false,
-    plugins: [react(), tailwindcss()],
-    resolve: { alias: [desktopMarkdownDecoderAlias()] },
-    base: './',
-    clearScreen: false,
-    logLevel: 'warn',
-    // Formal renderer bytes must not inherit the invoking process's test/dev
-    // environment. Development keeps its separate Vite server.
-    esbuild: { jsxDev: false },
-    define: {
-      'process.env.NODE_ENV': JSON.stringify('production'),
-      __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics),
-    },
-    build: {
-      target: 'es2022',
-      outDir: outdir,
-      emptyOutDir: false,
-      rollupOptions: {
-        input: {
-          ...(!development ? { main: join(root, 'index.html') } : {}),
-          'global-dialog': join(root, 'global-dialog.html'),
-        },
-        output: {
-          entryFileNames: (chunk) =>
-            chunk.name === 'global-dialog' ? 'global-dialog-renderer.js' : 'renderer.js',
+  if (!development)
+    await buildRenderer({
+      root,
+      configFile: false,
+      plugins: [react(), tailwindcss()],
+      resolve: { alias: [desktopMarkdownDecoderAlias()] },
+      base: './',
+      clearScreen: false,
+      logLevel: 'warn',
+      // Formal renderer bytes must not inherit the invoking process's test/dev
+      // environment. Development keeps its separate Vite server.
+      esbuild: { jsxDev: false },
+      define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+        __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics),
+      },
+      build: {
+        target: 'es2022',
+        outDir: outdir,
+        emptyOutDir: false,
+        rollupOptions: {
+          input: {
+            main: join(root, 'index.html'),
+            'global-dialog': join(root, 'global-dialog.html'),
+          },
+          output: {
+            entryFileNames: (chunk) =>
+              chunk.name === 'global-dialog' ? 'global-dialog-renderer.js' : 'renderer.js',
+          },
         },
       },
-    },
-  });
+    });
   await writeFile(
     join(outdir, 'package.json'),
     JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' }),

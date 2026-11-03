@@ -12,7 +12,7 @@ Status: implemented
 
 正常主窗口中的完全权限与移除空间确认，共用一个 Main 所属的专用 WebContentsView。退出应用按用户最新要求保留系统原生弹窗，Overlay 不再接受退出 kind。完整层序为 Root ＜ Page ＜ 浏览器受控输入屏障 ＜ 应用全局浮层。所有 Page 与 shield 插入都经过保留浮层最高位置的入口；shield 不因浮层在最上而反复排序，也不把焦点抢回 Root。
 
-浮层只加载构建产物中的 global-dialog.html、专用 preload 和同一套共享 AlertDialog、CSS 与字体。背景透明，遮罩覆盖完整内容区，原网页保持真实可见，不导航、刷新、复制截图或调整网页 bounds。主题跟随 Main 的实际主题；自绘确认按钮、布局和风险文案由共享组件维护。退出确认、目录／文件选择器保留系统行为；启动致命失败或主窗口已不存在时，原无法依附应用浮层的系统路径仍保留。
+普通固定客户端的浮层只加载构建产物中的 global-dialog.html、专用 preload 和同一套共享 AlertDialog、CSS 与字体；显式开发入口沿原 Main 从同一受限 Vite renderer 地址派生 global-dialog.html，专用 preload 与原隔离配置保持。背景透明，遮罩覆盖完整内容区，原网页保持真实可见，不导航、刷新、复制截图或调整网页 bounds。主题跟随 Main 的实际主题；自绘确认按钮、布局和风险文案由共享组件维护。退出确认、目录／文件选择器保留系统行为；启动致命失败或主窗口已不存在时，原无法依附应用浮层的系统路径仍保留。
 
 Root IPC 仍只提交准确请求 ID 与固定语言的 Full 确认。Main 校验准确 Root、主 frame、URL、父窗口和在途 owner；专用 Renderer 只能接收有限 kind 的状态并返回同一 requestId 的决定，没有 Service、浏览器、文件或通用 HTML 执行桥。空间名称按文本呈现，不能成为 HTML。两类自绘确认共用一个 modal owner；退出请求先退休旧自绘确认，再沿原生退出流程，旧肯定结果不能落到继任者。
 
@@ -38,6 +38,6 @@ Full 的有效确认继续交给原 Composer／权限控制器，新对话只修
 
 ## Consequences
 
-构建增加专用 HTML、Renderer 和 preload；普通及 development 都生成静态 overlay 资源，Root 原 index.html／renderer.js 不变。现有完整 app manifest 已收录并校验全部新增资源，不升级工具或 bundle 格式版本。
+普通固定客户端构建增加专用 HTML、Renderer 和 preload，Root 原 index.html／renderer.js 不变。2026-11-03 实机核对确认开发 Main 已从 Vite 加载两页，因此 development 仅构建 Main、preload 和 helper，不再生产构建未使用的静态 overlay；Vite 预热两页与 NativeDesktop，确认组件改经公开窄入口避开会话解析依赖。普通完整 app manifest 继续收录并校验全部静态资源，不升级工具或 bundle 格式版本。
 
 源码、聚焦回归、实机动作与画面分别提供不同资格。073 已核 Full 三轮、真实遮罩输入阻断、焦点与原页保持；074在run前因退出竞态退役，075用最终制品补核空间长说明与真实取消；审看限连续前六秒及稳定尾，不扩称整片。随后补提前取消、Root-only输入拦截、冷启动透明覆盖和前台焦点约束，并让 Root 排除隐藏焦点目标；这些行为用定向回归及076c实际Electron输入补核：旧Host吞掉已返回ACK的Page CDP鼠标，修复后键鼠到达而Overlay维持native focus；物理mask点击在Overlay＋1、Root／Page为0，取消和准确原页状态保持。load前仅核原生visible／全bounds／top，未扩大为空DOM物理输入或整体像素资格；精确范围仍归Desktop owner。退出改回原生后删除 Overlay 的退出分支；Full／空间的文案、DOM 与 CSS保持，复用075正常开关画面，不称所有UI资产逐字未变。各平台实际窗口、活动工作退出的真实展示及临时消息自然失败路径的资格，只以[Desktop owner](../../../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)记录为准，不由共享代码或最终截图推导。旧 resize、收展及重开反例继续保留，本决定不构成整个浏览器视觉收敛完成。

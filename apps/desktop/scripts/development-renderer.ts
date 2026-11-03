@@ -174,6 +174,13 @@ export async function startDesktopRenderer(root: string) {
       cacheDir: join(root, 'apps/desktop/node_modules/.vite-desktop-dev'),
       server: {
         middlewareMode: true,
+        // NativeDesktop is dynamically imported after the window appearance read.
+        // Prepare it alongside both HTML entries before Electron requests them.
+        warmup: {
+          clientFiles: ['./index.html', './global-dialog.html', './src/native.tsx'].filter((file) =>
+            existsSync(join(root, 'apps/desktop', file)),
+          ),
+        },
         hmr: { server: http, clientPort: address.port },
         host: '127.0.0.1',
         port: address.port,
