@@ -2,6 +2,8 @@
 
 Status: implemented
 
+旧 Task 工具、专用 required-result 与显式 after_turn 执行的保留决定，已由[退役决定](2026-11-02-retire-legacy-task.md)部分取代；当前六工具、通用 Operation、独立 Session、准确来源和安全／恢复边界继续适用。
+
 2026-10-22：本文中自动审核／标题生成使用 child 的承载方式已由[内部模型调用边界](2026-10-22-internal-model-calls-without-child-agents.md)部分替代；原完整正文、准确授权与标题生命周期／CAS理由继续适用。下文相关 child 实现描述解释旧记录。
 
 ## Problem

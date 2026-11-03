@@ -3010,15 +3010,6 @@
             }
           },
           {
-            "name": "workflow",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "const": "manual"
-            }
-          },
-          {
             "name": "afterId",
             "in": "query",
             "required": false,
@@ -5966,10 +5957,6 @@
             "minLength": 1,
             "maxLength": 128
           },
-          "workflow": {
-            "type": "string",
-            "const": "manual"
-          },
           "afterId": {
             "type": "string",
             "minLength": 1,
@@ -6144,109 +6131,6 @@
                     "minLength": 1,
                     "maxLength": 256
                   }
-                },
-                "workflow": {
-                  "type": "object",
-                  "properties": {
-                    "extensionId": {
-                      "type": "string",
-                      "const": "builtin.skill-workflow"
-                    },
-                    "definitionVersion": {
-                      "type": "string",
-                      "const": "1"
-                    },
-                    "skillId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "maxLength": 256
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "revision": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "state": {
-                      "type": "string",
-                      "enum": ["available", "disabled", "unavailable"]
-                    },
-                    "reason": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "workflow_disabled",
-                            "workflow_configuration_unavailable",
-                            "workflow_contract_unavailable",
-                            "workflow_dependency_unavailable",
-                            "workflow_manual_not_allowed",
-                            "workflow_input_required",
-                            "workflow_fork_unavailable",
-                            "workflow_verifier_unavailable",
-                            "workflow_source_changed",
-                            "skill_unavailable"
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "manualAllowed": {
-                      "type": "boolean"
-                    },
-                    "emptyInputValid": {
-                      "type": "boolean"
-                    },
-                    "contextMode": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": ["inline", "fork"]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "extensionId",
-                    "definitionVersion",
-                    "skillId",
-                    "name",
-                    "revision",
-                    "state",
-                    "reason",
-                    "manualAllowed",
-                    "emptyInputValid",
-                    "contextMode"
-                  ],
-                  "additionalProperties": false
                 }
               },
               "required": [
@@ -7793,6 +7677,25 @@
                     },
                     "required": ["backend", "available", "qualification"],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "backend": {
+                        "type": "string",
+                        "const": "windows_restricted_token"
+                      },
+                      "available": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "qualification": {
+                        "type": "string",
+                        "const": "write_restricted"
+                      }
+                    },
+                    "required": ["backend", "available", "qualification"],
+                    "additionalProperties": false
                   }
                 ]
               },
@@ -7807,7 +7710,13 @@
                   },
                   "supervision": {
                     "type": "string",
-                    "enum": ["none", "posix_group", "macos_coalition", "linux_pid_namespace"]
+                    "enum": [
+                      "none",
+                      "posix_group",
+                      "macos_coalition",
+                      "linux_pid_namespace",
+                      "windows_job"
+                    ]
                   },
                   "qualification": {
                     "type": "string",
@@ -7816,6 +7725,7 @@
                       "darwin_supervision_only",
                       "darwin_host_boundary",
                       "linux_host_boundary_unqualified",
+                      "windows_unelevated",
                       "unavailable"
                     ]
                   },
@@ -15364,15 +15274,6 @@
           "isActive": {
             "type": "boolean"
           },
-          "waitingForResults": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9_-]+$"
-            }
-          },
           "configuration": {
             "$ref": "#/components/schemas/Run/$defs/__schema0"
           },
@@ -17933,15 +17834,6 @@
                     "maxLength": 128,
                     "pattern": "^[A-Za-z0-9_-]+$"
                   },
-                  "waitingForResults": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "pattern": "^[A-Za-z0-9_-]+$"
-                    }
-                  },
                   "status": {
                     "type": "string",
                     "enum": [
@@ -18000,7 +17892,6 @@
                   "rootWorkCommandId",
                   "rootWorkSeq",
                   "contextSelectionId",
-                  "waitingForResults",
                   "status",
                   "isActive",
                   "createdAt",
@@ -18066,15 +17957,6 @@
                     "maxLength": 128,
                     "pattern": "^[A-Za-z0-9_-]+$"
                   },
-                  "waitingForResults": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "pattern": "^[A-Za-z0-9_-]+$"
-                    }
-                  },
                   "status": {
                     "type": "string",
                     "enum": [
@@ -18133,7 +18015,6 @@
                   "rootWorkCommandId",
                   "rootWorkSeq",
                   "contextSelectionId",
-                  "waitingForResults",
                   "status",
                   "isActive",
                   "createdAt",
@@ -18794,15 +18675,6 @@
                           "maxLength": 128,
                           "pattern": "^[A-Za-z0-9_-]+$"
                         },
-                        "waitingForResults": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128,
-                            "pattern": "^[A-Za-z0-9_-]+$"
-                          }
-                        },
                         "status": {
                           "type": "string",
                           "enum": [
@@ -18861,7 +18733,6 @@
                         "rootWorkCommandId",
                         "rootWorkSeq",
                         "contextSelectionId",
-                        "waitingForResults",
                         "status",
                         "isActive",
                         "createdAt",
@@ -18927,15 +18798,6 @@
                           "maxLength": 128,
                           "pattern": "^[A-Za-z0-9_-]+$"
                         },
-                        "waitingForResults": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128,
-                            "pattern": "^[A-Za-z0-9_-]+$"
-                          }
-                        },
                         "status": {
                           "type": "string",
                           "enum": [
@@ -18994,7 +18856,6 @@
                         "rootWorkCommandId",
                         "rootWorkSeq",
                         "contextSelectionId",
-                        "waitingForResults",
                         "status",
                         "isActive",
                         "createdAt",
@@ -19498,12 +19359,9 @@
                             },
                             "isActive": {
                               "type": "boolean"
-                            },
-                            "waitingForResults": {
-                              "type": "boolean"
                             }
                           },
-                          "required": ["id", "status", "isActive", "waitingForResults"],
+                          "required": ["id", "status", "isActive"],
                           "additionalProperties": false
                         },
                         {
@@ -19585,12 +19443,9 @@
                   },
                   "isActive": {
                     "type": "boolean"
-                  },
-                  "waitingForResults": {
-                    "type": "boolean"
                   }
                 },
-                "required": ["id", "status", "isActive", "waitingForResults"],
+                "required": ["id", "status", "isActive"],
                 "additionalProperties": false
               },
               {
@@ -20060,15 +19915,6 @@
                 },
                 "isActive": {
                   "type": "boolean"
-                },
-                "waitingForResults": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "pattern": "^[A-Za-z0-9_-]+$"
-                  }
                 },
                 "createdAt": {
                   "type": "number"
@@ -20563,15 +20409,6 @@
               },
               "isActive": {
                 "type": "boolean"
-              },
-              "waitingForResults": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "pattern": "^[A-Za-z0-9_-]+$"
-                }
               },
               "createdAt": {
                 "type": "number"
@@ -24438,15 +24275,6 @@
                 "isActive": {
                   "type": "boolean"
                 },
-                "waitingForResults": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "pattern": "^[A-Za-z0-9_-]+$"
-                  }
-                },
                 "configuration": {
                   "$ref": "#/components/schemas/SessionView/$defs/__schema0"
                 },
@@ -26501,6 +26329,32 @@
                   }
                 },
                 "required": ["reportCommandId", "runId", "outcome"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "reportCommandId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "runId": {
+                    "type": "null"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "const": "report_deferred"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[a-z0-9_]+$"
+                  }
+                },
+                "required": ["reportCommandId", "runId", "outcome", "reason"],
                 "additionalProperties": false
               },
               {

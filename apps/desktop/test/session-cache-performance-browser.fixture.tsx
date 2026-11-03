@@ -46,7 +46,7 @@ for (const session of sessions) {
       sessionId: session.id,
       status: 'completed',
       isActive: false,
-      waitingForResults: [],
+
       reason: null,
       originCommandId: `command-${session.id}-${index}`,
       rootWorkCommandId: `command-${session.id}-${index}`,

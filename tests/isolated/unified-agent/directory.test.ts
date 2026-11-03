@@ -331,7 +331,7 @@ test('actual Core activity follows message clocks independently of mode, rename,
     expect(await store.getMetadata()).toEqual(beforeReads);
     expect(await activity()).toMatchObject({
       queued: false,
-      run: { id: first.id, status: 'running', isActive: true, waitingForResults: false },
+      run: { id: first.id, status: 'running', isActive: true },
     });
     await store.acceptCommand({
       expectedStoreId,

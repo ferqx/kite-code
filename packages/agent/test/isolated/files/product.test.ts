@@ -129,7 +129,7 @@ test('glob ** matches zero/deep directories with stable complete pagination and 
   }
 });
 
-test('real UnifiedExecution dispatches paged read/glob; denied requests have zero adapter I/O', async () => {
+test('real UnifiedExecution dispatches paged and full reads; denied requests have zero adapter I/O', async () => {
   const f = fixture();
   const store = await openSqliteStore({ dataRoot: join(f.root, 'data'), profile: 'local' });
   const finish: ModelEvent = {
@@ -157,11 +157,11 @@ test('real UnifiedExecution dispatches paged read/glob; denied requests have zer
   const model = createFixedModel([
     call('read_file', { path: 'root.ts', start_line: 2, max_lines: 1 }),
     [finish],
-    call('glob_files', { pattern: '**/*.ts' }),
+    call('read_file', { path: 'root.ts' }),
     [finish],
     call('read_file', { path: 'root.ts' }),
     [finish],
-    call('glob_files', { pattern: '**/*.ts' }),
+    call('read_file', { path: 'root.ts' }),
     [finish],
   ]);
   let deny = false;
@@ -240,13 +240,15 @@ test('real UnifiedExecution dispatches paged read/glob; denied requests have zer
     await submit('glob');
     const records = await store.listExecutions('s');
     const read = records.find((value) => value.definitionId === 'files.read')!;
-    const glob = records.find((value) => value.definitionId === 'files.glob')!;
+    const glob = records.filter((value) => value.definitionId === 'files.read')[1]!;
     expect(read).toMatchObject({ status: 'succeeded', definitionVersion: '4' });
     expect(JSON.parse((read.result as { content: string }).content).content).toBe('two\n');
     expect(JSON.parse((read.result as { content: string }).content).baseline).toEqual(
       (await f.files.read('root.ts')).baseline,
     );
-    expect(JSON.parse((glob.result as { content: string }).content).paths).toEqual(['root.ts']);
+    expect(JSON.parse((glob.result as { content: string }).content).content).toBe(
+      'one\ntwo\nthree\n',
+    );
     expect(io).toBe(2);
     deny = true;
     await submit('denied-read');

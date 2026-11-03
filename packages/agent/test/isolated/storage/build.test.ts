@@ -96,14 +96,7 @@ try {
       ]);
       expect(exit, stderr).toBe(0);
       expect(readFileSync(join(dataRoot, 'built-file'), 'utf8')).toBe('built UTF-8');
-      expect(JSON.parse(stdout)).toEqual([
-        'files.read',
-        'files.write',
-        'files.edit',
-        'files.list',
-        'files.glob',
-        'files.search',
-      ]);
+      expect(JSON.parse(stdout)).toEqual(['files.read', 'files.write', 'files.edit']);
       const expectedStoreId = (await store.getMetadata()).storeId;
       await store.createWorkspace({
         expectedStoreId,

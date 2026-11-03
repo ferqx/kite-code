@@ -49,7 +49,7 @@ const wrapped = new Proxy(store, {
         if (groupApprovals.size === 3) {
           for (;;) {
             const root = await store.getView('s');
-            if (root.runs.find((run) => run.isActive)?.status === 'waiting_execution')
+            if (root.runs.some((run) => run.isActive))
               await stop(
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );
@@ -63,7 +63,7 @@ const wrapped = new Proxy(store, {
         if (++groupActivations === 3) {
           for (;;) {
             const root = await store.getView('s');
-            if (root.runs.find((run) => run.isActive)?.status === 'waiting_execution') {
+            if (root.runs.some((run) => run.isActive)) {
               await stop(
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );
@@ -73,25 +73,7 @@ const wrapped = new Proxy(store, {
         }
         await new Promise<void>(() => {});
       };
-    if (key === 'setRunResultWait' && mode.startsWith('group_'))
-      return async (input: Parameters<Store['setRunResultWait']>[0]) => {
-        const result = await store.setRunResultWait(input);
-        if (
-          ![
-            'group_foreground',
-            'group_nested',
-            'group_terminal',
-            'group_terminal_descendant',
-            'group_approval',
-          ].includes(mode) &&
-          mode !== 'group_activation' &&
-          input.executionIds.length === (mode === 'group_queued' ? 4 : 3)
-        ) {
-          const root = await store.getView('s');
-          await stop(root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id);
-        }
-        return result;
-      };
+
     if (key === 'persistModelPartial')
       return async (input: Parameters<Store['persistModelPartial']>[0]) => {
         const result = await store.persistModelPartial(input);
@@ -99,18 +81,37 @@ const wrapped = new Proxy(store, {
         if (mode === 'group_new_descendant' && ex?.sessionId !== 's') {
           for (;;) {
             const root = await store.getView('s');
-            if (root.runs.find((run) => run.isActive)?.status === 'waiting_execution')
+            if (root.runs.some((run) => run.isActive))
               await stop(
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );
             await Bun.sleep(5);
           }
         }
-        if (mode === 'group_foreground' && ex?.sessionId !== 's') {
+
+        if (
+          mode.startsWith('group_') &&
+          ex?.sessionId !== 's' &&
+          ![
+            'group_nested',
+            'group_terminal',
+            'group_terminal_descendant',
+            'group_new_descendant',
+            'group_approval',
+            'group_activation',
+          ].includes(mode)
+        ) {
           groupPartials.add(input.executionId);
-          if (groupPartials.size === 3) {
-            const root = await store.getView('s');
-            await stop(root.executions.find((execution) => execution.kind === 'model')!.id);
+          if (groupPartials.size === (mode === 'group_queued' ? 2 : 3)) {
+            for (;;) {
+              const root = await store.getView('s');
+              if (
+                root.executions.filter((item) => item.childSessionId).length ===
+                (mode === 'group_queued' ? 4 : 3)
+              )
+                await stop(root.executions.filter((item) => item.kind === 'model').at(-1)!.id);
+              await Bun.sleep(5);
+            }
           }
         }
         if (mode === 'group_nested' && ex?.sessionId !== 's') {
@@ -186,7 +187,7 @@ const wrapped = new Proxy(store, {
           for (;;) {
             const root = await store.getView('s');
             if (
-              root.runs.find((run) => run.isActive)?.status === 'waiting_execution' &&
+              root.runs.some((run) => run.isActive) &&
               (mode !== 'group_terminal_descendant' ||
                 readFileSync(join(directory, 'ledger'), 'utf8').includes('child-model:grand'))
             )

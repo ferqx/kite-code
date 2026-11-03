@@ -1255,15 +1255,18 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       proof.parentRunId === null ? null : source.host.getRun(proof.parentRunId),
       source.host.getExecution(proof.parentExecutionId),
     ]);
-    // The persisted child-start Command names its original carrier. Read that actual
-    // record directly; a full parent View includes unrelated growing Model history.
+    // Initial starts name the carrier directly. Follow-ups use the Store's verified
+    // carrier/predecessor projection instead of assuming every child Run is child.start.
     const originRequest = object(origin?.request);
+    const followUp = origin?.kind === 'input.follow_up' && originRequest.kind === 'input.follow_up';
     const carrierId =
       origin?.kind === 'child.start' &&
       originRequest.kind === 'child.start' &&
       typeof originRequest.parentExecutionId === 'string'
         ? originRequest.parentExecutionId
-        : null;
+        : followUp
+          ? (run.carrierExecutionId ?? null)
+          : null;
     const [parentCommand, carrier] = await Promise.all([
       parentExecution ? source.host.getCommand(parentExecution.originCommandId) : null,
       carrierId ? parent.host.getExecution(carrierId) : null,
@@ -1316,8 +1319,13 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       carrier.childSessionId !== source.session.id ||
       carrier.parentExecutionId !== parentExecution.id ||
       !carrier.childConfiguration ||
-      originRequest.configurationId !== carrier.childConfiguration.id ||
-      originRequest.configurationVersion !== carrier.childConfiguration.version ||
+      (!followUp &&
+        (originRequest.configurationId !== carrier.childConfiguration.id ||
+          originRequest.configurationVersion !== carrier.childConfiguration.version)) ||
+      (followUp &&
+        (run.carrierExecutionId !== carrier.id ||
+          carrier.definitionId !== `agent/${carrier.childConfiguration.id}` ||
+          carrier.definitionVersion !== carrier.childConfiguration.version)) ||
       (role.roleId !== undefined &&
         (carrier.childConfiguration.id !== role.roleId ||
           carrier.childConfiguration.version !== role.roleVersion)) ||

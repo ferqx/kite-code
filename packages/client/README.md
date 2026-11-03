@@ -1,5 +1,7 @@
 # Client
 
+冷报告恢复的专用 decoder 接受 `report_deferred`、null Run ID 与明确 reason。它是已落定的暂缓回执；CLI／TUI／Native 不因此读取不存在的 Run，也不重新提交原恢复申请。实际丢回复与冷 SQLite 路径见 [Service 回归](../../apps/service/test/isolated/job-report-resume.test.ts)。
+
 2026-10-26，[默认 Files 恢复联验](test/isolated/file-recovery-intent-default.test.ts)完整文件1项／174断言通过。夹具固定当前 Service 封存的 read／write 绑定，从实际模型可见的文本回执读取完整 baseline；恢复意图、两个独立申请的原身份、丢失响应后的只读查询及冷态不隐式重发断言保留。Client 生产协议和恢复实现未改，这项定向结果不代替全量测试或其他平台资格。
 
 ## 消息历史增量
@@ -202,13 +204,13 @@ Linux Shell 的准确 `linux_pid_namespace/linux_host_boundary_unqualified` 与 
 
 `listUserSkills({storeId,afterId?,revision?,limit?,byteLimit?,signal?})` 经 `user_skill_catalogue` 读取 `GET /v1/config/user/skills`，返回独立闭合 `UserSkillCataloguePage`。固定 `scope:user`，无 Session／Workspace 参数或身份，来源仅可为 user，不接受 Workflow 查询或投影。消费者在第一份 revision 下穷尽分页再发布完整目录；用户配置变化、取消或连接身份变化使本次读取失败，不创建隐藏任务或自动重开。默认 Native 全局设置使用此入口，项目 Skill 的实际执行选择仍由原 Run 合同处理。
 
-`listSkills(workspaceId,{storeId,workflow?,afterId?,revision?,limit?,byteLimit?,signal?})` 保留实际 Workspace 的 `skill_catalogue` metadata；`listAllSkills(workspaceId,{storeId,workflow?,signal?})` 在第一份revision下穷尽全部页，返回同一完整page形状（complete=true/nextAfterId=null）。SDK私有复制参数，核原Store/Workspace、state一致性、严格升序和末cursor、revision及原连接代次；失败/变更不重试或重新开始目录，更不创建任务。取消和迟到读取仅影响本调用，SSE和lastAppliedCursor保持。
+`listSkills(workspaceId,{storeId,afterId?,revision?,limit?,byteLimit?,signal?})` 保留实际 Workspace 的 `skill_catalogue` metadata；`listAllSkills(workspaceId,{storeId,signal?})` 在第一份revision下穷尽全部页，返回同一完整page形状（complete=true/nextAfterId=null）。SDK私有复制参数，核原Store/Workspace、state一致性、严格升序和末cursor、revision及原连接代次；失败/变更不重试或重新开始目录，更不创建任务。取消和迟到读取仅影响本调用，SSE和lastAppliedCursor保持。
 
 `SkillCataloguePage` 与HostStatus一样使用专门闭合响应schema，拒绝附加正文/路径/凭据字段；其他公共response的可扩展策略不变。available仅说明当前知识发现，不是Workflow activation、工具权限或未来版本预订；unavailable与有效空目录分别表达。单页字节预算不限制listAll的总条目数。
 
-[verifySkillCataloguePage 与 verifyUserSkillCataloguePage](src/skill-catalogue.ts) 公开对应的纯校验入口，私有克隆输入后使用各自生成的闭合 schema，核指定 Store／revision、升序与页尾游标、state／availability；Workspace verifier 另核 Workspace 与 opt-in Workflow 资格。Native 的有限用户 IPC 页复用用户 verifier，不建立 renderer 专用宽松 decoder。两个入口的可选 nullable `source` 均拒绝附加路径；Workspace 页可携 project/user，用户页仅可携 user，origin 仍为 .agents/.kite-code/profile/configured。旧响应省略来源仍可消费，调用者不能补造它。该字段不改变知识选择、权限或目录的总条目范围。
+[verifySkillCataloguePage 与 verifyUserSkillCataloguePage](src/skill-catalogue.ts) 公开对应的纯校验入口，私有克隆输入后使用各自生成的闭合 schema，核指定 Store／revision、升序与页尾游标、state／availability；Workspace verifier 另核准确 Workspace。Native 的有限用户 IPC 页复用用户 verifier，不建立 renderer 专用宽松 decoder。两个入口的可选 nullable `source` 均拒绝附加路径；Workspace 页可携 project/user，用户页仅可携 user，origin 仍为 .agents/.kite-code/profile/configured。旧响应省略来源仍可消费，调用者不能补造它。该字段不改变知识选择、权限或目录的总条目范围。
 
-显式 `workflow:'manual'` 要求原 Service 同时提供 `skill_workflow_catalogue`，字段在所有页保持冻结。仅 opt-in 接受并要求每项闭合 Workflow 投影；普通知识查询拒绝额外投影。SDK核对独立 available 状态与知识可用、manual/空输入资格、准确 `skill:<name>`、compiled revision 和 contextMode，拒绝缺字段、自相矛盾或附加敏感内容。缺能力在目录 GET 前失败，不修改原连接或 SSE 水位；是否提交激活由调用者决定。新增闭合响应不放宽其他 DTO 的校验策略。
+Skill Workflow 的查询参数、投影、能力声明及执行入口已移除。目录只返回普通知识 metadata，拒绝旧 Workflow 投影，不提供激活资格。
 
 每页读取前后通过 `verifyConnection` 核原profile/build/instance与Store；同endpoint被同Store的新实例替换也拒绝，不用原token可用性或未变化的本地generation冒充身份。调用开始即固定Store/参数，取消、身份变化或中途变更只丢本次目录，不替调用者自动重连。[Skill目录Client测试](test/skill-catalogue.test.ts)覆盖严格metadata、完整多页、scope/revision/cursor反例及替换实例零目录GET；[用户目录测试](test/user-skill-catalogue.test.ts)另核全局 GET 的完整分页、零观察游标变化，以及项目／Session／Workflow／正文／路径等越权字段的闭合拒绝。
 

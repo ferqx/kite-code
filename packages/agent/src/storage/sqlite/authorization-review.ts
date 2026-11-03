@@ -165,8 +165,6 @@ export function authorizationReviewSourceTarget(db: SqliteOperations, carrier: R
       extensionId: '__authorization_review__',
       operationKey: `review/${payloadHash}`,
       cancellation: 'attached',
-      resultRequirement: null,
-      resultRequirementSchema: null,
     };
     const receipt = object(JSON.parse(String(command.receipt_json)));
     const child = db.row('SELECT * FROM session WHERE id=?', carrier.child_session_id!);

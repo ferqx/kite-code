@@ -1,8 +1,13 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
-import type { AuthorizationRequest, Extension } from '../../../src/extensions';
+import type {
+  AuthorizationRequest,
+  Extension,
+  Json,
+  ToolContext,
+  ToolResult,
+} from '../../../src/extensions';
 import type { RuntimeOptions } from '../../../src/runtime';
-import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -20,9 +25,43 @@ export function groupOptions(
   | 'permissions'
   | 'resolveChildRunConfiguration'
 > {
-  const task = createTaskExtension({
-    roles: [{ id: 'worker', configurationId: 'worker', description: 'owned recovery worker' }],
-  });
+  // Fixed controlled-operation fixture, independent of the builtin Agent tool protocol.
+  const delegate = async (input: Json, context: ToolContext): Promise<ToolResult> => {
+    const content = (input as { content: string }).content;
+    const ref = await context.operations.ensure({
+      key: `owned-${context.executionId}`,
+      request: { kind: 'agent', configurationId: 'worker', input: { content } },
+      cancellation:
+        ['group_terminal_descendant', 'group_new_descendant'].includes(mode) && content === 'grand'
+          ? 'detached'
+          : 'attached',
+    });
+    if (['group_terminal_descendant', 'group_new_descendant'].includes(mode) && content === 'grand')
+      return { outcome: 'succeeded', content: 'Descendant accepted' };
+    const result = await context.operations.wait(ref, { signal: context.signal });
+    return { outcome: result.status as ToolResult['outcome'], content: 'Controlled child settled' };
+  };
+  const task: Extension = {
+    id: 'fixture.group',
+    version: '1',
+    apiMajor: 1,
+    tools: [
+      {
+        id: 'fixture_delegate',
+        version: '1',
+        description: 'Owned recovery fixture',
+        inputSchema: {
+          type: 'object',
+          properties: { content: { type: 'string' } },
+          required: ['content'],
+          additionalProperties: false,
+        },
+        recovery: { version: '1' },
+        execute: delegate,
+        resume: delegate,
+      },
+    ],
+  };
   const permissions = {
     async authorize(request: AuthorizationRequest) {
       if (
@@ -76,8 +115,8 @@ export function groupOptions(
         yield {
           type: 'tool_call',
           id: key,
-          name: mode === 'group_foreground' ? 'run_agent' : 'spawn_agent',
-          arguments: JSON.stringify({ key, role: 'worker', input: { content: key } }),
+          name: 'fixture_delegate',
+          arguments: JSON.stringify({ content: key }),
         };
       yield { ...finish, reason: 'tool_calls' };
     },
@@ -125,17 +164,8 @@ export function groupOptions(
         yield {
           type: 'tool_call',
           id: 'grand',
-          name: ['group_terminal_descendant', 'group_new_descendant'].includes(mode)
-            ? 'spawn_agent'
-            : 'run_agent',
-          arguments: JSON.stringify({
-            key: 'grand',
-            role: 'worker',
-            input: { content: 'grand' },
-            ...(['group_terminal_descendant', 'group_new_descendant'].includes(mode)
-              ? { cancellation: 'detached', result_disposition: 'background' }
-              : {}),
-          }),
+          name: 'fixture_delegate',
+          arguments: JSON.stringify({ content: 'grand' }),
         };
         yield { ...finish, reason: 'tool_calls' };
         return;
@@ -192,14 +222,13 @@ export function groupOptions(
           resolveChildRunConfiguration: async (
             input: Parameters<NonNullable<RuntimeOptions['resolveChildRunConfiguration']>>[0],
           ) => {
-            const key = (input.parentExecution.input as { input: { content: string } }).input
-              .content;
+            const key = (input.parentExecution.input as { content: string }).content;
             return {
               model: child,
               modelId: 'worker',
               extensions: [task],
               permissions,
-              toolIds: ['task'],
+              toolIds: ['fixture_delegate'],
               snapshot: { key },
               dispose: async () => {
                 disposed.add(key);
@@ -234,7 +263,7 @@ export function groupOptions(
         extensions: mode === 'group_approval' ? [task, effect] : [task],
         toolIds:
           mode === 'group_nested'
-            ? ['task.execute']
+            ? ['fixture_delegate']
             : mode === 'group_approval'
               ? ['fixture/child-effect']
               : [],

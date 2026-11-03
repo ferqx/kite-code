@@ -531,7 +531,6 @@ function fixture(
                 id: item.run!.id,
                 status: item.run!.status,
                 isActive: item.run!.isActive,
-                waitingForResults: !!item.run!.waitingForResults?.length,
               },
             },
           },

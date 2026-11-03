@@ -24,7 +24,7 @@ export function backgroundItem(index = 1, child = false): BackgroundExecutionIte
     contextSelectionId: 'context',
     status: 'waiting_execution' as const,
     isActive: true,
-    waitingForResults: child ? [`job-${index}`] : [],
+
     reason: 'required_results',
     createdAt: 1,
     finishedAt: null,

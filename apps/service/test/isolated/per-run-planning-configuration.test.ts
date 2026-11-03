@@ -569,7 +569,7 @@ test('plan approval never overrides newly current Auto human decision or trust d
   }
 }, 20000);
 
-test('closed business envelopes preserve original Workflow input; malformed intents and cold planning drift reject before credentials or Provider', async () => {
+test('closed business envelopes reject retired Workflow input; malformed intents and cold planning drift reject before credentials or Provider', async () => {
   const workflow = {
     extensionId: 'builtin.skill-workflow',
     definitionVersion: '1',
@@ -578,12 +578,14 @@ test('closed business envelopes preserve original Workflow input; malformed inte
   const request = {
     kind: 'run.start' as const,
     content: 'New task: exact original',
-    extensionInputs: [workflow, intent],
+    extensionInputs: [intent],
   };
   const digest = JSON.stringify(request);
   const split = readBusinessRunInputs(request);
   expect(split.planning).toEqual({ mode: 'plan' });
-  expect(split.workflowRequest).toEqual({ ...request, extensionInputs: [workflow] });
+  expect(() => readBusinessRunInputs({ ...request, extensionInputs: [workflow, intent] })).toThrow(
+    'business_run_input_unavailable',
+  );
   expect(JSON.stringify(request)).toBe(digest);
   const f = await fixture(planScript);
   try {
@@ -622,7 +624,7 @@ test('closed business envelopes preserve original Workflow input; malformed inte
       userConfigurationPath: f.profile.profilePath + '/config.jsonc',
       profile: f.profile,
       credentialBackend: f.credentialBackend,
-      planning: { allowWaiver: true },
+      planning: { allowedExecutionModes: ['accept_edits'] },
     });
     changed.permissionManagement?.(f.runtime);
     let rejected: unknown;

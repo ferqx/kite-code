@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -8,6 +7,7 @@ import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 async function within<T>(work: Promise<T>, milliseconds: number, phase: string): Promise<T> {
   if (milliseconds <= 0) {
@@ -54,9 +54,9 @@ interface Receipt {
 
 // Only the owned child's exact original FileHandle/FD close rejects before
 // native close. These cases do not assert a naturally occurring OS API failure.
-for (const mode of ['prep', 'tool', 'ordinary', 'manual', 'late'])
+for (const mode of ['prep', 'tool', 'ordinary', 'late'])
   test(`formal knowledge ${mode} retains original cleanup custody through cold recovery`, async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-knowledge-cleanup-ownership-')));
+    const root = temporaryDirectory('kite-knowledge-cleanup-ownership-');
     const profile = selectProfile({ dataRoot: root, profile: 'test' });
     const started = Date.now(),
       deadline = started + 6000,

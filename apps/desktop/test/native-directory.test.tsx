@@ -169,7 +169,7 @@ test('PC directory groups original IDs, keeps navigation available during creati
   }
 });
 
-test('retained Sidebar sorts real global activity, pages 5 then 10, distinguishes required waiting from user input and preserves stale history', async () => {
+test('retained Sidebar sorts real global activity, pages 5 then 10, distinguishes execution waiting from user input and preserves stale history', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -210,20 +210,18 @@ test('retained Sidebar sorts real global activity, pages 5 then 10, distinguishe
         run:
           index === 15
             ? {
-                id: 'required-parent',
+                id: 'waiting-parent',
                 status: 'waiting_execution',
                 isActive: true,
-                waitingForResults: true,
               }
             : index === 16
               ? {
                   id: 'human-wait',
                   status: 'waiting_interaction',
                   isActive: true,
-                  waitingForResults: false,
                 }
               : index === 14
-                ? { id: 'running', status: 'running', isActive: true, waitingForResults: false }
+                ? { id: 'running', status: 'running', isActive: true }
                 : null,
       },
     })),
@@ -255,8 +253,8 @@ test('retained Sidebar sorts real global activity, pages 5 then 10, distinguishe
     ]);
     expect(row(16).getAttribute('aria-description')).toBe('待用户输入');
     expect(row(16).textContent).toContain('待用户输入');
-    expect(row(15).getAttribute('aria-description')).toBe('任务进行中');
-    expect(row(15).querySelector('[aria-label="任务进行中"]')).not.toBeNull();
+    expect(row(15).getAttribute('aria-description')).toBe('等待执行结果');
+    expect(row(15).querySelector('[aria-label="会话运行中"]')).not.toBeNull();
     expect(row(15).textContent).not.toContain('待用户输入');
     expect(row(14).querySelector('[aria-label="会话运行中"]')).not.toBeNull();
     expect(row(13).getAttribute('aria-description')).toBe('排队中');
@@ -335,7 +333,7 @@ test('directory owner observation keeps exited work unverified without a running
           queued: false,
           pendingInteractions: 0,
           executionOwner: 'unheld',
-          run: { id: 'run', status: 'running', isActive: true, waitingForResults: false },
+          run: { id: 'run', status: 'running', isActive: true },
         },
       },
     ],
@@ -361,7 +359,7 @@ test('directory owner observation keeps exited work unverified without a running
   const expectUnverified = async () => {
     const summary = await render();
     expect(summary.status).toBe('执行状态待核实');
-    expect(summary.waitingReason).toBeUndefined();
+    expect(summary).not.toHaveProperty('waitingReason');
     expect(Boolean(summary.pendingInteractions)).toBe(false);
     expect(row().getAttribute('aria-description')).toBe('执行状态待核实');
     expect(row().querySelector('[aria-label="会话运行中"]')).toBeNull();
@@ -374,14 +372,12 @@ test('directory owner observation keeps exited work unverified without a running
       id: 'run',
       status: 'waiting_execution',
       isActive: true,
-      waitingForResults: true,
     };
     await expectUnverified();
     activity.run = {
       id: 'run',
       status: 'waiting_interaction',
       isActive: true,
-      waitingForResults: false,
     };
     activity.pendingInteractions = 1;
     await expectUnverified();
@@ -394,7 +390,6 @@ test('directory owner observation keeps exited work unverified without a running
         id: 'run',
         status: 'running',
         isActive: true,
-        waitingForResults: false,
       };
       expect((await render()).status).toBe('running');
       expect(row().querySelector('[aria-label="会话运行中"]')).not.toBeNull();
@@ -402,12 +397,11 @@ test('directory owner observation keeps exited work unverified without a running
         id: 'run',
         status: 'waiting_execution',
         isActive: true,
-        waitingForResults: true,
       };
       const waiting = await render();
-      expect(waiting.status).toBe('waiting');
-      expect(waiting.waitingReason).toBe('required_background');
-      expect(row().querySelector('[aria-label="任务进行中"]')).not.toBeNull();
+      expect(waiting.status).toBe('waiting_execution');
+      expect(waiting).not.toHaveProperty('waitingReason');
+      expect(row().getAttribute('aria-description')).toBe('等待执行结果');
     }
 
     activity.executionOwner = 'unheld';
@@ -415,7 +409,7 @@ test('directory owner observation keeps exited work unverified without a running
     directory.unavailable = true;
     const stale = await render();
     expect(stale.status).toBe('上次确认状态');
-    expect(stale.waitingReason).toBeUndefined();
+    expect(stale).not.toHaveProperty('waitingReason');
     expect(Boolean(stale.pendingInteractions)).toBe(false);
     expect(row().getAttribute('aria-description')).toBe('上次确认状态');
     expect(row().querySelector('[aria-label="任务进行中"]')).toBeNull();
@@ -548,7 +542,6 @@ test('directory activity updates and unavailable observations retain the exact p
       id: 'activity-run',
       status: 'waiting_execution',
       isActive: true,
-      waitingForResults: true,
     },
   };
   const observed: NativeDirectory = {
@@ -559,7 +552,7 @@ test('directory activity updates and unavailable observations retain the exact p
   };
   const ready = projection.project(observed);
   expect(ready).toEqual(desktopDirectory(observed));
-  expect(ready[1]!.sessions[0]!.waitingReason).toBe('required_background');
+  expect(ready[1]!.sessions[0]!).not.toHaveProperty('waitingReason');
   expect(projection.project(observed, selection('b'))).toBe(ready);
   const unheld = {
     ...observed,

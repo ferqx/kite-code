@@ -210,7 +210,7 @@ export interface SessionPageProps {
   interactionHidesPrompt?: boolean;
   statusNotice?: ReactNode;
   /** Ephemeral parent-run wait indicator supplied by a host; never a transcript message. */
-  requiredSubagentWait?: boolean;
+
   beforeConversation?: ReactNode;
   environmentInformation?: ReactNode;
   detailPanel?: { label: string; content: ReactNode; onClose: () => void };
@@ -774,7 +774,6 @@ function SessionPageContent({
       lazyHistory={keepAlive}
       loading={props.loading}
       initialPresentationPending={props.initialPresentationPending}
-      requiredSubagentWait={props.requiredSubagentWait}
       selected={!!props.selected}
       emptyState={
         !props.composer

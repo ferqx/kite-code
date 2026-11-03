@@ -68,14 +68,22 @@ test.each([
           resultDelivery: 'caller',
           request: { kind: 'job', definitionId: 'worker', definitionVersion: '1', input: {} },
         },
-        { ...options, resultDelivery: 'caller', resultRequirement: {} },
-        { ...options, resultDelivery: 'caller', continuation: { kind: 'after_turn' } },
       ]) {
         expect(
           await context.operations
             .ensure(invalid as unknown as OperationOptions)
             .catch((error: unknown) => error),
         ).toMatchObject({ code: 'invalid_operation_result_delivery' });
+      }
+      for (const [patch, code] of [
+        [{ resultRequirement: {} }, 'invalid_operation_options'],
+        [{ continuation: { kind: 'after_turn' } }, 'invalid_operation_continuation'],
+      ] as const) {
+        expect(
+          await context.operations
+            .ensure({ ...options, ...patch } as unknown as OperationOptions)
+            .catch((error) => error),
+        ).toMatchObject({ code });
       }
       ref = await context.operations.ensure(options);
       expect(await context.operations.ensure(options)).toEqual(ref);
@@ -104,6 +112,16 @@ test.each([
         childConfiguration: persisted.childConfiguration,
         ...(caller ? { resultDelivery: 'caller' as const } : {}),
       };
+      const cursor = (await store.getMetadata()).lastChangeCursor;
+      for (const patch of [{ resultRequirement: {} }, { resultRequirementSchema: {} }])
+        expect(
+          await store
+            .ensureOperation({ ...direct, ...patch } as unknown as Parameters<
+              Store['ensureOperation']
+            >[0])
+            .catch((error) => error),
+        ).toMatchObject({ code: 'invalid_operation_request' });
+      expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
       expect(
         await store
           .ensureOperation({

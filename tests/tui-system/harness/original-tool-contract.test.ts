@@ -7,14 +7,14 @@ import type { Json, ToolContext } from '@kite-ai/agent/extensions';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { createMockModelServer, parseDraftSavedPlan } from './fixtures';
-import { migrateOriginalToolCall } from './original-tool-contract';
+import { migrateOriginalToolCall, originalToolName } from './original-tool-contract';
 
 async function ownedFixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-original-tools-')));
   return { root, scope: { workspace: root, home: root } };
 }
 
-test('original File calls preserve IDs and execute the real new read/write/edit/glob/search Tools', async () => {
+test('original File calls preserve IDs and execute the current read/write/edit Tools', async () => {
   const { root, scope } = await ownedFixture();
   const files = createWorkspaceFiles({ root });
   const tools = new Map(createFileTools(files).map((tool) => [tool.id, tool]));
@@ -43,8 +43,6 @@ test('original File calls preserve IDs and execute the real new read/write/edit/
       new_string: 'beta',
     });
     expect(await readFile(join(root, 'sample.txt'), 'utf8')).toBe('beta\nsecond\n');
-    expect((await execute('glob', 'glob', { pattern: '*.txt' })).paths).toEqual(['sample.txt']);
-    expect((await execute('grep', 'grep', { pattern: 'beta' })).matches[0].content).toBe('beta');
     // Freshness is enforced by the real new Tool, not softened by the fixture.
     const stale = await migrateOriginalToolCall(
       { id: 'stale', name: 'write_file', args: { path: 'sample.txt', content: 'wrong' } },
@@ -80,20 +78,7 @@ test('non-equivalent shell deadlines, grep regex, unowned baselines and ignored 
         scope,
       ),
     ).toMatchObject({ id: 'shell-id', name: 'shell.execute', args: { command: 'echo safe' } });
-    expect(
-      await migrateOriginalToolCall(
-        {
-          id: 'child-id',
-          name: 'task',
-          args: { name: 'child', subagent_type: 'explore', task: 'original input' },
-        },
-        scope,
-      ),
-    ).toMatchObject({
-      id: 'child-id',
-      name: 'task.execute',
-      args: { role: 'explore', input: { name: 'child', content: 'original input' } },
-    });
+    expect(originalToolName('task')).toBe('task');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

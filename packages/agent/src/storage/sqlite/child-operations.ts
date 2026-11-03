@@ -18,7 +18,6 @@ import { record as extensionRecord, verifyNamespace } from './extension-operatio
 import { applyInputWork } from './input-operations';
 import { sealAfterTurn } from './job-report-operations';
 import type { SqliteOperations } from './operations';
-import { prepareResultRequirement, sealResultRequirement } from './result-requirements';
 
 /** A closed display envelope; arbitrary custom inputs retain their original JSON body. */
 function displayInput(input: Json): { content: string; name?: string } | undefined {
@@ -121,12 +120,12 @@ export function assertConfigurationReads(
   }
 }
 export function assertOperationResultDelivery(input: EnsureOperationInput): void {
+  if ('resultRequirement' in input || 'resultRequirementSchema' in input)
+    throw new AgentError('invalid_operation_request');
   if (
     input.resultDelivery !== undefined &&
     (input.resultDelivery !== 'caller' ||
       input.request.kind !== 'agent' ||
-      input.resultRequirement !== undefined ||
-      input.resultRequirementSchema !== undefined ||
       input.afterTurnAuthorization !== undefined)
   )
     throw new AgentError('invalid_operation_result_delivery');
@@ -173,7 +172,7 @@ export function ensureAgent(
   assertOperationResultDelivery(input);
   if (continuation && input.resultDelivery !== undefined)
     throw new AgentError('invalid_operation_result_delivery');
-  prepareResultRequirement(input);
+
   const work = (): OperationRef => {
     db.identity(input.expectedStoreId);
     db.owner(input.owner, input.sessionId);
@@ -308,8 +307,6 @@ export function ensureAgent(
       operationKey: input.operationKey,
       cancellation: input.cancellation ?? 'attached',
       ...(input.resultDelivery ? { resultDelivery: input.resultDelivery } : {}),
-      resultRequirement: (input.resultRequirement ?? null) as unknown as Json,
-      resultRequirementSchema: input.resultRequirementSchema ?? null,
       ...(firstActivation
         ? { firstActivation: firstActivation as unknown as Json }
         : continuation && 'afterRunId' in continuation
@@ -520,7 +517,7 @@ export function ensureAgent(
         startId,
       );
     }
-    sealResultRequirement(db, input, executionId);
+
     db.event(input.sessionId, executionId, 'execution.planned');
     if (!reusedChild) db.event(childSessionId, childSessionId, 'session.created');
     db.event(childSessionId, startId, 'command.accepted');

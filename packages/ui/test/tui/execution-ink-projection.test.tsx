@@ -227,15 +227,13 @@ test('original builtin friendly card uses actual content and only confirmed exec
   }
 });
 test.each([
-  'builtin.task/task',
-  'builtin.task/task.execute',
+  'builtin.task/task.spawn',
 ])('child tree %s requires exact carrier relationship, and public child scope validates before steps', (definitionId) => {
   const parent = execution('task', {
       definitionId,
       toolInput: {
-        role: definitionId.endsWith('task.execute') ? 'agent/explore' : 'explore',
-        key: 'original-task',
-        input: 'Investigate original',
+        preset: 'explore',
+        prompt: 'Investigate original',
       },
     }),
     carrier = execution('carrier', {
@@ -714,14 +712,14 @@ test('ConcurrentSubAgent groups only one actual Model call batch with overlappin
   );
   const model = execution('model', { kind: 'model', definitionId: 'model' }),
     first = execution('task-one', {
-      definitionId: 'task',
+      definitionId: 'task.spawn',
       toolCallId: 'one',
-      toolInput: { role: 'explore', input: 'first child' },
+      toolInput: { preset: 'explore', prompt: 'first child' },
     }),
     second = execution('task-two', {
-      definitionId: 'task',
+      definitionId: 'task.spawn',
       toolCallId: 'two',
-      toolInput: { role: 'code', input: 'second child' },
+      toolInput: { preset: 'code', prompt: 'second child' },
     }),
     a = execution('a', {
       kind: 'job',
@@ -740,8 +738,8 @@ test('ConcurrentSubAgent groups only one actual Model call batch with overlappin
   const owner = message('actual-batch', '1', {
     sourceIds: ['model'],
     toolCalls: [
-      { id: 'one', name: 'task', arguments: '{}' },
-      { id: 'two', name: 'task', arguments: '{}' },
+      { id: 'one', name: 'task.spawn', arguments: '{}' },
+      { id: 'two', name: 'task.spawn', arguments: '{}' },
     ],
   });
   const facts = snapshot([model, first, second, a, b], [owner]);
@@ -761,7 +759,7 @@ test('ConcurrentSubAgent groups only one actual Model call batch with overlappin
           planning: {
             binding: {
               tools: [
-                { extensionId: 'builtin.task', definitionId: 'task', definitionVersion: '1' },
+                { extensionId: 'builtin.task', definitionId: 'task.spawn', definitionVersion: '1' },
               ],
               readOnlyDefinitions: [],
             },
@@ -1074,11 +1072,11 @@ for (const field of ['check', 'review'] as const)
 
 test('child display uses its actual input name and dispatch duration without fabricating missing timing', () => {
   const parent = execution('named-task', {
-    definitionId: 'builtin.task/task',
+    definitionId: 'builtin.task/task.spawn',
     toolInput: {
-      role: 'explore',
-      key: 'named',
-      input: { name: 'Same-name tool child', content: 'Read the original file' },
+      preset: 'explore',
+      taskName: 'Same-name tool child',
+      prompt: 'Read the original file',
     },
   });
   const child = execution('named-carrier', {

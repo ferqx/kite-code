@@ -2,6 +2,8 @@
 
 Status: implemented
 
+旧 Task 工具、专用 required-result 与显式 after_turn 执行的保留决定，已由[退役决定](2026-11-02-retire-legacy-task.md)部分取代；当前六工具、通用 Operation、独立 Session、准确来源和安全／恢复边界继续适用。
+
 2026-10-22：其中“所有 Core 事件均推进目录时间”的决定被[消息时间修正](../bug-fix/2026-10-22-session-message-activity-time.md)部分替代。以下原取舍保留历史原因；当前时间只取 `message.updated`。状态摘要、只读观察、分页一致性、未知时间及无新增 schema 的理由继续适用。
 
 ## Problem

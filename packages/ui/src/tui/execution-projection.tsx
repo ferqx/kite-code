@@ -163,8 +163,6 @@ export function inkToolName(
     'builtin.shell/shell.execute': 'shell_execute',
     'builtin.web/web_fetch': 'web_fetch',
     'builtin.ask-user/ask_user': 'ask_user',
-    'builtin.task/task': 'task',
-    'builtin.task/task.execute': 'task',
     'builtin.task/task.spawn': 'spawn_agent',
     'builtin.task/task.follow_up': 'follow_up_agent',
     'builtin.task/task.message': 'send_agent_message',
@@ -327,11 +325,9 @@ function actualCarrierParent(job: Execution, tool: Execution, snapshot: TuiSnaps
 }
 function taskCarrierTool(tool: Execution, snapshot: TuiSnapshot): boolean {
   return (
-    frozenBuiltin(tool, snapshot, 'builtin.task', 'task') ||
-    frozenBuiltin(tool, snapshot, 'builtin.task', 'task.execute') ||
-    (tool.definitionVersion === '1' &&
-      (frozenBuiltin(tool, snapshot, 'builtin.task', 'task.spawn') ||
-        frozenBuiltin(tool, snapshot, 'builtin.task', 'task.follow_up')))
+    tool.definitionVersion === '1' &&
+    (frozenBuiltin(tool, snapshot, 'builtin.task', 'task.spawn') ||
+      frozenBuiltin(tool, snapshot, 'builtin.task', 'task.follow_up'))
   );
 }
 function displayArguments(args: Record<string, unknown>): Record<string, unknown> {
@@ -709,16 +705,7 @@ export function projectInkChild(
   if (!parent) return undefined;
   const args = inkToolArguments(parent, snapshot, loadedOutputs);
   if (!args) return undefined;
-  const legacy =
-    frozenBuiltin(parent, snapshot, 'builtin.task', 'task') ||
-    frozenBuiltin(parent, snapshot, 'builtin.task', 'task.execute');
-  if (legacy && typeof args.role !== 'string') return undefined;
-  const role =
-    typeof args.role === 'string'
-      ? args.role
-      : typeof args.preset === 'string'
-        ? args.preset
-        : 'worker';
+  const role = typeof args.preset === 'string' ? args.preset : 'worker';
   const childViews = (
     snapshot as TuiSnapshot & { childViews?: readonly { executionId: string; view: SessionView }[] }
   ).childViews;
@@ -816,7 +803,6 @@ export function projectInkChild(
         : pendingCheck?.status === 'planned'
           ? ('queued_auto_check' as const)
           : undefined;
-  const input = record(args.input);
   const task =
     typeof args.taskName === 'string' && args.taskName.trim()
       ? args.taskName
@@ -824,17 +810,7 @@ export function projectInkChild(
         ? args.prompt
         : typeof args.content === 'string'
           ? args.content
-          : typeof input?.name === 'string'
-            ? input.name
-            : typeof args.input === 'string'
-              ? args.input
-              : typeof input?.content === 'string'
-                ? input.content
-                : typeof input?.task === 'string'
-                  ? input.task
-                  : typeof args.key === 'string'
-                    ? args.key
-                    : (child?.session.title ?? execution.definitionId);
+          : (child?.session.title ?? execution.definitionId);
   const timing = snapshot.executionTimings?.[execution.id];
   const startedAt =
     timing?.availability === 'recorded_dispatch' &&

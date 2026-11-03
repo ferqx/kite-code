@@ -23,14 +23,7 @@ import {
 } from '@kite-ai/agent/sources';
 import { createConfiguredSkillSource } from './skill-source';
 
-const fileIds = [
-  'files.read',
-  'files.write',
-  'files.edit',
-  'files.list',
-  'files.glob',
-  'files.search',
-];
+const fileIds = ['files.read', 'files.write', 'files.edit'];
 const skillIds = ['skills.load', 'skills.resource'];
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 function source(id: string, kind: string, content: string): ContextSource {

@@ -280,7 +280,6 @@ test('directory details use original activity and exact time with bounded hover,
         id: 'original-run',
         status: 'waiting_execution',
         isActive: true,
-        waitingForResults: true,
       },
       queued: true,
       pendingInteractions: 3,
@@ -307,7 +306,7 @@ test('directory details use original activity and exact time with bounded hover,
         ?.nextElementSibling?.textContent;
     expect(field('Run')).toBe('Waiting for execution');
     expect(field('Activity')).toBe('Active');
-    expect(field('Required results')).toBe('Waiting');
+    expect(details).not.toContain('Required results');
     expect(field('Queued work')).toBe('Yes');
     expect(field('Pending interactions')).toBe('3');
     expect(f.calls.some((call) => call.startsWith('view:'))).toBe(false);
@@ -319,7 +318,7 @@ test('directory details use original activity and exact time with bounded hover,
     expect(f.tooltip()!.textContent).toContain('Unknown');
     expect(field('Run')).toBe('No runs');
     expect(field('Activity')).toBe('Inactive');
-    expect(field('Required results')).toBe('None');
+    expect(f.tooltip()!.textContent).not.toContain('Required results');
     expect(field('Queued work')).toBe('No');
     expect(field('Pending interactions')).toBe('0');
     expect(f.tooltip()!.querySelector('time')).toBeNull();
@@ -417,13 +416,13 @@ test('directory activity uses the original run, prioritizes waiting, and removes
       updatedAt: 50000,
       queued: false,
       pendingInteractions: 0,
-      run: { id: 'r', status: 'running', isActive: true, waitingForResults: false },
+      run: { id: 'r', status: 'running', isActive: true },
     };
     f.state.entries[1]!.activity = {
       updatedAt: 49000,
       queued: false,
       pendingInteractions: 2,
-      run: { id: 'r2', status: 'running', isActive: true, waitingForResults: false },
+      run: { id: 'r2', status: 'running', isActive: true },
     };
     await f.click(f.button('Workspace'));
     expect(f.rows()[0]!.querySelector('[aria-label="正在运行"]')).not.toBeNull();

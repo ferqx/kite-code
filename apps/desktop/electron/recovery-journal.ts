@@ -34,6 +34,7 @@ export function validateRecoveryIntent(value: unknown): NativeRecoveryIntent {
       'resumed',
       'interrupted',
       'suppressed',
+      'deferred',
       'failed',
       'outcome_unknown',
     ].includes(item.phase) ||

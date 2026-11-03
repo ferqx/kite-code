@@ -210,6 +210,51 @@ test('report receipt remains tied to original job.report Command and resulting R
     expect(result.phase).toBe(outcome === 'correct' ? 'resumed' : 'outcome_unknown');
   }
 });
+test('deferred report is durable and lookup never reads a nonexistent Run or submits again', async () => {
+  const f = fixture();
+  let posts = 0;
+  f.client.getCommand = (async (id) =>
+    id === 'report'
+      ? { id, kind: 'job.report', originStoreId: 'store', sessionId: 's' }
+      : {
+          id,
+          kind: 'job.report.resume',
+          originStoreId: 'store',
+          sessionId: 's',
+          status: 'applied',
+          cancelRequestedAt: null,
+          receipt: {
+            reportCommandId: 'report',
+            runId: null,
+            outcome: 'report_deferred',
+            reason: 'human_business_queued',
+          },
+        }) as AgentClient['getCommand'];
+  f.client.resumeJobReport = (async (_s, _id, input) => {
+    posts++;
+    return f.client.getCommand(input.commandId);
+  }) as AgentClient['resumeJobReport'];
+  f.client.getRun = async () => {
+    throw Error('deferred report has no Run');
+  };
+  const facts = await f.owner.prepare('report', 'report', 'read');
+  const result = await f.owner.submit(facts.observationId, false);
+  expect(result.phase).toBe('deferred');
+  expect(result.run).toBeUndefined();
+  // Applied receipts are complete caller intents, so the pending journal omits them.
+  expect(f.journal.recoveries()).toEqual([]);
+  const journal = memoryPrivateData();
+  journal.beginRecovery({ ...facts, commandId: result.commandId, phase: 'outcome_unknown' });
+  const cold = new NativeRecovery(
+    f.client,
+    () => ({ generation: 1, selection: 1, storeId: 'store', sessionId: 's' }),
+    () => {},
+    journal,
+  );
+  expect((await cold.lookup(result.commandId, 'lookup')).phase).toBe('deferred');
+  expect(posts).toBe(1);
+});
+
 test('wrong original Run receipt and cold submitting journal fail closed without replay', async () => {
   const f = fixture();
   f.journal.beginRecovery({

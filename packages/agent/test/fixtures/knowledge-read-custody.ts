@@ -52,7 +52,6 @@ mock.module('node:fs', () => ({
 const { createKnowledgeReadScope, KnowledgeReadCleanupError } = await import('../../src/sources');
 const { createProjectSources } = await import('../../src/sources');
 const { createSkillSource } = await import('../../src/skills');
-const { compileSkillWorkflow } = await import('../../src/skills/workflow-contract');
 const originalError = Error('original read failure after actual bytes');
 try {
   writeFileSync(join(root, 'AGENTS.md'), 'Original instruction 中🙂');
@@ -98,13 +97,6 @@ try {
     .catch((error: unknown) => error);
   const skills = createSkillSource({ trustedRoots: [root], locations: [root] });
   const skillError = await skills.list().catch((error: unknown) => error);
-  const workflowScope = createKnowledgeReadScope();
-  let workflowError: unknown;
-  try {
-    compileSkillWorkflow({ skillDir: root, source: 'project', origin: '.agents' }, workflowScope);
-  } catch (error) {
-    workflowError = error;
-  }
   const closing = scope.dispose();
   const closedError = await closing.catch((error: unknown) => error);
   const syncClosedError = await syncScope.dispose().catch((error: unknown) => error);
@@ -140,7 +132,6 @@ try {
       privateCause: !Object.keys(first as object).includes('cause'),
       projectTyped: projectError instanceof KnowledgeReadCleanupError,
       skillTyped: skillError instanceof KnowledgeReadCleanupError,
-      workflowTyped: workflowError instanceof KnowledgeReadCleanupError,
       retainedText: buffer.subarray(0, read.bytesRead).toString('utf8'),
       retainedSyncText: syncBytes.subarray(0, syncRead).toString('utf8'),
       asyncAttempts: handles.map((entry) => entry.attempts),

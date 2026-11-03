@@ -668,8 +668,9 @@ impl Owner {
         self.verify(id)?;
         let handle = self.entry(id)?.object.raw();
         let name: Vec<u16> = target.encode_utf16().collect();
-        let bytes = offset_of!(FILE_RENAME_INFORMATION, FileName) + name.len() * 2;
-        let mut storage = vec![0u64; bytes.max(size_of::<FILE_RENAME_INFORMATION>()).div_ceil(8)];
+        let bytes = (offset_of!(FILE_RENAME_INFORMATION, FileName) + name.len() * 2)
+            .max(size_of::<FILE_RENAME_INFORMATION>());
+        let mut storage = vec![0u64; bytes.div_ceil(8)];
         let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
         unsafe {
             (*info).Anonymous.ReplaceIfExists = !create_only;

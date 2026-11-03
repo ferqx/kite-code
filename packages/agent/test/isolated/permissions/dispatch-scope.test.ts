@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
 import type { JobContext, ToolContext } from '../../../src/extensions';
-import { verifyPathFileDispatch } from '../../../src/permissions/files-request';
 import { hostExecutionScope } from '../../../src/permissions/shell';
 
 type Snapshot = NonNullable<NonNullable<JobContext['dispatchAuthorization']>['snapshot']>;
@@ -13,7 +12,7 @@ function leaf(kind: 'tool' | 'job', mode = 'full'): Snapshot {
       workspaceTrust: true,
       capability: {
         kind,
-        definitionId: kind === 'job' ? 'shell.command' : 'files.write_path',
+        definitionId: kind === 'job' ? 'shell.command' : 'foreign.tool',
         definitionVersion: '1',
         hardAllowed: true,
         revision: 'target',
@@ -38,8 +37,7 @@ function intersection(parent: Snapshot, child?: Snapshot): Snapshot {
 function context(snapshot: Snapshot): JobContext & ToolContext {
   return { dispatchAuthorization: { revision: 'accepted', snapshot } } as JobContext & ToolContext;
 }
-const verifyFile = (snapshot: Snapshot) =>
-  verifyPathFileDispatch(context(snapshot), 'files.write_path', 'target');
+const verifyShell = (snapshot: Snapshot) => hostExecutionScope(context(snapshot));
 
 test('Planning wrappers preserve the current target and every nonempty approval ceiling', () => {
   const planning = (current: Snapshot, ceiling: Snapshot | null): Snapshot => ({
@@ -52,64 +50,54 @@ test('Planning wrappers preserve the current target and every nonempty approval 
       ceiling: ceiling as never,
     },
   });
-  expect(() => verifyFile(planning(leaf('tool'), null))).not.toThrow();
-  expect(() => verifyFile(planning(leaf('tool'), leaf('tool')))).not.toThrow();
-  const changed = leaf('tool');
-  (changed.data as { capability: { revision: string } }).capability.revision = 'other';
-  expect(() => verifyFile(planning(changed, leaf('tool')))).toThrow('file_dispatch_scope_changed');
-  expect(() => verifyFile(planning(leaf('tool'), changed))).toThrow('file_dispatch_scope_changed');
-  const malformed = planning(leaf('tool'), null);
+  expect(() => verifyShell(planning(leaf('job'), null))).not.toThrow();
+  expect(() => verifyShell(planning(leaf('job'), leaf('job')))).not.toThrow();
+  const changed = leaf('job');
+  (changed.data as { capability: { definitionId: string } }).capability.definitionId = 'foreign';
+  expect(() => verifyShell(planning(changed, leaf('job')))).toThrow(
+    'shell_dispatch_scope_unavailable',
+  );
+  expect(() => verifyShell(planning(leaf('job'), changed))).toThrow(
+    'shell_dispatch_scope_unavailable',
+  );
+  const malformed = planning(leaf('job'), null);
   (malformed.data as Record<string, unknown>).current = null;
-  expect(() => verifyFile(malformed)).toThrow('file_dispatch_scope_unavailable');
-  expect(() => verifyFile(planning(leaf('job'), null))).toThrow('file_dispatch_scope_changed');
+  expect(() => verifyShell(malformed)).toThrow('shell_dispatch_scope_unavailable');
+  expect(() => verifyShell(planning(leaf('tool'), null))).toThrow(
+    'shell_dispatch_scope_unavailable',
+  );
 });
 
-test('accepted parent and child challenges retain every adapter ceiling and leaf identity', () => {
-  expect(hostExecutionScope(context(intersection(leaf('job'), leaf('job', 'auto'))))).toEqual({
+test('accepted parent and child challenges retain the restrictive Shell ceiling', () => {
+  expect(verifyShell(intersection(leaf('job'), leaf('job', 'auto')))).toEqual({
     filesystem: 'workspace_write',
     network: 'none',
   });
-  expect(() => verifyFile(intersection(leaf('tool'), leaf('tool', 'auto')))).not.toThrow();
-  expect(() => verifyFile(leaf('job'))).toThrow('file_dispatch_scope_changed');
-  expect(() => hostExecutionScope(context(leaf('tool')))).toThrow(
-    'shell_dispatch_scope_unavailable',
-  );
-  const wrongTarget = leaf('tool');
-  (wrongTarget.data as { capability: { revision: string } }).capability.revision = 'other';
-  expect(() => verifyFile(intersection(wrongTarget, leaf('tool')))).toThrow(
-    'file_dispatch_scope_changed',
-  );
+  expect(() => verifyShell(leaf('tool'))).toThrow('shell_dispatch_scope_unavailable');
 });
 
 test('adapter proof trees keep the original 8192-node bound without recursive traversal', () => {
-  for (const kind of ['tool', 'job'] as const) {
+  for (const kind of ['job'] as const) {
     let snapshot = leaf(kind);
     for (let count = 1; count < 8192; count++) snapshot = intersection(snapshot);
-    const verify = (value: Snapshot) =>
-      kind === 'tool' ? verifyFile(value) : hostExecutionScope(context(value));
+    const verify = (value: Snapshot) => hostExecutionScope(context(value));
     expect(() => verify(snapshot)).not.toThrow();
-    expect(() => verify(intersection(snapshot))).toThrow(
-      `${kind === 'tool' ? 'file' : 'shell'}_dispatch_scope_unavailable`,
-    );
+    expect(() => verify(intersection(snapshot))).toThrow('shell_dispatch_scope_unavailable');
   }
 });
 
-test('malformed policy order rejects, and a child leaf error precedes a later parent subtree error', () => {
-  const reversed = intersection(leaf('tool'), leaf('tool'));
+test('malformed policy order and parent subtrees reject the Shell dispatch', () => {
+  const reversed = intersection(leaf('job'), leaf('job'));
   const policies = (reversed.data as { policies: { scope: string }[] }).policies;
   policies[0]!.scope = 'child';
   policies[1]!.scope = 'parent';
-  expect(() => verifyFile(reversed)).toThrow('file_dispatch_scope_unavailable');
-  expect(() => hostExecutionScope(context(reversed))).toThrow('shell_dispatch_scope_unavailable');
+  expect(() => verifyShell(reversed)).toThrow('shell_dispatch_scope_unavailable');
   const malformedParent: Snapshot = {
     namespace: 'agent.permission-intersection',
     version: '1',
     data: null,
   };
-  expect(() => verifyFile(intersection(malformedParent, leaf('job')))).toThrow(
-    'file_dispatch_scope_changed',
-  );
-  expect(() => verifyFile(intersection(malformedParent, leaf('tool')))).toThrow(
-    'file_dispatch_scope_unavailable',
+  expect(() => verifyShell(intersection(malformedParent, leaf('job')))).toThrow(
+    'shell_dispatch_scope_unavailable',
   );
 });

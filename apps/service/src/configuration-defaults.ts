@@ -19,12 +19,8 @@ export function ordinaryHostConfigurationDefaults(shellAvailable: boolean, taskA
       ...defaultConfiguration.tools,
       ...[
         'files.read',
-        'files.read_path',
         'files.write',
         'files.edit',
-        'files.list',
-        'files.glob',
-        'files.search',
         ...(shellAvailable ? shellToolIds : []),
         'web_fetch',
         ...(taskAvailable

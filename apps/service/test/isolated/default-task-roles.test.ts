@@ -14,13 +14,7 @@ function input(role: string, tools: string[]) {
   const actualTools = tools.map((id) => ({
     id,
     version:
-      id === 'files.read'
-        ? '4'
-        : id === 'files.search'
-          ? '4'
-          : ['files.read_path', 'files.glob'].includes(id)
-            ? '2'
-            : '1',
+      id === 'files.read' ? '4' : id === 'files.search' ? '4' : id === 'files.glob' ? '2' : '1',
     extensionId: id.endsWith('_path')
       ? 'builtin.files.path'
       : id.startsWith('files.')
@@ -57,24 +51,23 @@ test('default Task roles preserve worker and bind implementation plus three read
     'plan',
     'review',
   ]);
-  for (const id of ['task', 'task.execute']) {
-    const tool = task.tools.get(id)!;
-    const schema = tool.inputSchema as {
-      properties: { role: { enum: string[]; description: string } };
-    };
-    expect(schema.properties.role.enum).toEqual(['worker', 'code', 'explore', 'plan', 'review']);
-    expect(schema.properties.role.description).toContain('plan: Read-only planning');
-    expect(schema.properties.role.description).toContain('review: Read-only code review');
-    expect(tool.description).toContain('implementation');
-    expect(tool.description).toContain('multiple independent sibling task calls');
-  }
+  expect([...task.tools.keys()].sort()).toEqual([
+    'task.events',
+    'task.follow_up',
+    'task.interrupt',
+    'task.list',
+    'task.message',
+    'task.spawn',
+  ]);
   const spawn = task.tools.get('task.spawn')!;
   expect(spawn.description).toContain('Default role worker: General delegated work');
   expect(spawn.inputSchema).toMatchObject({
     properties: {
       preset: {
         enum: ['code', 'explore', 'plan', 'review'],
-        description: expect.stringContaining('No modifications or process/network dispatch'),
+        description: expect.stringContaining(
+          'No modifications or arbitrary process/network dispatch',
+        ),
       },
     },
   });
@@ -86,7 +79,6 @@ test('default Task roles preserve worker and bind implementation plus three read
   });
   const parent = [
     'files.read',
-    'files.read_path',
     'files.search',
     'files.write',
     'shell.launch',
@@ -102,12 +94,7 @@ test('default Task roles preserve worker and bind implementation plus three read
   }
   for (const role of ['explore', 'plan', 'review']) {
     const readonly = await configured.resolveChildRunConfiguration!(input(role, parent));
-    expect(readonly.toolIds).toEqual([
-      'files.read',
-      'files.read_path',
-      'files.search',
-      'shell.read',
-    ]);
+    expect(readonly.toolIds).toEqual(['files.read', 'shell.launch', 'shell.read']);
     expect(readonly.modelId).toBe('actual-parent');
   }
   expect(configured.childConfigurations![2]!.inputSchema).toMatchObject({
@@ -134,7 +121,7 @@ test('default children exclude the exact root clarification tool while retaining
     expect(result.toolIds).not.toContain('ask_user');
     expect(result.toolIds).toContain('planning.read');
     expect(result.toolIds).toContain('files.read');
-    expect(result.toolIds?.includes('shell.launch')).toBe(role === 'worker' || role === 'code');
+    expect(result.toolIds).toContain('shell.launch');
   }
 });
 
@@ -176,12 +163,7 @@ test('public spawn presets retain current builtin file discovery definitions and
           configuration: { modelId: 'actual-parent', tools: parentTools },
         },
       });
-    expect((await resolve(current)).toolIds).toEqual([
-      'files.read',
-      'files.list',
-      'files.glob',
-      'files.search',
-    ]);
+    expect((await resolve(current)).toolIds).toEqual(['files.read']);
     expect(
       (await resolve(current.map((tool) => ({ ...tool, extensionId: 'custom.same-name' }))))
         .toolIds,
@@ -254,6 +236,7 @@ test('all read-only roles reject unknown owners, future versions and prepared mu
     };
     tools.tools[0]!.extensionId = 'custom.same-name';
     tools.tools[1]!.version = 'future';
+    tools.tools[4]!.version = 'future';
     const result = await configured.resolveChildRunConfiguration!(request);
     expect(result.toolIds).toEqual([]);
     const oldSearch = input(role, ['files.search']);

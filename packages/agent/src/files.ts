@@ -17,6 +17,7 @@ export {
 } from './business/file-checkpoints';
 export { filesNativeAssets } from './files-native-binding';
 export { pdfAssets } from './tools/documents/pdf';
+export { withExternalFileReads } from './tools/external-file-reads';
 export {
   createWorkspaceFiles,
   type FileBaseline,
@@ -34,6 +35,5 @@ export {
 export type { FileMutationCapture } from './tools/files-tools';
 export { createFileTools } from './tools/files-tools';
 export { withInputFileReads } from './tools/input-files';
-export { createPathFileTools } from './tools/path-files';
 export { type EditablePlanFile, withPlanFileTools } from './tools/plan-files';
 export { type SessionOutput, withSessionOutputs } from './tools/session-outputs';

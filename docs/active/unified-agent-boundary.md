@@ -54,7 +54,7 @@ Files 的原生 I/O 沿 [Node-API owner](../../packages/agent/native/files/READM
 
 客户端测试专用的调试入口、诊断展示和辅助控件只允许由隔离测试夹具或明确测试制品开启，dev 与 prod 客户端必须关闭。公开启动参数、环境变量、URL 或环境名不提供开启资格；TUI 普通入口拒绝 `--test-ui-diagnostics`，Native 的开发与正式 renderer 将测试常量固定为 false，组件传入 true 也不能覆盖该值。测试目录的入口可向可信 host 显式传 `testDiagnostics:true`，测试 Native 可单独构建诊断制品；共享 Desktop context 默认关闭，不再按 `NODE_ENV=development` 增加技术详情。测试诊断只控制展示，不改变公共请求、身份、原申请持久化、审批与取消权，也不跳过制品完整验证。普通界面仍保未知／失败／未确认清理、完整业务结果和用户明确的原内容检查；移植原 Ink 的纯 Header／Footer／面板不能恢复旧 provider 或执行 authority。负责实现归 [TUI](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)与 [Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 
-[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、执行与 Workflow 共用的 builtin effect 分类、计划/Workflow/恢复审批约束、默认 Task 后续汇报许可，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。默认 after-turn 判定由 Agent 核原 role/source/root work、取消／删除和当前信任，Service 只提供可信读取；Planning 装配直接调用 Agent 工厂和原状态 reader，旧单次转发层退役。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖及原策略／范围／after-turn／Planning 工厂实现；Core／SQL 的激活、报告应用及最终 CAS 保独立 owner，正式制品仍须验证实际 Agent entry 与资产闭包。
+[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、执行的 builtin effect 分类、计划/恢复审批约束、默认 Task 后续汇报许可，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。默认 after-turn 判定由 Agent 核原 role/source/root work、取消／删除和当前信任，Service 只提供可信读取；Planning 装配直接调用 Agent 工厂和原状态 reader，旧单次转发层退役。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖及原策略／范围／after-turn／Planning 工厂实现；Core／SQL 的激活、报告应用及最终 CAS 保独立 owner，正式制品仍须验证实际 Agent entry 与资产闭包。
 
 Native 的明确普通输入在 Main 内按 Session 绑定的 Workspace 准备当前读取授权，不显示独立范围确认；准备使用原权限 observation、trust revision、目录身份和读取范围摘要 CAS，以及原权限 journal。未知或过期观察不继续输入，切换主体／Store／Session／项目不把旧申请改绑；打开历史和状态核实不自动授予范围，审批模式及工具硬上限独立。负责实现与回归归 [Desktop owner](../../apps/desktop/README.md#原会话输入区权限与停止)。
 
@@ -64,7 +64,7 @@ Native累计缓存用量沿已观察Message的原Model Execution只读取得：�
 
 原结果自动报告也保留这个边界：`applyJobReport` 在实际 source/carrier/afterTurn 应用事务中复制父 requirements 到新 report Run，不重新登记外国 Run refs。默认 Service 只通过实际原 report Command/receipt、source Execution、父 config、已知 result revision、root work 和主体关系读取原 Planning 批准；任意同 Session 新 Run 不获得例外。历史 receipt 的来源 digest 按原实际 Execution/批准 Run 重建，当前 inactive Run 的信息贡献保持 `approval:null`。各 owner 与真实资格见[Service](../../apps/service/README.md)和[Planning](../../packages/agent/src/business/planning/README.md)。
 
-[自动 mutation 验证](../../packages/agent/src/business/planning/README.md)由可信装配明确选择真实版本及 effects，Core 只保留通用 mutation/completion governance 边界。派发前保存潜在验证事实，真实 Execution 结算与事实 revision 在同一短事务落定，文件路径/hash 列表分页读取，不转成每个文件一条不可撤回 RequirementRef。Model 完成候选通过同 Loop 的普通 `validation.auto_check` 与独立获准的真实 Files checker 验证；失败诊断作为低权限结果交给下一 Model 修复，未知或取消不自动继续。后序同 Store/Run、同路径的实际成功 mutation 可以将旧 hash 验证标为 superseded，仍保留旧事实，最后 mutation 必须实查；failed/unknown/cancelled 不因此解除义务。JSONC 不能授予这些 hooks 或隐式补选 checker。
+专用自动 mutation 验证、五个 validation 工具和强制完成检查已退役。Core 的通用 mutation/completion governance 扩展端口与历史事实格式保持；默认宿主不再注册专用验证钩子、checker 或 waiver。计划批准和真实回执进度仍由 [Planning owner](../../packages/agent/src/business/planning/README.md)维护。
 
 Extension 的业务 Context 贡献只接收 scoped read projections，Core 检查 namespace 和有限格式，并强制以 user 数据呈现；来源没有累计数量额度。公开执行证明仅提供准确 identity、attempt、定义、参数摘要、结果 revision 和原来源 id/digest；信息 receipt 另行核实原 Interaction 的 accepted revision，不替代工具授权。配置文件、正文、展示卡和调用者自报证明不能生成这些权威事实。
 
@@ -126,7 +126,7 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 首次激活前已取消的稳定 child 只有在 Store 证明原 carrier 从未派发、原 `child.start` 已准确拒绝且 Session 没有真实前驱 Run 时，才由显式 `follow_up_agent` 创建新 carrier 和真实首次 `child.start`。私有证明随新命令封存，activation、邮件采用、冷恢复及跨层读取共用核验；原取消、Session 创建血缘与普通 Run 后继合同不改写。同工作原委派只作已取消背景，新指令优先；换工作不继承旧指令或邮件，旧 queued 引导不恢复。已派发、unknown、缺失或不符的来源不获新资格，不以空 Run 绑定绕过恢复门禁。准确机制与验证入口归 [Store owner](../../packages/agent/src/storage/README.md#子-agent-的首次激活复用)与 [Task owner](../../packages/agent/src/extensions/task/README.md#稳定身份准确命令和观察)。
 
-QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完整私有 Artifact 保存，sender 的实际成功结算与接收资格同事务提交；失败、取消、未知或未确认不形成成功邮件。idle send 零 Run/Model，普通后来人类工作不自动采用。显式 child follow-up 的原 ensure 事务封存邮件 seq 与成功 sender completed cursor 双上界，原 key 重试不能扩大集合；每页 50 封的实际接收最终核目标 Run/selection、carrier、主体、原 Store 和 stop/delete。邮件原未绑定 intent 不改写为新 targetRunId，保存准确 receivedRunId/selection；下一 Model 只按真实 receivedMessage/source proof 完整展开。Rewind 资格属于准确目标 Session selection，根选择变化不伪称 child 选择也改变。普通 child completion 将有限订阅与 idle 自动授权分开保存；同一父会话 active 接纳沿原活动 Run 权限，idle 续轮另核可信当前 afterTurn policy。nested 与 follow-up 保原 child deadline，report 不递归授权；冷缺绑定 needs_review/零 Provider。报告按准确结果键在同一事务选最终 Run、创建独立 Source、consume receipt 和 ack，多个完成可进入同一 R，不要求每个 report 都是 R.origin。提交后返回丢失只查回原 Run/Source。原 after_turn 旧历史与明确内部调用仍核其实际封存授权。
+QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完整私有 Artifact 保存，sender 的实际成功结算与接收资格同事务提交；失败、取消、未知或未确认不形成成功邮件。idle send 零 Run/Model，普通后来人类工作不自动采用。显式 child follow-up 的原 ensure 事务封存邮件 seq 与成功 sender completed cursor 双上界，原 key 重试不能扩大集合；每页 50 封的实际接收最终核目标 Run/selection、carrier、主体、原 Store 和 stop/delete。邮件原未绑定 intent 不改写为新 targetRunId，保存准确 receivedRunId/selection；下一 Model 只按真实 receivedMessage/source proof 完整展开。Rewind 资格属于准确目标 Session selection，根选择变化不伪称 child 选择也改变。普通 child completion 将有限订阅与 idle 自动授权分开保存；同一父会话 active 接纳沿原活动 Run 权限，idle 续轮另核可信当前 afterTurn policy。nested 与 follow-up 保原 child deadline，report 不递归授权；冷缺绑定 needs_review/零 Provider。报告按准确结果键在同一事务选最终 Run、创建独立 Source、consume receipt 和 ack，多个完成可进入同一 R，不要求每个 report 都是 R.origin。提交后返回丢失只查回原 Run/Source。旧 Task 工具与显式 after_turn 执行入口已删除，仅接受当前 agent_completion 邮箱订阅。
 
 普通输入直接由原公共 Command 进入当前主 Agent；不生成独立 raw/归属决定/处理轮，也不按正文自动暂停、继续或改选工作。steer 在准确活动 Run 的安全边界应用，队列等准确前驱结束，新轮次使用当前显式模型配置。旧记录与明确控制只保兼容，旧 processing 恢复在 scope/恢复校验后且加载配置前拒绝。准确取消、停止、root stop、Rewind、unknown 和 fence 仍有效，具体归[输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
@@ -158,7 +158,7 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 独立 Native `/v1/lifecycle` 与 `/v1/lifecycle/shutdown` 用 lifecycleVersion 和原 profile/instance 核对目标，业务 API 不兼容或 Store 不可用不阻断有限诊断。无 Origin 的 bearer 请求才可进入，Browser gateway 不暴露；202 仅为受理，成功资源关闭及所属进程退出另行确认。公共 Lifecycle Client 丢回复后只查询原实例，不自动重发或改绑。成功 HTTP 关闭明确结束 runner 自己的父管道读取；普通网络退出仍不等于父死亡。理由见[原子关闭决定](../../.agents/notes/implemented/architecture/2026-10-02-atomic-service-shutdown.md)；正式 daemon 目标发现与 CLI 切换尚未由此完成。
 
-耗时的纯校验不能占住Service事件循环：[MCP](../../packages/agent/src/mcp/README.md)按原scope／catalogue拥有完整schema编译和参数／结果校验Worker，[Workflow](../../packages/agent/src/business/skill-workflow/README.md)由显式Run binding拥有编译session，来源与能力事实仍每次完整重读。固定built Worker、校验和及原观察资产进入普通／外部Files与恢复保护，缺失或摘要不符拒绝，不回退TS源码或由配置替换。取消、目录失效与关闭须等原Worker实际退出，未知保原资源；计算缓存不缓存授权，不授效果重放。Files只读与Artifact全文校验按预算让出真实事件循环，原文件／目录句柄和活动票据持有到EOF或实际关闭；Runtime的二次正文摘要同样完整分片。短事务、原size/hash/scope与发布CAS保持，单次系统调用、连续分配和JSON展开不因此取得实时延迟保证。
+MCP 的完整 schema 编译及参数／结果校验继续由所属 Worker 负责，取消和关闭须核真实退出；计算缓存不缓存授权，不授效果重放。Workflow 编译 Worker 已随执行能力退役。Files 与 Artifact 的完整读取、分片摘要、原 size/hash/scope 和发布 CAS 保持。
 
 [`client`](../../packages/client/README.md)只依赖生成 schema 和网络能力；[`ui`](../../packages/ui/README.md)消费公开投影、React 与便携展示控件，不知道参考扩展业务。SSE 的 ready/heartbeat 不推进 cursor；变化应用成功后确认，过滤范围的 checkpoint 只来自一致页。快照页不代表全局事件应用成功，切换 scope 需要相应水位。reset 后先冻结原 Store 的全局集合基线，再完整重读所需事实；SDK `startAfter` 仅设置重开 scan 起点，保留原 ACK，不将单对象 snapshotCursor 冒充全局应用。validated `onReady` 可确认流准入并等待应用准备，仍不 ACK；正常 EOF 且 ACK 尚未到达重读基线时沿原起点重开。原 Store 改变、读取失败或未完成时不解除对应写门禁，也不重发业务意图。
 
@@ -292,7 +292,7 @@ TUI 模型设置同样通过专门公共 API，固定 user scope 和原读取集
 
 有限诊断与执行授权分离的理由、接口闭合成本和当前资格见[宿主诊断Note](../../.agents/notes/implemented/architecture/2026-10-02-host-diagnostics-from-assembly.md)。
 
-Skill知识目录属于Service宿主：公共只读目录和实际Run装配共用配置ID、canonical目标、正文version/digest及能力检查。单条坏项不阻未选择它的任务，显式选择和父原继承失效必须局部拒绝，不能静默换成同名项或扩大目录。目录metadata闭合，不外泄路径/正文/凭据；完整分页按原Store/Workspace/主体/信任与完整内容revision，变更后拒绝续页而不拼混。读取不启动Provider、Run、MCP或脚本；TUI面板的读取成功不能清SSEunknown。知识目录和单Run selectedSkills不替代旧Workflow activation/inline/fork/output/verification，后者迁移状态继续按完整方案记录。
+Skill知识目录属于Service宿主：公共只读目录和实际Run装配共用配置ID、canonical目标、正文version/digest及能力检查。单条坏项不阻未选择它的任务，显式选择和父原继承失效必须局部拒绝，不能静默换成同名项或扩大目录。目录metadata闭合，不外泄路径/正文/凭据；完整分页按原Store/Workspace/主体/信任与完整内容revision，变更后拒绝续页而不拼混。读取不启动Provider、Run、MCP或脚本；TUI面板的读取成功不能清SSEunknown。知识目录和单Run selectedSkills不替代旧Workflow activation/inline/fork/output/verification；Workflow 执行已退役。
 
 终端显示偏好由 CLI host 持有当前 profile 的 `ui/preferences.jsonc`，共享 UI 仅接收有限已确认值和单字段 CAS 保存 port。`/theme`、`/language` 不写 Service 配置、不提交业务 Command，不依赖 SSE freshness；更新呈现 context 保原 Session、草稿、审批和完整输出。原 profile shared authority 必须在读写发布时仍有效，文件由现有 configuration leaf 提供锁与原子发布；偏好原字节纳入维护备份。具体实现与失败行为由 [CLI owner](../../apps/cli/README.md#开发-tui-显示偏好) 负责。
 
@@ -326,27 +326,11 @@ TUI 权限保存的原结果与显示归属分别持有：当前 Store 的 mode/
 
 TUI 用户模型/effort 设置按准确 Store+user scope 保存和查询原意图，来源 Session 与本次展示归属分开，跨会话和 Workspace 保留原 ID 查询；未核实的用户模型写阻止竞争新写。modelRead/generation/原 panel 与原 ID 共同核展示，map 的最新同 ID 请求核结果更新；已核终态不因失联降级，活动 Run 仍用原配置。Model/Permission 仅复用原结果选择，scope、公共完整 read-set/CAS 与安全 marker 分别保持；没有新增 authority、持久格式或 Service 判断，当前完整行为归 [TUI owner](../../packages/ui/src/tui/README.md)。
 
-## Skill Workflow 的执行边界
+## Skill Workflow 退役
 
-已有有条件 Workflow 使用 Agent 的[显式业务扩展](../../packages/agent/src/business/skill-workflow/README.md)。Core 只保存通用具版本 `extensionInputs` 原意图与 Command 摘要；Service 先验证支持、可信实际源、flags 与 payload，再读取凭据。初始化记录先于首次 Model；动态必要条件绑定对应 Extension 判定器，不能由全局业务 provider 错接或忽略。知识目录和 selectedSkills 不触发 activation。
+2026-11-02 按用户确认完整退役。正式宿主不装配原六工具、契约编译器、核验／补偿 Job、fork 激活或 manual 目录；客户端激活入口移除。旧输入在 Provider 前拒绝，历史和未知结果保持可读，不自动续跑或重放。普通 Skill 知识、通用 Planning、MCP 与原执行权限不变，验证归[Service 退役回归](../../apps/service/test/isolated/tool-retirement.test.ts)。旧配置仍是维护格式中的不透明原字节资产，不据此取得执行资格或修改格式版本。
 
-完整指令和输入不塞进初始化 metadata record，activation 以原摘要绑定可信契约和原 Command。宿主冷重建后必须核同一输入，缺失或变化不能借进程内缓存获得资格。可信完整 Run 配置在 start、follow-up 和 child 路径一致保存，不为含来源正文的 child/follow-up 配置另加 1 MiB 上限；原消息、HTTP/IPC、metadata 与 Worker 队列限制分别保持。大配置仍参与完整 operation 摘要、子激活全等和冷恢复核对，没有 Skill 专用 SQL 分支。
-
-不可变 anchor、CAS head 与 append-only attempts 由扩展 records 持有，fork 和脚本核验使用普通 operation/Execution。内部状态变化不改写原 Model sources；required 失败后的 repair 仍保留原 ceiling、最低审批与 source freshness。新尝试只能由准确原 failed proof 和实际 repair/replan carrier 创建，旧 complete/verify 的缺省始终指 attempt 1，不能指向新 head。child 的实际工具、Job 与原来源范围由可信父快照和原 opening Execution 限制，resolver 只读父 namespace 的完整投影自动进入最终 carrier/activation 事务 CAS；prompt 不提供权限。完整输出、原 result revision 与 configured verifier proof 均在最终完成条件中核对；失败/未知不自动重跑，Session fork 不复制旧 activation 权利。最低审批不能扩大原策略硬拒绝。
-
-可信 Service 封存 versioned replan/waiver/compensation policy，JSONC/Skill/Model 不提供决定权。真实普通 question 的 request/accepted receipt 绑定原 Store、主体、Session/Run、anchor、requirement/Skill revision、head/attempt、完整 output digest 与原 verifier proof。waiver 另存 waived，原 verification 仍 failed；replan 另建 attempt。信息问题前后核实际 bound permissions/control reads，最终条件连同原决定记录一起核验。通用执行安全读取从原 Run 的持久 parent/child 闭包形成完整 revision、boolean 与准确 unconfirmed IDs；Host 只固定自身 Tool 排除项且遍历其后代，Job 不排除。实际 planned Job 的 satisfied dispatch/approval 可核自身与准确父工作，最终事务复算同一闭包；completion/waiver 与信息接纳仍要求无未清效果。普通无约束对话不因此新增全局义务。
-
-完整人工审批 request 超过有限卡预算时，以准确原 Execution scope Artifact 交接原 input/policy/grants；卡复用既有完整附件协议。接受与最终授权核 hash、scope、完整原文和当前准确 policy，主体与原审批 binding 保持；相同正文的两次审批仍有独立 Execution 引用，不互借许可。CLI 原 work 的 runless verifier 卡从准确持久 parent Execution 闭包定位，不用当前 active Run 猜测。CLI/TUI 未知 answer 保留原答复 Command，恢复只 GET 原 ID，不能重复 POST 或改绑新会话。
-
-手动调用目录以 `workflow=manual` 和实际 source 的 `skill_workflow_catalogue` 显式启用；原闭合知识 DTO 与 revision 保持原路径。投影与运行共用可信源编译和实际 Tool/Job/role facts，额外元数据不含指令、路径或凭据。读取不调用 Model、vault、MCP 或 Job，资格只说明当前手动空输入可用，不预订未来执行版本。Service 在提交时重新绑定实际源，不由客户端目录扩大权限。
-
-终端把知识 `--skill` 与执行 `--activate-skill` 分开，TUI 动态名称仅从真实 compiled metadata 唯一匹配，固定命令优先。完整 `extensionInputs` 属于原 Command；idle 使用 start，active 显式激活使用原 afterRunId/contextSelection 的 follow-up。未知回执只按原 ID 查询，不重复 POST；目录、迟到回执与草稿清理始终绑定原 scope/version。具体目录与调用边界由 [Service](../../apps/service/README.md#同源-skill-知识目录)、[Client](../../packages/client/README.md)、[CLI](../../apps/cli/README.md)和 [TUI](../../packages/ui/src/tui/README.md)负责。
-
-专用 profile `skill-workflow.jsonc` 默认关闭三项特性，纳入[维护原字节资产](../../packages/agent/src/maintenance/README.md)，不因恢复或缺文件自动启用。原 operation 等待超过有限观测窗口仍只查询原工作；没有隐藏重启器。声明补偿在原 Workspace 内契约、可信 policy 与实际 macOS confined 后端齐备时，使用独立 ordinary `skill.workflow.compensate@1`、原 accepted decision、一次 opening/operation 与 minimum:user 审批。完整原字节含二进制被封入只读副本，固定 Bun 在原 Workspace 执行，实际网络/fork/保护写拒绝；guardian 未确认仍保 unknown 和资产。compensated 不改 failed，也不替代新验证或准确 waiver。当前仅禁止子进程模式，完整恢复、正式入口和平台范围继续按[实施进度](../plans/unified-agent-refactor-v1-progress.md)闭合；取舍见[补偿记录](../../.agents/notes/implemented/architecture/2026-10-03-declared-workflow-compensation.md)。
-
-macOS 默认宿主、显式普通 POSIX 与严格 confined 沿用原 guardian/held-root 的唯一 closing和准确 reap。默认 ProcessService 已装配宿主后端，以原 resource coalition/内核 task count/pidversion 信号另核完整 setsid/orphan 后代；普通 POSIX 只证明原组，confined 仍固定 deny-fork。最终已接受的 dispatchAuthorization 快照在原 Store 派发事务之后交给 Job.start，只供可信宿主选择执行范围，不代替 grant、控制读集或取消。完整合同与当前 arm64 实测归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)和[Service](../../apps/service/README.md#默认-shell-装配)。冷读取/unknown不取得旧执行能力。
-
-Linux 默认 Shell、Workspace Skill verifier 与严格补偿现经正式 Service 选择[原 PID namespace 源码后端](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。每个 Job 消费自身定义的最终 scope，verifier 保原 Skill cwd 和独立授权 Workspace；冷 closed v2 不恢复 native 控制，清理未知继续保原 resource／binding lease。Profile Skill 来源投影、macOS verifier 全树迁移和 Linux 原生资格尚未闭合，实际跨包保护及平台门禁归[执行边界](execution-boundary.md#当前-v13-边界)与[平台范围](execution-platform-support.md#当前-v13-执行与发行)。Core／HTTP 公共业务合同及资源观测门禁保持。
+专用外部文件工具同时移除，外部路径只读接入原 `read_file`，修改使用 Shell。外部读取复用统一权限，按请求和实际路径检查保护范围，不生成编辑基线、不检查单链接数、不在 Tool 内重复核父子授权链；Workspace 编辑和私有附件／plan／output 的范围与恢复合同保持。路径规则不承诺识别同一文件的所有硬链接别名，具体交付归[Files owner](../../packages/agent/src/tools/files/README.md#统一读取工作区外文件)。
 
 ## 新终端候选边界
 

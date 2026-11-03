@@ -698,12 +698,11 @@ for (const slots of [4, 16])
           const view = await client.getView(childSessionId);
           return {
             session: view.session,
-            runs: view.runs.map(({ id, status, isActive, reason, waitingForResults }) => ({
+            runs: view.runs.map(({ id, status, isActive, reason }) => ({
               id,
               status,
               isActive,
               reason,
-              waitingForResults,
             })),
             executions: view.executions.map(({ result, ...execution }) => execution),
           };

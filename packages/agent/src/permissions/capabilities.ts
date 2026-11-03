@@ -1,18 +1,7 @@
 import type { AuthorizationRequest } from '../extensions';
-import type { WorkflowCapability } from '../skills/workflow-contract';
 import type { CapabilityDescription, CapabilityEffect } from './index';
 
-const planningRecordWrites = new Set([
-  'planning.write',
-  'planning.update',
-  'planning.review',
-  'validation.define',
-  'validation.check',
-  'validation.auto_check',
-  'validation.rebind',
-  'validation.request_waiver',
-  'validation.waive',
-]);
+const planningRecordWrites = new Set(['planning.write', 'planning.update', 'planning.review']);
 export function planningEffect(id: string): CapabilityEffect {
   return id === 'planning.read'
     ? 'read'
@@ -22,9 +11,7 @@ export function planningEffect(id: string): CapabilityEffect {
 }
 export function hostReadOnlyTool(extensionId: string, toolId: string) {
   return (
-    (extensionId === 'builtin.files.path' && toolId === 'files.read_path') ||
-    (extensionId === 'builtin.files' &&
-      ['files.read', 'files.list', 'files.glob', 'files.search'].includes(toolId)) ||
+    (extensionId === 'builtin.files' && toolId === 'files.read') ||
     (extensionId === 'builtin.skills' && ['skills.load', 'skills.resource'].includes(toolId)) ||
     (extensionId === 'builtin.mcp.sources' && toolId === 'mcp.sources.list') ||
     (extensionId === 'builtin.mcp.discovery' && toolId === 'mcp.tools.search') ||
@@ -56,28 +43,8 @@ export function taskToolCapability(id: string): {
   effects: readonly CapabilityEffect[];
   safeRead: boolean;
 } {
-  if (
-    [
-      'task_read',
-      'task_wait',
-      'list_agents',
-      'wait_agents',
-      'wait_agent',
-      'task.events',
-      'task.list',
-    ].includes(id)
-  )
-    return { effects: ['read'], safeRead: true };
-  if (
-    [
-      'task',
-      'send_message',
-      'followup_task',
-      'task.spawn',
-      'task.message',
-      'task.follow_up',
-    ].includes(id)
-  )
+  if (['task.events', 'task.list'].includes(id)) return { effects: ['read'], safeRead: true };
+  if (['task.spawn', 'task.message', 'task.follow_up'].includes(id))
     return { effects: ['unknown', 'record_write'], safeRead: false };
   return { effects: ['unknown'], safeRead: false };
 }
@@ -117,10 +84,6 @@ export function builtinCapability(
     ['planning.write', 'planning.review', 'planning.update'].includes(toolId)
   )
     return { effects: ['record_write'], safeRead: false, internalRecordOnly: true };
-  if (extensionId === 'builtin.files.path')
-    return ['1', '2'].includes(definitionVersion ?? '') && toolId === 'files.read_path'
-      ? { effects: ['read'], safeRead: true }
-      : { effects: ['external'], safeRead: false };
   if (extensionId === 'builtin.task') return taskToolCapability(toolId);
   if (extensionId === 'builtin.web' && toolId === 'web_fetch' && definitionVersion === '1')
     return { effects: ['network', 'unknown'], safeRead: false };
@@ -131,61 +94,6 @@ export function builtinCapability(
         ? []
         : [builtinToolEffect(extensionId, toolId, planningId)],
     safeRead: hostReadOnlyTool(extensionId, toolId),
-  };
-}
-
-/** Workflow keeps its original conservative Job and unknown-file ceilings. */
-export function workflowCapabilityDescription(
-  description: Pick<
-    CapabilityDescription,
-    'definitionId' | 'definitionVersion' | 'revision' | 'effects'
-  > & { kind: 'tool' | 'job'; extensionId?: string },
-): {
-  kind: 'tool' | 'job';
-  definitionId: string;
-  definitionVersion: string;
-  capability: WorkflowCapability;
-} {
-  const { kind, definitionId, definitionVersion, revision } = description;
-  // Permission classification treats an unknown Files tool as unknown; the existing
-  // Workflow contract conservatively reserves workspace writes for that projection.
-  const effects: readonly CapabilityEffect[] =
-    kind === 'tool' &&
-    description.extensionId === 'builtin.files' &&
-    description.effects.includes('unknown')
-      ? (['workspace_write'] as const)
-      : description.effects;
-  return {
-    kind,
-    definitionId,
-    definitionVersion,
-    capability: {
-      capabilityId: definitionId,
-      revision,
-      availability: 'available',
-      effectiveEffects: {
-        filesystem:
-          kind === 'job'
-            ? 'unknown'
-            : effects.length === 0
-              ? 'none'
-              : effects.includes('workspace_write')
-                ? 'write'
-                : effects.every((effect) => effect === 'read')
-                  ? 'read'
-                  : 'unknown',
-        network: kind === 'job' || effects.includes('network') ? 'unknown' : 'none',
-        externalState:
-          kind === 'job' ||
-          effects.some((effect) => ['external', 'process', 'unknown'].includes(effect))
-            ? 'unknown'
-            : 'none',
-      },
-      policy: {
-        minimumApproval:
-          kind === 'tool' && effects.every((effect) => effect === 'read') ? 'none' : 'user',
-      },
-    },
   };
 }
 

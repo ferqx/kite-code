@@ -19,7 +19,6 @@ import type {
 import type { AgentOperationView } from './task/port';
 
 export type { PermissionControlRead } from '../storage/port';
-
 export type {
   ExecutionOutputPage,
   ExtensionRecord,
@@ -103,6 +102,16 @@ export interface ToolDefinition {
 }
 export interface JobHandle {
   readonly reference: Json;
+}
+/** Failed admission: an original handle must be observed and disposed without
+ * recording running. An absent handle certifies no external dispatch occurred. */
+export class JobStartError extends Error {
+  readonly handle: JobHandle | undefined;
+  constructor(handle: JobHandle | undefined, code = 'job_start_failed') {
+    super(/^[a-z][a-z0-9_]{1,80}$/.test(code) ? code : 'job_start_failed');
+    this.name = 'JobStartError';
+    this.handle = handle;
+  }
 }
 export interface JobContext {
   readonly sessionId: string;
@@ -199,7 +208,7 @@ export interface Extension {
 export interface PublicRun {
   /** Read-only persisted provenance. Older external readers may omit it. */
   readonly originStoreId?: string;
-  waitingForResults: string[];
+
   id: string;
   sessionId: string;
   status: RunStatus;
@@ -306,8 +315,8 @@ export interface OperationOptions {
   /** Agent result is consumed by this caller instead of automatically entering Session context. */
   resultDelivery?: 'caller';
   /** Request only; the trusted Run policy must independently authorize this. */
-  continuation?: { kind: 'after_turn' | 'agent_completion' };
-  resultRequirement?: import('../storage/types').ResultRequirementDeclaration;
+  continuation?: { kind: 'agent_completion' };
+
   key: string;
   request: OperationRequest;
   planRecordKey?: string;

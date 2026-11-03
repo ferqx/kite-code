@@ -6,7 +6,6 @@ import {
   type PlanningState,
   planningExtensionId,
 } from '@kite-ai/agent/planning';
-import { skillWorkflowExtensionId } from '@kite-ai/agent/skill-workflow';
 import type { CommandRecord, ExecutionRecord, RunRecord } from '@kite-ai/agent/storage';
 
 export type PlanningIntent = { readonly mode: 'plan' } | null;
@@ -27,15 +26,13 @@ export const planningSnapshotDigest = (value: Json) =>
 /** Dispatch envelopes without changing the original Command or its digest. */
 export function readBusinessRunInputs(request: Json): {
   planning: PlanningIntent;
-  workflowRequest: Json;
 } {
   if (!object(request)) throw new AgentError('business_run_input_invalid');
   const inputs = request.extensionInputs;
-  if (inputs === undefined) return { planning: null, workflowRequest: structuredClone(request) };
+  if (inputs === undefined) return { planning: null };
   if (!Array.isArray(inputs)) throw new AgentError('business_run_input_invalid');
   const ids = new Set<string>();
   let planning: PlanningIntent = null;
-  const workflow: Json[] = [];
   for (const input of inputs) {
     if (
       !object(input) ||
@@ -55,11 +52,9 @@ export function readBusinessRunInputs(request: Json): {
       )
         throw new AgentError('planning_run_input_invalid');
       planning = Object.freeze({ mode: 'plan' });
-    } else if (input.extensionId === skillWorkflowExtensionId)
-      workflow.push(structuredClone(input));
-    else throw new AgentError('business_run_input_unavailable');
+    } else throw new AgentError('business_run_input_unavailable');
   }
-  return { planning, workflowRequest: { ...structuredClone(request), extensionInputs: workflow } };
+  return { planning };
 }
 
 export function readPlanningIntent(snapshot: Json): PlanningIntent {
@@ -287,20 +282,16 @@ export async function readBoundJobReportParent(
     carrier.delivery !== 'consumed' ||
     carrier.resultAcceptance?.runId !== reportRun.id ||
     !object(binding) ||
-    !['after_turn', 'agent_completion'].includes(String(binding.kind)) ||
+    binding.kind !== 'agent_completion' ||
     binding.parentRunId !== parent.id ||
     binding.sourceExecutionId !== carrier.parentExecutionId ||
     typeof binding.sourceExecutionId !== 'string' ||
     binding.contextSelectionId !== command.request.contextSelectionId ||
     planningSnapshotDigest(binding.configuration!) !==
       planningSnapshotDigest(carrier.childConfiguration as unknown as Json) ||
-    (binding.kind === 'after_turn' &&
-      planningSnapshotDigest(binding.authorization!) !==
-        planningSnapshotDigest(command.request.authorization!)) ||
-    (binding.kind === 'agent_completion' &&
-      (command.receipt.sourceId !== carrier.resultAcceptance?.sourceId ||
-        command.receipt.resultRevision !== carrier.resultRevision ||
-        carrier.resultAcceptance?.selectionId !== command.request.contextSelectionId))
+    command.receipt.sourceId !== carrier.resultAcceptance?.sourceId ||
+    command.receipt.resultRevision !== carrier.resultRevision ||
+    carrier.resultAcceptance?.selectionId !== command.request.contextSelectionId
   )
     throw unavailable();
   const [source, origin, child] = await Promise.all([

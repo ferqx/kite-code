@@ -1844,19 +1844,28 @@ export class AgentRuntime {
             : current.status === 'cancelled'
               ? ('cancelled' as const)
               : ('failed' as const);
-      const messages =
+      let messages: ModelMessage[] = [];
+      if (outcome === 'succeeded' || outcome === 'failed') {
+        try {
+          messages = await this.modelMessages(
+            activation.session.id,
+            parent.command.originStoreId,
+            undefined,
+            parent.command.subjectId,
+          );
+        } catch (error) {
+          // A failed child may have an incomplete/unreadable frontier. Preserve its
+          // actual terminal reason; absent preview never proves absent prior work.
+          if (outcome === 'succeeded') throw error;
+        }
+      }
+      const assistant =
         outcome === 'succeeded'
-          ? await this.modelMessages(
-              activation.session.id,
-              parent.command.originStoreId,
-              undefined,
-              parent.command.subjectId,
-            )
-          : [];
-      const assistant = messages
-        .slice()
-        .reverse()
-        .find((message) => message.role === 'assistant');
+          ? messages
+              .slice()
+              .reverse()
+              .find((message) => message.role === 'assistant')
+          : undefined;
       const content =
         assistant?.content ??
         current?.reason ??
@@ -5417,42 +5426,39 @@ export class AgentRuntime {
   }
   private async onJobSettled(scope: StandaloneScope, id: string) {
     const execution = await this.options.store.getExecution(id);
-    const fact = execution?.afterTurn as { parentRunId?: string } | null;
-    if (!execution || !fact?.parentRunId) return;
+    const fact = execution?.afterTurn as { kind?: string; parentRunId?: string } | null;
+    if (!execution || fact?.kind !== 'agent_completion' || !fact.parentRunId) return;
     const commandId = `report-${await semanticDigest([execution.originStoreId, id, execution.resultRevision])}`;
     const command = await this.options.store.getCommand(commandId);
-    if (this.closing) return;
-    const pending: CommandRecord[] = command?.status === 'accepted' ? [command] : [];
-    const mailbox =
-      (command?.request as { mailboxVersion?: number } | undefined)?.mailboxVersion === 1;
+    if (
+      this.closing ||
+      !command ||
+      (command.request as { mailboxVersion?: number }).mailboxVersion !== 1
+    )
+      return;
+    const pending: CommandRecord[] = command.status === 'accepted' ? [command] : [];
+
     let afterSeq = '0';
     for (;;) {
-      const page = mailbox
-        ? await this.options.store
-            .listAgentMessages({
-              expectedStoreId: execution.originStoreId,
-              sessionId: execution.sessionId,
-              subjectId: command!.subjectId,
-              pendingOnly: true,
-              afterSeq,
-              limit: 100,
-            })
-            .then(async (page) => ({
-              ...page,
-              commands: (
-                await Promise.all(
-                  page.items
-                    .filter((mail) => mail.kind === 'result')
-                    .map((mail) => this.options.store.getCommand(mail.id)),
-                )
-              ).filter((item): item is CommandRecord => item !== null),
-            }))
-        : await this.options.store.listPendingJobReports({
-            expectedStoreId: execution.originStoreId,
-            sessionId: execution.sessionId,
-            afterSeq,
-            limit: 100,
-          });
+      const page = await this.options.store
+        .listAgentMessages({
+          expectedStoreId: execution.originStoreId,
+          sessionId: execution.sessionId,
+          subjectId: command!.subjectId,
+          pendingOnly: true,
+          afterSeq,
+          limit: 100,
+        })
+        .then(async (page) => ({
+          ...page,
+          commands: (
+            await Promise.all(
+              page.items
+                .filter((mail) => mail.kind === 'result')
+                .map((mail) => this.options.store.getCommand(mail.id)),
+            )
+          ).filter((item): item is CommandRecord => item !== null),
+        }));
       for (const continued of page.commands) {
         if (
           continued.kind === 'job.report.continue' &&
@@ -5542,10 +5548,8 @@ export class AgentRuntime {
   ) {
     const receive = async () => {
       const original = await this.options.store.getCommand(input.commandId);
-      // Unmarked historical reports and non-Agent Jobs retain their original protocol.
       const version = (original?.request as { mailboxVersion?: number } | undefined)
         ?.mailboxVersion;
-      if (version === undefined) return this.options.store.applyJobReport(input);
       if (version !== 1) throw new AgentError('agent_message_unverifiable');
       await this.options.store.receiveAgentMessages({
         expectedStoreId: input.expectedStoreId,
@@ -5757,13 +5761,17 @@ export class AgentRuntime {
       const originalCarrier = await this.options.store.getExecution(
         (command.request as { executionId: string }).executionId,
       );
-      const collaboration =
-        (originalCarrier?.afterTurn as { kind?: string } | null)?.kind === 'agent_completion';
-      const carriedMessageIds =
-        collaboration && originalCarrier
-          ? await this.carriedAgentMessageIds(command, originalCarrier, controller.signal)
-          : [];
-      if (collaboration) {
+      if (
+        !originalCarrier ||
+        (originalCarrier.afterTurn as { kind?: string } | null)?.kind !== 'agent_completion'
+      )
+        throw new AgentError('report_unverifiable');
+      const carriedMessageIds = await this.carriedAgentMessageIds(
+        command,
+        originalCarrier,
+        controller.signal,
+      );
+      {
         const active = await this.receiveResultWithReceipt({
           expectedStoreId: command.originStoreId,
           owner,
@@ -5777,14 +5785,6 @@ export class AgentRuntime {
         if (reason !== 'idle_authorization_required') {
           deferred = true;
           this.watchDeferredReport(active.command);
-          return;
-        }
-      } else {
-        const parent = await this.options.store.getRun(
-          (command.request as { parentRunId: string }).parentRunId,
-        );
-        if (parent?.isActive) {
-          deferred = true;
           return;
         }
       }
@@ -7356,69 +7356,7 @@ export class AgentRuntime {
           throw new AgentError('context_refresh_required');
         capturedInputVersion = inputVersion;
       }
-      const requiredResults = async () => {
-        const current = await this.options.store.getRun(run.id);
-        let added = 0;
-        for (const ref of current?.requirements ?? []) {
-          if (
-            ref.runId !== run.id ||
-            ref.phase === 'dispatch' ||
-            ref.evaluationProvider !== 'extension'
-          )
-            continue;
-          const record = await this.options.store.getExtensionRecord({
-            extensionId: ref.extensionId,
-            sessionId: ref.sessionId,
-            key: ref.recordKey,
-          });
-          const value = record?.value;
-          if (
-            !value ||
-            typeof value !== 'object' ||
-            Array.isArray(value) ||
-            value.kind !== 'operation_result' ||
-            typeof value.executionId !== 'string'
-          )
-            continue;
-          const execution = await this.options.store.getExecution(value.executionId);
-          if (
-            !execution ||
-            !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status)
-          )
-            continue;
-          if (
-            execution.resultAcceptance?.runId === run.id &&
-            execution.resultAcceptance.selectionId === value.contextSelectionId &&
-            execution.resultAcceptance.resultRevision === execution.resultRevision
-          )
-            continue;
-          const commandId = `required-${createHash('sha256')
-            .update(
-              canonicalJson([
-                run.originStoreId,
-                run.id,
-                value.executionId,
-                execution.resultRevision,
-              ]),
-            )
-            .digest('hex')}`;
-          const before = await this.options.store.getCommand(commandId);
-          await this.options.store.consumeJobResult({
-            expectedStoreId: run.originStoreId,
-            owner,
-            commandId,
-            sessionId: run.sessionId,
-            executionId: execution.id,
-            resultRevision: execution.resultRevision,
-            contextSelectionId: String(value.contextSelectionId),
-            targetRunId: run.id,
-            requiredRef: ref,
-            ...(execution.status === 'outcome_unknown' ? { requiredDiagnostic: true } : {}),
-          });
-          if (!before) added++;
-        }
-        return added;
-      };
+
       if (command.kind === 'context.compression.reset') {
         const request = command.request as {
           expectedContextSelectionId: string;
@@ -7482,12 +7420,6 @@ export class AgentRuntime {
         return;
       }
       complete: while (true) {
-        await this.options.store.setRunResultWait({
-          expectedStoreId: run.originStoreId,
-          owner,
-          runId: run.id,
-          executionIds: [],
-        });
         await defaultLoop(loopContext);
         if (
           (await receivePendingInputs()) > 0 ||
@@ -7495,12 +7427,10 @@ export class AgentRuntime {
           inboxVersion !== capturedInboxVersion
         )
           continue;
-        let resultChanged = false;
-        const seenInteractions = new Set<string>();
-        settle: for (;;) {
+
+        for (;;) {
           controller.signal.throwIfAborted();
-          const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
-          resultChanged = (await requiredResults()) > 0 || resultChanged;
+
           const { evaluations, observation } = await this.execution.requirementEvaluation(
             scope,
             'completion',
@@ -7509,10 +7439,7 @@ export class AgentRuntime {
           );
           // A child can settle after the initial read but before evaluation finishes.
           // Admit its exact result before treating that fresh terminal state as a failure.
-          if ((await requiredResults()) > 0) {
-            resultChanged = true;
-            continue;
-          }
+
           if (
             (await receivePendingInputs()) > 0 ||
             inputVersion !== capturedInputVersion ||
@@ -7521,7 +7448,6 @@ export class AgentRuntime {
             continue complete;
           const blocked = evaluations.filter((evaluation) => evaluation.outcome === 'unsatisfied');
           if (!blocked.length) {
-            if (resultChanged) continue complete;
             if (!completionLifecycleDispatched) {
               completionLifecycleDispatched = true;
               await this.runLifecycleActions('beforeRunComplete', command, owner, run, controller);
@@ -7740,66 +7666,7 @@ export class AgentRuntime {
             if (continueModel) continue complete;
             continue;
           }
-          const ids = [
-            ...new Set(blocked.flatMap((evaluation) => evaluation.wait?.executionIds ?? [])),
-          ];
-          if (blocked.some((evaluation) => !evaluation.wait?.executionIds.length) || !ids.length) {
-            if (resultChanged) continue complete;
-            throw new AgentError('necessary_condition_unsatisfied');
-          }
-          for (const id of ids) {
-            const execution = await this.options.store.getExecution(id);
-            const parent = execution?.parentExecutionId
-              ? await this.options.store.getExecution(execution.parentExecutionId)
-              : null;
-            if (
-              execution?.kind !== 'job' ||
-              execution.originStoreId !== run.originStoreId ||
-              execution.sessionId !== run.sessionId ||
-              parent?.runId !== run.id ||
-              execution.rootWorkCommandId !== run.rootWorkCommandId ||
-              execution.rootWorkSeq !== run.rootWorkSeq
-            )
-              throw new AgentError('required_result_unverifiable');
-            if (!['planned', 'dispatching', 'running'].includes(execution.status)) continue settle;
-          }
-          try {
-            await this.options.store.setRunResultWait({
-              expectedStoreId: run.originStoreId,
-              owner,
-              runId: run.id,
-              executionIds: ids,
-            });
-          } catch (error) {
-            if (error instanceof AgentError && error.code === 'result_wait_changed') continue;
-            throw error;
-          }
-          const events = await this.changeWaits.wait(
-            cursor,
-            controller.signal,
-            Math.max(0, Math.min(30000, (run.deadlineAt ?? Number.MAX_SAFE_INTEGER) - Date.now())),
-          );
-          if ((await receivePendingInputs()) > 0) continue complete;
-          for (const event of events) {
-            if (
-              seenInteractions.has(event.objectId) ||
-              !['interaction.requested', 'interaction.projected'].includes(event.type)
-            )
-              continue;
-            const interaction = await this.options.store.getInteraction({
-              expectedStoreId: run.originStoreId,
-              sessionId: run.sessionId,
-              interactionId: event.objectId,
-            });
-            if (!interaction) continue;
-            const children = await Promise.all(
-              ids.map((id) => this.options.store.getExecution(id)),
-            );
-            if (children.some((execution) => execution?.childSessionId === interaction.sessionId)) {
-              seenInteractions.add(event.objectId);
-              continue complete;
-            }
-          }
+          throw new AgentError('necessary_condition_unsatisfied');
         }
       }
     } catch (error) {
@@ -8202,28 +8069,6 @@ export class AgentRuntime {
       upperCursor ??= page.highWaterCursor;
       for (const result of page.jobs) {
         signal.throwIfAborted();
-        const currentRun = await this.options.store.getRun(run.id);
-        let required = false;
-        for (const ref of currentRun?.requirements ?? []) {
-          if (ref.runId !== run.id || ref.evaluationProvider !== 'extension') continue;
-          const record = await this.options.store.getExtensionRecord({
-            extensionId: ref.extensionId,
-            sessionId: ref.sessionId,
-            key: ref.recordKey,
-          });
-          const value = record?.value;
-          if (
-            value &&
-            typeof value === 'object' &&
-            !Array.isArray(value) &&
-            value.kind === 'operation_result' &&
-            value.executionId === result.executionId
-          ) {
-            required = true;
-            break;
-          }
-        }
-        if (required) continue;
         // Imported or rewound facts remain historical; observation cannot grant a new delivery.
         if (
           result.originStoreId !== run.originStoreId ||

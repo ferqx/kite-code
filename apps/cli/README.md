@@ -78,9 +78,7 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 选择只缩小当前 Run 的 catalogue、sources、Tool lookup 和封存配置，不隐式启用 `skills.load`、运行资源脚本、扩大文件/网络范围或记录信任。已选择普通 `skills.load` 的宿主可按需读取全文，仍走真实权限与 UnifiedExecution；CLI 不复制发现器或 Skill manager。[test/isolated/host-skills.test.ts](test/isolated/host-skills.test.ts) 的知识场景使用实际 argv、构建 Service、临时 SQLite 与本机固定 compatible endpoint，验证完整正文/原来源、两 Run 独立 ID/hash 快照、unknown/ambiguous 原拒绝与零 Provider，以及未信任时零 Tool 派发、零脚本。完整资源操作与正式 CLI/TUI 制品切换仍由整体资格负责。
 
-显式 Workflow 使用独立、可重复的 `--activate-skill <compiled-name或skill:ID>`，仅 `run/resume` 接受，状态查询与管理/维护入口拒绝混用。参数存在时先要求实际 `skill_workflow_catalogue/run_extension_inputs`，在创建任务前由公共 `listAllSkills(...,{workflow:'manual'})` 穷尽原目录，不扫描本机文件或推断 flags。helper [workflow-activations.ts](host/workflow-activations.ts) 优先匹配真实 compiled name/ID；只有不可用项才可借知识名提供拒绝原因。重名拒绝、同项去重，生成稳定 `manual-N` key 与原 `input:{}`，任务内容不转成 schema 字段。
-
-知识 `selectedSkills` 与 Workflow `extensionInputs` 可以共存，各自保留原 Command。激活前读取原 Session view；idle 使用 `run.start`，有原活动 Run 时用准确 `afterRunId/contextSelectionId` 的 `input.follow_up`。便携 [run helper](src/index.ts) 对两类意图共用冻结、原 ID 查回与观察，不重发丢回执或更改原 Run 契约。目录 revision 仅用于完整分页，Service 仍在实际开始时重新绑定可信源。[配对测试](test/isolated/host-skills.test.ts)和[共享测试](test/isolated/shared-skills.test.ts)包含真实 argv、混合知识/Workflow、关闭及结构化输入零 Model、物理断线一 POST，以及活动 Run 的后续激活；实际结果见[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+Workflow 执行及 `--activate-skill` 已退役；CLI `--skill` 仍选择普通知识，TUI `/skills` 保留只读目录。旧激活选项在解析阶段拒绝，通用 Planning 输入和原命令查询继续可用。
 
 2026-10-19本机原[argv host](test/isolated/host.test.ts)、[Skill host](test/isolated/host-skills.test.ts)与[101轮管理](test/isolated/session-context-management.test.ts)分别2项60断言5.47秒、7项85断言6.69秒、1项335断言5.77秒通过。resume明确Follow up同工作，第二Skill与管理探针明确原独立New task；实际public/raw/decision/business/Run及Model Source逐条核验。17MiB完整正文、两份Skill快照、原2+1与4+1业务/标题Provider、101业务+1压缩/202消息/分页Fork/Rewind/reset/delete/丢回执和原45/15/30秒整例预算保持。输入已applied后继续观察准确业务Run终态，不能以原公共输入受理或数组位置代替完成。
 
@@ -175,7 +173,7 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 [源码外真实 PTY](test/isolated/tui-question-pty.test.ts)使用公共 Terminal candidate builder、实际默认 Process configuration 与普通 ask_user、真实 Service/SQLite/Client 和 80×24 键盘。Profile 不显式列出 Tool，键盘确认 Workspace trust 与 Ask；本机 compatible Provider 发出 canonical 三题，并核后续真实请求中的文案与自由原文。测试验证推荐标记、无默认答案、多题回退改选、Unicode/首尾空格/多行 paste、自由 ID 碰撞、各中间步骤零 Answer，以及最终原卡唯一答案、原 Tool/Run 完成、GET-only 观察、正常 Ctrl+Q 和所属 Service 清理。临时 credential backend 不证明 OS vault；不建立收费 Provider、正式安装、异常退出或其他平台资格。
 
-[原 Workflow PTY](test/isolated/tui-workflow-question-host.test.ts)已改为真实 decision/detail 步骤键序；replan/waive 的丢 Answer 响应和首 GET 丢回执仍只查询原答案命令，取消仍准确作用原 Run。既有[配对](../../packages/ui/test/isolated/tui/paired.test.ts)与[子会话](../../packages/ui/test/isolated/tui/child-permissions.test.ts)保持完整正文、原卡身份、取消及 EOF 零批准断言，仅更新已支持问题的选择键序。实际范围、冻结版本与日志见[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+[原 Workflow PTY](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/cli/test/isolated/tui-workflow-question-host.test.ts)已改为真实 decision/detail 步骤键序；replan/waive 的丢 Answer 响应和首 GET 丢回执仍只查询原答案命令，取消仍准确作用原 Run。既有[配对](../../packages/ui/test/isolated/tui/paired.test.ts)与[子会话](../../packages/ui/test/isolated/tui/child-permissions.test.ts)保持完整正文、原卡身份、取消及 EOF 零批准断言，仅更新已支持问题的选择键序。实际范围、冻结版本与日志见[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 ## 开发 CLI 离线维护
 
@@ -254,7 +252,7 @@ TUI 观察不可用独立于快照读取失败：SSE 出错而 HTTP 仍健康时
 
 ## 开发 TUI 模型设置
 
-`host/tui.tsx` 将公共 getModelSettings/updateModelSettings/getHostMutation 适配为 UI 的有限模型端口。`/model` 和 `/effort` 固定 user scope，统一修改 ~/.kite-code/kite-code.jsonc 的默认值、启禁和六档 effort（low/medium/high/xhigh/max/ultar）；切换 Workspace/Profile 不改变来源。默认模型和 effort 上下选择后单 Enter 保存，E 启用／禁用仍有独立确认。Session 仍拥有各自原输入与观察 generation，模型未知提交则按用户范围阻止竞争写入。宿主不自行写 JSONC 或推导远端能力；提交固定原 Store/read-set/commandId，原查询比较 userEtag、scope 和原操作。pending/丢回执保持 unknown，仅显式原 GET，不重发 POST。首次配置也使用同一 user scope。主界面头部同样只接受当前 Store、user scope 且无 workspaceId 的模型配置观察，显示该用户默认模型；项目配置不提供头部模型。
+`host/tui.tsx` 将公共 `listAllSkills(workspaceId,{storeId,signal})` 接入 `/skills`。全部页使用原准入 Store 与当前 Workspace，在固定目录 revision 下完整收集；宿主不扫描 Skill 文件、读取正文或制造执行请求。目录仅展示普通知识 metadata；R 刷新，Esc/Ctrl+C 释放所属读取。配对/共享使用同一方法，退出按已有所属生命周期处理。
 
 [模型 controller 测试](../../packages/ui/test/tui/models.test.tsx) 核对 stale、原观察、迟到与原查询；[实际 PTY 测试](test/isolated/tui-models-host.test.ts) 使用自有临时 profile、固定本机 compatible Provider 和标准 80×24 终端验证真实按键。最终资格与失败过程记录于[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。此接入不扩展 Native 的有限设置 IPC，也不代表远端模型发现或正式旧 TUI 切换完成。
 
@@ -284,9 +282,9 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 
 ## 开发 TUI Skill 目录
 
-`host/tui.tsx` 将公共 `listAllSkills(workspaceId,{storeId,signal,workflow?})` 接入 `/skills`。全部页使用原准入 Store 与当前 Workspace，在固定目录 revision 下完整收集；宿主不扫描 Skill 文件、读取正文或制造执行请求。仅确认 `skill_workflow_catalogue/run_extension_inputs` 两项能力时设置 `workflow:'manual'` 和 port 的 `workflowActivation`；无能力仍保持原知识目录。目录面板仅查看 metadata、独立 Workflow 资格与有限原因；R 刷新，Esc/Ctrl+C 释放所属读取。配对/共享使用同一方法，退出按已有所属生命周期处理。
+`host/tui.tsx` 将公共 `listAllSkills(workspaceId,{storeId,signal})` 接入 `/skills`。全部页使用原准入 Store 与当前 Workspace，在固定目录 revision 下完整收集；宿主不扫描 Skill 文件、读取正文或制造执行请求。仅确认 `skill_workflow_catalogue/run_extension_inputs` 两项能力时设置 `workflow:'manual'` 和 port 的 `workflowActivation`；无能力仍保持原知识目录。目录面板仅查看 metadata、独立 Workflow 资格与有限原因；R 刷新，Esc/Ctrl+C 释放所属读取。配对/共享使用同一方法，退出按已有所属生命周期处理。
 
-共享 UI controller 实现动态 `/<compiled-name> [task]`、原 scope/草稿复核和准确 start/follow-up，host 只转交公共请求；固定命令优先，知识名不成为执行许可。当前会话的原 unknown Command 自动只读核对；Ctrl+L 已移除，不触发刷新或查询，也不重复 POST。操作语义见[TUI 指南](../../docs/handbook/clients/tui/guides/mcp-and-skills.md#通用开发-tui-的-skill-目录)。[实际80×24目录测试](test/isolated/tui-skills-host.test.ts)负责跨页、读取隔离、零模型/执行；[动态 Workflow PTY](test/isolated/tui-workflow-host.test.ts)验证配对/共享实际输入、初始指令、原激活与完整完成，以及退出时准确所属进程。实际结果记录在[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+共享 UI controller 只读取普通 Skill 知识目录，不生成 Skill 激活命令；MCP prompt 的动态选择仍由独立原目录负责。原 Store、目录 revision、scope、草稿和 unknown Command 查询边界保持。
 
 同一[完整目录文件](test/isolated/tui-skills-host.test.ts)现沿[共享Bun驱动](test/fixtures/tui-skills-driver.ts)运行paired／shared两例，内嵌Python及Python sqlite3驱动已退役。304真实来源完整分页、同revision／唯一ID、available／disabled／broken／missing、首尾导航、held首page迟到隔离、Session b实际文件刷新、关闭重开与四次五张真实SQLite表只读计数相等保持，原14个Python assert完整迁入Node。知识查看仍零Model／脚本效果；paired所属Service退出，shared TUI退出仅detach且原daemon仍live。系统tmpdir／标准file URL、Windows USERPROFILE／正式SID pipe与私有失败IPC接线；Windows结束测试时用启动前已选Profile／instance绑定的公共Lifecycle if_idle核实际exit0，POSIX保真实SIGTERM。原10秒step、5秒held、100／200ms实际等待、6＋3退出和40秒整例不变；macOS原完整文件2pass／10expects／4.46秒，最后仅Windows身份绑定补正由CLI完整类型核实，原生资格仍后置。
 
@@ -306,13 +304,13 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 
 新 `release:terminal` 的构建、完整 npm/固定 Bun 闭包、归档、安装、升级、回滚和使用锁卸载见[终端制品 owner](docs/terminal-release.md)。安装入口使用完整候选身份与独立 `default` profile；真实 macOS 搬迁与生命周期已验证，根正式入口已切换，完整跨平台资格仍待取得。
 
-## 开发 Workflow 核验问题
+## 问题与嵌套审批
 
-CLI 保持原 Command 的 Store/Session/Run scope；原 Session 中没有独立 Run 的嵌套 verifier Job 审批，沿实际 `getExecution` 的持久 parent chain 核对归属，不依赖有限 view 窗口或当前 active Run。每一级必须匹配准确原 Store、Session 和 Execution ID；陌生 scope、循环或缺事实保持 unknown，不能通过回答另一任务的审批继续。父 `complete_skill` 与 `skill.workflow.verify` 的最低人工审批分别核对，父批准不替代 Job 批准。
-
-[真实问题 CLI fixture](test/isolated/workflow-question-host.test.ts)采用默认 Service、真实 SQLite、固定 loopback Model 和原监督 verifier，通过实际普通 question 的 JSON `replan/waive`；保留 attempt 1 的全文输出、失败核验和准确原用户决定。丢失原答案响应和首次 GET 后，paired wait cycle 只查询封存原答案，不重复提示或 POST；保存答案仍不证明原 work 完成。[80×24 PTY fixture](test/isolated/tui-workflow-question-host.test.ts)通过真实独立审批按键和原 question JSON，自动核实原答案并重读当前快照，Ctrl+C 则取消准确原 work。精确资格和失败过程归[总体实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，本机固定模型证据不扩展为生产 sandbox、其他平台或完整 V1.3 资格。
+CLI 保持原 Command 的 Store／Session／Run scope。嵌套 Job 的审批继续沿真实 parent Execution 链核准确归属；陌生 scope、循环、缺失事实和未知结果不能通过回答其他卡片继续。Workflow 核验问题及其专用夹具已随执行能力移除。
 
 ## 显式冷恢复消费者
+
+报告回执 `report_deferred` 显示为 `deferred`，CLI 退出 2；它保留原申请与原因，不读取 null Run ID，不误报失败、抑制或结果未知。日志保该 phase，冷查回只 GET 原申请；权限与人工工作优先顺序仍由 Service 决定。[日志与 caller 回归](test/recovery-journal.test.ts)覆盖暂缓、重开、原 ID 查询和零重新提交。
 
 开发宿主提供 `recovery run <root-session> --input <ResumeRunRequest JSON>`、`recovery report <root-session> <original report Command ID> --input <ResumeJobReportRequest JSON>` 和 `recovery interrupt <root-session> --input <RecoverSessionRequest JSON>`。`resume` 继续表示已有会话的新 follow-up。Run 和 report 目标必须明确提供，提交前分别实际读取原 `getRun` / `getCommand` 并核对 ID、Store、Session；report 还须是原 `job.report`，不会从有限 view、活动 Run 或 pending input 目录猜目标。interrupt 只接受 `decision:interrupt`，公共请求不接受 owner generation、lease 或其他私有执行权。
 
@@ -340,9 +338,9 @@ CLI 保持原 Command 的 Store/Session/Run scope；原 Session 中没有独立 
 
 开发 TUI `Ctrl+B` 已接 UI 的独立 pending 卡选择器。CLI host 保持原 Store 的完整分页公共目录与完整 artifact reader；选择和各卡草稿仅属 UI，POST 仍固定原展示 Session/card/revision，不从父 Run 或有限 view 推导权限。UI 的 [真实四卡 PTY](../../packages/ui/test/isolated/tui/pending-cards.test.ts) 使用 configured Core/Service 证明 sibling/root/ordinary required Job 的独立原作用域与完整附件；实际 `skill.workflow.verify` 默认工厂资格继续由本包 Workflow question/compensation fixture 单独提供。
 
-[Workflow question PTY](test/isolated/tui-workflow-question-host.test.ts)和[共享驱动](test/fixtures/tui-workflow-question-pty.ts)保 replan／waive／cancel 完整流程。最终答复仍在原10秒内核当前完整原 Session、第二题与完整 Answer 后单次 Enter；旧累计画面不证明输入 ready。原独立审批、一次 Answer POST、物理丢原回应／首 GET、按同一原 ID 自动查询、完整答案／proof／attempt／revision／原 Run 终态及40秒整例保持。自动原回执核对不清理正文；最终 Model 正文检查仅接受原 Question 最后 Enter 开启的独立实际字节窗口，原查询期间仍保完整正文，不能读取此前任意输出或用数据库完成代正文。真实默认 native 首次 waive 红及修正后原3case／70expects归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12composerworkflow-问题和-planning-完整三端测试)。生产输入守卫、schema与权限保持；Ctrl+L 已移除，显式 /clear 仍只清理显示。
+[Workflow question PTY](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/cli/test/isolated/tui-workflow-question-host.test.ts)和[共享驱动](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/cli/test/fixtures/tui-workflow-question-pty.ts)保 replan／waive／cancel 完整流程。最终答复仍在原10秒内核当前完整原 Session、第二题与完整 Answer 后单次 Enter；旧累计画面不证明输入 ready。原独立审批、一次 Answer POST、物理丢原回应／首 GET、按同一原 ID 自动查询、完整答案／proof／attempt／revision／原 Run 终态及40秒整例保持。自动原回执核对不清理正文；最终 Model 正文检查仅接受原 Question 最后 Enter 开启的独立实际字节窗口，原查询期间仍保完整正文，不能读取此前任意输出或用数据库完成代正文。真实默认 native 首次 waive 红及修正后原3case／70expects归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12composerworkflow-问题和-planning-完整三端测试)。生产输入守卫、schema与权限保持；Ctrl+L 已移除，显式 /clear 仍只清理显示。
 
-[Workflow 夹具](test/fixtures/workflow-question-profile.ts)的 macOS 专用 supervisor／programmatic Service wrapper 已退役，TUI 和原[CLI JSON replan／waive](test/isolated/workflow-question-host.test.ts)统一消费实际构建的 `@kite-ai/service/main.js`。正式装配自行选择合格后端；Linux 需要原 native init／Bubblewrap，Windows 缺 verifier 后端继续 fail closed，不能以普通 runner 或 skip 代替。Planning 无 Skill，不再因复用该夹具而装配 macOS 专用验证器。
+[Workflow 夹具](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/cli/test/fixtures/workflow-question-profile.ts)的 macOS 专用 supervisor／programmatic Service wrapper 已退役，TUI 和原[CLI JSON replan／waive](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/cli/test/isolated/workflow-question-host.test.ts)统一消费实际构建的 `@kite-ai/service/main.js`。正式装配自行选择合格后端；Linux 需要原 native init／Bubblewrap，Windows 缺 verifier 后端继续 fail closed，不能以普通 runner 或 skip 代替。Planning 无 Skill，不再因复用该夹具而装配 macOS 专用验证器。
 
 正式与开发 TUI 的 `/background` 由 [host](host/tui.tsx)仅接公共 SDK getExecution、getRun、listExecutionOutput、getView、listMessages、getModelOutput、cancelExecution/getCommand。UI 不获得 profile 文件、私有 ledger 或新的执行权。当前 Store 准入和原 Job 出处分开封存；恢复历史目录只读，输出与 child 读取保原 ID/definition/version 和完整原结果。child 日志沿实际 carrier/parent chain、原 Message/Model Execution/Run 与公共 child Session 关系核原 scope，Model 全文仍由当前 Store 的 SDK 完整 reader 校验。停止仅允许当前来源的准确活动 Job，独立于父 Run；响应未知只查原 Command。输出 gap 保持原事实，关闭读取和切会话不取消执行；正式 host 的持久停止意图沿[普通 caller](#tui-普通-caller-的持久原意图)，不提供 caller port 的有限组件只有内存意图。
 

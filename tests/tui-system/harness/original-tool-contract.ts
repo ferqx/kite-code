@@ -17,16 +17,11 @@ export const originalToolNames: Readonly<Record<string, string>> = {
   read_file: 'files.read',
   write_file: 'files.write',
   edit_file: 'files.edit',
-  glob: 'files.glob',
-  search_files: 'files.glob',
-  grep: 'files.search',
-  search_content: 'files.search',
   shell_execute: 'shell.execute',
   shell: 'shell.execute',
   tool_search: 'mcp.tools.search',
   list_mcp_resources: 'mcp.resources.list',
   read_mcp_resource: 'mcp.resources.read',
-  task: 'task.execute',
   read_plan: 'planning.read',
   write_plan: 'planning.write',
 };
@@ -149,7 +144,6 @@ export async function migrateOriginalToolCall(
     case 'read_file':
       keys(a, ['path', 'offset', 'limit'], call.name);
       args = { ...a, path: workspacePath(text(a, 'path'), scope) };
-      if (isAbsolute(String(args.path))) name = 'files.read_path';
       break;
     case 'tool_search':
       keys(a, ['query', 'limit'], call.name);
@@ -214,27 +208,9 @@ export async function migrateOriginalToolCall(
     }
     case 'glob':
     case 'search_files':
-      keys(a, ['pattern', 'path', 'limit'], call.name);
-      args = {
-        ...a,
-        ...(a.path === undefined ? {} : { path: workspacePath(text(a, 'path'), scope) }),
-      };
-      if (args.path === '.') delete args.path;
-      break;
     case 'grep':
     case 'search_content':
-      keys(a, ['pattern', 'path', 'limit'], call.name);
-      // Legacy grep is regex-based; only regex-free literals are identical to files.search.
-      if (/[.*+?^${}()|[\]\\]/.test(text(a, 'pattern')))
-        throw Error('original_tool_grep_regex_requires_scenario_migration');
-      args = {
-        text: a.pattern,
-        mode: 'content',
-        ...(a.path === undefined ? {} : { path: workspacePath(text(a, 'path'), scope) }),
-        ...(a.limit === undefined ? {} : { limit: a.limit }),
-      };
-      if (args.path === '.') delete args.path;
-      break;
+      throw Error('retired_file_search_requires_shell_migration');
     case 'write_file':
       keys(a, ['path', 'content'], call.name);
       args = {
@@ -242,7 +218,7 @@ export async function migrateOriginalToolCall(
         content: text(a, 'content'),
         base: await currentBaseline(text(a, 'path'), scope),
       };
-      if (isAbsolute(String(args.path))) name = 'files.write_path';
+      if (isAbsolute(String(args.path))) throw Error('external_write_requires_shell');
       break;
     case 'edit_file': {
       keys(a, ['path', 'old_string', 'new_string', 'replace_all'], call.name);
@@ -255,7 +231,7 @@ export async function migrateOriginalToolCall(
       if (a.replace_all === true)
         throw Error('original_tool_edit_replace_all_requires_scenario_migration');
       args = { path: workspacePath(path, scope), find, replace, occurrences: 1, base };
-      if (isAbsolute(String(args.path))) name = 'files.edit_path';
+      if (isAbsolute(String(args.path))) throw Error('external_write_requires_shell');
       break;
     }
     case 'shell_execute':
@@ -266,18 +242,6 @@ export async function migrateOriginalToolCall(
       args = {
         key: createHash('sha256').update(call.id).digest('hex'),
         command: text(a, 'command'),
-      };
-      break;
-    case 'task':
-      if ('key' in a || 'role' in a || 'input' in a) break;
-      keys(a, ['name', 'subagent_type', 'task'], call.name);
-      args = {
-        key: createHash('sha256').update(call.id).digest('hex'),
-        role: text(a, 'subagent_type'),
-        input: {
-          content: text(a, 'task'),
-          ...(a.name === undefined ? {} : { name: text(a, 'name') }),
-        },
       };
       break;
     case 'read_plan':

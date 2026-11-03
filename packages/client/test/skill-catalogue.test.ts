@@ -26,11 +26,11 @@ const entries = Array.from({ length: 301 }, (_, i) => ({
   requiredCapabilities: [],
   missingCapabilities: [],
 }));
-function fixture(supportsWorkflow = false) {
+function fixture() {
   const requests: URL[] = [];
   let identity = {
     ...info,
-    capabilities: [...info.capabilities, ...(supportsWorkflow ? ['skill_workflow_catalogue'] : [])],
+    capabilities: [...info.capabilities],
   };
   let transform = (page: SkillCataloguePage): unknown => page;
   const server = Bun.serve({
@@ -170,111 +170,6 @@ test('same Store replacement host cannot supply another catalogue under the orig
   }
 });
 
-function manualWorkflow(entry: SkillCataloguePage['entries'][number]) {
-  const name = `flow-${entry.id}`;
-  return {
-    extensionId: 'builtin.skill-workflow' as const,
-    definitionVersion: '1' as const,
-    skillId: `skill:${name}`,
-    name,
-    revision: 'c'.repeat(64),
-    state: 'available' as const,
-    reason: null,
-    manualAllowed: true,
-    emptyInputValid: true,
-    contextMode: 'inline' as const,
-  };
-}
-
-test('manual Workflow metadata requires a capability and explicit stable opt-in across every page', async () => {
-  const unsupported = fixture();
-  try {
-    await unsupported.client.connect();
-    await expect(
-      unsupported.client.listAllSkills('w', { storeId: 'store', workflow: 'manual' }),
-    ).rejects.toMatchObject({ code: 'capability_unavailable' });
-    expect(unsupported.requests).toHaveLength(0);
-  } finally {
-    unsupported.close();
-  }
-  const f = fixture(true);
-  try {
-    await f.client.connect();
-    f.set((page) => ({
-      ...page,
-      entries: page.entries.map((entry) => ({ ...entry, workflow: manualWorkflow(entry) })),
-    }));
-    const options: { storeId: string; workflow?: 'manual' } = {
-      storeId: 'store',
-      workflow: 'manual',
-    };
-    const pending = f.client.listAllSkills('w', options);
-    options.storeId = 'changed';
-    options.workflow = undefined;
-    const page = await pending;
-    expect(page.entries).toHaveLength(301);
-    expect(page.entries.at(-1)?.workflow).toEqual(manualWorkflow(entries.at(-1)!));
-    expect(f.requests).toHaveLength(9);
-    expect(f.requests.every((url) => url.searchParams.get('workflow') === 'manual')).toBe(true);
-    expect(f.requests.every((url) => url.searchParams.get('storeId') === 'store')).toBe(true);
-    expect(f.client.lastAppliedCursor).toBeUndefined();
-    const before = f.requests.length;
-    await expect(f.client.listAllSkills('w', { storeId: 'store' })).rejects.toMatchObject({
-      code: 'invalid_response',
-    });
-    expect(f.requests).toHaveLength(before + 1);
-    f.set((value) => value);
-    expect(
-      (await f.client.listSkills('w', { storeId: 'store' })).entries[0]?.workflow,
-    ).toBeUndefined();
-  } finally {
-    f.close();
-  }
-});
-
-test('manual Workflow metadata rejects missing, private, inconsistent and changed projections without retry', async () => {
-  const f = fixture(true);
-  try {
-    await f.client.connect();
-    for (const patch of [
-      undefined,
-      { instructions: 'private original instructions' },
-      { definitionVersion: '2' },
-      { skillId: 'skill:forged' },
-      { manualAllowed: false },
-      { emptyInputValid: false },
-      { contextMode: null },
-      { state: 'unavailable', reason: null },
-    ]) {
-      f.set((page) => ({
-        ...page,
-        entries: page.entries.map((entry) => ({
-          ...entry,
-          ...(patch === undefined ? {} : { workflow: { ...manualWorkflow(entry), ...patch } }),
-        })),
-      }));
-      const count = f.requests.length;
-      await expect(
-        f.client.listSkills('w', { storeId: 'store', workflow: 'manual' }),
-      ).rejects.toMatchObject({ code: 'invalid_response' });
-      expect(f.requests).toHaveLength(count + 1);
-    }
-    f.set((page) => ({
-      ...page,
-      revision: f.requests.at(-1)!.searchParams.has('revision') ? 'd'.repeat(64) : page.revision,
-      entries: page.entries.map((entry) => ({ ...entry, workflow: manualWorkflow(entry) })),
-    }));
-    const before = f.requests.length;
-    await expect(
-      f.client.listAllSkills('w', { storeId: 'store', workflow: 'manual' }),
-    ).rejects.toMatchObject({ code: 'skill_catalogue_changed' });
-    expect(f.requests).toHaveLength(before + 2);
-    expect(f.client.lastAppliedCursor).toBeUndefined();
-  } finally {
-    f.close();
-  }
-});
-
 function publicPage(): SkillCataloguePage {
   return {
     version: 1,
@@ -361,7 +256,6 @@ test('pure public Skill verifier retains identity, state, cursor, and availabili
   expect(() => verifySkillCataloguePage(privateFields)).toThrow(
     'Invalid SkillCataloguePage response.',
   );
-  expect(() => verifySkillCataloguePage(valid, { workflow: 'manual' })).toThrow('invalid_response');
   const unavailable = publicPage();
   unavailable.availability = 'unavailable';
   unavailable.reason = 'configuration_unavailable';

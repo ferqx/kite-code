@@ -7,7 +7,7 @@ use kite_windows_runner::restricted_token::{self, CapabilitySid};
 use kite_windows_runner::{
     build_bash_command_line, build_busybox_sh_command_line, build_isksh_command_line, sha256_file,
 };
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
@@ -486,17 +486,10 @@ fn execute_restricted_token_invocation(
     output_writer: ControlFrameWriter,
 ) -> Result<(), String> {
     let direct = &request.direct_workspace;
-    let network_authorized = matches!(request.network_mode, NetworkMode::AllowAll);
     let approved_filesystem = matches!(request.filesystem_scope, FilesystemScope::FullAccess);
-    // Schannel needs the current interactive token, but that token has no
-    // restricted-SID filesystem ceiling. Never silently widen a network-only
-    // or workspace-scoped approval into the user's ambient file authority.
-    if network_authorized && !approved_filesystem {
-        return Err(
-            "approved_network_requires_full_filesystem_scope: Windows allow_all requires an explicit full_access filesystem grant"
-                .to_string(),
-        );
-    }
+    // Internet permission alone keeps the Workspace token. Only a command
+    // with both complete filesystem and network scope bypasses restriction;
+    // Schannel may remain unavailable under the restricted token.
 
     materialize_coreutils_aliases(&request.runtime_root, coreutils_path)?;
     runner_debug("coreutils aliases materialized");

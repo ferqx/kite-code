@@ -20,8 +20,6 @@ test('only exact finite builtin role declarations classify Task creation and car
   const describe = createDefaultTaskRequestClassifier(defaultTaskRoles);
   for (const role of defaultTaskRoles) {
     for (const invocation of [
-      request('task', { key: 'a', role: role.id, input: { content: 'a' } }),
-      request('task.execute', { key: 'a', role: role.id, input: { content: 'a' } }),
       request('task.spawn', { taskName: 'a', preset: role.id, prompt: 'a' }),
       request(`agent/${role.id}`, { content: 'a' }, 'job'),
     ]) {
@@ -36,23 +34,30 @@ test('only exact finite builtin role declarations classify Task creation and car
     internalRecordOnly: true,
   });
   expect(describe(request('task.spawn', { preset: 'custom', prompt: 'a' }))).toBeUndefined();
-  for (const id of ['send_message', 'followup_task', 'task_cancel', 'agent/custom'])
+  for (const id of [
+    'task',
+    'task.execute',
+    'send_message',
+    'followup_task',
+    'task_cancel',
+    'agent/custom',
+  ])
     expect(describe(request(id, { role: 'code' }))).toBeUndefined();
   expect(describe(request('task.execute', { role: 'custom' }))).toBeUndefined();
   for (const id of ['plan', 'review']) {
     const original = defaultTaskRoles.find((role) => role.id === id)!;
     expect(
       createDefaultTaskRequestClassifier([{ ...original, toolPolicy: 'parent' }])(
-        request('task.execute', { role: id }),
+        request('task.spawn', { preset: id, prompt: 'a' }),
       ),
     ).toBeUndefined();
   }
   expect(
     createDefaultTaskRequestClassifier([
       { id: 'code', version: '1', toolPolicy: 'parent', modelId: 'custom' },
-    ])(request('task.execute', { role: 'code' })),
+    ])(request('task.spawn', { preset: 'code', prompt: 'a' })),
   ).toBeUndefined();
-  const original = request('task.execute', { key: 'a', role: 'code', input: { content: 'a' } });
+  const original = request('task.spawn', { preset: 'code', prompt: 'a' });
   const capability = {
     kind: original.kind,
     definitionId: original.definitionId,
@@ -90,8 +95,7 @@ test('only exact finite builtin role declarations classify Task creation and car
   });
   expect((await changed.authorize(original)).allowed).toBe(false);
   expect((await changed.authorize(original)).revision).not.toBe(accepted.revision);
-  expect(
-    describe(request('task.execute', { key: 'a', role: 'code', input: { content: 'changed' } }))
-      ?.revision,
-  ).not.toBe(capability.revision);
+  expect(describe(request('task.spawn', { preset: 'code', prompt: 'changed' }))?.revision).not.toBe(
+    capability.revision,
+  );
 });

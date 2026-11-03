@@ -481,7 +481,7 @@ export function Conversation({
   initialPresentationPending = false,
   lazyHistory = false,
   turnActivity: incomingTurnActivity,
-  requiredSubagentWait,
+
   selected,
   connected,
   initialReading,
@@ -503,7 +503,7 @@ export function Conversation({
   /** Native limits cold large-history mounting; data and read admission stay host-owned. */
   lazyHistory?: boolean;
   turnActivity?: TurnActivity;
-  requiredSubagentWait?: boolean;
+
   selected: boolean;
   connected: boolean;
   initialReading?: ReadingState;
@@ -1455,11 +1455,6 @@ export function Conversation({
                     加载后续消息
                   </Button>
                 </div>
-              )}
-              {!loading && selected && requiredSubagentWait && (
-                <Marker className="mt-4" role="status">
-                  <MarkerContent>正在等待子 Agent 结果</MarkerContent>
-                </Marker>
               )}
             </div>
           </section>

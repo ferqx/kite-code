@@ -239,3 +239,35 @@ test('Linux namespace status preserves pending qualification and rejects a promo
     f.close();
   }
 });
+
+test('Windows status describes write restriction without promoting it to a read or network isolation claim', async () => {
+  const f = fixture();
+  const facts = status();
+  facts.execution.sandbox = {
+    backend: 'windows_restricted_token',
+    available: true,
+    qualification: 'write_restricted',
+  };
+  facts.execution.shell = {
+    configured: true,
+    available: true,
+    supervision: 'windows_job',
+    qualification: 'windows_unelevated',
+    reason: null,
+  };
+  try {
+    await f.client.connect();
+    f.set(facts);
+    expect(await f.client.getHostStatus()).toEqual(facts);
+    f.set({
+      ...facts,
+      execution: {
+        ...facts.execution,
+        sandbox: { ...facts.execution.sandbox, qualification: 'host_scope' },
+      },
+    } as unknown as HostStatus);
+    await expect(f.client.getHostStatus()).rejects.toMatchObject({ code: 'invalid_response' });
+  } finally {
+    f.close();
+  }
+});

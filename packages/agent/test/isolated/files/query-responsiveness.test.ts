@@ -2,7 +2,6 @@ import { afterEach, expect, mock, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ToolContext } from '../../../src/extensions';
 import type { WorkspaceFiles } from '../../../src/files';
 import * as nativeBinding from '../../../src/files-native-binding';
 
@@ -43,7 +42,7 @@ mock.module('../../../src/files-native-binding', () => ({
     };
   },
 }));
-const { createWorkspaceFiles, createFileTools } = await import('../../../src/files');
+const { createWorkspaceFiles } = await import('../../../src/files');
 const roots: string[] = [];
 const handles: WorkspaceFiles[] = [];
 afterEach(async () => {
@@ -99,53 +98,6 @@ test('glob traversal yields to a real macrotask and an independent file read bef
   expect(siblingBeforeSettlement).toBe(true);
 });
 
-test('glob Tool cancellation from a macrotask stops actual traversal before the whole tree is enumerated', async () => {
-  const { files } = tree();
-  const controller = new AbortController();
-  let atAbort = 0;
-  let release!: () => void;
-  const macro = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  firstEnumeration = () => {
-    setTimeout(() => {
-      atAbort = enumerations;
-      controller.abort();
-      release();
-    }, 0);
-  };
-  const tool = createFileTools(files).find((definition) => definition.id === 'files.glob')!;
-  const [result] = await Promise.all([
-    tool.execute({ pattern: '**/*.ts', limit: 200 }, { signal: controller.signal } as ToolContext),
-    macro,
-  ]);
-  expect(controller.signal.aborted).toBe(true);
-  expect(atAbort).toBeGreaterThan(0);
-  expect(result.outcome).toBe('cancelled');
-  // 128 real child directories plus the root; no timing threshold or fake delay.
-  expect(enumerations).toBeLessThan(129);
-});
-
-test('model glob prunes ignored trees before enumeration and opt-out retains full discovery', async () => {
-  const { root, files } = tree();
-  writeFileSync(join(root, '.gitignore'), 'dir-*/\n!dir-000/\n');
-  const tool = createFileTools(files).find((definition) => definition.id === 'files.glob')!;
-  const result = await tool.execute({ pattern: '**/*.ts' }, {
-    signal: new AbortController().signal,
-  } as ToolContext);
-  expect(result.outcome).toBe('succeeded');
-  expect(JSON.parse(result.content).paths).toEqual(['dir-000/a.ts', 'dir-000/b.ts']);
-  expect(enumerations).toBe(2);
-  enumerations = 0;
-  const scoped = await files.glob({ pattern: '*.ts', path: 'dir-001', respectIgnore: true });
-  expect(scoped.paths).toEqual([]);
-  const all = await tool.execute({ pattern: '*.ts', respectIgnore: false, limit: 200 }, {
-    signal: new AbortController().signal,
-  } as ToolContext);
-  expect(JSON.parse(all.content).paths).toHaveLength(200);
-  expect(JSON.parse(all.content).next).not.toBeNull();
-});
-
 test('search yields to a real macrotask and an independent file read before settling', async () => {
   const { files } = tree();
   let settled = false;
@@ -175,34 +127,6 @@ test('search yields to a real macrotask and an independent file read before sett
   expect(result.matches).toHaveLength(200);
   expect(result.next).not.toBeNull();
   expect(siblingBeforeSettlement).toBe(true);
-});
-
-test('search Tool cancellation from a macrotask interrupts the original traversal', async () => {
-  const { files } = tree();
-  const controller = new AbortController();
-  let settled = false;
-  let abortedBeforeSettlement = false;
-  let release!: () => void;
-  const macro = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  firstEnumeration = () => {
-    setTimeout(() => {
-      abortedBeforeSettlement = !settled;
-      controller.abort();
-      release();
-    }, 0);
-  };
-  const tool = createFileTools(files).find((definition) => definition.id === 'files.search')!;
-  const query = tool
-    .execute({ text: 'export const', limit: 200 }, { signal: controller.signal } as ToolContext)
-    .finally(() => {
-      settled = true;
-    });
-  const [result] = await Promise.all([query, macro]);
-  expect(abortedBeforeSettlement).toBe(true);
-  expect(result.outcome).toBe('cancelled');
-  expect(enumerations).toBeLessThan(129);
 });
 
 test('responsive glob retains sorted keyset pages, root ** matches, protected roots and no symlink traversal', async () => {

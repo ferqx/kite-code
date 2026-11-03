@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-02：本记录的 Workflow 执行及专用外部文件工具范围已由[退役与统一读取决定](2026-11-02-tool-surface-retirement.md)替代。保留原设计理由、历史证据及仍适用的原生身份、权限、取消／未知效果和只读历史约束；当前功能以手册和 owner 为准。
+
 ## Problem
 
 既有 TUI 动态 `/<Skill 名称>` 和旧 CLI `--skill` 会请求用户 Workflow activation。通用入口已经交付的 `--skill` 则选择每 Run 可按需读取的知识；知识目录 available 不能证明 manual invocation、原输入 schema、真实功能开关或 fork/verifier 绑定可用。共享 Service 的客户端也不能用本机文件推断远端配置。

@@ -41,7 +41,7 @@ const snapshot = (id: string): TuiSnapshot => ({
               createdAt: 1,
               finishedAt: null,
               reason: null,
-              waitingForResults: [],
+
               configuration: {},
             },
           ]
@@ -174,6 +174,42 @@ for (const wrong of [
     expect(f.stats()).toEqual({ writes: 1, reads: 1, cancels: 0 });
     f.controller.dispose();
   });
+test('TUI shows deferred report without inventing a Run or relabeling the receipt as unknown', async () => {
+  const f = fixture();
+  await f.controller.select('a');
+  await f.controller.openRecovery();
+  const submitted = f.controller.submitRecovery('report', 'report');
+  expect(f.controller.state.recovery?.status).toBe('submitting');
+  const intent = f.original();
+  f.resolve({
+    intent,
+    status: 'deferred',
+    command: {
+      id: intent.request.commandId,
+      kind: 'job.report.resume',
+      originStoreId: 'store',
+      sessionId: 'a',
+      status: 'applied',
+      cancelRequestedAt: null,
+      receipt: {
+        reportCommandId: 'report',
+        runId: null,
+        outcome: 'report_deferred',
+        reason: 'human_business_queued',
+      },
+    },
+  });
+  await submitted;
+  expect(f.controller.state.recovery?.status).toBe('deferred');
+  expect(f.controller.state.recovery?.run).toBeUndefined();
+  const view = render(<TuiSession controller={f.controller} />);
+  await tick();
+  expect(view.lastFrame()).toContain('deferred');
+  expect(f.stats()).toEqual({ writes: 1, reads: 0, cancels: 0 });
+  view.unmount();
+  f.controller.dispose();
+});
+
 test('TUI interrupt requires explicit orphan-group confirmation and never infers a report ID', async () => {
   const f = fixture();
   await f.controller.select('a');

@@ -5,8 +5,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
+import { planningProfile } from '../fixtures/planning-profile';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from '../fixtures/tui-pty';
-import { workflowQuestionProfile } from '../fixtures/workflow-question-profile';
 
 const repo = resolve(import.meta.dir, '../../../..');
 test('native 80x24 PTY observer preserves complete Unicode and styled material across wraps', async () => {
@@ -50,7 +50,7 @@ test('native 80x24 PTY observer preserves complete Unicode and styled material a
 });
 for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draft'] as const)
   test(`80x24 actual ${entrance} single Planning intent reviews full original Artifact and never inherits Full authority`, async () => {
-    const f = await workflowQuestionProfile('waive');
+    const f = await planningProfile();
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     const body = `ORIGINAL_PLAN_UTF8 ${'原完整🙂e\u0301方案'.repeat(6500)} ORIGINAL_PLAN_FULL_TAIL`;
     let calls = 0,

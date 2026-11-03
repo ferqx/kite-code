@@ -50,7 +50,7 @@ export async function runCLIProcess(
       'kite resume --thread <id> --task <text>\n--ask selects Accept Edits; approvals require an explicit answer.\n',
     );
     process.stdout.write(
-      'Development management: session rename|delete|fork <id> --input <closed JSON>; context read|rewind|include|compact|reset <id> --input <closed JSON> [--execution <id>]. Both support --server <local socket>.\nRepeat --skill <configured ID or discovered name> to select guidance; it does not grant tool permission.\nRepeat --activate-skill <compiled name or exact skillId> on run/resume to explicitly activate an enabled Workflow accepting empty input; flags and ordinary permissions still apply.\n',
+      'Development management: session rename|delete|fork <id> --input <closed JSON>; context read|rewind|include|compact|reset <id> --input <closed JSON> [--execution <id>]. Both support --server <local socket>.\nRepeat --skill <configured ID or discovered name> to select guidance; it does not grant tool permission.\n',
     );
     process.stdout.write(
       'Development recovery: recovery run|interrupt <root-session> or recovery report <root-session> <original report Command ID> --input <closed JSON>; recovery lookup <root-session> --input <saved intent JSON>. Ctrl+C stops this wait. resume remains a new Work request.\n' +

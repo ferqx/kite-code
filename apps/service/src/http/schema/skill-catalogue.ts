@@ -5,13 +5,12 @@ const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const positive = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const SkillCatalogueQuerySchema = z.strictObject({
   storeId: id,
-  workflow: z.literal('manual').optional(),
   afterId: id.optional(),
   revision: digest.optional(),
   limit: positive.optional(),
   byteLimit: positive.max(1048576).optional(),
 });
-export const UserSkillCatalogueQuerySchema = SkillCatalogueQuerySchema.omit({ workflow: true });
+export const UserSkillCatalogueQuerySchema = SkillCatalogueQuerySchema;
 export const skillUnavailableReasons = [
   'invalid_skill_configuration',
   'skill_path_denied',
@@ -25,31 +24,6 @@ export const skillUnavailableReasons = [
   'skill_text_invalid',
   'skill_path_changed',
 ] as const;
-export const workflowUnavailableReasons = [
-  'workflow_disabled',
-  'workflow_configuration_unavailable',
-  'workflow_contract_unavailable',
-  'workflow_dependency_unavailable',
-  'workflow_manual_not_allowed',
-  'workflow_input_required',
-  'workflow_fork_unavailable',
-  'workflow_verifier_unavailable',
-  'workflow_source_changed',
-  'skill_unavailable',
-] as const;
-/** A read-only manual activation projection; execution still revalidates the original source. */
-export const SkillWorkflowCatalogueSchema = z.strictObject({
-  extensionId: z.literal('builtin.skill-workflow'),
-  definitionVersion: z.literal('1'),
-  skillId: id.nullable(),
-  name: z.string().max(256).nullable(),
-  revision: digest.nullable(),
-  state: z.enum(['available', 'disabled', 'unavailable']),
-  reason: z.enum(workflowUnavailableReasons).nullable(),
-  manualAllowed: z.boolean(),
-  emptyInputValid: z.boolean(),
-  contextMode: z.enum(['inline', 'fork']).nullable(),
-});
 export const SkillCatalogueEntrySchema = z.strictObject({
   id,
   source: z
@@ -67,7 +41,6 @@ export const SkillCatalogueEntrySchema = z.strictObject({
   reason: z.enum(skillUnavailableReasons).nullable(),
   requiredCapabilities: z.array(z.string().min(1).max(256)),
   missingCapabilities: z.array(z.string().min(1).max(256)),
-  workflow: SkillWorkflowCatalogueSchema.optional(),
 });
 export const SkillCataloguePageSchema = z.strictObject({
   version: z.literal(1),
@@ -92,7 +65,7 @@ export const UserSkillCataloguePageSchema = SkillCataloguePageSchema.omit({
   scope: z.literal('user'),
   reason: z.enum(['configuration_unavailable', 'skill_catalogue_source_unavailable']).nullable(),
   entries: z.array(
-    SkillCatalogueEntrySchema.omit({ workflow: true, source: true }).extend({
+    SkillCatalogueEntrySchema.omit({ source: true }).extend({
       source: z
         .strictObject({
           scope: z.literal('user'),

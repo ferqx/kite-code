@@ -12,6 +12,7 @@ import {
   type FileCheckpoint,
   type FileCheckpointCaptureProof,
   type SessionOutput,
+  withExternalFileReads,
   withInputFileReads,
   withPlanFileTools,
   withSessionOutputs,
@@ -434,9 +435,24 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
     { includeTools: true },
   );
+  const externalReads = withExternalFileReads({
+    tools: extension.tools ?? [],
+    protectedRoots: () => [
+      options.profile.dataRoot,
+      options.profile.coordinationPath,
+      ...options.runtimeAssets(),
+    ],
+    async workspaceRoot(request) {
+      const runtime = options.runtime();
+      const session = await runtime.getSession(request.sessionId);
+      const workspace = session && (await runtime.getWorkspace(session.workspaceId));
+      if (!workspace) throw new AgentError('file_read_scope_unavailable');
+      return fileURLToPath(workspace.rootUri);
+    },
+  });
   const inputFiles = withInputFileReads({
     profilePath: options.profile.profilePath,
-    tools: extension.tools ?? [],
+    tools: externalReads.tools,
     async resolve(request, uri) {
       const runtime = options.runtime();
       const actual = await runtime.getExecution(request.executionId);
@@ -630,7 +646,8 @@ export function createDefaultFileCheckpointConfiguration(options: {
       return (
         (await outputs.describeRequest(request)) ??
         (await planFiles.describeRequest(request)) ??
-        (await inputFiles.describeRequest(request))
+        (await inputFiles.describeRequest(request)) ??
+        (await externalReads.describeRequest(request))
       );
     },
   };

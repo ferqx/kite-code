@@ -3975,27 +3975,6 @@ function NativeDesktopContent({
         ) : undefined
       }
       environmentInformation={environment.card}
-      requiredSubagentWait={
-        !executionUnconfirmed &&
-        !preparing &&
-        historyState.phase === 'complete' &&
-        !selection?.viewLoading &&
-        !selection?.permissionUnavailable &&
-        !!selection?.runs.some(
-          (run) =>
-            run.isActive &&
-            run.status === 'waiting_execution' &&
-            run.waitingForResults?.some((id) =>
-              selection.executions.some(
-                (execution) =>
-                  execution.id === id &&
-                  execution.childSessionId !== null &&
-                  execution.originStoreId === selection.storeId &&
-                  ['planned', 'dispatching', 'running'].includes(execution.status),
-              ),
-            ),
-        )
-      }
       connected={generation.current > 0}
       connectionLabel={
         diagnostics

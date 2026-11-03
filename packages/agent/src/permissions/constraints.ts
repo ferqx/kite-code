@@ -24,9 +24,6 @@ const management = new Set([
   'planning.write',
   'planning.review',
   'planning.update',
-  'validation.define',
-  'validation.check',
-  'validation.rebind',
 ]);
 
 /** One ceiling cannot grant a call denied by current policy or widen its grant scope. */
@@ -160,8 +157,11 @@ export function createPlanningPermissionPolicy(options: {
           request.definitionVersion === '1') ||
         (await options.isPlanFileEdit?.(request)) === true ||
         (request.kind === 'tool' &&
-          ((request.definitionVersion === '1' && management.has(request.definitionId)) ||
-            (!!description?.safeRead && description.effects.every((effect) => effect === 'read'))));
+          request.definitionVersion === '1' &&
+          management.has(request.definitionId)) ||
+        ((request.kind === 'tool' || request.kind === 'job') &&
+          !!description?.safeRead &&
+          description.effects.every((effect) => effect === 'read'));
       if (state.status !== 'approved' || beforeApproval)
         return intersect(
           current,
@@ -191,25 +191,6 @@ export function createPlanningPermissionPolicy(options: {
       return intersect(current, await policy.authorize(request), state, identity);
     },
   };
-}
-
-/** A trusted workflow minimum may require a human; it cannot relax a hard denial. */
-export function requireWorkflowApproval(
-  decision: PermissionDecision,
-  minimum: Json | undefined,
-): PermissionDecision {
-  if (minimum && minimum !== 'none' && (decision.allowed || decision.approval || decision.check)) {
-    return {
-      ...decision,
-      allowed: false,
-      check: decision.check ? { ...decision.check, requireApproval: true } : undefined,
-      approval: decision.approval ?? {
-        request: { reason: 'workflow_minimum_approval', minimum },
-      },
-      reason: 'workflow_minimum_approval',
-    };
-  }
-  return decision;
 }
 
 /** Explicit file restoration always uses the original exact human approval contract. */

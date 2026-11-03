@@ -87,6 +87,7 @@ test('background directory verifies each same-Session follow-up carrier and reje
     ],
   });
   let db: Database | undefined;
+  let directOperations: SqliteOperations | undefined;
   let closed = false;
   try {
     await runtime.createWorkspace({
@@ -135,7 +136,8 @@ test('background directory verifies each same-Session follow-up carrier and reje
     await runtime.close();
     closed = true;
     db = new Database(join(root, 'data', 'test', 'core.db'));
-    const operations = new SqliteOperations(db, false);
+    directOperations = new SqliteOperations(db, false);
+    const operations = directOperations;
     const next = db
       .query("SELECT * FROM command WHERE session_id=? AND kind='input.follow_up'")
       .get(agentId) as Record<string, string>;
@@ -185,6 +187,7 @@ test('background directory verifies each same-Session follow-up carrier and reje
       expect(operations.runRecord(run).carrierExecutionId).toBe(item.execution.id);
     }
   } finally {
+    directOperations?.releaseStatements();
     db?.close();
     if (!closed) await runtime.close();
     rmSync(root, { recursive: true, force: true });

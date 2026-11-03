@@ -71,6 +71,7 @@
     "scripts/release/entrypoints/windows-terminal-verifier.ts",
     "tests/fixtures/unified-agent/**/*.ts",
     "tests/e2e/live/model/model-tools.live.ts",
+    "tests/e2e/live/model/model-tools-all.live.ts",
     "tests/e2e/live/model/agent-task-quality.live.ts",
     "tests/e2e/live/model/agent-task-quality-checkout-ab.live.ts",
     "tests/e2e/live/model/agent-task-quality-checkout-ab.test.ts",

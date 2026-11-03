@@ -144,6 +144,5 @@ jobs:
           apps/cli/test/isolated/tui-preferences-host.test.ts
           apps/cli/test/isolated/tui-mcp-connection-pty.test.ts
           apps/cli/test/isolated/tui-composer-host.test.ts
-          apps/cli/test/isolated/tui-workflow-question-host.test.ts
           apps/cli/test/isolated/tui-planning-host.test.ts
           tests/isolated/unified-agent/extension-upgrade.test.ts

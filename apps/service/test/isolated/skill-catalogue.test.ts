@@ -264,7 +264,7 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     });
     const unavailable = await startService({
       runtime,
-      capabilities: ['skill_catalogue', 'skill_workflow_catalogue'],
+      capabilities: ['skill_catalogue'],
       subjectId: 'owner',
       buildId: 'no-source',
       profile: {
@@ -284,10 +284,7 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       expect(advertised.capabilities).not.toContain('skill_catalogue');
       expect(advertised.capabilities).not.toContain('skill_workflow_catalogue');
       const unsupportedWorkflow = await read('w', '&workflow=manual');
-      expect(unsupportedWorkflow.status).toBe(404);
-      expect(await unsupportedWorkflow.json()).toMatchObject({
-        code: 'skill_workflow_catalogue_unavailable',
-      });
+      expect(unsupportedWorkflow.status).toBe(400);
       expect((await read('absent')).status).toBe(404);
       expect(await (await read('w')).json()).toMatchObject({
         availability: 'unavailable',

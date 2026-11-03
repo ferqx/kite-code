@@ -20,11 +20,17 @@ function json(content: string): ObjectValue | undefined {
     return;
   }
 }
-function supportedResult(result: ToolResult) {
+function supportedResult(result: ToolResult, externalRead = false) {
   const value = object(result);
   return (
     !!value &&
-    keys(value, ['outcome', 'content', 'artifactRefs', 'modelContent']) &&
+    keys(value, [
+      'outcome',
+      'content',
+      'artifactRefs',
+      'modelContent',
+      ...(externalRead ? ['details'] : []),
+    ]) &&
     result.outcome === 'succeeded' &&
     (result.artifactRefs === undefined ||
       (!!result.modelContent &&
@@ -134,7 +140,11 @@ export function formatFileReadResult({
   readonly result: ToolResult;
   readonly body?: string;
 }): string | undefined {
-  if (!supportedResult(result)) return;
+  const externalRead = isDeepStrictEqual(result.details, {
+    fileScope: 'external_path',
+    workspaceCheckpoint: false,
+  });
+  if (!supportedResult(result, externalRead)) return;
   const value = json(result.content);
   if (
     !value ||
@@ -150,7 +160,7 @@ export function formatFileReadResult({
       'inlineBody',
     ]) ||
     typeof value.path !== 'string' ||
-    !baseline(value.baseline) ||
+    (!baseline(value.baseline) && !(externalRead && value.baseline === undefined)) ||
     !knownObservation(value.observation, 'inspection')
   )
     return;
@@ -197,7 +207,10 @@ export function formatFileReadResult({
     (selected.toLine === selected.totalLines || selected.totalLines === 0);
   return (
     `Read ${quote(value.path)}; from_line=${selected.fromLine}; lines=${selected.toLine === null ? 'none' : `${selected.fromLine}-${selected.toLine}`}/${selected.totalLines}; next_line=${selected.nextOffset}; ${whole ? 'complete file' : 'selected window only'}.\n` +
-    `baseline=${quote(value.baseline)}\nContent (${Buffer.byteLength(content)} UTF-8 bytes; starts on next line):\n${content}`
+    (externalRead
+      ? 'External read-only file; no edit baseline.\n'
+      : `baseline=${quote(value.baseline)}\n`) +
+    `Content (${Buffer.byteLength(content)} UTF-8 bytes; starts on next line):\n${content}`
   );
 }
 

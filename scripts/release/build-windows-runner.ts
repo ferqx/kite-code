@@ -10,19 +10,14 @@ if (process.platform !== 'win32') {
   process.exit(1);
 }
 
-const cargoArgs = [
-  'build',
-  '--release',
-  '--manifest-path',
-  'native/windows-sandbox-runner/Cargo.toml',
-];
+const targetArgs: string[] = [];
 if (targetDirFlag !== -1) {
   const targetDir = process.argv[targetDirFlag + 1];
   if (!targetDir || targetDir.startsWith('--')) {
     console.error('build-windows-runner: --target-dir requires a path.');
     process.exit(1);
   }
-  cargoArgs.push('--target-dir', isAbsolute(targetDir) ? targetDir : resolve(targetDir));
+  targetArgs.push('--target-dir', isAbsolute(targetDir) ? targetDir : resolve(targetDir));
 }
 
 const rustFlags = [
@@ -33,15 +28,20 @@ const rustFlags = [
   '-C',
   'link-arg=--no-insert-timestamp',
 ];
-const build = Bun.spawn(['cargo', ...cargoArgs], {
-  cwd: projectRoot,
-  env: {
-    ...process.env,
-    CARGO_ENCODED_RUSTFLAGS: rustFlags.join('\x1f'),
-  },
-  stdin: 'inherit',
-  stdout: 'inherit',
-  stderr: 'inherit',
-});
-
-process.exit(await build.exited);
+for (const manifest of [
+  'native/windows-sandbox-runner/Cargo.toml',
+  'native/windows-msys-compat/Cargo.toml',
+]) {
+  const build = Bun.spawn(
+    ['cargo', 'build', '--release', '--manifest-path', manifest, ...targetArgs],
+    {
+      cwd: projectRoot,
+      env: { ...process.env, CARGO_ENCODED_RUSTFLAGS: rustFlags.join('\x1f') },
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    },
+  );
+  const exit = await build.exited;
+  if (exit !== 0) process.exit(exit);
+}

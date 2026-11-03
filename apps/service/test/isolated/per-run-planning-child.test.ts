@@ -176,7 +176,7 @@ async function fixture(
       { id: 'files.write', definitionVersion: '3' },
       ...['task.spawn', 'task.events', 'task.list'].map((id) => ({ id, definitionVersion: '1' })),
       ...(scenario === 'pending_job'
-        ? ['shell.launch', 'validation.define', 'validation.check'].map((id) => ({
+        ? ['shell.launch'].map((id) => ({
             id,
             definitionVersion: '1',
           }))
@@ -194,10 +194,6 @@ async function fixture(
     ],
     ...(scenario === 'pending_job'
       ? {
-          planning: {
-            requiredValidation: true,
-            commandChecker: { definitionId: 'shell.command', definitionVersion: '1' },
-          },
           shell: {
             platform: 'darwin' as const,
             configurationId: 'plan-child-shell',
@@ -224,14 +220,11 @@ async function fixture(
             definitionId: id,
             definitionVersion: '1',
           })),
-          ...[
-            'task.spawn',
-            'task.events',
-            'task.list',
-            'shell.launch',
-            'validation.define',
-            'validation.check',
-          ].map((id) => ({ kind: 'tool' as const, definitionId: id, definitionVersion: '1' })),
+          ...['task.spawn', 'task.events', 'task.list', 'shell.launch'].map((id) => ({
+            kind: 'tool' as const,
+            definitionId: id,
+            definitionVersion: '1',
+          })),
           { kind: 'job', definitionId: 'agent/worker', definitionVersion: '1' },
           { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
           { kind: 'tool', definitionId: 'files.read', definitionVersion: '5' },
@@ -596,20 +589,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   const current = planRecord.value as Record<string, Json>;
   if (f.scenario === 'pending_job') {
     if (step === 1)
-      return {
-        name: 'define_validation_checks',
-        input: {
-          run_id: (await f.run()).id,
-          checks: [
-            {
-              kind: 'command',
-              input: { command: 'printf forbidden > forbidden.txt' },
-              expected_exit_code: 0,
-            },
-          ],
-        },
-      };
-    if (step === 2) return { name: 'run_validation_checks', input: { run_id: (await f.run()).id } };
+      return { name: 'launch_shell', input: { command: 'printf forbidden > forbidden.txt' } };
     return null;
   }
   if (step === 1)
@@ -676,7 +656,7 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
       expect(String(diagnostic.content)).toContain('plan_draft_pending');
       const denied = (await f.store.listExecutions('s')).find(
         (execution) =>
-          execution.definitionId === (scenario === 'pending_task' ? 'task.spawn' : 'shell.command'),
+          execution.definitionId === (scenario === 'pending_task' ? 'task.spawn' : 'shell.launch'),
       )!;
       expect(denied.status).toBe('failed');
       expect(denied.authorization?.dispatched).toBe(false);
@@ -687,10 +667,10 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
       expect(existsSync(join(f.workspace, 'forbidden.txt'))).toBe(false);
       if (scenario === 'pending_job')
         expect(
-          (await f.store.listExecutions('s')).find(
+          (await f.store.listExecutions('s')).some(
             (e) => e.kind === 'job' && e.definitionId === 'shell.command',
-          )!.status,
-        ).toBe('failed');
+          ),
+        ).toBe(false);
       const cancelled = await f.cancelIncomplete(run.id);
       expect(cancelled.requirements).toEqual(run.requirements);
     } finally {

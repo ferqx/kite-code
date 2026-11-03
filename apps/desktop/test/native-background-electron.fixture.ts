@@ -227,12 +227,11 @@ try {
   const originalRun = originalState.selection!.runs.find((row) => row.status === 'completed')!;
   const tasks = originalState.selection!.executions.filter((row) => !!row.childSessionId);
   assert.equal(tasks.length, 3);
-  // Task keys and child Session IDs are original durable facts, not manufactured lifecycle rows.
+  // Execution and child Session IDs are original durable facts, not manufactured lifecycle rows.
   const taskKeys = tasks.map((row) => ({ id: row.id, childSessionId: row.childSessionId }));
   stage('ordinary_parent_completed_with_live_children', {
     runId: originalRun.id,
     status: originalRun.status,
-    required: originalRun.waitingForResults,
     taskKeys,
   });
   await fetch(`${control}/release/UNICODE_CHILD`);

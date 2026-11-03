@@ -4,6 +4,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension } from '../../../src/extensions';
@@ -13,7 +14,6 @@ import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
 import type { JobReportRecovery } from '../../../src/storage/sqlite/job-report-operations';
 import { AgentError, type Json } from '../../../src/storage/types';
-import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -27,8 +27,10 @@ async function fixture(withRequirements = false) {
     expectedStoreId = (await store.getMetadata()).storeId;
   const pendingStore = new Proxy(store, {
     get(target, key) {
-      if (key === 'applyJobReport')
-        return async () => {
+      if (key === 'applyJobReport' || key === 'receiveAgentMessages')
+        return async (input: Parameters<typeof target.receiveAgentMessages>[0]) => {
+          if (key === 'receiveAgentMessages' && !input.resultOptions)
+            return target.receiveAgentMessages(input);
           throw new AgentError('report_recovery_required');
         };
       const value = Reflect.get(target, key);
@@ -37,7 +39,6 @@ async function fixture(withRequirements = false) {
   }) as Store;
   const task = createTaskExtension({
     roles: [{ id: 'reader', configurationId: 'child', description: 'fixed role' }],
-    afterTurn: { enabled: true },
   });
   const obligation: Extension = {
     id: 'fixture.report-obligation',
@@ -68,18 +69,16 @@ async function fixture(withRequirements = false) {
         type: 'tool_call',
         id: 'delegate',
         name: 'spawn_agent',
-        arguments: JSON.stringify({
-          key: 'child',
-          role: 'reader',
-          result_disposition: 'after_turn',
-          cancellation: 'detached',
-          input: { content: 'original child' },
-        }),
+        arguments: JSON.stringify({ prompt: 'original child' }),
       },
       { ...finish, reason: 'tool_calls' },
     ],
     [{ type: 'text_delta', text: 'parent completed' }, finish],
   ]);
+  let releaseChild!: () => void;
+  const childCompletion = new Promise<void>((resolve) => {
+    releaseChild = resolve;
+  });
   const runtime = createRuntime({
     store: pendingStore,
     artifacts: createArtifactStore({ profile, store }),
@@ -126,9 +125,14 @@ async function fixture(withRequirements = false) {
       {
         id: 'child',
         version: '1',
-        model: createFixedModel([
-          [{ type: 'text_delta', text: 'actual original child result' }, finish],
-        ]),
+        model: {
+          async *stream(request, options) {
+            await childCompletion;
+            yield* createFixedModel([
+              [{ type: 'text_delta', text: 'actual original child result' }, finish],
+            ]).stream(request, options);
+          },
+        },
         modelId: 'child',
         toolIds: [],
         snapshot: { child: true },
@@ -169,6 +173,7 @@ async function fixture(withRequirements = false) {
       request: { kind: 'run.start', content: 'delegate original job' },
     });
     await runtime.waitForCommand('work', { timeoutMs: 5000 });
+    releaseChild();
     const view = await store.getView('root'),
       carrier = view.executions.find((execution) => execution.childSessionId)!;
     await runtime.waitForCommand(carrier.originCommandId, { timeoutMs: 5000 });
@@ -425,7 +430,7 @@ for (const mode of [
           f.execution.childSessionId!,
           f.reportId,
         ]);
-        await rejected(f.apply(), 'group_root_required');
+        await rejected(f.apply(), 'result_mail_unverifiable');
       } else if (mode === 'suppressed') {
         f.db.run("UPDATE command SET status='rejected',receipt_json=? WHERE id=?", [
           JSON.stringify({ outcome: 'suppressed', reason: 'cancelled' }),
@@ -440,7 +445,14 @@ for (const mode of [
         const input: Parameters<Store['applyJobReport']>[0] & { recovery: JobReportRecovery } = {
           ...f.base,
           authorization:
-            mode === 'authorization' ? { revision: 'changed-policy' } : f.base.authorization,
+            mode === 'authorization'
+              ? {
+                  revision: 'changed-policy',
+                  controlReads: [
+                    { kind: 'permission.mode', scope: 'session:root', revision: '9999' },
+                  ],
+                }
+              : f.base.authorization,
           recovery: {
             commandId: 'resume',
             subjectId: 'owner',
@@ -449,12 +461,17 @@ for (const mode of [
         };
         const outcome = await f.store.applyJobReport(input);
         expect(outcome.run).toBeNull();
-        expect(outcome.command.status).toBe('rejected');
-        expect((await f.store.getCommand('resume'))?.receipt).toMatchObject({
-          reportCommandId: f.reportId,
-          runId: null,
-          outcome: 'report_suppressed',
-        });
+        if (mode === 'authorization') {
+          expect(outcome.command.status).toBe('accepted');
+          expect(outcome.command.receipt).toMatchObject({ reason: 'permission_control_changed' });
+        } else {
+          expect(outcome.command.status).toBe('rejected');
+          expect((await f.store.getCommand('resume'))?.receipt).toMatchObject({
+            reportCommandId: f.reportId,
+            runId: null,
+            outcome: 'report_suppressed',
+          });
+        }
       }
       expect((await f.store.getView('root')).runs).toHaveLength(1);
       expect(

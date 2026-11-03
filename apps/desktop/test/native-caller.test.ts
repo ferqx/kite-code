@@ -2093,7 +2093,6 @@ test('global activity refresh follows non-selected changes, retains failed obser
                   id: 'actual-run',
                   status: pending ? 'waiting_interaction' : 'completed',
                   isActive: !!pending,
-                  waitingForResults: false,
                 }
               : null,
         },

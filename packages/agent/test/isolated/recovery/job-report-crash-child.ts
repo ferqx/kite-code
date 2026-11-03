@@ -1,13 +1,13 @@
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime, type RuntimeOptions } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
-import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -38,13 +38,7 @@ export function crashReportOptions(input: {
           type: 'tool_call',
           id: 'task-call',
           name: 'spawn_agent',
-          arguments: JSON.stringify({
-            key: 'original-child',
-            role: 'reader',
-            result_disposition: 'after_turn',
-            cancellation: 'detached',
-            input: { content: 'Original crash child work' },
-          }),
+          arguments: JSON.stringify({ prompt: 'Original crash child work' }),
         };
         yield { ...finish, reason: 'tool_calls' };
       } else {
@@ -82,7 +76,6 @@ export function crashReportOptions(input: {
     extensions: [
       createTaskExtension({
         roles: [{ id: 'reader', configurationId: 'child', description: 'fixed crash child' }],
-        afterTurn: { enabled: true },
       }),
     ],
     childConfigurations: [

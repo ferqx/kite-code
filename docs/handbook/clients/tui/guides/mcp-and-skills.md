@@ -1,6 +1,6 @@
 # MCP 与 Skills
 
-MCP 提供外部工具和资源，Skills 提供可发现的任务指导或工作流。它们的可用性取决于配置、认证、模型工具能力和功能开关，不能把列表存在视为所有操作可执行。
+MCP 提供外部工具和资源，Skills 提供可发现的任务指导。它们的可用性取决于配置、认证、模型工具能力和功能开关，不能把列表存在视为所有操作可执行。
 
 ## MCP 管理
 
@@ -108,7 +108,7 @@ Login、Refresh credentials、Clear local credentials、Revoke remote credential
 
 ## Skills
 
-可发现且启用的 Skill 可出现在命令候选中，通过 `/<Skill 名称> [任务]` 激活。Skill Workflow 默认受功能开关限制；没有候选时先检查发现与配置，不凭旧手册猜测内置 Skill 名称。
+Skills 作为按需知识使用；`/skills` 查看目录，CLI `--skill` 选择知识。Skill Workflow 和 `/<Skill 名称>` 激活入口已移除。
 
 全局语义及限制见[扩展能力](../../../features/extensions.md)。
 
@@ -117,12 +117,6 @@ Login、Refresh credentials、Clear local credentials、Revoke remote credential
 通用开发入口的 `/skills` 不接受参数，显示当前已信任 Workspace 的真实知识目录。上下选择条目，左右翻阅完整详情，R 重新读取，Esc 返回；面板内 Ctrl+C 仍请求原整轮取消，并关闭本地读取。目录包含可用、禁用和不可用项，详情提供配置 ID、名称、描述、内容版本、缺失能力与有限失败原因。禁用项不会读取其文件；目录失败显示未知，保留同范围最后确认的内容，不把失败显示成空目录。
 
 目录按同一版本完整读取，读取途中发生变化会失败，需明确刷新。切换会话后，原读取结果不能覆盖新视图；目录读取成功也不表示持续连接已恢复。查看、刷新和详情导航都不创建任务、调用模型或运行 Skill 脚本，可用状态不授予工具执行权限。
-
-宿主同时支持 Workflow 目录与激活时，详情显示独立的 Workflow 状态、失败原因和合格的 `/<Skill 名称> [任务]`。知识可用不代表 Workflow 可用；名称重名、禁止手动调用、需要结构化输入、缺角色或核验能力的项目不能借目录激活。固定命令及别名优先，不被同名 Skill 覆盖。
-
-输入动态命令后会重新读取当前完整目录，再以空对象作为原 Workflow 输入；任务文字只作为任务内容，省略任务时使用该 Skill 的默认请求文字。空闲会话启动新 Run，活动会话排为准确原 Run 之后的 follow-up。读取期间 Ctrl+C 只取消读取；切换会话或修改草稿使旧读取失效。提交结果未知时保留原草稿，回到原会话主界面后自动查询原命令，不重复提交；迟到回执不会清除后来编辑的草稿。目录显示的版本不预订未来执行版本，实际开始以 Service 核实的可信源为准。
-
-CLI 的 `--skill` 仍用于选择本次 Run 可以按需使用的知识；显式 Workflow 使用 `--activate-skill`。正式 CLI、Terminal 与开发 TUI 已消费当前公共能力；完整 Workflow、终端交互与平台资格仍按[实施进度](../../../../plans/unified-agent-refactor-v1-progress.md)分别核对。
 
 ## 手工配置参考
 
@@ -147,4 +141,4 @@ CLI 的 `--skill` 仍用于选择本次 Run 可以按需使用的知识；显式
 
 MCP 面板提供 Saved prompts／resources，读取已保存 list Record 的原描述和全部 arguments 等字段；历史绑定与当前 live 绑定分别标示。分页、详情和关闭不连接服务器、读取远端正文或执行 prompt。
 
-命令候选包含当前完整目录中唯一且准确匹配的 `/mcp__<server>__<prompt>`。选择前重新核对目录及 live／配置绑定；与原 TUI 一致，只在当前会话显示该原命令，没有 Run 或远端 RPC。动态 Workflow 仍使用独立的新服务调用和权限校验，两种选择不混用。
+命令候选包含当前完整目录中唯一且准确匹配的 `/mcp__<server>__<prompt>`。选择前重新核对目录及 live／配置绑定；与原 TUI 一致，只在当前会话显示该原命令，没有 Run 或远端 RPC。

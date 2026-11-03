@@ -29,7 +29,6 @@ import type { CLIArguments } from '../src/arguments';
 import { callerCanonical, callerDigest, parseCallerIntent } from './caller-intents';
 import { openCallerJournal } from './caller-journal';
 import { CLICallerPrepareError, createCLICallerPort, createTuiCallerPort } from './caller-port';
-import { selectWorkflowActivations } from './workflow-activations';
 
 export {
   runNativeTerminalCLI,
@@ -462,9 +461,6 @@ export async function runSelectedCLI(input: {
         'commands',
         'history',
         ...(taskArgs?.skills.length ? ['run_skill_selection'] : []),
-        ...(taskArgs?.activateSkills?.length
-          ? ['skill_workflow_catalogue', 'run_extension_inputs']
-          : []),
       ];
   const connection = args.server
     ? await (await import('./shared-service')).connectSharedService({
@@ -846,49 +842,15 @@ export async function runSelectedCLI(input: {
       if (outcome.exitCode !== 0) return outcome.exitCode;
     }
     input.signal?.throwIfAborted();
-    const activations = args.activateSkills?.length
-      ? selectWorkflowActivations(
-          await client.listAllSkills(workspace.id, {
-            storeId,
-            workflow: 'manual',
-            signal: input.signal,
-          }),
-          args.activateSkills,
-        )
-      : [];
-    input.signal?.throwIfAborted();
-    const current = activations.length
-      ? await client.getView(session.id, { signal: input.signal })
-      : undefined;
-    if (current && (current.storeId !== storeId || current.session.id !== session.id))
-      throw new CLIHostError('session_identity_mismatch');
-    const activeRun = current?.runs.find((value) => value.isActive);
     const commandId = crypto.randomUUID();
     input.write(`work intent ${JSON.stringify({ storeId, sessionId: session.id, commandId })}`);
     const intent = Object.freeze({
-      ...(activeRun
-        ? {
-            kind: 'input.follow_up' as const,
-            afterRunId: activeRun.id,
-            contextSelectionId: current!.session.contextSelectionId,
-          }
-        : { kind: 'run.start' as const }),
+      kind: 'run.start' as const,
       expectedStoreId: storeId,
       commandId,
       content: args.task,
       ...(args.skills.length ? { selectedSkills: [...new Set(args.skills)] } : {}),
       ...(args.model ? { modelId: args.model } : {}),
-      ...(activations.length
-        ? {
-            extensionInputs: [
-              {
-                extensionId: 'builtin.skill-workflow',
-                definitionVersion: '1',
-                input: { activations },
-              },
-            ],
-          }
-        : {}),
     });
     return await executeWork(session.id, intent, caller, true);
   } finally {

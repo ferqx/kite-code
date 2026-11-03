@@ -16,16 +16,13 @@ export function createDefaultTaskRequestClassifier(selectedRoles: readonly Trust
     const input = request.input;
     const role =
       request.kind === 'tool' &&
-      ['task', 'task.execute', 'task.spawn'].includes(request.definitionId) &&
+      request.definitionId === 'task.spawn' &&
       input &&
       typeof input === 'object' &&
-      !Array.isArray(input) &&
-      (typeof input.role === 'string' || request.definitionId === 'task.spawn')
-        ? request.definitionId === 'task.spawn'
-          ? typeof input.preset === 'string'
-            ? input.preset
-            : 'worker'
-          : input.role
+      !Array.isArray(input)
+        ? typeof input.preset === 'string'
+          ? input.preset
+          : 'worker'
         : request.kind === 'job' && request.definitionId.startsWith('agent/')
           ? request.definitionId.slice('agent/'.length)
           : undefined;

@@ -96,6 +96,7 @@ function childReportCarrierProof(db: SqliteOperations, report: Row, seen = new S
   const request = parse(report.request_json);
   const result = db.row('SELECT * FROM execution WHERE id=?', String(request.executionId));
   const binding = result?.after_turn_json ? parse(result.after_turn_json) : null;
+  if (binding?.kind !== 'agent_completion') throw new AgentError('report_unverifiable');
   const parent =
     binding &&
     db.row(
@@ -212,7 +213,7 @@ export function sealAfterTurn(
   input: { afterTurnAuthorization?: AfterTurnAuthorization; collaborationCompletion?: true },
   configuration: Json,
 ): Json | null {
-  if (!input.afterTurnAuthorization && !input.collaborationCompletion) return null;
+  if (!input.collaborationCompletion) return null;
   const session = db.row('SELECT * FROM session WHERE id=?', parent.session_id!);
   const run =
     parent.run_id !== null &&
@@ -237,7 +238,7 @@ export function sealAfterTurn(
   if (input.afterTurnAuthorization)
     validateAfterTurnAuthorization(db, parent, input.afterTurnAuthorization);
   return {
-    kind: input.collaborationCompletion ? 'agent_completion' : 'after_turn',
+    kind: 'agent_completion',
     parentRunId: String(run.id),
     sourceExecutionId: String(parent.id),
     definitionId: String(parent.adapter_id),
@@ -313,17 +314,7 @@ function suppression(
     )
   )
     return 'result_not_pending';
-  // Historical explicit after_turn invocations retain their sealed delivery contract.
-  // New collaboration subscriptions use the work selection/control contract below.
-  if (
-    binding.kind !== 'agent_completion' &&
-    db.row(
-      "SELECT id FROM command WHERE session_id=? AND seq>(SELECT seq FROM command WHERE id=?) AND kind IN('run.start','input.follow_up','extension.invoke','child.start') AND cancelled=0 AND status IN('accepted','applied') LIMIT 1",
-      execution.session_id!,
-      parent.origin_command_id!,
-    )
-  )
-    return 'human_start_preferred';
+
   return null;
 }
 export function registerJobReport(db: SqliteOperations, executionId: string): void {
@@ -331,12 +322,13 @@ export function registerJobReport(db: SqliteOperations, executionId: string): vo
   if (!execution?.after_turn_json) return;
   const binding = parse(execution.after_turn_json),
     origin = db.row('SELECT * FROM command WHERE id=?', execution.origin_command_id!)!;
+  if (binding.kind !== 'agent_completion') throw new AgentError('report_unverifiable');
   const commandId = `report-${digest([String(execution.origin_store_id), executionId, String(execution.result_revision)])}`;
   if (db.row('SELECT id FROM command WHERE id=?', commandId)) return;
   const reason = suppression(db, execution, binding);
   const request: Json = {
     kind: 'job.report',
-    ...(binding.kind === 'agent_completion' ? { mailboxVersion: 1 } : {}),
+    mailboxVersion: 1,
     executionId,
     resultRevision: String(execution.result_revision),
     contextSelectionId: binding.contextSelectionId!,
@@ -365,7 +357,7 @@ export function registerJobReport(db: SqliteOperations, executionId: string): vo
     execution.root_work_seq!,
     commandId,
   );
-  if (binding.kind === 'agent_completion') sealResultMail(db, commandId, execution);
+  sealResultMail(db, commandId, execution);
   if (reason && execution.delivery === 'pending')
     db.run(
       "UPDATE execution SET delivery='suppressed',delivery_reason=? WHERE id=?",
@@ -534,6 +526,7 @@ function recordReportRecovery(
   prepared: { request: Json; prior: boolean } | undefined,
   run: Row | null,
   reason?: string,
+  deferred = false,
 ) {
   if (!recovery || !prepared || prepared.prior) return;
   db.insertCommand(
@@ -549,7 +542,7 @@ function recordReportRecovery(
     {
       reportCommandId: String(report.id),
       runId: run ? String(run.id) : null,
-      outcome: reason ? 'report_suppressed' : 'report_resumed',
+      outcome: deferred ? 'report_deferred' : reason ? 'report_suppressed' : 'report_resumed',
       ...(reason ? { reason } : {}),
     },
   );
@@ -584,6 +577,13 @@ export function applyJobReport(
     const prepared = input.recovery
       ? prepareReportRecovery(db, command, input.recovery)
       : undefined;
+    const defer = (reason: string) => {
+      if (input.recovery && command.status === 'needs_review')
+        db.run("UPDATE command SET status='accepted' WHERE id=?", command.id!);
+      const result = deferReport(db, command, reason);
+      recordReportRecovery(db, command, input.recovery, prepared, null, reason, true);
+      return result;
+    };
     if (
       prepared?.prior ||
       command.status === 'applied' ||
@@ -606,6 +606,8 @@ export function applyJobReport(
     if (!execution?.after_turn_json || String(execution.result_revision) !== request.resultRevision)
       throw new AgentError('report_unverifiable');
     const binding = parse(execution.after_turn_json);
+    if (binding.kind !== 'agent_completion' || request.mailboxVersion !== 1)
+      throw new AgentError('report_unverifiable');
     const parent = db.row('SELECT * FROM run WHERE id=?', String(binding.parentRunId));
     const source = db.row('SELECT * FROM execution WHERE id=?', String(binding.sourceExecutionId));
     let continued = false;
@@ -620,13 +622,7 @@ export function applyJobReport(
     }
     let reason = command.cancelled ? 'cancelled' : suppression(db, execution, binding, continued);
     if (continuationInvalid) reason ??= 'work_continuation_unavailable';
-    if (
-      binding.kind !== 'agent_completion' &&
-      (!input.authorization ||
-        canonicalJson(input.authorization as unknown as Json) !==
-          canonicalJson(binding.authorization!))
-    )
-      reason ??= 'after_turn_policy_changed';
+
     if (
       !source ||
       !parent ||
@@ -684,8 +680,7 @@ export function applyJobReport(
         started: false,
       };
     }
-    if (eligibility.state === 'deferred')
-      return deferReport(db, command, eligibility.reason ?? 'work_not_selected');
+    if (eligibility.state === 'deferred') return defer(eligibility.reason ?? 'work_not_selected');
     const active = db.row(
       'SELECT * FROM run WHERE session_id=? AND is_active=1',
       command.session_id!,
@@ -700,44 +695,37 @@ export function applyJobReport(
         command.id!,
       )?.seq !== null
     )
-      return deferReport(db, command, 'human_business_queued');
-    if (binding.kind !== 'agent_completion' && (active || parent?.is_active))
-      return deferReport(db, command, 'report_parent_active');
+      return defer('human_business_queued');
+
     if (
       active &&
       (active.cancel_requested || active.context_selection_id !== binding.contextSelectionId)
     )
-      return deferReport(db, command, 'session_busy');
+      return defer('session_busy');
     // An active ordinary Run already has work authority. Idle wake authority is a
     // separate current decision, never inferred from observing a completion.
     if (!active && (input.activeOnly || !input.authorization))
-      return deferReport(db, command, 'idle_authorization_required');
+      return defer('idle_authorization_required');
     if (input.authorization && source) {
       try {
         validateAfterTurnAuthorization(db, source, input.authorization);
       } catch (error) {
         if (!(error instanceof AgentError) || error.code !== 'permission_control_changed')
           throw error;
-        return deferReport(db, command, 'permission_control_changed');
+        return defer('permission_control_changed');
       }
     }
-    if (
-      !active &&
-      binding.kind !== 'agent_completion' &&
-      canonicalJson(input.authorization as unknown as Json) !==
-        canonicalJson(binding.authorization!)
-    )
-      return deferReport(db, command, 'after_turn_policy_changed');
+
     assertNoExecutionGroupFence(db, String(command.session_id));
     if (!active && (!parent || parent.is_active || parent.status !== 'completed'))
-      return deferReport(db, command, 'report_parent_active');
+      return defer('report_parent_active');
     if (
       !active &&
       db.row('SELECT parent_id FROM session WHERE id=?', command.session_id!)?.parent_id !== null
     ) {
       const enclosing = childReportCarrierProof(db, command);
       if (['dispatching', 'running'].includes(String(enclosing.state)))
-        return deferReport(db, command, 'report_carrier_active');
+        return defer('report_carrier_active');
     }
     if (active) db.active(input.owner, String(active.origin_command_id), String(active.id));
     else db.active(input.owner, String(command.id));

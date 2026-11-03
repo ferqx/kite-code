@@ -291,7 +291,6 @@ export async function startService(options: ServiceOptions) {
         'skill_catalogue',
         'user_skill_catalogue',
         'user_mcp_settings',
-        'skill_workflow_catalogue',
         'run_skill_selection',
         'run_extension_inputs',
         'job_report_resume',
@@ -329,7 +328,6 @@ export async function startService(options: ServiceOptions) {
   if (options.userMcpManagement) capabilities.push('user_mcp_settings');
   if (options.skillCatalogue) capabilities.push('skill_catalogue');
   if (options.skillCatalogue?.listUser) capabilities.push('user_skill_catalogue');
-  if (options.skillCatalogue?.supportsWorkflow) capabilities.push('skill_workflow_catalogue');
   if (sessionLogs) capabilities.push('session_logs');
   if (supportsFileRecovery(options.runtime)) capabilities.push('file_recovery');
   schemas.ServerInfo.parse({
@@ -1412,8 +1410,6 @@ export async function startService(options: ServiceOptions) {
   app.get('/v1/workspaces/:id/skills', async (context) => {
     context.header('cache-control', 'no-store');
     const query = sessionExportQuery(context.req.queries(), SkillCatalogueQuerySchema);
-    if (query.workflow && !options.skillCatalogue?.supportsWorkflow)
-      throw new HttpFailure('skill_workflow_catalogue_unavailable', 404);
     const workspaceId = context.req.param('id');
     const target = schemas.Workspace.shape.id.safeParse(workspaceId);
     if (!target.success) throw new HttpFailure('invalid_request', 400);
@@ -1450,14 +1446,7 @@ export async function startService(options: ServiceOptions) {
       throw new HttpFailure('skill_catalogue_identity_mismatch', 409);
     if (query.revision && page.revision !== query.revision)
       throw new HttpFailure('skill_catalogue_changed', 409);
-    // Existing clients consume a closed knowledge DTO. The richer projection is explicit opt-in.
-    const response = query.workflow
-      ? page
-      : {
-          ...page,
-          entries: page.entries.map(({ workflow: _workflow, ...entry }) => entry),
-        };
-    return context.json(SkillCataloguePageSchema.parse(response));
+    return context.json(SkillCataloguePageSchema.parse(page));
   });
   app.get('/v1/diagnostics/host-status', async (context) => {
     context.header('cache-control', 'no-store');

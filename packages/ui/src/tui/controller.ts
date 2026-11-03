@@ -101,7 +101,7 @@ import {
   type TuiRecoveryOutcome,
   type TuiRecoveryPort,
 } from './recovery';
-import { manualWorkflow, type TuiSkillsPort, type TuiSkillsSnapshot } from './skills';
+import type { TuiSkillsPort, TuiSkillsSnapshot } from './skills';
 import type { TuiStatusPort, TuiStatusSnapshot } from './status';
 
 export * from './caller';
@@ -2183,6 +2183,8 @@ export class TuiController {
           if (checked.receipt.outcome === 'report_suppressed') {
             if (result.status !== 'suppressed' || result.run)
               throw Error('recovery_scope_mismatch');
+          } else if (checked.receipt.outcome === 'report_deferred') {
+            if (result.status !== 'deferred' || result.run) throw Error('recovery_scope_mismatch');
           } else if (
             result.status !== 'resumed' ||
             result.run?.id !== checked.receipt.runId ||
@@ -5125,10 +5127,7 @@ export class TuiController {
     try {
       command = parseTuiCommand(text);
     } catch (error) {
-      if (error instanceof Error && error.message === 'tui_command_unavailable') {
-        await this.sendWorkflow(text);
-      } else
-        this.publish({ error: error instanceof Error ? error.message : 'invalid_tui_command' });
+      this.publish({ error: error instanceof Error ? error.message : 'invalid_tui_command' });
       return;
     }
     if (command.kind === 'plan') {
@@ -5699,118 +5698,6 @@ export class TuiController {
       if (!concurrent) this.busy = false;
     }
   }
-  private workflowReading = false;
-  private async sendWorkflow(text: string) {
-    const token = /^\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s+([\s\S]*))?$/.exec(text.trim());
-    const snapshot = this.value.snapshot,
-      sessionId = this.value.sessionId;
-    if (!token || !this.port.skills?.workflowActivation) {
-      this.publish({ error: 'tui_command_unavailable' });
-      return;
-    }
-    if (
-      !snapshot ||
-      !sessionId ||
-      this.busy ||
-      this.workflowReading ||
-      this.value.stale ||
-      this.hasUnknownAnswer() ||
-      this.pendingRecovery() ||
-      this.value.intent?.phase === 'unknown'
-    )
-      return;
-    const generation = this.generation,
-      version = this.draftVersions.get(sessionId) ?? 0;
-    this.workflowReading = true;
-    try {
-      const facts = await this.readSkills(false);
-      if (
-        !facts ||
-        this.busy ||
-        this.hasUnknownAnswer() ||
-        this.state.intent?.phase === 'unknown' ||
-        this.disposed ||
-        generation !== this.generation ||
-        this.value.sessionId !== sessionId ||
-        (this.draftVersions.get(sessionId) ?? 0) !== version ||
-        this.value.stale ||
-        this.value.skills?.read !== 'verified'
-      )
-        return;
-      const workflow = manualWorkflow(facts, token[1]!);
-      if (!workflow) {
-        const matches = facts.entries.filter((entry) => entry.workflow?.name === token[1]);
-        const rejected = matches[0] ?? facts.entries.find((entry) => entry.name === token[1]);
-        this.publish({
-          error:
-            matches.length > 1
-              ? 'workflow_name_ambiguous'
-              : (rejected?.workflow?.reason ?? rejected?.reason ?? 'tui_command_unavailable'),
-        });
-        return;
-      }
-      const current = this.value.snapshot!;
-      if (
-        current.view.session.workspaceId !== snapshot.view.session.workspaceId ||
-        current.view.session.contextSelectionId !== snapshot.view.session.contextSelectionId ||
-        current.view.runs.find((value) => value.isActive)?.id !==
-          snapshot.view.runs.find((value) => value.isActive)?.id
-      )
-        return;
-      const run = current.view.runs.find((value) => value.isActive);
-      if (run && !['running', 'waiting_interaction', 'waiting_execution'].includes(run.status))
-        return;
-      const commandId = this.port.nextCommandId();
-      const scope = {
-        storeId: this.port.storeId,
-        workspaceId: current.view.session.workspaceId,
-        sessionId,
-      };
-      let storedRevision: number | undefined;
-      try {
-        storedRevision = this.port.drafts?.version(scope);
-      } catch {
-        this.draftUnavailable('tui_draft_storage_unavailable');
-        return;
-      }
-      const extensionInputs = [
-        {
-          extensionId: workflow.extensionId,
-          definitionVersion: workflow.definitionVersion,
-          input: { activations: [{ key: commandId, skillId: workflow.skillId!, input: {} }] },
-        },
-      ];
-      const common = {
-        expectedStoreId: this.port.storeId,
-        commandId,
-        content: token[2]?.trim() || `Run the ${workflow.name} Skill Workflow.`,
-        extensionInputs,
-      };
-      const intent: StartCommandRequest | FollowUpCommandRequest = freezeIntent(
-        run
-          ? {
-              ...common,
-              kind: 'input.follow_up',
-              afterRunId: run.id,
-              contextSelectionId: current.view.session.contextSelectionId,
-            }
-          : { ...common, kind: 'run.start' },
-      );
-      this.submittedDrafts.set(commandId, {
-        scope,
-        localRevision: version,
-        storedRevision,
-        request: intent,
-      });
-      await this.write(sessionId, commandId, intent.kind, () =>
-        this.port.callers ? this.submitCaller(scope, intent) : this.port.submit(sessionId, intent),
-      );
-      this.settleDraft(commandId);
-    } finally {
-      this.workflowReading = false;
-    }
-  }
-
   async send() {
     if (this.value.draft.trim().startsWith('/')) {
       await this.routeCommand(this.value.draft);
@@ -6027,10 +5914,6 @@ export class TuiController {
   async cancel() {
     if (this.pendingRecovery(true) || this.value.panel === 'recovery') {
       this.cancelRecoveryRead();
-      return;
-    }
-    if (this.workflowReading && this.value.skills?.read === 'reading') {
-      this.skillsRead?.abort();
       return;
     }
     const snapshot = this.value.snapshot,

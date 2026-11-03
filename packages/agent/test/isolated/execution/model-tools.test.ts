@@ -3,6 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -11,7 +12,6 @@ import { projectModelContext } from '../../../src/context-estimate';
 import type { AuthorizationRequest, Json, ToolDefinition } from '../../../src/extensions';
 import { createModelToolSurface, modelToolCall } from '../../../src/model-tools';
 import { openSqliteStore } from '../../../src/sqlite';
-import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -132,31 +132,64 @@ test('public name and parameter collisions fail before Model I/O', () => {
   );
 });
 
-test('only one child wait entry accepts task targets; event waits have no task parameters', () => {
-  const tools = createTaskExtension({
+test('Agent tools expose exactly the current six definitions and reject retired names and arguments', () => {
+  const extension = createTaskExtension({
     roles: [{ id: 'worker', configurationId: 'worker', description: 'Bounded work' }],
-  }).tools!;
+  });
+  const tools = extension.tools!;
+  expect(tools.map((tool) => tool.id).sort()).toEqual([
+    'task.events',
+    'task.follow_up',
+    'task.interrupt',
+    'task.list',
+    'task.message',
+    'task.spawn',
+  ]);
+  expect(extension.conditions).toBeUndefined();
+  expect(extension.records).toBeUndefined();
   const surface = createModelToolSurface(
     request(tools),
     new Map(tools.map((tool) => [tool.id, tool])),
   );
-  expect(surface.tools.some((tool) => tool.id === 'task_wait')).toBe(false);
-  const wait = surface.tools.find((tool) => tool.id === 'wait_agents')!;
-  expect(wait.inputSchema.required).toContain('task_ids');
-  expect(wait.inputSchema.properties).not.toHaveProperty('task_id');
-  const event = surface.tools.find((tool) => tool.id === 'wait_agent_event')!;
-  expect(Object.keys(event.inputSchema.properties!)).toEqual(['after_seq', 'timeout_ms']);
-  expect(surface.decode({ id: 'hidden', name: 'task_wait', arguments: '{}' }).model?.error).toBe(
-    'tool_not_available',
-  );
+  for (const name of [
+    'task',
+    'task.execute',
+    'task_read',
+    'task_wait',
+    'task_cancel',
+    'send_message',
+    'followup_task',
+    'wait_agents',
+    'wait_agent',
+    'run_agent',
+    'read_agent',
+    'cancel_agent_task',
+    'followup_agent',
+    'wait_agent_event',
+  ]) {
+    expect(surface.decode({ id: 'retired', name, arguments: '{}' }).model?.error).toBe(
+      'tool_not_available',
+    );
+  }
+  const event = surface.tools.find((tool) => tool.id === 'wait_agent_events')!;
+  expect(Object.keys(event.inputSchema.properties!)).toEqual(['after_seq', 'wait_ms']);
   expect(
-    surface.decode({ id: 'singular', name: 'wait_agents', arguments: '{"task_id":"one"}' }).model
-      ?.error,
-  ).toBe('invalid_tool_arguments');
-  expect(
-    surface.decode({ id: 'valid', name: 'wait_agents', arguments: '{"task_ids":["one"]}' })
-      .arguments,
-  ).toBe('{"taskIds":["one"]}');
+    surface.decode({
+      id: 'valid',
+      name: 'wait_agent_events',
+      arguments: '{"after_seq":"0","wait_ms":0}',
+    }).arguments,
+  ).toBe('{"afterSeq":"0","waitMs":0}');
+  for (const [name, args] of [
+    ['spawn_agent', { prompt: 'work', key: 'old', role: 'worker', result_disposition: 'required' }],
+    ['wait_agent_events', { task_ids: ['old'] }],
+    ['interrupt_agent', { task_id: 'old', target_run_id: 'old', command_id: 'old' }],
+  ] as const) {
+    expect(
+      surface.decode({ id: 'retired-arguments', name, arguments: JSON.stringify(args) }).model
+        ?.error,
+    ).toBe('invalid_tool_arguments');
+  }
 });
 
 test('real Runtime keeps internal dispatch authority and cold public snapshots while all adapters see the model surface', async () => {

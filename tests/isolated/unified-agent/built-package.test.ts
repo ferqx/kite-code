@@ -147,10 +147,10 @@ nativeTest(
       expect(existsSync(join(agentPath, 'storage/migrations/0001-baseline.sql'))).toBe(true);
       expect(existsSync(join(agentPath, 'platform/process/shell-supervisor.js'))).toBe(true);
       expect(existsSync(join(agentPath, 'mcp/stdio-guardian.js'))).toBe(true);
-      for (const path of ['mcp/schema-worker', 'skills/workflow-contract/worker']) {
-        expect(existsSync(join(agentPath, `${path}.js`))).toBe(true);
-        expect(existsSync(join(agentPath, `${path}.sha256`))).toBe(true);
-      }
+      expect(existsSync(join(agentPath, 'mcp/schema-worker.js'))).toBe(true);
+      expect(existsSync(join(agentPath, 'mcp/schema-worker.sha256'))).toBe(true);
+      expect(existsSync(join(agentPath, 'skills/workflow-contract/worker.js'))).toBe(false);
+      expect(existsSync(join(agentPath, 'skills/workflow-contract/worker.sha256'))).toBe(false);
       expect(exports).toEqual({
         '.': './index.js',
         './extensions': './extensions/index.js',
@@ -178,12 +178,11 @@ nativeTest(
         './web-fetch': './tools/web-fetch/index.js',
         './maintenance': './maintenance/index.js',
         './artifact-access': './artifact-access.js',
-        './skill-workflow': './business/skill-workflow/index.js',
         './sqlite-engine': './sqlite-engine.js',
         './windows-path-security': './platform/windows-path-security.js',
       });
       expect(exports['./maintenance']).toBe('./maintenance/index.js');
-      expect(exports['./skill-workflow']).toBe('./business/skill-workflow/index.js');
+      expect(exports['./skill-workflow']).toBeUndefined();
       expect(exports['./web-fetch']).toBe('./tools/web-fetch/index.js');
       expect(existsSync(join(agentPath, 'tools/web-fetch/extractor-worker.js'))).toBe(true);
       expect(existsSync(join(agentPath, 'tools/web-fetch/extractor-worker.sha256'))).toBe(true);
@@ -233,7 +232,6 @@ const {defineExtension}=await import('@kite-ai/agent/extensions');
 const {openSqliteStore}=await import('@kite-ai/agent/sqlite');
 const {createShellJob,shellSupervisorAsset}=await import('@kite-ai/agent/jobs/shell');
 const {createSkillSource}=await import('@kite-ai/agent/skills');
-const {compileSkillWorkflow,compileSkillWorkflowAsync,workflowCompilerAssets,validateWorkflowArguments,createSkillWorkflowCompensator}=await import('@kite-ai/agent/skill-workflow');
 const {createWorkspaceFiles}=await import('@kite-ai/agent/files');
 const {createConfigurationSnapshot}=await import('@kite-ai/agent/config');
 const {webExtractorAsset}=await import('@kite-ai/agent/web-fetch');
@@ -270,29 +268,9 @@ writeFileSync(join(working,'packaged.ts'),'one\\ntwo\\n');
 const files=createWorkspaceFiles({root:working});const filePage=await files.read('packaged.ts',{offset:2,limit:1});assert.equal(filePage.content,'two\\n');assert.equal(filePage.baseline.size,8);assert.deepEqual((await files.glob({pattern:'**/*.ts'})).paths,['packaged.ts']);
 const skills=join(working,'knowledge');mkdirSync(skills);writeFileSync(join(skills,'SKILL.md'),'---\\nname: packaged\\ndescription: artifact knowledge\\n---\\nRead [note](note.txt)');writeFileSync(join(skills,'note.txt'),'packaged reference');
 const source=createSkillSource({trustedRoots:[skills],locations:[skills]});const summary=(await source.list()).entries[0];const body=await source.load({id:summary.id,version:summary.version});assert.equal(body.resources.length,1);assert.equal((await source.readResource({skillId:summary.id,version:summary.version,path:'note.txt'})).body,'packaged reference');
-const workflowRoot=join(working,'workflow');mkdirSync(workflowRoot);writeFileSync(join(workflowRoot,'SKILL.md'),'---\\n'+JSON.stringify({name:'packaged-workflow',version:'1.0.0',description:'Actual built Workflow compiler',invocation:{allow_manual:true,allow_implicit:false},context:{mode:'inline',agent:'code'},input_schema:{type:'object'},output_schema:{type:'object',properties:{ok:{const:true}},required:['ok']},capabilities:{require:[],deny:[]},effects:{filesystem:'read',network:'none',external_state:'none'},approval:{minimum:'none'},execution:{timeout_ms:1000,max_attempts:1},verification:{mode:'required'},recovery:{retry:'never'}})+'\\n---\\nFollow the exact packaged workflow.');const compiledWorkflow=compileSkillWorkflow({skillDir:workflowRoot,source:'project',origin:'.agents'});assert.deepEqual(compiledWorkflow.diagnostics,[]);assert.equal(validateWorkflowArguments(compiledWorkflow.contract.outputSchema,{ok:true}),null);assert.notEqual(validateWorkflowArguments(compiledWorkflow.contract.outputSchema,{ok:false}),null);
-assert.equal(shellSupervisorAsset(),join(packageRoot,'platform/process/shell-supervisor.js'));
-assert.equal(mcpStdioGuardianAsset(),join(packageRoot,'mcp/stdio-guardian.js'));
-const compilerAssets=[mcpSchemaWorkerAssets(),workflowCompilerAssets()];
+const compilerAssets=[mcpSchemaWorkerAssets()];
 assert.equal(compilerAssets[0].worker,join(packageRoot,'mcp/schema-worker.js'));
-assert.equal(compilerAssets[1].worker,join(packageRoot,'skills/workflow-contract/worker.js'));
 for(const assets of compilerAssets){assert.equal(readFileSync(assets.checksum,'utf8'),createHash('sha256').update(readFileSync(assets.worker)).digest('hex')+String.fromCharCode(10));for(const file of [assets.preload,...assets.observerModules])assert(file.startsWith(packageRoot+'/')&&existsSync(file));}
-assert.deepEqual(await compileSkillWorkflowAsync({skillDir:workflowRoot,source:'project',origin:'.agents'}),compiledWorkflow);
-renameSync(compilerAssets[1].worker,compilerAssets[1].worker+'.held');try{await assert.rejects(compileSkillWorkflowAsync({skillDir:workflowRoot,source:'project',origin:'.agents'}));}finally{renameSync(compilerAssets[1].worker+'.held',compilerAssets[1].worker);}
-let compensationQualified=false;
-if(process.platform==='darwin'){
- const skillRoot=join(working,'compensation'),privateRoot=join(base,'compensation-control'),temporaryRoot=join(base,'compensation-runtime');
- for(const root of [skillRoot,privateRoot,temporaryRoot])mkdirSync(root);
- const ledger=join(working,'compensation-ledger');
- writeFileSync(join(skillRoot,'SKILL.md'),'---\\n'+JSON.stringify({name:'packaged-compensation',version:'1.0.0',description:'Original packaged compensation',invocation:{allow_manual:true,allow_implicit:false},context:{mode:'inline',agent:'code'},input_schema:{type:'object'},output_schema:{type:'object'},capabilities:{require:[],deny:[]},effects:{filesystem:'write',network:'none',external_state:'none'},approval:{minimum:'user'},execution:{timeout_ms:5000,max_attempts:1},verification:{mode:'required'},recovery:{retry:'never',compensation:'compensate.ts'}})+'\\n---\\nRun only the original declared script.');
- writeFileSync(join(skillRoot,'compensate.ts'),"import {writeFileSync} from 'node:fs';if(process.env.OWNED_SECRET)throw Error('secret_inherited');let refused=false;try{writeFileSync("+JSON.stringify(join(privateRoot,'forbidden'))+",'x')}catch{refused=true}if(!refused)throw Error('protected_write');writeFileSync("+JSON.stringify(ledger)+",'1');");
- const compiled=compileSkillWorkflow({skillDir:skillRoot,source:'project',origin:'.agents'});assert.deepEqual(compiled.diagnostics,[]);
- const compensator=createSkillWorkflowCompensator({entries:[compiled],protectedRoots:[privateRoot],temporaryRoot,shell:{cwd:working,env:{OWNED_SECRET:'nonsecret-fixture'},supervisorPath:shellSupervisorAsset(),bunExecutable:process.execPath,shellExecutable:'/bin/sh'}});
- const job=compensator.extension.jobs[0],input=compensator.compensationJob.prepare({entry:compiled,activationId:'one',attempt:1,outputDigest:createHash('sha256').update('{}').digest('hex'),output:{},decisionKey:'original/accepted/decision',decisionDigest:'a'.repeat(64)});
- const handle=await job.start(input,{sessionId:'owned',executionId:'packaged-compensation',signal:new AbortController().signal});let terminal;
- for await(const event of job.observe(handle))if(event.type==='terminal')terminal=event;
- assert.equal(terminal.supervision,'ended');assert.equal(terminal.result.outcome,'succeeded');assert.equal(readFileSync(ledger,'utf8'),'1');assert.equal(existsSync(join(privateRoot,'forbidden')),false);assert.equal(readdirSync(temporaryRoot).length,0);await job.dispose(handle);compensationQualified=true;
-}
 let effects=0;
 const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){if(request.method!=='POST')return new Response(null,{status:405});const rpc=await request.json();if(rpc.id===undefined)return new Response(null,{status:202});let result;if(rpc.method==='initialize')result={protocolVersion:'2024-11-05',serverInfo:{name:'artifact',version:'1'},capabilities:{tools:{}}};else if(rpc.method==='tools/list')result={tools:[{name:'artifact-count',inputSchema:{type:'object'}}]};else{assert.equal(rpc.method,'tools/call');assert.equal(rpc.params.name,'artifact-count');assert.deepEqual(rpc.params.arguments,{});effects++;result={content:[{type:'text',text:'artifact operation'}]};}return Response.json({jsonrpc:'2.0',id:rpc.id,result});}});
 const adapter=createMcpAdapter({id:'packaged',transport:{type:'http',url:server.url.href}});const scope=adapter.scope('session');
@@ -425,7 +403,7 @@ try{
 
  }finally{await restoredReader.close();}
  assert.deepEqual({provider:providerRequests.length,effects,stdioEffects},beforeBackup);
- process.stdout.write(JSON.stringify({entries:Object.keys(manifest.exports).length,worker:true,guardian:true,mcpGuardian:true,service:true,client:true,httpPort:true,stdioQualified:process.platform==='darwin',stdioAdmissions,stdioEffects,stdioStopped,skillVersion:body.version,mcpEffects:effects,shellStatus:job.status,sourceFallback:false,filePaging:true,glob:true,webWorker:true,parserHash,webArtifactBytes:binary.content.byteLength,webArtifactScope:reference.scope.kind,webRequests,webAdmissions,webStatus:webExecution.status,webMissingAssetRejected:true,pairedMain,pairedStopped,lifecycleStopped,gatewayRead,nativeSecretHidden,backupVerified:true,restoreVerified:true,compensationQualified})+'\\n');
+ process.stdout.write(JSON.stringify({entries:Object.keys(manifest.exports).length,worker:true,guardian:true,mcpGuardian:true,service:true,client:true,httpPort:true,stdioQualified:process.platform==='darwin',stdioAdmissions,stdioEffects,stdioStopped,skillVersion:body.version,mcpEffects:effects,shellStatus:job.status,sourceFallback:false,filePaging:true,glob:true,webWorker:true,parserHash,webArtifactBytes:binary.content.byteLength,webArtifactScope:reference.scope.kind,webRequests,webAdmissions,webStatus:webExecution.status,webMissingAssetRejected:true,pairedMain,pairedStopped,lifecycleStopped,gatewayRead,nativeSecretHidden,backupVerified:true,restoreVerified:true})+'\\n');
 }finally{await files.close();await service?.close();await runtime?.close();if(!runtime)await store?.close();await lifecycle.close();await adapter.close();server.stop(true);web.stop(true);provider.stop(true);}
 `,
       );
@@ -462,9 +440,7 @@ try{
         nativeSecretHidden: boolean;
         backupVerified: boolean;
         restoreVerified: boolean;
-        compensationQualified: boolean;
       };
-      expect(result.compensationQualified).toBe(process.platform === 'darwin');
       expect(result).toMatchObject({
         entries: Object.keys(exports).length,
         worker: true,

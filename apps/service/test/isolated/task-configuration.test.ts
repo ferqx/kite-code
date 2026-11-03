@@ -425,13 +425,12 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
   }
   expect(createTaskConfiguration([]).extension).toBeUndefined();
   for (const id of [
-    'task.execute',
-    'send_message',
-    'followup_task',
-    'list_agents',
-    'interrupt_agent',
-    'wait_agents',
-    'wait_agent',
+    'task.spawn',
+    'task.message',
+    'task.follow_up',
+    'task.events',
+    'task.list',
+    'task.interrupt',
   ]) {
     expect(() => createTaskConfiguration([]).validateSelection([id])).toThrow(
       'task_role_unavailable',
@@ -440,17 +439,6 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
   const task = createTaskConfiguration([{ id: 'worker', version: '1' }]);
   expect(task.snapshot.tools.map((row) => row.id).sort()).toEqual(
     [
-      'task',
-      'task.execute',
-      'task_read',
-      'task_wait',
-      'task_cancel',
-      'send_message',
-      'followup_task',
-      'list_agents',
-      'interrupt_agent',
-      'wait_agents',
-      'wait_agent',
       'task.spawn',
       'task.message',
       'task.follow_up',
@@ -459,7 +447,7 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
       'task.interrupt',
     ].sort(),
   );
-  for (const id of ['list_agents', 'wait_agents', 'wait_agent']) {
+  for (const id of ['task.list', 'task.events']) {
     expect(taskToolCapability(id)).toEqual({ effects: ['read'], safeRead: true });
     expect(task.tools.get(id)?.version).toBe('1');
     expect(task.tools.get(id)?.inputSchema).toMatchObject({
@@ -467,19 +455,35 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
       additionalProperties: false,
     });
   }
-  expect(taskToolCapability('interrupt_agent')).toEqual({ effects: ['unknown'], safeRead: false });
-  expect(task.tools.get('interrupt_agent')?.inputSchema).toMatchObject({
-    required: ['taskId', 'targetRunId', 'commandId'],
+  expect(taskToolCapability('task.interrupt')).toEqual({ effects: ['unknown'], safeRead: false });
+  expect(task.tools.get('task.interrupt')?.inputSchema).toMatchObject({
+    required: ['agentId'],
     additionalProperties: false,
   });
-  expect(taskToolCapability('send_message')).toEqual({
+  expect(taskToolCapability('task.message')).toEqual({
     effects: ['unknown', 'record_write'],
     safeRead: false,
   });
-  expect(taskToolCapability('followup_task')).toEqual({
+  expect(taskToolCapability('task.follow_up')).toEqual({
     effects: ['unknown', 'record_write'],
     safeRead: false,
   });
+  for (const id of [
+    'task',
+    'task.execute',
+    'task_read',
+    'task_wait',
+    'task_cancel',
+    'send_message',
+    'followup_task',
+    'list_agents',
+    'interrupt_agent',
+    'wait_agents',
+    'wait_agent',
+  ]) {
+    expect(task.tools.has(id)).toBe(false);
+    expect(taskToolCapability(id)).toEqual({ effects: ['unknown'], safeRead: false });
+  }
 });
 
 test('a new trusted role version and SDK route bind only new Run work; original Task record and child definition stay unchanged', async () => {

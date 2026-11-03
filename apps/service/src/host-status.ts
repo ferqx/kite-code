@@ -100,20 +100,30 @@ export function createDefaultHostStatusSource(options: {
             configured: true,
             available: true,
             supervision:
-              shell.platform === 'linux'
-                ? 'linux_pid_namespace'
-                : shell.host
-                  ? 'macos_coalition'
-                  : 'posix_group',
+              shell.platform === 'win32'
+                ? 'windows_job'
+                : shell.platform === 'linux'
+                  ? 'linux_pid_namespace'
+                  : shell.host
+                    ? 'macos_coalition'
+                    : 'posix_group',
             qualification:
-              shell.platform === 'linux'
-                ? 'linux_host_boundary_unqualified'
-                : shell.host
-                  ? 'darwin_host_boundary'
-                  : 'darwin_supervision_only',
+              shell.platform === 'win32'
+                ? 'windows_unelevated'
+                : shell.platform === 'linux'
+                  ? 'linux_host_boundary_unqualified'
+                  : shell.host
+                    ? 'darwin_host_boundary'
+                    : 'darwin_supervision_only',
             reason: null,
           };
-          if (shell.host)
+          if (shell.host && shell.platform === 'win32')
+            facts.execution.sandbox = {
+              backend: 'windows_restricted_token',
+              available: true,
+              qualification: 'write_restricted',
+            };
+          else if (shell.host)
             facts.execution.sandbox = {
               ...(shell.platform === 'linux'
                 ? {

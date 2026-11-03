@@ -9,9 +9,9 @@ import type { Extension } from '@kite-ai/agent/extensions';
 import * as filesModule from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
-import { createLegacyTaskFixture as createTaskExtension } from '../../../../packages/agent/test/fixtures/legacy-task-surface';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createWorkspaceAssembly } from '../../src/assembly';
@@ -222,7 +222,6 @@ const jobExtension: Extension = {
 };
 const task = createTaskExtension({
   roles: [{ id: 'reader', configurationId: 'child', description: 'original role' }],
-  afterTurn: { enabled: true },
 });
 const policy = { authorize: async () => ({ allowed: true, revision: 'original-report' }) };
 async function seedRun() {
@@ -373,15 +372,7 @@ if (mode === 'seed-run') {
             id: 'original-launch',
             name: mode === 'report' ? 'spawn_agent' : 'ledger.launch',
             arguments:
-              mode === 'report'
-                ? JSON.stringify({
-                    key: 'child',
-                    role: 'reader',
-                    result_disposition: 'after_turn',
-                    cancellation: 'detached',
-                    input: { content: '原实际子结果 中🙂\r\n' },
-                  })
-                : '{}',
+              mode === 'report' ? JSON.stringify({ prompt: '原实际子结果 中🙂\r\n' }) : '{}',
           },
           { ...finish, reason: 'tool_calls' },
         ],

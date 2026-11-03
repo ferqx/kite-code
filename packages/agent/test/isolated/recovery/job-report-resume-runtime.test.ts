@@ -3,6 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension, JobEvent } from '../../../src/extensions';
@@ -12,7 +13,6 @@ import { createRuntime, type RunConfiguration } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
 import { AgentError } from '../../../src/storage/types';
-import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -77,13 +77,7 @@ for (const mode of [
             type: 'tool_call',
             id: 'delegate',
             name: 'spawn_agent',
-            arguments: JSON.stringify({
-              key: 'child',
-              role: 'reader',
-              result_disposition: 'after_turn',
-              cancellation: 'detached',
-              input: { content: 'child result' },
-            }),
+            arguments: JSON.stringify({ prompt: 'child result' }),
           };
           yield { ...finish, reason: 'tool_calls' };
         } else {
@@ -111,7 +105,6 @@ for (const mode of [
     };
     const task = createTaskExtension({
       roles: [{ id: 'reader', configurationId: 'child', description: 'trusted' }],
-      afterTurn: { enabled: true },
     });
     const permission = {
       async authorize() {
@@ -189,8 +182,10 @@ for (const mode of [
     // facts and the needs_review marker are produced by the actual Core and SQLite.
     const faultStore = new Proxy(store, {
       get(target, key) {
-        if (key === 'applyJobReport')
-          return async () => {
+        if (key === 'applyJobReport' || key === 'receiveAgentMessages')
+          return async (input: Parameters<typeof target.receiveAgentMessages>[0]) => {
+            if (key === 'receiveAgentMessages' && !input.resultOptions)
+              return target.receiveAgentMessages(input);
             throw new AgentError('report_recovery_required');
           };
         const value = Reflect.get(target, key);
@@ -496,6 +491,15 @@ for (const mode of [
           expect((await runtime.getView('root')).runs).toHaveLength(2);
           const carrier = originalExecutions.find((e) => e.kind === 'job' && e.childSessionId)!;
           expect((await runtime.getExecution(carrier.id))!.status).toBe('succeeded');
+        } else if (mode === 'deny' || mode === 'human_before') {
+          expect(receipt.receipt).toMatchObject({
+            outcome: 'report_deferred',
+            runId: null,
+            reason: mode === 'deny' ? 'idle_authorization_required' : 'human_business_queued',
+          });
+          expect((await store.getCommand(reportId))?.status).toBe('accepted');
+          expect(await runtime.resumeJobReport(intent)).toEqual(receipt);
+          expect(requests).toHaveLength(2);
         } else {
           expect(receipt.receipt).toMatchObject({ outcome: 'report_suppressed', runId: null });
           expect(requests).toHaveLength(2);

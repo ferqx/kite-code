@@ -27,35 +27,30 @@ export const defaultTaskRoles: readonly TrustedTaskRole[] = Object.freeze([
     version: '1',
     toolPolicy: 'read_only' as const,
     description:
-      'Read-only repository exploration: trace the current entry point and configuration through reachable calls to data, state and output; report evidence and unresolved steps. No modifications or process/network dispatch.',
+      'Read-only repository exploration: trace the current entry point and configuration through reachable calls to data, state and output; report evidence and unresolved steps. Use literal rg, ls and pwd Shell queries. No modifications or arbitrary process/network dispatch.',
   }),
   Object.freeze({
     id: 'plan',
     version: '1',
     toolPolicy: 'read_only' as const,
     description:
-      'Read-only planning: establish the current entry point, configuration and reachable implementation before proposing scoped changes and verification; report unresolved assumptions. Do not modify files, dispatch effects or approve a plan.',
+      'Read-only planning: establish the current entry point, configuration and reachable implementation before proposing scoped changes and verification; report unresolved assumptions. Use literal rg, ls and pwd Shell queries. Do not modify files, dispatch other effects or approve a plan.',
   }),
   Object.freeze({
     id: 'review',
     version: '1',
     toolPolicy: 'read_only' as const,
     description:
-      'Read-only code review: inspect actual changes and reachable surrounding code, identify defects with causal evidence, and state unverified scope. Do not implement changes or dispatch effects.',
+      'Read-only code review: inspect actual changes and reachable surrounding code, identify defects with causal evidence, and state unverified scope. Use literal rg, ls and pwd Shell queries. Do not implement changes or dispatch other effects.',
   }),
 ]);
 
-/** Exact existing builtin definitions with read-only behavior; unknown IDs fail closed. */
+/** Exact builtin bindings. Shell dispatch additionally requires the host's literal-query ceiling. */
 const readOnlyBindings = [
   ['builtin.files', 'files.read', '4'],
   ['builtin.files', 'files.read', '5'],
-  ['builtin.files.path', 'files.read_path', '2'],
-  ['builtin.files', 'files.list', '1'],
-  ['builtin.files', 'files.glob', '2'],
-  ['builtin.files', 'files.glob', '3'],
-  ['builtin.files', 'files.search', '3'],
-  ['builtin.files', 'files.search', '4'],
-  ['builtin.files', 'files.search', '5'],
+  ['builtin.shell', 'shell.execute', '1'],
+  ['builtin.shell', 'shell.launch', '1'],
   ['builtin.shell', 'shell.read', '1'],
   ['builtin.shell', 'shell.wait', '1'],
   ['builtin.planning', 'planning.read', '1'],

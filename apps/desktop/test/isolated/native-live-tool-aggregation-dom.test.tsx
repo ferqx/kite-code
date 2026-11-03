@@ -97,7 +97,6 @@ function fixture() {
                   id: (cachedDirectoryRun ?? runs[0]!).id,
                   status: (cachedDirectoryRun ?? runs[0]!).status,
                   isActive: (cachedDirectoryRun ?? runs[0]!).isActive,
-                  waitingForResults: false,
                 },
               },
             }

@@ -42,16 +42,28 @@ export const HostStatusSchema = z.strictObject({
         available: z.literal(true),
         qualification: z.literal('host_scope_unqualified'),
       }),
+      z.strictObject({
+        backend: z.literal('windows_restricted_token'),
+        available: z.literal(true),
+        qualification: z.literal('write_restricted'),
+      }),
     ]),
     shell: z.strictObject({
       configured: z.boolean(),
       available: z.boolean(),
-      supervision: z.enum(['none', 'posix_group', 'macos_coalition', 'linux_pid_namespace']),
+      supervision: z.enum([
+        'none',
+        'posix_group',
+        'macos_coalition',
+        'linux_pid_namespace',
+        'windows_job',
+      ]),
       qualification: z.enum([
         'not_configured',
         'darwin_supervision_only',
         'darwin_host_boundary',
         'linux_host_boundary_unqualified',
+        'windows_unelevated',
         'unavailable',
       ]),
       reason: z

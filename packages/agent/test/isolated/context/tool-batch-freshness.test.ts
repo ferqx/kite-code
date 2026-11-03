@@ -31,7 +31,7 @@ function calls(...values: { id: string; name: string; path: string }[]): ModelEv
   ];
 }
 const read = (id: string, path: string) => ({ id, name: 'read_file', path });
-const list = (id: string, path: string) => ({ id, name: 'list_directory', path });
+const list = (id: string, path: string) => read(id, `${path}/value.txt`);
 const inputPath = (request: SourceRequest) => {
   const input = request.input;
   return input &&
@@ -52,6 +52,8 @@ async function fixture(
     mkdirSync(join(workspace, directory), { recursive: true });
   writeFileSync(join(workspace, 'package.json'), '{"name":"batch-fixture"}');
   writeFileSync(join(workspace, 'docs/value.txt'), 'original docs evidence');
+  for (const directory of ['apps', 'packages'])
+    writeFileSync(join(workspace, directory, 'value.txt'), 'read-only evidence');
   writeFileSync(join(workspace, 'AGENTS.md'), 'Original root rule.');
   writeFileSync(join(workspace, 'docs/AGENTS.md'), 'Original local docs rule.');
   const project = createProjectSources({
@@ -171,9 +173,9 @@ test('trusted readonly discovery completes every mixed Files call once and reach
     ).toEqual(['apps', 'docs-old', 'package', 'packages']);
     expect(JSON.stringify(model.requests[1]!.messages)).not.toContain('context_refresh_required');
     expect(f.executed.filter(({ path }) => path === 'package.json')).toHaveLength(1);
-    expect(f.executed.filter(({ path }) => path === 'apps')).toHaveLength(1);
-    expect(f.executed.filter(({ path }) => path === 'packages')).toHaveLength(1);
-    expect(f.executed.filter(({ path }) => path === 'docs')).toHaveLength(1);
+    expect(f.executed.filter(({ path }) => path === 'apps/value.txt')).toHaveLength(1);
+    expect(f.executed.filter(({ path }) => path === 'packages/value.txt')).toHaveLength(1);
+    expect(f.executed.filter(({ path }) => path === 'docs/value.txt')).toHaveLength(1);
     expect(tools).toHaveLength(4);
     for (const callId of ['package', 'apps', 'packages', 'docs-old'])
       expect(tools.find((tool) => tool.callId === callId)).toMatchObject({
@@ -283,7 +285,7 @@ for (const boundary of ['unmarked', 'extension-source'] as const)
     ]);
     const context: NonNullable<Extension['context']> = {
       async capture(request) {
-        return inputPath(request) === 'docs'
+        return inputPath(request) === 'docs/value.txt'
           ? [
               {
                 id: 'builtin.files:pretend-project',
@@ -306,7 +308,7 @@ for (const boundary of ['unmarked', 'extension-source'] as const)
     try {
       const tools = await f.run();
       expect(model.requests).toHaveLength(3);
-      expect(f.executed).toEqual([{ name: 'files.list', path: 'docs' }]);
+      expect(f.executed).toEqual([{ name: 'files.read', path: 'docs/value.txt' }]);
       expect(tools.find((tool) => tool.callId === 'unreviewed')).toMatchObject({
         status: 'failed',
         authorization: { dispatched: false },

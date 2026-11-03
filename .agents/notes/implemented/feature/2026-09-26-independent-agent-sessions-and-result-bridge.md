@@ -2,6 +2,8 @@
 
 Status: implemented
 
+旧 Task 的 required 桥接与显式 after_turn 执行已由[退役决定](../architecture/2026-11-02-retire-legacy-task.md)部分取代；独立子 Session、目录过滤、准确来源和取消取舍继续适用。
+
 ## Problem
 阶段 A–C 已修复父 Run 在多个后台子任务及 Shell 错峰完成时的等待和结果接纳。阶段 D 的未发布候选实现却把多个 Agent 行、子模型事实和邮箱写入同一个父 Session。并发兄弟写入会竞争同一 revision／effect lease；该结构也无法赋予子 Agent 独立的持久对话上下文。用户要求子 Agent 像 Codex 的 Agent thread 一样拥有自己的会话线程，且内部线程不能占据空间的顶层会话列表。官方 [Subagents 文档](https://learn.chatgpt.com/docs/agent-configuration/subagents)说明可检查 Agent thread 与独立上下文，但不规定 Kite 的数据库布局。
 

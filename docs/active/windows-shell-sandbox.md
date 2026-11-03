@@ -12,13 +12,21 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 ## 当前新图与Windows资格
 
-`native/windows-sandbox-runner` 的原生后端源码及[独立 Windows 构建脚本](../../scripts/release/build-windows-runner.ts)保留，本次已撤销对它们的删除并恢复原始文件。旧 Runtime 和发布调用方仍已删除，源码保留不表示当前新架构已经接入或取得 Windows 实机资格。
+Job 只有在 READY 核验与 GO 写入确认后进入 running；失败准入仍把原 handle 交回 Core，清理未知不会丢失停止能力或释放资源。确认未派发的准备失败不虚构进程 owner，正常释放资源。运行时以原 manifest 固定完整所选副本的文件摘要，每次派发重核，包括 MSYS／兼容 DLL 和 Git helper；资产漂移先于 native 创建失败。原 runner 的 ACL 账本同步、关闭写句柄后再原子发布；Windows 临时访问／共享冲突仅在200ms内重试原替换，持续失败仍保原账本并拒绝启动。连续替换、短冲突恢复与持续冲突零损坏由 [原生回归](../../native/windows-sandbox-runner/src/direct_workspace.rs)核验。协议6与runner0.8.3不变，权限范围不扩。
 
-新正式CLI/TUI与3OSplatform/execution/release workflow没有调用旧Rust sandbox runner或旧State投影。当前默认Shell在Provider/Job前unavailable，Windows private Profile/Store/config ACL实现不授Shell/network/fork资格；普通Workspace声明仍不可信，既有ACL不自动修复。
+2026-11-02 已按用户确认的无账户 unelevated 边界，将原协议6 runner 接入普通 Job 和默认 Git Bash。工作区范围沿原 WRITE_RESTRICTED 令牌及 capability ACL 限制写入；读取沿宿主 ACL，离线范围提供代理及常用包管理器的环境提示，不承诺系统级断网或禁止读取路径。Full 明确绕过沙箱；准确批准的完整文件范围与网络范围分别传递，不能由联网批准隐式扩大文件权限。没有新增账户、WFP 规则或设置入口。
 
-Windows stdio MCP 现有独立[原 Job／HANDLE owner](../../packages/agent/src/platform/process/windows-owned-child.ts)及[正式 transport 接线](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)源码；这不是 Shell sandbox，也不解除上述 Shell guard。下一 Shell 实施须另建当前 Full／Workspace 范围的真实权限 ceiling：旧 `WRITE_RESTRICTED` 的 restricting SID 只参与写检查，不能证明 Profile 读拒绝；旧 `protected_deny_paths` 实际为空，Full＋网络分支还使用无该 guard 的当前用户 token。原目录及祖先 deny-DELETE HANDLE 可保护对象身份，但不能代替内容读写隔离。源码缺口保持，不能先删 guard 再普通 spawn；实机资格继续依用户顺序留重构后。
+当前执行宿主为 Windows x64 的 Bun Service；正式 Terminal／Native 客户端使用该宿主。Node 嵌入不宣告这一依赖 Bun FFI 的 Shell 能力，避免先提供定义再在派发时失败。工作区加联网范围仍保持受限令牌；依赖系统 Schannel 的工具可能保留该令牌的兼容性限制，不能自动升为完整文件范围。
 
-本轮核对当前源码与 [CreateRestrictedToken 官方语义](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)：现有 current-user token／Job 原语不能同时组成广泛 HOME／工具读取、Workspace／Full 写范围和私有内容无条件拒绝。用户已决定保留现有合同，Windows Shell 后端继续作为未闭合门禁，先完成其他独立能力迁移。AppContainer 的读取资源／Full 行为变更及系统隔离后端的管理员安装／驱动或 VM 范围不在本轮实施授权内。[Windows Files 原 HANDLE 后端](../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)是可信宿主的独立能力，源码实施不依赖 Shell 后端完成，也不解除 guard。
+业务允许／拒绝只由统一权限与计划／角色上限决定。Tool 和真实 Job 按各自原身份授权；runner 只消费最终 markDispatching 接纳的父／子范围交集，不按默认范围覆盖批准，也不再安装独立命令拒绝脚本。范围外的 OS 访问失败、坏协议／资产身份及清理未知仍按执行事实报告，不构成新的业务审批。批准外部写入后，完整文件范围可实际执行；不因它位于 Workspace 外在 Shell 层再拒一次。
+
+[运行时准备](../../packages/agent/src/jobs/windows-git-bash.ts)从本机 Git for Windows 生成私有摘要闭包，保留原安装目录。MSYS 用户信号管道只接受 user／SYSTEM／Administrators，原 Workspace 限制 SID 不能通过；仓库独立的 [IPC 兼容层](../../native/windows-msys-compat/README.md)只为相关 MSYS 对象保留同登录会话权限，不改变令牌或文件范围。Full／完整文件范围使用未修改的独立 MSYS 副本，避免并发共享区冲突。制品内置 runner、兼容 DLL、Coreutils 与 rg；Git Bash 来自本机 Git，不在运行时下载。缺 Git、资产变化或无法确认原进程身份时失败，不回退其他解释器或普通 spawn。
+
+生命周期与其他平台共用普通 Job：准备／READY 后由原 owner 放行 GO，READY 最多等待5秒，超时后的迟到 READY 不再放行。持续排空双流，取消作用于原 Job；根退出后清理剩余后代。正常 ended 须原 runner 回执、外层 Job 空树、进程 wait、句柄关闭和 temp 清理均确认。GO 前取消有原空树和未派发证明；关闭未知继续保原 owner 和 binding，不回收成成功。宿主 EOF／强杀由 kill-on-close 清整个嵌套 Job；冷读取只保原结果，不用 PID 重建控制或重放。
+
+[实际 Windows Shell](../../packages/agent/test/isolated/jobs/windows-shell.test.ts)已核空 ambient PATH 的内置 rg、中文／空格文件、fork／管道、Git 子 Shell、受限与 Full 并发、写范围收窄、环境离线与准确联网范围、启动取消、后台后代取消、宿主 EOF／强杀与原 HANDLE 死亡。[真实 Service／SQLite](../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读子 Agent、计划前检索和原审批卡、外部写入批准前零效果／批准后实际写入、重复命令及冷只读零重放。原 [Job owner 回归](../../packages/agent/test/isolated/jobs/windows-owned-child.test.ts)保关闭失败／unknown 合同。此范围是本机 Windows 开发验证，不代表完整安装、签名或全部平台发布资格。
+
+Windows stdio MCP 继续使用同一[原 Job／HANDLE owner](../../packages/agent/src/platform/process/windows-owned-child.ts)，其 [transport](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)边界独立。Windows Files 的原 HANDLE 端口亦不由 Shell 取代，见 [Files owner](../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)。旧 Runtime、State writer、Workflow 执行和旧调用方不恢复。
 
 下方V6/restricted-token/Schannel/Job、旧candidate与旧Gate资料保留历史机制、实际限制和安全经验。若后续将其中能力移入新宿主，仍须以新公共Execution/Job、准确封闭来源/许可、实际Windowsnative与完整制品证明；不能包装旧Host/writer，或凭旧pin/CI记录启用新的effectfulplatform。当前新平台formal verifier继续拒完整缺资格；三OS结果由[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。
 
@@ -170,8 +178,8 @@ fail closed。
 
 `windows-runner.json` 的 V1 仍表示 manifest schema/file naming，不是 invocation protocol。
 新 runner pin 必须固定 protocol V6、runner 0.8.3+、binary digest、Windows baseline 与 vendored runtime
-digest。当前仓库 pin 已由 canonical Windows build 提升为 0.8.3/V6，并固定该构建生成的 binary
-digest `sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`；后续任何 native
+digest。历史 0.8.3/V6 构建固定的 binary digest 为
+`sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`；当前构建 pin 见[manifest](../../release/platform-capabilities/windows-runner.json)。后续任何 native
 runner 变更都必须重新运行同一可复现构建并提交新的 digest，不能只改 protocol、版本或 manifest 文本，
 也不能复用旧 binary digest。
 Windows candidate 的 standalone resolver 还必须把 `@kite-ai/builtin-runtime/sandbox` 及其他 workspace public

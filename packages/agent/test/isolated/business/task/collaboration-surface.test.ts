@@ -242,12 +242,12 @@ test('six public tools reuse one child Session, preserve responsibility and obse
     // Isolated directory-only sequence placement: this does not claim whole-context large-sequence qualification.
     const database = openFaultDatabase(join(root, 'data', 'test', 'core.db'));
     const commands = database
-      .prepare(
+      .query(
         "SELECT id,seq FROM command WHERE session_id='root' AND kind='operation.agent' ORDER BY seq",
       )
       .all() as { id: string; seq: number }[];
     const originalSequence = (
-      database.prepare("SELECT next_seq FROM session WHERE id='root'").get() as { next_seq: number }
+      database.query("SELECT next_seq FROM session WHERE id='root'").get() as { next_seq: number }
     ).next_seq;
     for (const [index, command] of commands.entries())
       database.run('UPDATE command SET seq=? WHERE id=?', [

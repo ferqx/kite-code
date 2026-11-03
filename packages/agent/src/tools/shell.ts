@@ -234,8 +234,18 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         model: { name: 'shell_stop', snakeCase: true },
         version: '1',
         description:
-          'Request cancellation of one exact Shell Job. Receipt does not prove group stop.',
-        inputSchema: object({ shellId: idSchema, commandId: idSchema }, ['shellId', 'commandId']),
+          'Request cancellation of one exact Shell Job. shell_id is the returned Shell handle; command_id is a new unique ID chosen for this cancellation, never a returned launch/Job command ID. Reuse command_id only to query/retry the same cancellation intent. Receipt does not prove group stop.',
+        inputSchema: object(
+          {
+            shellId: idSchema,
+            commandId: {
+              ...idSchema,
+              description:
+                'New unique cancellation intent ID. Do not copy ref.commandId or any existing command ID.',
+            },
+          },
+          ['shellId', 'commandId'],
+        ),
         async execute(input, context) {
           const inputArgs = args(input);
           const shellId = text(inputArgs, 'shellId');

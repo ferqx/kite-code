@@ -475,11 +475,11 @@ test('first question Escape cancels the exact presented original execution once'
 test('a completed Model retains its original delegation caption before its qualified child result', async () => {
   const call = {
     id: 'call-child',
-    name: 'task.execute',
+    name: 'task.spawn',
     arguments: JSON.stringify({
-      role: 'agent/explore',
-      key: 'child',
-      input: { name: 'Child task', content: 'Inspect only' },
+      preset: 'explore',
+      taskName: 'Child task',
+      prompt: 'Inspect only',
     }),
   };
   const originalModel: Execution = {
@@ -496,7 +496,7 @@ test('a completed Model retains its original delegation caption before its quali
     ...originalModel,
     id: 'task',
     kind: 'tool',
-    definitionId: 'builtin.task/task.execute',
+    definitionId: 'builtin.task/task.spawn',
     parentExecutionId: 'model',
     toolCallId: call.id,
     toolInput: JSON.parse(call.arguments),

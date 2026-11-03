@@ -56,7 +56,6 @@ function original(phase: 'request' | 'apply' = 'request'): DefaultAfterTurnInput
       deadlineAt: null,
       finishedAt: phase === 'request' ? null : 2,
       reason: null,
-      waitingForResults: [],
     },
     session: {
       id: 's',
@@ -77,11 +76,11 @@ function original(phase: 'request' | 'apply' = 'request'): DefaultAfterTurnInput
       runId: 'run',
       originCommandId: 'work',
       kind: 'tool',
-      definitionId: 'task',
+      definitionId: 'task.spawn',
       definitionVersion: '1',
       status: phase === 'request' ? 'running' : 'succeeded',
       cancelRequestedAt: null,
-      input: { role: 'worker' },
+      input: { prompt: 'work' },
       resultAcceptance: null,
       interactionBinding: null,
       childSessionId: null,
@@ -190,7 +189,7 @@ test('finite default policy rejects wrong original Tool, role, source and cancel
       };
     },
     (i) => {
-      (i.execution as { input: Json }).input = { role: 'foreign' };
+      (i.execution as { definitionId: string }).definitionId = 'task';
     },
     (i) => {
       (i.command as { cancelRequestedAt: number | null }).cancelRequestedAt = 1;
@@ -244,10 +243,9 @@ test('finite default policy supports exact followup and nested origins without s
   });
   const first = await policy.authorize(original());
   const followup = original();
-  (followup.execution as { definitionId: string; input: Json }).definitionId = 'followup_task';
+  (followup.execution as { definitionId: string; input: Json }).definitionId = 'task.follow_up';
   (followup.execution as { input: Json }).input = {
-    taskId: 'old-child',
-    key: 'new-work',
+    agentId: 'stable-child',
     content: 'new work',
   };
   expect((await policy.authorize(followup)).allowed).toBe(true);
@@ -275,7 +273,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   }
 }
 async function fixture(
-  disposition: 'required' | 'background' | 'after_turn',
+  idleAuthority: boolean,
   recurse = false,
   managed = false,
   planning = false,
@@ -409,7 +407,7 @@ async function fixture(
         return 'owned-local-fixture-secret';
       },
     },
-    ...(disposition !== 'after_turn'
+    ...(!idleAuthority
       ? {
           afterTurn: {
             async authorize() {
@@ -772,7 +770,7 @@ async function fixture(
   };
 }
 test('default factory honors an explicit human ceiling independently for original Task/carrier and reports exactly once', async () => {
-  const f = await fixture('after_turn', false, true);
+  const f = await fixture(true, false, true);
   try {
     await f.start();
     const tool = await f.approve('task.spawn');
@@ -818,8 +816,8 @@ test('default factory honors an explicit human ceiling independently for origina
   }
 }, 25000);
 test('trusted denied idle completion authority preserves ordinary child work without report Runs', async () => {
-  for (const disposition of ['required', 'background'] as const) {
-    const f = await fixture(disposition);
+  for (const idleAuthority of [false]) {
+    const f = await fixture(idleAuthority);
     try {
       await f.start();
       await f.approve('task.spawn');
@@ -841,7 +839,7 @@ test('trusted denied idle completion authority preserves ordinary child work wit
 }, 30000);
 test('default current policy/trust drift after parent completion defers original report without child replay', async () => {
   for (const trusted of [true, false]) {
-    const f = await fixture('after_turn');
+    const f = await fixture(true);
     try {
       await f.start();
       await f.approve('task.spawn');
@@ -886,7 +884,7 @@ test('default current policy/trust drift after parent completion defers original
 }, 30000);
 
 test('default report final source digest rejects changed original Tool intent while preserving the child result', async () => {
-  const f = await fixture('after_turn');
+  const f = await fixture(true);
   try {
     await f.start();
     const tool = await f.approve('task.spawn');
@@ -924,7 +922,7 @@ test('default report final source digest rejects changed original Tool intent wh
 }, 20000);
 
 async function plannedReport(singleSlot: boolean, driftPlan = false, continued = false) {
-  const f = await fixture('after_turn', false, false, true, singleSlot);
+  const f = await fixture(true, false, false, true, singleSlot);
   let phase = 'initial_plan_and_original_approvals';
   try {
     await f.start();

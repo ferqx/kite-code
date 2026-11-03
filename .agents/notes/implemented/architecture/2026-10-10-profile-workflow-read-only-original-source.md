@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-02：本记录的 Workflow 执行及专用外部文件工具范围已由[退役与统一读取决定](2026-11-02-tool-surface-retirement.md)替代。保留原设计理由、历史证据及仍适用的原生身份、权限、取消／未知效果和只读历史约束；当前功能以手册和 owner 为准。
+
 ## Problem
 
 正式 Skill Source 同时准入 Workspace 与选中 Profile 的 Skill。脚本 verifier 必须在原 canonical Skill root 执行固定 Bun 和相对 entrypoint，并以原 Workspace 取得写范围；整个 dataRoot／coordination 的保护不能因启用 Workflow 解除。原 macOS 正式 verifier 仍使用普通进程组，切到完整 host 后端会被保护根内 cwd 拒绝；Linux 也有相同来源缺口。

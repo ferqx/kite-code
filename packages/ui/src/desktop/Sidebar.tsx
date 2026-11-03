@@ -190,9 +190,7 @@ const SessionRow = memo(function SessionRow({
   onOpen?: (id: string) => void;
 }) {
   const awaitingInteraction = Boolean(session.pendingInteractions);
-  const managedWaiting =
-    session.status === 'waiting' && session.waitingReason === 'required_background';
-  const statusLabel = managedWaiting ? '任务进行中' : sessionStatusLabel(session.status);
+  const statusLabel = sessionStatusLabel(session.status);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -215,8 +213,8 @@ const SessionRow = memo(function SessionRow({
           </span>
           {awaitingInteraction ? (
             <Badge>待用户输入</Badge>
-          ) : session.status === 'running' || managedWaiting ? (
-            <Spinner aria-label={managedWaiting ? '任务进行中' : '会话运行中'} />
+          ) : session.status === 'running' || session.status === 'waiting_execution' ? (
+            <Spinner aria-label="会话运行中" />
           ) : null}
         </Button>
       </TooltipTrigger>

@@ -1,5 +1,7 @@
 # 独立终端消费者
 
+原报告恢复的 `report_deferred` 通过专用 decoder 和原申请绑定校验后显示 `deferred`，不要求不存在的 Run，不改成 unknown。提交中到暂缓的状态与渲染由 [恢复回归](../../test/tui/recovery.test.tsx)核验；Service 的权限与工作优先顺序保持，界面不重新提交。
+
 清屏只过滤原已观察消息、结束执行和本地回执的展示身份；`exportLoadedText` 使用当前已加载 snapshot 与原位置的全部本地回执，完整已读正文及 reasoning 继续沿同一 reader 缓存。重复清屏不删除导出输入，换会话仍清理本地回执，导出不增加 Model、Tool 或正文读取。[导出回归](../../test/tui/export.test.ts)核完整正文、未读取预览标记和重复清屏；[实际 PTY 场景](../../../../tests/tui-system/scenarios/slash-commands.test.ts)核正文隐藏、输入恢复与导出字节，按[手册](../../../../docs/handbook/clients/tui/guides/history-and-export.md)的既有保全合同验收。
 
 ## 原 Ink 展示与明确测试诊断

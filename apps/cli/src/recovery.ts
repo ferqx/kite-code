@@ -23,7 +23,14 @@ export type RecoveryIntent =
     };
 export interface RecoveryOutcome {
   intent: RecoveryIntent;
-  status: 'accepted' | 'resumed' | 'interrupted' | 'suppressed' | 'failed' | 'outcome_unknown';
+  status:
+    | 'accepted'
+    | 'resumed'
+    | 'interrupted'
+    | 'suppressed'
+    | 'deferred'
+    | 'failed'
+    | 'outcome_unknown';
   exitCode: 0 | 1 | 2;
   command?: Command;
   run?: Run;
@@ -130,6 +137,8 @@ async function outcome(
       throw new ClientError('invalid_response');
     if (receipt.outcome === 'report_suppressed')
       return { intent, command, status: 'suppressed', exitCode: 1 };
+    if (receipt.outcome === 'report_deferred')
+      return { intent, command, status: 'deferred', exitCode: 2 };
     runId = receipt.runId;
     originalCommandId = intent.reportCommandId;
   }

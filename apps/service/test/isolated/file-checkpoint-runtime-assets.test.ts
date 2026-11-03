@@ -350,9 +350,6 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
     'files.read',
     'files.write',
     'files.edit',
-    'files.list',
-    'files.glob',
-    'files.search',
   ]);
   const actual = sqliteStorageAssets();
   expect(actual.worker.pathname.endsWith('/storage/worker/main.ts')).toBe(true);
@@ -419,23 +416,8 @@ test('actual file, directory and missing loader companion protection rejects rea
     ).toBe('succeeded');
     expect(readFileSync(join(f.workspace, 'loader.js-neighbor'), 'utf8')).toBe('new neighbor');
     expect(f.assetReads).toBeGreaterThan(0);
-    const rootList = await f.execute('files.list', {});
-    expect(rootList.outcome).toBe('succeeded');
-    expect(
-      JSON.parse(rootList.content).entries.map((entry: { name: string }) => entry.name),
-    ).toEqual(['loader.js-neighbor']);
-    const glob = await f.execute('files.glob', { pattern: '**/*' });
-    expect(glob.outcome).toBe('succeeded');
-    expect(JSON.parse(glob.content).paths).toEqual(['loader.js-neighbor']);
-    const search = await f.execute('files.search', { text: 'immutable' });
-    expect(search.outcome).toBe('succeeded');
-    expect(JSON.parse(search.content).matches).toEqual([]);
-    for (const [id, input] of [
-      ['files.list', { path: 'runtime' }],
-      ['files.glob', { path: 'runtime', pattern: '**/*' }],
-      ['files.search', { path: 'runtime', text: 'immutable' }],
-    ] as const)
-      expect(await code(f.execute(id, input))).toBe('file_path_protected');
+    for (const id of ['files.list', 'files.glob', 'files.search'])
+      expect(f.configuration().tools.some((tool) => tool.id === id)).toBe(false);
     const point = [...f.records.values()].find(
       (row) => row.contentType === 'builtin.files.checkpoint',
     )!;
@@ -489,23 +471,8 @@ test('profile protection canonicalizes actual ancestor aliases; assets containin
     expect((await tool.execute({ path: 'private-data-neighbor' }, f.context)).outcome).toBe(
       'succeeded',
     );
-    for (const [id, input] of [
-      ['files.list', {}],
-      ['files.glob', { pattern: '**/*' }],
-      ['files.search', { text: 'original private bytes' }],
-    ] as const) {
-      const result = await profileTools.find((tool) => tool.id === id)!.execute(input, f.context);
-      expect(result.outcome).toBe('succeeded');
-      expect(result.content).not.toContain('secret');
-      if (id === 'files.search') {
-        const search = JSON.parse(result.content);
-        expect(search.query.text).toBe('original private bytes');
-        expect(search.files).toEqual([]);
-        expect(search.matches).toEqual([]);
-        expect(search.stats.matchedFiles).toBe(0);
-      } else expect(result.content).not.toContain('original private bytes');
-      expect(result.content).not.toContain('"private-data"');
-    }
+    for (const id of ['files.list', 'files.glob', 'files.search'])
+      expect(profileTools.some((tool) => tool.id === id)).toBe(false);
     for (const assets of [
       [f.root],
       ['relative-loader'],

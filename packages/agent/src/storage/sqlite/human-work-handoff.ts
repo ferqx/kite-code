@@ -30,7 +30,6 @@ function publishInputHandoff(
     reason,
     controlRevision,
     runId: String(run.id),
-    waiting: String(run.waiting_results_json),
     requirements: String(run.requirements_json),
     frontier: db.rows(
       "SELECT id,state,CAST(result_revision AS TEXT) AS resultRevision FROM execution WHERE run_id=? AND state IN('planned','dispatching','running','outcome_unknown') ORDER BY id",
@@ -308,9 +307,6 @@ export function handoffHumanRun(
       if (!(error instanceof AgentError)) throw error;
       return blocked(error.code);
     }
-    const waiting = JSON.parse(String(run.waiting_results_json)) as unknown;
-    if (!Array.isArray(waiting)) throw new AgentError('required_result_unverifiable');
-    if (waiting.length) return blocked('required_results_pending');
     const unsettled = db.row(
       "SELECT state FROM execution WHERE run_id=? AND state IN('dispatching','running','outcome_unknown') LIMIT 1",
       input.runId,
@@ -319,25 +315,6 @@ export function handoffHumanRun(
       return blocked(
         unsettled.state === 'outcome_unknown' ? 'outcome_unknown' : 'execution_unsettled',
       );
-    // A mandatory carrier still belongs to A even when it is not one of A's direct Tools.
-    if (
-      db.row(
-        `SELECT e.id FROM execution e JOIN command c ON c.id=e.origin_command_id
-      WHERE e.parent_execution_id IN(SELECT id FROM execution WHERE run_id=?)
-        AND json_type(c.request_json,'$.resultRequirement') IS NOT NULL
-        AND json_type(c.request_json,'$.resultRequirement')<>'null'
-        AND (e.state IN('planned','dispatching','running','outcome_unknown') OR NOT EXISTS(
-          SELECT 1 FROM context_snapshot s WHERE s.kind='result_ref' AND s.execution_id=e.id
-            AND s.result_revision=e.result_revision AND s.selection_id=?
-            AND json_extract(s.request_json,'$.targetRunId')=?
-            AND COALESCE(json_extract(s.request_json,'$.diagnostic'),0)=0
-            AND COALESCE(json_extract(s.request_json,'$.pendingInput'),0)=0)) LIMIT 1`,
-        input.runId,
-        session.context_selection_id!,
-        input.runId,
-      )
-    )
-      return blocked('required_results_pending');
     const planned = db.rows(
       "SELECT * FROM execution WHERE run_id=? AND state='planned' AND dispatched=0 AND kind IN('model','tool') ORDER BY id LIMIT 4097",
       input.runId,

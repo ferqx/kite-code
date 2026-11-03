@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { JobDefinition, ToolDefinition } from '@kite-ai/agent/extensions';
-import { createFileTools, createPathFileTools, type WorkspaceFiles } from '@kite-ai/agent/files';
+import { createFileTools, type WorkspaceFiles } from '@kite-ai/agent/files';
 import { createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { createPlanningValidation } from '@kite-ai/agent/planning';
 import { createShellExtension } from '@kite-ai/agent/shell';
@@ -29,7 +29,6 @@ const job: JobDefinition = {
 const definitions = new Map<string, ToolDefinition>(
   [
     ...createFileTools(files),
-    ...createPathFileTools({ qualifiedPlatforms: [], protectedRoots: [] }).tools,
     ...createShellExtension({ job }).tools!,
     ...createPlanningValidation().extension.tools!,
     ...createMcpLifecycle({ servers: [] }).extension.tools!,

@@ -71,7 +71,7 @@ jobs:
           packages/agent/test/isolated/files/native-packaged.test.ts
           packages/agent/test/isolated/files/native-path-lifetime.test.ts
           packages/agent/test/isolated/files/windows.test.ts
-          packages/agent/test/isolated/files/path-files.test.ts
+          packages/agent/test/isolated/files/external-file-reads.test.ts
           packages/agent/test/isolated/files/tool-paths.test.ts
           packages/agent/test/isolated/files/recovery-primitives.test.ts
           packages/agent/test/isolated/file-checkpoints/capture.test.ts

@@ -96,6 +96,8 @@ function source(db: SqliteOperations, row: Row): ResultContextSource {
     execution.origin_store_id !== row.origin_store_id
   )
     throw new AgentError('context_source_unverifiable');
+  if (parse<{ statusOnly?: boolean }>(row.request_json).statusOnly)
+    throw new AgentError('context_source_unverifiable');
   return {
     id: String(row.id),
     seq: String(row.seq),
@@ -105,17 +107,7 @@ function source(db: SqliteOperations, row: Row): ResultContextSource {
     resultRevision: String(row.result_revision),
     originStoreId: String(row.origin_store_id),
     inclusion: row.inclusion as ResultContextSource['inclusion'],
-    result: parse<{ statusOnly?: boolean }>(row.request_json).statusOnly
-      ? {
-          outcome: String(execution.state),
-          content: 'required_operation_settlement',
-          details: {
-            executionId: String(row.execution_id),
-            resultRevision: String(row.result_revision),
-            statusOnly: true,
-          },
-        }
-      : parse(execution.result_json),
+    result: parse(execution.result_json),
   };
 }
 function explicitInSelection(
@@ -742,8 +734,8 @@ export function callContextSelection(
               executionId: input.executionId,
               resultRevision: input.resultRevision,
               targetRunId: input.targetRunId ?? null,
-              requiredRef: (input.requiredRef ?? null) as unknown as Json,
-              requiredDiagnostic: input.requiredDiagnostic ?? false,
+              requiredRef: null,
+              requiredDiagnostic: false,
             }
           : {
               kind: 'result.include',
@@ -899,68 +891,6 @@ export function callContextSelection(
       )
         throw new AgentError('result_not_pending');
     }
-    let statusOnly = false;
-    const diagnostic = method === 'consumeJobResult' && input.requiredDiagnostic === true;
-    if (diagnostic && (!input.requiredRef || execution.state !== 'outcome_unknown'))
-      throw new AgentError('required_result_unverifiable');
-    if (method === 'consumeJobResult' && input.requiredRef) {
-      const ref = input.requiredRef;
-      const parent = input.targetRunId
-        ? db.row(
-            'SELECT * FROM run WHERE id=? AND session_id=?',
-            input.targetRunId,
-            input.sessionId,
-          )
-        : null;
-      const metadata = db.row(
-        "SELECT * FROM extension_record WHERE extension_id=? AND scope_kind='session' AND scope_id=? AND key=?",
-        ref.extensionId,
-        input.sessionId,
-        ref.recordKey,
-      );
-      const value = metadata ? parse<Record<string, Json>>(metadata.json) : null;
-      const refs = parent
-        ? parse<import('../types').RequirementRef[]>(parent.requirements_json)
-        : [];
-      if (
-        !parent?.is_active ||
-        parent.cancel_requested ||
-        ref.runId !== parent.id ||
-        ref.sessionId !== input.sessionId ||
-        !refs.some(
-          (actual) =>
-            canonicalJson(actual as unknown as Json) === canonicalJson(ref as unknown as Json),
-        ) ||
-        !metadata ||
-        String(metadata.revision) !== ref.revision ||
-        metadata.origin_store_id !== input.expectedStoreId ||
-        value?.kind !== 'operation_result' ||
-        value.executionId !== input.executionId ||
-        value.runId !== parent.id ||
-        value.sessionId !== input.sessionId ||
-        value.originStoreId !== input.expectedStoreId ||
-        value.originCommandId !== execution.origin_command_id ||
-        value.parentExecutionId !== execution.parent_execution_id ||
-        value.rootWorkCommandId !== execution.root_work_command_id ||
-        value.rootWorkSeq !== String(execution.root_work_seq) ||
-        db.row('SELECT run_id FROM execution WHERE id=?', execution.parent_execution_id!)
-          ?.run_id !== parent.id ||
-        db.row('SELECT extension_id FROM command WHERE id=?', execution.origin_command_id!)
-          ?.extension_id !== ref.extensionId ||
-        value.contextSelectionId !== expected ||
-        execution.root_work_command_id !== parent.root_work_command_id ||
-        String(execution.root_work_seq) !== String(parent.root_work_seq) ||
-        (execution.state === 'outcome_unknown' && !diagnostic)
-      )
-        throw new AgentError('required_result_unverifiable');
-      db.active(input.owner, String(parent.origin_command_id), String(parent.id));
-      if (diagnostic) statusOnly = true;
-      if (!diagnostic && execution.delivery === 'suppressed') {
-        if (execution.delivery_reason !== 'execution_cancel' || !execution.cancel_requested)
-          throw new AgentError('result_not_pending');
-        statusOnly = true;
-      }
-    }
     const active = db.row('SELECT * FROM run WHERE session_id=? AND is_active=1', input.sessionId);
     if (method === 'includeResult') {
       if (active) {
@@ -987,15 +917,14 @@ export function callContextSelection(
       if (execution.origin_store_id !== input.expectedStoreId)
         throw new AgentError('operation_unverifiable');
       if (execution.context_selection_id !== expected) throw new AgentError('context_rewound');
-      if (execution.kind !== 'job' || (execution.delivery !== 'pending' && !statusOnly))
+      if (execution.kind !== 'job' || execution.delivery !== 'pending')
         throw new AgentError('result_not_pending');
       if (
-        (!statusOnly && execution.cancel_requested) ||
+        execution.cancel_requested ||
         BigInt(execution.root_work_seq!) <= BigInt(current.stop_boundary!)
       )
         throw new AgentError('result_delivery_cancelled');
-      if (!statusOnly && !reportConsumption)
-        db.active(input.owner, String(execution.origin_command_id));
+      if (!reportConsumption) db.active(input.owner, String(execution.origin_command_id));
     }
     const sf = filter(selection, 'seq');
     let existingSource = db.row(
@@ -1003,13 +932,13 @@ export function callContextSelection(
       input.sessionId,
       input.executionId,
       input.resultRevision,
-      diagnostic ? 1 : 0,
+      0,
       ...sf.args,
     );
     if (!existingSource) {
       db.allocateSessionSequence(input.sessionId);
       const seq = db.row('SELECT next_seq FROM session WHERE id=?', input.sessionId)!.next_seq;
-      const id = `result-${hash([input.sessionId, selection.id, input.executionId, input.resultRevision, diagnostic])}`;
+      const id = `result-${hash([input.sessionId, selection.id, input.executionId, input.resultRevision, false])}`;
       db.run(
         "INSERT INTO context_snapshot(id,session_id,selection_id,sources_json,request_json,kind,seq,execution_id,result_revision,inclusion,origin_store_id,subject_id) VALUES(?,?,?,'[]',?,'result_ref',?,?,?,?,?,?)",
         id,
@@ -1018,8 +947,8 @@ export function callContextSelection(
         canonicalJson({
           targetRunId: input.targetRunId ?? null,
           pendingInput: method === 'includeResult' && Boolean(active),
-          statusOnly,
-          diagnostic,
+          statusOnly: false,
+          diagnostic: false,
         }),
         seq,
         input.executionId,
@@ -1031,7 +960,7 @@ export function callContextSelection(
       existingSource = db.row('SELECT * FROM context_snapshot WHERE id=?', id)!;
       db.event(input.sessionId, id, 'context.result_included');
     }
-    if (method === 'consumeJobResult' && !statusOnly)
+    if (method === 'consumeJobResult')
       db.run(
         "UPDATE execution SET delivery='consumed',delivery_reason=NULL WHERE id=?",
         input.executionId,

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AuthorizationRequest, ToolContext } from '../../../src/extensions';
+import type { ToolContext } from '../../../src/extensions';
 import type { WorkspaceFiles } from '../../../src/files';
 import * as binding from '../../../src/files-native-binding';
 
@@ -49,7 +49,6 @@ mock.module('../../../src/files-native-binding', () => ({
   },
 }));
 const { createWorkspaceFiles, createFileTools } = await import('../../../src/files');
-const { createPathFileTools } = await import('../../../src/tools/path-files');
 const roots: string[] = [];
 const owners: WorkspaceFiles[] = [];
 afterEach(async () => {
@@ -201,43 +200,4 @@ test('search yields and observes cancellation during line matching after native 
   expect(abortedDuringMatching).toBe(true);
   expect(result.outcome).toBe('cancelled');
   expect(reads).toBeGreaterThanOrEqual(253);
-});
-
-test('read_user_file passes the actual trusted signal to its anchored complete read', async () => {
-  const { root } = fixture();
-  const api = createPathFileTools({ qualifiedPlatforms: [process.platform], protectedRoots: [] });
-  const controller = new AbortController();
-  const input = { path: join(root, 'large.txt'), limit: 1 };
-  const capability = await api.describeRequest({
-    kind: 'tool',
-    definitionId: 'files.read_path',
-    definitionVersion: '2',
-    input,
-    signal: controller.signal,
-  } as unknown as AuthorizationRequest);
-  firstRead = () => {
-    setImmediate(() => {
-      controller.abort();
-    });
-  };
-  const result = await api.tools
-    .find((tool) => tool.id === 'files.read_path')!
-    .execute(input, {
-      signal: controller.signal,
-      dispatchAuthorization: {
-        revision: 'owned-read-dispatch',
-        snapshot: {
-          namespace: 'builtin.permissions',
-          version: '1',
-          data: {
-            mode: 'accept_edits',
-            workspaceTrust: true,
-            capability,
-          },
-        },
-      },
-    } as unknown as ToolContext);
-  expect(result.outcome).toBe('cancelled');
-  expect(reads).toBeGreaterThan(0);
-  expect(reads).toBeLessThan(253);
 });

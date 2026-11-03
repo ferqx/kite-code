@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-02：本记录的 Workflow 执行及专用外部文件工具范围已由[退役与统一读取决定](2026-11-02-tool-surface-retirement.md)替代。保留原设计理由、历史证据及仍适用的原生身份、权限、取消／未知效果和只读历史约束；当前功能以手册和 owner 为准。
+
 ## Problem
 
 既有 required Verification 失败后应通过普通模型、工具和权限链修复；已允许的用户可以选择 replan 或准确 waiver，compensation 成功也不等于核验通过。原 Workflow 只保存一次不可变 closed/output 与 verification，重复核验只查原结果，无法登记修复后的输出或新尝试。Planning 的 waiver 属于另一 namespace 和要求，不能解除 Workflow 义务。

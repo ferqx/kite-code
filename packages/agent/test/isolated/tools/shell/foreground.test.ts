@@ -1,6 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
 import type { OperationRef, PublicExecution, ToolContext } from '@kite-ai/agent/extensions';
-import { completeForegroundTask } from '../../../../src/extensions/task/foreground';
 import { AgentError } from '../../../../src/storage/types';
 import { completeForegroundShell } from '../../../../src/tools/shell-foreground';
 
@@ -150,14 +149,4 @@ test('abort during final Shell output reading does not lose an already recorded 
   expect(result.outcome).toBe('cancelled');
   expect(result.details).toMatchObject({ cancellationObserved: true });
   expect(c.dispatches()).toBe(0);
-});
-
-test('foreground Task cancellation preserves an actual failed or unknown carrier instead of inventing cancellation', async () => {
-  for (const status of ['failed', 'outcome_unknown'] as const) {
-    const c = context(new AbortController(), async () => execution(status));
-    const result = await completeForegroundTask(ref, c.value);
-    expect(result.outcome).toBe(status);
-    expect(result.content).toBe(`Shell ${status}`);
-    expect(c.dispatches()).toBe(0);
-  }
 });

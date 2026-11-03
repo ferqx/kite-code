@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-02：本记录的 Workflow 执行及专用外部文件工具范围已由[退役与统一读取决定](2026-11-02-tool-surface-retirement.md)替代。保留原设计理由、历史证据及仍适用的原生身份、权限、取消／未知效果和只读历史约束；当前功能以手册和 owner 为准。
+
 ## Problem
 
 既有 Skill Workflow 具有双特性开关、显式与隐式激活、inline/fork、结构化输出和独立验证。知识目录与 `selectedSkills` 不能表达这些行为。迁移必须保留这些已有行为，同时遵守 [V1.3](../../../../docs/plans/unified-agent-refactor-v1.md) 的唯一 Loop、普通权限与受控子操作，不能把未来 WorkflowEngine 作为已有能力的替代。

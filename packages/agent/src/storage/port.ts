@@ -157,9 +157,7 @@ export interface EnsureOperationInput extends OwnedWrite, RecordScope {
   parentExecutionId: string;
   operationKey: string;
   request: OperationRequest;
-  resultRequirement?: import('./types').ResultRequirementDeclaration;
-  /** Trusted captured record schema; never supplied by an extension's declaration. */
-  resultRequirementSchema?: Json;
+
   cancellation?: 'attached' | 'detached';
   childConfiguration?: ChildConfiguration;
   /** Trusted owner authorization; ordinary OperationOptions contain only intent. */
@@ -847,9 +845,7 @@ export interface Store {
       toolHistoryProofs?: import('./recovery-history').RecoveryToolHistoryProof[];
     },
   ): Promise<RecoveryReport>;
-  setRunResultWait(
-    input: OwnedWrite & { runId: string; executionIds: string[] },
-  ): Promise<RunRecord>;
+
   finishRun(
     input: OwnedWrite & {
       runId: string;
@@ -1158,8 +1154,6 @@ export interface Store {
       resultRevision: string;
       contextSelectionId: string;
       targetRunId?: string;
-      requiredRef?: RequirementRef;
-      requiredDiagnostic?: boolean;
     },
   ): Promise<{ command: CommandRecord; source: ResultContextSource }>;
   includeResult(

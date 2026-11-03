@@ -1,10 +1,15 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
-import { linuxShellInitAsset, shellSupervisorAsset } from '@kite-ai/agent/jobs/shell';
+import {
+  linuxShellInitAsset,
+  shellSupervisorAsset,
+  windowsShellAssets,
+  withBundledRipgrep,
+} from '@kite-ai/agent/jobs/shell';
 import { McpStdioPortError, mcpStdioGuardianAsset, mcpStdioLinuxAssets } from '@kite-ai/agent/mcp';
 import { type ProfileSelection, selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
@@ -341,43 +346,67 @@ function packagedShellAssets(
   profile: ProfileSelection,
   runtimeAssets: readonly string[],
 ): ShellConfigurationOptions | undefined {
-  if (process.platform !== 'darwin' && process.platform !== 'linux') return;
+  if (!['darwin', 'linux', 'win32'].includes(process.platform)) return;
+  if (process.platform === 'win32' && !process.versions.bun) return;
   let supervisorPath: string;
+  let windows: ReturnType<typeof windowsShellAssets> | undefined;
   try {
-    supervisorPath = process.platform === 'linux' ? linuxShellInitAsset() : shellSupervisorAsset();
+    if (process.platform === 'win32')
+      windows = windowsShellAssets(join(profile.profilePath, 'windows-sandbox'));
+    supervisorPath =
+      windows?.runner ??
+      (process.platform === 'linux' ? linuxShellInitAsset() : shellSupervisorAsset());
   } catch (error) {
     if (
       !(error instanceof Error) ||
-      !['shell_supervisor_asset_unavailable', 'linux_shell_init_asset_unavailable'].includes(
-        error.message,
-      )
+      ![
+        'shell_supervisor_asset_unavailable',
+        'linux_shell_init_asset_unavailable',
+        'windows_shell_asset_unavailable',
+        'windows_git_bash_unavailable',
+      ].includes(error.message)
     )
       throw error;
     return;
   }
   const bubblewrap = process.platform === 'linux' ? Bun.which('bwrap') : undefined;
   if (process.platform === 'linux' && !bubblewrap) return;
-  const roots = [...new Set([dirname(process.execPath), ...(process.env.PATH ?? '').split(':')])]
-    .filter((path) => isAbsolute(path) && path !== '/' && existsSync(path))
-    .map((path) => realpathSync.native(path))
-    .filter((path) => lstatSync(path).isDirectory());
-  return {
-    platform: process.platform,
-    configurationId:
-      process.platform === 'linux' ? 'default.linux-host-shell-v1' : 'default.macos-host-shell-v1',
-    env: Object.fromEntries(
+  const ripgrep = withBundledRipgrep(
+    Object.fromEntries(
       Object.entries(process.env).filter(
         (entry): entry is [string, string] => typeof entry[1] === 'string',
       ),
     ),
+  );
+  const roots = [...new Set([dirname(process.execPath), ...ripgrep.env.PATH.split(delimiter)])]
+    .filter((path) => isAbsolute(path) && path !== '/' && existsSync(path))
+    .map((path) => realpathSync.native(path))
+    .filter((path) => lstatSync(path).isDirectory());
+  return {
+    platform: process.platform as 'linux' | 'darwin' | 'win32',
+    configurationId: windows
+      ? 'default.windows-host-shell-v1'
+      : process.platform === 'linux'
+        ? 'default.linux-host-shell-v1'
+        : 'default.macos-host-shell-v1',
+    env: ripgrep.env,
     supervisorPath,
     bunExecutable: process.execPath,
-    shellExecutable: '/bin/sh',
+    shellExecutable: windows?.shell ?? '/bin/sh',
+    ...(windows
+      ? {
+          windows: {
+            coreutilsPath: windows.coreutils,
+            fullShellExecutable: windows.fullShell,
+            stateRoot: windows.stateRoot,
+          },
+        }
+      : {}),
     ...(bubblewrap ? { linux: { bubblewrapPath: realpathSync.native(bubblewrap) } } : {}),
     host: {
       controlBase: profile.coordinationPath,
       protectedRoots: [profile.dataRoot, profile.coordinationPath],
-      readonlyAssets: [...runtimeAssets],
+      readonlyAssets: [...runtimeAssets, ripgrep.root],
       runtimeReadOnlyRoots: [...new Set(roots)],
     },
   };

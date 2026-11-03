@@ -266,7 +266,7 @@ async function main() {
       const prompts =
         scenario === 'files'
           ? [
-              'Work only in this synthetic workspace. List the root directory; glob docs/**/*.md; search docs for the literal text [a-z]+. Read source.txt starting at line 1 (at most 20 lines). Use its exact returned complete-file baseline to edit message=before to message=after with exactly one match. Create result.txt with exactly verified and a trailing newline, using the tool for creating files. Complete all steps with the provided tools, then briefly confirm.',
+              'Work only in this synthetic workspace. Read source.txt starting at line 1 (at most 20 lines). Use its exact returned complete-file baseline to edit message=before to message=after with exactly one match. Create result.txt with exactly verified and a trailing newline, using the tool for creating files. Complete all steps with the provided tools, then briefly confirm.',
               'Read source.txt and result.txt again using the tools and confirm their actual contents. Keep the final response short.',
             ]
           : [
@@ -337,14 +337,7 @@ async function main() {
       const observedCalls = calls.slice(firstCall);
       const expected =
         scenario === 'files'
-          ? [
-              'list_directory',
-              'glob_files',
-              'search_content',
-              'read_file',
-              'edit_file',
-              'write_file',
-            ]
+          ? ['read_file', 'edit_file', 'write_file']
           : [
               'spawn_agent',
               'wait_agent_events',

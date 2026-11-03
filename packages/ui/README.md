@@ -20,7 +20,7 @@ Desktop入口导出公共shadcn Input、Textarea、Select和Switch供Native设�
 
 2026-10-25，Windows x64／Bun1.4.3，`b31d05415` 加本轮工作树，重新打开新对话往返抖动：复查时文档已记录统一占位，但负责源码仍为挂载后测量滚动条、固定环境卡基础留白的旧实现；此前临时浏览器证据不适用于该源码。现补齐首帧CSS轨道预留、28／20／12px响应式留白，回到最新消息的覆盖层也显式沿相同轨道占位，不再额外建立原生滚动条预留。[原浏览器runner](../../apps/desktop/test/session-shell-browser-runner.fixture.ts)接入[持久几何回归](../../apps/desktop/test/session-shell-geometry.fixture.ts)，原隔离bridge可显式提供首Run封存协议与40段长正文，普通DOM消费者的原夹具输入保持。修复前新增回归实际复现按钮对齐失败；修复后单独执行完整几何段：Chrome155深浅主题、500／800／1440／1920px八组，包含选择等待、模型准备、历史读取、完成、上翻和缓存返回，1446帧的输入区横纵位置、宽高及消息列对齐保持；两份草稿保留，返回后准确恢复80px阅读位置，无重复输入区和浏览器异常。原[侧栏](test/isolated/desktop-sidebar.test.tsx)与[滚动](test/isolated/desktop-conversation-scroll.test.tsx)逐文件10项／1100断言、UI／Desktop类型检查、定向Biome、测试归属与文档检查通过。未重跑原shell runner其余200次切换段、真实Service／模型或完整安装版Electron；保留既有嵌套关键帧编译提示。
 
-侧栏会话运行中与等待必需后台任务的 `Spinner` 在[共享样式](src/desktop/style.css)中与空间编辑／更多图标共用14px尺寸；不修改公共Spinner或其他加载图标。2026-10-25，Windows x64／Chrome155，实际Sidebar与生产编译CSS的隔离浏览器在深浅主题、1280／500px四组场景逐步核悬停、持续旋转、运行→空闲→运行：loading与编辑图标均为14×14px，状态切换保留32px行高与原行宽，页面无横向溢出或浏览器异常。定向Biome与文档检查通过；本轮仅调整局部样式，未重验完整安装版Electron。
+侧栏会话运行中与普通执行等待的 `Spinner` 在[共享样式](src/desktop/style.css)中与空间编辑／更多图标共用14px尺寸；不修改公共Spinner或其他加载图标。2026-10-25，Windows x64／Chrome155，实际Sidebar与生产编译CSS的隔离浏览器在深浅主题、1280／500px四组场景逐步核悬停、持续旋转、运行→空闲→运行：loading与编辑图标均为14×14px，状态切换保留32px行高与原行宽，页面无横向溢出或浏览器异常。定向Biome与文档检查通过；本轮仅调整局部样式，未重验完整安装版Electron。
 
 2026-10-23，Windows x64／Bun1.4.3，`5c28cd1fd` 加本轮样式工作树：逐文件运行 `bun test ./packages/ui/test/isolated/desktop-conversation-scroll.test.tsx` 与 `bun test ./packages/ui/test/isolated/desktop-sidebar.test.tsx`，6项／885断言通过；UI／Desktop typecheck、定向 Biome、文档检查通过。实际 SessionPage／Conversation 与生产编译 CSS 在隔离浏览器中逐步核对上翻、内容追加、运行到静态、回到底部恢复跟随、环境信息展开／收起及侧栏悬停／选中；1280／1600px 和390px、深浅主题下按钮32px且与正文中心误差小于0.01px，窄屏无横向溢出，追加保留手动阅读位置。该轮侧栏与设置分类计算样式均为零过渡，选中项移开后透明；当前侧栏选中底色已按上文要求恢复，下文新证据覆盖此变化。圆形与层级调整后补验深浅主题、活动／静态、悬停及点击：32px按钮的圆角为50%，浅阴影为2px／8px／14%，覆盖层1高于正文0且限定在会话层叠上下文；正文重叠区域命中原按钮，悬停底色不透明，点击后隐藏按钮并到达底部。未重验完整 Electron 安装版；保留既有加载动画的嵌套关键帧编译提示。
 
@@ -453,7 +453,7 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 
 普通 TUI 的 Thinking 只使用指示器自身留位，与回复正文同列；消息容器不再重复为 Thought 添加回复缩进，活动、结束及工具步骤的布局归上述 TUI owner。
 
-[真实四卡 PTY](test/isolated/tui/pending-cards.test.ts) 在 owned Core/Service SQLite、80×24 中同时保持两个 sibling Ask Tool、root question 和独立 `required-verifier` ordinary Job，按 root-first/job-first 顺序分别批准。真实 parent/child intersection 70KB policy 的完整 artifact 由公共 SDK reader 核 hash/原 scope，缓存切换不重复读取；首 POST 与首原 GET 回应物理丢失后只查原 answer Command，实际两 child 效果与 Job 各一次。该 configured ordinary Job 不是 `skill.workflow.verify`；Workflow verifier 的真实审批另由 CLI Workflow question/compensation fixtures 验证。revision 清理和迟到选择由 Ink 反例核对，不代表同四卡窗口内实际改变后端 policy 的资格。
+[真实四卡 PTY](test/isolated/tui/pending-cards.test.ts) 在 owned Core/Service SQLite、80×24 中同时保持两个 sibling Ask Tool、root question 和独立 `required-verifier` ordinary Job，按 root-first/job-first 顺序分别批准。真实 parent/child intersection 70KB policy 的完整 artifact 由公共 SDK reader 核 hash/原 scope，缓存切换不重复读取；首 POST 与首原 GET 回应物理丢失后只查原 answer Command，实际两 child 效果与 Job 各一次。该 configured ordinary Job 的通用审批能力保留；Skill Workflow 执行及其专用夹具已移除。revision 清理和迟到选择由 Ink 反例核对，不代表同四卡窗口内实际改变后端 policy 的资格。
 
 
 开发 TUI 的 `/rewind` 现在通过有限 `TuiFileRecoveryPort` 读取实际 Files 恢复点、预览与原两 leg，支持仅会话/仅代码/两者；它不持 profile、文件或热 POST permit。普通审批、已确认 Code 后的明确 Fork 继续、unknown 原 GET 与关闭/切会话的迟到隔离见 [TUI owner](src/tui/README.md)。实际编译 PTY、强杀与丢回执证据归 [CLI host owner](../../apps/cli/README.md#files-三范围恢复-caller)，不据此宣称正式旧入口、Native 或所有平台已完成切换。
@@ -475,3 +475,5 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 ## 选中与重连的后端状态核实
 
 [TuiController](src/tui/controller.ts) 的明确 `select` 默认先等待宿主可选 `reconcileSession` port，再读历史；普通刷新显式传 `reconcile:false`；同会话激活尚未完成时等待其核实与历史读取，不中止核实或重复写入。失败仍读历史并保留内部失败事实，普通会话在后台退避重读而不另加异常横幅或 Error 行，切换／取消后旧结果不发布，等待中的旧刷新也不能重新选中原会话。写入与 capability 核验归 [CLI Host](../../apps/cli/README.md)，纯 UI 不取得 authority。[选择器测试](test/tui/session-chooser.test.tsx)核顺序、跳过及失败阅读。桌面持久终态优先于 `executionUnconfirmed` 回退；后端与原恢复边界归[Core owner](../agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。
+
+TUI `/skills` 仅查看普通 Skill 知识目录；不再提供 Workflow 资格、激活按钮或动态 Skill 执行命令。刷新、详情和读取取消保留，MCP prompt 命令继续由独立目录提供。实现与键盘回归见 [Skills panel](src/tui/skills-panel.tsx) 和 [目录测试](test/tui/skills.test.tsx)。

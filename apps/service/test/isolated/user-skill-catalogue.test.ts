@@ -48,9 +48,6 @@ function fixture() {
       explicit: () => explicit,
       defaults,
       allowedCapabilities: ['files.read'],
-      workflowBindings: async () => {
-        throw Error('unexpected_workflow_compilation');
-      },
     });
   return {
     root,

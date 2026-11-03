@@ -11,12 +11,7 @@ import {
   readConfigurationFile,
   resolveConfiguration,
 } from '@kite-ai/agent/config';
-import { inspectShellAssets } from '@kite-ai/agent/permissions/shell';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
-import {
-  createWorkflowCompilerSession,
-  validateWorkflowArgumentsAsync,
-} from '@kite-ai/agent/skill-workflow';
 import { createKnowledgeReadScope, KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import type { z } from 'zod';
 import { defaultConfiguration } from './configuration-defaults';
@@ -29,11 +24,6 @@ import {
 } from './http/schema/skill-catalogue';
 import type { PermissionManagementPort } from './permission-management';
 import { createConfiguredSkillSource } from './skill-source';
-import {
-  compileConfiguredWorkflows,
-  type createWorkflowConfiguration,
-  readSkillWorkflowFlags,
-} from './skill-workflow-configuration';
 import { type UserConfiguration, withoutProjectModels } from './user-configuration';
 
 type Query = z.infer<typeof SkillCatalogueQuerySchema>;
@@ -50,8 +40,6 @@ export interface UserSkillCatalogueContext extends z.infer<typeof UserSkillCatal
   subjectId: string;
 }
 export interface SkillCatalogueSource {
-  /** This source supplies the separately validated manual Workflow projection. */
-  readonly supportsWorkflow?: true;
   list(context: SkillCatalogueContext): Promise<SkillCataloguePage>;
   /** Global knowledge metadata from trusted user locations, independent of a Workspace or Session. */
   listUser?(context: UserSkillCatalogueContext): Promise<UserSkillCataloguePage>;
@@ -136,16 +124,6 @@ export function createDefaultSkillCatalogueSource(options: {
   userConfiguration: UserConfiguration;
   explicit: () => JsonObject;
   allowedCapabilities?: readonly string[];
-  workflowBindings?: (input: {
-    workspaceRoot: string;
-    effective: ReturnType<typeof resolveConfiguration>;
-    toolIds: string[];
-  }) => Promise<
-    Pick<
-      Parameters<typeof createWorkflowConfiguration>[0],
-      'capabilities' | 'forkConfigurations' | 'shell'
-    >
-  >;
 }): SkillCatalogueSource {
   const profile = Object.freeze({ ...options.profile });
   const explicit = options.explicit;
@@ -221,141 +199,6 @@ export function createDefaultSkillCatalogueSource(options: {
           ? ('skill_unavailable' as const)
           : (entry.reason as SkillCataloguePage['entries'][number]['reason']),
     }));
-    let workflowFacts: unknown;
-    if (context.workflow === 'manual' && options.workflowBindings) {
-      const base = () => ({
-        extensionId: 'builtin.skill-workflow' as const,
-        definitionVersion: '1' as const,
-        skillId: null,
-        name: null,
-        revision: null,
-        state: 'unavailable' as 'available' | 'disabled' | 'unavailable',
-        reason: 'skill_unavailable' as NonNullable<
-          SkillCataloguePage['entries'][number]['workflow']
-        >['reason'],
-        manualAllowed: false,
-        emptyInputValid: false,
-        contextMode: null as 'inline' | 'fork' | null,
-      });
-      for (const row of entries) row.workflow = base();
-      const compiler = createWorkflowCompilerSession();
-      try {
-        const flags = readSkillWorkflowFlags(profile);
-        workflowFacts = { flags };
-        if (!flags.skillActivation || !flags.skillWorkflow) {
-          for (const row of entries)
-            row.workflow = { ...base(), state: 'disabled', reason: 'workflow_disabled' };
-        } else {
-          const bindings = await options.workflowBindings({
-            workspaceRoot: root,
-            effective,
-            toolIds,
-          });
-          const capabilities = new Map(
-            bindings.capabilities.map((binding) => [
-              binding.capability.capabilityId,
-              binding.capability,
-            ]),
-          );
-          const compiled = await compileConfiguredWorkflows({
-            profile,
-            source,
-            listed,
-            compiler,
-            resolveCapability: (id) => capabilities.get(id),
-          });
-          let assets: Awaited<ReturnType<typeof inspectShellAssets>> | null = null;
-          let verifierAvailable = false;
-          if (
-            flags.verification &&
-            bindings.shell &&
-            compiled.entries.some(
-              (entry) =>
-                entry.descriptor.availability === 'available' &&
-                entry.contract?.verification.strategy === 'script',
-            )
-          ) {
-            try {
-              assets = await inspectShellAssets(bindings.shell);
-              verifierAvailable = true;
-            } catch {
-              /* Local verifier unavailable; no process is entered. */
-            }
-          }
-          workflowFacts = {
-            flags,
-            capabilities: bindings.capabilities,
-            forkConfigurations: bindings.forkConfigurations,
-            assets,
-            entries: compiled.entries.map((entry) => ({
-              revision: entry.descriptor.revision,
-              sourceBinding: entry.sourceBinding,
-              diagnostics: entry.diagnostics,
-            })),
-            failures: [...compiled.failures],
-          };
-          for (const row of entries) {
-            if (!row.enabled) {
-              row.workflow = { ...base(), state: 'disabled', reason: 'workflow_disabled' };
-              continue;
-            }
-            if (compiled.failures.has(row.id)) {
-              row.workflow = { ...base(), reason: 'workflow_source_changed' };
-              continue;
-            }
-            const entry = compiled.byConfiguredId.get(row.id);
-            if (!entry) continue;
-            const contract = entry.contract;
-            const projection = {
-              ...base(),
-              skillId: contract ? entry.descriptor.capabilityId : null,
-              name: contract?.name ?? null,
-              revision: entry.descriptor.revision,
-              manualAllowed: contract?.invocation.allowManual ?? false,
-              emptyInputValid: contract
-                ? !(await validateWorkflowArgumentsAsync(contract.inputSchema, {}, { compiler }))
-                : false,
-              contextMode: contract?.context.mode ?? null,
-            };
-            if (entry.descriptor.availability !== 'available' || !contract)
-              projection.reason = entry.diagnostics.some(
-                (d) => d.code === 'missing_capability' || d.code === 'dependency_changed',
-              )
-                ? 'workflow_dependency_unavailable'
-                : 'workflow_contract_unavailable';
-            else if (!projection.manualAllowed) projection.reason = 'workflow_manual_not_allowed';
-            else if (!projection.emptyInputValid) projection.reason = 'workflow_input_required';
-            else if (
-              contract.context.mode === 'fork' &&
-              !bindings.forkConfigurations.some((role) => role.agent === contract.context.agent)
-            )
-              projection.reason = 'workflow_fork_unavailable';
-            else if (
-              flags.verification &&
-              contract.verification.strategy === 'script' &&
-              !verifierAvailable
-            )
-              projection.reason = 'workflow_verifier_unavailable';
-            else {
-              projection.state = 'available';
-              projection.reason = null;
-            }
-            row.workflow = projection;
-          }
-        }
-      } catch (error) {
-        if (isCleanupFailure(error)) throw error;
-        workflowFacts = { unavailable: true };
-        for (const row of entries)
-          row.workflow = {
-            ...base(),
-            state: row.enabled ? 'unavailable' : 'disabled',
-            reason: row.enabled ? 'workflow_configuration_unavailable' : 'workflow_disabled',
-          };
-      } finally {
-        await compiler.dispose();
-      }
-    }
     const revision = hash({
       storeId: context.storeId,
       workspaceId: context.workspaceId,
@@ -367,7 +210,6 @@ export function createDefaultSkillCatalogueSource(options: {
       toolIds,
       allowedCapabilities,
       entries,
-      ...(context.workflow === 'manual' ? { workflowFacts } : {}),
     });
     const page: SkillCataloguePage = {
       version: 1,
@@ -469,7 +311,6 @@ export function createDefaultSkillCatalogueSource(options: {
     return task;
   }
   return Object.freeze({
-    ...(options.workflowBindings ? { supportsWorkflow: true as const } : {}),
     list(context: SkillCatalogueContext) {
       return admit(() => list(context));
     },

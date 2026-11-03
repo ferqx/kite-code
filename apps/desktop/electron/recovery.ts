@@ -270,6 +270,8 @@ export class NativeRecovery {
         throw new ClientError('invalid_response');
       if (checked.receipt.outcome === 'report_suppressed')
         return { ...state, phase: 'suppressed', command };
+      if (checked.receipt.outcome === 'report_deferred')
+        return { ...state, phase: 'deferred', command };
       runId = checked.receipt.runId;
     }
     const run = await this.client.getRun(runId, { signal });

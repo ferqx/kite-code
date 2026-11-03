@@ -10,12 +10,11 @@ import {
   type CapabilityDescription,
   createPermissionPolicy,
   type PermissionPolicySnapshot,
-  workflowCapabilityDescription,
 } from '@kite-ai/agent/permissions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 
-test('shared builtin facts do not grant a namesake extension or relax Workflow Job ceilings', async () => {
+test('shared builtin facts do not grant a namesake extension', async () => {
   for (const extensionId of ['builtin.files', 'untrusted.namesake']) {
     const f = await fixture('accept_edits', 'files.read');
     try {
@@ -23,35 +22,15 @@ test('shared builtin facts do not grant a namesake extension or relax Workflow J
         ...f.capability,
         ...builtinCapability(extensionId, 'files.read', 'tool', 'builtin.planning'),
       };
-      const workflow = workflowCapabilityDescription({
-        ...f.capability,
-        kind: 'tool',
-        extensionId,
-      });
       await f.submit();
       if (extensionId === 'untrusted.namesake') {
         const card = await f.pending();
         expect(f.effects).toBe(0);
         expect(card.request).toMatchObject({ policy: { effects: ['unknown'] } });
-        expect(workflow.capability.policy.minimumApproval).toBe('user');
         await f.approve(card);
-      } else {
-        expect(workflow.capability.effectiveEffects).toEqual({
-          filesystem: 'read',
-          network: 'none',
-          externalState: 'none',
-        });
-        expect(workflow.capability.policy.minimumApproval).toBe('none');
       }
       await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
       expect(f.effects).toBe(1);
-      const job = workflowCapabilityDescription({ ...f.capability, kind: 'job' });
-      expect(job.capability.effectiveEffects).toEqual({
-        filesystem: 'unknown',
-        network: 'unknown',
-        externalState: 'unknown',
-      });
-      expect(job.capability.policy.minimumApproval).toBe('user');
     } finally {
       await f.close();
     }
@@ -444,28 +423,6 @@ test('record_write stays outside Accept Edits; Request Approval and unqualified 
     }
   }
 }, 15000);
-
-test('absolute file reads retain their read classification at both known versions', () => {
-  for (const version of ['1', '2'])
-    expect(
-      builtinCapability(
-        'builtin.files.path',
-        'files.read_path',
-        'tool',
-        'builtin.planning',
-        version,
-      ),
-    ).toEqual({ effects: ['read'], safeRead: true });
-  for (const [id, version] of [
-    ['files.read_path', '3'],
-    ['files.read_path', undefined],
-    ['files.write_path', '1'],
-    ['files.edit_path', '1'],
-  ])
-    expect(
-      builtinCapability('builtin.files.path', id!, 'tool', 'builtin.planning', version),
-    ).toEqual({ effects: ['external'], safeRead: false });
-});
 
 test('Web network effects require the exact registered builtin Tool identity and version', () => {
   expect(builtinCapability('builtin.web', 'web_fetch', 'tool', 'builtin.planning', '1')).toEqual({

@@ -2,9 +2,10 @@ import { expect, test } from 'bun:test';
 import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
+import type { AgentClient, Command } from '@kite-ai/client';
 import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { openRecoveryJournal } from '../host/recovery-journal';
-import type { RecoveryIntent } from '../src/recovery';
+import { lookupRecovery, type RecoveryIntent, submitRecovery } from '../src/recovery';
 
 function fixture() {
   const root = temporaryDirectory('kite-recovery-journal-'),
@@ -35,6 +36,68 @@ const intent = (id = 'original'): Extract<RecoveryIntent, { kind: 'run' }> => ({
     commandId: id,
     runId: 'original-run',
   },
+});
+
+test('deferred report receipt survives caller restart and lookup without a Run read or resubmit', async () => {
+  const f = fixture();
+  const report: RecoveryIntent = {
+    kind: 'report',
+    sessionId: 's',
+    reportCommandId: 'report',
+    request: { expectedStoreId: 'original-store', commandId: 'recover-report' },
+  };
+  const command: Command = {
+    id: 'recover-report',
+    kind: 'job.report.resume',
+    originStoreId: 'original-store',
+    sessionId: 's',
+    status: 'applied',
+    cancelRequestedAt: null,
+    receipt: {
+      reportCommandId: 'report',
+      runId: null,
+      outcome: 'report_deferred',
+      reason: 'idle_authorization_required',
+    },
+  };
+  let posts = 0,
+    gets = 0;
+  const client = {
+    serverInfo: { capabilities: ['job_report_resume'] },
+    resumeJobReport: async () => {
+      posts++;
+      return command;
+    },
+    getCommand: async (id: string) => {
+      if (id === 'report')
+        return { id, kind: 'job.report', originStoreId: 'original-store', sessionId: 's' };
+      gets++;
+      return command;
+    },
+    getRun: async () => {
+      throw Error('deferred report has no Run');
+    },
+  } as unknown as AgentClient;
+  try {
+    const journal = f.open();
+    expect(await submitRecovery(report, { client, journal })).toMatchObject({
+      status: 'deferred',
+      exitCode: 2,
+      command,
+    });
+    journal.close();
+    const cold = f.open();
+    expect(cold.list()).toEqual([{ intent: report, phase: 'deferred' }]);
+    expect(await lookupRecovery(cold.list()[0]!.intent, { client, journal: cold })).toMatchObject({
+      status: 'deferred',
+      exitCode: 2,
+      command,
+    });
+    expect({ posts, gets }).toEqual({ posts: 1, gets: 1 });
+    cold.close();
+  } finally {
+    f.close();
+  }
 });
 test('durable caller journal reopens exact original scope, keeps pending, rejects conflict and shared data lock', () => {
   const f = fixture();

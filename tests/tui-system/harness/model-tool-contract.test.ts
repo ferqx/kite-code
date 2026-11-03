@@ -66,28 +66,6 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
       expectedRequest: {
         toolResults: [{ toolCallId: 'original-edit', contentIncludes: ['sample.txt'] }],
       },
-      message: {
-        tool_calls: [{ id: 'original-glob', name: 'search_files', args: { pattern: '*.txt' } }],
-      },
-    },
-    {
-      expectedRequest: {
-        toolResults: [{ toolCallId: 'original-glob', contentIncludes: ['sample.txt'] }],
-      },
-      message: {
-        tool_calls: [
-          {
-            id: 'original-search',
-            name: 'grep',
-            args: { pattern: 'changed 雪', path: 'sample.txt' },
-          },
-        ],
-      },
-    },
-    {
-      expectedRequest: {
-        toolResults: [{ toolCallId: 'original-search', contentIncludes: ['changed 雪'] }],
-      },
       message: { content: 'All real tools finished.' },
     },
   ]);
@@ -142,8 +120,6 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
       ['original-read', 'files.read', 'succeeded'],
       ['original-write', 'files.write', 'succeeded'],
       ['original-edit', 'files.edit', 'succeeded'],
-      ['original-glob', 'files.glob', 'succeeded'],
-      ['original-search', 'files.search', 'succeeded'],
     ]);
     expect(executions[0]!.input).toEqual({ path: 'sample.txt', offset: 2, limit: 1 });
     expect(executions[1]!.input).toMatchObject({
@@ -154,26 +130,19 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
       replace: 'changed 雪',
       occurrences: 1,
     });
-    expect(executions[4]!.input).toEqual({
-      text: 'changed 雪',
-      mode: 'content',
-      path: 'sample.txt',
-    });
     expect(
       server.getToolContractMigrations().map(({ emitted }) => [emitted.id, emitted.name]),
     ).toEqual([
       ['original-read', 'read_file'],
       ['original-write', 'write_file'],
       ['original-edit', 'edit_file'],
-      ['original-glob', 'glob_files'],
-      ['original-search', 'search_content'],
     ]);
     expect(server.getToolContractMigrations()[0]!.emitted.args).toEqual({
       path: 'sample.txt',
       start_line: 2,
       max_lines: 1,
     });
-    expect(server.getRequests()).toHaveLength(6);
+    expect(server.getRequests()).toHaveLength(4);
     expect(server.getRequests()[0]!.body.tools).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ function: expect.objectContaining({ name: 'read_file' }) }),

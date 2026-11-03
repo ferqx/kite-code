@@ -85,7 +85,6 @@ export function readDirectory(
               WHERE e.type='message.updated' GROUP BY e.scope_session_id
             ) SELECT s.*,r.id AS activity_run_id,r.status AS activity_run_status,r.is_active AS activity_run_active,
               r.cancel_requested AS activity_run_cancel_requested,
-              r.waiting_results_json<>'[]' AS activity_run_waiting,
               EXISTS(SELECT 1 FROM command c WHERE c.session_id=s.id AND c.status='accepted' AND c.cancelled=0 AND c.root_work_seq>s.stop_boundary
                 AND c.kind IN ('run.start','input.follow_up')) AS activity_queued,
               (SELECT COUNT(*) FROM interaction i WHERE i.presentation_session_id=s.id
@@ -139,7 +138,6 @@ export function readDirectory(
                         !!row.activity_run_cancel_requested,
                       ),
                       isActive: !!row.activity_run_active,
-                      waitingForResults: !!row.activity_run_waiting,
                     },
               queued: !!row.activity_queued,
               pendingInteractions: Number(row.activity_pending),

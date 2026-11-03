@@ -225,7 +225,7 @@ test('child tool history keeps its operation and DOM across legacy lifecycle obs
       {
         ...receipt,
         id: 'tool:follow-up',
-        toolName: 'followup_task',
+        toolName: 'follow_up_agent',
         title: '跟进子 Agent',
         text: '{"accepted":true,"operation":"follow_up"}',
       },

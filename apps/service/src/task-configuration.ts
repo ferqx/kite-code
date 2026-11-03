@@ -12,23 +12,9 @@ const taskIds = new Set([
   'task.events',
   'task.list',
   'task.interrupt',
-  'task',
-  'task.execute',
-  'task_read',
-  'task_wait',
-  'task_cancel',
-  'send_message',
-  'followup_task',
-  'list_agents',
-  'interrupt_agent',
-  'wait_agents',
-  'wait_agent',
 ]);
 /** Pure host composition; Task roles and their child bindings never originate in JSONC. */
-export function createTaskConfiguration(
-  declarations: readonly ChildRole[],
-  options: { readonly afterTurn?: { enabled: true } } = {},
-) {
+export function createTaskConfiguration(declarations: readonly ChildRole[]) {
   const roles = declarations.map(({ id, version, description }) => ({ id, version, description }));
   const extension =
     roles.length && roles.length <= 64
@@ -42,7 +28,6 @@ export function createTaskConfiguration(
               description ??
               `Host-registered child ${id}; capabilities remain bounded by the parent.`,
           })),
-          ...(options.afterTurn ? { afterTurn: { enabled: true } } : {}),
         })
       : undefined;
   const tools = new Map((extension?.tools ?? []).map((tool) => [tool.id, tool]));
@@ -51,7 +36,6 @@ export function createTaskConfiguration(
     tools,
     snapshot: {
       available: !!extension,
-      afterTurn: !!extension && options.afterTurn?.enabled === true,
       roles: roles.map(({ id, version }) => ({
         id,
         configurationId: id,

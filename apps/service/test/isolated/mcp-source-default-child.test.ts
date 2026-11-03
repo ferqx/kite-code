@@ -12,7 +12,90 @@ import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import type { McpSelectedSourceSnapshot } from '../../src/mcp-source-configuration';
 
-type Scenario = 'allowed' | 'deny' | 'drift' | 'cold' | 'nested';
+type Scenario = 'allowed' | 'deny' | 'drift' | 'cold' | 'nested' | 'followup' | 'unconnected';
+
+test(
+  'a failed child retains successful MCP metadata receipts without claiming a remote business effect',
+  async () => {
+    const f = await fixture('unconnected');
+    try {
+      await f.run();
+      const carrier = (await f.store.listExecutions('parent')).find(
+        (entry) => entry.childSessionId,
+      )!;
+      expect(carrier.status).toBe('failed');
+      expect(carrier.result).toMatchObject({
+        outcome: 'failed',
+        content: 'child_tool_scope_exceeds_parent',
+      });
+      const child = await f.store.getView(carrier.childSessionId!);
+      const tools = (await f.store.listExecutions(carrier.childSessionId!)).filter(
+        (entry) => entry.kind === 'tool',
+      );
+      expect(tools.map((entry) => ({ id: entry.definitionId, status: entry.status }))).toEqual([
+        { id: 'mcp.connect', status: 'succeeded' },
+      ]);
+      expect(f.opens).toBe(1);
+      expect(f.effects).toBe(0);
+      expect(carrier.result).toMatchObject({
+        details: {
+          evidence: {
+            sessionId: carrier.childSessionId,
+            runId: child.runs[0]!.id,
+            reportVerification: 'not_verified',
+            coverage: 'selected_history',
+            tools: [{ tool: 'mcp.connect', definitionVersion: '1', outcomes: { succeeded: 1 } }],
+          },
+        },
+      });
+    } finally {
+      await f.close();
+    }
+  },
+  process.platform === 'win32' ? 150000 : 30000,
+);
+
+test(
+  'idle default child follow-up keeps the exact inherited MCP source and reaches its second model/tool turn',
+  async () => {
+    const f = await fixture('followup');
+    try {
+      await f.run();
+      const first = (await f.store.listExecutions('parent')).find(
+        (execution) => execution.childSessionId,
+      )!;
+      expect(first.status).toBe('succeeded');
+      const childId = first.childSessionId!;
+      expect(f.effects).toBe(1);
+      await f.run(15000, { commandId: 'work-followup', content: `FOLLOW_UP_CHILD:${childId}` });
+      const carriers = (await f.store.listExecutions('parent')).filter(
+        (execution) => execution.childSessionId,
+      );
+      expect(carriers).toHaveLength(2);
+      expect(carriers.every((carrier) => carrier.childSessionId === childId)).toBe(true);
+      expect(carriers.map((carrier) => carrier.status)).toEqual(['succeeded', 'succeeded']);
+      const child = await f.store.getView(childId);
+      expect(child.runs.map((run) => run.status)).toEqual(['completed', 'completed']);
+      expect(f.counts.child).toBe(6);
+      expect(f.effects).toBe(2);
+      const second = child.runs[1]!;
+      expect(second.carrierExecutionId).toBe(carriers[1]!.id);
+      const origin = (await f.store.getCommand(second.originCommandId))!;
+      expect(origin.kind).toBe('input.follow_up');
+      const sources = (
+        second.configuration as unknown as {
+          snapshot: { configuration: { mcp: { sources: McpSelectedSourceSnapshot } } };
+        }
+      ).snapshot.configuration.mcp.sources;
+      expect(sources.inheritance?.parentExecutionId).toBe(carriers[1]!.parentExecutionId!);
+      expect(readFileSync(f.sourcePath, 'utf8')).toBe(f.sourceBytes);
+    } finally {
+      await f.close();
+    }
+  },
+  process.platform === 'win32' ? 150000 : 30000,
+);
+
 async function fixture(scenario: Scenario) {
   const root = realpathSync(temporaryDirectory('kite-default-child-source-'));
   const workspace = join(root, 'workspace');
@@ -22,6 +105,7 @@ async function fixture(scenario: Scenario) {
   const rpc: string[] = [];
   let effects = 0,
     opens = 0;
+  let followupSent = false;
   const remote = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -105,19 +189,29 @@ async function fixture(scenario: Scenario) {
       });
       const safeId = JSON.stringify(messages).match(/mcp-[a-f0-9]{64}/)?.[0];
       let call: { name: string; input: unknown } | null = null;
-      if (!child && scenario !== 'cold' && index === 0)
+      const followupTarget = /FOLLOW_UP_CHILD:([A-Za-z0-9-]+)/.exec(JSON.stringify(messages))?.[1];
+      if (!child && scenario === 'followup' && followupTarget && !followupSent) {
+        followupSent = true;
+        call = {
+          name: 'follow_up_agent',
+          input: { agent_id: followupTarget, content: 'CHILD_FOLLOW_UP_REQUEST' },
+        };
+      } else if (!child && scenario !== 'cold' && scenario !== 'unconnected' && index === 0)
         call = { name: 'connect_mcp_server', input: { server_id: safeId, key: 'parent' } };
-      else if (!child && index === (scenario === 'cold' ? 0 : 1))
+      else if (!child && index === (scenario === 'cold' || scenario === 'unconnected' ? 0 : 1))
         call = {
           name: 'spawn_agent',
           input: {
             prompt: 'CHILD_OWNED_REQUEST',
           },
         };
-      else if (child && index === 0)
+      else if (child && (index === 0 || (scenario === 'followup' && index === 3)))
         call = {
           name: 'connect_mcp_server',
-          input: { server_id: safeId, key: grandchild ? 'grandchild' : 'child' },
+          input: {
+            server_id: safeId,
+            key: grandchild ? 'grandchild' : index === 3 ? 'child-followup' : 'child',
+          },
         };
       else if (child && !grandchild && index === 1 && scenario === 'nested')
         call = {
@@ -126,7 +220,11 @@ async function fixture(scenario: Scenario) {
             prompt: 'GRANDCHILD_OWNED_REQUEST',
           },
         };
-      else if (child && index === 1 && scenario !== 'deny') {
+      else if (
+        child &&
+        (index === 1 || (scenario === 'followup' && index === 4)) &&
+        scenario !== 'deny'
+      ) {
         const tools = body.tools as { function: { name: string; parameters: unknown } }[];
         const tool = tools.find((tool) =>
           JSON.stringify(tool.function.parameters).includes('"const":"exact"'),
@@ -180,6 +278,7 @@ async function fixture(scenario: Scenario) {
       ],
       tools: [
         { id: 'task.spawn', definitionVersion: '1' },
+        ...(scenario === 'followup' ? [{ id: 'task.follow_up', definitionVersion: '1' }] : []),
         ...(scenario === 'nested' ? [{ id: 'task.events', definitionVersion: '1' }] : []),
       ],
     }),
@@ -189,6 +288,19 @@ async function fixture(scenario: Scenario) {
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     mcpSources: { http: { allowLoopbackForTests: true } },
+    ...(scenario === 'followup'
+      ? {
+          afterTurn: {
+            async authorize() {
+              return {
+                allowed: false,
+                revision: 'owned-explicit-followup',
+                reason: 'explicit_observation',
+              };
+            },
+          },
+        }
+      : {}),
   });
   const store = await openSqliteStore(profile),
     expectedStoreId = (await store.getMetadata()).storeId;
@@ -321,21 +433,24 @@ async function fixture(scenario: Scenario) {
     get elapsedMs() {
       return elapsedMs;
     },
-    async run(observerMs: 15000 | 30000 = scenario === 'nested' ? 30000 : 15000) {
+    async run(
+      observerMs: 15000 | 30000 = scenario === 'nested' ? 30000 : 15000,
+      work = { commandId: 'work', content: 'PARENT_OWNED_REQUEST' },
+    ) {
       const observedAt = Date.now();
       await client.startRun('parent', {
         expectedStoreId,
-        commandId: 'work',
+        commandId: work.commandId,
         kind: 'run.start',
-        content: 'PARENT_OWNED_REQUEST',
+        content: work.content,
       });
       const approved: { definitionId: string; sessionId: string }[] = [];
       const deadline = observedAt + (process.platform === 'win32' ? observerMs * 6 : observerMs);
       for (;;) {
-        const command = await runtime.getCommand('work');
+        const command = await runtime.getCommand(work.commandId);
         const view = await store.getView('parent');
         const rootFinished = view.runs.some(
-          (run) => run.originCommandId === 'work' && !run.isActive,
+          (run) => run.originCommandId === work.commandId && !run.isActive,
         );
         if (command?.status === 'rejected') break;
         const sessions = new Set(['parent']);
@@ -695,7 +810,7 @@ test(
       for (const run of runs) {
         expect(run.status).toBe('completed');
         expect(run.isActive).toBe(false);
-        expect(run.waitingForResults).toEqual([]);
+        expect(run).not.toHaveProperty('waitingForResults');
       }
       expect(runs[0]!.deadlineAt).toBeNull();
       for (const run of runs.slice(1)) expect(run.deadlineAt! - run.createdAt).toBe(30 * 60 * 1000);
@@ -753,12 +868,11 @@ test(
               cancelRequestedAt,
             }),
           ),
-          runs: runs.map(({ id, sessionId, status, deadlineAt, waitingForResults }) => ({
+          runs: runs.map(({ id, sessionId, status, deadlineAt }) => ({
             id,
             sessionId,
             status,
             deadlineAt,
-            waitingForResults,
           })),
           commands: commands.map((command) => ({
             id: command!.id,

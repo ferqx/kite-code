@@ -285,45 +285,37 @@ test('already dispatched or unknown actions keep A active and raw B durable with
   }
 });
 
-test('necessary completion conditions and required result waits remain hard gates before any retirement', async () => {
-  for (const blocker of ['requirement', 'required_result'] as const) {
-    const f = await fixture();
-    try {
-      await f.plan('effect');
-      await f.register();
-      // Isolated Store guard fixture: declare exact unfulfilled completion facts, never an execution proof.
-      if (blocker === 'requirement') {
-        const requirement: RequirementRef = {
-          extensionId: 'fixture',
-          definitionVersion: '1',
-          requirementId: 'required',
-          revision: '1',
-          phase: 'completion',
-          sessionId: 's',
-          runId: f.run.id,
-          recordKey: 'missing',
-          originStoreId: f.scope.expectedStoreId,
-        };
-        f.database
-          .query('UPDATE run SET requirements_json=? WHERE id=?')
-          .run(JSON.stringify([requirement]), f.run.id);
-      } else
-        f.database
-          .query('UPDATE run SET waiting_results_json=? WHERE id=?')
-          .run(JSON.stringify(['required-child']), f.run.id);
-      expect(await f.store.handoffHumanRun(await f.input())).toMatchObject({
-        handedOff: false,
-        reason:
-          blocker === 'requirement' ? 'requirement_not_satisfied' : 'required_results_pending',
-        run: { isActive: true },
-      });
-      expect((await f.store.getExecution('effect'))?.status).toBe('planned');
-      const cursor = (await f.store.getMetadata()).lastChangeCursor;
-      await f.store.handoffHumanRun(await f.input());
-      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
-    } finally {
-      await f.close();
-    }
+test('necessary completion conditions remain hard gates before handoff', async () => {
+  const f = await fixture();
+  try {
+    await f.plan('effect');
+    await f.register();
+    // Isolated Store guard fixture: declare exact unfulfilled completion facts, never an execution proof.
+    const requirement: RequirementRef = {
+      extensionId: 'fixture',
+      definitionVersion: '1',
+      requirementId: 'required',
+      revision: '1',
+      phase: 'completion',
+      sessionId: 's',
+      runId: f.run.id,
+      recordKey: 'missing',
+      originStoreId: f.scope.expectedStoreId,
+    };
+    f.database
+      .query('UPDATE run SET requirements_json=? WHERE id=?')
+      .run(JSON.stringify([requirement]), f.run.id);
+    expect(await f.store.handoffHumanRun(await f.input())).toMatchObject({
+      handedOff: false,
+      reason: 'requirement_not_satisfied',
+      run: { isActive: true },
+    });
+    expect((await f.store.getExecution('effect'))?.status).toBe('planned');
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    await f.store.handoffHumanRun(await f.input());
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+  } finally {
+    await f.close();
   }
 });
 

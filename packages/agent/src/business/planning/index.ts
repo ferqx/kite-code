@@ -10,7 +10,6 @@ import type {
   Json,
   JsonSchema,
   NecessaryConditions,
-  OperationRef,
   PublicExecution,
   ReadContext,
   RunInitializationContext,
@@ -18,11 +17,8 @@ import type {
   ToolResult,
 } from '../../extensions';
 import { AgentError } from '../../storage/types';
-import { type AutomaticValidationOptions, createAutomaticValidation } from './automatic';
 import type { PlanFile, PlanFiles } from './files';
-import { checkArtifactSchema, checkSemanticResult } from './verification';
 
-export type { AutomaticValidationOptions } from './automatic';
 export { createPlanFiles } from './files';
 
 export const planningExtensionId = 'builtin.planning';
@@ -33,14 +29,6 @@ const schema = (
   required = Object.keys(properties),
 ): JsonSchema => ({ type: 'object', additionalProperties: false, properties, required });
 const empty = schema({});
-const targetSchema = schema({
-  executionId: text,
-  attempt: { type: 'integer', minimum: 1 },
-  definitionId: text,
-  definitionVersion: text,
-  inputDigest: text,
-  resultRevision: text,
-});
 type Ref = Parameters<NecessaryConditions['evaluate']>[0][number];
 type Target = {
   executionId: string;
@@ -53,24 +41,8 @@ type Target = {
 export interface PlanningOptions {
   /** Trusted host opt-in: a premature completion returns one keyed planning diagnostic. */
   completionGuidance?: boolean;
-  automaticValidation?: AutomaticValidationOptions;
   requirePlan?: boolean;
-  requiredValidation?: boolean;
-  allowWaiver?: boolean;
-  requiredReceiptDefinitions?: readonly { definitionId: string; definitionVersion: string }[];
   allowedExecutionModes?: readonly string[];
-  /** Host-selected ordinary Tool returning a complete baseline SHA-256, never model metadata. */
-  fileHashChecker?: { definitionId: string; definitionVersion: string };
-  /** Explicit host registration of a supervised command Job; no ambient Shell fallback. */
-  commandChecker?: { definitionId: string; definitionVersion: string };
-  /** Host-qualified read-only MCP definitions, not remote annotations or model declarations. */
-  mcpCheckers?: readonly {
-    id: string;
-    definitionId: string;
-    definitionVersion: string;
-    sourceDefinitionId: string;
-    sourceDefinitionVersion: string;
-  }[];
 }
 export interface PlanningRunPolicy {
   /** Trusted host only; false never weakens the factory's existing obligation. */
@@ -186,12 +158,7 @@ const knownPreflight = new Set([
   'plan_steps_incomplete',
   'plan_requirement_missing',
   'plan_completion_evidence_required',
-  'validation_host_checks_missing',
-  'validation_plan_missing',
-  'validation_waiver_not_allowed',
-  'validation_requirement_missing',
-  'validation_waiver_unknown_effect',
-  'validation_waiver_target_changed',
+
   'record_revision_conflict',
   'extension_record_format_unavailable',
 ]);
@@ -315,43 +282,50 @@ async function receiptStatus(
       : 'inconclusive';
 }
 
-async function unknownVerification(
-  read: Pick<ReadContext, 'getExecution'> & { records: Pick<ReadContext['records'], 'get'> },
-  runId: string,
-  spec: Record<string, Json> | null,
-) {
-  const bindingPointer = decode(await read.records.get(`run/${runId}/validation.binding.current`));
-  const binding = bindingPointer
-    ? decode(await read.records.get(string(bindingPointer.key)))
-    : null;
-  const bindings = binding ? object(binding.bindings) : {};
-  if (spec && Array.isArray(spec.checks))
-    for (let i = 0; i < spec.checks.length; i++) {
-      const check = object(spec.checks[i]);
-      for (const candidate of [check, bindings[String(i)] ? object(bindings[String(i)]) : null]) {
-        if (
-          candidate?.target &&
-          (await read.getExecution(string(object(candidate.target).executionId)))?.status ===
-            'outcome_unknown'
-        )
-          return true;
-      }
-    }
-  const pointer = decode(await read.records.get(`run/${runId}/validation.current`));
-  const attempt = pointer ? decode(await read.records.get(string(pointer.key))) : null;
-  return (
-    !!attempt &&
-    Array.isArray(attempt.checks) &&
-    attempt.checks.some((check) => object(check).outcome === 'unknown')
-  );
-}
-
 /** Business records and predicates only. Permissions and execution authority remain in the host. */
 export function createPlanningValidation(
   inputOptions: PlanningOptions = {},
   planFiles?: PlanFiles,
   readExecutionInput?: (executionId: string) => Promise<Json>,
+  isReadOnlyShell?: (input: Json) => Promise<boolean>,
 ) {
+  if (
+    Object.keys(inputOptions).some(
+      (key) => !['completionGuidance', 'requirePlan', 'allowedExecutionModes'].includes(key),
+    )
+  )
+    throw new AgentError('planning_options_unavailable');
+  async function isShellSearch(
+    read: ConditionReadContext,
+    boundary: import('../../extensions').NecessaryConditionContext['boundary'],
+  ) {
+    if (
+      !isReadOnlyShell ||
+      !readExecutionInput ||
+      !boundary.executionId ||
+      boundary.definitionVersion !== '1' ||
+      !(
+        (boundary.kind === 'tool' &&
+          ['shell.execute', 'shell.launch'].includes(boundary.definitionId ?? '')) ||
+        (boundary.kind === 'job' && boundary.definitionId === 'shell.command')
+      )
+    )
+      return false;
+    const actual = await read.getExecution(boundary.executionId);
+    if (
+      !actual ||
+      actual.sessionId !== read.sessionId ||
+      actual.sessionId !== boundary.sessionId ||
+      actual.runId !== boundary.runId ||
+      actual.attempt !== boundary.attempt ||
+      actual.kind !== boundary.kind ||
+      actual.definitionId !== boundary.definitionId ||
+      actual.definitionVersion !== boundary.definitionVersion
+    )
+      return false;
+    const input = await readExecutionInput(actual.id);
+    return (await digest(input)) === actual.inputDigest && (await isReadOnlyShell(input));
+  }
   async function isFileEdit(
     read: ConditionReadContext,
     boundary: import('../../extensions').NecessaryConditionContext['boundary'],
@@ -389,195 +363,20 @@ export function createPlanningValidation(
       return false;
     return true;
   }
-  const configured = inputOptions.requiredReceiptDefinitions ?? [];
-  if (
-    !Array.isArray(configured) ||
-    configured.length > 64 ||
-    configured.some(
-      (item) =>
-        !item ||
-        Object.keys(item).some((key) => !['definitionId', 'definitionVersion'].includes(key)) ||
-        typeof item.definitionId !== 'string' ||
-        !item.definitionId.trim() ||
-        item.definitionId.length > 512 ||
-        typeof item.definitionVersion !== 'string' ||
-        !item.definitionVersion.trim() ||
-        item.definitionVersion.length > 512,
-    ) ||
-    new Set(configured.map((item) => canonical([item.definitionId, item.definitionVersion])))
-      .size !== configured.length
-  )
-    throw new Error('validation_host_policy_invalid');
-  if (
-    inputOptions.fileHashChecker &&
-    (Object.keys(inputOptions.fileHashChecker).some(
-      (key) => !['definitionId', 'definitionVersion'].includes(key),
-    ) ||
-      !inputOptions.fileHashChecker.definitionId?.trim() ||
-      !inputOptions.fileHashChecker.definitionVersion?.trim())
-  )
-    throw new Error('validation_host_checker_invalid');
-  const mcpCheckers = inputOptions.mcpCheckers ?? [];
-  for (const checker of [inputOptions.commandChecker, ...mcpCheckers]) {
-    if (
-      checker &&
-      (!checker.definitionId?.trim() ||
-        !checker.definitionVersion?.trim() ||
-        Object.keys(checker).some(
-          (key) =>
-            ![
-              'id',
-              'definitionId',
-              'definitionVersion',
-              'sourceDefinitionId',
-              'sourceDefinitionVersion',
-            ].includes(key),
-        ))
-    )
-      throw new Error('validation_host_checker_invalid');
-  }
-  if (
-    mcpCheckers.length > 64 ||
-    mcpCheckers.some(
-      (checker) =>
-        !checker.id?.trim() ||
-        !checker.sourceDefinitionId?.trim() ||
-        !checker.sourceDefinitionVersion?.trim(),
-    ) ||
-    new Set(mcpCheckers.map((checker) => checker.id)).size !== mcpCheckers.length
-  )
-    throw new Error('validation_host_checker_invalid');
   const options = Object.freeze({
     ...inputOptions,
-    commandChecker: inputOptions.commandChecker
-      ? Object.freeze({ ...inputOptions.commandChecker })
-      : undefined,
-    mcpCheckers: Object.freeze(mcpCheckers.map((checker) => Object.freeze({ ...checker }))),
-    fileHashChecker: inputOptions.fileHashChecker
-      ? Object.freeze({ ...inputOptions.fileHashChecker })
-      : undefined,
-    requiredReceiptDefinitions: Object.freeze(configured.map((item) => Object.freeze({ ...item }))),
     allowedExecutionModes: Object.freeze([
       ...(inputOptions.allowedExecutionModes ?? ['auto', 'accept_edits']),
     ]),
   });
-  const automatic = inputOptions.automaticValidation
-    ? createAutomaticValidation(planningExtensionId, inputOptions.automaticValidation)
-    : null;
   const modes = [...options.allowedExecutionModes];
   if (!modes.length || modes.some((mode) => !['auto', 'accept_edits'].includes(mode)))
     throw new Error('planning_execution_mode_invalid');
-  function semanticDefinition(spec: Record<string, Json>, check: Record<string, Json>) {
-    if (check.kind === 'command') {
-      if (
-        !spec.commandChecker ||
-        !options.commandChecker ||
-        check.input === undefined ||
-        canonical(spec.commandChecker) !== canonical(options.commandChecker)
-      )
-        return null;
-      return { ...options.commandChecker, kind: 'job' as const };
-    }
-    if (check.kind === 'mcp' && Array.isArray(spec.mcpCheckers)) {
-      const configured = options.mcpCheckers.find((checker) => checker.id === check.checkerId);
-      if (
-        !configured ||
-        !spec.mcpCheckers.some((checker) => canonical(checker) === canonical(configured))
-      )
-        return null;
-      return { ...configured, kind: 'tool' as const };
-    }
-    return null;
-  }
-  async function semanticProof(
-    read: Pick<ReadContext, 'getExecution' | 'getRun' | 'getInteraction'> & {
-      records: Pick<ReadContext['records'], 'get'>;
-    },
-    spec: Record<string, Json>,
-    check: Record<string, Json>,
-    actual: PublicExecution | null,
-    target: Target,
-    operationRef: OperationRef,
-    checkIndex: number,
-    parentExecutionId: string,
-    runId: string,
-    storeId: string | undefined,
-    sessionId: string,
-  ) {
-    const definition = semanticDefinition(spec, check);
-    if (
-      !operationRef ||
-      operationRef.originStoreId !== storeId ||
-      operationRef.sessionId !== sessionId ||
-      operationRef.extensionId !== planningExtensionId ||
-      (operationRef.executionId !== null && operationRef.executionId !== target.executionId) ||
-      (operationRef.executionId === null && actual?.kind !== 'tool') ||
-      operationRef.commandId !== actual?.originCommandId ||
-      operationRef.key !== `verification/${parentExecutionId}/${checkIndex}`
-    )
-      return 'scope_mismatch';
-    if (
-      !actual ||
-      !definition ||
-      actual.kind !== definition.kind ||
-      actual.parentExecutionId !== parentExecutionId ||
-      actual.definitionId !== definition.definitionId ||
-      actual.definitionVersion !== definition.definitionVersion ||
-      actual.inputDigest !== (await digest(check.input!))
-    )
-      return 'inconclusive';
-    // Nested ordinary Tools as well as Jobs carry their actual parent rather than a guessed Run.
-    const parent = await read.getExecution(parentExecutionId);
-    if (
-      !parent ||
-      parent.runId !== runId ||
-      parent.kind !== 'tool' ||
-      parent.definitionId !== 'validation.check' ||
-      parent.sessionId !== sessionId ||
-      parent.originStoreId !== storeId ||
-      actual.originStoreId !== storeId ||
-      actual.sessionId !== sessionId ||
-      (actual.runId !== null && actual.runId !== runId) ||
-      actual.rootWorkCommandId !== parent.rootWorkCommandId ||
-      actual.attempt !== target.attempt ||
-      actual.definitionId !== target.definitionId ||
-      actual.definitionVersion !== target.definitionVersion ||
-      actual.inputDigest !== target.inputDigest ||
-      actual.resultRevision !== target.resultRevision
-    )
-      return 'scope_mismatch';
-    if (actual.status === 'outcome_unknown') return 'unknown';
-    if (actual.status !== 'succeeded' && !(check.kind === 'command' && actual.status === 'failed'))
-      return actual.status === 'failed' ? 'failed' : 'inconclusive';
-    if (spec.plan !== null && !(await matchesPlanSource({ ...read, sessionId }, actual)))
-      return 'scope_mismatch';
-    if (check.kind === 'mcp') {
-      const source = object(check.target) as unknown as Target;
-      const original = await read.getExecution(source.executionId);
-      if (
-        !('sourceDefinitionId' in definition) ||
-        source.definitionId !== definition.sourceDefinitionId ||
-        source.definitionVersion !== definition.sourceDefinitionVersion ||
-        (await receiptStatus(read, original, source, runId, storeId, sessionId)) !== 'passed' ||
-        (spec.plan !== null &&
-          (!original || !(await matchesPlanSource({ ...read, sessionId }, original))))
-      )
-        return 'scope_mismatch';
-    }
-    try {
-      return checkSemanticResult(check, actual);
-    } catch {
-      return 'inconclusive';
-    }
-  }
   const management = new Set([
     'planning.read',
     'planning.write',
     'planning.review',
     'planning.update',
-    'validation.define',
-    'validation.check',
-    'validation.rebind',
   ]);
   const planInput = schema(
     {
@@ -1154,11 +953,10 @@ export function createPlanningValidation(
           )
             throw new Error('plan_steps_incomplete');
           const refs: Ref[] = [];
-          for (const kind of ['plan', 'validation'] as const) {
+          for (const kind of ['plan'] as const) {
             const requirementId = `${kind}.required`,
               recordKey = `run/${runId}/${requirementId}`,
               record = await context.records.get(recordKey);
-            if (!record && kind === 'validation') continue;
             if (!record?.originStoreId) throw new Error('plan_requirement_missing');
             refs.push({
               extensionId: planningExtensionId,
@@ -1169,7 +967,7 @@ export function createPlanningValidation(
               originStoreId: record.originStoreId,
               runId,
               sessionId: context.sessionId,
-              phase: kind === 'plan' ? 'both' : 'completion',
+              phase: 'both',
             });
           }
           // Candidate check only. Core independently re-reads and commits all actual obligations.
@@ -1187,457 +985,12 @@ export function createPlanningValidation(
               return context;
             },
           });
-          if (checks.some((check) => !['satisfied', 'waived'].includes(check.outcome)))
+          if (checks.some((check) => check.outcome !== 'satisfied'))
             throw new Error('plan_completion_evidence_required');
         }
         await write(context, `${key}/attempt/${context.executionId}`, progress, true);
         const saved = await writeAt(context, key, progress, old);
         return result({ ...progress, revision: saved.revision });
-      },
-    },
-    'validation.define': {
-      input: schema({
-        runId: text,
-        checks: {
-          type: 'array',
-          minItems: 1,
-          maxItems: 64,
-          items: {
-            oneOf: [
-              schema({ kind: { const: 'receipt' }, target: targetSchema }),
-              schema({
-                kind: { const: 'file_hash' },
-                path: { type: 'string', minLength: 1, maxLength: 4096 },
-                sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-              }),
-              schema({
-                kind: { const: 'artifact_schema' },
-                target: targetSchema,
-                artifactRef: { type: 'object' },
-                schema: { type: 'object' },
-              }),
-              schema({ kind: { enum: ['command', 'mcp'] }, description: text }),
-              schema({
-                kind: { const: 'command' },
-                input: { type: 'object' },
-                expectedExitCode: { type: 'integer' },
-              }),
-              schema({
-                kind: { const: 'mcp' },
-                checkerId: text,
-                input: { type: 'object' },
-                target: targetSchema,
-                schema: { type: 'object' },
-              }),
-            ],
-          },
-        },
-      }),
-      async execute(input, context) {
-        const value = object(input),
-          runId = string(value.runId),
-          own = await context.getExecution(context.executionId);
-        if (!own || own.runId !== runId)
-          return { outcome: 'failed', content: 'validation_run_mismatch' };
-        const key = `run/${runId}/validation.spec`;
-        const old = await context.records.get(key);
-        if (old) return { outcome: 'failed', content: 'validation_spec_immutable' };
-        const requirement = decode(await context.records.get(`run/${runId}/validation.required`));
-        const requiredDefinitions = (requirement?.requiredReceiptDefinitions ??
-          options.requiredReceiptDefinitions) as unknown as {
-          definitionId: string;
-          definitionVersion: string;
-        }[];
-        const checks = value.checks as Json[];
-        if (
-          !requiredDefinitions.every((required) =>
-            checks.some((check) => {
-              const item = object(check);
-              const target = ['receipt', 'artifact_schema'].includes(String(item.kind))
-                ? object(item.target)
-                : null;
-              return (
-                target?.definitionId === required.definitionId &&
-                target.definitionVersion === required.definitionVersion
-              );
-            }),
-          )
-        )
-          throw new Error('validation_host_checks_missing');
-        const planRequirement = await context.records.get(`run/${runId}/plan.required`);
-        const currentPlan = planRequirement
-          ? decode(await context.records.get('plan.current'))
-          : null;
-        if (planRequirement && !currentPlan) throw new Error('validation_plan_missing');
-        const record = await write(
-          context,
-          key,
-          {
-            kind: 'validation_spec',
-            runId,
-            checks: value.checks!,
-            plan: currentPlan,
-            fileHashChecker: options.fileHashChecker ? { ...options.fileHashChecker } : null,
-            commandChecker: options.commandChecker ? { ...options.commandChecker } : null,
-            mcpCheckers: options.mcpCheckers.map((checker) => ({ ...checker })),
-          },
-          true,
-        );
-        return result({ key, revision: record.revision });
-      },
-    },
-    'validation.rebind': {
-      input: schema({
-        runId: text,
-        expectedRevision: { type: ['string', 'null'] },
-        bindings: {
-          type: 'array',
-          minItems: 1,
-          maxItems: 64,
-          items: schema(
-            {
-              index: { type: 'integer', minimum: 0 },
-              target: targetSchema,
-              artifactRef: { type: 'object' },
-            },
-            ['index', 'target'],
-          ),
-        },
-      }),
-      async execute(input, context) {
-        const value = object(input),
-          runId = string(value.runId),
-          own = await context.getExecution(context.executionId);
-        if (own?.runId !== runId) return { outcome: 'failed', content: 'validation_run_mismatch' };
-        const spec = decode(await context.records.get(`run/${runId}/validation.spec`));
-        const pointer = await context.records.get(`run/${runId}/validation.binding.current`);
-        if (
-          !spec ||
-          !Array.isArray(spec.checks) ||
-          (pointer?.revision ?? null) !== value.expectedRevision
-        )
-          return { outcome: 'failed', content: 'validation_binding_changed' };
-        const previous = decode(pointer),
-          prior = previous ? decode(await context.records.get(string(previous.key))) : null;
-        const bindings = { ...(prior ? object(prior.bindings) : {}) };
-        for (const raw of value.bindings as Json[]) {
-          const binding = object(raw),
-            index = Number(binding.index);
-          if (!spec.checks[index])
-            return { outcome: 'failed', content: 'validation_binding_index' };
-          const check = object(spec.checks[index]),
-            target = object(binding.target) as unknown as Target;
-          if (!['receipt', 'artifact_schema', 'mcp'].includes(String(check.kind)))
-            return { outcome: 'failed', content: 'validation_binding_kind' };
-          const original = object(check.target);
-          if (
-            target.definitionId !== original.definitionId ||
-            target.definitionVersion !== original.definitionVersion
-          )
-            return { outcome: 'failed', content: 'validation_binding_definition_changed' };
-          const actual = await context.getExecution(target.executionId);
-          if (
-            (await receiptStatus(
-              context,
-              actual,
-              target,
-              runId,
-              own.originStoreId,
-              context.sessionId,
-            )) !== 'passed'
-          )
-            return { outcome: 'failed', content: 'validation_binding_receipt_invalid' };
-          if (spec.plan !== null && actual && !(await matchesPlanSource(context, actual)))
-            return { outcome: 'failed', content: 'validation_binding_source_changed' };
-          bindings[String(index)] = { ...binding };
-        }
-        const key = `run/${runId}/validation.binding/${context.executionId}`;
-        await write(
-          context,
-          key,
-          { kind: 'validation_binding', runId, bindings, previous: previous?.key ?? null },
-          true,
-        );
-        await context.records.write({
-          key: `run/${runId}/validation.binding.current`,
-          expectedRevision: value.expectedRevision as string | null,
-          contentType,
-          contentVersion: 1,
-          executable: true,
-          value: {
-            ...(pointer ? object(pointer.value) : {}),
-            kind: 'validation_binding_current',
-            key,
-          },
-        });
-        return result({ key });
-      },
-    },
-    'validation.check': {
-      input: schema({ runId: text }),
-      async execute(input, context) {
-        const runId = string(object(input).runId),
-          own = await context.getExecution(context.executionId);
-        if (!own || own.runId !== runId)
-          return { outcome: 'failed', content: 'validation_run_mismatch' };
-        const spec = await context.records.get(`run/${runId}/validation.spec`),
-          value = decode(spec);
-        if (!value || !Array.isArray(value.checks)) return result({ outcome: 'missing' });
-        // Capture both heads before asynchronous checks. A late callback never covers a newer binding/attempt.
-        const head = await context.records.get(`run/${runId}/validation.current`);
-        const bindingPointer = await context.records.get(`run/${runId}/validation.binding.current`);
-        const bindingValue = decode(bindingPointer),
-          bindingRecord = bindingValue
-            ? decode(await context.records.get(string(bindingValue.key)))
-            : null;
-        const bindings = bindingRecord ? object(bindingRecord.bindings) : {};
-        const checks: Json[] = [];
-        for (let index = 0; index < value.checks.length; index++) {
-          const check = object(value.checks[index]),
-            binding = bindings[String(index)] ? object(bindings[String(index)]) : check;
-          if (['command', 'mcp'].includes(String(check.kind)) && check.input !== undefined) {
-            const definition = semanticDefinition(value, check);
-            if (!definition) {
-              checks.push({
-                kind: check.kind!,
-                outcome: 'inconclusive',
-                reason: 'validation_checker_unavailable',
-              });
-              continue;
-            }
-            if (check.kind === 'mcp') {
-              const source = object(binding.target) as unknown as Target;
-              const original = await context.getExecution(source.executionId);
-              if (
-                !('sourceDefinitionId' in definition) ||
-                source.definitionId !== definition.sourceDefinitionId ||
-                source.definitionVersion !== definition.sourceDefinitionVersion ||
-                (await receiptStatus(
-                  context,
-                  original,
-                  source,
-                  runId,
-                  own.originStoreId,
-                  context.sessionId,
-                )) !== 'passed' ||
-                (value.plan !== null &&
-                  (!original || !(await matchesPlanSource(context, original))))
-              ) {
-                checks.push({
-                  kind: check.kind,
-                  outcome: 'inconclusive',
-                  reason: 'validation_source_mismatch',
-                });
-                continue;
-              }
-            }
-            let operation: OperationRef;
-            try {
-              operation = await context.operations.ensure({
-                key: `verification/${context.executionId}/${index}`,
-                request: {
-                  kind: definition.kind,
-                  definitionId: definition.definitionId,
-                  definitionVersion: definition.definitionVersion,
-                  input: check.input,
-                },
-                cancellation: 'attached',
-              });
-            } catch (error) {
-              if (!(error instanceof Error) || error.message !== 'operation_definition_unavailable')
-                throw error;
-              checks.push({
-                kind: check.kind!,
-                outcome: 'inconclusive',
-                reason: 'validation_checker_unavailable',
-              });
-              continue;
-            }
-            const actual = await context.operations.wait(operation);
-            const target: Target = {
-              executionId: actual.id,
-              attempt: actual.attempt!,
-              definitionId: actual.definitionId!,
-              definitionVersion: actual.definitionVersion!,
-              inputDigest: actual.inputDigest!,
-              resultRevision: actual.resultRevision,
-            };
-            checks.push({
-              kind: check.kind!,
-              target: target as unknown as Json,
-              operationRef: operation as unknown as Json,
-              outcome: await semanticProof(
-                context,
-                value,
-                check.kind === 'mcp' ? { ...check, target: binding.target! } : check,
-                actual,
-                target,
-                operation,
-                index,
-                context.executionId,
-                runId,
-                own.originStoreId,
-                context.sessionId,
-              ),
-            });
-            continue;
-          }
-          if (check.kind === 'file_hash') {
-            const checker = value.fileHashChecker ? object(value.fileHashChecker) : null;
-            if (!checker) {
-              checks.push({
-                outcome: 'inconclusive',
-                reason: 'validation_checker_unavailable',
-                kind: check.kind,
-              });
-              continue;
-            }
-            let operation: OperationRef;
-            try {
-              operation = await context.operations.ensure({
-                key: `verification/${context.executionId}/${index}`,
-                request: {
-                  kind: 'tool',
-                  definitionId: string(checker.definitionId),
-                  definitionVersion: string(checker.definitionVersion),
-                  input: { path: check.path!, offset: 1, limit: 1 },
-                },
-              });
-            } catch (error) {
-              if (!(error instanceof Error) || error.message !== 'operation_definition_unavailable')
-                throw error;
-              checks.push({
-                outcome: 'inconclusive',
-                reason: 'validation_checker_unavailable',
-                kind: check.kind,
-              });
-              continue;
-            }
-            const actual = await context.operations.wait(operation);
-            if (actual.status !== 'succeeded') {
-              checks.push({
-                outcome: actual.status === 'outcome_unknown' ? 'unknown' : 'inconclusive',
-                kind: check.kind,
-                checkerExecutionId: actual.id,
-              });
-              continue;
-            }
-            try {
-              const snapshot = object(JSON.parse(string(object(actual.result).content)) as Json),
-                baseline = object(snapshot.baseline),
-                observed = string(baseline.hash);
-              if (!/^[a-f0-9]{64}$/.test(observed)) throw new Error('validation_baseline_invalid');
-              checks.push({
-                kind: check.kind,
-                outcome: observed === check.sha256 ? 'passed' : 'failed',
-                observedHash: observed,
-                checkerExecutionId: actual.id,
-              });
-            } catch {
-              checks.push({
-                kind: check.kind,
-                outcome: 'inconclusive',
-                reason: 'validation_baseline_invalid',
-              });
-            }
-            continue;
-          }
-          if (!['receipt', 'artifact_schema'].includes(String(check.kind))) {
-            checks.push({
-              outcome: 'inconclusive',
-              reason: 'validation_capability_unavailable',
-              kind: check.kind!,
-            });
-            continue;
-          }
-          const target = object(binding.target) as unknown as Target,
-            actual = await context.getExecution(target.executionId);
-          const status =
-            value.plan !== null && actual && !(await matchesPlanSource(context, actual))
-              ? 'scope_mismatch'
-              : await receiptStatus(
-                  context,
-                  actual,
-                  target,
-                  runId,
-                  own.originStoreId,
-                  context.sessionId,
-                );
-          if (check.kind === 'artifact_schema' && status === 'passed') {
-            const ref = binding.artifactRef ?? check.artifactRef!;
-            const refs =
-              actual?.result && typeof actual.result === 'object' && !Array.isArray(actual.result)
-                ? actual.result.artifactRefs
-                : null;
-            if (
-              !context.artifacts ||
-              !Array.isArray(refs) ||
-              !refs.some((item) => canonical(item) === canonical(ref))
-            ) {
-              checks.push({
-                outcome: 'inconclusive',
-                reason: 'validation_artifact_reference_unavailable',
-                target: binding.target!,
-                kind: check.kind,
-              });
-              continue;
-            }
-            try {
-              const checked = await checkArtifactSchema(
-                context.artifacts,
-                ref as unknown as ArtifactRef,
-                check.schema!,
-              );
-              checks.push({
-                ...checked,
-                target: binding.target!,
-                artifactRef: ref,
-                kind: check.kind,
-              });
-            } catch {
-              checks.push({
-                outcome: 'inconclusive',
-                reason: 'validation_artifact_unavailable',
-                target: binding.target!,
-                kind: check.kind,
-              });
-            }
-          } else
-            checks.push({
-              outcome: status,
-              target: binding.target!,
-              result: actual?.result ?? null,
-              kind: check.kind!,
-            });
-        }
-        const outcome = checks.every((c) => object(c).outcome === 'passed')
-          ? 'passed'
-          : 'unsatisfied';
-        const evidence = {
-          kind: 'validation_attempt',
-          specRevision: spec!.revision,
-          bindingRevision: bindingPointer?.revision ?? null,
-          checkerExecutionId: context.executionId,
-          runId,
-          checks,
-          outcome,
-        };
-        const key = `run/${runId}/validation.attempt/${context.executionId}`;
-        await write(context, key, evidence, true);
-        if (
-          (await context.records.get(`run/${runId}/validation.binding.current`))?.revision !==
-          bindingPointer?.revision
-        )
-          return { outcome: 'failed', content: 'validation_binding_changed' };
-        await context.records.write({
-          key: `run/${runId}/validation.current`,
-          expectedRevision: head?.revision ?? null,
-          contentType,
-          contentVersion: 1,
-          executable: true,
-          value: { ...(head ? object(head.value) : {}), kind: 'validation_current', key },
-        });
-        return result(evidence);
       },
     },
   };
@@ -1659,21 +1012,6 @@ export function createPlanningValidation(
       name: 'update_plan_progress',
       description:
         'Update progress for the current plan using actual execution receipts; cannot approve a plan.',
-    },
-    'validation.define': {
-      name: 'define_validation_checks',
-      description:
-        'Define checks and expected results for this Run; existing required checks remain mandatory.',
-    },
-    'validation.check': {
-      name: 'run_validation_checks',
-      description:
-        'Run the defined checks against their exact execution targets and save the observed results.',
-    },
-    'validation.rebind': {
-      name: 'rebind_validation_checks',
-      description:
-        'Bind existing checks to a new successful repair execution without changing their expectations.',
     },
   };
   for (const [id, fn] of Object.entries(functions))
@@ -1697,99 +1035,12 @@ export function createPlanningValidation(
       execute: guarded(functions[id]!.execute),
     }),
   );
-  actions.push({
-    id: 'validation.waive',
-    version: '1',
-    description: 'Request an exact user waiver; never grants Tool permissions',
-    inputSchema: schema({ recordKey: text, reason: text }),
-    async prepare(input) {
-      return input;
-    },
-    async execute(input, context) {
-      if (!options.allowWaiver) throw new Error('validation_waiver_not_allowed');
-      const value = object(input),
-        recordKey = string(value.recordKey),
-        record = await context.records.get(recordKey),
-        obligation = decode(record);
-      if (!record || !obligation || obligation.kind !== 'validation')
-        throw new Error('validation_requirement_missing');
-      const waiverHead = await context.records.get(`${recordKey}/waiver.current`);
-      if (waiverHead) decode(waiverHead);
-      const spec = await context.records.get(`run/${obligation.runId}/validation.spec`);
-      const bindingPointer = await context.records.get(
-        `run/${obligation.runId}/validation.binding.current`,
-      );
-      const specValue = decode(spec),
-        plan = decode(await context.records.get('plan.current'));
-      if (await unknownVerification(context, string(obligation.runId), specValue))
-        throw new Error('validation_waiver_unknown_effect');
-      const request = {
-        kind: 'validation_waiver',
-        specRevision: spec?.revision ?? null,
-        bindingRevision: bindingPointer?.revision ?? null,
-        spec: specValue,
-        plan,
-        recordKey,
-        revision: record.revision,
-        originStoreId: record.originStoreId,
-        runId: obligation.runId!,
-        requirementId: obligation.requirementId!,
-        reason: string(value.reason),
-      };
-      const proof = await accepted(context, 'question', {
-        schema: schema({ waive: { const: true } }),
-        ...request,
-      });
-      if (proof.answer.kind !== 'question' || object(proof.answer.answers).waive !== true)
-        return result({ outcome: 'unsatisfied' });
-      if (
-        (await context.records.get(`run/${obligation.runId}/validation.spec`))?.revision !==
-          spec?.revision ||
-        (await context.records.get(`run/${obligation.runId}/validation.binding.current`))
-          ?.revision !== bindingPointer?.revision ||
-        canonical(decode(await context.records.get('plan.current'))) !== canonical(plan)
-      )
-        throw new Error('validation_waiver_target_changed');
-      const waiverKey = `${recordKey}/waiver.attempt/${context.executionId}`;
-      await write(
-        context,
-        waiverKey,
-        {
-          kind: 'waiver',
-          request: proof.request,
-          proof: proof as unknown as Json,
-          savedAt: Date.now(),
-          actor: 'user',
-        },
-        true,
-      );
-      await writeAt(
-        context,
-        `${recordKey}/waiver.current`,
-        { kind: 'waiver_current', key: waiverKey },
-        waiverHead,
-      );
-      return result({ outcome: 'waived' });
-    },
-  });
-  const waiverAction = actions[actions.length - 1]!;
-  waiverAction.execute = guarded(waiverAction.execute);
-  tools.push({
-    id: 'validation.request_waiver',
-    version: '1',
-    model: { name: 'request_validation_waiver', snakeCase: true },
-    description: 'Ask the user for an exact waiver; the Tool cannot approve it',
-    inputSchema: waiverAction.inputSchema,
-    execute: waiverAction.execute,
-  });
-  management.add('validation.request_waiver');
+
   const conditions: NecessaryConditions = {
     async evaluate(refs, phase, context) {
       return Promise.all(
         refs.map(
           async (ref): Promise<Awaited<ReturnType<NecessaryConditions['evaluate']>>[number]> => {
-            if (automatic && ref.requirementId === 'mutation.required')
-              return automatic.evaluate(ref, phase, context);
             let outcome: 'satisfied' | 'waived' | 'unsatisfied' = 'unsatisfied';
             let reason = 'business_evidence_missing';
             if (!context)
@@ -1891,6 +1142,14 @@ export function createPlanningValidation(
               if (
                 phase === 'dispatch' &&
                 !inheritedPlanContinuation &&
+                (await isShellSearch(read, boundary))
+              ) {
+                outcome = 'satisfied';
+                reason = 'planning_read_only_shell_search';
+              }
+              if (
+                phase === 'dispatch' &&
+                !inheritedPlanContinuation &&
                 (await isFileEdit(read, boundary))
               ) {
                 outcome = 'satisfied';
@@ -1927,206 +1186,6 @@ export function createPlanningValidation(
                 outcome = 'satisfied';
                 reason = 'planning_management_boundary';
               }
-            } else if (obligation.kind === 'validation') {
-              const spec = await read.records.get(`run/${ref.runId}/validation.spec`),
-                specValue = decode(spec);
-              const planRequirement = await read.records.get(`run/${ref.runId}/plan.required`);
-              const pointer = decode(await read.records.get(`run/${ref.runId}/validation.current`));
-              const attempt = pointer ? decode(await read.records.get(string(pointer.key))) : null;
-              const bindingPointer = await read.records.get(
-                `run/${ref.runId}/validation.binding.current`,
-              );
-              const bindingValue = decode(bindingPointer),
-                binding = bindingValue
-                  ? decode(await read.records.get(string(bindingValue.key)))
-                  : null;
-              const bindings = binding ? object(binding.bindings) : {};
-              if (
-                spec &&
-                specValue &&
-                (
-                  obligation.requiredReceiptDefinitions as unknown as {
-                    definitionId: string;
-                    definitionVersion: string;
-                  }[]
-                ).every(
-                  (required) =>
-                    Array.isArray(specValue.checks) &&
-                    specValue.checks.some((check) => {
-                      const item = object(check);
-                      const target = ['receipt', 'artifact_schema'].includes(String(item.kind))
-                        ? object(item.target)
-                        : null;
-                      return (
-                        target?.definitionId === required.definitionId &&
-                        target.definitionVersion === required.definitionVersion
-                      );
-                    }),
-                ) &&
-                ((!planRequirement && specValue.plan === null) ||
-                  (specValue.plan !== null &&
-                    canonical(specValue.plan!) ===
-                      canonical(decode(await read.records.get('plan.current'))))) &&
-                attempt?.specRevision === spec.revision &&
-                attempt.runId === ref.runId &&
-                Array.isArray(specValue.checks) &&
-                Array.isArray(attempt.checks) &&
-                specValue.checks.length > 0 &&
-                specValue.checks.length === attempt.checks.length
-              ) {
-                let passed = true;
-                if (attempt.checkerExecutionId) {
-                  const checker = await read.getExecution(string(attempt.checkerExecutionId));
-                  if (
-                    !checker ||
-                    checker.runId !== ref.runId ||
-                    checker.sessionId !== ref.sessionId ||
-                    checker.originStoreId !== ref.originStoreId ||
-                    checker.status !== 'succeeded' ||
-                    checker.definitionId !== 'validation.check' ||
-                    checker.definitionVersion !== '1' ||
-                    canonical(object(checker.result).details ?? null) !== canonical(attempt)
-                  )
-                    passed = false;
-                  if (attempt.bindingRevision !== (bindingPointer?.revision ?? null))
-                    passed = false;
-                }
-                for (let i = 0; i < specValue.checks.length; i++) {
-                  const check = object(specValue.checks[i]),
-                    evidence = object(attempt.checks[i]);
-                  const targetBinding = bindings[String(i)] ? object(bindings[String(i)]) : check;
-                  if (evidence.outcome !== 'passed') {
-                    passed = false;
-                    continue;
-                  }
-                  if (['command', 'mcp'].includes(String(check.kind))) {
-                    if (!evidence.target || !evidence.operationRef || !attempt.checkerExecutionId) {
-                      passed = false;
-                      continue;
-                    }
-                    const target = object(evidence.target) as unknown as Target;
-                    if (
-                      (await semanticProof(
-                        read,
-                        specValue,
-                        check.kind === 'mcp' ? { ...check, target: targetBinding.target! } : check,
-                        await read.getExecution(target.executionId),
-                        target,
-                        evidence.operationRef as unknown as OperationRef,
-                        i,
-                        string(attempt.checkerExecutionId),
-                        ref.runId,
-                        ref.originStoreId,
-                        ref.sessionId,
-                      )) !== 'passed'
-                    )
-                      passed = false;
-                    continue;
-                  }
-                  if (check.kind === 'file_hash') {
-                    const checker = evidence.checkerExecutionId
-                      ? await read.getExecution(string(evidence.checkerExecutionId))
-                      : null;
-                    const definition = specValue.fileHashChecker
-                      ? object(specValue.fileHashChecker)
-                      : null;
-                    if (
-                      !checker ||
-                      !definition ||
-                      checker.status !== 'succeeded' ||
-                      checker.parentExecutionId !== attempt.checkerExecutionId ||
-                      checker.originStoreId !== ref.originStoreId ||
-                      checker.sessionId !== ref.sessionId ||
-                      checker.definitionId !== definition.definitionId ||
-                      checker.definitionVersion !== definition.definitionVersion ||
-                      checker.inputDigest !==
-                        (await digest({ path: check.path!, offset: 1, limit: 1 })) ||
-                      evidence.observedHash !== check.sha256
-                    )
-                      passed = false;
-                    if (checker) {
-                      try {
-                        const snapshot = object(
-                          JSON.parse(string(object(checker.result).content)) as Json,
-                        );
-                        if (object(snapshot.baseline).hash !== evidence.observedHash)
-                          passed = false;
-                      } catch {
-                        passed = false;
-                      }
-                    }
-                    continue;
-                  }
-                  if (
-                    !['receipt', 'artifact_schema'].includes(String(check.kind)) ||
-                    canonical(targetBinding.target!) !== canonical(evidence.target!) ||
-                    (await receiptStatus(
-                      read,
-                      await read.getExecution(string(object(targetBinding.target).executionId)),
-                      object(targetBinding.target) as unknown as Target,
-                      ref.runId,
-                      ref.originStoreId,
-                      ref.sessionId,
-                    )) !== 'passed'
-                  ) {
-                    passed = false;
-                    continue;
-                  }
-                  const actual = await read.getExecution(
-                    string(object(targetBinding.target).executionId),
-                  );
-                  if (
-                    specValue.plan !== null &&
-                    (!actual || !(await matchesPlanSource(read, actual)))
-                  )
-                    passed = false;
-                  if (check.kind === 'artifact_schema') {
-                    const refs = actual ? object(actual.result).artifactRefs : null;
-                    if (
-                      !attempt.checkerExecutionId ||
-                      !Array.isArray(refs) ||
-                      !refs.some((item) => canonical(item) === canonical(evidence.artifactRef!)) ||
-                      canonical(evidence.artifactRef!) !==
-                        canonical(targetBinding.artifactRef ?? check.artifactRef!)
-                    )
-                      passed = false;
-                  }
-                }
-                if (passed) outcome = 'satisfied';
-              }
-              if (outcome !== 'satisfied' && options.allowWaiver) {
-                const waiverHead = decode(
-                  await read.records.get(`${ref.recordKey}/waiver.current`),
-                );
-                const waiver = waiverHead
-                  ? decode(await read.records.get(string(waiverHead.key)))
-                  : null;
-                if (waiver) {
-                  const request = object(waiver.request),
-                    proof = object(waiver.proof),
-                    answer = object(proof.answer);
-                  const unknownEffect = await unknownVerification(read, ref.runId, specValue);
-                  if (
-                    !unknownEffect &&
-                    request.specRevision === (spec?.revision ?? null) &&
-                    request.bindingRevision === (bindingPointer?.revision ?? null) &&
-                    canonical(request.spec!) === canonical(specValue) &&
-                    canonical(request.plan!) ===
-                      canonical(decode(await read.records.get('plan.current'))) &&
-                    request.recordKey === ref.recordKey &&
-                    request.revision === ref.revision &&
-                    request.runId === ref.runId &&
-                    request.originStoreId === ref.originStoreId &&
-                    request.requirementId === ref.requirementId &&
-                    typeof request.reason === 'string' &&
-                    request.reason.trim() &&
-                    answer.kind === 'question' &&
-                    object(answer.answers).waive === true &&
-                    (await proofValid(read, waiver, request, ref))
-                  )
-                    outcome = 'waived';
-                }
-              }
             }
             return {
               requirement: ref,
@@ -2139,16 +1198,7 @@ export function createPlanningValidation(
       );
     },
   };
-  if (automatic)
-    tools.push({ ...automatic.tool, model: { name: 'check_file_changes', snakeCase: true } });
   const extension: Extension = {
-    ...(automatic
-      ? {
-          mutationGovernance: automatic.governance,
-          completionGovernance: automatic.completion,
-          conditions,
-        }
-      : {}),
     ...(options.completionGuidance
       ? {
           completionGovernance: {
@@ -2190,7 +1240,7 @@ export function createPlanningValidation(
                   };
                 }
               }
-              return automatic ? automatic.completion.prepare(input) : null;
+              return null;
             },
           } satisfies import('../../extensions').CompletionGovernance,
         }
@@ -2201,27 +1251,6 @@ export function createPlanningValidation(
     tools,
     actions,
     records: [
-      ...(automatic
-        ? [
-            {
-              contentType: 'agent.mutation-policy',
-              contentVersion: 1,
-              schema: {
-                type: 'object',
-                required: [
-                  'kind',
-                  'runId',
-                  'requirementId',
-                  'definitions',
-                  'checkDefinitionId',
-                  'checkDefinitionVersion',
-                ],
-                properties: { kind: { const: 'mutation_policy' } },
-                additionalProperties: true,
-              } as JsonSchema,
-            },
-          ]
-        : []),
       {
         contentType,
         contentVersion: 1,
@@ -2495,80 +1524,6 @@ export function createPlanningValidation(
       },
     ],
   };
-  const query = extension.queries![0]!;
-  const extendedExtension: Extension = {
-    ...extension,
-    queries: [
-      ...extension.queries!,
-      {
-        ...query,
-        id: 'validation.status',
-        description: 'Read exact Run verification and waiver facts',
-        inputSchema: schema({ runId: text }),
-        async execute(input, context) {
-          const runId = string(object(input).runId);
-          if (!(await context.getRun(runId))) throw new Error('validation_run_unavailable');
-          const prefix = `run/${runId}`;
-          const obligation = await context.records.get(`${prefix}/validation.required`);
-          const spec = await context.records.get(`${prefix}/validation.spec`);
-          const pointer = await context.records.get(`${prefix}/validation.current`);
-          const pointerValue =
-            pointer?.contentType === contentType && pointer.contentVersion === 1
-              ? object(pointer.value)
-              : null;
-          const resolvedKey = typeof pointerValue?.key === 'string' ? pointerValue.key : null;
-          const attempt = resolvedKey ? await context.records.get(resolvedKey) : null;
-          const bindingPointer = await context.records.get(`${prefix}/validation.binding.current`);
-          const bindingValue =
-            bindingPointer?.contentType === contentType && bindingPointer.contentVersion === 1
-              ? object(bindingPointer.value)
-              : null;
-          const bindingKey = typeof bindingValue?.key === 'string' ? bindingValue.key : null;
-          const binding = bindingKey ? await context.records.get(bindingKey) : null;
-          const waiverHead = await context.records.get(
-            `${prefix}/validation.required/waiver.current`,
-          );
-          const waiverHeadValue =
-            waiverHead?.contentType === contentType && waiverHead.contentVersion === 1
-              ? object(waiverHead.value)
-              : null;
-          const waiverKey = typeof waiverHeadValue?.key === 'string' ? waiverHeadValue.key : null;
-          const waiver = waiverKey ? await context.records.get(waiverKey) : null;
-          return [
-            {
-              extensionId: planningExtensionId,
-              contentType,
-              contentVersion: 1,
-              summary: waiver
-                ? 'User waiver recorded'
-                : attempt
-                  ? 'Verification attempt recorded'
-                  : 'Verification evidence unavailable',
-              payload: {
-                runId,
-                resolution:
-                  (pointer && !resolvedKey) ||
-                  (bindingPointer && !bindingKey) ||
-                  (waiverHead && !waiverKey)
-                    ? 'unavailable'
-                    : 'available',
-                current: pointer?.value ?? null,
-                bindingCurrent: bindingPointer?.value ?? null,
-                binding: binding?.value ?? null,
-                obligation: obligation?.value ?? null,
-                spec: spec?.value ?? null,
-                attempt: attempt?.value ?? null,
-                waiverCurrent: waiverHead?.value ?? null,
-                waiver: waiver?.value ?? null,
-              },
-              artifactRefs: [],
-              actions: [],
-            },
-          ];
-        },
-      },
-    ],
-  };
   async function readPlanningState(
     read: ConditionReadContext,
     identity: { runId: string; originStoreId: string },
@@ -2671,14 +1626,8 @@ export function createPlanningValidation(
       throw new Error('planning_host_read_only_invalid');
     const context = await input.forExtension(planningExtensionId),
       refs: Ref[] = [];
-    if (automatic) refs.push(await automatic.initialize(input));
-    for (const kind of ['plan', 'validation'] as const) {
-      if (
-        !(kind === 'plan'
-          ? options.requirePlan || policy.requirePlan === true
-          : options.requiredValidation)
-      )
-        continue;
+    for (const kind of ['plan'] as const) {
+      if (!(options.requirePlan || policy.requirePlan === true)) continue;
       const requirementId = `${kind}.required`,
         key = `run/${input.run.id}/${requirementId}`;
       const record = await context.records.create({
@@ -2689,7 +1638,6 @@ export function createPlanningValidation(
           kind,
           runId: input.run.id,
           requirementId,
-          requiredReceiptDefinitions: options.requiredReceiptDefinitions as unknown as Json,
           ...(kind === 'plan' ? { readOnlyDefinitions } : {}),
         },
       });
@@ -2907,7 +1855,7 @@ export function createPlanningValidation(
   }
   return {
     extension: {
-      ...extendedExtension,
+      ...extension,
       context: {
         async capture(request, context) {
           return captureModelContext(request, context);

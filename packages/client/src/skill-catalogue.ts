@@ -7,7 +7,6 @@ export interface SkillCatalogueVerificationOptions {
   readonly revision?: string;
   readonly afterId?: string;
   readonly limit?: number;
-  readonly workflow?: 'manual';
 }
 
 /** Verify the closed public metadata contract and retain a private copy of the input. */
@@ -33,7 +32,7 @@ export function verifySkillCataloguePage(
 
 export type UserSkillCatalogueVerificationOptions = Omit<
   SkillCatalogueVerificationOptions,
-  'workspaceId' | 'workflow'
+  'workspaceId'
 >;
 
 /** The global directory never accepts project identity, paths or Workflow activation metadata. */
@@ -77,23 +76,6 @@ function verifyMetadata(
           entry.missingCapabilities.length)) ||
       (entry.state === 'disabled' && (entry.enabled || entry.reason !== null)) ||
       (entry.state === 'unavailable' && (!entry.enabled || entry.reason === null))
-    )
-      throw new ClientError('invalid_response');
-    const workflow = entry.workflow;
-    if (
-      (options.workflow === 'manual') !== (workflow !== undefined) ||
-      (workflow &&
-        ((workflow.state === 'available' &&
-          (entry.state !== 'available' ||
-            !workflow.skillId ||
-            !workflow.name ||
-            !workflow.revision ||
-            workflow.reason !== null ||
-            !workflow.manualAllowed ||
-            !workflow.emptyInputValid ||
-            workflow.contextMode === null)) ||
-          (workflow.state !== 'available' && workflow.reason === null) ||
-          (workflow.name !== null && workflow.skillId !== `skill:${workflow.name}`)))
     )
       throw new ClientError('invalid_response');
     previous = entry.id;

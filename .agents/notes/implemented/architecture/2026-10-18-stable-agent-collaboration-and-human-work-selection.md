@@ -2,6 +2,8 @@
 
 Status: implemented
 
+旧 Task 工具、专用 required-result 与显式 after_turn 执行的保留决定，已由[退役决定](2026-11-02-retire-legacy-task.md)部分取代；当前六工具、通用 Operation、独立 Session、准确来源和安全／恢复边界继续适用。
+
 2026-10-22 部分替代：用户确认移除独立输入归属判定，当前采用[普通消息直接进入主 Agent](2026-10-22-direct-conversation-input.md)。本记录的输入预判、自然语言控制预处理、selected-work 屏障、按工作过滤普通结果和自动恢复旧配置仅作历史理由；稳定协作者、精确来源、实时权限、unknown 和旧消息审计／呈现兼容仍适用。当前事实以手册与 owner 文档为准。
 
 2026-10-23，新的子 Agent 完成结果改为[复用现有邮箱统一接收](2026-10-23-unified-message-reception.md)，替代独立完成报告待收扫描。原稳定 Command／carrier／Source、当前续跑授权、配置 lease、事务回执和精确历史恢复的理由继续适用；用户输入与 Agent 数据保留不同权限和处理效果。

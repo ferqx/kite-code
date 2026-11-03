@@ -47,7 +47,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 ## 默认装配与业务规则归属
 
-普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含 `files.read_path`（模型名称 `read_user_file`），使模型可以读取用户明确引用的普通工作区外文件；`files.write_path/edit_path` 不随此默认开启。显式禁用／移除仍生效，嵌入式最小默认保持仅 `ask_user`。工具可见不等于执行授权：外部读取继续经过准确目标、原生身份、当前权限和 protected/private 检查，既不扩大工作区文件工具的根，也不加载外部目录的项目说明。[默认装配回归](test/isolated/configuration.test.ts)以真实 paired Service／SDK／原生文件读取核默认选择、外部完整结果进入下一 Model，以及显式禁用；[工作区越界回归](test/isolated/assembly-file-denial.test.ts)仍核误用 `read_file` 的普通失败。缺选原因与只读范围归[Note](../../.agents/notes/implemented/bug-fix/2026-10-19-default-external-file-read.md)，原生真实模型附件资格归 [Desktop owner](../desktop/README.md#markdown-与附件输入)。
+普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含 Files 六项、问答、网页与六个协作工具；具备 Shell 时为19项，否则14项。`read_file` 统一读取工作区内文件和准确外部用户文件，专用外部读写工具已移除。外部读取复用统一权限和路径保护，不再附加基线、单链接限制或重复授权证明检查，不加载外部项目说明；外部写入使用 Shell。[真实 paired 回归](test/isolated/configuration.test.ts)核实际模型目录、外部完整正文、独立项目指令及显式禁用，[退役回归](test/isolated/tool-retirement.test.ts)核旧配置与激活在模型调用前拒绝。
 
 默认装配注册 [Agent 会话命名扩展](../../packages/agent/src/business/session-title/index.ts)，通过原 Run 生命周期 Action 和受限内部 Model 调用生成标题。Service 提供 Runtime 读取／rename／runInternalModel 端口与原轮选定模型的无工具绑定，不注册 session-title childConfiguration 或专用子 Agent。启动前保存原文兜底，正常完成前最多尝试一次；`session.title` Command 和同 Session 无 Run Model 保留实际输入、输出、用量和取消事实，普通消息不增加内部正文。标题规则、10秒取消、幂等与 CAS 归扩展，[本机 HTTP 回归](test/isolated/session-title.test.ts)核所选模型、目录自然零 child、消息隔离和冷读零调用。
 
@@ -55,7 +55,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 已取得准入的 MCP 连接可把准确 Store／Session／Run／connection generation 作为只读 Model 来源；资源列表／读取仍使用原 Tool 和目录收据的严格绑定。Run 内认证通过普通 nested Action 与真实父 Tool 绑定，沿原 Actor、root work、权限及取消收束；没有直接绕过 Core 的 OAuth 执行入口。默认压缩可在同一用户任务的已结算 Tool 边界发生，不要求额外用户轮次；user-role 来源附件仍不冒充用户输入。
 
-[默认配置](src/configuration.ts)读取实际 Profile、Workspace、当前身份和注册定义，装配唯一 Agent Runtime；固定内建能力效果和 Workflow 审批投影由[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一提供。正式 Run、恢复绑定与只读 Skill 目录共用工具版本校验和内建注册集合，各自的来源捕获、选中范围与资源释放时刻仍独立。Service 不维护第二份 Task、Shell、Files、Skills 或 Web 效果规则。默认 Run binding 同时强持有 `createWorkflowConfiguration` 返回的资源对象；统一dispose先调用其原dispose，等待compiler确认退出并关闭知识来源后，再关闭assembly，web绑定独立等待结算。准备失败的清理包装保留workflow资源与原错误，不因退出请求或其他分支已关闭就丢失owner；准确关闭合同归[Workflow owner](../../packages/agent/src/business/skill-workflow/README.md)。
+[默认配置](src/configuration.ts)读取实际 Profile、Workspace、当前身份和注册定义，装配唯一 Agent Runtime；固定内建能力效果由[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一提供。正式 Run、恢复绑定与只读 Skill 目录共用工具版本校验和内建注册集合，各自的来源捕获、选中范围与资源释放时刻仍独立。Service 不维护第二份 Task、Shell、Files、Skills 或 Web 效果规则。默认 Run binding 持有 Workspace assembly 与 Web 资源，dispose 等待各 owner 结算；普通知识来源由 assembly 关闭。Workflow compiler、verifier 和 compensation 的资源装配已删除，不再是准备或退出路径。
 
 [Web 装配](src/web-fetch-configuration.ts)从准确注册版本取得 Agent 的固定分类，仅组合原可信网络 policy、`off` 硬拒绝、`builtin.web:1` revision 和 snapshot；默认 Tool 登记一次采用该元数据，原后置覆盖 loop 与 Workflow 的 Web 效果特例已删除。同名外部扩展不因此取得内建分类。[Task 装配](src/task-configuration.ts)只提供原 extension、角色／工具 snapshot 和选择校验，无正式消费者的权限 `describe` 副出口已退役；实际权限仍沿 Agent 公共分类，原默认 Task 和独立 carrier 授权保持。
 
@@ -298,6 +298,8 @@ resolver 返回每 Run 的 `extensions`、`sources` 与 `dispose`。项目来源
 
 Process assembler 把 source factory 绑定到真实 Runtime，macOS／Windows stdio使用已构建的公开 guardian `.js`，Linux使用本包封存的原生 init与canonical Bubblewrap；没有源码 `.ts` 或安装机编译fallback。独立尚未绑定 Runtime 的工厂没有 raw source authority；其 source selection 为明确空项，不能伪造文件观察。冷重建要使用真实原 Store/Session/Workspace；原来源 snapshot 不等时在 Model vault lookup 前拒绝。实际目录根采用 canonical realpath/devino，保留 macOS `/var` 祖先别名兼容，仍拒绝 Workspace 目录本身的 symlink。
 
+同一 child Session 的显式追发使用 `input.follow_up`，来源继承通过 Store 已验证承载执行／前驱关系的 `RunRecord.carrierExecutionId` 定位原 Job；不能假设每轮都是首次 `child.start` 或从用户字符串猜 ID。父子 Session／Workspace／root work、冻结配置、来源摘要和 read-set 校验继续执行。[默认子来源回归](test/isolated/mcp-source-default-child.test.ts)同时核首次、追发、嵌套、拒绝、漂移和冷读取；[真实模型入口](../../tests/e2e/live/model/README.md#全工具真实模型)另以同一 Agent 两轮实际结果证明默认装配可继续工作。
+
 同一正式 assembler 现按实际平台选包内 Windows stdio guardian，Source approval、原 SQL Job／parent input／capture digest、最后准入与 wire freshness 不另建路径。Windows executable 只收绝对 `.exe`＋原 argv；当前 `.cmd`／`.bat` 明确拒绝，无 COMSPEC／PATH fallback。原 Job／HANDLE／FILETIME、实际 guardian reap 与 observation close 的 v3 归[Agent MCP owner](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)，不借 Shell 权限或旧 Host carrier。本机[完整封装默认链](test/isolated/mcp-source-packaged-default.test.ts)核资产进入清单、实际默认来源／Tool／准确取消和 cold 原 Command／Execution／完整输出零 Provider／RPC；Windows 原生分支及 installed 维护／版本链仍待验，不将本机邻接计为资格。
 
 Linux默认Source／SQL Job／SDK Tool现沿同一port接入独立namespace源码，原args／cwd／env、文件／设备与网络保持。明确Linux init／Bubblewrap在装配及每次最后freshness边界重新核完整EOF／字节SHA／原文件身份；原FD关闭unknown保首错与对象、不重试数字，内部Profile门禁接装配cleanup及`beforeResourceClose`，保原Store／Profile／candidate使用权。真正stdin入队前在ready等待后同步复核原binding／source／signal，cleanup不受漂移阻断；完整合同与待验范围归[Linux MCP owner](../../packages/agent/src/mcp/README.md#linux-stdio-所属-namespace)。本机原封装整文件1项60断言通过只证明macOS邻接与新资产图；Linux原生／installed资格仍待重构后Actions。
@@ -324,13 +326,13 @@ HTTP 来源支持 none、由真实原 question 绑定且尚未过期/撤销的 o
 
 [资源/提示默认装配测试](test/isolated/mcp-resources-prompts.test.ts)使用真实 fixed compatible SDK、SQLite/ArtifactStore、pinned loopback HTTP 和 owned macOS stdio guardian，验证四项普通 Model Tool、普通 Action、独立 deny/持久 Ask、原目录/参数、scope/version 拒绝、完整 Prompt 低信任来源、冷查询零 I/O 与 wire 前后取消。不是付费 Provider、真实 OAuth、用户 keychain、完整 server 管理或跨平台资格。
 
-[planning-configuration.ts](src/planning-configuration.ts) 验证原 Command 中已知、唯一 version-1 `builtin.planning` / `builtin.skill-workflow` envelopes，单次计划仅接受 `{mode:"plan"}`。Workflow 仅接收自身筛选后的输入，原 Command/body/digest 不改写；坏/重复/未知输入在 vault 与 Provider 前拒绝。单次 Plan 在实际 Run initializer 建立不可变 `plan.required`，从实际 assembly safe-read 定义封存准确版本。当前权限之外叠加计划执行方式上界；所有 hard denial/control read-set 保留，Full 不能绕过未批准计划，Auto 仍取得独立 reviewer，请求批准/撤销 trust 仍独立生效。
+[planning-configuration.ts](src/planning-configuration.ts) 验证原 Command 中已知、唯一 version-1 builtin.planning envelope，单次计划仅接受 `{mode:"plan"}`。Skill Workflow 输入及执行已移除，原 Command/body/digest 不改写；坏/重复/未知输入在 vault 与 Provider 前拒绝。单次 Plan 在实际 Run initializer 建立不可变 plan.required，从实际 assembly safe-read 定义封存准确版本。当前权限之外叠加计划执行方式上界；所有 hard denial/control read-set 保留，Full 不能绕过未批准计划，Auto 仍取得独立 reviewer，请求批准/撤销 trust 仍独立生效。
 
 批准记录为原 Run-specific immutable proof。子任务/嵌套 runless Job 的 ceiling 核实际 parent chain/root work 和原父 Run；必要条件仍在最终原 record/control CAS 重核。下一 Run 不借用旧批准。源请求公共类型不新增 guessed Run 字段；实际 active approved Run 的贡献只提供信息，不授权限。完整大计划封存为原 review Execution Artifact，原 accepted request/hash/UTF8/plan digest/proof/seal revision 由 [Planning owner](../../packages/agent/src/business/planning/README.md)负责核对；丢失或变化不继续批准。
 
 [per-Run 默认测试](test/isolated/per-run-planning-configuration.test.ts)和[真实 parent/child 测试](test/isolated/per-run-planning-child.test.ts)覆盖实际 Service/SQLite/SDK/固定 Provider、Full 预批准零写/Job/child、只读分析、选定方式与当前权限交集、真实步骤回执/完成、same-Session next Run 拒借及冷策略变化前零 vault；最终 child 派发前仅增原 parent head revision 保 JSON 的外部 SQL 漂移也拒绝零写。Planning leaf/Artifact 与相关业务三文件现为 50 项/454 断言；Task 默认报告与规划相关九文件现为 48 项/747 断言。TUI 文件/Plan 相关十九文件 119/1063 保留四个真实 80×24 单次入口/排队/草稿/约143KB完整计划/回答丢回执窗口；客户端强杀后的普通 Work/Planning intent 和正式旧入口/平台资格继续验证。
 
-真实 parent/child fixture 的自动审核转人工／untrusted 场景中，`task_wait` 可因原 child 等待交互而正常早返回，不能以父 Command 结束证明子写入完成。原父下一 Model 在真实 `planExecution` 后、取得唯一 Model 槽前等待准确原 Run→Task→child Job 的 Command 终态；保持原批准存活，原 child 人工审批和当前 mode／trust 交集继续实际派发。原五例、全部断言、4 秒 Task wait 和整例预算保持，完整文件 5pass／52expects；准确失败和未筛选默认范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)。
+真实 parent/child fixture 的自动审核转人工／untrusted 场景中，`wait_agent_events` 可因原 child 等待交互而正常早返回，不能以父 Command 结束证明子写入完成。原父下一 Model 在真实 `planExecution` 后、取得唯一 Model 槽前等待准确原 Run→Task→child Job 的 Command 终态；保持原批准存活，原 child 人工审批和当前 mode／trust 交集继续实际派发。原五例、全部断言、4 秒 Task wait 和整例预算保持，完整文件 5pass／52expects；准确失败和未筛选默认范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)。
 
 [mcp-management.ts](src/mcp-management.ts) 提供独立普通扩展 `builtin.mcp.management@1`。默认工厂即使没有注册 Server，也注册闭合空输入 Query `mcp.servers`；它根据实际 Store/Session/Workspace 身份读取安全 registry、当前 selection 和六字段 read-set，零连接/vault/Model。普通 Action `mcp.server.select@1` 只选择可信 registry 已准入的 Server，独立核真实 Execution/Command/主体，沿原 config HostMutation 保存一次，原目标锁内复核两来源、explicit/registry 和 canonical Workspace。注释和 unknown 字段保留；文件已发布但 SQLite 回执未落定时保原 mutation pending/unknown，只查询原 ID，不重做。该 manager 不能注册原始 URL/command/env/auth；原始来源由上文独立 factory 私人读取。
 
@@ -378,7 +380,7 @@ Auto 分类只返回准确 invocation、effects 与 `readCheckContext` 的只读
 
 [默认权限配置测试](test/isolated/permission-configuration.test.ts) 使用实际默认 resolver、SDK、Service HTTP、SQLite Worker、安全文件 leaf 和本机兼容 Model 端点，证明真实 Auto 的 ask_user 回退后单次批准写入、请求批准的工作区无卡写入、Full/default trust 拒绝、旧 manifest 与当前撤权区别、新 Run 目录变化、可信 Permissions 上限以及错误 builtin version 在 Provider I/O 前拒绝。早期与 default configuration 和 assembly HTTP 的组合记录为 12 项测试、105 条断言通过；当前三策略消费者的原完整回归见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11shell-三策略与旧模式退役)；未调用付费模型、用户 keychain 或旧数据。[默认 Auto 测试](test/isolated/auto-configuration.test.ts)与 policy 组合 11/137 通过：单模型槽、完整 task、新旧 SDK route、单次批准、Provider/闭合输出失败与 ask_user 原卡回退、拒绝以及撤权/取消零文件效果。测试按正式 main 装配真实 ArtifactStore，避免把缺内容能力的人工回退误判为 reviewer 成功。会话 same_command 与原 epoch 清除已接入下述授权目录；正式入口切换仍按完整客户端资格核对。
 
-默认进程装配唯一全局 `@kite-ai/agent/planning` 业务 Extension，其目录、空闲 Action 与只读 Query 不依赖前台 Run。JSONC `tools` 只选择明确注册的 planning/validation Tool ID 和准确支持版本，不能启用 requirements、允许 waiver 或授予权限。只有可信 `createDefaultProcessConfiguration({planning: PlanningOptions})` 提供 `requirePlan`、`requiredValidation`、`allowWaiver`、required receipt definitions 和允许执行模式。选中的业务定义取得真实保守权限描述：`planning.read` 是 safe read；planning write/update/review 与 validation define/check/rebind/waiver 是 `record_write`，`safeRead:false`；显式宿主 Permissions 保留额外硬拒绝或明确人工上限。空闲 Action 使用相同 programmatic `readPolicy`，准确身份为 `kind:job`、`builtin.planning/<action>` 和实际 version；默认未信任策略拒绝，可信请求批准产生普通审批，显式 Permissions 仍与根当前模式和信任相交。`record_write` 修改封存治理记录，不等于 Workspace 文件写入或执行结果，Accept Edits 不自动允许它。Auto 使用当前 Run 封存的同一持久 Core reviewer，独立无 Run Action 要求显式可信 reviewer，否则准确人工回退。目录可见不授予权限。每个新 Run 保存工厂 conditions、启用的纯 metadata initializer 和实际非秘密 option/definition snapshot，包括宿主选中的 `fileHashChecker` ID/version 或明确 null；JSONC 不能选择 checker。嵌套 validation checker Execution 保持独立 Tool 授权，权限审批不会回答独立 validation waiver 问题。不启用治理 flag 时，普通会话保持不受这些要求约束。[Planning 默认配置测试](test/isolated/planning-configuration.test.ts)用本机 compatible 端点与 SQLite/Core，验证首次 Provider 请求前初始化、准确用户 plan review、真实私有文件 receipt 完成 progress、无额外 Model/Run 的空闲 Action/Query、错误版本在 Provider I/O 前拒绝，以及保存的 waiver 不能为缺证据的后续 Run 授权。这证明默认装配与便携业务路径，不等于正式 UI、外部 validator 或平台发行资格。
+默认进程装配唯一全局 `@kite-ai/agent/planning` 业务 Extension，其目录、空闲 Action 与只读 Query 不依赖前台 Run。JSONC `tools` 只选择明确注册的 planning/validation Tool ID 和准确支持版本，不能启用 requirements、允许 waiver 或授予权限。只有可信 `createDefaultProcessConfiguration({planning: PlanningOptions})` 提供 `requirePlan`、`requiredValidation`、`allowWaiver`、required receipt definitions 和允许执行模式。选中的业务定义取得真实保守权限描述：`planning.read` 是 safe read；planning write/update/review 与 validation define/check/rebind/waiver 是 `record_write`，`safeRead:false`；显式宿主 Permissions 保留额外硬拒绝或明确人工上限。空闲 Action 使用相同 programmatic `readPolicy`，准确身份为 `kind:job`、`builtin.planning/<action>` 和实际 version；默认未信任策略拒绝，可信请求批准产生普通审批，显式 Permissions 仍与根当前模式和信任相交。`record_write` 修改封存治理记录，不等于 Workspace 文件写入或执行结果，Accept Edits 不自动允许它。Auto 使用当前 Run 封存的同一持久 Core reviewer，独立无 Run Action 要求显式可信 reviewer，否则准确人工回退。目录可见不授予权限。每个新 Run 保存工厂 conditions、启用的纯 metadata initializer 和实际非秘密 option/definition snapshot。不启用治理 flag 时，普通会话保持不受这些要求约束。[Planning 默认配置测试](test/isolated/planning-configuration.test.ts)用本机 compatible 端点与 SQLite/Core，验证首次 Provider 请求前初始化、准确用户 plan review、真实私有文件 receipt 完成 progress、无额外 Model/Run 的空闲 Action/Query、错误版本在 Provider I/O 前拒绝。这证明默认装配与便携业务路径，不等于正式 UI、外部 validator 或平台发行资格。
 
 
 默认 Service 支持可信宿主通过 `createDefaultProcessConfiguration({child:[{id,version,modelId?,toolIds?}]})` 声明有限 child 配置，入口见 [child-configuration.ts](src/child-configuration.ts)。该声明不来自 JSONC，也不是业务 AgentType 或权限模式。静态注册只有闭合 `{content:string,name?:string}` 输入 schema、准确角色 id/version 和不可执行、无 I/O 的占位 Model；只有首次建立新 carrier 时，Core 提供实际原父 Execution/Run/Session/Command、Workspace 和取消信号，再由共享默认 resolver 重读同一根目录用户配置与 Workspace 的非模型配置。显式角色 `modelId` 或原父 Run 封存的 `modelId` 固定路由选择身份，当前用户 `models` 只解析该已知身份的 compatible SDK 配置与凭据引用；坏配置、缺失/禁用模型、未知 Tool 或角色均局部失败，不发现 Profile 配置或回退另一 Provider。
@@ -409,9 +411,11 @@ Auto 分类只返回准确 invocation、effects 与 `readCheckContext` 的只读
 
 ## 默认 Shell 装配
 
-macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[Agent Shell 工厂](../../packages/agent/src/permissions/shell.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Win/Linux 默认后端尚未取得资格，实际验证依用户选择在重构完成后交给 GitHub Actions。
+内置 rg 由 Agent 制品携带，通过固定资产及 Shell 子进程 PATH 提供，不依赖用户安装，也不在运行时下载。目录查看、文件查找和正文搜索统一使用 Shell；单条字面 rg／ls／pwd 可在计划批准前执行，只读子 Agent 同时保逐次参数限制。实际注册退役归[工具回归](test/isolated/tool-retirement.test.ts)，真实 Windows／Service／SQLite 检索、只读拒写与计划卡归[检索集成](test/isolated/shell-search-configuration.test.ts)，Windows 范围归[平台 active](../../docs/active/windows-shell-sandbox.md)。
 
-Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产及独立解析资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要、scope和Workflow接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows默认Shell仍缺真实权限ceiling；Linux实机、installed维护／版本链及全部资源门禁继续pending。
+macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[Agent Shell 工厂](../../packages/agent/src/permissions/shell.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Windows 已接原 V6 runner、无账户受限 Git Bash 及 Full；Linux 和完整发布资格沿原门禁，不能互借通过。
+
+Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产及独立解析资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要和scope接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows 受限与 Full 已接原 Job/HANDLE 后端；Linux实机、installed维护／版本链及全部资源门禁继续pending。
 
 可信 programmatic 宿主仍可显式传入 `shell:{platform:'darwin',configurationId,env,supervisorPath,bunExecutable,shellExecutable,graceMs?,maxQueuedBytes?,host?}`；省略 host 的原 options 保留 POSIX group 语义，不取得全树或 Seatbelt 资格。绑定封存 canonical cwd、资产 bytes hash、宿主身份和非秘密 env key 名，完整 env 只留可信 binding。factory/import 不启动进程；Job.start 重核资产、路径及最终范围。
 
@@ -471,11 +475,7 @@ Native 绑定该 manager 后提供 `permission_controls` capability。读取 mod
 
 [Native HTTP/SDK 权限测试](test/isolated/permission-http.test.ts) 当前 6 项／63 个断言通过，包含真实默认 Store 冷重开、CAS/身份拒绝、零执行副作用、物理丢失写响应后仅查询原命令 ID，以及闭合请求不接受客户端自造主体或范围。mode/trust 的底层读取与默认授权只读取有限 Session 元数据和控制记录，不依赖大历史/Execution 正文；独立测试将 `Runtime.getView` 明确设为禁止仍完成管理链路。
 
-可信宿主还可显式传入 `planning.automaticValidation`，声明准确 mutation definition/version/effects 与 `fileHashChecker`。当前资格仅为 `files.write@3`／`files.edit@2` 的 `workspace_write` 与 `files.read@5` 完整 baseline；这些实际 Tool 必须由普通配置选择，`validation.auto_check@1` 也是普通已选 Tool，不为验证旁路注册或授予能力。已选 mutation 的版本/effect 与真实宿主元数据不一致，或已选 checker 不是准确 safe-read 定义时，在 Provider 前局部拒绝。JSONC 不能启用此策略、替换 checker 或补造 mutation 权威。
-
-这个开关独立于 `requirePlan`/`requiredValidation`：启用后在首次 Model 派发前封存原 `mutation.required` policy/ref，Run snapshot 保存可信映射及当次实际 selection/effects；后来修改调用方 options 不改变它。缺省关闭时普通对话不增加义务。每次实际 mutation 令旧 head 通过事实失效，停止意图触发普通 auto-check，再由 `operations.ensure` 派发准确 Files read；三者分别经过当前权限与原 Store/Execution/source 校验。只有真实完整 hash 检查和当前 head 的 CAS 事实满足原义务，不以管理 Tool 的 succeeded 回执代替验证。移除后续工厂开关不消除旧 Run 封存要求；缺 checker 或撤 trust 不能标 passed。
-
-[默认自动验证测试](test/isolated/automatic-validation-configuration.test.ts) 使用本机 compatible SDK、临时 SQLite、明确持久 Full 模式与 Workspace trust，覆盖无 plan flags 的实际写入 → auto-check → 原父 Execution 下嵌套 read → completion、第二次 mutation 使旧通过失效、默认关闭且 JSONC 无权启用、缺选中 checker/卸后续工厂仍保原义务、撤 trust 零 checker 效果，以及错误 mutation version/effect 在 Provider 前拒绝。该证据不声明 Shell network-off、MCP 验证、外部检查器或任意非合作写入与 SQL 提交原子化；完整事实与修复规则由 [planning owner](../../packages/agent/src/business/planning/README.md)维护。
+专用自动验证配置、checker 和 waiver 已退役。Planning 仅装配计划、准确审阅及真实进度回执；普通 Shell 测试独立经过统一权限。
 
 ## 完整 Workspace/Session 目录
 
@@ -537,9 +537,11 @@ Windows x64 已接当前SID私有pipe/record和准确kernel process HANDLE到同
 
 ## 显式冷报告恢复
 
+HTTP 与生成的 Client schema 接受 Store 的三类实际回执：`report_resumed` 带实际 Run ID，`report_suppressed` 与 `report_deferred` 的 Run ID 为 null。暂缓另带明确 reason，原报告仍可排队，恢复 Command 自身已 applied；查询原申请返回同一回执，不重新解析配置或启动模型。[实际 HTTP 回归](test/isolated/job-report-resume.test.ts)覆盖冷 SQLite、权限暂缓、物理丢响应、原 ID 查回和重复申请零新轮次。
+
 专用 `POST /v1/sessions/:id/job-reports/:reportCommandId/resume` 只接受原Store和恢复申请commandId，主体由认证派生，调用Runtime的根Session有限 `resumeJobReport`。返回新的 `job.report.resume` Command，receipt说明原报告、实际Run和恢复/抑制事实；受理不表示模型完成。Browser不获得恢复写权限，读取历史、连接及启动不会触发该入口。
 
-默认宿主用专门 `resolveRecoveryRunConfiguration` 固定原manifest中的modelId与Skill选择，并先比较原配置digest，再读取凭据。根 Run 恢复沿用原根工具选择和 Planning/Workflow 快照；携带持久 Model/Skill 选择不把它改为 child，只有新建 child binding 才排除 `ask_user`。原模型参数/引用或支持配置变化时局部拒绝；普通默认模型变更不能偷换旧绑定。[配置冷恢复测试](test/isolated/configuration.test.ts)验证原模型与 `ask_user` 定义保留、配置变化在凭据及 Provider 前拒绝；[实际 child 测试](test/isolated/ask-user-configuration.test.ts)另核继承和显式角色都缺少问题工具。Core仍核完整注册manifest和当前afterTurn权限，实际派发仍走原权限/来源检查。没有匹配原版本时保留历史，不自动安装或调用当前默认模型。此能力只恢复已有真实报告的安全推进边界，不宣称一般Run恢复或adapter reconcile已实现。
+默认宿主用专门 `resolveRecoveryRunConfiguration` 固定原manifest中的modelId与Skill选择，并先比较原配置digest，再读取凭据。根 Run 恢复沿用原根工具选择和 Planning/Skill 快照；携带持久 Model/Skill 选择不把它改为 child，只有新建 child binding 才排除 `ask_user`。原模型参数/引用或支持配置变化时局部拒绝；普通默认模型变更不能偷换旧绑定。[配置冷恢复测试](test/isolated/configuration.test.ts)验证原模型与 `ask_user` 定义保留、配置变化在凭据及 Provider 前拒绝；[实际 child 测试](test/isolated/ask-user-configuration.test.ts)另核继承和显式角色都缺少问题工具。Core仍核完整注册manifest和当前afterTurn权限，实际派发仍走原权限/来源检查。没有匹配原版本时保留历史，不自动安装或调用当前默认模型。此能力只恢复已有真实报告的安全推进边界，不宣称一般Run恢复或adapter reconcile已实现。
 
 
 ## 显式 Job 核实
@@ -586,25 +588,7 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 ## 有条件 Skill Workflow
 
-默认每 Run 装配另读当前 profile 的 `skill-workflow.jsonc`，严格格式为 `{version:1,features:{skillActivation:boolean,skillWorkflow:boolean,verification:boolean}}`。缺文件三项皆 false；前两项同时开启才注册 Workflow，Workspace 或 Skill 文本不能打开这些开关。该配置的备份保原 JSONC 字节，由维护 owner 负责。知识 `selectedSkills` 与 Workflow 激活继续分开。
-
-公开 Native `run.start/input.follow_up` 可携带 `extensionInputs:[{extensionId:"builtin.skill-workflow",definitionVersion:"1",input:{activations:[{key,skillId,input}]}}]`。Service 只在 Runtime 声明并实际有 resolver 时发布 `run_extension_inputs`；未知版本/扩展、重复 envelope/key、结构或输入 schema 错误、不可用原 Skill 和未启用开关在凭据与 Provider 前拒绝。省略与空数组保持原 Command 语义，steer 不接受。通用协议测试见[HTTP](test/isolated/extension-inputs-contract.test.ts)。
-
-[`skill-workflow-configuration.ts`](src/skill-workflow-configuration.ts) 只编译同源可信目录的实际可用位置，编译前后核原 root/body，解析完整原 Workflow 契约；坏项仍局部不可用。实际 Tool/Job 的身份、风险与版本参与依赖封存，不接受 Skill 自报能力。纯 Workflow initializer 与 Planning initializer 顺序组合，在首次 Model 前建立不可变业务义务，普通 Tool/Job 沿用同一 Loop。完整业务记录与结果证明由 [Agent Workflow owner](../../packages/agent/src/business/skill-workflow/README.md) 负责。
-
-fork 从原 parent Execution 和封存 parent Run 选择可信角色与准确版本。`activate_skill`、`repair_skill` 与真实 replan carrier 的 resolver 在回调内通过 Core 只读 scoped records 核原 activation anchor、CAS head、独立 attempt opening 和 fork opening；后两者必须绑定准确新 attempt、原 carrier Execution/input digest、原 Store/Session/Run、Skill revision 与角色版本。replan 另读原 decision 记录，waived head、旧 attempt、错 carrier 或缺原记录拒绝派发。resolver 仅封存读取的事实，不将已关闭的 getter 留给后来权限或来源回调；最终记录读集的事务复核由 Core 负责。实际 child Tool/Job 范围与父能力相交。原 Skill source/依赖在 child resolver、权限检查与 source capture 再核，审批等待中的漂移拒绝后续效果。Skill 最低审批从原 Run 范围的不可变 anchor 定位身份后叠加原可信策略，原硬拒绝不转为可批准；继承最低审批不改变 Model 权限。原 carrier 的特例只限准确角色、原 parent、Session/Store/root work，不放宽其他 Job。
-
-可信 `skillWorkflow.userDecisions` 只由程序化宿主传入，默认 `{version:"1",allowWaiver:true,allowReplan:true,allowCompensation:true}`；宿主启动时深拷贝并冻结，JSONC、Skill 和模型无权替换。Workflow flags 缺省仍全部关闭，compensation 还必须有原声明和实际受限后端。完整 policy 进入原 Workflow snapshot，冷 resolver 在读取凭据前比较，后来修改传入对象不改写原绑定，冷恢复遇到 policy 变化明确拒绝。[隔离 policy 测试](test/isolated/skill-workflow-attempts-configuration.test.ts)核实际冻结与恢复前凭据边界；[真实 fork attempts 测试](test/isolated/skill-workflow-fork-attempts.test.ts)以固定模型、所属监督脚本和普通审批/question 验证 repair/replan 的独立 child、完整原输入与结果、原失败保留及新核验一次成功。完整范围仍按实施进度记录。
-
-脚本核验仅在可信已核准 Shell 装配下注册普通 `skill.workflow.verify@1`。实际资产与非秘密环境摘要封存，模型不能传 command/cwd/env/path；执行前再次核原资产。脚本从原 Skill root 执行，修改该目录内已封存文件会被来源复核拒绝。配置与发现本身不启动进程。核验与 fork 的失败、未知、必要审批和结果始终留在原 Run/Execution；冷 resolver 在读凭据前比较原 Workflow 快照，不偷换现在配置。
-
-macOS／Linux正式verifier均使用原host后端，原Skill cwd与授权Workspace分别捕获，scope核实际`skill.workflow.verify@1`最终policy，不能借`shell.command`的快照。Profile Skill在完整来源复核后只读暴露准确原子树与必要祖先metadata；保原相对资源及忽略目录读取，其余Profile／coordination、来源写入／移动及native exec-map仍受保护。Workspace来源保持原Workspace写范围。默认macOS已从group切到完整coalition；Linux源码接入私有tmpfs祖先链及原目录ro-bind，原生资格继续待验。普通Shell没有此来源例外，模型不能提供投影选项。
-
-[正式来源整例](test/isolated/skill-workflow-profile-host.test.ts)经实际SQLite／Runtime、同一配置工厂、原extensionInputs激活、独立Tool／Job审批和原verifierproof，核Profile／Workspace完整Run及审批期间来源漂移零启动。正常drain后的完整原View／Run／Execution／records在冷只读Store全等，零新Model／Job；macOS已实际通过，同一文件的Linux分支使用真实编译init／Bubblewrap并核v2全部结束事实，尚未运行，不取得installed／HTTP／Linux资格。
-
-声明补偿在实际macOS资产，或明确Linux native init／Bubblewrap资产、trusted policy与Workspace内原声明可用时注册`skill.workflow.compensate@1`。该独立Job始终minimum:user，显式策略硬拒绝仍优先；最低审批不会借原verifier或普通question许可。工厂封存保护整个dataRoot／coordination的受限配置与资产摘要，guard在普通派发前拒绝变更；固定Bun在原Workspace执行完整只读原资产，禁止网络和派生子进程，没有普通Shell fallback。Linux snapshot准确标`linux-bubblewrap-pid-namespace`，实际资格仍未执行；macOS标`macos-seatbelt`。compensated不满足原verification，unknown不豁免。[真实默认Service补偿测试](test/isolated/skill-workflow-compensation.test.ts)使用实际SDK/HTTP/SQLite、超过300KiB的完整审批附件，核一次脚本效果、拒绝零效果、原failed保留、repair attempt2重验和准确waiver；这是本机macOS范围，不是全部平台或正式客户端资格。
-
-[真实默认装配测试](test/isolated/skill-workflow-configuration.test.ts) 使用隔离 profile、固定 loopback 模型与所属 guardian，覆盖原意图/初始指令、schema完成、child能力缩小、审批中来源漂移和脚本核验。CLI/TUI 动态命令与恢复、受限补偿和未完成的正式切换/平台资格分别按[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)记录，不能以本接口替代未切换的客户端行为。
+2026-11-02 已完整退役执行实现和客户端入口；六工具、契约编译器、verifier／compensator 与 manual 目录不再注册。旧配置不能启用执行，旧激活请求明确拒绝。普通 Skill 知识和 Planning 的通用 extension input 保留；原记录只读不重放，旧配置仅按维护格式保留原字节。验证归[退役回归](test/isolated/tool-retirement.test.ts)。
 
 ## 同源 Skill 知识目录
 
@@ -612,13 +596,13 @@ macOS／Linux正式verifier均使用原host后端，原Skill cwd与授权Workspa
 
 每次发现仍重新读取全部启用位置及内容版本；独立位置的 I/O 每批最多四项并发，结果按原配置顺序汇总后才发布绑定。完成顺序不决定重复物理位置的配置身份，原首项即使 digest 不匹配也保留其 ID，并将双方标为重复不可用。分页不缓存发现结果，后续页仍核当前字节与完整 revision。[目录测试](test/isolated/skill-catalogue.test.ts)覆盖同批别名、跨批重复、禁用项及新版本拒绝旧绑定；[Run 选择测试](test/isolated/skill-selection.test.ts)核准确 root/child 继承。
 
-配置源使用同一[Agent 知识读取作用域](../../packages/agent/src/platform/knowledge-reads.ts)，资源 owner 独立于重建的 metadata Map。Run 的项目指令、Skill 正文／资源与 Workflow 读取沿原 assembly disposer 结算，准备失败沿现有 `ConfigurationPreparationCleanupError` 移交实际资源和两原错误。正文、目录、编译和取消 catch 先透传关闭未知；普通坏文件、缺能力和版本拒绝仍局部处理。Service 只组合原接口与错误，不执行知识文件 I/O 或建立第二份资源策略。
+配置源使用同一[Agent 知识读取作用域](../../packages/agent/src/platform/knowledge-reads.ts)，资源 owner 独立于重建的 metadata Map。Run 的项目指令、Skill 正文／资源读取沿原 assembly disposer 结算，准备失败沿现有 `ConfigurationPreparationCleanupError` 移交实际资源和两原错误。正文、目录、编译和取消 catch 先透传关闭未知；普通坏文件、缺能力和版本拒绝仍局部处理。Service 只组合原接口与错误，不执行知识文件 I/O 或建立第二份资源策略。
 
 默认装配提供 [skillCatalogue source](src/skill-catalogue.ts)，Service 仅在实际 source 存在时发布 `skill_catalogue`。`GET /v1/workspaces/:id/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 在原 Store、实际 Workspace 和持久信任范围下返回闭合 `SkillCataloguePage`：可用性、revision、metadata/status entries、nextAfterId 与 complete。没有source明确unavailable；坏配置不是空目录。响应没有正文、路径、凭据、任意宿主配置或 Workflow 契约，不构造 Run 或调用 Model/vault/Shell/MCP。
 
 Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_skill_catalogue` capability。`GET /v1/config/user/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 返回闭合 `UserSkillCataloguePage`：固定 `scope:user`，不含 Session／Workspace 身份或 Workflow 投影，`source.scope` 也只接受 user。它仅合并 defaults、同一用户配置适配器与可信宿主 explicit，读取用户配置文件所在根及已有 Profile `skills` root 中明确配置的位置；不读取项目 JSONC、Workspace、trust 或项目指令，不扫描 home，也不创建隐藏 Session／Workspace。相对路径按用户配置目录解析，越界或 symlink 目标局部不可用。缺少配置且无 Skill 项时返回可用空目录，不创建目录；坏用户 JSONC 明确 unavailable。原 Workspace API 与 Run 的项目 Skill 选择、可信来源和执行规则保持。
 
-该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的用户／Workspace／手动 Workflow list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。关闭前的临时 Workflow 装配同时保原工作错误和清理错误。知识作用域与目录保留集合报告同一错误对象时，目录dispose按对象身份去重并原样抛出，保留原unknown错误码；不同错误仍以Aggregate保全部原因，不合并独立失败或释放未确认的资源。
+该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的用户／Workspace list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。关闭前的临时 Workflow 装配同时保原工作错误和清理错误。知识作用域与目录保留集合报告同一错误对象时，目录dispose按对象身份去重并原样抛出，保留原unknown错误码；不同错误仍以Aggregate保全部原因，不合并独立失败或释放未确认的资源。
 
 默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。越界、非法或不能确定的位置为 null；旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。
 
@@ -626,13 +610,9 @@ Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_s
 
 用户目录复用相同排序、revision／cursor 和字节分页合同；其 revision 仅含用户主体、Store、用户 Skill 配置、能力及完整目录版本状态，不绑定当前 Session、Workspace 或信任观察。用户来源分类沿用户根的 `.agents/skills`、`.kite-code/skills`、其他配置位置与 Profile 分别返回 user/.agents、user/.kite-code、user/configured、user/profile，绝不输出项目行。[用户源反例](test/isolated/user-skill-catalogue.test.ts)核无 Workspace／permission 访问、306 条完整分页、项目路径和 symlink 越界、零正文／路径泄漏、坏用户配置恢复及关闭后拒绝；[全局设置 HTTP](test/isolated/user-settings-global.test.ts)核默认 Service／Client 在无 Workspace／Session 时读取同一用户目录。
 
-目录的 `workflow=manual` 查询是独立 opt-in：只有实际 source 声明 `supportsWorkflow:true` 才发布 `skill_workflow_catalogue`，配置中的同名 capability 不能替代实现；不支持时该查询返回404。普通请求保留原闭合知识 shape、revision 与读取路径。显式请求的每项附带闭合 `workflow`：固定扩展身份、实际 compiled Skill ID/name/revision、独立 state/reason、manualAllowed、emptyInputValid 与 contextMode。可用只表示该次读取确认手动空对象输入可以准入，不是执行授权。
-
 目录与 Run 绑定共用 `compileConfiguredWorkflows` 的真实源前后复核，以及 `workflowCapabilitiesFor` 的实际 Tool/Job/role 版本。投影另核 profile flags、完整输入 schema、fork 角色和脚本核验资产；关闭、坏契约、缺依赖或缺实现只改变相应 Workflow 资格。投影不包含指令、路径或完整契约，不选择模型、读取 vault、连接 MCP 或启动 Job；临时装配释放所属文件资源。flags、来源、依赖及宿主绑定参与 manual 分页 revision，变化拒绝续页。无 `workflow` 的旧知识请求不承担这次装配，也不因只改 Workflow flags 而换 revision。
 
-目录不预订提交时的版本；实际 Command 仍由原 Service resolver 编译并封存可信源，后续漂移按原权限与来源检查拒绝。目录和单 Run 知识选择的原契约见前文及[同源目录决定](../../.agents/notes/implemented/architecture/2026-10-02-scoped-skill-catalogue.md)。[实际 HTTP 投影测试](test/isolated/skill-workflow-catalogue.test.ts)覆盖277项完整分页、局部失败、版本变化、零模型/凭据/执行，以及与正常原 Command 绑定的 compiled revision 相等；[旧接口测试](test/isolated/skill-catalogue.test.ts)保留旧消费者与缺实现 capability 边界。当前资格范围见[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
-
-[完整关闭未知调用者](test/isolated/knowledge-cleanup-ownership.test.ts)沿正式 Service／Client 验证必选 Skill 准备、实际 Tool 取消、普通目录、manual Workflow 原同步 fd 和在途目录关闭。故障只在实际原资源 close 边界拒绝；活进程公开维护拒绝，自有 child 实际0和双 EOF 后才备份并完整冷读零 Model。原正常项目指令、目录、Workflow、配置、取消与完整包回归保持。具体原红、准确输入及有限平台资格归[知识收尾进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13同源知识读取与正式目录收尾)，不提升为全资源／RSS或阶段退出。
+[完整关闭未知调用者](test/isolated/knowledge-cleanup-ownership.test.ts)沿正式 Service／Client 验证必选 Skill 准备、实际 Tool 取消、普通目录、在途目录关闭。故障只在实际原资源 close 边界拒绝；活进程公开维护拒绝，自有 child 实际0和双 EOF 后才备份并完整冷读零 Model。原正常项目指令、目录、配置、取消与完整包回归保持。具体原红、准确输入及有限平台资格归[知识收尾进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13同源知识读取与正式目录收尾)，不提升为全资源／RSS或阶段退出。
 
 ## 默认 Task 的源码外资格
 

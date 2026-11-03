@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-02：用户已确认退役五个专用验证工具及自动检查、强制验证与 waiver 机制，下文保留原决定的历史理由。当前不再装配该业务，通用 Store 事实、未知效果与恢复合同保留；当前行为见[工具退役决定](2026-11-02-tool-surface-retirement.md)和[Planning owner](../../../../packages/agent/src/business/planning/README.md)。
+
 ## Problem
 
 模型表示完成、管理 Tool 返回 succeeded 或旧一次检查通过，都不能证明最后实际文件修改已验证。逐文件注册不可撤回 RequirementRef 又会把文件数量变成 Run 的隐式额度；只依赖 Model 主动调用验证，会在停止候选和后续修改之间遗失必要义务。跨文件系统与 SQL 的结算也不能被描述为全局原子成功。
@@ -33,8 +35,8 @@ checker 的当前 owner/generation 控制新检查写入；已知 terminal targe
 
 已封存的治理不会因后续工厂参数移除而消失，缺 checker 也不会暗装能力或标 passed。65 次实际 mutation 的回归证明没有 64 refs 的隐式终止；同路径后序修改保留旧事实而检查最新内容。诊断、信息 receipt 和公开 JSON 都不能制造原 policy 或实际执行证明。
 
-[嵌套 Store 门禁](../../../../packages/agent/test/isolated/storage/nested-tool-requirements.test.ts)核原 refs、晚登记与准确重放、后代继承、缺 evaluation/intent 的最终拒绝及准确 settlement；[真实 Service/Client/Files](../../../../apps/service/test/isolated/automatic-validation-nested-tools.test.ts)核普通 wrapper 的 write→edit→完整 hash 校验→原 Run 完成与冷读零重放。三平台使用同一通用路径和便携测试准备；本机实际通过仅授 macOS 所列能力，不替代后置 Win/Linux 原生资格。
+[嵌套 Store 门禁](../../../../packages/agent/test/isolated/storage/nested-tool-requirements.test.ts)核原 refs、晚登记与准确重放、后代继承、缺 evaluation/intent 的最终拒绝及准确 settlement；[真实 Service/Client/Files](https://github.com/ferqx/kite-code/blob/0dc1e3b7b8a316dc9226cc4e841186cc6486d34e/apps/service/test/isolated/automatic-validation-nested-tools.test.ts)核普通 wrapper 的 write→edit→完整 hash 校验→原 Run 完成与冷读零重放。三平台使用同一通用路径和便携测试准备；本机实际通过仅授 macOS 所列能力，不替代后置 Win/Linux 原生资格。
 
 [公开恢复门禁](../../../../packages/agent/test/isolated/storage/mutation-check-resume.test.ts)通过真实 cold reopen 与 verify/begin/commitRunResume，核旧 terminal 代次/结果/refs不变、新 checker 可保存 inconclusive、旧 owner写拒绝与零效果重放。该 Store 诊断不伪造 file-hash passed，也不解除原 completion requirement。
 
-[实际自动治理回归](../../../../packages/agent/test/isolated/business/automatic-validation.test.ts) 15 tests/86 assertions、[默认实际 SDK/Files 装配](../../../../apps/service/test/isolated/automatic-validation-configuration.test.ts)与相邻 planning/permissions 18/174，以及 child/conditions 19/388 通过。本机固定 Provider/临时 SQLite 只证明所列机制；Shell network-off、MCP/外部 checker、正式业务面板、跨平台与发行资格仍未由这些测试建立。
+[实际自动治理回归](https://github.com/ferqx/kite-code/blob/0dc1e3b7b8a316dc9226cc4e841186cc6486d34e/packages/agent/test/isolated/business/automatic-validation.test.ts) 15 tests/86 assertions、[默认实际 SDK/Files 装配](https://github.com/ferqx/kite-code/blob/0dc1e3b7b8a316dc9226cc4e841186cc6486d34e/apps/service/test/isolated/automatic-validation-configuration.test.ts)与相邻 planning/permissions 18/174，以及 child/conditions 19/388 通过。本机固定 Provider/临时 SQLite 只证明所列机制；Shell network-off、MCP/外部 checker、正式业务面板、跨平台与发行资格仍未由这些测试建立。

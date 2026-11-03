@@ -382,9 +382,7 @@ export class BrowserClient {
         originStoreId: run.originStoreId,
         status: run.status,
         isActive: run.isActive,
-        ...(run.waitingForResults === undefined
-          ? {}
-          : { waitingForResults: run.waitingForResults }),
+
         createdAt: run.createdAt,
         finishedAt: run.finishedAt,
         reason: run.reason,

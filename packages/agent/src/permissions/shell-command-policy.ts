@@ -323,7 +323,9 @@ export async function createShellCommandPolicy(input: {
     : posix.isAbsolute(input.cwd)
       ? posix.resolve(input.cwd)
       : resolve(input.cwd);
-  const supported = ['bash', 'zsh', 'sh', 'dash'].includes(basename(input.shellExecutable));
+  const supported = ['bash', 'zsh', 'sh', 'dash', 'bash.exe', 'sh.exe', 'isksh.exe'].includes(
+    basename(input.shellExecutable).toLowerCase(),
+  );
   return {
     assets,
     async classify(command) {

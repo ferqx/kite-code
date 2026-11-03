@@ -4,7 +4,7 @@
 
 [createShellJob](shell.ts) 保留显式 POSIX 装配。[createMacosHostShellJob](shell.ts) 由 macOS 默认 ProcessService 选择；factory/import 不启动进程，不读取旧数据。调用者明确选择 cwd/env，统一宿主负责命令、工作区权限与派发；Job input 仅包含 command，Model/HTTP 不能提供 launcher、路径范围或隔离声明。根 manifest 的 `./jobs/shell` 是公开 leaf 导出。
 
-Linux 默认 ProcessService 现选择 `createLinuxHostShellJob`，声明补偿选择 `createLinuxConfinedShellJob`。可信宿主必须提供已经封存的 Bubblewrap 与 native init；包内资产缺失或后端不满足契约时拒绝，没有普通进程组回退。源码、完整调用者接线与原生运行资格分别核验，具体见下节。
+Linux 默认 ProcessService 现选择 `createLinuxHostShellJob`，低层另保留 `createLinuxConfinedShellJob`。可信宿主必须提供已经封存的 Bubblewrap 与 native init；包内资产缺失或后端不满足契约时拒绝，没有普通进程组回退。源码、完整调用者接线与原生运行资格分别核验，具体见下节。
 
 命令通过独立 Bun [guardian](../platform/process/shell-supervisor.ts) 在新的 POSIX process group 内运行。私有 stdin 控制管道只承载本次启动/取消与真实父生命期：父 EOF 或强杀会让 guardian 清理整个命令组；HTTP/SSE 断线不影响该管道。正常 shell 退出也先清理仍在组内的后台后代。自然退出、cancel、EOF 和失败共用一次 closing；后到入口加入原清理，保留首次入口携带的原根退出／取消事实，不重复 TERM/KILL、清理或发布 terminal。两流完成前的真实输出错误另保失败，不被先到的自然退出覆盖。停止先 SIGTERM、有界等待，再必要时 SIGKILL；只有后端核实原组停止并完成原根收尾才报告 stopped/groupStopped，不把单个 pid 退出当停止确认。无法确认时返回 unknown 与 terminal supervision=unknown，不伪装成功；只有 groupStopped 的证明产生 supervision=ended。较晚停止证明只补充监督事实，不能把已记录的未知 effect 改为成功。调用 cancel/dispose 幂等，host 是唯一业务事件观察者。
 
@@ -18,9 +18,9 @@ Darwin pipe读取使用 `readSync` 的同次原生错误快照，仅 `EAGAIN`／
 
 [build-assets](build-assets.ts) 将 guardian bundle 到 `dist/platform/process/shell-supervisor.js`。built `dist/jobs/shell.js` 自动定位该资产，固定当前 Bun 执行它；源码测试显式传入已编译 guardian 路径，不回退到 `.ts` 源码。编译为单一 executable 的宿主应从发行资产根显式选定 supervisorPath，不能依赖虚拟 import.meta 路径。凭据/env 经私有管道传递，不进入 helper argv。
 
-其他公开 leaf（包括 Workflow verifier）通过 `@kite-ai/agent/jobs/shell` 使用此实现，完整包构建保留独立公开依赖。不能把含相对资产定位的实现以内部相对 import 合并进任意共享 chunk；实际完整 manifest 的源码树外测试同时验证多个入口装配与 guardian 路径。
+其他公开 leaf 通过 `@kite-ai/agent/jobs/shell` 使用此实现，完整包构建保留独立公开依赖。不能把含相对资产定位的实现以内部相对 import 合并进任意共享 chunk；实际完整 manifest 的源码树外测试同时验证多个入口装配与 guardian 路径。
 
-[真实测试](../../test/isolated/jobs/shell.test.ts) 在 macOS 验证正常/自然终态、真实子进程组与后代清理、TERM 忽略的强制停止、无关进程保持存活、父 fixture EOF/强杀、输出 gap 与离开源码树的资产定位。该父 fixture 直接运行公开 leaf，证明监督机制；[真实 Service/Core 集成](../../../../tests/isolated/unified-agent/shell-service.test.ts) 使用公开 paired 启动、Action 子操作和已构建 guardian，验证同 profile 的 Session owner 与 Workspace OS 锁、取消回执先于进程组停止、真实输出 GET、Service 父 EOF 与 SIGKILL 清后代且不杀无关进程。EOF 正常停机保存 cancelled；强杀后通过显式恢复保存 outcome_unknown，重开及重复原命令不重启旧 Shell。恢复中的 unknown 不宣称外部 effect 已成功或可重放。Linux 的代码路径存在但本轮运行资格 pending；Windows 明确 unsupported；PTY、Windows Job Object 和三平台发行签名/权限仍 pending。旧 POSIX 实现最终退役状态不由这些叶子测试宣告完成。
+[真实测试](../../test/isolated/jobs/shell.test.ts) 在 macOS 验证正常/自然终态、真实子进程组与后代清理、TERM 忽略的强制停止、无关进程保持存活、父 fixture EOF/强杀、输出 gap 与离开源码树的资产定位。该父 fixture 直接运行公开 leaf，证明监督机制；[真实 Service/Core 集成](../../../../tests/isolated/unified-agent/shell-service.test.ts) 使用公开 paired 启动、Action 子操作和已构建 guardian，验证同 profile 的 Session owner 与 Workspace OS 锁、取消回执先于进程组停止、真实输出 GET、Service 父 EOF 与 SIGKILL 清后代且不杀无关进程。EOF 正常停机保存 cancelled；强杀后通过显式恢复保存 outcome_unknown，重开及重复原命令不重启旧 Shell。恢复中的 unknown 不宣称外部 effect 已成功或可重放。Linux 的代码路径存在但本轮运行资格 pending；此 POSIX leaf 不支持 Windows，默认 Windows Job 后端见下节；PTY 和三平台发行签名/权限仍 pending。旧 POSIX 实现最终退役状态不由这些叶子测试宣告完成。
 
 原 native 根所有权证据仅在 macOS arm64/Bun 1.4.2 实际运行。[Native 回归](../../test/isolated/jobs/darwin-owned-child.test.ts)核冷 import 零 native I/O、强制 GC 后完整 argv/env、双 pipe 全文、重复 WNOWAIT、原根自然退出后真实 child/grandchild 强停、启动失败零 child/FD 漏出及准确一次 reap。普通 POSIX、严格 confined、显式 Service/Core 与声明补偿各自保留原证据，不能扩为允许 fork 的全树证明。默认宿主的新范围与实际测试见下节；x86_64 ABI 尚未本机执行，Win/Linux 运行验证依用户选择延后到重构完成后的 GitHub Actions。
 
@@ -33,6 +33,18 @@ Darwin pipe读取使用 `readSync` 的同次原生错误快照，仅 `EAGAIN`／
 普通 Tool 的 `reportProgress` 可由宿主写入同一有界输出表：存储只接受实际已派发、仍为 dispatching/running 的 Tool、stream=progress。该事实不会修改 Execution 状态，stdout/stderr 仍仅供 Job；取消已提交后的迟到事实可保存，终态以后不再追加 Tool progress。沿用 Job 输出的 32 KiB chunk、JSON/行开销预算、独立 Decimal64 高水位和 owner generation 核实。真实拒绝与迟到事实测试见 storage/jobs.test.ts。
 
 Store output paging preserves the one MiB JSON/row-overhead budget independently of terminal facts. A producer drop begins that stream's coalesced tail gap; other streams can still retain normal output while the total budget is available. `output_truncated` records that clipping occurred, while the internal `output_budget_exhausted` flag closes further retention after the global budget fails. There are at most three stream gaps. GET merges every gap intersecting the bounded normal-row page, clipping a gap to the last retained normal-row boundary when more content may remain; clipped byte attribution is null. Cross-stream gap intervals may overlap, so a consumer advances afterSeq to the maximum throughSeq on the page, rather than treating gaps as exclusive global intervals or using only the last item's endpoint. Real Store tests in test/isolated/storage/jobs.test.ts generate 220 normal chunks interleaved with three actual producer gaps through appendExecutionOutput, retain every chunk across a 200-row page, and verify overlapping tail ranges and readonly cursors without SQL relocation.
+
+## 默认 Windows Git Bash
+
+`start` 仅在原 runner READY 核验与 GO 写入确认后返回；此前不进入 Core running。失败准入通过 `JobStartError` 交回原 handle，Core 观察原终态并清理，未知清理仍保 handle、资源及 binding，不能丢失后仅保一个无法停止的空引用。已确认零派发的准备失败携带无 handle 的明确事实，Core 保存失败并释放资源。原协议与版本不变。
+
+运行时清单是两份 Git Bash 副本的唯一闭包目录。每次派发核清单原身份与所选副本全部文件摘要，包含 MSYS、兼容 DLL、Git helper 和证书；不把另一份未使用副本混入当前检查。权限快照固定同一清单摘要，损坏闭包在原生进程创建前失败。[回归](../../test/isolated/jobs/windows-git-bash.test.ts)实际变更两份闭包的 DLL／helper／证书与清单，核零 native 派发。
+
+[适配器](windows-shell.ts)将原协议6 runner 接入普通 Job。工作区沿原无账户 write-restricted token／ACL，读取沿宿主权限，离线范围仅使用环境提示；Full 明确绕过沙箱。业务审批只在权限层，执行入口不重复作命令拒绝。完整文件与联网范围取最终父／子授权交集，互不隐式扩大，准确获批的外部写入可实际执行。
+
+[准备层](windows-git-bash.ts)固定本机 Git 的私有运行时闭包。仓库 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)修复 MSYS 对象 ACL；Full／完整文件范围保另一份未修改映像，避免并发共享区冲突，不修改安装 Git。两份映像共用复制与校验流程，[准备层回归](../../test/isolated/jobs/windows-git-bash.test.ts)核冷创建、复用、缺失文件恢复和变更文件保留。构建携带 runner／兼容 DLL／Coreutils／rg，不创建账户或网络规则。未知关闭保 owner，冷读取不从 PID 重建或重跑。
+
+[原生测试](../../test/isolated/jobs/windows-shell.test.ts)与 [Service 集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)覆盖检索、Git／fork／管道、范围与审批、并发、取消／宿主死亡、准确关闭和冷零重放；事实及安装资格范围归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
 
 ## 默认 macOS 宿主 Shell
 
@@ -50,15 +62,17 @@ Store output paging preserves the one MiB JSON/row-overhead budget independently
 
 [真实 host 测试](../../test/isolated/jobs/macos-host-shell.test.ts)11项/65断言已在 macOS26.7.1 arm64/Bun1.4.2 运行通过：宿主工具/fork/HOME/广泛读取、两种写范围、IP与带无沙箱正例的Unix拒绝、实际 Full 父目录 rename/hardlink拒绝、自然根退出后的 setsid/grandchildren、重复取消/无关存活、长控制路径、输出gap和父 EOF/SIGKILL及准确标签已撤销后的清理。夹具先完整关闭 PID 记录，再原子发布就绪路径；父退出场景核三项均为正整数后才观察实际后代。原清理断言和观察期限保持。默认消费者、最终 Ask/Full 快照、源码树外/持久输出及持续负载分别归[Service owner](../../../../apps/service/README.md#默认-shell-装配)和[韧性 owner](../../../../docs/active/runtime-resilience-qualification.md)。这些不等于跨平台、全部原生资源指标或完整发布 qualification。
 
-普通 host 与 confined 工厂另接可信 `protectedFiles`，与必须存在且为目录的 `protectedRoots` 分开。[私有文件准备](protected-files.ts)只观察路径及最近存在父目录的 metadata，不读认证正文或计算文件摘要；派发前核父目录和 canonical 名称，允许原文件缺失、稍后创建或正常原子轮换。macOS 规则拒绝原路径／canonical 名称的读取、写入与映射，并保护祖先改名及尚不存在父目录的重定向；Workflow verifier 和声明补偿复用相同边界。认证位于授权 Workspace 内也不取得读取资格。[实际私有文件回归](../../test/isolated/jobs/protected-files.test.ts)覆盖默认 host、Workspace／Full、缺失路径、轮换及 confined／补偿拒绝，普通 Workspace 写入继续可用。
+普通 host 与 confined 工厂另接可信 `protectedFiles`，与必须存在且为目录的 `protectedRoots` 分开。[私有文件准备](protected-files.ts)只观察路径及最近存在父目录的 metadata，不读认证正文或计算文件摘要；派发前核父目录和 canonical 名称，允许原文件缺失、稍后创建或正常原子轮换。macOS 规则拒绝原路径／canonical 名称的读取、写入与映射，并保护祖先改名及尚不存在父目录的重定向。认证位于授权 Workspace 内也不取得读取资格。[实际私有文件回归](../../test/isolated/jobs/protected-files.test.ts)覆盖默认 host、Workspace／Full、缺失路径、轮换及低层 confined 工厂，普通 Workspace 写入继续可用。
 
 ## Profile Skill 的准确只读来源
+
+本节保留原 Workflow verifier 的低层隔离取舍和历史验证。执行调用链已退役，以下工厂与 helper 不构成当前 Skill 执行入口。
 
 [read-only-source](read-only-source.ts)只接可信verifier在原来源复核后提供的准确canonical Skill cwd。来源必须是保护根的严格子树，不能包含原Workspace或其他保护根，与control双向不重叠；原Workspace仍不能位于保护根内，confined拒绝此选项。全部原目录和祖先身份仍在派发前复验；不是模型参数、通用文件grant或新的恢复控制权。
 
 macOS host在读取deny中精确减去该子树及必要祖先metadata，单独拒绝祖先data／xattr读取；整保护根write／unlink／ioctl和native exec-map禁止保留，Full也不能移动原来源或其祖先。Linux host用每级独立私有tmpfs代替原Profile祖先，只接回原来源ro-bind；init在P后／业务fork前持原DIR FD核每级0700 tmpfs只有唯一下级和来源原dev／ino／RO，改0111并逐项封RO／NOEXEC／NOSUID／NODEV，复核closed children／原内部身份并严格关闭FD后清空capabilities。其他mask仍为000；来源内未声明子mount拒绝，unknown不打开业务gate。
 
-原目录投影保原cwd、相对导入及忽略目录资源；`contract.files`仍只约束其实际参与摘要的文件，不把该集合当完整目录镜像。外部不合作同UID最后一刻替换仍是原可信宿主边界。[原生verifier整例](../../test/isolated/business/skill-workflow-host-verifier.test.ts)实际核macOS Workspace／Full下完整读取、私有保护、source drift、准确取消与超时的原coalition结束；[正式Service整例](../../../../apps/service/test/isolated/skill-workflow-profile-host.test.ts)另核完整Run／proof和cold零重放。Linux源码、纯协议与C语法适配通过不代对应Linux原生资格；取舍见[原来源决定](../../../../.agents/notes/implemented/architecture/2026-10-10-profile-workflow-read-only-original-source.md)。
+原目录投影保原cwd、相对导入及忽略目录资源；`contract.files`仍只约束其实际参与摘要的文件，不把该集合当完整目录镜像。外部不合作同UID最后一刻替换仍是原可信宿主边界。[原生verifier整例](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/packages/agent/test/isolated/business/skill-workflow-host-verifier.test.ts)实际核macOS Workspace／Full下完整读取、私有保护、source drift、准确取消与超时的原coalition结束；[正式Service整例](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/service/test/isolated/skill-workflow-profile-host.test.ts)另核完整Run／proof和cold零重放。Linux源码、纯协议与C语法适配通过不代对应Linux原生资格；取舍见[原来源决定](../../../../.agents/notes/implemented/architecture/2026-10-10-profile-workflow-read-only-original-source.md)。
 
 ## 固定 macOS confined Shell
 
@@ -94,4 +108,4 @@ Linux [build-assets](build-assets.ts)在构建机器使用 C compiler生成 ELF6
 
 Shell 与 MCP 两个 Linux init 的 unknown-owner 固定 stderr 诊断按 `sizeof(diagnostic)-1` 的准确长度写入，EINTR重试，短写或错误继续标记unknown；原无限等待和零完成receipt保持。该修复保正式FORTIFY／Werror构建约束，不增加产品能力。[诊断回归](../../test/isolated/jobs/linux-init-diagnostic.test.ts)在正式C编译参数下分别核成功、EINTR、短写及EIO（两项／20断言）；完整八workspace build通过不替代namespace或安装运行资格。
 
-[准备层](../../test/isolated/jobs/linux-preparation.test.ts)、[原 owner mock](../../test/isolated/jobs/linux-owned-shell.test.ts)、[普通 Job 生命周期](../../test/isolated/jobs/linux-shell.test.ts)、[冷证据](../../test/isolated/jobs/linux-shell-process-evidence.test.ts)和[正式 Service 装配](../../../../apps/service/test/isolated/linux-shell-configuration.test.ts)已分别实际执行纯布局／身份、模拟内核交接、输出／取消／unknown、严格冷形状与真实配置接线；不执行 Linux 内核。[四个原生整例](../../test/isolated/jobs/linux-native-shell.test.ts)定义文件／网络／fork／temp exec、自然脱离后代和准确取消的验收；[正式Workflow来源整例](../../../../apps/service/test/isolated/skill-workflow-profile-host.test.ts)另定义Profile／Workspace与零启动漂移闭环。Linux缺工具／编译／执行失败直接失败，本机platform skip及macOS通过不计Linux资格。Profile准确来源投影源码已接，Linux ABI／完整 installed用户链仍依用户安排留重构后Actions，Windows权限后端、RSS与完整Runtime观测仍保退出缺口。
+[准备层](../../test/isolated/jobs/linux-preparation.test.ts)、[原 owner mock](../../test/isolated/jobs/linux-owned-shell.test.ts)、[普通 Job 生命周期](../../test/isolated/jobs/linux-shell.test.ts)、[冷证据](../../test/isolated/jobs/linux-shell-process-evidence.test.ts)和[正式 Service 装配](../../../../apps/service/test/isolated/linux-shell-configuration.test.ts)已分别实际执行纯布局／身份、模拟内核交接、输出／取消／unknown、严格冷形状与真实配置接线；不执行 Linux 内核。[四个原生整例](../../test/isolated/jobs/linux-native-shell.test.ts)定义文件／网络／fork／temp exec、自然脱离后代和准确取消的验收；[历史 Workflow 来源整例](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/service/test/isolated/skill-workflow-profile-host.test.ts)另定义原 Profile／Workspace与零启动漂移闭环，执行入口现已退役。Linux缺工具／编译／执行失败直接失败，本机platform skip及macOS通过不计Linux资格。Linux ABI／完整 installed用户链仍依原资格范围核验；Windows 默认后端见上节，RSS与完整Runtime观测仍保原退出缺口。

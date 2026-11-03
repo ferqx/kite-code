@@ -1,0 +1,15 @@
+[package]
+name = "kite-windows-msys-compat"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "IPC ACL compatibility for a private Git Bash runtime under write-restricted tokens"
+
+[lib]
+name = "ktipc"
+crate-type = ["cdylib"]
+
+[profile.release]
+panic = "abort"
+lto = true
+strip = true

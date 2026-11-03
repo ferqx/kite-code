@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-02：本记录的 Workflow 执行及专用外部文件工具范围已由[退役与统一读取决定](../architecture/2026-11-02-tool-surface-retirement.md)替代。保留原设计理由、历史证据及仍适用的统一权限、取消／未知效果和只读历史约束；外部只读的原生身份、基线和单链接要求已由用户明确取消；当前功能以手册和 owner 为准。
+
 ## Problem
 macOS Seatbelt、Linux bubblewrap 与 Windows restricted-token 都默认把 Shell 写入限制在 Workspace，
 但它们对 `/tmp` 和宿主外部路径的可见形态不同。旧链路虽然会把 `externalRead`、`externalWrite` 或

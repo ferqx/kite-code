@@ -25,13 +25,9 @@ import {
   readConfigurationFile,
   resolveConfiguration,
 } from '@kite-ai/agent/config';
-import {
-  defineExtension,
-  type Extension,
-  type Json,
-  type Permissions,
-} from '@kite-ai/agent/extensions';
-import { createPathFileTools, filesNativeAssets, pdfAssets } from '@kite-ai/agent/files';
+import type { Json, Permissions } from '@kite-ai/agent/extensions';
+import { filesNativeAssets, pdfAssets } from '@kite-ai/agent/files';
+import { ripgrepAsset } from '@kite-ai/agent/jobs/shell';
 import {
   createMcpResourceModelSource,
   type McpLifecycleOptions,
@@ -51,11 +47,11 @@ import {
   type PermissionPolicyOptions,
   type PermissionPolicySnapshot,
   requireFileRestoreApproval,
-  requireWorkflowApproval,
-  workflowCapabilityDescription,
 } from '@kite-ai/agent/permissions';
 import {
+  createShellCommandPolicy,
   createShellConfiguration,
+  readOnlySearchCommand,
   type ShellConfigurationOptions,
   shellToolIds,
 } from '@kite-ai/agent/permissions/shell';
@@ -66,7 +62,6 @@ import {
 } from '@kite-ai/agent/planning';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { createSessionTitleExtension } from '@kite-ai/agent/session-title';
-import { workflowCompilerAssets } from '@kite-ai/agent/skill-workflow';
 import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { createDefaultTaskRequestClassifier } from '@kite-ai/agent/task';
@@ -111,16 +106,6 @@ import {
 } from './planning-configuration';
 import { assertSessionModelProtocol } from './session-model-protocol';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
-import {
-  assertWorkflowForkCurrent,
-  composeRequirementInitializers,
-  createWorkflowConfiguration,
-  readSkillWorkflowFlags,
-  type WorkflowUserDecisions,
-  workflowForkFence,
-  workflowSnapshotDigest,
-  workflowToolIds,
-} from './skill-workflow-configuration';
 import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
 import { createUserConfiguration, withoutProjectModels } from './user-configuration';
 import { createUserMcpManagement } from './user-mcp-management';
@@ -161,12 +146,6 @@ function assertSelectedToolVersions(
   const tools = registrations.flatMap((definitions) => [...definitions]);
   for (const selected of configurations ?? []) {
     if (!toolIds.includes(selected.id)) continue;
-    if (
-      workflowToolIds.includes(selected.id) &&
-      selected.definitionVersion !== undefined &&
-      selected.definitionVersion !== '1'
-    )
-      throw new AgentError('tool_definition_version_unavailable');
     const actual = tools.find((tool) => tool.id === selected.id);
     if (
       actual &&
@@ -234,8 +213,6 @@ export function createDefaultProcessConfiguration(options: {
   permissionPolicy?: Pick<PermissionPolicyOptions, 'readPolicy'>;
   /** Trusted host business constraints; JSONC selects tools, never these permission/requirement options. */
   planning?: PlanningOptions;
-  /** Trusted Workflow user decision policy; never selected by JSONC or Skill text. */
-  skillWorkflow?: { readonly userDecisions?: WorkflowUserDecisions };
   /** Trusted server/transport admission only; JSONC selects allowlisted IDs. */
   mcp?: McpLifecycleOptions | McpHostFactory;
   /** Trusted source transport assets and network policy; raw JSON never supplies these ports. */
@@ -265,16 +242,6 @@ export function createDefaultProcessConfiguration(options: {
   const explicit = structuredClone(options.hostConfiguration);
   explicitConfiguration(explicit);
   const planningOptions = structuredClone({ completionGuidance: true, ...options.planning });
-  const workflowUserDecisions: WorkflowUserDecisions = Object.freeze(
-    structuredClone(
-      options.skillWorkflow?.userDecisions ?? {
-        version: '1' as const,
-        allowWaiver: true,
-        allowReplan: true,
-        allowCompensation: true,
-      },
-    ),
-  );
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
   const describeDefaultTask = createDefaultTaskRequestClassifier(options.child ? [] : childRoles);
   let shellOptions = options.shell ? structuredClone(options.shell) : undefined;
@@ -352,10 +319,7 @@ export function createDefaultProcessConfiguration(options: {
         ? { validateExpanded: selectedCompressor.validateExpanded.bind(selectedCompressor) }
         : {}),
     });
-  const task = createTaskConfiguration(
-    childRoles,
-    afterTurn ? { afterTurn: { enabled: true } } : {},
-  );
+  const task = createTaskConfiguration(childRoles);
   const configurationDefaults = options.ordinaryHostTools
     ? ordinaryHostConfigurationDefaults(options.shell !== undefined, task.extension !== undefined)
     : defaultConfiguration;
@@ -367,6 +331,29 @@ export function createDefaultProcessConfiguration(options: {
       const execution = await policyRuntime.getExecution(id);
       if (!execution) throw new AgentError('execution_scope_unavailable');
       return execution.input;
+    },
+    async (input) => {
+      if (
+        !shellOptions ||
+        !input ||
+        typeof input !== 'object' ||
+        Array.isArray(input) ||
+        typeof input.command !== 'string'
+      )
+        return false;
+      const policy = await createShellCommandPolicy({
+        cwd: options.profile.profilePath,
+        shellExecutable: shellOptions.shellExecutable,
+      });
+      const result = await policy.classify(input.command);
+      return (
+        !result.hardDenied &&
+        readOnlySearchCommand(
+          result.plainCommands,
+          shellOptions.shellExecutable,
+          shellOptions.windows?.coreutilsPath,
+        ) !== undefined
+      );
     },
   );
   const askUser = createAskUserExtension();
@@ -406,12 +393,13 @@ export function createDefaultProcessConfiguration(options: {
     const storage = sqliteStorageAssets();
     const extractor = webExtractorAssets();
     const pdf = pdfAssets();
-    const compilers = [mcpSchemaWorkerAssets(), workflowCompilerAssets()];
+    const compilers = [mcpSchemaWorkerAssets()];
     return [
       dirname(userConfiguration.path),
       ...(codexProtectionPath === undefined ? [] : [codexProtectionPath]),
       process.execPath,
       fileURLToPath(import.meta.url),
+      ripgrepAsset(),
       ...filesNativeAssets().map((asset) => fileURLToPath(asset)),
       fileURLToPath(storage.module),
       fileURLToPath(storage.worker),
@@ -437,20 +425,6 @@ export function createDefaultProcessConfiguration(options: {
       ...(options.runtimeAssets ?? []),
     ];
   };
-  const pathFiles = createPathFileTools({
-    qualifiedPlatforms: ['darwin', 'linux', 'win32'],
-    protectedRoots: [
-      options.profile.dataRoot,
-      options.profile.coordinationPath,
-      ...runtimeAssets(),
-    ],
-  });
-  const pathFilesExtension: Extension = defineExtension({
-    id: 'builtin.files.path',
-    version: '1',
-    apiMajor: 1,
-    tools: pathFiles.tools,
-  });
   const files = createDefaultFileCheckpointConfiguration({
     profile: options.profile,
     runtimeAssets,
@@ -464,7 +438,6 @@ export function createDefaultProcessConfiguration(options: {
     askUser,
     planning.extension,
     files.extension,
-    pathFilesExtension,
     ...(task.extension ? [task.extension] : []),
   ];
   const sourceOptions = options.mcpSources;
@@ -797,23 +770,16 @@ export function createDefaultProcessConfiguration(options: {
       modelOnly?: boolean;
       toolIds?: readonly string[];
       skillSelection?: SkillSelection;
-      workflowFence?: Awaited<ReturnType<typeof workflowForkFence>>;
-      workflowCarrier?: {
-        parentExecutionId: string;
-        sessionId: string;
-        roleId: string;
-        roleVersion: string;
-      };
       mcpParent?: Parameters<typeof mcpSources.deriveChildSelection>[0];
       parentTools?: Parameters<
         NonNullable<RuntimeOptions['resolveChildRunConfiguration']>
       >[0]['parentTools'];
       inheritDynamicMcp?: boolean;
+      readOnlyTask?: boolean;
     },
     recovery?: {
       digest: string;
       signal: AbortSignal;
-      workflowSnapshot: Json;
       planningSnapshot: Json;
       mcpSourceSnapshot: Json;
       webSnapshot: Json;
@@ -832,7 +798,6 @@ export function createDefaultProcessConfiguration(options: {
       const skillSelection = selection
         ? (selection.skillSelection?.requested ?? undefined)
         : commandSkills(command.request);
-      const workflowFlags = readSkillWorkflowFlags(options.profile);
       const user = userConfiguration.read().value;
       let root: string;
       try {
@@ -1040,7 +1005,6 @@ export function createDefaultProcessConfiguration(options: {
         askUserTools.values(),
         businessTools.values(),
         fileTools.values(),
-        pathFiles.tools,
         task.tools.values(),
         shellTools.values(),
         webTools.values(),
@@ -1050,7 +1014,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser, pathFilesExtension],
+        externallyRegisteredExtensions: [askUser],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
@@ -1064,18 +1028,15 @@ export function createDefaultProcessConfiguration(options: {
           ...web.toolIds,
           ...mcp.tools.keys(),
           selectedSources.directoryToolId,
-          ...(workflowFlags.skillActivation && workflowFlags.skillWorkflow ? workflowToolIds : []),
         ],
         allowedCapabilities: options.allowedToolCapabilities,
       });
       let webBinding: ReturnType<typeof web.bind> | undefined;
       let runWeb = web;
-      let workflowResource: Awaited<ReturnType<typeof createWorkflowConfiguration>> | undefined;
       let disposal: Promise<void> | undefined;
       const dispose = () =>
         (disposal ??= Promise.allSettled([
           Promise.resolve().then(async () => {
-            await workflowResource?.dispose();
             await assembly.dispose();
           }),
           Promise.resolve().then(() => webBinding?.dispose()),
@@ -1113,45 +1074,6 @@ export function createDefaultProcessConfiguration(options: {
           webBinding = runWeb.bind();
           assembly.extensions.push(webBinding.extension);
         }
-        const workflowCapabilities = workflowCapabilitiesFor(assembly);
-        const workflow = await createWorkflowConfiguration({
-          knowledgeScope: assembly.knowledgeScope,
-          profile: options.profile,
-          workspaceRoot: root,
-          skills: effective.skills ?? [],
-          toolIds: assembly.toolIds,
-          allowedCapabilities: options.allowedToolCapabilities,
-          flags: workflowFlags,
-          userDecisions: workflowUserDecisions,
-          shell: shellOptions,
-          request: businessInputs.workflowRequest,
-          capabilities: workflowCapabilities,
-          forkConfigurations: childRoles.map((role) => ({
-            agent: role.id,
-            configurationId: role.id,
-            definitionVersion: role.version,
-          })),
-        });
-        workflowResource = workflow;
-        if (workflow.enabled) {
-          assembly.extensions.push(workflow.extension);
-          if (workflow.verifierExtension) assembly.extensions.push(workflow.verifierExtension);
-          if (workflow.compensatorExtension)
-            assembly.extensions.push(workflow.compensatorExtension);
-          assembly.toolIds.push(
-            ...workflowToolIds.filter(
-              (id) =>
-                !assembly.toolIds.includes(id) &&
-                (!selection?.workflowFence ||
-                  selection.workflowFence.capabilities.some(
-                    (binding) =>
-                      binding.kind === 'tool' &&
-                      binding.definitionId === id &&
-                      binding.definitionVersion === '1',
-                  )),
-            ),
-          );
-        }
         // The original selection and parent fence narrow the catalogue before credential reads.
         const snapshot = createConfigurationSnapshot({
           ...effective,
@@ -1173,18 +1095,12 @@ export function createDefaultProcessConfiguration(options: {
         );
         const planningBinding = {
           version: '1',
+          readOnlyTask: selection?.readOnlyTask === true,
           intent: planningIntent,
           requirePlan,
           readOnlyDefinitions,
           policy: {
-            automaticValidation: planningOptions.automaticValidation ?? null,
-            requiredValidation: planningOptions.requiredValidation === true,
             completionGuidance: planningOptions.completionGuidance === true,
-            allowWaiver: planningOptions.allowWaiver === true,
-            requiredReceiptDefinitions: planningOptions.requiredReceiptDefinitions ?? [],
-            fileHashChecker: planningOptions.fileHashChecker ?? null,
-            commandChecker: planningOptions.commandChecker ?? null,
-            mcpCheckers: planningOptions.mcpCheckers ?? [],
             allowedExecutionModes: planningOptions.allowedExecutionModes ?? [
               'auto',
               'accept_edits',
@@ -1211,8 +1127,6 @@ export function createDefaultProcessConfiguration(options: {
             planningSnapshotDigest(
               (assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null) as unknown as Json,
             ) !== planningSnapshotDigest(recovery.webSnapshot) ||
-            workflowSnapshotDigest(workflow.snapshot as unknown as Json) !==
-              workflowSnapshotDigest(recovery.workflowSnapshot) ||
             !recovery.planningSnapshot ||
             typeof recovery.planningSnapshot !== 'object' ||
             Array.isArray(recovery.planningSnapshot) ||
@@ -1316,35 +1230,6 @@ export function createDefaultProcessConfiguration(options: {
           const action = globalCapabilities.get(key('job', 'builtin.planning/planning.write', '1'));
           if (action) actual.set(key('job', action.definitionId, action.definitionVersion), action);
         }
-        // A selected mutation must match the actual definition/effect metadata; a typo
-        // cannot silently leave its real mutation outside the sealed obligation.
-        if (planningOptions.automaticValidation) {
-          for (const mutation of planningOptions.automaticValidation.mutations) {
-            if (!assembly.toolIds.includes(mutation.definitionId)) continue;
-            const capability = actual.get(
-              key('tool', mutation.definitionId, mutation.definitionVersion),
-            );
-            if (
-              !capability?.hardAllowed ||
-              capability.effects.length !== mutation.effects.length ||
-              capability.effects.some(
-                (effect) =>
-                  !mutation.effects.includes(
-                    effect as 'workspace_write' | 'destructive' | 'unknown',
-                  ),
-              )
-            )
-              throw new AgentError('automatic_validation_definition_unavailable');
-          }
-          const checker = planningOptions.automaticValidation.fileHashChecker;
-          if (assembly.toolIds.includes(checker.definitionId)) {
-            const capability = actual.get(
-              key('tool', checker.definitionId, checker.definitionVersion),
-            );
-            if (!capability?.hardAllowed || !capability.safeRead)
-              throw new AgentError('automatic_validation_checker_unavailable');
-          }
-        }
         const classifiedPermissions = withInjectedCeiling(
           createPermissionPolicy({
             readCheckContext: createPermissionCheckContextReader({
@@ -1379,7 +1264,6 @@ export function createDefaultProcessConfiguration(options: {
                 ? {
                     ...description,
                     ...(await shell.describeRequest(request)),
-                    ...(await pathFiles.describeRequest(request)),
                     ...(await files.describeRequest(request)),
                     ...describeDefaultTask(request),
                     ...(commandDigest ? { commandDigest } : {}),
@@ -1389,21 +1273,13 @@ export function createDefaultProcessConfiguration(options: {
           }),
         );
         let planningRun: { runId: string; sessionId: string } | undefined = recovery?.runIdentity;
-        const initializeBusinessRequirements = composeRequirementInitializers(
-          requirePlan || planningOptions.requiredValidation || planningOptions.automaticValidation
-            ? (input) =>
-                planning.initializeRequirements(input, {
-                  requirePlan,
-                  readOnlyDefinitions,
-                })
-            : undefined,
-          workflow.enabled ? workflow.initializeRequirements : undefined,
-        );
-        const hasBusinessInitializer =
-          requirePlan ||
-          planningOptions.requiredValidation ||
-          planningOptions.automaticValidation ||
-          workflow.enabled;
+        const hasBusinessInitializer = Boolean(requirePlan);
+        const initializeBusinessRequirements: NonNullable<
+          RunConfiguration['initializeRequirements']
+        > = (input) =>
+          hasBusinessInitializer
+            ? planning.initializeRequirements(input, { requirePlan, readOnlyDefinitions })
+            : Promise.resolve([]);
         const planningOriginStoreId = command.originStoreId;
         const planningPermissions = createPlanningPermissionPolicy({
           isPlanFileEdit: files.isPlanFileEdit,
@@ -1429,7 +1305,7 @@ export function createDefaultProcessConfiguration(options: {
             return description
               ? {
                   ...description,
-                  ...(await pathFiles.describeRequest(request)),
+                  ...(await shell.describeRequest(request)),
                   ...(await files.describeRequest(request)),
                   ...(commandDigest ? { commandDigest } : {}),
                 }
@@ -1439,6 +1315,22 @@ export function createDefaultProcessConfiguration(options: {
         const permissions: RuntimeOptions['permissions'] = {
           toolDispatchOrder: planningPermissions.toolDispatchOrder,
           async authorize(request) {
+            if (
+              selection?.readOnlyTask &&
+              ['shell.execute', 'shell.launch', 'shell.command'].includes(request.definitionId)
+            ) {
+              const description = await shell.describeRequest(request);
+              if (
+                !description?.hardAllowed ||
+                !description.safeRead ||
+                !description.effects?.every((effect) => effect === 'read')
+              )
+                return {
+                  allowed: false,
+                  revision: 'task-read-only-shell-1',
+                  reason: 'read_only_task_requires_literal_search',
+                };
+            }
             if (
               'assertExecutionScope' in selectedSources &&
               typeof selectedSources.assertExecutionScope === 'function'
@@ -1453,113 +1345,10 @@ export function createDefaultProcessConfiguration(options: {
                 };
               }
             }
-            if (selection?.workflowFence) {
-              try {
-                await assertWorkflowForkCurrent(selection.workflowFence, assembly.knowledgeScope);
-              } catch (error) {
-                if (error instanceof KnowledgeReadCleanupError) throw error;
-                return {
-                  allowed: false,
-                  revision: 'workflow-fork-source-1',
-                  reason: 'workflow_source_changed',
-                };
-              }
-            }
-            let carrier = false;
-            if (
-              selection?.workflowCarrier &&
-              policyRuntime &&
-              request.kind === 'job' &&
-              request.definitionId === `agent/${selection.workflowCarrier.roleId}` &&
-              request.definitionVersion === selection.workflowCarrier.roleVersion &&
-              request.sessionId === selection.workflowCarrier.sessionId
-            ) {
-              const execution = await policyRuntime.getExecution(request.executionId);
-              carrier =
-                execution?.parentExecutionId === selection.workflowCarrier.parentExecutionId &&
-                execution.originStoreId === command.originStoreId &&
-                execution.rootWorkCommandId === command.rootWorkCommandId;
-            }
-            if (
-              selection?.workflowFence &&
-              !carrier &&
-              request.kind !== 'model' &&
-              !selection.workflowFence.capabilities.some(
-                (binding) =>
-                  binding.kind === request.kind &&
-                  binding.definitionId === request.definitionId &&
-                  binding.definitionVersion === request.definitionVersion,
-              )
-            )
-              return {
-                allowed: false,
-                revision: 'workflow-fork-ceiling-1',
-                reason: 'workflow_capability_denied',
-              };
             const error =
               selectedSources.admissionError(request) ?? selectedMcp.admissionError(request);
             if (error) return { allowed: false, revision: 'mcp-selected-server-1', reason: error };
-            const decision = await planningPermissions.authorize(request);
-            let minimum =
-              request.kind === 'model' ? undefined : selection?.workflowFence?.minimumApproval;
-            if (
-              workflow.enabled &&
-              ((request.kind === 'tool' && workflowToolIds.includes(request.definitionId)) ||
-                (request.kind === 'job' &&
-                  ['skill.workflow.verify', 'skill.workflow.compensate'].includes(
-                    request.definitionId,
-                  )))
-            ) {
-              const input =
-                request.input && typeof request.input === 'object' && !Array.isArray(request.input)
-                  ? request.input
-                  : {};
-              let skillId = request.kind === 'job' ? input.skillId : input.skill_id;
-              if (request.kind === 'tool' && request.definitionId !== 'activate_skill') {
-                const activationId = input.activation_id;
-                if (
-                  policyRuntime &&
-                  request.runId &&
-                  typeof activationId === 'string' &&
-                  /^[A-Za-z0-9_.-]{1,128}$/.test(activationId)
-                ) {
-                  const anchor = await policyRuntime.readRunExtensionRecord({
-                    sessionId: request.sessionId,
-                    runId: request.runId,
-                    extensionId: 'builtin.skill-workflow',
-                    key: `run/${request.runId}/workflow.${createHash('sha256').update(activationId).digest('hex')}`,
-                  });
-                  const frame = anchor?.value;
-                  if (
-                    anchor?.contentType === 'application/vnd.kite.skill-activation+json' &&
-                    anchor.contentVersion === 1 &&
-                    frame &&
-                    typeof frame === 'object' &&
-                    !Array.isArray(frame) &&
-                    frame.kind === 'activation' &&
-                    frame.runId === request.runId &&
-                    frame.sessionId === request.sessionId &&
-                    frame.activationId === activationId
-                  )
-                    skillId = frame.skillId;
-                }
-              }
-              const entry = workflow.entries.find(
-                (entry) => entry.descriptor.capabilityId === skillId,
-              );
-              if (!entry?.contract)
-                return {
-                  allowed: false,
-                  revision: decision.revision,
-                  reason: 'workflow_activation_unavailable',
-                  controlReads: decision.controlReads,
-                };
-              minimum =
-                request.kind === 'job' && request.definitionId === 'skill.workflow.compensate'
-                  ? 'user'
-                  : entry.contract.effectiveMinimumApproval;
-            }
-            return requireWorkflowApproval(decision, minimum);
+            return await planningPermissions.authorize(request);
           },
         };
         return {
@@ -1662,8 +1451,6 @@ export function createDefaultProcessConfiguration(options: {
             async capture(
               request: Parameters<NonNullable<RunConfiguration['sources']>['capture']>[0],
             ) {
-              if (selection?.workflowFence)
-                await assertWorkflowForkCurrent(selection.workflowFence, assembly.knowledgeScope);
               return [
                 ...(await assembly.sources.capture(request)),
                 ...(await selectedSources.sources.capture(request)),
@@ -1675,8 +1462,6 @@ export function createDefaultProcessConfiguration(options: {
                 NonNullable<RunConfiguration['sources']>['capture']
               >[0][],
             ) {
-              if (selection?.workflowFence)
-                await assertWorkflowForkCurrent(selection.workflowFence, assembly.knowledgeScope);
               const sources = new Map<string, ContextSource>();
               const append = (values: ContextSource[]) => {
                 if (!Array.isArray(values)) throw new AgentError('context_source_invalid');
@@ -1699,9 +1484,6 @@ export function createDefaultProcessConfiguration(options: {
           dispose,
           snapshot: {
             ...snapshot,
-            skillWorkflow: workflow.snapshot,
-            workflowForkFence: selection?.workflowFence ?? null,
-            workflowCarrier: selection?.workflowCarrier ?? null,
             skillSelection: {
               requested: selection
                 ? (selection.skillSelection?.requested ?? null)
@@ -1711,7 +1493,6 @@ export function createDefaultProcessConfiguration(options: {
             actualCapabilities: assembly.snapshotFacts,
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
-            pathFiles: pathFiles.snapshot,
             web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null,
             task: {
               ...task.snapshot,
@@ -1720,41 +1501,7 @@ export function createDefaultProcessConfiguration(options: {
             planning: {
               intent: planningIntent,
               binding: planningBinding,
-              automaticValidation: planningOptions.automaticValidation
-                ? {
-                    ...structuredClone(planningOptions.automaticValidation),
-                    selected: {
-                      mutations: planningOptions.automaticValidation.mutations.map((mutation) => ({
-                        ...mutation,
-                        actualEffects:
-                          actual.get(key('tool', mutation.definitionId, mutation.definitionVersion))
-                            ?.effects ?? null,
-                        selected: actual.has(
-                          key('tool', mutation.definitionId, mutation.definitionVersion),
-                        ),
-                      })),
-                      checker: actual.has(
-                        key(
-                          'tool',
-                          planningOptions.automaticValidation.fileHashChecker.definitionId,
-                          planningOptions.automaticValidation.fileHashChecker.definitionVersion,
-                        ),
-                      ),
-                      autoCheck: actual.has(key('tool', 'validation.auto_check', '1')),
-                    },
-                  }
-                : null,
               requirePlan,
-              requiredValidation: planningOptions.requiredValidation === true,
-              allowWaiver: planningOptions.allowWaiver === true,
-              requiredReceiptDefinitions: planningOptions.requiredReceiptDefinitions ?? [],
-              fileHashChecker: planningOptions.fileHashChecker
-                ? { ...planningOptions.fileHashChecker }
-                : null,
-              commandChecker: planningOptions.commandChecker
-                ? { ...planningOptions.commandChecker }
-                : null,
-              mcpCheckers: (planningOptions.mcpCheckers ?? []).map((checker) => ({ ...checker })),
               allowedExecutionModes: planningOptions.allowedExecutionModes ?? [
                 'auto',
                 'accept_edits',
@@ -1774,7 +1521,7 @@ export function createDefaultProcessConfiguration(options: {
           throw new ConfigurationPreparationCleanupError({
             originalError: error,
             cleanupError,
-            resources: { assembly, webBinding, workflow: workflowResource },
+            resources: { assembly, webBinding },
           });
         }
         throw error;
@@ -1794,63 +1541,6 @@ export function createDefaultProcessConfiguration(options: {
       );
     }
   };
-  function workflowCapabilitiesFor(assembly: Awaited<ReturnType<typeof createWorkspaceAssembly>>) {
-    const extensions = [...builtinExtensions, ...assembly.extensions];
-    const workflowCapabilities: Parameters<
-      typeof createWorkflowConfiguration
-    >[0]['capabilities'][number][] = extensions.flatMap((extension) =>
-      (extension.tools ?? [])
-        .filter((tool) => assembly.toolIds.includes(tool.id))
-        .map((tool) => {
-          const effects = builtinCapability(
-            extension.id,
-            tool.id,
-            'tool',
-            planning.extension.id,
-            tool.version,
-          ).effects;
-          return workflowCapabilityDescription({
-            kind: 'tool',
-            definitionId: tool.id,
-            definitionVersion: tool.version,
-            revision: `${extension.id}:${extension.version}:${tool.version}`,
-            extensionId: extension.id,
-            effects,
-          });
-        }),
-    );
-    const registeredJobs = extensions.flatMap((extension) => [
-      ...(extension.jobs ?? []).map((job) => ({
-        id: job.id,
-        version: job.version,
-        revision: `${extension.id}:${extension.version}:${job.version}`,
-      })),
-      ...(extension.actions ?? []).map((action) => ({
-        id: `${extension.id}/${action.id}`,
-        version: action.version,
-        revision: `${extension.id}:${extension.version}:${action.version}`,
-      })),
-    ]);
-    registeredJobs.push(
-      ...childRoles.map((role) => ({
-        id: `agent/${role.id}`,
-        version: role.version,
-        revision: `trusted-child:${role.id}:${role.version}`,
-      })),
-    );
-    workflowCapabilities.push(
-      ...registeredJobs.map((job) =>
-        workflowCapabilityDescription({
-          kind: 'job',
-          definitionId: job.id,
-          definitionVersion: job.version,
-          revision: job.revision,
-          effects: ['unknown'],
-        }),
-      ),
-    );
-    return workflowCapabilities;
-  }
   const resolveRunConfiguration: NonNullable<RuntimeOptions['resolveRunConfiguration']> = (input) =>
     resolveConfigurationBinding(input);
   const resolveRecoveryRunConfiguration: NonNullable<
@@ -1905,11 +1595,18 @@ export function createDefaultProcessConfiguration(options: {
       {
         modelId: manifest.modelId,
         skillSelection: readSkillSelection({ ...manifest, snapshot }),
+        readOnlyTask:
+          !!snapshot.planning &&
+          typeof snapshot.planning === 'object' &&
+          !Array.isArray(snapshot.planning) &&
+          !!snapshot.planning.binding &&
+          typeof snapshot.planning.binding === 'object' &&
+          !Array.isArray(snapshot.planning.binding) &&
+          snapshot.planning.binding.readOnlyTask === true,
       },
       {
         digest: snapshot.digest,
         signal: input.signal,
-        workflowSnapshot: snapshot.skillWorkflow ?? null,
         planningSnapshot: snapshot.planning ?? null,
         webSnapshot: snapshot.web ?? null,
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
@@ -1924,38 +1621,12 @@ export function createDefaultProcessConfiguration(options: {
     roles: childRoles,
     resolve: async (input, selection) => {
       try {
-        if (workflowToolIds.includes(input.parentExecution.definitionId ?? '') && !input.parentRun)
-          throw new AgentError('workflow_fork_unavailable');
-        const workflowFence =
-          input.parentRun &&
-          ['activate_skill', 'repair_skill', 'decide_skill_verification'].includes(
-            input.parentExecution.definitionId ?? '',
-          )
-            ? await workflowForkFence(
-                input.parentRun.configuration,
-                input.parentExecution,
-                selection.role,
-                {
-                  runId: input.parentRun.id,
-                  records: input.records.forExtension('builtin.skill-workflow'),
-                },
-              )
-            : undefined;
-        if (workflowFence) await assertWorkflowForkCurrent(workflowFence);
         return await resolveConfigurationBinding(
           { command: input.command, session: input.parentSession, workspace: input.workspace },
           {
             modelId: selection.modelId,
-            toolIds: workflowFence?.toolIds ?? selection.role.toolIds,
-            workflowFence,
-            workflowCarrier: workflowFence
-              ? {
-                  parentExecutionId: input.parentExecution.id,
-                  sessionId: input.parentExecution.sessionId,
-                  roleId: selection.role.id,
-                  roleVersion: selection.role.version,
-                }
-              : undefined,
+            toolIds: selection.role.toolIds,
+            readOnlyTask: selection.role.toolPolicy === 'read_only',
             parentTools: input.parentTools,
             inheritDynamicMcp: selection.inheritDynamicMcp,
             mcpParent: {
@@ -1992,83 +1663,6 @@ export function createDefaultProcessConfiguration(options: {
       profile: options.profile,
       explicit: () => explicitConfiguration(explicit),
       allowedCapabilities: options.allowedToolCapabilities,
-      workflowBindings: async ({ workspaceRoot, effective, toolIds }) => {
-        task.validateSelection(toolIds);
-        mcp.select(
-          effective.mcp?.filter(
-            (server) =>
-              mcpRegistry.servers.some((registered) => registered.id === server.id) ||
-              !/^mcp-[a-f0-9]{64}$/.test(server.id),
-          ),
-          toolIds.filter((id) => !id.startsWith('mcp.')),
-        );
-        const shell = await createShellConfiguration({
-          workspaceRoot,
-          toolIds,
-          options: shellOptions,
-        });
-        const assembly = await createWorkspaceAssembly({
-          workspaceRoot,
-          profile: options.profile,
-          externallyRegisteredFileTools: files.tools,
-          externallyRegisteredExtensions: [askUser, pathFilesExtension],
-          toolIds,
-          toolConfigurations: effective.tools,
-          skills: [],
-          knownToolIds: [
-            ...(options.knownToolIds ?? []),
-            ...businessTools.keys(),
-            ...task.tools.keys(),
-            ...shellToolIds,
-            ...web.toolIds,
-            ...mcp.tools.keys(),
-            ...workflowToolIds,
-          ],
-          allowedCapabilities: options.allowedToolCapabilities,
-        });
-        const resolveBindings = () => {
-          assembly.extensions.push(...shell.extensions);
-          if (toolIds.some((id) => webTools.has(id))) assembly.extensions.push(web.extension);
-          assertSelectedToolVersions(toolIds, effective.tools, [
-            askUserTools.values(),
-            businessTools.values(),
-            fileTools.values(),
-            pathFiles.tools,
-            task.tools.values(),
-            ...assembly.extensions.map((extension) => extension.tools ?? []),
-            mcp.tools.values(),
-          ]);
-          return {
-            capabilities: workflowCapabilitiesFor(assembly),
-            forkConfigurations: childRoles.map((role) => ({
-              agent: role.id,
-              configurationId: role.id,
-              definitionVersion: role.version,
-            })),
-            shell: shellOptions,
-          };
-        };
-        let bindings: ReturnType<typeof resolveBindings> | undefined;
-        let failed = false;
-        let originalError: unknown;
-        try {
-          bindings = resolveBindings();
-        } catch (error) {
-          failed = true;
-          originalError = error;
-        }
-        try {
-          await assembly.dispose();
-        } catch (cleanupError) {
-          throw new ConfigurationPreparationCleanupError({
-            originalError,
-            cleanupError,
-            resources: { assembly },
-          });
-        }
-        if (failed) throw originalError;
-        return bindings!;
-      },
     }),
     diagnosticSource: createDefaultHostStatusSource({
       shell: shellOptions,

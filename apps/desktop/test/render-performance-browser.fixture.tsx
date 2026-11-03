@@ -99,7 +99,6 @@ const runs = (id: string) =>
     status: index === count - 1 && !settled.has(id) ? ('running' as const) : ('completed' as const),
     finishedAt: index === count - 1 && !settled.has(id) ? null : startedAt + index * 5000 + 3000,
     reason: null,
-    waitingForResults: [],
   }));
 const bridge: NativeBridge = {
   ...control.bridge,

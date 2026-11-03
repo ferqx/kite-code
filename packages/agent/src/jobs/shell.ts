@@ -29,11 +29,11 @@ import {
 } from './shell-process-evidence';
 
 export type { MacosHostPaths } from './host-preparation';
-
 export {
   decodeLinuxShellProcessEvidence,
   type LinuxShellProcessEvidence,
 } from './linux-shell-process-evidence';
+export { ripgrepAsset, withBundledRipgrep } from './ripgrep';
 export {
   decodeMacosShellProcessEvidence,
   decodeShellProcessEvidence,
@@ -41,6 +41,8 @@ export {
   type ShellProcessEvidence,
   shellProcessEvidenceEnded,
 } from './shell-process-evidence';
+export { stageWindowsGitBash } from './windows-git-bash';
+export { createWindowsShellJob, windowsShellAssets } from './windows-shell';
 
 export interface ShellJobOptions {
   readonly cwd: string;

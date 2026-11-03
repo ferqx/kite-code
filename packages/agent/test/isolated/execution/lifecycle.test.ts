@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { JobDefinition, JobEvent, ToolDefinition } from '../../../src/extensions';
+import { JobStartError } from '../../../src/extensions';
 import { createWorkspaceSerialLocks } from '../../../src/resources';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage';
@@ -538,13 +539,18 @@ test('failed terminal binding disposal keeps cleanup busy and retains Store on s
   }
 });
 
-async function backgroundFixture(unconfirmed: boolean, failDisposal = false) {
+async function backgroundFixture(
+  unconfirmed: boolean,
+  failDisposal = false,
+  failAdmission: boolean | 'not_dispatched' = false,
+) {
   const started = gate(),
     settled = gate(),
     bindingDisposed = gate();
   let cancels = 0,
     disposals = 0,
     bindingDisposals = 0;
+  const originalHandle = { reference: { original: true } };
   const job: JobDefinition = {
     id: 'fixture.job',
     version: '1',
@@ -553,22 +559,28 @@ async function backgroundFixture(unconfirmed: boolean, failDisposal = false) {
     resources: { slot: 'process' },
     async start() {
       started.release();
-      return { reference: { original: true } };
+      if (failAdmission === 'not_dispatched')
+        throw new JobStartError(undefined, 'shell_asset_changed');
+      if (failAdmission) throw new JobStartError(originalHandle);
+      return originalHandle;
     },
-    async *observe(): AsyncIterable<JobEvent> {
+    async *observe(handle): AsyncIterable<JobEvent> {
+      expect(handle).toBe(originalHandle);
       await settled.promise;
       yield {
         type: 'terminal',
-        result: { outcome: 'succeeded', content: 'done' },
+        result: { outcome: failAdmission ? 'failed' : 'succeeded', content: 'done' },
         supervision: unconfirmed ? 'unknown' : 'ended',
       };
     },
-    async cancel() {
+    async cancel(handle) {
+      expect(handle).toBe(originalHandle);
       cancels++;
       settled.release();
       return { status: unconfirmed ? 'unknown' : 'stopped' };
     },
-    async dispose() {
+    async dispose(handle) {
+      expect(handle).toBe(originalHandle);
       disposals++;
       if (failDisposal) throw new Error('retained original Job handle');
     },
@@ -613,6 +625,64 @@ async function backgroundFixture(unconfirmed: boolean, failDisposal = false) {
     bindingDisposals: () => bindingDisposals,
   };
 }
+
+test('known pre-dispatch failure releases permits and binding without inventing an unconfirmed process', async () => {
+  const f = await backgroundFixture(false, false, 'not_dispatched');
+  try {
+    await f.submit('rejected-admission');
+    await f.runtime.waitForCommand('rejected-admission');
+    const execution = (await f.original.listExecutions(f.sessionId)).find(
+      (entry) => entry.definitionId === 'fixture.job',
+    )!;
+    expect(execution.status).toBe('failed');
+    expect(execution.result).toMatchObject({
+      content: 'shell_asset_changed',
+      details: { adapterAttempted: false },
+    });
+    expect(execution.reference).toBeNull();
+    await f.runtime.close();
+    expect(f.cancels()).toBe(0);
+    expect(f.disposals()).toBe(0);
+    expect(f.bindingDisposals()).toBe(1);
+    expect(f.storeCloses()).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const unknown of [false, true])
+  test(`failed Job admission keeps its original handle without running; cleanup unknown=${unknown}`, async () => {
+    const f = await backgroundFixture(unknown, false, true);
+    try {
+      await f.submit('failed-admission');
+      await f.runtime.waitForCommand('failed-admission');
+      const execution = (await f.original.listExecutions(f.sessionId)).find(
+        (entry) => entry.definitionId === 'fixture.job',
+      )!;
+      expect(execution.status).toBe(unknown ? 'outcome_unknown' : 'failed');
+      expect(execution.reference).toBeNull();
+      expect(f.cancels()).toBe(1);
+      if (unknown) {
+        expect(await f.runtime.close().catch((error: unknown) => error)).toMatchObject({
+          code: 'shutdown_cleanup_unconfirmed',
+        });
+        expect(f.cancels()).toBe(2);
+        expect(f.disposals()).toBe(0);
+        expect(f.bindingDisposals()).toBe(0);
+        expect(f.storeCloses()).toBe(0);
+      } else {
+        await f.runtime.close();
+        expect(f.disposals()).toBe(1);
+        expect(f.bindingDisposals()).toBe(1);
+        expect(f.storeCloses()).toBe(1);
+      }
+    } finally {
+      if (unknown) {
+        await f.original.close();
+        rmSync(f.root, { recursive: true, force: true });
+      } else await f.close();
+    }
+  });
 
 test('detached Job outlives completed parent and remains busy until its actual cancellation/disposal', async () => {
   const f = await backgroundFixture(false);

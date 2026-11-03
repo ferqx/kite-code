@@ -137,7 +137,6 @@ export const storeMethods: readonly (keyof Store)[] = [
   'reconcileSession',
   'readRecoveryToolHistory',
   'finishRun',
-  'setRunResultWait',
   'cancelCommand',
   'cancelWork',
   'getChanges',

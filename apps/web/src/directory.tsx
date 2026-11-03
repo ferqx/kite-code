@@ -51,8 +51,6 @@ export function SessionDetails({ item }: { item: DirectorySession }) {
         <dd>{activity.run ? runLabels[activity.run.status] : 'No runs'}</dd>
         <dt>Activity</dt>
         <dd>{activity.run?.isActive ? 'Active' : 'Inactive'}</dd>
-        <dt>Required results</dt>
-        <dd>{activity.run?.waitingForResults ? 'Waiting' : 'None'}</dd>
         <dt>Queued work</dt>
         <dd>{activity.queued ? 'Yes' : 'No'}</dd>
         <dt>Pending interactions</dt>

@@ -1783,7 +1783,6 @@ test('actual after-turn report admission and its active Run block scheduling unt
     extensions: [
       createTaskExtension({
         roles: [{ id: 'reader', configurationId: 'child', description: 'Harmless' }],
-        afterTurn: { enabled: true },
       }),
       {
         id: 'fixture',

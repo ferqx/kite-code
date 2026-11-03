@@ -265,7 +265,6 @@ function BackgroundPanel({
                     原父轮次 <NativeDiagnostic>{item.run.id} · </NativeDiagnostic>
                     {item.run.status}
                     {item.run.reason ? ` · ${item.run.reason}` : ''}
-                    {item.run.waitingForResults.includes(e.id) ? ' · 本轮必需任务' : ''}
                   </p>
                 )}
                 {e.childSessionId && (

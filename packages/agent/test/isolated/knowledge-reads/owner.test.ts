@@ -86,11 +86,10 @@ test('isolated actual FileHandle and fd close failures retain original bytes, er
     'privateCause',
     'projectTyped',
     'skillTyped',
-    'workflowTyped',
   ])
     expect(receipt[key]).toBe(true);
   expect(receipt.retainedText).toBe('Original instruction 中🙂');
   expect(receipt.retainedSyncText).toBe('Original instruction 中🙂');
   expect(receipt.asyncAttempts).toEqual([1, 1, 1, 1]);
-  expect(receipt.syncAttempts).toEqual([1, 1]);
+  expect(receipt.syncAttempts).toEqual([1]);
 }, 10000);

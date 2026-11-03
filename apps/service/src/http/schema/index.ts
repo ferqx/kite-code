@@ -1064,7 +1064,7 @@ export const schemas = {
     rootWorkSeq: sequence.optional(),
     status: runStatus,
     isActive: z.boolean(),
-    waitingForResults: z.array(id).optional(),
+
     configuration: json.optional(),
     createdAt: z.number(),
     finishedAt: z.number().nullable(),
@@ -1432,6 +1432,16 @@ export const ResumeJobReportResponseSchema = schemas.Command.extend({
     z.strictObject({
       reportCommandId: id,
       runId: z.null(),
+      outcome: z.literal('report_deferred'),
+      reason: z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[a-z0-9_]+$/),
+    }),
+    z.strictObject({
+      reportCommandId: id,
+      runId: z.null(),
       outcome: z.literal('report_suppressed'),
       reason: z
         .string()
@@ -1658,9 +1668,7 @@ export const WorkspaceDirectoryPageSchema = z.object({
 export const SessionDirectoryActivitySchema = z.object({
   updatedAt: z.number().int().min(0).max(8640000000000000).nullable(),
   executionOwner: z.enum(['held', 'unheld', 'unknown']).optional(),
-  run: z
-    .object({ id, status: runStatus, isActive: z.boolean(), waitingForResults: z.boolean() })
-    .nullable(),
+  run: z.object({ id, status: runStatus, isActive: z.boolean() }).nullable(),
   queued: z.boolean(),
   pendingInteractions: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
 });
@@ -1696,7 +1704,7 @@ const backgroundRun = z.strictObject({
   rootWorkCommandId: id,
   rootWorkSeq: sequence,
   contextSelectionId: id,
-  waitingForResults: z.array(id),
+
   status: runStatus,
   isActive: z.boolean(),
   createdAt: z.number(),

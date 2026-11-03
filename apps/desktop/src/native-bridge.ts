@@ -388,6 +388,7 @@ export type NativeRecoverySubmission = NativeRecoveryFacts & {
     | 'resumed'
     | 'interrupted'
     | 'suppressed'
+    | 'deferred'
     | 'failed'
     | 'outcome_unknown';
   command?: Command;

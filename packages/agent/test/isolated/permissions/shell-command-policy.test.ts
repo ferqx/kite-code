@@ -13,7 +13,63 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createShellCommandPolicy } from '@kite-ai/agent/permissions/shell';
+import { withBundledRipgrep } from '@kite-ai/agent/jobs/shell';
+import { createShellCommandPolicy, readOnlySearchCommand } from '@kite-ai/agent/permissions/shell';
+
+test('literal search uses bundled rg through Bash with quoted arguments and no ambient rg configuration', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-search-')));
+  const shell =
+    process.platform === 'win32'
+      ? realpathSync.native(join(dirname(dirname(Bun.which('git')!)), 'usr/bin/bash.exe'))
+      : '/bin/bash';
+  try {
+    const directory = join(root, '目录 space');
+    mkdirSync(directory);
+    const needle = "needle'; printf unexpected > marker; #";
+    writeFileSync(join(directory, '条目.txt'), `${needle}\n`);
+    const configuration = join(root, 'rg-config');
+    writeFileSync(configuration, '--glob=*.unmatchable\n');
+    const policy = await createShellCommandPolicy({ cwd: root, shellExecutable: shell });
+    const classified = await policy.classify(`rg -n -F "${needle}" "目录 space/条目.txt"`);
+    const command = readOnlySearchCommand(classified.plainCommands, shell);
+    expect(classified.hardDenied).toBeNull();
+    expect(command).toBeDefined();
+    const { env } = withBundledRipgrep({
+      SystemRoot: process.env.SystemRoot ?? '',
+      PATH: '',
+      RIPGREP_CONFIG_PATH: configuration,
+    });
+    const child = Bun.spawn([shell, '--noprofile', '--norc', '-c', command!], {
+      cwd: root,
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [exit, output, error] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(exit, error).toBe(0);
+    expect(output).toBe(`1:${needle}\n`);
+    expect(() => readFileSync(join(root, 'marker'))).toThrow();
+    for (const candidate of [
+      'rg --pre=helper pattern .',
+      'rg --pr helper pattern .',
+      'rg --hostname-b helper pattern .',
+      'rg --hostna helper pattern .',
+      'rg pattern . > output',
+      'rg pattern . | cat',
+      'env rg pattern .',
+      'rg "$(printf pattern)" .',
+    ]) {
+      const parsed = await policy.classify(candidate);
+      expect(readOnlySearchCommand(parsed.plainCommands, shell), candidate).toBeUndefined();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('loads the real packaged Bash WASM and accepts only literal argv sequences', async () => {
   const policy = await createShellCommandPolicy({

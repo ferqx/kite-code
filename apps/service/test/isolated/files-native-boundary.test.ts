@@ -16,13 +16,13 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { filesNativeAssets } from '@kite-ai/agent/files';
 import { mcpSchemaWorkerAssets } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { workflowCompilerAssets } from '@kite-ai/agent/skill-workflow';
+import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
-test('actual default Service keeps native and compiler assets protected in Full while an ordinary external file remains readable', async () => {
+test('actual default Service keeps native and compiler assets protected in Full while unified read_file reads external user text', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-files-native-service-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -32,7 +32,7 @@ test('actual default Service keeps native and compiler assets protected in Full 
   const metadata = join(assets[1]!, 'manifest.json');
   const deniedNew = join(assets[1]!, `qualification-denied-${process.pid}.txt`);
   const original = readFileSync(metadata);
-  const compilerAssets = [mcpSchemaWorkerAssets(), workflowCompilerAssets()].flatMap((assets) => [
+  const compilerAssets = [mcpSchemaWorkerAssets()].flatMap((assets) => [
     assets.worker,
     assets.checksum,
   ]);
@@ -49,7 +49,7 @@ test('actual default Service keeps native and compiler assets protected in Full 
         tools: { function: { name: string; description: string } }[];
       };
       const find = (operation: string) =>
-        input.tools.find((tool) => tool.function.name === `${operation}_user_file`)!.function.name;
+        input.tools.find((tool) => tool.function.name === `${operation}_file`)!.function.name;
       const calls = [
         [find('read'), { path: ordinary }],
         [find('read'), { path: metadata }],
@@ -99,9 +99,9 @@ test('actual default Service keeps native and compiler assets protected in Full 
           baseURL: `http://127.0.0.1:${provider.port}/v1`,
         },
       ],
-      tools: ['files.read_path', 'files.write_path'].map((id) => ({
+      tools: ['files.read', 'files.write'].map((id) => ({
         id,
-        definitionVersion: id === 'files.read_path' ? '2' : '1',
+        definitionVersion: id === 'files.read' ? '5' : '3',
       })),
     }),
   );
@@ -125,7 +125,15 @@ test('actual default Service keeps native and compiler assets protected in Full 
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const artifacts = createArtifactStore({ profile, store });
-  const runtime = createRuntime({ ...host, permissions: host.permissions!, store, artifacts });
+  const workspaceSerialLocks = createWorkspaceSerialLocks(profile);
+  host.bindWorkspaceSerialLocks?.(workspaceSerialLocks);
+  const runtime = createRuntime({
+    ...host,
+    permissions: host.permissions!,
+    store,
+    artifacts,
+    workspaceSerialLocks,
+  });
   host.permissionManagement?.(runtime);
   try {
     const expectedStoreId = (await store.getMetadata()).storeId;
@@ -172,6 +180,13 @@ test('actual default Service keeps native and compiler assets protected in Full 
     );
     for (const tool of tools.slice(1)) {
       expect(tool.status).toBe('failed');
+      if (tool.definitionId === 'files.write') {
+        expect(tool.result).toMatchObject({
+          outcome: 'failed',
+          details: { code: 'file_path_invalid' },
+        });
+        continue;
+      }
       expect(tool.result).toMatchObject({
         content: 'permission_denied',
         details: {
@@ -189,6 +204,7 @@ test('actual default Service keeps native and compiler assets protected in Full 
     expect(modelCalls).toBe(2);
   } finally {
     await runtime.close();
+    await workspaceSerialLocks.close();
     await artifacts.close();
     await store.close();
     provider.stop(true);

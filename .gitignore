@@ -56,6 +56,8 @@ bun.lock
 # Rust native runner build artifacts
 native/windows-sandbox-runner/target/
 native/windows-sandbox-runner/target-*/
+native/windows-msys-compat/target/
+native/windows-msys-compat/target-*/
 release/windows-shell-runner/
 packages/agent/native/files/target/
 packages/agent/src/native/files/

@@ -59,8 +59,8 @@ const view = (id: string, executions: Execution[]): SessionView => ({
 test('ordinary main screen compresses actual concurrent child cards in a short terminal and keeps their current summary visible', async () => {
   const calls = Array.from({ length: 4 }, (_, i) => ({
     id: `call-${i}`,
-    name: 'task',
-    arguments: JSON.stringify({ role: 'explore', input: `child-${i}` }),
+    name: 'task.spawn',
+    arguments: JSON.stringify({ preset: 'explore', prompt: `child-${i}` }),
   }));
   const model = execution('model', {
     kind: 'model',
@@ -69,10 +69,10 @@ test('ordinary main screen compresses actual concurrent child cards in a short t
   });
   const parents = calls.map((call, i) =>
     execution(`task-${i}`, {
-      definitionId: 'builtin.task/task',
+      definitionId: 'builtin.task/task.spawn',
       parentExecutionId: 'model',
       toolCallId: call.id,
-      toolInput: { role: 'explore', input: `child-${i}` },
+      toolInput: { preset: 'explore', prompt: `child-${i}` },
       status: 'running',
       result: null,
     }),

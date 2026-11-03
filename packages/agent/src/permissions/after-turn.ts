@@ -49,9 +49,7 @@ export function createDefaultAfterTurnPolicy(options: {
           'job.report.continue',
         ].includes(command.kind) ||
         execution.kind !== 'tool' ||
-        !['task', 'followup_task', 'task.spawn', 'task.follow_up'].includes(
-          execution.definitionId,
-        ) ||
+        !['task.spawn', 'task.follow_up'].includes(execution.definitionId) ||
         execution.definitionVersion !== '1' ||
         command.sessionId !== session.id ||
         run.sessionId !== session.id ||
@@ -80,12 +78,7 @@ export function createDefaultAfterTurnPolicy(options: {
         typeof snapshot !== 'object' ||
         Array.isArray(snapshot) ||
         snapshot.roleId !== configuration.id ||
-        snapshot.roleVersion !== configuration.version ||
-        (execution.definitionId === 'task' &&
-          (!execution.input ||
-            typeof execution.input !== 'object' ||
-            Array.isArray(execution.input) ||
-            execution.input.role !== configuration.id))
+        snapshot.roleVersion !== configuration.version
       )
         return denied;
       const current = await readCurrent(input);

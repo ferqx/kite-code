@@ -10,7 +10,6 @@ import {
   useInkI18n,
   useTuiPresentation,
 } from './presentation';
-import { manualWorkflow } from './skills';
 
 type SkillEntry = SkillCataloguePage['entries'][number];
 /** Full metadata is reachable page by page; list previews never replace the original facts. */
@@ -27,17 +26,6 @@ export function skillDetails(
     `${t('Required capabilities:')} ${entry.requiredCapabilities.join(', ') || 'none'}`,
     `${t('Missing capabilities:')} ${entry.missingCapabilities.join(', ') || 'none'}`,
     `${t('Description:')} ${entry.description ?? 'unavailable'}`,
-    ...(entry.workflow
-      ? [
-          `${t('Workflow:')} ${entry.workflow.state} · ${entry.workflow.reason ?? 'none'}`,
-          ...(testDiagnostics
-            ? [
-                `${t('Manual:')} ${entry.workflow.manualAllowed} · ${t('Input {}:')} ${entry.workflow.emptyInputValid}`,
-                `${t('Workflow version:')} ${entry.workflow.revision ?? 'unavailable'}`,
-              ]
-            : []),
-        ]
-      : []),
   ].join('\n');
   // At most 32 code points also fit 80 columns when every displayed point is wide.
   const lines = terminalText(text)
@@ -106,19 +94,7 @@ export function TuiSkillsPanel({ controller }: { controller: TuiController }) {
         />
       }
     >
-      <Text>
-        {t(
-          facts?.entries.some((value) => value.workflow)
-            ? 'Read only · Use /name [task] in the composer'
-            : 'Read only · Workflow activation is not available here',
-        )}
-      </Text>
-      {entry?.workflow?.name &&
-        facts &&
-        snapshot?.read === 'verified' &&
-        manualWorkflow(facts, entry.workflow.name) && (
-          <Text>{`/${entry.workflow.name} [task]`}</Text>
-        )}
+      <Text>{t('Read only · Skill knowledge')}</Text>
       <Text>{t('Discovery does not grant tool permissions')}</Text>
       {testDiagnostics && (
         <Text>

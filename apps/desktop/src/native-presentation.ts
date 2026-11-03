@@ -13,8 +13,6 @@ function desktopSessionSummary(
     const { run, queued, pendingInteractions, updatedAt } = session.activity;
     const unconfirmed =
       session.activity.executionOwner === 'unheld' || session.activity.executionOwner === 'unknown';
-    const waiting =
-      !unconfirmed && run?.isActive && run.status === 'waiting_execution' && run.waitingForResults;
     return {
       sessionId: session.id,
       displayName: session.title || '新对话',
@@ -23,10 +21,10 @@ function desktopSessionSummary(
         : unconfirmed
           ? '执行状态待核实'
           : run?.isActive
-            ? run.status === 'waiting_interaction' || waiting
+            ? run.status === 'waiting_interaction'
               ? 'waiting'
               : run.status === 'waiting_execution'
-                ? '等待执行结果'
+                ? 'waiting_execution'
                 : run.status === 'cancelling'
                   ? '正在停止'
                   : run.status
@@ -35,9 +33,6 @@ function desktopSessionSummary(
               : (run?.status ?? 'idle'),
       ...(updatedAt !== null ? { updatedAt: new Date(updatedAt).toISOString() } : {}),
       ...(!directory.unavailable && !unconfirmed ? { pendingInteractions } : {}),
-      ...(!directory.unavailable && waiting
-        ? { waitingReason: 'required_background' as const }
-        : {}),
     };
   }
   const observed = selection?.storeId === directory.storeId && selection.session.id === session.id;
@@ -52,7 +47,7 @@ function desktopSessionSummary(
         : active?.status === 'waiting_interaction'
           ? 'waiting'
           : active?.status === 'waiting_execution'
-            ? '等待执行结果'
+            ? 'waiting_execution'
             : active?.status === 'cancelling'
               ? '正在停止'
               : (active?.status ?? 'idle'),
@@ -109,8 +104,7 @@ function sameSessionSummary(left: SessionSummary | undefined, right: SessionSumm
       left.displayName === right.displayName &&
       left.status === right.status &&
       left.updatedAt === right.updatedAt &&
-      left.pendingInteractions === right.pendingInteractions &&
-      left.waitingReason === right.waitingReason)
+      left.pendingInteractions === right.pendingInteractions)
   );
 }
 

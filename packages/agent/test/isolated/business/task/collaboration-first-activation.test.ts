@@ -90,10 +90,7 @@ async function exerciseFirstActivation(scenario: Scenario) {
   const storedRow = (id: string, table: 'command' | 'execution' = 'command') => {
     const database = new Database(join(root, 'data', 'test', 'core.db'), { readonly: true });
     try {
-      return database.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id) as Record<
-        string,
-        unknown
-      >;
+      return database.query(`SELECT * FROM ${table} WHERE id=?`).get(id) as Record<string, unknown>;
     } finally {
       database.close();
     }

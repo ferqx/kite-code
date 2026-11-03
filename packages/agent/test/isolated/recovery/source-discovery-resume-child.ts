@@ -55,9 +55,9 @@ export function discoveryBinding(directory: string) {
         }
         for (const [id, name, path] of [
           ['package', 'read_file', 'package.json'],
-          ['apps', 'list_directory', 'apps'],
-          ['packages', 'list_directory', 'packages'],
-          ['docs', 'list_directory', 'docs'],
+          ['apps', 'read_file', 'apps/app-evidence.txt'],
+          ['packages', 'read_file', 'packages/package-evidence.txt'],
+          ['docs', 'read_file', 'docs/AGENTS.md'],
         ])
           yield { type: 'tool_call', id: id!, name: name!, arguments: JSON.stringify({ path }) };
         yield { ...finish, type: 'finish', reason: 'tool_calls' };

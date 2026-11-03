@@ -1,5 +1,7 @@
-import { chmodSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { ripgrepAsset } from './ripgrep';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'platform/process');
 mkdirSync(destination, { recursive: true });
@@ -10,6 +12,53 @@ const result = await Bun.build({
   naming: 'shell-supervisor.js',
 });
 if (!result.success) throw new Error('shell_supervisor_build_failed');
+// Install real executables in the package's immutable tool directory.
+const searchDirectory = resolve(destination, 'tools');
+mkdirSync(searchDirectory, { recursive: true });
+const sourceRg = ripgrepAsset();
+copyFileSync(sourceRg, join(searchDirectory, basename(sourceRg)));
+copyFileSync(
+  join(dirname(dirname(sourceRg)), 'LICENSE'),
+  join(searchDirectory, 'LICENSE.vscode-ripgrep'),
+);
+for (const name of ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt'])
+  copyFileSync(resolve(import.meta.dir, 'ripgrep-licenses', name), join(searchDirectory, name));
+writeFileSync(
+  join(searchDirectory, 'manifest.json'),
+  `${JSON.stringify({ platform: process.platform, arch: process.arch, rg: { version: '15.0.0', package: '@vscode/ripgrep', packageVersion: '1.18.0', sha256: createHash('sha256').update(readFileSync(sourceRg)).digest('hex') } }, null, 2)}\n`,
+);
+
+if (process.platform === 'win32') {
+  if (process.arch !== 'x64') throw Error('windows_shell_arch_unsupported');
+  const root = resolve(import.meta.dir, '../../../..');
+  const compiled = Bun.spawnSync(
+    [process.execPath, 'run', resolve(root, 'scripts/release/build-windows-runner.ts')],
+    { cwd: root, stdout: 'inherit', stderr: 'inherit' },
+  );
+  if (compiled.exitCode !== 0) throw Error('windows_shell_runner_build_failed');
+  const output = resolve(destination, 'windows-shell');
+  mkdirSync(output, { recursive: true });
+  const files: Record<string, string> = {};
+  for (const [name, source] of [
+    [
+      'kite-windows-runner.exe',
+      resolve(root, 'native/windows-sandbox-runner/target/release/kite-windows-runner.exe'),
+    ],
+    ['coreutils.exe', resolve(root, 'vendor/isksh/coreutils.exe')],
+    ['ktipc.dll', resolve(root, 'native/windows-msys-compat/target/release/ktipc.dll')],
+  ] as const) {
+    copyFileSync(source, resolve(output, name));
+    files[name] = createHash('sha256').update(readFileSync(source)).digest('hex');
+  }
+  copyFileSync(
+    resolve(root, 'vendor/isksh/LICENSE.coreutils'),
+    resolve(output, 'LICENSE.coreutils'),
+  );
+  writeFileSync(
+    resolve(output, 'manifest.json'),
+    `${JSON.stringify({ protocol: 6, runtime: 'git-bash-restricted-token', files }, null, 2)}\n`,
+  );
+}
 
 // This is a build-time dependency. Installed Jobs use this exact sealed ELF,
 // never a compiler or a source fallback on the user's machine.

@@ -22,8 +22,6 @@ export type AgentInput = { key: string; contextSelectionId: string; content: str
   | {
       mode: 'follow_up';
       afterRunId: string;
-      resultRequirement?: import('../../storage/types').ResultRequirementDeclaration;
-      continuation?: { kind: 'after_turn' };
     }
 );
 export interface AgentOperations extends Operations {

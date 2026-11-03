@@ -1886,7 +1886,6 @@ export class AgentClient {
     const { signal, ...input } = options;
     const frozen = structuredClone(input);
     validateRequest('SkillCatalogueQuery', frozen);
-    if (frozen.workflow) this.requireCapability('skill_workflow_catalogue');
     validateRequest('HostStatusQuery', { workspaceId });
     if (frozen.afterId && !frozen.revision) throw new ClientError('invalid_skill_catalogue_query');
     if (this.lastServer!.storeId !== frozen.storeId)

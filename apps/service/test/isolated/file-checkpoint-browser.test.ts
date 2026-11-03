@@ -249,7 +249,6 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
         'list_agents',
         'list_directory',
         'read_file',
-        'read_user_file',
         'search_content',
         'send_agent_message',
         'spawn_agent',

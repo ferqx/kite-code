@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as promises from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 process.once('SIGTERM', () => process.exit(143));
 process.stdin.setEncoding('utf8');
@@ -40,7 +41,8 @@ const realFs = { ...fs };
 const realPromises = { ...promises };
 const workspaceRoot = join(root, 'workspace');
 const skillRoot = join(workspaceRoot, 'original');
-realFs.mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+privateDirectory(root);
+privateDirectory(profile.profilePath);
 realFs.mkdirSync(skillRoot, { recursive: true, mode: 0o700 });
 const target = join(skillRoot, 'SKILL.md');
 const manifest = {
@@ -63,8 +65,7 @@ realFs.writeFileSync(target, fileBody, { mode: 0o600 });
 let attempts = 0,
   opens = 0,
   modelCalls = 0,
-  loadActive = 0,
-  workflowCompileActive = 0;
+  loadActive = 0;
 let retainedHandle: promises.FileHandle | undefined;
 let retainedDescriptor: number | undefined;
 let closeEntered!: () => void;
@@ -89,10 +90,7 @@ mock.module('node:fs/promises', () => ({
     const handle = await realPromises.open(...args);
     if (String(args[0]) === target) {
       opens++;
-      if (
-        !retainedHandle &&
-        (mode === 'manual' ? workflowCompileActive > 0 : mode !== 'tool' || loadActive)
-      ) {
+      if (!retainedHandle && (mode !== 'tool' || loadActive)) {
         retainedHandle = handle;
         handle.close = async () => {
           attempts++;
@@ -124,28 +122,6 @@ mock.module('node:fs', () => ({
     return realFs.closeSync(descriptor);
   },
 }));
-if (mode === 'manual') {
-  const workflow = {
-    ...((await load(
-      'packages/agent/src/business/skill-workflow/index.ts',
-    )) as typeof import('@kite-ai/agent/skill-workflow')),
-  };
-  mock.module('@kite-ai/agent/skill-workflow', () => ({
-    ...workflow,
-    async compileSkillWorkflowAsync(
-      ...args: Parameters<typeof workflow.compileSkillWorkflowAsync>
-    ) {
-      // The normal catalogue metadata/load reads must finish before the fault.
-      // Reject only the real Workflow compiler's acquired target FileHandle close.
-      workflowCompileActive++;
-      try {
-        return await workflow.compileSkillWorkflowAsync(...args);
-      } finally {
-        workflowCompileActive--;
-      }
-    },
-  }));
-}
 if (mode === 'tool') {
   const skills = {
     ...((await load(
@@ -401,7 +377,6 @@ try {
   } else {
     const request = client.listSkills('w', {
       storeId: expectedStoreId,
-      ...(mode === 'manual' ? { workflow: 'manual' as const } : {}),
     });
     void request.catch(() => {});
     if (mode === 'late') {
@@ -426,7 +401,6 @@ try {
       secondRead = await settle(
         client.listSkills('w', {
           storeId: expectedStoreId,
-          ...(mode === 'ordinary' ? { workflow: 'manual' as const } : {}),
         }),
       );
   }

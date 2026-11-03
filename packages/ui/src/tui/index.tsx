@@ -95,7 +95,6 @@ import {
 import { TuiRecoveryPanel } from './recovery-panel';
 import { TuiResult } from './result';
 import { TuiSessionChooser } from './session-chooser';
-import { manualWorkflow } from './skills';
 import { TuiSkillsPanel } from './skills-panel';
 import { TuiStatusPanel } from './status-panel';
 import { type SubagentLayout, subagentLayouts } from './subagent-layout';
@@ -1450,28 +1449,12 @@ function TuiSessionView({
     composer = new ComposerBuffer();
     composers.current.set(composerScope, composer);
   }
-  const skillCommands =
-    state.skills?.read === 'verified' && state.skills.facts
-      ? state.skills.facts.entries.flatMap((entry) =>
-          entry.workflow?.name && manualWorkflow(state.skills!.facts!, entry.workflow.name)
-            ? [`/${entry.workflow.name}`]
-            : [],
-        )
-      : [];
   composer.commands = [
     ...fixedTuiCommands,
     ...(state.draft.trim().length > 1 ? additionalTuiCommands : []),
-    ...skillCommands,
     ...[...(state.mcpPromptCommands?.keys() ?? [])].map((name) => `/${name}`),
   ];
   composer.commandDescriptions = Object.fromEntries([
-    ...(state.skills?.read === 'verified'
-      ? (state.skills.facts?.entries.flatMap((entry) =>
-          entry.workflow?.name && skillCommands.includes(`/${entry.workflow.name}`)
-            ? [[`/${entry.workflow.name}`, terminalText(entry.description ?? '')]]
-            : [],
-        ) ?? [])
-      : []),
     ...[...(state.mcpPromptCommands?.values() ?? [])].map((entry) => [
       `/${entry.command}`,
       terminalText(

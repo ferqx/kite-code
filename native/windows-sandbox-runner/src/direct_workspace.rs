@@ -619,15 +619,28 @@ fn write_ledger(path: &Path, ledger: &WorkspaceCapabilityLedger) -> Result<()> {
         file.write_all(&bytes)
             .and_then(|_| file.sync_all())
             .map_err(|source| error("restricted_token_ledger_write_failed", source.to_string()))?;
+        // Publish only after the writer is closed. Keeping a write handle open
+        // across MoveFileEx makes Windows replacement depend on sharing state.
+        drop(file);
         let source = wide_path(&temp)?;
         let destination = wide_path(path)?;
-        unsafe {
-            MoveFileExW(
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+        loop {
+            let moved = unsafe { MoveFileExW(
                 PCWSTR(source.as_ptr()),
                 PCWSTR(destination.as_ptr()),
                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-            .map_err(|source| error("restricted_token_ledger_write_failed", source.to_string()))?;
+            ) };
+            match moved {
+                Ok(()) => break,
+                Err(source) if matches!(source.code().0 as u32, 0x80070005 | 0x80070020)
+                    && std::time::Instant::now() < deadline => {
+                    // Short sharing conflicts (including file scanners) must not
+                    // turn a complete ledger update into a lost invocation.
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(source) => return Err(error("restricted_token_ledger_write_failed", source.to_string())),
+            }
         }
         Ok(())
     })();
@@ -715,6 +728,42 @@ mod tests {
         assert!(path_equal(r"\\?\C:\Work", r"C:\Work"));
         assert!(!is_child_path("C:\\Work", "C:\\Workspace"));
         assert!(!is_child_path("C:\\Work", "C:\\Work"));
+    }
+
+    #[test]
+    fn ledger_replacement_publishes_complete_bytes_and_leaves_no_temporary_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = std::env::temp_dir().join(format!("kite-ledger-replace-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("workspace.json");
+        let mut ledger = WorkspaceCapabilityLedger {
+            version: LEDGER_VERSION,
+            workspace_root: "C:\\Work".to_string(),
+            capability_sid: "S-1-15-3-1".to_string(),
+            protected_dacl_snapshots: Vec::new(),
+            protected_paths_digest: String::new(),
+            setup_complete: false,
+        };
+        for revision in 0..64 {
+            ledger.protected_paths_digest = revision.to_string();
+            write_ledger(&path, &ledger).unwrap();
+            assert_eq!(load_ledger(&path, "C:\\Work").unwrap().protected_paths_digest, revision.to_string());
+            assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        }
+        let reader = OpenOptions::new().read(true).share_mode(3).open(&path).unwrap();
+        let release = thread::spawn(move || { thread::sleep(Duration::from_millis(50)); drop(reader); });
+        ledger.protected_paths_digest = "after-sharing-conflict".to_string();
+        write_ledger(&path, &ledger).unwrap();
+        release.join().unwrap();
+        assert_eq!(load_ledger(&path, "C:\\Work").unwrap().protected_paths_digest, "after-sharing-conflict");
+        let before = fs::read(&path).unwrap();
+        let reader = OpenOptions::new().read(true).share_mode(3).open(&path).unwrap();
+        ledger.protected_paths_digest = "must-not-publish".to_string();
+        assert_eq!(write_ledger(&path, &ledger).unwrap_err().code, "restricted_token_ledger_write_failed");
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        drop(reader);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -330,12 +330,10 @@ export {
   hostReadOnlyTool,
   planningEffect,
   taskToolCapability,
-  workflowCapabilityDescription,
 } from './capabilities';
 export { createPermissionCheckContextReader } from './check-context';
 export {
   createPlanningPermissionPolicy,
   requireFileRestoreApproval,
-  requireWorkflowApproval,
 } from './constraints';
 export { intersectPermissionPolicies } from './inheritance';

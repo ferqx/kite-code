@@ -9,13 +9,18 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
+
+2026-11-02：Skill Workflow 的执行实现、工具及客户端激活入口已退役，旧 flags 和核验／补偿资格不再代表可启用的运行能力。保留的历史证据不提升其他平台或正式发布资格；普通 Skill 知识、MCP、Shell、取消／未知效果及现行安全门禁继续按各自 owner 核验。当前范围见[执行边界](unified-agent-boundary.md#skill-workflow-的执行边界)。
+
 ## 当前 V1.3 执行与发行
 
 CLI/TUI/Service 与平台/execution/release workflow 已选择新完整 Terminal/Native 闭包。macOS 默认 Shell 现选择宿主 Seatbelt/launchd resource coalition，允许 fork 并核完整 setsid/orphan 后代；Files 保准确 runtimeAssets 与原权限/read-set。非 Full/Full、私有根/祖先、网络及停止的实际范围归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)及[执行边界](execution-boundary.md)。显式 POSIX 和固定 confined 保各自合同，不能互借资格。
 
-Linux 默认 Shell、Workspace Skill verifier 与严格补偿的正式调用者已接 Bubblewrap／固定 C init／原 PID namespace 源码，build 在 Linux 生成并核对准确架构 ELF；安装机器只使用包内封存资产。Service 在装配时封存原 Bun、Shell、Bubblewrap 与 init，派发前复核原字节及实际定义 scope；缺资产或后端拒绝，不回退普通进程组。Profile Skill 的准确原目录只读投影已接 macOS／Linux 源码，macOS 正式 verifier 已迁入完整 coalition；来源读取例外、祖先与 native exec-map 保护归[Jobs owner](../../packages/agent/src/jobs/README.md#profile-skill-的准确只读来源)。真实 macOS leaf 和正式 Service 通过仅证明其列明范围。
+Linux 默认 Shell 已接 Bubblewrap／固定 C init／原 PID namespace 源码，build 在 Linux 生成并核对准确架构 ELF；安装机器只使用包内封存资产。Service 在装配时封存原 Bun、Shell、Bubblewrap 与 init，派发前复核原字节及实际定义 scope；缺资产或后端拒绝，不回退普通进程组。Profile Skill 的准确原目录只读投影已接 macOS／Linux 源码，macOS 正式 verifier 已迁入完整 coalition；来源读取例外、祖先与 native exec-map 保护归[Jobs owner](../../packages/agent/src/jobs/README.md#profile-skill-的准确只读来源)。真实 macOS leaf 和正式 Service 通过仅证明其列明范围。
 
-Linux 实现与源码/mock 范围归[Jobs owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)；[三个原生 Shell 验收场景](../../packages/agent/test/isolated/jobs/linux-native-shell.test.ts)和[正式 Workflow 整例的 Linux 分支](../../apps/service/test/isolated/skill-workflow-profile-host.test.ts)未在本机 Linux 执行，user/mount/PID namespace、seccomp、pidfd、来源 mount／Bun 加载、实际全树与权限资格均未取得。Linux 分支缺 compiler／Bubblewrap 或真实失败必须失败，不能 availability skip。它们不改变下述 formal 门禁、空 production support set 或 RSS／完整观测门禁。
+Linux 实现与源码/mock 范围归[Jobs owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)；[三个原生 Shell 验收场景](../../packages/agent/test/isolated/jobs/linux-native-shell.test.ts)和[正式 Workflow 整例的 Linux 分支](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/service/test/isolated/skill-workflow-profile-host.test.ts)未在本机 Linux 执行，user/mount/PID namespace、seccomp、pidfd、来源 mount／Bun 加载、实际全树与权限资格均未取得。Linux 分支缺 compiler／Bubblewrap 或真实失败必须失败，不能 availability skip。它们不改变下述 formal 门禁、空 production support set 或 RSS／完整观测门禁。
+
+Windows 默认 Job 已接无账户受限 Git Bash 和 Full；本机回归不解除安装及完整发布门禁，见 [Windows active](windows-shell-sandbox.md)。上述 Workflow verifier／补偿仅保历史证据，当前执行入口已退役。
 
 新[平台 probe](../../scripts/release/unified-platform-probe.ts)实际运行 Source 外的完整 candidate，核 Files、准确 SQLite、实际 PID、两个独立 SH、原 Run 及 cleanup；macOS 另核真实默认 Shell 的原 execution/output hash、全树停止和 cold 同结果/零重放。diagnostic 通过只证明列明范围；资源与跨平台仍缺资格，formal verifier 继续拒 `default_effectful_platform_not_qualified`，productionQualified/effectfulQualified 保持 false。新三 OS workflow 保 actual producer、原 head/clean-source、固定 Bun/actions 与失败上传；用户已确认 Win/Linux 验证留到重构完成后的 GitHub Actions，本机不再等待或安装这两个环境，也未 dispatch workflow。未在对应 OS 执行不取得其资格。
 
@@ -23,15 +28,15 @@ Windows private Profile/Store/config native实现与普通Workspace scope的边�
 
 Node/Electron Main 的有限独立使用权及 managed Native 加载前源码已接，见[原生owner](../../apps/desktop/native/windows-access/README.md)、[原锁提案](../../.agents/notes/proposed/architecture/2026-10-04-windows-node-owned-profile-and-artifact-leases.md)及[创建链决定](../../.agents/notes/implemented/architecture/2026-10-10-windows-managed-native-admission.md)。固定 C 前门、compiled Bun verifier、Electron Main 以两跳实际创建证书和各自完整原文件 pin 绑定准入；Main／Bun Service 各取 LockFileEx SH，继承或 DuplicateHandle 不作授权。私有UI保原Profile/UI目录和主DB HANDLE及volume/FileID，数据库关闭后再释放。缺 handoff、错误证书或原对象漂移仍在 addon／SQLite／factory／child 前拒绝，无 formal bypass；本机负例与有限控制流不证明 Windows MSVC、Electron ABI 或真实文件生命周期。Windows 维护、安装及全部正式消费者已逐项接源码，但实机资格与发布者信任仍未闭合；旧 KASD／runner／candidate 只保历史和安全经验，不作为新闭包或三平台通过依据，支持集合与安全准入没有放宽。
 
-Windows stdio MCP 同一正式 Source／connection Job／Tool caller 已接[独立原 Job 后端](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)源码和 closed v3。绝对 native executable、创建前 Job 归属、原 HANDLE／FILETIME／空树和实际关闭是其准确合同；它不提供 Shell 文件／网络隔离、不覆盖外部系统 broker 代启动，也不计为全部 Runtime 后代观测。本机 ABI mock、macOS 封装消费者及静态构建不代 Windows native资格，Windows Shell 的真实权限后端缺口和原实机／RSS／完整观测门禁继续保留。
+Windows stdio MCP 同一正式 Source／connection Job／Tool caller 已接[独立原 Job 后端](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)源码和 closed v3。绝对 native executable、创建前 Job 归属、原 HANDLE／FILETIME／空树和实际关闭是其准确合同；它不提供 Shell 文件／网络隔离、不覆盖外部系统 broker 代启动，也不计为全部 Runtime 后代观测。本机 ABI mock、macOS 封装消费者及静态构建不代 Windows native资格；Shell 后端与本机原生验证单独归 [Windows active](windows-shell-sandbox.md)，原 RSS／完整观测门禁继续保留。
 
 Linux stdio MCP 的同一正式 Source／connection Job／SDK Tool 已接[独立原 namespace 后端](../../packages/agent/src/mcp/README.md#linux-stdio-所属-namespace)与 closed v4 源码，直接执行原程序，保原 host 文件／设备／网络及完整 stdout／stdin。构建生成封存 ELF，正式资产最后 wire 复核及 unknown Profile 关闭门禁已有接线；原树 wait／ECHILD、pidfd 死亡、wrapper 实际关闭与全部 FD 证明仍须对应 Linux 原生验收。本机控制流、macOS 封装邻接与冷纯解码不计平台支持、全部 Runtime 观测或阶段退出；RSS／观测及原 formal 拒绝继续保留。
 
 [transport workflow](../../.github/workflows/runtime-transport-qualification.yml)已接入这五项强制后端案例，并与 release 共用[预装 MSVC/SDK 准备](../../scripts/release/prepare-windows-native-ci.ts)；准确 source head、固定 x64 编译器、环境字节及准备早于消费由[CI反例](../../tests/integration/scripts/unified-ci.test.ts)和[纯准备合同](../../tests/isolated/unified-agent/windows-native-ci.test.ts)核验。缺后端、编译器或 ABI 在 Windows 上失败，只有非 Windows 平台条件才跳过其原生案例。这是接线与本机负例证据，仍不宣称实际 Windows syscall、Native 启动或三平台资格。
 
-本次正式 Shell 共用三策略与独立 filesystem/network 请求语义，macOS 的 Seatbelt 已实际验证；Linux 源码接到 Bubblewrap 与 C socket/socketpair filter。平台 workflow 新增原/native Shell、共享审批/解析以及真实 `web_fetch` 准入测试，formal verifier 保留。Windows 正式 Shell backend 仍缺失，Bash AST 对 PowerShell/cmd 不取得识别资格；共享逻辑通过与平台 skip 都不能证明 native 支持。当前只在 macOS 验证，Linux/Windows 原生运行留后续 Actions，没有 dispatch，原 RSS/完整观测与阶段门禁保持。
+正式 Shell 共用三策略与独立 filesystem/network 请求语义，macOS 的 Seatbelt 已实际验证；Linux 源码接到 Bubblewrap 与 C socket/socketpair filter。平台 workflow 包含原/native Shell、共享审批/解析以及真实 `web_fetch` 准入测试，formal verifier 保留。Windows x64 的 Bun Service 已接原 V6 runner 与无账户 Git Bash，本机执行、审批及生命周期验证范围见 [Windows active](windows-shell-sandbox.md)。Bash AST 不为 PowerShell/cmd 提供识别资格，共享逻辑通过与平台 skip 不证明其他后端可用。各平台安装、RSS／完整观测和正式阶段门禁保持独立。
 
-TUI 的 Workspace 文件候选现分派到私有 POSIX FD／Windows HANDLE 只读端口；公共 scope、完整分页、实际 `.gitignore`、取消和不读候选正文保持。它不使用 Shell 执行权限，也不导出 Agent 的私有 Files I/O。[CLI owner](../../apps/cli/README.md#开发-tui-workspace-文件候选)记录实际平台范围；完整候选、目录记录和平台原生测试在 transport 中分别运行，均早于仍缺 Windows 后端的 Shell 权限例。源码与本机 POSIX 结果不改变 Windows/Linux 原生、RSS、完整观测或正式阶段门禁。
+TUI 的 Workspace 文件候选现分派到私有 POSIX FD／Windows HANDLE 只读端口；公共 scope、完整分页、实际 `.gitignore`、取消和不读候选正文保持。它不使用 Shell 执行权限，也不导出 Agent 的私有 Files I/O。[CLI owner](../../apps/cli/README.md#开发-tui-workspace-文件候选)记录实际平台范围；完整候选、目录记录和平台原生测试在 transport 中分别运行，早于 Shell 权限例。源码与本机 POSIX 结果不改变 Windows/Linux 原生、RSS、完整观测或正式阶段门禁。
 
 ## 历史实现与仍适用的安全约束
 

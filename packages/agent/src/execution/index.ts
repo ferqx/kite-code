@@ -17,6 +17,7 @@ import type {
   ToolDefinition,
   ToolResult,
 } from '../extensions';
+import { JobStartError } from '../extensions';
 import { canonicalJson, semanticDigest } from '../json';
 import { bodyReference } from '../model-body';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
@@ -1670,11 +1671,13 @@ export class UnifiedExecution {
       operations: {
         ensure: unavailable,
         get: unavailable,
+
         readAgent: unavailable,
         sendAgentInput: unavailable,
+        waitAny: unavailable,
         readOutput: unavailable,
         wait: unavailable,
-        waitAny: unavailable,
+
         cancel: unavailable,
       },
     };
@@ -1917,11 +1920,23 @@ export class UnifiedExecution {
         await cancellation;
       }
     } catch (error) {
+      if (error instanceof JobStartError) {
+        handle = error.handle;
+        if (!handle) attempted = false;
+      }
       if (handle && !supervisionEnded) {
         cancel();
         await cancellation;
       }
       let observedChildCancellation = false;
+      if (error instanceof JobStartError && handle && !observedTerminal) {
+        try {
+          await observe(true);
+          observedChildCancellation = observedTerminal;
+        } catch {
+          /* Keep the original handle when its admission result remains unknown. */
+        }
+      }
       if (
         input.resumedChild &&
         handle &&
@@ -1941,7 +1956,12 @@ export class UnifiedExecution {
       if (!observedChildCancellation)
         result = {
           outcome: attempted ? 'outcome_unknown' : scope.signal.aborted ? 'cancelled' : 'failed',
-          content: error instanceof AgentError ? error.code : 'job_failed',
+          content:
+            error instanceof AgentError
+              ? error.code
+              : error instanceof JobStartError
+                ? error.message
+                : 'job_failed',
           details: {
             adapterAttempted: attempted,
             stopConfirmation: confirmation

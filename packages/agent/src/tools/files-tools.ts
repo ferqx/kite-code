@@ -1,8 +1,8 @@
 import type { ArtifactRef, ToolContext, ToolDefinition } from '../extensions';
 import type { Json, JsonSchema } from '../storage/types';
 import { AgentError } from '../storage/types';
-import type { FileBaseline, FileSearchResult, FileSnapshot, WorkspaceFiles } from './files';
-import { formatFileReadResult, formatFileSearchResult } from './files/model-result';
+import type { FileBaseline, FileSnapshot, WorkspaceFiles } from './files';
+import { formatFileReadResult } from './files/model-result';
 
 /** Optional trusted host capture. Tokens and evidence never come from Model input. */
 export interface FileMutationCapture {
@@ -30,10 +30,6 @@ const path = {
   maxLength: 4096,
   description:
     'Path relative to the fixed workspace root, or an absolute path inside that workspace. No .. segments; paths outside the workspace are rejected.',
-};
-const directoryPath = {
-  ...path,
-  description: `${path.description} Omit path or use "." or "" for the workspace root.`,
 };
 const artifactSchema: JsonSchema = {
   type: 'object',
@@ -228,128 +224,14 @@ export function createFileTools(
         );
       },
     },
-    {
-      name: 'list',
-      required: [],
-      properties: {
-        path: directoryPath,
-        afterName: { type: 'string', maxLength: 255 },
-        limit: { type: 'integer', minimum: 1, maximum: 200 },
-      },
-      call: (i) =>
-        files.list({
-          ...(i.path === undefined ? {} : { path: string(i.path) }),
-          ...(i.afterName === undefined ? {} : { afterName: string(i.afterName) }),
-          ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
-        }),
-    },
-    {
-      name: 'glob',
-      required: ['pattern'],
-      properties: {
-        pattern: { type: 'string', minLength: 1, maxLength: 1024 },
-        path: directoryPath,
-        after: { type: 'string', maxLength: 4096 },
-        limit: { type: 'integer', minimum: 1, maximum: 200 },
-        respectIgnore: {
-          type: 'boolean',
-          default: true,
-          description:
-            'Apply .gitignore from the workspace root through the selected tree. false includes ordinarily ignored files; safety restrictions always apply.',
-        },
-      },
-      call: (i, context) =>
-        files.glob(
-          {
-            pattern: string(i.pattern),
-            respectIgnore: i.respectIgnore === undefined ? true : (i.respectIgnore as boolean),
-            ...(i.path === undefined ? {} : { path: string(i.path) }),
-            ...(i.after === undefined ? {} : { after: string(i.after) }),
-            ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
-          },
-          { signal: context.signal },
-        ),
-    },
-    {
-      name: 'search',
-      required: ['text'],
-      properties: {
-        path: {
-          ...directoryPath,
-          description: `${directoryPath.description} Search one file or a directory tree. Explicit files bypass ordinary ignore rules; directory searches inherit .gitignore from the workspace root.`,
-        },
-        text: { type: 'string', minLength: 1, maxLength: 1024 },
-        mode: {
-          enum: ['files', 'content'],
-          default: 'files',
-          description:
-            'files locates matching files without body text (limit counts files); content returns matching lines and context (limit counts matches).',
-        },
-        after: {
-          type: 'string',
-          maxLength: 32768,
-          description:
-            'Pass the returned next_cursor here as cursor, keeping mode, query, path and filters unchanged (raw JSON fallback: next).',
-        },
-        limit: { type: 'integer', minimum: 1, maximum: 200, default: 100 },
-        glob: {
-          type: 'string',
-          minLength: 1,
-          maxLength: 1024,
-          description:
-            'Filter filenames, or paths relative to the search directory when the glob contains /. **/ matches zero or more directories.',
-        },
-        contextLines: {
-          type: 'integer',
-          minimum: 0,
-          maximum: 10,
-          default: 0,
-          description:
-            'Context lines before and after each matching line, used only in mode=content.',
-        },
-        maxLineChars: {
-          type: 'integer',
-          minimum: 1,
-          maximum: 10000,
-          default: 2000,
-          description:
-            'In mode=content, preview characters per matching or context line. Truncation is explicit; use read_file for complete lines.',
-        },
-        respectIgnore: {
-          type: 'boolean',
-          default: true,
-          description:
-            'Apply .gitignore from the workspace root through the selected tree. false includes ordinarily ignored files; safety restrictions always apply.',
-        },
-      },
-      call: (i, context) =>
-        files.search(
-          {
-            text: string(i.text),
-            mode: i.mode === undefined ? 'files' : (i.mode as 'files' | 'content'),
-            ...(i.path === undefined ? {} : { path: string(i.path) }),
-            ...(i.after === undefined ? {} : { after: string(i.after) }),
-            limit: i.limit === undefined ? 100 : Number(i.limit),
-            maxLineChars: i.maxLineChars === undefined ? 2000 : Number(i.maxLineChars),
-            respectIgnore: i.respectIgnore === undefined ? true : (i.respectIgnore as boolean),
-            ...(i.glob === undefined ? {} : { glob: string(i.glob) }),
-            ...(i.contextLines === undefined ? {} : { contextLines: Number(i.contextLines) }),
-          },
-          { signal: context.signal },
-        ),
-    },
   ];
   const modelNames: Record<string, string> = {
     read: 'read_file',
     write: 'write_file',
     edit: 'edit_file',
-    list: 'list_directory',
-    glob: 'glob_files',
-    search: 'search_content',
   };
   const modelParameters: Record<string, Record<string, string>> = {
     read: { offset: 'start_line', limit: 'max_lines' },
-    search: { after: 'cursor' },
     edit: {
       find: 'old_text',
       replace: 'new_text',
@@ -363,41 +245,20 @@ export function createFileTools(
     write:
       'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; missing workspace parent directories are created through the same protected no-follow boundary. Replacing a file requires its exact complete-file baseline and existing parents. Supply exactly one of content or content_artifact. If a call fails, correct the reported cause before another attempt; repeating the same path and input does not fix it. A failure may leave newly created empty parent directories. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
     edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
-    list: 'List immediate directory entries, with name-based pagination. Defaults to the workspace root and 100 entries; limit is 1–200. Continue using the returned name cursor.',
-    glob: 'Find file paths matching a glob, including **/ for zero or more directory levels. Defaults to the workspace root and 100 paths; limit is 1–200. Respects .gitignore from the workspace root by default; respect_ignore=false includes ordinarily ignored files. Continue using the returned path cursor with the same scope, pattern and ignore option.',
-    search:
-      'Search literal text in one file or a directory tree. Defaults to mode=files, returning at most 100 matching files with their first matching line number and complete-file baseline, without body text. Use mode=content for matching line previews and optional context (default 2000 characters per line). limit counts files in files mode or matches in content mode. Continue by passing next_cursor as cursor (raw JSON fallback: next), keeping mode, query, scope and filters unchanged; truncated lines require read_file for full content. Binary and non-UTF-8 files are skipped with current-page scope diagnostics; no matches does not prove complete coverage when scope.complete is false. Directory searches inherit .gitignore from the workspace root; explicit files bypass ordinary ignore. Filtering never grants access.',
   };
   return definitions.map((d) => ({
     id: `files.${d.name}`,
     model: {
       name: modelNames[d.name]!,
       snakeCase: true,
-      ...(['read', 'search'].includes(d.name)
-        ? { resultVersion: d.name === 'read' ? '1' : '2' }
-        : {}),
+      ...(d.name === 'read' ? { resultVersion: '1' } : {}),
       ...(modelParameters[d.name] ? { parameterNames: modelParameters[d.name] } : {}),
     },
-    ...(d.name === 'read'
-      ? { formatModelResult: formatFileReadResult }
-      : d.name === 'search'
-        ? { formatModelResult: formatFileSearchResult }
-        : {}),
+    ...(d.name === 'read' ? { formatModelResult: formatFileReadResult } : {}),
     ...(capture && (d.name === 'write' || d.name === 'edit')
       ? { resources: { serial: { scope: 'workspace' as const, key: 'files.mutation' } } }
       : {}),
-    version:
-      d.name === 'read'
-        ? '4'
-        : d.name === 'search'
-          ? '5'
-          : d.name === 'glob'
-            ? '3'
-            : d.name === 'write'
-              ? '3'
-              : d.name === 'edit'
-                ? '2'
-                : '1',
+    version: d.name === 'read' ? '4' : d.name === 'write' ? '3' : '2',
     description: `${descriptions[d.name]} Paths are relative to the fixed workspace root or absolute inside it, never relative to Shell cwd.`,
     inputSchema: {
       type: 'object',
@@ -422,9 +283,7 @@ export function createFileTools(
           }
         : {}),
     },
-    ...(['read', 'list', 'glob', 'search'].includes(d.name)
-      ? { contextDiscovery: 'read_only' as const }
-      : {}),
+    ...(d.name === 'read' ? { contextDiscovery: 'read_only' as const } : {}),
     async execute(input, context) {
       if (context.signal.aborted)
         return { outcome: 'cancelled', content: 'cancelled_before_file_io' };
@@ -436,7 +295,8 @@ export function createFileTools(
             : { ...parameters, path: files.relativePath(string(parameters.path)) },
           context,
         );
-        if (['read', 'list', 'glob', 'search'].includes(d.name)) context.signal.throwIfAborted();
+        if (d.name === 'read') context.signal.throwIfAborted();
+        if (d.name === 'read') return await createFileReadResult(value as FileSnapshot, context);
         const mutationResult =
           d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot) : undefined;
         let delivery: ArtifactRef | undefined;
@@ -471,76 +331,7 @@ export function createFileTools(
                   : {}),
               }
             : value;
-        const observation = (() => {
-          if (d.name === 'read') {
-            const snapshot = value as FileSnapshot;
-            if (
-              !snapshot.baseline ||
-              typeof snapshot.baseline.hash !== 'string' ||
-              typeof snapshot.content !== 'string'
-            )
-              return undefined;
-            const selection = snapshot.selection;
-            let excerptEnd = Math.min(snapshot.content.length, 2000);
-            if (excerptEnd > 0 && /[\uD800-\uDBFF]/.test(snapshot.content[excerptEnd - 1]!))
-              excerptEnd--;
-            const excerpt = {
-              text: snapshot.content.slice(0, excerptEnd),
-              truncated: excerptEnd < snapshot.content.length,
-            };
-            const complete =
-              !selection ||
-              (selection.fromLine === 1 &&
-                selection.nextOffset === null &&
-                (selection.toLine === selection.totalLines || selection.totalLines === 0));
-            return {
-              kind: 'inspection',
-              scope: snapshot.path,
-              sources: [
-                {
-                  path: snapshot.path,
-                  version: snapshot.baseline.hash,
-                  ...(selection
-                    ? {
-                        fromLine: selection.fromLine,
-                        ...(selection.toLine === null ? {} : { toLine: selection.toLine }),
-                      }
-                    : {}),
-                },
-              ],
-              complete,
-              coverage: complete ? 'file' : 'window',
-              windowComplete: true,
-              excerpt,
-            };
-          }
-          if (d.name === 'search') {
-            const search = value as FileSearchResult;
-            if (!search.query || !search.files) return undefined;
-            return {
-              kind: 'lookup',
-              scope: search.query.path,
-              query: JSON.stringify(search.query),
-              sources: search.files.map((file) => ({
-                path: file.path,
-                version: file.baseline.hash,
-              })),
-              matchCount:
-                search.query.mode === 'files' ? search.files.length : search.matches.length,
-              matchUnit: search.query.mode === 'files' ? 'files' : 'lines',
-              complete:
-                search.query.after === null &&
-                search.next === null &&
-                search.scope?.complete !== false,
-              coverage: 'page',
-              next: search.next,
-            };
-          }
-          return undefined;
-        })();
-        const observedValue = observation
-          ? { ...(publicValue as Record<string, unknown>), observation }
-          : publicValue;
+        const observedValue = publicValue;
         const content = JSON.stringify(
           ['read', 'write', 'edit'].includes(d.name)
             ? {
@@ -552,31 +343,21 @@ export function createFileTools(
         );
         if (Buffer.byteLength(content) > 1024 * 1024) {
           if (!context.artifacts) throw new AgentError('artifact_publication_unavailable');
-          const snapshot = publicValue as {
-            path?: string;
-            content?: string;
-            baseline?: FileBaseline;
-            selection?: unknown;
-          };
-          const fileText = d.name === 'read' ? snapshot.content! : content;
+
           const reference = await context.artifacts.publish({
             key: `files.${d.name}.body`,
-            content: Buffer.from(fileText),
-            mediaType: d.name === 'read' ? 'text/plain' : 'application/json',
+            content: Buffer.from(content),
+            mediaType: 'application/json',
           });
-          const summary =
-            d.name === 'read'
-              ? { path: snapshot.path, baseline: snapshot.baseline, selection: snapshot.selection }
-              : { kind: d.name };
+
           return {
             outcome: 'succeeded',
             content: JSON.stringify({
-              ...summary,
-              ...(observation ? { observation } : {}),
+              kind: d.name,
               body: {
                 complete: true,
                 encoding: 'utf-8',
-                format: d.name === 'read' ? 'file_text' : 'json',
+                format: 'json',
                 reference,
               },
               inlineBody: false,
@@ -601,33 +382,6 @@ export function createFileTools(
             : {}),
         };
       } catch (error) {
-        const searchCode =
-          d.name === 'search' && error instanceof AgentError ? error.code : undefined;
-        const searchAdvice: Record<string, string> = {
-          ENOENT:
-            'The selected search path does not exist. Locate an existing path with glob_files or list_directory, then search it.',
-          ENOTDIR:
-            'A path component is not a directory. Verify the selected path with list_directory; search_content accepts an existing file or directory.',
-          file_not_regular:
-            'The selected search path is not a regular file or directory. Choose a real workspace path; links are not followed.',
-          file_path_protected:
-            'The selected search scope is protected. Choose an allowed workspace scope; ignore options cannot grant access.',
-          file_path_invalid:
-            'Choose a path inside the fixed workspace without parent traversal. File tools do not follow the Shell working directory.',
-          file_search_invalid:
-            'Supply nonempty literal text up to 1024 UTF-8 bytes. For filenames use glob_files; content search is not a regular expression.',
-          file_search_filter_invalid:
-            'respect_ignore must be true or false. It never overrides protected paths or link restrictions.',
-          file_glob_invalid:
-            'Use a relative filename/path glob, without parent traversal or absolute paths. This filter is not a regular expression.',
-          file_search_context_invalid: 'context_lines must be an integer from 0 to 10.',
-          file_search_preview_invalid: 'max_line_chars must be a positive integer.',
-          file_page_invalid:
-            'Use limit from 1 to 200 and copy next_cursor into cursor unchanged (raw next into after). Start a new search without cursor when changing mode, scope, query or filters.',
-          file_changed:
-            'A file changed while being read. Recheck the relevant scope before making a new search; this attempt did not provide a stable complete result.',
-        };
-        const advice = searchCode ? searchAdvice[searchCode] : undefined;
         const baselineConflict =
           (d.name === 'write' || d.name === 'edit') &&
           error instanceof AgentError &&
@@ -686,14 +440,11 @@ export function createFileTools(
               parentNotice
             : mutationNext
               ? `${mutationCode}${failedPath === undefined ? '' : ` (${JSON.stringify(failedPath)})`}: ${error instanceof Error && error.message !== mutationCode ? `${error.message} ` : ''}${mutationNext}${parentNotice}`
-              : advice
-                ? `${searchCode}: ${advice}`
-                : error instanceof Error
-                  ? error.message
-                  : String(error),
+              : error instanceof Error
+                ? error.message
+                : String(error),
           details: {
             code: error instanceof AgentError ? error.code : 'file_io_failed',
-            ...(advice ? { next_action: advice } : {}),
             ...(mutationNext ? { next_action: mutationNext } : {}),
             ...(mutationCode && failedPath !== undefined ? { path: failedPath } : {}),
           },
@@ -701,4 +452,88 @@ export function createFileTools(
       }
     },
   }));
+}
+
+/** Shared delivery for workspace snapshots and external read-only text (which has no baseline). */
+export async function createFileReadResult(
+  snapshot: Omit<FileSnapshot, 'baseline'> & { baseline?: FileBaseline },
+  context: ToolContext,
+  details?: Json,
+): Promise<import('../extensions').ToolResult> {
+  const observation = (() => {
+    if (snapshot.baseline) {
+      if (
+        !snapshot.baseline ||
+        typeof snapshot.baseline.hash !== 'string' ||
+        typeof snapshot.content !== 'string'
+      )
+        return undefined;
+      const selection = snapshot.selection;
+      let excerptEnd = Math.min(snapshot.content.length, 2000);
+      if (excerptEnd > 0 && /[\uD800-\uDBFF]/.test(snapshot.content[excerptEnd - 1]!)) excerptEnd--;
+      const excerpt = {
+        text: snapshot.content.slice(0, excerptEnd),
+        truncated: excerptEnd < snapshot.content.length,
+      };
+      const complete =
+        !selection ||
+        (selection.fromLine === 1 &&
+          selection.nextOffset === null &&
+          (selection.toLine === selection.totalLines || selection.totalLines === 0));
+      return {
+        kind: 'inspection',
+        scope: snapshot.path,
+        sources: [
+          {
+            path: snapshot.path,
+            version: snapshot.baseline.hash,
+            ...(selection
+              ? {
+                  fromLine: selection.fromLine,
+                  ...(selection.toLine === null ? {} : { toLine: selection.toLine }),
+                }
+              : {}),
+          },
+        ],
+        complete,
+        coverage: complete ? 'file' : 'window',
+        windowComplete: true,
+        excerpt,
+      };
+    }
+
+    return undefined;
+  })();
+  const metadata = {
+    path: snapshot.path,
+    ...(snapshot.baseline ? { baseline: snapshot.baseline } : {}),
+    selection: snapshot.selection,
+    ...(observation ? { observation } : {}),
+  };
+  const content = JSON.stringify({
+    ...metadata,
+    content: snapshot.content,
+    executionId: context.executionId,
+    runId: context.runId,
+  });
+  if (Buffer.byteLength(content) <= 1024 * 1024)
+    return { outcome: 'succeeded', content, ...(details ? { details } : {}) };
+  if (!context.artifacts) throw new AgentError('artifact_publication_unavailable');
+  const reference = await context.artifacts.publish({
+    key: 'files.read.body',
+    content: Buffer.from(snapshot.content),
+    mediaType: 'text/plain',
+  });
+  context.signal.throwIfAborted();
+  return {
+    outcome: 'succeeded',
+    content: JSON.stringify({
+      ...metadata,
+      body: { complete: true, encoding: 'utf-8', format: 'file_text', reference },
+      inlineBody: false,
+    }),
+    artifactRefs: [reference],
+    modelContent: { kind: 'artifact', reference, encoding: 'utf-8' },
+    ...(details ? { details } : {}),
+  };
 }

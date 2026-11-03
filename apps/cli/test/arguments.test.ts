@@ -12,6 +12,14 @@ function rejected(argv: readonly string[], reason?: string) {
   expect((error as CLIArgumentError).code).toBe('invalid_cli_arguments');
   if (reason) expect((error as CLIArgumentError).reason).toBe(reason);
 }
+
+test('retired Workflow activation flags cannot create work through run or resume', () => {
+  for (const command of ['run', 'resume'])
+    rejected(
+      [command, '--task', 'ordinary work', '--activate-skill', 'old-workflow'],
+      'unknown_option',
+    );
+});
 test('run/resume preserve full task, host-selected strings and skill order without allocating thread or resolving workspace', () => {
   const argv = Object.freeze([
     '--data-root',
@@ -341,36 +349,4 @@ test('development session/context commands accept only finite generated JSON and
     ['session', 'rename', 's', '--input', JSON.stringify(input), '--model', 'hidden'],
   ])
     expect(() => parseCLIArguments(argv)).toThrow();
-});
-
-test('explicit Workflow activation is repeatable only for run/resume and independent of knowledge selection', () => {
-  for (const command of ['run', 'resume']) {
-    const args = parseCLIArguments([
-      command,
-      '--task',
-      'original task',
-      '--skill',
-      'guide',
-      '--activate-skill',
-      'Workflow Name',
-      '--activate-skill',
-      'skill:exact',
-    ]);
-    expect(args).toMatchObject({
-      kind: command,
-      task: 'original task',
-      skills: ['guide'],
-      activateSkills: ['Workflow Name', 'skill:exact'],
-    });
-  }
-  rejected(['run', '--task', 't', '--activate-skill', ''], 'missing_value');
-  rejected(['server', 'status', '--activate-skill', 'skill:x'], 'option_not_supported');
-  rejected(['trace', '/original', '--activate-skill', 'skill:x'], 'option_not_supported');
-});
-
-test('status remains readonly and cannot silently ignore explicit Workflow activation', () => {
-  rejected(
-    ['run', '--execution-status', '--activate-skill', 'Skill'],
-    'activation_not_supported_with_status',
-  );
 });

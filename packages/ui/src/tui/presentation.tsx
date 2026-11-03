@@ -597,7 +597,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Input {}:': '输入 {}：',
   'Workflow version:': 'Workflow 版本：',
   'Read only · Use /name [task] in the composer': '只读 · 在输入框使用 /name [任务]',
-  'Read only · Workflow activation is not available here': '只读 · 此处不提供 Workflow 激活',
+  'Read only · Skill knowledge': '只读 · Skill 知识',
   'Discovery does not grant tool permissions': '发现目录不授予工具权限',
   'Catalog read:': '目录读取：',
   '· Observation:': '· 持续观察：',

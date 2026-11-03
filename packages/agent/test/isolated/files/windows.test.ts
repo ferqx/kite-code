@@ -45,7 +45,25 @@ function fixture(protectedPaths: string[] = []) {
 }
 
 nativeTest(
-  'Windows six Files tools preserve complete text, baseline, pages and mutation receipts',
+  'Windows publishes and replaces single-character filenames through the original parent handle',
+  async () => {
+    const f = fixture();
+    try {
+      for (const path of ['X', '中']) {
+        const created = await f.files.write({ path, content: 'first', base: null });
+        const replaced = await f.files.write({ path, content: 'second', base: created.baseline });
+        expect(replaced.baseline.hash).toBe(hash('second'));
+        expect((await f.files.read(path)).content).toBe('second');
+        expect(readFileSync(join(f.root, path), 'utf8')).toBe('second');
+      }
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+nativeTest(
+  'Windows three Files tools and internal file queries preserve complete text, baseline, pages and mutation receipts',
   async () => {
     const f = fixture();
     try {
@@ -53,9 +71,6 @@ nativeTest(
         ['files.read', '4'],
         ['files.write', '3'],
         ['files.edit', '2'],
-        ['files.list', '1'],
-        ['files.glob', '3'],
-        ['files.search', '5'],
       ]);
       const text = '\uFEFF第一行 α\r\nsecond second\r\n末行\n';
       const first = await f.files.write({ path: 'Exact.txt', content: text, base: null });
@@ -109,7 +124,7 @@ nativeTest(
 );
 
 nativeTest(
-  'Windows ordinary Core accepts absolute workspace list/read paths and supplies the complete Artifact to the next Model',
+  'Windows ordinary Core accepts absolute workspace read paths and supplies the complete Artifact to the next Model',
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-windows-files-core-')));
     const workspace = join(root, 'workspace');
@@ -135,12 +150,6 @@ nativeTest(
       };
       const model = createFixedModel([
         [
-          {
-            type: 'tool_call',
-            id: 'list',
-            name: 'list_directory',
-            arguments: JSON.stringify({ path: workspace, limit: 50 }),
-          },
           {
             type: 'tool_call',
             id: 'read',
@@ -186,13 +195,6 @@ nativeTest(
         request: { kind: 'run.start', content: 'read the complete file' },
       });
       await runtime.waitForCommand('read');
-      const listed = (await store.listExecutions('s')).find(
-        (row) => row.definitionId === 'files.list',
-      )!;
-      expect(listed.status).toBe('succeeded');
-      expect(JSON.parse((listed.result as { content: string }).content).entries).toEqual([
-        { name: 'large.txt', kind: 'file' },
-      ]);
       const execution = (await store.listExecutions('s')).find(
         (row) => row.definitionId === 'files.read',
       )!;

@@ -56,7 +56,7 @@ function publicRun(run: Awaited<ReturnType<Store['getRun']>>): PublicRun | null 
     status: run.status,
     isActive: run.isActive,
     createdAt: run.createdAt,
-    waitingForResults: run.waitingForResults,
+
     finishedAt: run.finishedAt,
   };
 }
@@ -1195,6 +1195,7 @@ export class ExtensionHost {
         ? publicExecution(await this.options.store.getExecution(original.executionId))
         : null;
     };
+
     const readAgent = async (ref: OperationRef) => {
       if (
         ref.originStoreId !== scope.command.originStoreId ||
@@ -1507,12 +1508,17 @@ export class ExtensionHost {
         ensure: async (options) => {
           this.options.assertAcceptingWork?.();
           scope.signal.throwIfAborted();
+          if ('resultRequirement' in options) throw new AgentError('invalid_operation_options');
+          if (
+            options.continuation &&
+            (options.continuation.kind !== 'agent_completion' || options.request.kind !== 'agent')
+          )
+            throw new AgentError('invalid_operation_continuation');
           const admission = (options as { admission?: unknown }).admission;
           if (
             options.resultDelivery !== undefined &&
             (options.resultDelivery !== 'caller' ||
               options.request.kind !== 'agent' ||
-              options.resultRequirement !== undefined ||
               options.continuation !== undefined)
           )
             throw new AgentError('invalid_operation_result_delivery');
@@ -1543,28 +1549,13 @@ export class ExtensionHost {
                 request.configurationId !== options.request.configurationId ||
                 canonicalJson(request.input as Json) !== canonicalJson(options.request.input) ||
                 request.cancellation !== (options.cancellation ?? 'attached') ||
-                (request.resultDelivery ?? null) !== (options.resultDelivery ?? null) ||
-                canonicalJson((request.resultRequirement ?? null) as Json) !==
-                  canonicalJson((options.resultRequirement ?? null) as unknown as Json)
+                (request.resultDelivery ?? null) !== (options.resultDelivery ?? null)
               )
                 throw new AgentError('operation_conflict');
               return prior;
             }
           }
-          if (options.resultRequirement) {
-            const requested = options.resultRequirement;
-            if (
-              !extension.conditions ||
-              !extension.records?.some(
-                (record) =>
-                  record.contentType === requested.contentType &&
-                  record.contentVersion === requested.contentVersion,
-              )
-            )
-              throw new AgentError('result_requirement_definition_unavailable');
-            if (options.request.kind !== 'agent')
-              throw new AgentError('result_requirement_unsupported');
-          }
+
           const agent =
             options.request.kind === 'agent'
               ? await this.options.resolveAgent?.(
@@ -1596,32 +1587,22 @@ export class ExtensionHost {
               throw new AgentError('operation_definition_unavailable');
             const afterTurnAuthorization = options.continuation
               ? await (async () => {
-                  if (options.continuation?.kind === 'agent_completion') {
-                    try {
-                      return await this.options.authorizeAfterTurn?.(
-                        scope,
-                        executionId,
-                        agent!.configuration,
-                      );
-                    } catch (error) {
-                      if (
-                        !(error instanceof AgentError) ||
-                        !['after_turn_not_authorized', 'after_turn_scope_unsupported'].includes(
-                          error.code,
-                        )
+                  try {
+                    return await this.options.authorizeAfterTurn?.(
+                      scope,
+                      executionId,
+                      agent!.configuration,
+                    );
+                  } catch (error) {
+                    if (
+                      !(error instanceof AgentError) ||
+                      !['after_turn_not_authorized', 'after_turn_scope_unsupported'].includes(
+                        error.code,
                       )
-                        throw error;
-                      return undefined;
-                    }
+                    )
+                      throw error;
+                    return undefined;
                   }
-                  if (
-                    options.continuation?.kind !== 'after_turn' ||
-                    options.request.kind !== 'agent' ||
-                    !agent ||
-                    !this.options.authorizeAfterTurn
-                  )
-                    throw new AgentError('after_turn_not_authorized');
-                  return this.options.authorizeAfterTurn(scope, executionId, agent.configuration);
                 })()
               : undefined;
             const ref = await this.options.store
@@ -1638,16 +1619,7 @@ export class ExtensionHost {
                 ...(options.continuation?.kind === 'agent_completion'
                   ? { collaborationCompletion: true }
                   : {}),
-                ...(options.resultRequirement
-                  ? {
-                      resultRequirement: options.resultRequirement,
-                      resultRequirementSchema: extension.records!.find(
-                        (record) =>
-                          record.contentType === options.resultRequirement!.contentType &&
-                          record.contentVersion === options.resultRequirement!.contentVersion,
-                      )!.schema,
-                    }
-                  : {}),
+
                 cancellation: options.cancellation ?? 'attached',
                 ...(options.resultDelivery ? { resultDelivery: options.resultDelivery } : {}),
                 ...(agent ? { childConfiguration: agent.configuration } : {}),
@@ -1725,15 +1697,7 @@ export class ExtensionHost {
             if (
               Object.keys(input).some(
                 (key) =>
-                  ![
-                    'mode',
-                    'key',
-                    'afterRunId',
-                    'contextSelectionId',
-                    'content',
-                    'resultRequirement',
-                    'continuation',
-                  ].includes(key),
+                  !['mode', 'key', 'afterRunId', 'contextSelectionId', 'content'].includes(key),
               ) ||
               !/^[A-Za-z0-9_.-]{1,128}$/.test(input.key) ||
               !input.content ||
@@ -1777,9 +1741,6 @@ export class ExtensionHost {
                 request.parentExecutionId !== executionId ||
                 request.configurationId !== configurationId ||
                 canonicalJson(request.input as Json) !== canonicalJson(prepared) ||
-                canonicalJson((request.resultRequirement ?? null) as Json) !==
-                  canonicalJson((input.resultRequirement ?? null) as unknown as Json) ||
-                Boolean(request.afterTurn) !== Boolean(input.continuation) ||
                 canonicalJson(request.followUp as Json) !==
                   canonicalJson({
                     previousCommandId: ref.commandId,
@@ -1796,16 +1757,7 @@ export class ExtensionHost {
                 receipt: { ref: prior } as unknown as Json,
               };
             }
-            if (
-              input.resultRequirement &&
-              (!extension.conditions ||
-                !extension.records?.some(
-                  (record) =>
-                    record.contentType === input.resultRequirement!.contentType &&
-                    record.contentVersion === input.resultRequirement!.contentVersion,
-                ))
-            )
-              throw new AgentError('result_requirement_definition_unavailable');
+
             const agent = await this.options.resolveAgent?.(
               configurationId,
               scope,
@@ -1817,16 +1769,7 @@ export class ExtensionHost {
             try {
               if (!this.validator.compile(agent.definition.inputSchema)(prepared))
                 throw new AgentError('operation_definition_unavailable');
-              const afterTurnAuthorization = input.continuation
-                ? await (async () => {
-                    if (
-                      input.continuation?.kind !== 'after_turn' ||
-                      !this.options.authorizeAfterTurn
-                    )
-                      throw new AgentError('after_turn_not_authorized');
-                    return this.options.authorizeAfterTurn(scope, executionId, agent.configuration);
-                  })()
-                : undefined;
+
               const next = await this.options.store.ensureAgentFollowUp({
                 expectedStoreId: scope.command.originStoreId,
                 owner: scope.owner,
@@ -1838,17 +1781,7 @@ export class ExtensionHost {
                 request: { kind: 'agent', configurationId, input: prepared },
                 cancellation: 'detached',
                 childConfiguration: agent.configuration,
-                ...(afterTurnAuthorization ? { afterTurnAuthorization } : {}),
-                ...(input.resultRequirement
-                  ? {
-                      resultRequirement: input.resultRequirement,
-                      resultRequirementSchema: extension.records!.find(
-                        (record) =>
-                          record.contentType === input.resultRequirement!.contentType &&
-                          record.contentVersion === input.resultRequirement!.contentVersion,
-                      )!.schema,
-                    }
-                  : {}),
+
                 previous: ref,
                 afterRunId: input.afterRunId,
                 contextSelectionId: input.contextSelectionId,

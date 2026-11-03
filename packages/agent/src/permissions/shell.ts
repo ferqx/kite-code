@@ -1,24 +1,28 @@
 import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import { access, lstat, realpath } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { dirname, isAbsolute } from 'node:path';
 import {
   createLinuxHostShellJob,
   createMacosHostShellJob,
   createShellJob,
+  createWindowsShellJob,
+  ripgrepAsset,
 } from '@kite-ai/agent/jobs/shell';
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
+import { JobStartError } from '../extensions';
 import { AgentError } from '../storage/types';
 import { shellToolCapability as describe } from './capabilities';
 import { dispatchScopeLeaves } from './dispatch-scope';
 import type { CapabilityDescription } from './index';
 import { createShellCommandPolicy } from './shell-command-policy';
 import { shellExplorationPresentation } from './shell-presentation';
+import { readOnlySearchCommand } from './shell-search';
 
 export interface ShellConfigurationOptions {
   /** Trusted platform assembly; command input cannot choose an OS boundary. */
-  readonly platform: 'darwin' | 'linux';
+  readonly platform: 'darwin' | 'linux' | 'win32';
   readonly configurationId: string;
   readonly env: Readonly<Record<string, string>>;
   readonly supervisorPath: string;
@@ -28,6 +32,11 @@ export interface ShellConfigurationOptions {
   readonly maxQueuedBytes?: number;
   /** Linux supervisorPath is the packaged native init, plus this verified launcher. */
   readonly linux?: { readonly bubblewrapPath: string };
+  readonly windows?: {
+    readonly coreutilsPath: string;
+    readonly stateRoot: string;
+    readonly fullShellExecutable: string;
+  };
   /** Default host boundary; Linux requires it, explicit macOS legacy assembly may omit it. */
   readonly host?: {
     readonly controlBase: string;
@@ -188,24 +197,36 @@ function commandRequest(request: AuthorizationRequest, scoped: boolean) {
 type ShellAsset = Awaited<ReturnType<typeof asset>>;
 export async function inspectShellAssets(
   options: ShellConfigurationOptions,
-): Promise<
-  [ShellAsset, ShellAsset, ShellAsset] | [ShellAsset, ShellAsset, ShellAsset, ShellAsset]
-> {
+): Promise<ShellAsset[]> {
   assertShellConfiguration(options);
-  const [supervisor, bun, shell, bubblewrap] = await Promise.all([
-    asset(options.supervisorPath, options.platform === 'linux'),
-    asset(options.bunExecutable, true),
-    asset(options.shellExecutable, true),
-    options.linux ? asset(options.linux.bubblewrapPath, true) : Promise.resolve(undefined),
-  ]);
-  return bubblewrap ? [supervisor, bun, shell, bubblewrap] : [supervisor, bun, shell];
+  const paths: [string, boolean][] = [
+    [options.supervisorPath, options.platform !== 'darwin'],
+    [options.bunExecutable, true],
+    [options.shellExecutable, true],
+  ];
+  if (options.linux) paths.push([options.linux.bubblewrapPath, true]);
+  if (options.windows)
+    paths.push(
+      [options.windows.coreutilsPath, true],
+      [options.windows.fullShellExecutable, true],
+      [`${dirname(options.windows.fullShellExecutable)}/coreutils.exe`, true],
+      [`${dirname(options.shellExecutable)}/../../manifest.json`, true],
+    );
+  return Promise.all(paths.map(([path, executable]) => asset(path, executable)));
 }
 function assertShellConfiguration(options: ShellConfigurationOptions) {
   if (
     process.platform !== options.platform ||
-    !['darwin', 'linux'].includes(options.platform) ||
+    !['darwin', 'linux', 'win32'].includes(options.platform) ||
     (options.platform === 'linux' && (!options.host || !options.linux)) ||
-    (options.platform === 'darwin' && options.linux)
+    (options.platform === 'darwin' && (options.linux || options.windows)) ||
+    (options.platform === 'win32' &&
+      (!options.host ||
+        !options.windows ||
+        options.linux ||
+        process.arch !== 'x64' ||
+        !process.versions.bun)) ||
+    (options.platform !== 'win32' && options.windows)
   )
     throw new AgentError('shell_platform_unqualified');
   if (
@@ -214,7 +235,13 @@ function assertShellConfiguration(options: ShellConfigurationOptions) {
     Buffer.byteLength(JSON.stringify(options.env)) > 64 * 1024 ||
     Object.entries(options.env).some(
       ([key, value]) =>
-        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof value !== 'string' || value.length > 16384,
+        !(
+          options.platform === 'win32'
+            ? /^[A-Za-z_][A-Za-z0-9_]*(?:\(x86\))?$/
+            : /^[A-Za-z_][A-Za-z0-9_]*$/
+        ).test(key) ||
+        typeof value !== 'string' ||
+        value.length > 16384,
     )
   )
     throw new AgentError('invalid_shell_configuration');
@@ -255,13 +282,18 @@ export async function createShellConfiguration(input: {
     const cwd = await realpath(input.workspaceRoot);
     if (!(await lstat(cwd)).isDirectory()) throw new AgentError('shell_workspace_unavailable');
     const assets = await inspectShellAssets(options);
-    const [supervisor, bun, shell, bubblewrap] = assets;
+    const [supervisor, bun, shell, extra] = assets;
+    const bubblewrap = options.platform === 'linux' ? extra : undefined;
+    const coreutils = options.platform === 'win32' ? extra : undefined;
     if (!supervisor || !bun || !shell) throw new AgentError('shell_asset_unavailable');
     const commandPolicy = await createShellCommandPolicy({ cwd, shellExecutable: shell.path });
+    const searchAsset = await asset(ripgrepAsset(), true);
     const host = options.host && {
       ...options.host,
       readonlyAssets: [
         ...options.host.readonlyAssets,
+        searchAsset.path,
+        dirname(searchAsset.path),
         ...commandPolicy.assets.map((item) => item.path),
       ],
     };
@@ -278,22 +310,31 @@ export async function createShellConfiguration(input: {
         : {}),
     };
     const job =
-      options.platform === 'linux' && bubblewrap && host
-        ? createLinuxHostShellJob({
+      options.platform === 'win32' && coreutils && host
+        ? createWindowsShellJob({
             ...jobOptions,
-            ...host,
-            bubblewrapPath: bubblewrap.path,
-            filesystemScope: hostFilesystemScope,
+            controlBase: host.controlBase,
+            coreutilsPath: coreutils.path,
+            fullShellExecutable: options.windows!.fullShellExecutable,
+            stateRoot: options.windows!.stateRoot,
             executionScope: hostExecutionScope,
           })
-        : host
-          ? createMacosHostShellJob({
+        : options.platform === 'linux' && bubblewrap && host
+          ? createLinuxHostShellJob({
               ...jobOptions,
               ...host,
+              bubblewrapPath: bubblewrap.path,
               filesystemScope: hostFilesystemScope,
               executionScope: hostExecutionScope,
             })
-          : createShellJob(jobOptions);
+          : host
+            ? createMacosHostShellJob({
+                ...jobOptions,
+                ...host,
+                filesystemScope: hostFilesystemScope,
+                executionScope: hostExecutionScope,
+              })
+            : createShellJob(jobOptions);
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
       async classifyPresentation(command) {
@@ -318,27 +359,41 @@ export async function createShellConfiguration(input: {
             }
           : {}),
         async start(value, context) {
-          context.signal.throwIfAborted();
-          const actual = await Promise.all([
-            asset(supervisor.path, options.platform === 'linux'),
-            asset(bun.path, true),
-            asset(shell.path, true),
-            ...(bubblewrap ? [asset(bubblewrap.path, true)] : []),
-          ]);
-          if (actual.some((item, index) => item.digest !== assets[index]!.digest))
-            throw new AgentError('shell_asset_changed');
-          context.signal.throwIfAborted();
-          const command =
-            value && typeof value === 'object' && !Array.isArray(value) ? value.command : undefined;
-          if (typeof command !== 'string') throw new AgentError('invalid_shell_arguments');
-          const classified = await commandPolicy.classify(command);
-          if (classified.hardDenied)
-            throw new AgentError('shell_command_hard_denied', classified.hardDenied);
-          context.signal.throwIfAborted();
+          let dispatched = false;
           try {
-            return await job.start({ command }, context);
+            context.signal.throwIfAborted();
+            const actual = await Promise.all(
+              assets.map((item, index) =>
+                asset(item.path, index !== 0 || options.platform !== 'darwin'),
+              ),
+            );
+            if (actual.some((item, index) => item.digest !== assets[index]!.digest))
+              throw new AgentError('shell_asset_changed');
+            if ((await asset(searchAsset.path, true)).digest !== searchAsset.digest)
+              throw new AgentError('shell_asset_changed');
+            context.signal.throwIfAborted();
+            const command =
+              value && typeof value === 'object' && !Array.isArray(value)
+                ? value.command
+                : undefined;
+            if (typeof command !== 'string') throw new AgentError('invalid_shell_arguments');
+            const classified = await commandPolicy.classify(command);
+            context.signal.throwIfAborted();
+            const search = readOnlySearchCommand(
+              classified.plainCommands,
+              shell.path,
+              coreutils?.path,
+            );
+            dispatched = true;
+            return await job.start({ command: search ?? command }, context);
           } catch (error) {
-            if (!options.host || error instanceof AgentError) throw error;
+            if (!dispatched)
+              throw new JobStartError(
+                undefined,
+                error instanceof Error ? error.message : 'shell_preparation_failed',
+              );
+            if (!options.host || error instanceof AgentError || error instanceof JobStartError)
+              throw error;
             // Only a fixed non-secret adapter code crosses the ordinary Job
             // failure contract; private paths and native error text stay private.
             const message = error instanceof Error ? error.message : '';
@@ -355,13 +410,15 @@ export async function createShellConfiguration(input: {
         available: true,
         platform: options.platform,
         qualification:
-          options.platform === 'linux'
-            ? options.host?.protectedFiles?.length
-              ? 'linux_owned_pid_namespace_bubblewrap_private_directories'
-              : 'linux_owned_pid_namespace_bubblewrap'
-            : host
-              ? 'macos_launchd_coalition_seatbelt'
-              : 'posix_group_supervision_only',
+          options.platform === 'win32'
+            ? 'windows_unelevated_git_bash_job'
+            : options.platform === 'linux'
+              ? options.host?.protectedFiles?.length
+                ? 'linux_owned_pid_namespace_bubblewrap_private_directories'
+                : 'linux_owned_pid_namespace_bubblewrap'
+              : host
+                ? 'macos_launchd_coalition_seatbelt'
+                : 'posix_group_supervision_only',
         configurationId: options.configurationId,
         cwd,
         assets: {
@@ -369,7 +426,9 @@ export async function createShellConfiguration(input: {
           bun,
           shell,
           ...(bubblewrap ? { bubblewrap } : {}),
+          ...(coreutils ? { coreutils } : {}),
           parser: [...commandPolicy.assets],
+          ripgrep: searchAsset,
         },
         ...(options.host ? { host: options.host, scope: 'final_dispatch_authorization' } : {}),
         envKeys: Object.keys(options.env).sort(),
@@ -388,6 +447,11 @@ export async function createShellConfiguration(input: {
         if (!value) return { hardAllowed: false, denialReason: 'invalid_shell_arguments' };
         const classified = await commandPolicy.classify(value.command);
         return {
+          ...(readOnlySearchCommand(classified.plainCommands, shell.path, coreutils?.path) &&
+          value.executionScope.filesystem === 'workspace_write' &&
+          value.executionScope.network === 'none'
+            ? { safeRead: true, effects: ['read'] as const }
+            : {}),
           ...(host ? { executionScope: value.executionScope } : {}),
           hardAllowed: classified.hardDenied === null,
           ...(classified.hardDenied ? { denialReason: 'shell_command_hard_denied' } : {}),
@@ -429,3 +493,4 @@ export async function createShellConfiguration(input: {
   }
 }
 export { createShellCommandPolicy } from './shell-command-policy';
+export { readOnlySearchCommand } from './shell-search';

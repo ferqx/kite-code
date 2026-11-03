@@ -14,9 +14,9 @@
 
 2026-10-25，Windows x64／Bun1.4.3／Rust1.97.1、`3dc3a941f` 加本任务未提交改动：tool-paths、native-addon、recovery-primitives、path-files、windows、change-preview、native-packaged 七个 Files 叶共36项通过，capture 整文件21项通过。最后一次 `bun test --timeout=30000` 对 capture＋tool-paths 为27项404断言通过，对 change-preview＋path-files＋Service runtime-assets 为20项322断言通过。前者核真实版本2来源仍可恢复、版本3嵌套创建、准确失败交给下一 Model、取消、并发改绑和 unknown；后者核外部范围、快照与保护边界。
 
-默认 Service 的 files-native-boundary、file-checkpoint-default、auto-configuration、planning-configuration 和 automatic-validation-configuration 整文件均通过；其中 planning 为16项272断言。crate 的 `cargo test --locked --lib -- --test-threads=1` 为5项通过，包含实际目录已创建但取得结果未知时保留原父链且不重试。Linux GNU／macOS ARM64 的 `cargo check --locked --target ...` 通过，只证明目标编译。根、Agent 和 Service typecheck，变更 TS 的 Biome、文档结构／影响、core boundary 和公开 API 检查均已核对。
+此前默认 Service 的文件、检查点、权限与计划回归已通过（专用自动验证现已退役）；其中 planning 为16项272断言。crate 的 `cargo test --locked --lib -- --test-threads=1` 为5项通过，包含实际目录已创建但取得结果未知时保留原父链且不重试。Linux GNU／macOS ARM64 的 `cargo check --locked --target ...` 通过，只证明目标编译。根、Agent 和 Service typecheck，变更 TS 的 Biome、文档结构／影响、core boundary 和公开 API 检查均已核对。
 
-同日后续已修复此前保留的三个回归失败：[automatic-validation](../../../test/isolated/business/automatic-validation.test.ts) 的 Rewind 按当前普通输入合同核原 `run.start` Command、Run 与 Model 消息来源，并保留文件基线不变、仅一次写入及旧验证历史不重放；[per-run-planning-configuration](../../../../../apps/service/test/isolated/per-run-planning-configuration.test.ts) 的新冷恢复配置先绑定真实 Runtime，再核配置漂移在凭据／Model 读取前拒绝且 Store 游标不变；[automatic-validation-nested-tools](../../../../../apps/service/test/isolated/automatic-validation-nested-tools.test.ts) 显式持有并在 Service 收束后关闭夹具自建的 WorkspaceFiles，关闭成功才清理目录，保留原超时与失败证据规则。`bun test --timeout=30000` 对这三个完整文件同次20项196断言通过。只修正测试断言与资源归属，生产输入、恢复授权和关闭实现未改；当前 Desktop 窗口的完整过程、正式制品重建安装和其他平台运行资格仍未验收。
+同日后续已修复此前保留的三个回归失败：[automatic-validation](https://github.com/ferqx/kite-code/blob/0dc1e3b7b8a316dc9226cc4e841186cc6486d34e/packages/agent/test/isolated/business/automatic-validation.test.ts) 的 Rewind 按当前普通输入合同核原 `run.start` Command、Run 与 Model 消息来源，并保留文件基线不变、仅一次写入及旧验证历史不重放；[per-run-planning-configuration](../../../../../apps/service/test/isolated/per-run-planning-configuration.test.ts) 的新冷恢复配置先绑定真实 Runtime，再核配置漂移在凭据／Model 读取前拒绝且 Store 游标不变；[automatic-validation-nested-tools](https://github.com/ferqx/kite-code/blob/0dc1e3b7b8a316dc9226cc4e841186cc6486d34e/apps/service/test/isolated/automatic-validation-nested-tools.test.ts) 显式持有并在 Service 收束后关闭夹具自建的 WorkspaceFiles，关闭成功才清理目录，保留原超时与失败证据规则。`bun test --timeout=30000` 对这三个完整文件同次20项196断言通过。只修正测试断言与资源归属，生产输入、恢复授权和关闭实现未改；当前 Desktop 窗口的完整过程、正式制品重建安装和其他平台运行资格仍未验收。
 
 ## 会话文件与 PDF
 
@@ -48,7 +48,7 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 Windows 本机联验已覆盖附件→PDF→Artifact→后继模型 wire、输出编辑、历史快照、Fork 独立副本及备份恢复；两协议 wire 不等于真实视觉模型识别资格。测试入口为 [Service 文件／Plan 联验](../../../../../apps/service/test/isolated/planning-configuration.test.ts)、[真实 PDF Worker](../../../test/isolated/files/pdf.test.ts)与 [AI 图片协议](../../../../ai/test/input-images.test.ts)。
 
-模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file/list_directory/glob_files/search_content`，绝对用户文件为 `read_user_file/write_user_file/edit_user_file`。读取使用 `start_line/max_lines`，搜索续页使用 `cursor`（内部 `after`），编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline、权限与检查点合同保持原样。`search_content` 仍是字面量搜索，不新增正则能力。
+模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file`；外部普通文件也由 `read_file` 读取，外部修改由 Shell 处理。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline、权限与检查点合同保持原样。目录、文件查找和正文搜索使用 Shell 与内置 rg。
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
@@ -56,19 +56,19 @@ Windows 本机联验已覆盖附件→PDF→Artifact→后继模型 wire、输�
 
 异步读取保留原目录及文件 FD，恢复时核原根和取消，EOF 后再次核完整文件身份；漂移不发布旧结果。`close()` 先拒绝新读取并让在途只读退出、关闭各自 FD 后再关闭 native owner，多次 close 共用同一结果。取消和异常不关闭别的读取句柄。写入/edit 的共享读取按同步方式消费同一分块校验，不在原最后 CAS 与发布之间插入让出；字节恢复和发布后 unknown 合同不变。合作让出不能给单次慢磁盘 native read/fsync 承诺耗时上限，也不为完整正文增加文件额度。
 
-模型 `glob_files@3` 与 `search_content@5` 默认 `respect_ignore:true`，进入忽略目录前即剪枝，避免查找文件时遍历依赖、构建产物和测试缓存；`respect_ignore:false` 保留普通忽略项的明确发现路径。低层 `WorkspaceFiles.glob/search` 省略 `respectIgnore` 仍保留不使用普通 ignore 的原行为；指定 true 时均继承工作区内祖先规则，规则文件沿原生 no-follow、完整读取与取消边界。搜索游标的匹配域摘要包含本次 ignore 语义版本，旧游标不能混入新结果域。
+模型 `list_directory/glob_files/search_content` 已退役；客户端候选及独立内部调用仍可使用低层 `WorkspaceFiles.list/glob/search`。低层省略 `respectIgnore` 保留不使用普通 ignore 的原行为；指定 true 时，在进入忽略目录前剪枝，并继承工作区内祖先规则。规则文件沿原生 no-follow、完整读取与取消边界。搜索游标包含 ignore 语义版本，旧游标不能混入新结果域。
 
-## 内容搜索
+## 内部内容搜索与历史结果
 
 2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次查询 diff：同一仓库、同一原生后端的只读前后对照中，`packages/agent/**/README.md` 查找由2762ms降至289ms（均41项），`packages` 中的 `autoReview` 内容搜索由20017ms降至4809ms（均返回30条，实际检查文件由2348降至1172）；根 `AGENTS.md` 查找为1192ms，仅返回3个未忽略路径。忽略域变化意味着不承诺两种模式返回相同产物命中，`respect_ignore:false` 可明确读取原普通范围。入口与结果保留于本机 `.cache/file-query-performance.ts`／`.cache/file-query-performance.json`；这是当前本机文件查询对照，不代表所有工作区、完整客户端切换延迟或内存峰值。Files五份完整回归50项744断言通过，覆盖原生六工具、父规则继承／否定、分页、宏任务取消、目录联接拒绝与关闭边界；Windows 的链接夹具使用真实目录 junction，POSIX 保原 symlink。
 
-模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部路径工具保留自己的原回执。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
+模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。统一外部只读沿同一呈现路径，不返回编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
 
-`search_content` 当前定义版本为 5，`path` 可选择一个普通文件或目录；省略、空字符串和 `.` 选择工作区根。匹配仍为字面文本，不按文件名查找（文件名／路径查找使用 `glob_files`）。模型默认 `mode:files`，每页最多 100 个命中文件；每文件只返回一次 `path`、完整文件 `baseline`、`firstMatchLine`，不返回正文，也不宣称统计了该文件所有匹配。`stats.returnedFiles` 和 `observation.matchUnit:files` 明确单位。显式 `mode:content` 才返回匹配行及上下文，`stats.returnedMatches`、`matchUnit:lines` 表示行命中；此时默认每页 100 条、每个匹配／上下文行 2000 个 UTF-16 字符，`limit` 可设为 1–200，`max_line_chars` 为 1–10000；截断不拆代理对，返回 `truncated:true/originalLength`。用 `read_file` 的行窗口取得完整正文。底层 `WorkspaceFiles.search` 省略 mode 时保持 `content`；limit／maxLineChars 均可省略，以保留全部命中及完整长行；不把预览长度变成文件读取额度。
+内部 `WorkspaceFiles.search` 的 `path` 可选择普通文件或目录，省略、空字符串和 `.` 选择工作区根。它按字面文本匹配；文件名查找使用内部 `glob`。`mode:files` 每文件只返回一次路径、完整 baseline 与首命中行，`mode:content` 返回命中行及上下文。省略 mode 保持 `content`；`limit/maxLineChars` 可省略以保留全部命中及完整长行。这些内部参数和游标不是已退役模型工具的继续入口。
 
 `glob` 筛选文件名，包含 `/` 时匹配相对所选目录的路径；`**/` 含零层目录。显式单文件以文件名匹配。`context_lines` 为 0–10，返回具名 `before/after` 行及真实行号，上下文同样遵循明确预览限制。遍历按完整相对路径排序，目录以 `name/` 与文件共同排序；只有前瞻到下一项才产生 `next`，模型呈现为 `next_cursor` 并原样传给 `cursor`（原 JSON 回退是 `next` → 内部 `after`）。游标包含格式版本、查询／模式／范围／glob／ignore 的摘要及最后返回位置；不接受不同命中域的游标，改条件时重新开始。limit 及片段预览参数可以变化。文件模式按完整文件路径续页，内容模式按路径／行号续页，不重复返回同一文件定位项。`stats.matchedFiles` 和内容模式 `stats.matches` 只记录本页实际遇到的命中文件／匹配（可含一个前瞻），不是整个搜索总数。后页须使用相同范围、文本和过滤条件；它不是跨外部文件变化的快照。
 
-模型默认 `respect_ignore:true`。目录规则复用固定 `ignore` matcher，读取工作区根到搜索范围及范围内各级 `.gitignore`，逐级使用本级相对路径，包含注释、目录、否定及父目录排除规则；所有规则文件均经原 native 安全读取，链接规则文件不读取。显式非根目录继承工作区内祖先规则，被排除的父目录不会因更深的否定规则重新打开；显式单文件绕过普通 ignore；`respect_ignore:false` 包含普通忽略项。底层未指定该参数时保留原不使用普通 ignore 的行为。过滤不修改授权，protected／no-follow／根和文件身份检查始终有效。
+内部调用显式 `respectIgnore:true` 时使用忽略规则。目录规则复用固定 `ignore` matcher，读取工作区根到搜索范围及范围内各级 `.gitignore`，逐级使用本级相对路径，包含注释、目录、否定及父目录排除规则；所有规则文件均经原 native 安全读取，链接规则文件不读取。显式非根目录继承工作区内祖先规则，被排除的父目录不会因更深的否定规则重新打开；显式单文件绕过普通 ignore；`respectIgnore:false` 包含普通忽略项。底层未指定该参数时保留原不使用普通 ignore 的行为。过滤不修改授权，protected／no-follow／根和文件身份检查始终有效。
 
 二进制与非 UTF-8 内容分别计为 `binary/encoding` 并跳过，不再使其他文本结果丢失。普通忽略项和不跟随的链接／特殊对象也分别计为 `ignored/links`；目录忽略计一项，不宣称知道其后代文件数。有过滤、分页或跳过时，`scope.kind=current_page` 描述本次页实际遍历，返回计数与最多 20 个路径／原因样例。`scope.complete:false` 表示有未检查项或尚有结果后页，文件模式空 files 或内容模式空 matches 均不能解读为全工作区无匹配；后页诊断不累计此前页，也不宣称完整扫描未到达目录。过滤 glob 的范围由 `scope.filters` 明示。权限、根漂移、读取身份变化和其他 I/O 失败不当作二进制吞掉；失败仍沿当前 Tool 返回，常见路径／参数错误提供 `code` 和纠正信息，不获得重试或访问授权。
 
@@ -101,35 +101,24 @@ Agent／Service／Desktop typecheck、原包边界与 API／测试归属、文�
 
 六个 Workspace 模型工具接受相对路径及当前 Workspace 内的绝对路径。`WorkspaceFiles.relativePath` 只按工厂固定的根转换，`createFileTools` 在实际 IO 和检查点 capture 前调用它；Shell 改变 cwd 不改变文件工具基准。list／glob／search 省略 path、传空字符串或 `.` 均选择根目录；Windows 另接受普通盘符绝对路径和相对路径的原生反斜杠。目录穿越段在转换前拒绝，其他盘符、UNC／设备路径和 Workspace 外目标不能借转换取得访问。
 
-原 `WorkspaceFiles` IO 和字节恢复原语仍只接收相对路径，原目录对象锚定、reparse／symlink／短名、受保护路径和 baseline 检查继续生效。文件结果、变更预览与检查点 capture 使用转换后的相对路径；原模型调用、审批与执行记录保留原始参数。工具 schema 明确路径范围，绝对用户文件工具另保准确绝对目标契约，不借此扩大外部访问。设计理由见[路径分层决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-16-workspace-tool-paths.md)。
+原 `WorkspaceFiles` IO 和字节恢复原语仍只接收相对路径，原目录对象锚定、reparse／symlink／短名、受保护路径和 baseline 检查继续生效。文件结果、变更预览与检查点 capture 使用转换后的相对路径；原模型调用、审批与执行记录保留原始参数。工具 schema 明确路径范围，统一外部只读适配器另处理工作区外绝对路径，不扩大原 Workspace IO。设计理由见[路径分层决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-16-workspace-tool-paths.md)。
 
 [工具路径回归](../../../test/isolated/files/tool-paths.test.ts)实际调用全部六工具，核工作区绝对路径、目录默认、原生分隔符、准确 capture／结果及越界和保护拒绝；[真实 capture](../../../test/isolated/file-checkpoints/capture.test.ts)让同一路径的首个绝对调用和后续相对调用共用原 preimage／末 postimage。[Windows Core 用例](../../../test/isolated/files/windows.test.ts)经原 Runtime 实际列绝对工作区并读取绝对文件，将完整 Artifact 交给下一 Model。具体本机范围见下节。
 
-## 绝对用户文件
+## 统一读取工作区外文件
 
-同一公开入口的 [createPathFileTools](../path-files.ts) 新增 `files.read_path/files.write_path/files.edit_path`，read_path 定义版本2、write_path/edit_path 版本1，由正式宿主注册为 `builtin.files.path`。原 WorkspaceFiles IO 的 relative-only 路径合同不变；绝对 Tool 不是 Model 自报 root 或回退旧 filesystem authority。工厂冻结可信 `qualifiedPlatforms/protectedRoots`；保护根先逐项通过原路径校验，再按精确字符串去重、稳定排序，classifier 和快照使用同一集合边界。排列或重复不改变保护目标，真正增删目标仍改变快照；不宽松比较 Run 配置或自动迁移旧快照。只有显式合格的当前 native 平台才能执行；源码存在不提供 Win/Linux 实测资格。
+[external-file-reads](../external-file-reads.ts) 将工作区外绝对路径接入同一个 `read_file`；没有单独的外部读写工具。外部只读使用普通 OS 文件读取，检查规则覆盖请求路径和解析后的实际路径；权限决定仍由统一权限模块负责，工具不再次遍历授权证明。外部读取不计算完整基线，不检查 owner 或硬链接数，保留 UTF-8、分页、取消和大正文 Artifact 交付。Workspace IO、检索和 mutation 仍限原根，外部写入使用 Shell；外部路径不加载项目指令。
 
-[路径 request classifier](../../permissions/files-request.ts) 选择 canonical 绝对路径的真实物理父目录，通过 `WorkspaceFiles.inspectIdentity` 从实际 native IO 核 parent device/inode、目标 regular file 身份、本人 owner、单链接及完整原输入，并将其与可信边界一起纳入 revision。该可信 host 方法只检查元数据，不读取正文，不是新增 Model Tool；Windows 使用与 baseline 相同的 volume／128-bit FileID，不与 Node stat 的 dev/ino 混比，也不截断 FileID。父链符号链接、目标 symlink／hardlink、私有 Profile／凭据／控制资产和危险系统写入目标在 Full 模式也拒绝。实际派发证明由 UnifiedExecution 注入，Tool 逐项核全部父子 policy snapshot 的准确定义、版本、信任、hardAllowed 和同一 revision，再打开 native parent，并直接在这个已锚定的引擎上重核身份；独立探针不能代替实际 IO 对象，宿主或 Model 输入不能伪造该证明。
+保存的 input/plan/output 适配器位于外部读取层之上，仍只接受原准确私有引用。外部读取绕过 Workspace checkpoint capture，并保留 `fileScope:external_path/workspaceCheckpoint:false`；检查点恢复不会触及外部文件。Workspace 的原生平台、ACL、取消和完整数据校验合同保持；外部读取使用宿主 OS 权限，路径规则不承诺识别同一文件的所有硬链接别名。
 
-这些 Tool 复用原 `createFileTools/createWorkspaceFiles` 的完整 UTF-8、Artifact、文件 baseline 和原子 IO。仅把固定 basename 交给已选定物理 parent，不建立第二个写入引擎。绝对读取启用可信 `strictReads`，在原 FD 的读前／后核 owner 和单链接；这个选项不改变普通 Workspace 默认读取合同。write 的 `base=null` 只创建，existing base 核完整字节／hash／size／device／inode；edit 保原精确字面匹配和 occurrences，父对象或目标改绑拒绝。派发前取消零效果，发布后的同步或核实错误仍 `file_publish_outcome_unknown`，不能因包装成绝对路径降格为无效果失败。当前机制仍不承诺不合作外部编辑器的任意 rename／编辑原子 CAS。
+[外部读取回归](../../../test/isolated/files/external-file-reads.test.ts)核同一定义、分页／BOM／CRLF、无外部基线、硬链接正常读取、私有路径及链接实际目标、完整大正文和取消；[真实 Service](../../../../../apps/service/test/isolated/configuration.test.ts)核模型仅使用 `read_file` 读取外部正文且不读取外部项目说明。
 
-read 请求的固定效果是安全 `read`；write/edit 是 `external`。请求批准对外部写入要求实际人类决定，自动审核使用真实 reviewer，Full 保危险／私有／native 资格等硬门槛；child 另受准确父工具集合和全部权限 ceiling。完整策略由[权限 owner](../../permissions/README.md)维护。结果中的 path 与 fileChange 是实际绝对路径，保存的 `fileScope=external_path/workspaceCheckpoint=false` 明确排除 Workspace checkpoint 捕获、恢复和回退；外部文件成功不冒认为 Workspace 恢复点。
-
-此前 macOS 工作树执行 [path-files](../../../test/isolated/files/path-files.test.ts) 与原 [files](../../../test/isolated/files/files.test.ts) 完整叶文件，共9项、77断言通过：真实 native IO／Runtime 派发、完整 BOM／CRLF、create/edit/CAS、父目标换绑、Profile symlink／hardlink 别名、交集漂移、取消和未合格平台拒绝。原 [subagent 终端](../../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 整文件9项120断言及 [tool-approve](../../../../../tests/tui-system/scenarios/tool-approve.test.ts) 整文件1项12断言证明正式 Service 真实批准／自动审核后写入、拒绝零效果和外部摘要不泄露正文。Linux 实际验证、发布 RSS／观测和整体阶段门禁不由这些本机证据解除。
-
-2026-10-16 在 Windows x64／Bun1.4.2、基于 `77662488` 的未提交 diff，先复现外部 path-files 的 `file_dispatch_scope_changed` 和私有 Profile 夹具失败。统一原生身份后，`bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/files/path-files.test.ts` 整文件8项122断言通过：包含真实工作区外的 Full／人工批准写入、批准前和拒绝后零效果、原持久回执、超过1MiB的完整 Artifact／下一 Model 正文、合法大小写及非法 Windows 路径拒绝。Profile 夹具用正式 `privateDirectory` 新建私有目录，不修复既有 ACL。普通 files 的两个 symlink 夹具仍受本机创建权限限制；本轮证据不证明正式安装版、完整 Service／客户端或全部平台资格。
-
-同轮相邻验证覆盖9个叶文件、63个不同用例，包括 [native path lifetime](../../../test/isolated/files/native-path-lifetime.test.ts) 在真实 `NtSetInformationFile(FileRenameInformation=10)` 前强制 GC，保原 rename／disposition 的借用内存。首轮与三个 typecheck 并行时，一个旧检查点恢复用例触发5秒超时；资源释放后单独重跑 capture 整文件19项267断言全部通过，该用例4.31秒，没有提高时限或修改恢复实现。其余44项在首轮全部通过；Agent／Service／Desktop typecheck、文档、测试归属与执行边界检查通过。这些分批结果不写成单次全套通过。
-
-低层 `WorkspaceFiles.read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 4，缺省页为 200 行，write 为 3，edit/glob 为 2，search 为 4，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
-
-POSIX 使用目录 FD 与 no-follow openat 逐段锚定路径，macOS 调用非 variadic `__openat`。相对路径禁止 `..`、`.`、绝对路径和反斜线；根与目标链均不跟随符号链接，不读取设备/FIFO/目录作为正文。根目录替换后原对象不被重新解释成另一权限目标。临时文件清理不会覆盖原发布结果。目录描述符设置 close-on-exec。Windows x64 的独立原 HANDLE 后端见下节，其他不支持的平台仍明确 `file_platform_unsupported`。
 
 ## Windows Workspace 文件源码
 
 [平台交接](../files-io.ts)让同一个 `WorkspaceFiles` 语义层使用 [Node-API 原资源 owner](../../../native/files/README.md)。正式 Service／六工具、完整 Artifact／Model 正文和检查点 restore／remove 沿原公开入口使用该后端；不增加第二套工具、权限来源、恢复状态或旧 filesystem fallback。源码接入不等于原生、全部正式客户端或安装制品资格已通过。
 
-Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他架构或路径范围不从源码接入推定可用。工厂固定当前 token SID 和 System DLL，只在实际创建能力时加载。它持有原根及祖先目录 HANDLE，以 `NtCreateFile` 的原父 HANDLE 逐段打开，不跟随 reparse；普通 Workspace 使用已有 DACL，不修 ACL。新 temporary 与 POSIX 的 0600 对应，使用当前 SID 私有权限。完整 baseline 使用实际 volume、128-bit FileID、完整 EOF／hash／size，并比较原 HANDLE 的 LastWriteTime 与 ChangeTime。字节恢复及外部路径的严格身份检查要求父目录和文件的当前 SID owner、文件单链接；普通 Workspace 默认读取保宿主已有权限。
+Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他架构或路径范围不从源码接入推定可用。工厂固定当前 token SID 和 System DLL，只在实际创建能力时加载。它持有原根及祖先目录 HANDLE，以 `NtCreateFile` 的原父 HANDLE 逐段打开，不跟随 reparse；普通 Workspace 使用已有 DACL，不修 ACL。新 temporary 与 POSIX 的 0600 对应，使用当前 SID 私有权限。完整 baseline 使用实际 volume、128-bit FileID、完整 EOF／hash／size，并比较原 HANDLE 的 LastWriteTime 与 ChangeTime。字节恢复的严格身份检查要求父目录和文件的当前 SID owner、文件单链接；普通 Workspace 默认读取保宿主已有权限。
 
 组件拒绝 ADS、DOS 设备名、尾点／空格及非规范路径。实际原 HANDLE 的 canonical 长名对照拒绝 8.3 别名；保护范围按实际组件与 Windows 大小写等价核对，普通合法大小写变体仍可读取同一对象。目录枚举使用原 HANDLE，保护范围与原分页、search、glob 语义共用。未知类型、对象漂移、关闭或内存释放未确认均保明确失败，不从数字 HANDLE 重建资源。
 
@@ -141,7 +130,7 @@ Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他�
 
 [Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行六工具、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
 
-Model 可调用的 `files.read/files.read_path` 缺省 `limit=200`，将 `next_line` 传给 `start_line` 续读（原 JSON 回退为 `selection.nextOffset`）；显式 limit 保原请求。该默认页仅控制返回范围，不改变低层全文读取、完整文件验证或累计读取能力。
+Model 可调用的 `files.read` 缺省 `limit=200`，将 `next_line` 传给 `start_line` 续读（原 JSON 回退为 `selection.nextOffset`）；显式 limit 保原请求。该默认页仅控制返回范围，不改变低层全文读取、完整文件验证或累计读取能力。
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 
@@ -153,7 +142,7 @@ glob/search 的原生操作仍绑定原根及 FD 链；遍历每64项或累计8m
 
 文件写入先校验原完整基线、再临时发布。发布后同步/读取失败返回 file_publish_outcome_unknown；Tool 保留 outcome_unknown，不把已发生替换假报为零效果失败。
 
-`write/edit` 的 `file_baseline_conflict` 解释本次基线或仅创建前置条件被拒绝、本次没有发布，但不返回当前文件正文。基线描述完整文件的身份与版本；冲突不证明另一编辑修改了同一段文字，须按各次请求的修改和各自回执区分。此前读取只代表当时观察，不能从冲突推断文件仍保留旧值；其他已经成功的操作不会回滚。后续另获授权的新编辑先读取当前文件并使用新完整基线，错误说明本身不授权重读或重做。绝对用户文件工具复用这项结果语义；发布后确认失败仍保留原 unknown。
+`write/edit` 的 `file_baseline_conflict` 解释本次基线或仅创建前置条件被拒绝、本次没有发布，但不返回当前文件正文。基线描述完整文件的身份与版本；冲突不证明另一编辑修改了同一段文字，须按各次请求的修改和各自回执区分。此前读取只代表当时观察，不能从冲突推断文件仍保留旧值；其他已经成功的操作不会回滚。后续另获授权的新编辑先读取当前文件并使用新完整基线，错误说明本身不授权重读或重做。外部只读没有编辑基线；发布后确认失败仍保留原 unknown。
 
 ## 逐操作文件变更预览
 

@@ -45,7 +45,7 @@ function fixtureTurn(sessionId: string, index: number) {
     sessionId,
     status: 'completed',
     isActive: false,
-    waitingForResults: [],
+
     reason: null,
     originCommandId: `command-${runId}`,
     rootWorkCommandId: `command-${runId}`,

@@ -63,7 +63,6 @@ export interface TaskCLIArguments {
   trustWorkspace: boolean;
   permissionMode?: CLIPermissionMode;
   skills: string[];
-  activateSkills?: string[];
   status?: CLIStatus;
   server?: string;
 }
@@ -178,7 +177,6 @@ const valued = new Set([
   '--kite-home',
   '--model',
   '--skill',
-  '--activate-skill',
   '--server',
   '--turn',
   '--format',
@@ -234,8 +232,7 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
     if (retired.has(name)) fail('retired_option', name);
     if ((argument.includes('=') && name !== '--scope') || (!valued.has(name) && !toggles.has(name)))
       fail('unknown_option', name);
-    if (name !== '--skill' && name !== '--activate-skill' && values.has(name))
-      fail('duplicate_option', name);
+    if (name !== '--skill' && values.has(name)) fail('duplicate_option', name);
     const entries = values.get(name) ?? [];
     if (valued.has(name)) {
       const value = argument.includes('=')
@@ -674,7 +671,6 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
           '--auto',
           '--full',
           '--skill',
-          '--activate-skill',
           '--execution-status',
           '--release-status',
           '--telemetry-status',
@@ -712,7 +708,6 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
               : undefined;
     if (task.trim().length === 0 && (command === 'resume' || status === undefined))
       fail('task_required');
-    if (status && has('--activate-skill')) fail('activation_not_supported_with_status');
     const permissionMode: CLIPermissionMode | undefined =
       modes[0] === '--ask'
         ? 'accept_edits'
@@ -733,7 +728,6 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
       trustWorkspace: has('--trust-workspace'),
       ...(permissionMode ? { permissionMode } : {}),
       skills: [...(values.get('--skill') ?? [])],
-      ...(has('--activate-skill') ? { activateSkills: [...values.get('--activate-skill')!] } : {}),
       ...(status ? { status } : {}),
       ...(server !== undefined ? { server } : {}),
     };

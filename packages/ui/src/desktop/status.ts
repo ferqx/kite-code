@@ -4,6 +4,7 @@ const labels: Readonly<Record<string, string>> = {
   creating: '创建中',
   running: '正在工作',
   waiting: '等待交互',
+  waiting_execution: '等待执行结果',
   auto_checking: '自动审核中',
   auto_reviewing: '自动审查中',
   completed: '已完成',

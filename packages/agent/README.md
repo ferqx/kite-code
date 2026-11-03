@@ -14,11 +14,11 @@
 
 [取证观察](src/tool-observations.ts)把 Files 工具的准确查询、文件版本和读取窗口作为低信任数据供决策使用。搜索在原结果中说明字面匹配、分页和未检查范围，读取附当前窗口的原文预览，完整 Artifact 正文保持。Agent 不根据搜索／读取次数注入额外收束提醒、不设累计额度或新完成判定；研究方法由共用合同说明，实际判断仍需任务证据。次数型提醒只作过隔离实验，未保留为默认机制，其收益与局限见[任务质量 owner](../../tests/e2e/live/model/README.md#工具反馈与任务质量)。
 
-成功子结果沿原 carrier 的 `details.evidence` 携带当前 child Run 的工具结果摘要和取证预览，原完整报告正文不改写。宿主核实际 execution、call、Session／Run／Store 后记录身份，observation 仍是具名工具数据；同一 child 的后续 Run 不混用旧取证。`reportVerification:not_verified` 明确整份子报告尚未被核验，这是原结果的数据说明而非新业务状态；父级只采用逐项查实的主张，不能把核对当前路径扩张为整份报告与原文完全一致。预览保留最多 64 种工具统计，观察正文总量最多 32 KiB，lookup 使用较小的 8 KiB 阈值为 inspection 留出空间；`toolCallsOmitted/observationsOmitted` 明示省略，完整回执仍在原执行历史。`coverage:selected_history` 不证明全部历史或已压缩工作。父级须核对决定答案的入口／配置与实现连接；该材料不证明语义正确、调用可达或未发生其他动作。自动结果 Source 保原不可变结果及接纳身份；目录中的纯结果正文不另冒充取证包。
+成功子结果及历史可安全读取的失败子结果沿原 carrier 的 `details.evidence` 携带当前 child Run 的工具结果摘要和取证预览，原完整报告正文不改写。宿主核实际 execution、call、Session／Run／Store 后记录身份，observation 仍是具名工具数据；同一 child 的后续 Run 不混用旧取证。`reportVerification:not_verified` 明确整份子报告尚未被核验，这是原结果的数据说明而非新业务状态；父级只采用逐项查实的主张，不能把核对当前路径扩张为整份报告与原文完全一致。预览保留最多 64 种工具统计，观察正文总量最多 32 KiB，lookup 使用较小的 8 KiB 阈值为 inspection 留出空间；`toolCallsOmitted/observationsOmitted` 明示省略，完整回执仍在原执行历史。`coverage:selected_history` 不证明全部历史或已压缩工作。父级须核对决定答案的入口／配置与实现连接；该材料不证明语义正确、调用可达或未发生其他动作。自动结果 Source 保原不可变结果及接纳身份；目录中的纯结果正文不另冒充取证包。
 
 [观察负例](test/isolated/context/tool-observations.test.ts)和[子结果取证](test/isolated/business/task/child-tool-evidence.test.ts)覆盖准确范围、同子会话后续轮、原文片段以及累计超过 19 MiB 原观察的正常结算。真实模型的当前／历史实现干扰、错误子报告采纳与收束证据归[任务质量 owner](../../tests/e2e/live/model/README.md#工具反馈与任务质量)；固定模型验证不保证任意模型的语义判断。
 
-[Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护单文件/目录搜索、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、精确重复失败保护和 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
+[Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护文件读改写、内部目录检索 API、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、精确重复失败保护和 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
 
 设计原因、备选与代价保存在[工具反馈与任务质量决定](../../.agents/notes/implemented/architecture/2026-10-23-agent-feedback-and-task-quality.md)。模型指导已实施，真实样本中仍有冗长和超出证据的表述；机械执行断言与全文质量分别说明，不能据工具全部成功宣称模型结论全部正确。
 
@@ -34,7 +34,7 @@
 
 [真实 SQLite/Artifact 测试](test/isolated/artifacts/input-images.test.ts)核纯图片输入、后继轮次、Fork、冷重开、错 scope／hash 与 URL 拒绝。持久取舍见[图片引用决定](../../.agents/notes/implemented/architecture/2026-10-18-user-image-input-references.md)，HTTP 与 Native 准入分别归各 owner。
 
-正式构建内联[声明的普通 JS 依赖](scripts/bundled-dependencies.ts)，包括独立 Web extraction Worker 的 Readability/Turndown；keyring、Files Node-API、tree-sitter WASM 与 jsdom 动态资源仍沿原外部资产闭包核验。生成物扫描、原许可全文及精确资源复制归 [Terminal owner](../../apps/cli/docs/terminal-release.md)，不改变权限或 Worker 生命周期。Windows 制品原 HANDLE 的类型/大小/身份、完整字节/SHA 和私有批量复制边界归 [platform owner](src/platform/README.md)。
+正式构建先清理本包 `dist`，拒绝链接目录，避免已删除入口和旧 split chunk 随制品残留；随后内联[声明的普通 JS 依赖](scripts/bundled-dependencies.ts)，包括独立 Web extraction Worker 的 Readability/Turndown。keyring、Files Node-API、tree-sitter WASM 与 jsdom 动态资源仍沿原外部资产闭包核验。生成物扫描、原许可全文及精确资源复制归 [Terminal owner](../../apps/cli/docs/terminal-release.md)，不改变权限或 Worker 生命周期。Windows 制品原 HANDLE 的类型/大小/身份、完整字节/SHA 和私有批量复制边界归 [platform owner](src/platform/README.md)。
 
 `@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。正式 Terminal 已消费通用 TUI。2026-10-26 已按用户要求删除其他旧架构模块，仅保留无运行依赖闭包的 `apps/kite-cli` 历史源码；客户端、资源及正式发布资格仍按实际门禁核对。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
@@ -52,7 +52,7 @@
 - [扩展入口](src/extensions/index.ts)：具版本 Tool/Action/Query、JSON schema、公开内容 envelope 与有限操作。扩展只获得当前 Session、自有 namespace 的记录 CAS、公开 Run/Execution 和受控子工具；不取得 SQL、owner 或完整运行状态。
 - [权限策略与 Shell 授权](src/permissions/README.md)：独立 `@kite-ai/agent/permissions` 与 `/permissions/shell`，统一三策略、权限约束、Shell AST/危险拒绝、摘要和最终 scope；Service 只注入宿主事实，Loop 保持通用授权接口。
 - [普通问题入口](src/tools/ask-user/README.md)：`@kite-ai/agent/ask-user` 的纯工厂通过原 `requestInput` 提供 1–3 题、原选项和自由回答，并将原答案解释为模型与历史文案；默认选择及 child 禁用归 Service。
-- [计划与 receipt 验证入口](src/business/planning/README.md)：显式业务工厂、真实用户计划审阅、来源绑定的步骤回执、required 判定和准确 waiver；共享扩展端口与唯一 Loop。完整文件/Artifact/命令/MCP 验证及自动修复继续按该 owner 范围实施。
+- [计划审阅与进度入口](src/business/planning/README.md)：真实用户计划审阅、来源绑定的步骤回执和唯一 Loop。专用验证工具、自动检查、checker 与 waiver 已退役。
 - [Store 端口](src/storage/port.ts)：宿主使用的具名查询和事务；[记录](src/storage/types.ts)保存业务事实，非完整内存 State。
 - [上下文选择与结果](src/storage/sqlite/context/README.md)：当前选择、完整历史和准确结果引用分开保存；双游标读取固定同一选择与顺序上界。
 - [Profile 入口](src/profile.ts)：`selectProfile({dataRoot, profile})` 只读确定规范 data-root、逻辑名称与稳定 `profileAccessKey`，供 launcher 在启动前固定目标；import 与选择均不创建目录、取得锁或打开数据库。
@@ -78,7 +78,7 @@
 - [Web Fetch 入口](src/tools/web-fetch/README.md)：普通 `web_fetch` Tool、逐跳资源准入与真实 DNS/socket 绑定，惰性使用已构建的无执行能力解析 Worker；大正文保留完整 Artifact。
 - [配置入口](src/config/README.md)：JSONC 评论保留与短锁 CAS、分层解析、脱敏封存、opaque credential refs 和惰性 OS backend。默认 Service 的每 Run 解析由 Service owner 负责。
 - [Skills](src/skills/README.md)与[MCP](src/mcp/README.md)：摘要发现、按需正文/资源与具有版本的普通 Tool 快照；leaf import 不连接远端或启动进程。
-- [Skill Workflow](src/business/skill-workflow/README.md)：有条件 activation、inline/fork、严格输出和普通核验 Job；业务记录及必要条件归扩展，沿用唯一 Loop 与实际父子权限。
+- Skill Workflow 执行已退役，普通 [Skill 知识](src/skills/README.md) 保留；[退役边界](src/business/skill-workflow/README.md)保留历史导航。
 
 未提交普通Action的结果不以Command.applied视为完成；同Session后续普通派发须继续核原receipt主Execution。准确Store/owner观察、合法detached Job与未提交Action的区分，以及真实最终提交故障测试归[Store owner](src/storage/README.md#未提交普通-action-的串行边界)。
 
@@ -162,7 +162,7 @@ Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终
 
 可信宿主的 `readRunExtensionRecord({sessionId,runId,extensionId,key})` 只观测准确当前 Store、实际 Run manifest 所含 namespace 的原记录，拒绝外部 origin/fork provenance；返回 clone/freeze。它属于 Runtime 的普通只读资源生命周期，不取得执行 owner、不初始化 Provider，也不增加 HTTP 或 Model 能力。Service 可由原 immutable activation anchor 读取最低审批，不能用模型输入或有限当前视图猜权限。
 
-普通 Task 的模型表面由[六工具 owner](src/extensions/task/README.md)维护，默认通用 child 异步受理并在 carrier ensure 事务保存有限 `agent_completion` 订阅，不让模型选择 required/background/after_turn。稳定 Agent 以 child Session 为身份，每轮仍有准确 carrier、Run、配置、结果 revision 和取消范围。已受理 child 满槽时保留准确 planned carrier，等槽位后在激活前重核当前权限；后续普通父输入不因 selected-work 使它暂缓，准确停止、取消及旧控制仍核验；具体边界和回归由同一六工具 owner 维护。可信内部调用的 required 义务、caller 交付及旧记录恢复继续保持各自封存合同；它们不成为普通模型的兼容 alias。
+普通 Task 的模型表面由[六工具 owner](src/extensions/task/README.md)维护，默认通用 child 异步受理并在 carrier ensure 事务保存有限 `agent_completion` 订阅，不让模型选择 required/background/after_turn。稳定 Agent 以 child Session 为身份，每轮仍有准确 carrier、Run、配置、结果 revision 和取消范围。已受理 child 满槽时保留准确 planned carrier，等槽位后在激活前重核当前权限；后续普通父输入不因 selected-work 使它暂缓，准确停止、取消及旧控制仍核验；具体边界和回归由同一六工具 owner 维护。旧 Task 工具、参数、专用 required-result 义务及显式 after_turn 执行已删除；通用受控 Operation、当前邮箱订阅与 Planning 条件保留，没有旧工具兼容入口。
 
 child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 的 `deadlineAt=null`。Runtime 计时器与 SQL 最后派发使用同一固定期限，到期按真实 Run 提交取消并停止 attached 域；已激活独立 child 与 detached Job 保持自己的适用域。迟到 partial、终态或 unknown 可以保存，不能启动新工作。没有公开短期限或累计 token/Tool/attempt 额度。期限 owner 与真实持续等待证据见[child README](test/isolated/child/README.md)。
 
@@ -214,7 +214,7 @@ Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execu
 
 有 Artifact 宿主时，continuation v3 以[来源请求增量链](src/source-request-journal.ts)引用每批首次出现的完整输入；后续 Model、摘要和重试只封存链头及准确失败 streak，不重复写入整个累计请求集。恢复完整核原 Artifact/hash、Store/Session/subject/Run、顺序和无环关系；v1/v2仍按原格式读取，无 Artifact 的小型 Core 保v2。热 Model 只共享 Core 已冻结请求，宿主每次捕获拿独立输入副本；压缩不丢弃早期新鲜性依据。[真实128轮回归](test/isolated/context/source-request-journal.test.ts)核增量保存量、全部原输入、宿主修改隔离及非法引用，原SIGKILL恢复回归继续核不重放。完整 `captureBatch` 现行合同仍要求保留一个准确输入集合；这里消除重复副本和累计重复封存，不承诺常量RSS。
 
-Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 OS 锁/generation 下原子接管所选 Run 的活动 child 树，沿原配置、权限交集、carrier 与截止时间继续；queued、激活前、已结束子结果、原审批和前台 task.execute 共用普通监督与唯一 Loop。纯 Model 中断结束旧尝试并创建新请求；自动压缩 pending/未发布摘要重新尝试，已发布点保持。普通工具和外部 Job 的未知效果、半完成任意 initializer、无法重建的绑定继续拒绝；受限 continuation 合同不按工具名称放行。资源和证明边界归[协议 owner](src/storage/sqlite/run-resume.README.md)。
+Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 OS 锁/generation 下原子接管所选 Run 的活动 child 树，沿原配置、权限交集、carrier 与截止时间继续；queued、激活前、已结束子结果、原审批和通用受控 Operation 共用普通监督与唯一 Loop。纯 Model 中断结束旧尝试并创建新请求；自动压缩 pending/未发布摘要重新尝试，已发布点保持。普通工具和外部 Job 的未知效果、半完成任意 initializer、无法重建的绑定继续拒绝；受限 continuation 合同不按工具名称放行。资源和证明边界归[协议 owner](src/storage/sqlite/run-resume.README.md)。
 
 恢复会话的 `reconcileSession` 在取得原 root 系统排他锁并复核整个执行组后，保存主／子 Run 中断、未派发工作取消及已尝试调用的失败／未知状态。准确结果和身份保持，不调用模型、工具或后台任务。私有 checkpoint 保安全边界，供之后明确 `run.resume` 完整核验并接续；公共 View 不保 running。活 owner 不抢占，检查失败不伪造中断；[恢复 owner](src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)完整维护状态、CAS、失效和维护规则。
 
@@ -305,7 +305,7 @@ Operation 等待共享持久变化水位，最多 64 个活动 wake registration
 
 真实强杀探针和显式中断测试位于[test/isolated/recovery](test/isolated/recovery)，来源与重新准备位于[test/isolated/context](test/isolated/context)。跨平台、实际安装制品、外部 adapter 核实窗口与完整客户端资格分开记录；局部测试通过不代表整个重构已完成。
 
-[完整包制品回归](../../tests/isolated/unified-agent/built-package.test.ts)按实际manifest同次构建当前29个公开入口及其运行资产，准确核全部key→built路径；新增 `sqlite-engine` 提供宿主固定引擎选择，`windows-path-security`提供惰性Windows私有路径leaf，不由本机import推导Windows syscall资格。源码树外实际运行Worker/SQL、Shell、文件、Skills、MCP guardian、默认web_fetch解析Worker与完整Artifact及Service/Client认证读取；外部npm复用已安装模块，不代表独立安装或三平台发行。本轮1项73断言通过，含完整MCP／Workflow计算Worker的实际built定位、SHA及缺失资产拒绝、公开异步Workflow编译器与原同步结果一致、输出schema、原skill-workflow.jsonc字节/摘要和准确无Desktop manifest v5的备份恢复。自建stdio生命周期先核default恰有一个同id再显式替换，其他default extensions保留；重复定义拒绝不放宽。原child20s/test30s期限、全部源外消费者与guardian无源码fallback保持。旧21入口/54断言只属于当时窗口，相关红日志保留。
+[完整包制品回归](../../tests/isolated/unified-agent/built-package.test.ts)按实际manifest同次构建当前28个公开入口及其运行资产，准确核全部key→built路径；新增 `sqlite-engine` 提供宿主固定引擎选择，`windows-path-security`提供惰性Windows私有路径leaf，不由本机import推导Windows syscall资格。源码树外实际运行Worker/SQL、Shell、文件、Skills、MCP guardian、默认web_fetch解析Worker与完整Artifact及Service/Client认证读取；外部npm复用已安装模块，不代表独立安装或三平台发行。本轮1项73断言通过，含完整MCP／Workflow计算Worker的实际built定位、SHA及缺失资产拒绝、公开异步Workflow编译器与原同步结果一致、输出schema、原skill-workflow.jsonc字节/摘要和准确无Desktop manifest v5的备份恢复。自建stdio生命周期先核default恰有一个同id再显式替换，其他default extensions保留；重复定义拒绝不放宽。原child20s/test30s期限、全部源外消费者与guardian无源码fallback保持。旧21入口/54断言只属于当时窗口，相关红日志保留。
 
 此前加入 maintenance 的18入口1/48与 profile-access 的19入口1/49只证明当时范围，包含v2原配置字节/摘要、原媒体/Store出处和新Store核对，零额外业务执行。源文件变化按Worker严格关闭SQLite缓存语句修复；恢复后 Artifact 读取曾混用当前 Store 与原来源，现分别校验当前 Store 准入、完整原执行链与原引用。当前源码外包继续通过实际 HTTP/Client 在新 Store 读取原 Artifact 全文，保留原 Store/hash/字节，冷读取零 Model。
 

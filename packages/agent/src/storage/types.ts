@@ -161,13 +161,7 @@ export interface RequirementRef {
   attempt?: number;
   recordKey: string;
 }
-export interface ResultRequirementDeclaration {
-  recordKey: string;
-  requirementId: string;
-  definitionVersion: string;
-  contentType: string;
-  contentVersion: number;
-}
+
 export interface RunExecutionSafety {
   originStoreId: string;
   sessionId: string;
@@ -284,8 +278,6 @@ export interface RequirementEvaluation {
   /** Related executable records read by this evaluator, in the requirement's namespace/scope. */
   recordReads?: RequirementRecordRead[];
   executionSafetyReads?: RequirementExecutionSafetyRead[];
-  /** Non-authoritative completion advice; Core verifies each stored observation before waiting. */
-  wait?: { executionIds: string[] };
 }
 export interface RequirementRecordRead {
   key: string;
@@ -298,7 +290,7 @@ export interface RunRecord {
   carrierExecutionId?: string;
   /** Actual immutable selection captured by the original Run activation transaction. */
   contextSelectionId: string;
-  waitingForResults: string[];
+
   id: string;
   sessionId: string;
   originCommandId: string;
@@ -932,7 +924,6 @@ export interface SessionDirectoryActivity {
     id: string;
     status: RunRecord['status'];
     isActive: boolean;
-    waitingForResults: boolean;
   } | null;
   queued: boolean;
   pendingInteractions: number;

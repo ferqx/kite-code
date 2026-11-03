@@ -797,7 +797,7 @@ test('Native background DOM publishes only complete pages, shows original parent
     });
     expect(host.textContent).toContain('后台目录已完整读取，共 2 项');
     expect(host.textContent).toContain('原父轮次 parent-run · waiting_execution');
-    expect(host.textContent).toContain('本轮必需任务');
+    expect(host.textContent).not.toContain('本轮必需任务');
     expect(host.textContent).toContain('原子轮次 original-child-run · running');
     const second = host.querySelector<HTMLElement>('[data-execution-id="job-2"]')!;
     await click(second, '读取完整已保存输出');

@@ -1,10 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { OperationRef } from '../../../src/extensions';
@@ -16,7 +16,7 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   usage: { inputTokens: 1, outputTokens: 1 },
 };
 test('more than a thousand sequential children and independent authorization checks reuse one hot slot after failure and cancellation', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'kite-child-history-'));
+  const root = temporaryDirectory('kite-child-history-');
   const profile = { dataRoot: root, profile: 'test' };
   const store = await openSqliteStore(profile);
   const expectedStoreId = (await store.getMetadata()).storeId;

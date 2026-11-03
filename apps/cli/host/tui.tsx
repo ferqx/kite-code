@@ -431,18 +431,10 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         },
       },
       skills: {
-        workflowActivation: ['skill_workflow_catalogue', 'run_extension_inputs'].every(
-          (capability) => client.serverInfo?.capabilities.includes(capability),
-        ),
         read: (_sessionId, workspaceId, signal) =>
           client.listAllSkills(workspaceId, {
             storeId,
             signal,
-            ...(['skill_workflow_catalogue', 'run_extension_inputs'].every((capability) =>
-              client.serverInfo?.capabilities.includes(capability),
-            )
-              ? { workflow: 'manual' as const }
-              : {}),
           }),
       },
       status: {

@@ -201,9 +201,62 @@ bun run test:model:pdf:live --output=C:/absolute/owned-directory/pdf-vision.json
 KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=/absolute/owned-directory/report.json
 ```
 
-可用 `--scenario=files` 或 `--scenario=agents` 单独定位；省略时仍按原 20 次实际 HTTP、240 秒预算顺序运行两场景。Files 检查目录、glob、字面搜索、准确基线编辑、新建和下一 Run 重读。agents 使用当前六工具，核同一稳定 agent_id、两个准确 carrier/Run、完整结果、idle 邮件零自行启动、显式 follow-up 后恰好一次采用、idle interrupt 回执及准确结果接纳 Source。父业务请求恰有六工具，输入解释请求必须 tools=[]；父子全部实际公开 ModelInput 做热/冷完整比较，冷读零 Provider。
+可用 `--scenario=files` 或 `--scenario=agents` 单独定位；省略时仍按原 20 次实际 HTTP、240 秒预算顺序运行两场景。Files 检查准确基线读取、编辑、新建和下一 Run 重读；目录／文件／正文检索归下方全工具入口的真实 Shell／rg 场景。agents 使用当前六工具，核同一稳定 agent_id、两个准确 carrier/Run、完整结果、idle 邮件零自行启动、显式 follow-up 后恰好一次采用、idle interrupt 回执及准确结果接纳 Source。父业务请求恰有六工具，输入解释请求必须 tools=[]；父子全部实际公开 ModelInput 做热/冷完整比较，冷读零 Provider。
 
 该 smoke 直接创建 Runtime，权限和 after-turn 由自有隔离夹具明确允许，child 仅做无工具算术。因此它证明已列身份、历史和 Source 路径，不证明正式客户端输入选择、默认审批、当前环境重读或全部 A05 变体。
+
+## 全工具真实模型
+
+2026-11-03，恢复回执、Windows 准入及运行时闭包修复后，`live-all-luna-low-08` 七组再次通过：固定 `gpt-6-luna/low`，46次实际请求均HTTP200，30个内置工具和1个动态MCP工具全部成功且回到模型。实际原子Shell停止、控制目录空、同一子Agent两轮323／667与资源关闭均确认，运行内源码摘要一致。已逐请求复核工具调用、结果接管与最终正文；后续只为Service测试夹具补上非空类型断言，生产路径及本测试入口未再改变。报告和完整原始请求／事件保留在本机 `.cache/tool-surface-prune-round2/live-all-luna-low-08.json` 及其 `.workspace`，范围仍为Windows源码Service与合成MCP，不代替完整客户端视觉或安装发行资格。
+
+[全工具入口](model-tools-all.live.ts)在 Windows x64／Bun 上固定使用本机已登录会话提供的 `gpt-6-luna`、`reasoningEffort:low`，逐次核实际 wire 设置；不修改用户默认模型或凭据。沿真实 Service／Client HTTP、SQLite、Files、Windows Git Bash、内置 rg、Skill 和 MCP 装配执行，权限由合成工作区明确设置 Full，Shell 检索另明确收窄为 Workspace／无网络。MCP 使用本机合成 HTTP Server，网页读取使用实际 `web_fetch`。
+
+```powershell
+$env:KITE_RUN_LIVE_MODEL_TOOLS = '1'
+bun tests/e2e/live/model/model-tools-all.live.ts --output=D:/absolute/new/report.json
+```
+
+七组为 `files-shell`、`question`、`planning`、`skills`、`mcp`、`web`、`agents`；`--scenario=<组名>`只验证该组，省略才验证全部30个内置工具及1个动态MCP工具。最多100次实际HTTP／1200秒，不换模型、协议，不改写模型回复或外围自动重试。问答和计划通过真实公开 Interaction API 回答，由测试夹具选择首项／批准，不能当作真人或客户端视觉验收。
+
+成功要求实际调用、成功 Execution 和结果进入后续模型请求同时成立，并核磁盘字节、后台 Shell 原停止证明、问答答案、计划实际完成和同一子 Agent 两轮真实结果。只创建成功或工具调用齐全不能代替完成。整个运行保代码输入无漂移；关闭未知或任何场景失败均失败。新绝对报告及其 `.workspace` 均须不存在；保留合成文件、canonical Store、逐请求／事件和执行回执供本机过程复核，报告中同样包含合成回执正文，不保存认证请求头或密钥。模型走已登记 HTTPS 代理时明确记录出口类型，不在失败后自动直连。
+
+2026-11-03，Windows x64／Bun1.4.3，当前工具退役工作树：最终 `live-all-luna-low-07` 七组通过，50次真实请求均HTTP200，30个内置工具和1个动态MCP工具全部成功执行且回到模型；实际子结果为323／667，Shell全树停止、控制目录空和资源关闭确认。已逐段复核原调用、回执、消息顺序和最终正文。测试发现并修复默认MCP来源只接受首次child.start、拒绝同一Session追发轮的问题；取消参数说明区分准确Shell句柄与新取消意图ID。来源继承受控回归4项／266断言，Shell／模型投影9项／103断言通过。
+
+此前失败原样保留，包括宿主权限／直连失败、夹具缺工作区锁、真实MCP追发故障及模型误用取消ID／漏传MCP generation。早期`04`脚本虽打印passed，过程复核发现第二child失败，附加review判为失败；不能当作全工具通过证据。准确本机原件位于`.cache/tool-surface-prune-round2/`。此结论限定上述模型和本机源码Service，不代表任意远端MCP、完整UI、其他平台、安装或发布资格。
+
+### 扩展工具场景
+
+同一入口加 `--extended` 执行11个扩展场景，继续固定 `gpt-6-luna/low`、原模型输入／事件、真实Service/HTTP/SQLite和Windows Git Bash。最多160次实际HTTP、1200秒；`--scenario=<场景名>`可定位单项，报告与工作目录仍必须使用不存在的新绝对路径。
+
+```powershell
+$env:KITE_RUN_LIVE_MODEL_TOOLS = '1'
+bun tests/e2e/live/model/model-tools-all.live.ts --extended --output=D:/absolute/new/extended.json
+```
+
+[扩展用例](model-tools-extended-cases.ts)分别核对以下行为：
+
+- `files-conflict`：中文／空格路径、三行分页的完整基线、准确旧基线拒绝、重新读取后的编辑与其余全文保全。
+- `shell-isolation`、`execution-timeout`：两个真实后台Job、有限等待零取消、准确单任务停止及兄弟存活、自然完成、执行期限触发清理及后续命令继续。
+- `agents-parallel-mail`、`agent-interrupt-reuse`：实际重叠的子轮次、消息接纳到准确活动Run、独立随机文件结果，以及准确中断原Shell、同一Agent追发成功且旧操作零重放。
+- `approval-deny`、`approval-external`：原拒绝使本轮cancelled、原生零派发／文件零效果；原Tool和Job分别批准后，准确完整文件范围只执行一次。
+- `active-guidance`：真实Shell执行期间投递两条HTTP用户引导，同一Run按原Command/Source顺序接纳，实际后继模型收到两条原文并报告最终纠正。
+- `client-reconnect`：原POST已提交后物理断开socket丢回复，只查询原Command；新Client连接重读历史零模型／零重放，再用真实follow-up验证原上下文与唯一文件效果。此场景不宣称重启Service或冷数据库恢复。
+- `mcp-child-followup`、`mcp-parent-boundary`：父级先连接真实schema后，子级首次／同Session追发均取得实际随机MCP token；父级未连接schema时仍准确拒绝越过父工具范围，远端业务调用为零。
+
+冲突、超时、拒绝和负向父范围各有准确回执及副作用断言，不能以任意失败代替预期分支。其他工具仍须全部成功；任何业务核对失败都会使原场景和整体报告失败。只有业务核对完成才输出场景通过，失败原件保留，不改写模型回复、不换协议／模型、不放宽生产权限。当前范围是源码Service与合成MCP，客户端渲染与安装发行仍单独验收。
+
+2026-11-03，Windows x64／Bun1.4.3，11个扩展场景分别取得通过证据：
+
+| 验收范围 | 场景数 | 原始证据 |
+| --- | --- | --- |
+| 分页冲突、执行超时、并发消息、中断复用、拒绝／批准、连续引导、Client重连 | 8 | `live-extended-luna-low-02.json` 中对应 `verified:true` 场景 |
+| 双后台Shell隔离 | 1 | `live-extended-luna-low-03-shell.json` |
+| 同一子Agent的MCP首次／追发 | 1 | `live-extended-luna-low-04-mcp.json` |
+| 未连接父schema拒绝、失败子轮原工具证据进入父模型及准确报告 | 1 | `live-extended-luna-low-06-boundary.json` |
+
+准确本机原件保留在 `.cache/tool-surface-prune-round2/`。`01/02/05` 整体仍为 failed，不改写；失败包括测试错读行窗字段、模型误传preset／误用等待工具／漏传MCP绑定。过程复核还发现 `02` 的负向场景虽脚本通过，最终文本却把“父级未连接”误说为“没有连接”；附加 `.review.json` 明确判该项失败。Runtime随后修复失败子轮清空原工具取证的问题，`06` 实际父输入含已成功的连接回执，最终正文保留未观察业务效果的不确定性。该修复只触及 failed 子轮的可读取证，前述8项和两项定向成功用例所经过的正常／取消路径未改；原代码、载荷、Source及副作用断言可据其范围复用。
+
+修复后另跑 `live-all-luna-low-09.json`：七组、44次实际HTTP200，30个内置工具和1个动态MCP工具全部成功并回到模型。新增6轮扩展尝试合计192次真实请求，加本轮全工具基线共236次；全部wire均核 `gpt-6-luna/low`，各轮源码输入无漂移、资源关闭确认且控制目录空。失败子取证及MCP／取证／结算／通知回归7文件28项950断言通过，八workspace类型检查通过。上述数据不保证低思考模型永不误用参数；实际失败及其随后纠正均保留，HTTP200也不代替业务验收。
 
 ## 统一邮箱收件
 

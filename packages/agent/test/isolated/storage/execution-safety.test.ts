@@ -450,7 +450,7 @@ test('safety follows actual child Run and deeper child Tool instead of relying o
       input: {},
       decisionSource: f.source,
     });
-    expect((await f.store.getRun(f.run.id))?.waitingForResults).toEqual([]);
+    expect(await f.store.getRun(f.run.id)).not.toHaveProperty('waitingForResults');
     expect((await safety(f, 'parent')).unconfirmed).toBe(true);
     await rejected(
       f.store.readRunExecutionSafety({

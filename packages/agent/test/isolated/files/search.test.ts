@@ -2,10 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ModelRequest } from '@kite-ai/ai';
 import type { ToolContext } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, type WorkspaceFiles } from '../../../src/files';
-import { createModelToolSurface, modelToolCall } from '../../../src/model-tools';
 
 const roots: string[] = [];
 const owners: WorkspaceFiles[] = [];
@@ -183,27 +181,6 @@ test('scoped discovery inherits ancestor ignores without reopening excluded pare
   ).toEqual(['packages/hidden/nested/a.ts']);
 });
 
-test('model search v5 content mode bounds results/line previews by default and exposes recoverable path errors', async () => {
-  const { files, put } = fixture();
-  put('a', Array.from({ length: 120 }, () => `needle${'x'.repeat(2100)}`).join('\n'));
-  const tool = createFileTools(files).find((t) => t.id === 'files.search')!;
-  expect(tool.version).toBe('5');
-  const result = await tool.execute({ text: 'needle', mode: 'content' }, context());
-  expect(result.outcome).toBe('succeeded');
-  const body = JSON.parse(result.content);
-  expect(body.matches).toHaveLength(100);
-  expect(body.matches[0]).toMatchObject({ truncated: true, originalLength: 2106 });
-  expect(body.matches[0].content).toHaveLength(2000);
-  expect(body.next).not.toBeNull();
-  expect(body.scope).toMatchObject({ kind: 'current_page', complete: false });
-  const missing = await tool.execute({ path: 'missing.ts', text: 'needle' }, context());
-  expect(missing.outcome).toBe('failed');
-  expect(missing.content).toContain('does not exist');
-  expect(missing.details).toMatchObject({ code: 'ENOENT', next_action: expect.any(String) });
-  const component = await tool.execute({ path: 'a/b', text: 'needle' }, context());
-  expect(component.content).toContain('path component is not a directory');
-});
-
 test('ignore options cannot grant access to protected files or follow links', async () => {
   const { files, root, put, dir } = fixture({ protectedPaths: ['private'], protectReads: true });
   dir('private');
@@ -269,86 +246,6 @@ test('content glob filtering and path discovery share invalid pattern boundaries
   expect((await files.search({ text: 'needle', glob: '**/*.ts' })).matches).toHaveLength(1);
 });
 
-test('search metadata records normalized parameters, actual lookahead statistics and one returned baseline per file', async () => {
-  const { root, files, put, dir } = fixture();
-  dir('src');
-  put('src/a.ts', 'needle\nneedle\nneedle');
-  const tool = createFileTools(files).find((t) => t.id === 'files.search')!;
-  const result = await tool.execute(
-    { path: join(root, 'src'), text: 'needle', mode: 'content', limit: 1 },
-    context(),
-  );
-  const page = JSON.parse(result.content);
-  expect(page.query).toEqual({
-    mode: 'content',
-    path: 'src',
-    text: 'needle',
-    glob: null,
-    respectIgnore: true,
-    after: null,
-    limit: 1,
-    contextLines: 0,
-    maxLineChars: 2000,
-  });
-  expect(page.stats).toEqual({
-    checkedTextFiles: 1,
-    matchedFiles: 1,
-    matches: 2,
-    returnedMatches: 1,
-  });
-  expect(page.files).toHaveLength(1);
-  const snapshot = await files.read('src/a.ts');
-  expect(page.files[0]).toEqual({ path: 'src/a.ts', baseline: snapshot.baseline });
-  expect(page.observation).toMatchObject({
-    kind: 'lookup',
-    scope: 'src',
-    sources: [{ path: 'src/a.ts', version: snapshot.baseline.hash }],
-    matchCount: 1,
-    complete: false,
-    coverage: 'page',
-    next: page.next,
-  });
-  expect(page.feedback).toContain('Continue with next');
-  const tail = JSON.parse(
-    (
-      await tool.execute(
-        { path: 'src', text: 'needle', mode: 'content', after: page.next },
-        context(),
-      )
-    ).content,
-  );
-  expect(tail.next).toBeNull();
-  expect(tail.observation.complete).toBe(false);
-  put('src/a.ts', 'needle changed');
-  const changed = await files.search({ path: 'src/a.ts', text: 'needle' });
-  expect(changed.files![0]!.baseline.hash).not.toBe(snapshot.baseline.hash);
-  expect(changed.files![0]!.baseline).toEqual((await files.read('src/a.ts')).baseline);
-});
-
-test('zero matches retain partial-scope facts rather than implying absence', async () => {
-  const { files, put } = fixture();
-  put('text', 'unrelated');
-  put('encoded', Buffer.from([0xff]));
-  const tool = createFileTools(files).find((t) => t.id === 'files.search')!;
-  const page = JSON.parse((await tool.execute({ text: 'needle' }, context())).content);
-  expect(page.query.path).toBe('');
-  expect(page.stats).toEqual({
-    checkedTextFiles: 1,
-    matchedFiles: 0,
-    returnedFiles: 0,
-  });
-  expect(page.files).toEqual([]);
-  expect(page.observation).toMatchObject({
-    sources: [],
-    matchCount: 0,
-    complete: false,
-    coverage: 'page',
-  });
-  expect(page.scope.skipped.encoding).toBe(1);
-  expect(page.feedback).toContain('does not establish which implementation is active');
-  expect(page.feedback).toContain('not inspected');
-});
-
 test('read observations distinguish complete selected windows from complete file content', async () => {
   const { files, put } = fixture();
   put('a', 'one\ntwo\nthree\n');
@@ -375,21 +272,6 @@ test('read observations distinguish complete selected windows from complete file
   const suffix = JSON.parse((await tool.execute({ path: 'a', offset: 2 }, context())).content);
   expect(suffix.observation.complete).toBe(false);
   expect(suffix.observation.coverage).toBe('window');
-});
-
-test('legacy search adapters without observation metadata keep their original successful result', async () => {
-  const { files } = fixture();
-  const adapter = new Proxy(files, {
-    get(target, key) {
-      if (key === 'search') return async () => ({ matches: [], next: null });
-      const value = Reflect.get(target, key);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
-  const tool = createFileTools(adapter).find((t) => t.id === 'files.search')!;
-  const result = await tool.execute({ text: 'needle', mode: 'content' }, context());
-  expect(result.outcome).toBe('succeeded');
-  expect(JSON.parse(result.content)).toEqual({ matches: [], next: null });
 });
 
 test('read excerpts quote the actual selected window and never split Unicode surrogate pairs', async () => {
@@ -462,45 +344,6 @@ test('pattern-like query feedback preserves literal matches and accurately scope
   expect((await files.search({ text: 'ordinary literal' })).feedback).not.toContain('pattern-like');
 });
 
-test('default file location pages return each file once with a complete baseline and no archive body', async () => {
-  const { files, put, dir } = fixture();
-  dir('a');
-  dir('archive');
-  put('a.ts', `head\n${'needle archive body\n'.repeat(1000)}`);
-  put('a/child.ts', 'needle child');
-  put('archive/old.ts', 'needle legacy');
-  const tool = createFileTools(files).find((t) => t.id === 'files.search')!;
-  const paths: string[] = [];
-  let after: string | undefined;
-  for (let pageNumber = 0; pageNumber < 3; pageNumber++) {
-    const result = await tool.execute(
-      { text: 'needle', limit: 1, ...(after ? { after } : {}) },
-      context(),
-    );
-    const page = JSON.parse(result.content);
-    expect(page.query.mode).toBe('files');
-    expect(page.matches).toEqual([]);
-    expect(page.stats.returnedFiles).toBe(1);
-    expect(page.stats.matches).toBeUndefined();
-    expect(page.stats.returnedMatches).toBeUndefined();
-    expect(page.observation).toMatchObject({ matchUnit: 'files', matchCount: 1 });
-    const file = page.files[0];
-    paths.push(file.path);
-    expect(file.baseline).toEqual((await files.read(file.path)).baseline);
-    expect(file.firstMatchLine).toBe(pageNumber === 0 ? 2 : 1);
-    expect(result.content).not.toContain('needle archive body');
-    expect(tool.formatModelResult!({ result })).toContain('body not returned');
-    if (pageNumber < 2) expect(page.next).toBeString();
-    else expect(page.next).toBeNull();
-    after = page.next ?? undefined;
-  }
-  expect(paths).toEqual(['a.ts', 'a/child.ts', 'archive/old.ts']);
-  const explicit = await files.search({ text: 'needle', path: 'a.ts', mode: 'files', limit: 1 });
-  expect(explicit.next).toBeNull();
-  expect(explicit.files).toHaveLength(1);
-  expect(explicit.files![0]!.firstMatchLine).toBe(2);
-});
-
 test('search cursors bind matching scope and granularity while permitting a different page size', async () => {
   const { files, put } = fixture();
   put('a.ts', 'needle\nneedle');
@@ -532,55 +375,6 @@ test('search cursors bind matching scope and granularity while permitting a diff
   await expect(files.search({ ...query, after: 'a.ts\u0000000000000001' })).rejects.toMatchObject({
     code: 'file_page_invalid',
   });
-});
-
-test('actual projected declarations and formatted continuation values drive read and search next pages', async () => {
-  const { files, put } = fixture();
-  put('a', 'needle\nneedle');
-  put('b', 'needle');
-  const tools = createFileTools(files);
-  const request: ModelRequest = {
-    modelId: 'fixture',
-    requestId: 'request',
-    messages: [],
-    tools: tools.map((tool) => ({
-      id: tool.id,
-      definitionVersion: tool.version,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })),
-  };
-  const surface = createModelToolSurface(request, new Map(tools.map((tool) => [tool.id, tool])));
-  const read = tools.find((tool) => tool.id === 'files.read')!;
-  const search = tools.find((tool) => tool.id === 'files.search')!;
-  expect(surface.tools.find((tool) => tool.id === 'read_file')!.description).toContain(
-    'next_line as start_line',
-  );
-  const schema = surface.tools.find((tool) => tool.id === 'search_content')!;
-  expect(schema.description).toContain('next_cursor as cursor');
-  expect(schema.inputSchema.properties).toHaveProperty('cursor');
-  expect(schema.inputSchema.properties).not.toHaveProperty('after');
-  async function invoke(name: string, input: Record<string, unknown>) {
-    const call = surface.decode({ id: 'call', name, arguments: JSON.stringify(input) });
-    expect(call.model?.error).toBeUndefined();
-    expect(modelToolCall(call)).toEqual({ id: 'call', name, arguments: JSON.stringify(input) });
-    const tool = tools.find((tool) => tool.id === call.name)!;
-    const result = await tool.execute(JSON.parse(call.arguments), context());
-    expect(result.outcome).toBe('succeeded');
-    return { raw: JSON.parse(result.content), text: tool.formatModelResult!({ result })! };
-  }
-  const r1 = await invoke('read_file', { path: 'a', max_lines: 1 });
-  const line = /^.*next_line=(\d+);/m.exec(r1.text)![1];
-  const r2 = await invoke('read_file', { path: 'a', start_line: Number(line), max_lines: 1 });
-  expect(r2.raw.selection).toMatchObject({ fromLine: 2, nextOffset: null });
-  const p1 = await invoke('search_content', { text: 'needle', limit: 1 });
-  const cursor = JSON.parse(/^next_cursor=(.*)$/m.exec(p1.text)![1]!);
-  const p2 = await invoke('search_content', { text: 'needle', limit: 1, cursor });
-  expect(p1.raw.files[0].path).toBe('a');
-  expect(p2.raw.files[0].path).toBe('b');
-  expect(p2.raw.next).toBeNull();
-  expect(read.model?.resultVersion).toBe('1');
-  expect(search.version).toBe('5');
 });
 
 test('search continuation uses the normalized scope for trailing and repeated separators', async () => {

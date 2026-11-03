@@ -421,7 +421,6 @@ export type SessionLogPage = {
 };
 export type SkillCatalogueQuery = {
   storeId: string;
-  workflow?: 'manual';
   afterId?: string;
   revision?: string;
   limit?: number;
@@ -468,31 +467,6 @@ export type SkillCataloguePage = {
       | null;
     requiredCapabilities: Array<string>;
     missingCapabilities: Array<string>;
-    workflow?: {
-      extensionId: 'builtin.skill-workflow';
-      definitionVersion: '1';
-      skillId: string | null;
-      name: string | null;
-      revision: string | null;
-      state: 'available' | 'disabled' | 'unavailable';
-      reason:
-        | (
-            | 'workflow_disabled'
-            | 'workflow_configuration_unavailable'
-            | 'workflow_contract_unavailable'
-            | 'workflow_dependency_unavailable'
-            | 'workflow_manual_not_allowed'
-            | 'workflow_input_required'
-            | 'workflow_fork_unavailable'
-            | 'workflow_verifier_unavailable'
-            | 'workflow_source_changed'
-            | 'skill_unavailable'
-          )
-        | null;
-      manualAllowed: boolean;
-      emptyInputValid: boolean;
-      contextMode: ('inline' | 'fork') | null;
-    };
   }>;
   nextAfterId: string | null;
   complete: boolean;
@@ -706,16 +680,23 @@ export type HostStatus = {
     sandbox:
       | { backend: 'none'; available: false; qualification: 'unqualified' }
       | { backend: 'macos_seatbelt'; available: true; qualification: 'host_scope' }
-      | { backend: 'linux_bubblewrap'; available: true; qualification: 'host_scope_unqualified' };
+      | { backend: 'linux_bubblewrap'; available: true; qualification: 'host_scope_unqualified' }
+      | { backend: 'windows_restricted_token'; available: true; qualification: 'write_restricted' };
     shell: {
       configured: boolean;
       available: boolean;
-      supervision: 'none' | 'posix_group' | 'macos_coalition' | 'linux_pid_namespace';
+      supervision:
+        | 'none'
+        | 'posix_group'
+        | 'macos_coalition'
+        | 'linux_pid_namespace'
+        | 'windows_job';
       qualification:
         | 'not_configured'
         | 'darwin_supervision_only'
         | 'darwin_host_boundary'
         | 'linux_host_boundary_unqualified'
+        | 'windows_unelevated'
         | 'unavailable';
       reason:
         | (
@@ -2069,7 +2050,6 @@ export type Run = {
     | 'cancelled'
     | 'interrupted';
   isActive: boolean;
-  waitingForResults?: Array<string>;
   configuration?: Run___schema0;
   createdAt: number;
   finishedAt: number | null;
@@ -2509,7 +2489,6 @@ export type BackgroundExecutionItem = {
     rootWorkCommandId: string;
     rootWorkSeq: string;
     contextSelectionId: string;
-    waitingForResults: Array<string>;
     status:
       | 'running'
       | 'waiting_interaction'
@@ -2534,7 +2513,6 @@ export type BackgroundExecutionItem = {
     rootWorkCommandId: string;
     rootWorkSeq: string;
     contextSelectionId: string;
-    waitingForResults: Array<string>;
     status:
       | 'running'
       | 'waiting_interaction'
@@ -2646,7 +2624,6 @@ export type BackgroundExecutionPage = {
       rootWorkCommandId: string;
       rootWorkSeq: string;
       contextSelectionId: string;
-      waitingForResults: Array<string>;
       status:
         | 'running'
         | 'waiting_interaction'
@@ -2671,7 +2648,6 @@ export type BackgroundExecutionPage = {
       rootWorkCommandId: string;
       rootWorkSeq: string;
       contextSelectionId: string;
-      waitingForResults: Array<string>;
       status:
         | 'running'
         | 'waiting_interaction'
@@ -2772,7 +2748,6 @@ export type SessionDirectoryPage = {
           | 'cancelled'
           | 'interrupted';
         isActive: boolean;
-        waitingForResults: boolean;
       } | null;
       queued: boolean;
       pendingInteractions: number;
@@ -2794,7 +2769,6 @@ export type SessionDirectoryActivity = {
       | 'cancelled'
       | 'interrupted';
     isActive: boolean;
-    waitingForResults: boolean;
   } | null;
   queued: boolean;
   pendingInteractions: number;
@@ -2889,7 +2863,6 @@ export type BrowserView = {
       | 'cancelled'
       | 'interrupted';
     isActive: boolean;
-    waitingForResults?: Array<string>;
     createdAt: number;
     finishedAt: number | null;
     reason: string | null;
@@ -2991,7 +2964,6 @@ export type BrowserRunFacts = {
       | 'cancelled'
       | 'interrupted';
     isActive: boolean;
-    waitingForResults?: Array<string>;
     createdAt: number;
     finishedAt: number | null;
     reason: string | null;
@@ -3632,7 +3604,6 @@ export type SessionView = {
       | 'cancelled'
       | 'interrupted';
     isActive: boolean;
-    waitingForResults?: Array<string>;
     configuration?: SessionView___schema0;
     createdAt: number;
     finishedAt: number | null;
@@ -3966,6 +3937,7 @@ export type ResumeJobReportResponse = {
   status: 'applied';
   receipt:
     | { reportCommandId: string; runId: string; outcome: 'report_resumed' }
+    | { reportCommandId: string; runId: null; outcome: 'report_deferred'; reason: string }
     | { reportCommandId: string; runId: null; outcome: 'report_suppressed'; reason?: string };
   dispatchFailure?: { code: string; instanceId: string };
   originStoreId: string;

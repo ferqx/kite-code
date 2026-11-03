@@ -28,8 +28,7 @@ for (const mode of [
   'group_reconciled',
   'group_reconciled_queued',
   'group_reconciled_approval',
-  'group_required',
-  'group_foreground',
+  'group_owned',
   'group_queued',
   'group_nested',
   'group_activation',
@@ -54,7 +53,7 @@ for (const mode of [
         : mode === 'group_reconciled_approval'
           ? 'group_approval'
           : mode === 'group_reconciled'
-            ? 'group_required'
+            ? 'group_owned'
             : mode === 'group_cleanup'
               ? 'group_new_descendant'
               : mode === 'group_dynamic_drift'
@@ -66,7 +65,7 @@ for (const mode of [
                       'group_binding',
                       'group_handoff_cancel',
                     ].includes(mode)
-                  ? 'group_required'
+                  ? 'group_owned'
                   : mode;
     const child = Bun.spawn(
       [
@@ -487,9 +486,6 @@ for (const mode of [
               ? 'cancelled'
               : 'succeeded',
             childSessionId: carrier.childSessionId,
-            ...(['group_required', 'group_queued'].includes(mode)
-              ? { resultAcceptance: { runId: ready.runId } }
-              : {}),
           });
           const before = children.find((view) => view.session.id === carrier.childSessionId)!;
           const after = await store.getView(carrier.childSessionId!);
@@ -526,11 +522,7 @@ for (const mode of [
         if (seedMode === 'group_approval')
           expect(ledger.filter((line) => line.startsWith('effect:'))).toHaveLength(3);
         expect(ledger.filter((line) => line === 'parent-model')).toHaveLength(
-          mode === 'group_new_descendant'
-            ? 4
-            : ['group_foreground', 'group_handoff_cancel'].includes(mode)
-              ? 2
-              : 3,
+          mode === 'group_new_descendant' ? 3 : mode === 'group_handoff_cancel' ? 1 : 2,
         );
         for (const key of [
           'group_nested',

@@ -31,6 +31,7 @@ const phases: RecoveryPhase[] = [
   'resumed',
   'interrupted',
   'suppressed',
+  'deferred',
   'failed',
   'outcome_unknown',
 ];

@@ -175,11 +175,10 @@ function read(): TuiSnapshot {
   if (mode === 'subagents' || mode === 'mixed') {
     const calls = Array.from({ length: 4 }, (_, index) => ({
       id: `task-${index}`,
-      name: 'task',
+      name: 'task.spawn',
       arguments: JSON.stringify({
-        role: 'explore',
-        key: `child-${index}`,
-        input: `Child ${index}`,
+        preset: 'explore',
+        prompt: `Child ${index}`,
       }),
     }));
     modelMessages('children-model', calls);
@@ -187,7 +186,7 @@ function read(): TuiSnapshot {
       const childId = `child-${index}`;
       executions.push(
         displayExecution(call.id, {
-          definitionId: 'builtin.task/task',
+          definitionId: 'builtin.task/task.spawn',
           toolCallId: call.id,
           toolInput: JSON.parse(call.arguments),
           status: 'succeeded',
