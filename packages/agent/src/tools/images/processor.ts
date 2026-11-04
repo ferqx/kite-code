@@ -92,7 +92,8 @@ async function collect(
   for await (const chunk of stream) {
     size += chunk.length;
     if (size > maximum) {
-      await stop();
+      // Let iterator cleanup close an overflowing pipe before waiting for child close.
+      void stop().catch(() => {});
       throw new AgentError('image_process_output_invalid');
     }
     chunks.push(Buffer.from(chunk));
@@ -234,16 +235,20 @@ async function execute(
       windowsHide: true,
     });
     let exited = false;
-    const closed = new Promise<number | null>((resolve, reject) => {
-      child.once('error', reject);
+    const closed = new Promise<number | null>((resolve) => {
       child.once('close', (code) => {
         exited = true;
         resolve(code);
       });
     });
-    void closed.catch(() => {});
+    // An operation error is not evidence that the original child/pipes failed to close.
+    const result = Promise.race([
+      closed,
+      new Promise<never>((_resolve, reject) => child.once('error', reject)),
+    ]);
+    void result.catch(() => {});
     const stop = async () => {
-      if (!exited) child.kill('SIGKILL');
+      if (!exited && child.pid !== undefined) child.kill('SIGKILL');
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
@@ -259,15 +264,17 @@ async function execute(
     owner = {
       stdout: child.stdout,
       stderr: child.stderr,
-      exited: closed,
+      exited: result,
       stop,
       close: stop,
       write: () =>
         new Promise<void>((resolve, reject) => {
-          child.stdin.once('error', reject);
-          child.stdin.end(bytes, () => {
-            child.stdin.removeListener('error', reject);
-            resolve();
+          child.stdin.on('error', reject);
+          child.stdin.once('close', () => child.stdin.removeListener('error', reject));
+          child.stdin.end(bytes, (error?: Error | null) => {
+            // Writable.end may report failure before the stream emits its error event.
+            if (error) reject(error);
+            else resolve();
           });
         }),
     };
