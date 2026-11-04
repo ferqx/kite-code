@@ -153,6 +153,7 @@ export function inkToolName(
   }
   const names: Readonly<Record<string, string>> = {
     'builtin.files/files.read': 'read_file',
+    'builtin.files/files.view_images': 'view_images',
     'builtin.files/files.write': 'write_file',
     'builtin.files/files.edit': 'edit_file',
     'builtin.files.path/files.write_path': 'write_file',

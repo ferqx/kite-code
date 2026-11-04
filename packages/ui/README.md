@@ -2,6 +2,8 @@
 
 # UI
 
+`ToolActivity` 为宿主已核实的 `view_images` 结果显示图像图标、“已查看 N 张图像”与120px圆角缩略图，默认展开，标题按钮可折叠，多图保持120px并自动换行；成功消息不直接铺原始 JSON。计数来自准确成功回执的展示字段，运行、失败、取消和未核实结果不计入成功数。宿主通过原图片 reader 提供缩略图，混合工具分组保持原顺序且不重复渲染图片；后续加入普通工具不会自动折叠已展示的图片，用户显式折叠仍优先。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)覆盖计数、增量展开与取消／失败；Native 的真实图片、读取租约及组件过程归[Desktop owner](../../apps/desktop/README.md)。
+
 [Sidebar](src/desktop/Sidebar.tsx)接受宿主确认的 `SessionSummary.hasUnreadTurn`，在会话行右侧显示8px蓝色微光圆点，并补充“有新结束的回复”无障碍描述；原运行中图标与待输入提示保留。提醒不增加行高、不执行读取或业务操作，已读与持久化由[Native owner](../../apps/desktop/README.md#native-项目会话目录)负责；Web 未提供该标记时保持原目录行为。
 
 应用确认框另有公开的 `@kite-ai/ui/desktop/confirmation` [专用入口](src/desktop/confirmation.ts)，只重新导出原 `ApplicationConfirmationDialog` 与 Full 确认组件；[Desktop 构建](scripts/build-desktop.ts)同步产出 `confirmation.js`。固定确认页面无需通过桌面总出口加载会话 Markdown／公式／高亮初始化，确认文案、样式、焦点与决定准入仍由原组件和宿主负责。共享加载动画 `conversation-loading-shimmer` 的关键帧位于顶层，保留原动画参数与减少动态效果覆盖，避免生产 CSS 优化器拒绝嵌套关键帧。

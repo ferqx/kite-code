@@ -40,7 +40,7 @@ export type NativeToolMessageFact = Pick<
   inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };
   /** Exact known Shell result content equals its saved structured details. */
   shellResultVerified?: boolean;
-  /** Original PDF page image metadata, loaded through the same bounded image reader. */
+  /** Original image/PDF metadata, loaded through the same bounded image reader. */
   images?: { name: string; reference: { mediaType: string; size: string } }[];
   /** Read-only original Execution authorization; never a grant or answer capability. */
   authorization?: Execution['authorization'];

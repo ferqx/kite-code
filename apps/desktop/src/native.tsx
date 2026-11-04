@@ -4065,8 +4065,34 @@ function NativeDesktopContent({
     );
     if (!aggregate && group.length === 1 && unverified.has(group[0]!.id))
       return originalTool(group[0]!, controls.expanded, controls.onToggle);
+    const renderToolImages = (model: (typeof group)[number]) => {
+      const message = messagesById.get(model.id);
+      const images = displayTools.find((entry) => entry.messageId === model.id)?.images;
+      return message && images?.length && selection && state ? (
+        <NativeUserImages
+          key={model.id}
+          bridge={bridge}
+          previews={imageDrafts.previews}
+          generation={state.generation}
+          viewSelection={selection.viewSelection ?? selection.viewGeneration}
+          historyEpoch={state.historyEpoch ?? 0}
+          message={message}
+          images={images}
+          readAvailable={
+            !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable
+          }
+        />
+      ) : null;
+    };
     const models = group.map((model) => {
       if (unverified.has(model.id)) return { ...model, title: model.title ?? '工具结果', text: '' };
+      const image = displayTools.find((entry) => entry.messageId === model.id);
+      if (image?.definitionId === 'files.view_images' && image.definitionVersion === '1')
+        return {
+          ...model,
+          toolName: 'view_images',
+          toolImageCount: image.status === 'succeeded' ? (image.images?.length ?? 0) : 0,
+        };
       const target = displayTargets.find((entry) => entry.messageId === model.id);
       return target?.path && target.operation
         ? {
@@ -4099,6 +4125,7 @@ function NativeDesktopContent({
               : agentTool(model)
           }
           renderChildren={() => null}
+          renderImages={renderToolImages}
           openFileForMessage={(model) => {
             const target = displayTargets.find((entry) => entry.messageId === model.id);
             if (
@@ -4139,25 +4166,10 @@ function NativeDesktopContent({
               />
             ))}
         {group.map((model) => {
-          const message = messagesById.get(model.id);
-          const images = displayTools.find((entry) => entry.messageId === model.id)?.images;
-          return message && images?.length && selection && state ? (
-            <NativeUserImages
-              key={model.id}
-              bridge={bridge}
-              previews={imageDrafts.previews}
-              generation={state.generation}
-              viewSelection={selection.viewSelection ?? selection.viewGeneration}
-              historyEpoch={state.historyEpoch ?? 0}
-              message={message}
-              images={images}
-              readAvailable={
-                !selection.viewLoading &&
-                historyState.phase === 'complete' &&
-                !directory?.unavailable
-              }
-            />
-          ) : null;
+          const image = displayTools.find((entry) => entry.messageId === model.id);
+          return image?.definitionId === 'files.view_images' && image.definitionVersion === '1'
+            ? null
+            : renderToolImages(model);
         })}
         {liveNotices}
       </>

@@ -7,6 +7,7 @@ import {
   FileSearchIcon,
   Folder01Icon,
   Globe02Icon,
+  Image02Icon,
   Search01Icon,
   ShieldAlertIcon,
   ShieldCheckIcon,
@@ -57,6 +58,7 @@ const TOOL_LABELS: Record<string, string> = {
   load_skill: '加载技能',
   mcp_tool: '运行 MCP 工具',
   read_file: '读取',
+  view_images: '查看图像',
   read_mcp_resource: '读取 MCP 资源',
   read_skill_resource: '读取技能资料',
   request_plan_review: '请求计划审阅',
@@ -272,6 +274,7 @@ function toolTarget(message: Message): string | undefined {
         : undefined;
     }
     case 'read_file':
+    case 'view_images':
     case 'edit_file':
     case 'write_file':
       return argument('path');
@@ -347,6 +350,8 @@ function toolDetailText(message: Message, includeProgress = false): string {
 
 function toolIcon(message: Message) {
   switch (message.toolName) {
+    case 'view_images':
+      return Image02Icon;
     case 'read_file':
     case 'read_mcp_resource':
     case 'load_skill':
@@ -401,6 +406,8 @@ function toolIcon(message: Message) {
 
 function activityAction(message: Message): string {
   switch (message.toolName) {
+    case 'view_images':
+      return '查看图像';
     case 'write_file':
     case 'edit_file':
       return '编辑文件';
@@ -926,6 +933,7 @@ export function ToolActivity({
   openFileForMessage,
   renderChildren,
   renderItem,
+  renderImages,
   expandedItems,
   onToggleItem,
   childProcess = false,
@@ -950,6 +958,8 @@ export function ToolActivity({
   renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
   /** Keep a host's original per-item reader inside the aggregate's disclosure. */
   renderItem?: (message: Message) => ReactNode | undefined;
+  /** Verified image receipts use the host's existing scoped image reader. */
+  renderImages?: (message: Message) => ReactNode;
   suppressGenericFailure?: boolean;
   childProcess?: boolean;
   activityId?: string;
@@ -985,6 +995,20 @@ export function ToolActivity({
   }
   const askMultiple = !!ask && ask.questions.length > 1;
   const grouped = aggregate || messages.length > 1;
+  const imageOnly = !unverified && messages.every((item) => item.toolName === 'view_images');
+  const [imageDefaultOpen, setImageDefaultOpen] = useState(imageOnly);
+  // Appending a sibling must not fold an image the user is already reading.
+  if (imageOnly && !imageDefaultOpen) setImageDefaultOpen(true);
+  const imageCount = messages.reduce(
+    (count, item) =>
+      count +
+      (item.status === 'completed' &&
+      Number.isSafeInteger(item.toolImageCount) &&
+      item.toolImageCount! > 0
+        ? item.toolImageCount!
+        : 0),
+    0,
+  );
   if (grouped) ask = undefined;
   const shell = !grouped && isShellMessage(message);
   const managedShell = !grouped ? shellSnapshot(message) : undefined;
@@ -1010,7 +1034,15 @@ export function ToolActivity({
   const detailLabel = itemIssue ? '工具异常详情' : '工具详情';
   // A failed original Tool receipt always keeps its own failure presentation.
   const agent = !grouped && !itemIssue && message.status !== 'cancelled' ? childAgent : undefined;
-  const open = expanded ?? false;
+  const open = expanded ?? (imageOnly || imageDefaultOpen);
+  const imageThumbnails = () =>
+    renderImages && (
+      <div className="tool-image-thumbnails">
+        {messages.map((item) => (
+          <Fragment key={item.presentationKey ?? item.id}>{renderImages(item)}</Fragment>
+        ))}
+      </div>
+    );
   let projectedChildren: ReactNode[] | undefined;
   const getChildren = () => {
     projectedChildren ??=
@@ -1046,28 +1078,37 @@ export function ToolActivity({
       !!ask ||
       message.toolName === 'task' ||
       !!message.text ||
+      (imageOnly && !!renderImages) ||
       getChildren().some(Boolean));
-  const label = grouped
-    ? activityLabel(messages)
-    : ask
-      ? askMultiple
-        ? `询问用户 · ${message.status === 'completed' && !ask.cancelled ? '已回答 ' : ''}${ask.questions.length} 项`
-        : '询问用户'
-      : shell
-        ? shellTitle(message)
-        : toolTitle(message);
-  const target = ask
-    ? !askMultiple
-      ? ask.questions[0]?.question
-      : undefined
+  const label = imageOnly
+    ? running
+      ? '正在查看图像'
+      : imageCount && !issues.length
+        ? `已查看 ${imageCount} 张图像`
+        : '查看图像'
     : grouped
-      ? undefined
-      : shell
-        ? (shellCommand(message) ??
-          message.shell?.commandPreview ??
-          message.shell?.shellId ??
-          toolTarget(message))
-        : toolTarget(message);
+      ? activityLabel(messages)
+      : ask
+        ? askMultiple
+          ? `询问用户 · ${message.status === 'completed' && !ask.cancelled ? '已回答 ' : ''}${ask.questions.length} 项`
+          : '询问用户'
+        : shell
+          ? shellTitle(message)
+          : toolTitle(message);
+  const target = imageOnly
+    ? undefined
+    : ask
+      ? !askMultiple
+        ? ask.questions[0]?.question
+        : undefined
+      : grouped
+        ? undefined
+        : shell
+          ? (shellCommand(message) ??
+            message.shell?.commandPreview ??
+            message.shell?.shellId ??
+            toolTarget(message))
+          : toolTarget(message);
   const status =
     ask && (ask.cancelled || message.status === 'cancelled')
       ? open
@@ -1103,7 +1144,7 @@ export function ToolActivity({
       <TraceIcon className="tool-activity-marker-icon">
         <HugeiconsIcon
           className="tool-activity-kind-icon"
-          icon={grouped ? Wrench01Icon : toolIcon(message)}
+          icon={imageOnly ? Image02Icon : grouped ? Wrench01Icon : toolIcon(message)}
         />
       </TraceIcon>
       <TraceTitle
@@ -1153,7 +1194,7 @@ export function ToolActivity({
   return (
     <TraceCollapsible asChild open={Boolean(open && canExpand)} onOpenChange={onToggle}>
       <article
-        className={`message tool-activity${grouped ? ' tool-activity-aggregate' : ''}${shell ? ' shell-activity' : ''}${agent ? ' child-agent-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
+        className={`message tool-activity${imageOnly ? ' tool-image-activity' : ''}${grouped ? ' tool-activity-aggregate' : ''}${shell ? ' shell-activity' : ''}${agent ? ' child-agent-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
         data-restored-expanded={restoredExpanded?.has(activityId ?? message.id) || undefined}
         onFocusCapture={(event) =>
           setApprovalFocused(
@@ -1267,6 +1308,8 @@ export function ToolActivity({
             className="tool-activity-content"
             open={Boolean(open && canExpand)}
             render={() => {
+              if (imageOnly && !issues.length && message.status !== 'cancelled')
+                return imageThumbnails();
               const children = getChildren();
               return (
                 <>
@@ -1309,6 +1352,7 @@ export function ToolActivity({
                                   openFileForMessage={openFileForMessage}
                                   childDetail={childDetailForMessage?.(item)}
                                   renderChildren={renderChildren}
+                                  renderImages={imageOnly ? undefined : renderImages}
                                 />
                               ))}
                           </Fragment>
@@ -1399,6 +1443,7 @@ export function ToolActivity({
                           )
                         : children}
                   </div>
+                  {imageOnly && imageThumbnails()}
                 </>
               );
             }}

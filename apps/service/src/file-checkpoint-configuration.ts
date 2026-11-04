@@ -7,7 +7,9 @@ import type { PublicExecution, ReadContext, ToolContext } from '@kite-ai/agent/e
 import {
   type CheckpointSource,
   createFileCheckpointing,
+  createImageFileReads,
   createScopedFileCheckpointing,
+  createWorkspaceFiles,
   type EditablePlanFile,
   type FileCheckpoint,
   type FileCheckpointCaptureProof,
@@ -638,12 +640,76 @@ export function createDefaultFileCheckpointConfiguration(options: {
       };
     },
   });
+  const images = createImageFileReads({
+    profilePath: options.profile.profilePath,
+    protectedRoots: () => [
+      options.profile.dataRoot,
+      options.profile.coordinationPath,
+      ...options.runtimeAssets(),
+    ],
+    async workspaceRoot(request) {
+      const runtime = options.runtime(),
+        session = await runtime.getSession(request.sessionId);
+      const workspace = session && (await runtime.getWorkspace(session.workspaceId));
+      if (!workspace) fail('file_read_scope_unavailable');
+      return fileURLToPath(workspace.rootUri);
+    },
+    async readWorkspace(path, context, signal) {
+      const bound = await scope(context);
+      const files = createWorkspaceFiles({
+        root: bound.root,
+        protectReads: true,
+        protectedPaths: await protectedPaths(bound.root, options.profile, options.runtimeAssets()),
+      });
+      try {
+        signal.throwIfAborted();
+        const value = await files.readBytes(files.relativePath(path), {
+          maxBytes,
+          signal,
+          sharedRead: true,
+        });
+        signal.throwIfAborted();
+        return { path, bytes: value.bytes, hash: value.baseline.hash };
+      } finally {
+        await files.close();
+      }
+    },
+    async resolveInput(request, uri) {
+      const runtime = options.runtime(),
+        actual = await runtime.getExecution(request.executionId);
+      const metadata = await runtime.getMetadata(),
+        command = actual && (await runtime.getCommand(actual.originCommandId));
+      if (
+        !actual ||
+        !command ||
+        actual.sessionId !== request.sessionId ||
+        actual.originStoreId !== metadata.storeId ||
+        command.originStoreId !== metadata.storeId ||
+        actual.kind !== 'tool' ||
+        actual.definitionId !== 'files.view_images' ||
+        actual.definitionVersion !== '1'
+      )
+        fail('input_file_scope_denied');
+      return runtime.resolveInputFile({
+        expectedStoreId: metadata.storeId,
+        sessionId: request.sessionId,
+        subjectId: command.subjectId,
+        uri,
+        signal: request.signal,
+      });
+    },
+  });
+  const imageExtension = {
+    ...outputs.extension,
+    tools: [...outputs.extension.tools!, images.tool],
+  };
   return {
-    extension: outputs.extension,
-    tools: outputs.extension.tools!,
+    extension: imageExtension,
+    tools: imageExtension.tools,
     isPlanFileEdit: planFiles.isPlanFileEdit,
     async describeRequest(request: import('@kite-ai/agent/extensions').AuthorizationRequest) {
       return (
+        (await images.describeRequest(request)) ??
         (await outputs.describeRequest(request)) ??
         (await planFiles.describeRequest(request)) ??
         (await inputFiles.describeRequest(request)) ??

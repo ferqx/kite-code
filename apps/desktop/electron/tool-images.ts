@@ -5,29 +5,47 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
     ? (value as Record<string, unknown>)
     : undefined;
 
-/** Display metadata from an exact successful PDF read, never from model-authored paths. */
+/** Display metadata from exact successful image/PDF reads, never model-authored paths. */
 export function nativeToolImages(execution: Execution) {
   const result = object(execution.result);
   if (
-    execution.definitionId !== 'files.read' ||
-    execution.definitionVersion !== '5' ||
+    !(
+      (execution.definitionId === 'files.read' && execution.definitionVersion === '5') ||
+      (execution.definitionId === 'files.view_images' && execution.definitionVersion === '1')
+    ) ||
     execution.status !== 'succeeded' ||
     result?.outcome !== 'succeeded' ||
     result.modelImages === undefined
   )
     return [];
+  const local = execution.definitionId === 'files.view_images';
   if (
     !Array.isArray(result.modelImages) ||
-    result.modelImages.length > 4 ||
+    result.modelImages.length > (local ? 10 : 4) ||
     !Array.isArray(result.artifactRefs)
   )
     throw new ClientError('tool_images_invalid');
   let pages: unknown[] = [];
+  let imageNames: (string | undefined)[] = [];
   try {
     const body = JSON.parse(String(result.content));
     if (Array.isArray(body.pages)) pages = body.pages;
+    if (local) {
+      const images = Array.isArray(body.images) ? body.images : [body];
+      imageNames = images.map((image: unknown) => {
+        const path = object(image)?.path;
+        return typeof path === 'string' ? path.split(/[\\/]/).at(-1)?.slice(0, 512) : undefined;
+      });
+    }
   } catch {}
   let total = 0n;
+  if (
+    local &&
+    (!result.modelImages.length ||
+      imageNames.length !== result.modelImages.length ||
+      imageNames.some((name) => !name))
+  )
+    throw new ClientError('tool_images_invalid');
   return result.modelImages.map((value, index) => {
     const ref = object(value),
       scope = object(ref?.scope);
@@ -38,6 +56,7 @@ export function nativeToolImages(execution: Execution) {
       ref.mediaType !== 'image/png' ||
       typeof ref.size !== 'string' ||
       !/^[1-9][0-9]{0,8}$/.test(ref.size) ||
+      (local && BigInt(ref.size) > 8n * 1024n * 1024n) ||
       scope?.kind !== 'execution' ||
       scope.id !== execution.id ||
       !(result.artifactRefs as unknown[]).some((candidate) => {
@@ -58,9 +77,10 @@ export function nativeToolImages(execution: Execution) {
     const page = object(pages[index])?.number ?? pages[index];
     return {
       name:
-        Number.isSafeInteger(page) && Number(page) > 0
+        imageNames[index] ??
+        (Number.isSafeInteger(page) && Number(page) > 0
           ? `PDF 第 ${page} 页`
-          : `PDF 页图 ${index + 1}`,
+          : `PDF 页图 ${index + 1}`),
       reference: {
         id: ref.id,
         mediaType: 'image/png',

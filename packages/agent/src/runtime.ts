@@ -8984,6 +8984,7 @@ export class AgentRuntime {
     const retainedInputIds = new Set<string>();
     const historyRuns = new Map<string, RunRecord | null>();
     const historyCommands = new Map<string, CommandRecord | null>();
+    let localImageBytes = 0;
     let afterSeq = '0';
     let afterSourceId = '';
     let contextSelectionId: string | undefined;
@@ -9236,7 +9237,18 @@ export class AgentRuntime {
                 message.sourceIds?.length !== 1
               )
                 throw new AgentError('tool_images_invalid');
-              for (const ref of toolImages(value.modelImages, execution.id)) {
+              for (const ref of toolImages(value.modelImages, execution.id, {
+                id: execution.definitionId,
+                version: execution.definitionVersion,
+              })) {
+                if (
+                  execution.definitionId === 'files.view_images' &&
+                  execution.definitionVersion === '1'
+                ) {
+                  localImageBytes += Number(ref.size);
+                  if (localImageBytes > 32 * 1024 * 1024)
+                    throw new AgentError('image_context_too_large');
+                }
                 const original = await this.options.store.getArtifactReference({
                   expectedStoreId: storeId,
                   sessionId: execution.sessionId,

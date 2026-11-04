@@ -33,6 +33,10 @@
 
 ## 图片输入协议
 
+默认装配增加 `files.view_images@1`／模型名 `view_images`，位于同一个 `builtin.files` 扩展；普通无 Shell 目录为12项，有 Shell为17项，浏览器工具另按实际宿主选择。它从真实 Execution/Workspace 和当前输入登记派生读取范围，使用原只读权限与父子交集；子 Agent 的准确只读定义白名单也包含该版本。受保护根包括 Profile、协调目录、处理程序／摘要与实际 Sharp/native 依赖闭包。单次`paths`最多10张，兼容互斥的单图`path`，私有原件派发revision绑定完整有序批次；失败不交付部分图片。新增工具不增加 HTTP 图片协议、调试入口或文件写入权。
+
+图片结果沿现有 Artifact 和后继模型链传递；本地原件／视觉结果的目录与 GC 由[Files owner](../../packages/agent/src/tools/files/README.md#本地保存与缓存目录)维护。[默认 Service 联验](test/isolated/image-reading.test.ts)覆盖真实持久化、外部／私有路径、两个图片调用、冷重开／Fork和两协议实际 SDK 编码；真实视觉识别及性能范围见同一 owner。
+
 具备 Artifact port 的 Runtime 宣告 `input_images`；认证写入口 `POST /v1/sessions/{id}/input-images` 接收 expectedStoreId、稳定发布 ID、名称、明确图片 MIME 与 base64，主体由可信宿主提供。闭合 schema 与最多 24 MiB 的请求体先准入，Runtime 再按单张 16 MiB 和真实字节校验，返回完整不可变引用。路径、URL 和 PDF 二进制不属于此协议；普通文件另以 `files` 路径引用发送，Native 的统一入口按类型自动分流。
 
 公共 start/steer/follow-up 以及 Message 的可选 `images` 保存图片引用，可选 `files` 保存最多 128 个名称与本地 URI，两类附件均可替代空文本。三个写入口的 `images` 数量最多 10，历史 Message 仍按原保存元数据读取；三个写入口完整转发各自元数据，不在 HTTP 层把文件名拼回正文。真实输入解释与业务派生继续保留这些元数据和原请求摘要，不从附件中的资料推导停止或批准。引用准入和完整历史组装归 [Agent](../../packages/agent/README.md#用户图片输入)。[HTTP/Client 测试](test/isolated/input-images.test.ts)通过真实认证连接上传纯图片、单独发送普通文件，核模型原图／路径与历史原文分离及非法 URL 拒绝；[生成器](../../scripts/generate-unified-api.ts)同步 OpenAPI、schema、声明和 validators。未扩 Web 写入权限或原业务命令恢复权限。

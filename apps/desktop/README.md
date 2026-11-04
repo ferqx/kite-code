@@ -12,7 +12,11 @@
 
 会话输出在对应工具消息提供“查看本次交付的文件”。[历史 reader](electron/file-changes.ts)核原 succeeded Execution、原结果 revision、scope、Artifact 成员及完整 hash／size，按完整 UTF-8 边界返回每段至多64KiB；界面提供续读和回到开头，当前文件被改动或删除也不改旧版本。“打开当前文件”仍单独走原编辑器路径及准确登记重核。历史读取目前沿 Client 完整 Artifact reader 后分页 IPC，不宣称流式磁盘分页或大文件内存限额。
 
-PDF 工具页图复用 [图片 reader](electron/input-image-reads.ts)及 [NativeUserImages](src/native-user-images.tsx)：Main 只接观察到的完成 Tool 消息和索引，核原执行、最多4个 PNG 引用及16MiB总量，renderer 不能指定任意引用或路径。后继轮次、Fork 与冷历史按原来源读取，预览缓存只负责显示，不承担历史保存。只含一次读取的工具组也显示其页图。
+本地 `files.view_images@1` 和 PDF `files.read@5` 复用[图片 reader](electron/input-image-reads.ts)及 [NativeUserImages](src/native-user-images.tsx)：Main 只接观察到的完成 Tool 消息和索引，核原执行及准确引用；图片工具1至10张PNG、每张最多8MiB且整批16MiB，PDF仍最多4张／16MiB。renderer 不能指定任意引用或路径。后继轮次、Fork 与冷历史按原来源读取，预览缓存只负责显示，不承担历史保存。原件和实际模型图片的持久目录由[Files owner](../../packages/agent/src/tools/files/README.md#本地保存与缓存目录)维护。
+
+图像工具消息按准确成功回执显示“已查看 N 张图像”，默认展开120px圆角缩略图；标题可折叠，成功时不铺原始JSON或重复文件名。混合工具分组把图片放回所属工具，计数只来自 Main 核实的成功引用。加载、关闭、切换和失败重试沿原读取租约与窗口预览缓存。[原执行来源回归](test/input-image-reads.test.ts)覆盖图片／PDF跨Fork与伪造scope拒绝，[共享工具聚合](../../packages/ui/test/isolated/desktop-tool-aggregation.test.tsx)覆盖准确计数、折叠与零重复；[隔离浏览器 runner](test/tool-image-preview-browser-runner.fixture.ts)使用真实组件和预览 Worker，观察加载、折叠取消、成功、切换、hash失败与恢复全过程。它是明确测试制品，不由普通dev/prod开关启用；受控桥／Chrome组件验证不代完整Native窗口或安装资格。
+
+2026-11-04，`686a384e5`加本次diff、Windows x64／Bun1.4.3／Chrome156：[实际 Native 页面回归](test/isolated/native-tool-receipt-render-dom.test.tsx)10项139断言、工具聚合29项1124断言通过，包含后续普通工具加入时保留已展开图片。浏览器12阶段（含10图等待／完成／折叠）逐图核对通过，缩略图完整120×120、阅读位置保持、单图最多一图、10图同次恰10张且顺序一致、取消／切换后零租约，hash失败的重试文字在深色主题可读且实际恢复；本机截图及报告位于`.cache/tool-image-preview-H3ilVi`。夹具最初误等不会结束的CSS滚动时间线，已限定等待普通披露动画并设置5秒上限；串行最终构建与12阶段均通过。全面更名后的Main来源、实际Native页面和聚合回归再次通过；上述更名前的Chrome像素证据按未改变的中文文案、布局和读取生命周期复用，不冒称已重跑该浏览器程序。此前全窗口自动化初始化失败，未取得完整Electron窗口或安装资格。
 
 2026-10-23，`ba34a2e6` 加本轮修复、同一 Windows 开发环境：实际页面观察复制中源文件变化的失败提示、准备中状态、显式取消保留草稿与后续重新添加。补正准备完毕但界面未接纳的生命周期：signal 保持到 `addFiles` 接管，失效输入或丢弃的晚结果释放准确 Main 项，已接纳附件不随准备结束删除。[准备 owner DOM 回归](test/isolated/native-input-files-dom.test.tsx)1项30断言和 [Composer 回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)8项78断言通过。最新页面再次混选文本／PDF／图片，实际观察发送占位→一条持久用户消息→三次读取→页图与报告交付→终态；源文件删除后重载，原图片、页图和历史正文仍可读，没有重复消息或卡住。该观察使用上述隔离浏览器桥，仍不代证完整 Electron 安装窗口。
 

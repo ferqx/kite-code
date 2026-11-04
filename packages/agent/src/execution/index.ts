@@ -1599,7 +1599,10 @@ export class UnifiedExecution {
       if (result.modelImages !== undefined) {
         if (!this.options.validateArtifacts)
           throw new AgentError('artifact_references_unavailable');
-        await this.options.validateArtifacts(scope, toolImages(result.modelImages, executionId));
+        await this.options.validateArtifacts(
+          scope,
+          toolImages(result.modelImages, executionId, definition),
+        );
       }
       if (result.modelContent) {
         if (

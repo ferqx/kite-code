@@ -151,6 +151,8 @@ export interface Message {
     readonly cancelRequested?: boolean;
   };
   readonly toolName?: string;
+  /** Count from a verified successful original image Tool receipt, never model-authored text. */
+  readonly toolImageCount?: number;
   /** Host-confirmed display classification; tool aggregation does not require it. */
   readonly presentation?: 'exploration' | 'standalone' | 'hidden';
   /** Exact child-task owner for internal tool presentation. */

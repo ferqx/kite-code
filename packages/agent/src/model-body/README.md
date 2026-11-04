@@ -2,6 +2,8 @@
 
 ## 工具视觉结果
 
+`files.view_images@1` 复用同一合同，准确版本的单个结果最多10张、每张8MiB、整批16MiB，数组顺序对应原请求；其他工具仍最多4张／16MiB。执行接纳和历史展开共用[视觉引用校验](../tool-images.ts)。Runtime 对所选历史中这个准确版本的 PNG 引用先累计 size，合计超过32MiB时在读取越界正文前返回 `image_context_too_large`；不更改既有用户、PDF或浏览器图片预算，不在容量失败时静默丢图。[真实预算回归](../../test/isolated/artifacts/tool-image-budget.test.ts)核完整已发布 PNG、越界正文零读取及零后继模型请求。
+
 `ToolResult.modelImages` 只声明本次结果已列入 `artifactRefs` 的有限 PNG 引用，完整合同由 [tool-images](../tool-images.ts)校验。Runtime 只从准确原 succeeded Tool Execution、完成消息及一致 Run／出处展开图片，保留原调用与结果配对；Fork 和恢复按原来源读取。实际完整图像字节进入中立 ModelInput 的 tool 消息，AI 的 Responses／Chat Completions 编码见 [AI owner](../../../ai/README.md)。图片是低信任工具数据，不产生人类消息、命令或审批。PDF 缓存不是历史图片来源；损坏、引用不符或取消会阻止该 Model 请求。Native 预览沿同一原消息／执行读取，不能由 renderer 自报任意 Artifact。
 
 Core 的 `ToolResult.modelContent` 是 `{kind:'artifact',reference,encoding:'utf-8'}`。公开 reference 只表示准确原 scope 的产物，不授予 hash/path 读取权。Tool、Action、Job 返回时都核对真实引用；读取选中 Tool 历史或纳入的后台结果时，Runtime 从原 Execution/Command 派生 Store、Session 与 subject，核对 metadata，再完整读取、严格 UTF-8 解码与核 hash。Provider 同时收到原结果 metadata/summary 与完整正文，Files baseline/selection 不因展开正文丢失；不把摘要或引用当成已读内容。来源 ID、选定上下文和原调用关系保持。背景正文仍明确作为低信任 user 数据，不增加权限。传输、短事务与实际审核 proof 的取舍见[完整正文决定](../../../../.agents/notes/implemented/architecture/2026-10-01-immutable-model-body-and-review-proof.md)。

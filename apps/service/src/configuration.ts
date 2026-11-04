@@ -28,7 +28,7 @@ import {
   resolveConfiguration,
 } from '@kite-ai/agent/config';
 import type { Json, Permissions } from '@kite-ai/agent/extensions';
-import { filesNativeAssets, pdfAssets } from '@kite-ai/agent/files';
+import { filesNativeAssets, imageAssets, pdfAssets } from '@kite-ai/agent/files';
 import { ripgrepAsset } from '@kite-ai/agent/jobs/shell';
 import {
   createMcpResourceModelSource,
@@ -440,6 +440,7 @@ export function createDefaultProcessConfiguration(options: {
     const storage = sqliteStorageAssets();
     const extractor = webExtractorAssets();
     const pdf = pdfAssets();
+    const image = imageAssets();
     const compilers = [mcpSchemaWorkerAssets()];
     return [
       dirname(userConfiguration.path),
@@ -469,6 +470,9 @@ export function createDefaultProcessConfiguration(options: {
       pdf.worker,
       pdf.checksum,
       ...pdf.dependencies,
+      image.child,
+      image.checksum,
+      ...image.dependencies,
       browser.privateDirectory,
       ...browser.runtimeAssets,
       ...(options.runtimeAssets ?? []),

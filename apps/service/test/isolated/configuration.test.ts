@@ -507,12 +507,13 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     const browserNames = browserViews.length
       ? []
       : browserToolIds.map((id) => id.replace('.', '_'));
-    expect(names).toHaveLength(11 + browserNames.length);
+    expect(names).toHaveLength(12 + browserNames.length);
     expect([...names].sort()).toEqual(
       [
         'ask_user',
         'web_fetch',
         'read_file',
+        'view_images',
         'write_file',
         'edit_file',
         'spawn_agent',
@@ -525,7 +526,7 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       ].sort(),
     );
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
-    expect(new Set(names).size).toBe(11 + browserNames.length);
+    expect(new Set(names).size).toBe(12 + browserNames.length);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
       (

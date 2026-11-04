@@ -2,6 +2,8 @@
 
 ## 图片消息
 
+本地 `view_images` 复用原中立 tool 图像合同和两种 SDK 编码；AI 不读取它的路径，也没有新增协议或转换版本。[默认 Service 联验](../../apps/service/test/isolated/image-reading.test.ts)将真实 Runtime/Artifact 产生的两个视觉结果交给 SDK，核原调用配对与完整PNG字节。实际模型识别、严格解码和本地保存归[Files owner](../agent/src/tools/files/README.md#图片读取)。
+
 中立 `ModelMessage.images` 为 user 输入或原 tool 结果提供明确 MIME 的 base64 图像，不接受 URL，支持 PNG、JPEG、WebP、GIF。AI 不读取本地路径或远程图片；[SDK adapter](src/sdk.ts)将 user 图像映射为 SDK file parts。tool 页图保留原工具调用／结果配对：Responses 在原 tool output 内编码文件数据；Chat Completions 的 tool reply 只能承载文字，因此在整组工具回复之后追加明确注明调用 ID、非人类请求／批准的视觉载体。中立持久历史仍是 tool 来源，不新增人类 Command 或 Run。本轮不接 Anthropic Messages，真实视觉支持由 Provider 决定。转换版本随此变化更新，旧历史与原适配器元数据保持原值。
 
 [受控请求测试](test/input-images.test.ts)实际捕获两种协议的图片字节和文字，并核 URL 拒绝；不根据模型名称猜图片能力，真实支持仍由所选 Provider 决定。Artifact 引用、来源校验和历史图片读回归 [Agent owner](../agent/README.md#用户图片输入)。

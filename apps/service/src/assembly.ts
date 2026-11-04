@@ -24,6 +24,7 @@ import {
 import { createConfiguredSkillSource } from './skill-source';
 
 const fileIds = ['files.read', 'files.write', 'files.edit'];
+const optionalFileIds = ['files.view_images'];
 const skillIds = ['skills.load', 'skills.resource'];
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 function source(id: string, kind: string, content: string): ContextSource {
@@ -58,20 +59,21 @@ export async function createWorkspaceAssembly(options: {
   if (!stat.isDirectory() || stat.isSymbolicLink())
     throw new AgentError('workspace_configuration_unavailable');
   const externalExtensions = options.externallyRegisteredExtensions ?? [];
+  const externalFiles = options.externallyRegisteredFileTools;
   const known = new Set([
     ...fileIds,
+    ...(externalFiles ?? []).map((tool) => tool.id),
     ...skillIds,
     ...(options.knownToolIds ?? []),
     ...externalExtensions.flatMap((extension) => (extension.tools ?? []).map((tool) => tool.id)),
   ]);
   if (options.toolIds.some((id) => !known.has(id)))
     throw new AgentError('tool_definition_unavailable');
-  const externalFiles = options.externallyRegisteredFileTools;
   if (
     externalFiles &&
-    (externalFiles.length !== fileIds.length ||
-      new Set(externalFiles.map((tool) => tool.id)).size !== fileIds.length ||
-      externalFiles.some((tool) => !fileIds.includes(tool.id)))
+    (new Set(externalFiles.map((tool) => tool.id)).size !== externalFiles.length ||
+      fileIds.some((id) => !externalFiles.some((tool) => tool.id === id)) ||
+      externalFiles.some((tool) => ![...fileIds, ...optionalFileIds].includes(tool.id)))
   )
     throw new AgentError('file_registration_conflict');
   for (const selected of options.toolConfigurations ?? []) {

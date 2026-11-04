@@ -16,6 +16,31 @@ function codeOf(error: unknown) {
     : 'file_read_failed';
 }
 
+/** Shared exact-path classification; this performs no content read or new authorization. */
+export async function externalReadTarget(
+  path: string,
+  workspace: string,
+  roots: readonly string[],
+  signal: AbortSignal,
+) {
+  if (!isAbsolute(path)) return null;
+  path = resolve(path);
+  if (path.includes('\0')) throw new AgentError('file_path_invalid');
+  if (within(path, workspace)) return null;
+  const actual = await realpath(path);
+  for (const root of roots) {
+    const protectedRoot = resolve(root);
+    const actualRoot = await realpath(protectedRoot).catch((error) => {
+      if (codeOf(error) === 'ENOENT') return protectedRoot;
+      throw error;
+    });
+    if (within(path, protectedRoot) || within(actual, actualRoot))
+      throw new AgentError('file_path_protected');
+  }
+  signal.throwIfAborted();
+  return { path, actual };
+}
+
 /** Ordinary external reads share the existing permission policy and result delivery.
  * Saved input/plan/output adapters wrap this layer and retain their scoped private references.
  */
@@ -38,22 +63,8 @@ export function withExternalFileReads(options: {
       !isAbsolute(input.path)
     )
       return null;
-    const path = resolve(input.path);
-    if (path.includes('\0')) throw new AgentError('file_path_invalid');
     const workspace = await options.workspaceRoot(request);
-    if (within(path, workspace)) return null;
-    const actual = await realpath(path);
-    for (const root of options.protectedRoots()) {
-      const protectedRoot = resolve(root);
-      const actualRoot = await realpath(protectedRoot).catch((error) => {
-        if (codeOf(error) === 'ENOENT') return protectedRoot;
-        throw error;
-      });
-      if (within(path, protectedRoot) || within(actual, actualRoot))
-        throw new AgentError('file_path_protected');
-    }
-    request.signal.throwIfAborted();
-    return { path, actual };
+    return externalReadTarget(input.path, workspace, options.protectedRoots(), request.signal);
   }
   return {
     tools: options.tools.map(

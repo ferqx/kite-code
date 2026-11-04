@@ -2,7 +2,11 @@
 
 工具可以读取、执行命令、修改文件或访问外部系统。可发现、可请求、获准执行和执行成功是不同状态。
 
-普通 CLI、TUI 和 Desktop 默认提供文件读写、`ask_user`、`web_fetch` 和六个子 Agent 协作工具。具备合格 Shell 后端时默认共16项，否则11项。`read_file` 同时接受准确工作区外绝对路径，只读该文件，不加载外部项目指令；外部写入和编辑使用经过原权限检查的 Shell。专用 `read_user_file/write_user_file/edit_user_file` 已移除。显式禁用或移除仍不向后续 Run 提供工具，实际调用继续核当前权限、工作区信任和平台能力。
+普通 CLI、TUI 和 Desktop 默认提供文件读写、图片读取、`ask_user`、`web_fetch` 和六个子 Agent 协作工具。具备合格 Shell 后端时基础目录共17项，否则12项；浏览器能力另按宿主配置提供。`read_file` 同时接受准确工作区外绝对路径，只读该文件，不加载外部项目指令；外部写入和编辑使用经过原权限检查的 Shell。专用 `read_user_file/write_user_file/edit_user_file` 已移除。显式禁用或移除仍不向后续 Run 提供工具，实际调用继续核当前权限、工作区信任和平台能力。
+
+`view_images({paths:[...]})` 按文件只读权限一次读取1至10张本地 PNG、JPEG、WebP 或 GIF，也兼容单图 `view_images({path})`，两种参数不能同时传入，列表不能含重复路径。支持工作区路径、允许的外部绝对路径和当前有效的上传原件，不接受 URL。每张原图最多16MiB、3200万像素、单边16384；应用 EXIF，动画取首帧，最长边缩至2048且不放大，每张PNG结果最多8MiB、整批最多16MiB，实际缩放在结果中说明。按请求顺序处理和交图；任一图片失败、取消或超限，整批不向模型交付部分图片。失败不会授予换路径或绕过权限的许可。所选历史中该工具图片合计超过32MiB时明确失败，不静默删图。工具读取不提供编辑基线。
+
+上传原件和实际交给模型的图片保存于当前 Profile 的不可变 Blob 目录，后续历史、Fork和冷重开读取保存结果；工作区原路径删除不影响已完成的视觉记录。仍被引用的图片不按临时缓存过期删除，目录与生命周期见[Files owner](../../../packages/agent/src/tools/files/README.md#本地保存与缓存目录)。Native 成功工具消息显示“已查看 N 张图像”和圆角缩略图，默认展开，可折叠；数量只统计已核实的成功图像，读取中、失败和取消各保留原状态。
 
 五个专用验证工具和自动检查文件变更、强制验证完成、waiver 机制已退役。Agent 使用普通 Shell 运行测试，并按实际输出报告结果。`request_plan_review` 和原计划审批继续保留。
 
@@ -15,6 +19,7 @@ Windows Git Bash 使用原无账户受限令牌：工作区写入按批准范围
 | 能力 | 模型工具名称 | 主要参数或含义 |
 | --- | --- | --- |
 | 工作区文件 | `read_file` | `path` 以工作区根目录为基准；读取用 `start_line`、`max_lines` |
+| 本地图片 | `view_images` | `paths` 按序指定1至10张本地图片；也兼容单图 `path`，两者互斥 |
 | 文件修改 | `write_file`、`edit_file` | 保留 `base` 原完整文件基线；新建使用 `base:null`；精确编辑用 `old_text`、`new_text`、`expected_matches` |
 | Shell | `shell_execute`、`shell_launch`、`shell_read`、`shell_wait`、`shell_stop` | 前台执行、后台启动、读取、等待和停止分别处理；保留原操作 `key` |
 | 问题与网页 | `ask_user`、`web_fetch` | 普通问题只收集信息；网页时限用 `timeout_ms` |

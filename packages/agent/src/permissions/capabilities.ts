@@ -11,7 +11,7 @@ export function planningEffect(id: string): CapabilityEffect {
 }
 export function hostReadOnlyTool(extensionId: string, toolId: string) {
   return (
-    (extensionId === 'builtin.files' && toolId === 'files.read') ||
+    (extensionId === 'builtin.files' && ['files.read', 'files.view_images'].includes(toolId)) ||
     (extensionId === 'builtin.skills' && ['skills.load', 'skills.resource'].includes(toolId)) ||
     (extensionId === 'builtin.mcp.sources' && toolId === 'mcp.sources.list') ||
     (extensionId === 'builtin.mcp.discovery' && toolId === 'mcp.tools.search') ||

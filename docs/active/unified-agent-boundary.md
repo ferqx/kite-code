@@ -1,5 +1,9 @@
 # 通用 Agent 新执行边界
 
+本地图片读取由[Files owner](../../packages/agent/src/tools/files/README.md#图片读取)的 `files.view_images@1` 承担：原权限／路径／附件选择先约束全字节读取，固定严格解码程序只收字节，不收用户路径或 Provider 状态；明确空 Bun/tsconfig 防止目录 preload／别名改变入口。Windows 原 Job owner 提供512MiB和单进程限制，取消后核原 wait／tree；退出无法确认时结算 unknown、保 owner／图片名额并拒绝后续读取，不无限等待缺失证明。监督进程隔离崩溃与资源，不把它称为文件／网络 OS 沙箱。Service 保护实际处理资产及 native 依赖根；其他平台资格独立核实。
+
+图片结果保存原 Execution 的不可变 Artifact，沿既有 `modelImages` 与两协议交接，当前运行、历史、Fork和冷读保原出处；单次批次只对该准确版本接纳最多10张／每张8MiB／整批16MiB，其他工具仍为4张；批次先约束完整有序路径及输入原件revision，串行读取并在全部解码成功后才交付视觉结果，容量继续只对该准确新工具版本累计32MiB，并在越界图片展开前失败，不修改其他图片入口。Native 的计数、缩略图和折叠从准确原成功回执派生，窗口预览缓存不承担历史保存或授权。上传原件与实际视觉结果均沿原 Blob／引用／显式无引用 GC，不新增会过期的历史图片缓存；原协议和既有工具版本保持。
+
 Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desktop/README.md#native-项目会话目录)保存，Store／Session／Run 与终态仅作本机呈现依据，不是业务 receipt 或执行 authority。renderer 的 `session.markRead` 仍须原主 frame／generation、准确选择与 Main 已观察终态，写入不修改 Runtime、会话消息时间、Run、审批或命令，不授予 Service 写权；原业务 Store／公开工具协议版本保持。
 
 默认 Service 的模型代理选择归 [Service owner](../../apps/service/README.md)，不下沉到 AI／Core 或客户端。新 Run 的 `snapshot.modelTransport.digest` 只绑定宿主代理环境与系统选择的摘要；恢复前变化拒绝，旧无字段记录不追补。代理传输不改变模型请求、权限、工具身份、未知结果或零重放边界，也不把模型自动代理推广到 MCP 网络准入。
@@ -12,7 +16,7 @@ Native消息历史在完整基线之后，可按`message_changes`能力用持久
 
 工具反馈不成为执行权威：[Shell leaf](../../packages/agent/src/tools/shell.README.md)仅在可确定的本地引用缺失预查返回 failed，Store 读取异常及派发后未知仍保守结算。`files.search@3` 的过滤、预览与当前页跳过范围归 [Files owner](../../packages/agent/src/tools/files/README.md)，其描述和结果不能放宽原路径、权限及恢复约束。公开预设说明来自实际注册目录，准确只读 definition/version 白名单与父能力交集保持；[行为合同](../../packages/agent/src/model-context.ts)只指导推进、取证和交付，不新增完成状态、自动重放或额外审批。Runtime 仍以原 Command/Run、真实派发和必要条件作为权威。
 
-Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不识别具体文件工具 ID，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型。
+Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不按文件工具 ID 判断研究是否充分或按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型；上述准确图像版本识别仅用于请求展开的资源预算。
 
 会话文件沿 Native 字节准备 → Service 流式导入 → Store 原消息事务绑定 → Files 精确对象权限 → Artifact／模型结果交接。Blob、可变工作文件和可重建缓存职责分开；会话路径不扩大 Shell／普通外部文件工具的 Profile 权限。Plan 文件编辑经原 Planning Action 保存新版本，文件事实不能替代原 Run／版本批准。PDF 页图由准确 Tool Execution 的不可变 Artifact 进入中立 tool 消息，协议视觉载体不产生人类授权。跨介质发布保留 pending／unknown；备份 v20 保存最新实际工作文件和明确缺失，恢复生成新 Store。详细合同分别归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)、[维护](../../packages/agent/src/maintenance/README.md)和 [AI](../../packages/ai/README.md#图片消息)。
 

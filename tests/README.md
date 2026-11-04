@@ -1,5 +1,7 @@
 # 测试体系
 
+图片读取的严格格式／进程取消／退出证明、源码树外闭包、实际 Service／冷历史／Fork 和两协议回归分别位于 [Agent Files](../packages/agent/test/isolated/files/images.test.ts)、[退出未知](../packages/agent/test/isolated/files/image-process-unknown.test.ts)、[闭包](../packages/agent/test/isolated/files/images-packaged.test.ts)和[Service](../apps/service/test/isolated/image-reading.test.ts)。[显式性能程序](e2e/live/model/image-reading.benchmark.ts)仅合成图片／固定模型，测真实持久化与下一次输入；[真实视觉程序](e2e/live/model/image-vision.live.ts)另需 opt-in，边界和命令见[live说明](e2e/live/model/README.md#本地图片读取)。Native 工具摘要沿[真实页面回归](../apps/desktop/test/isolated/native-tool-receipt-render-dom.test.tsx)和[明确浏览器制品](../apps/desktop/test/tool-image-preview-browser-runner.fixture.ts)观察全过程；这些入口不启用普通客户端诊断或扩展发版权限。
+
 Windows 每个正式测试作业使用自有私有 HOME 与其下私有 TEMP/TMP，源码外制品沿实际私有父目录准入，不读取用户应用配置或改变系统临时目录 ACL。仅成功作业清理隔离根，失败／中断保留准确路径和证据。清理仅接受当前运行器创建的规范根，在同一 PowerShell 内逐项核边界，遇 reparse 目录只解除入口，不遍历外部目标；私有只读 Artifact 通过父目录已有删除权清理，不放宽其 ACL。[运行器回归](isolated/scripts/test-suite-runner.test.ts)覆盖真实制品准入、只读文件和外部 junction 目标保全。
 
 2026-10-26 已删除仅服务旧架构的测试、fixture 和工具脚本；旧架构只保留无运行依赖闭包的 `apps/kite-cli` 源码。当前默认发现以[统一计划](../scripts/unified-test-plan.ts)为准。本文固定 revision 链接与带历史日期的旧库存、旧入口拒绝、旧 library 记录仅说明当时证据，不属于当前测试入口，也不表示删除后的库存已完整执行。安全、恢复、平台与发布门禁按原适用范围保留。

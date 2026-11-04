@@ -25,6 +25,7 @@ export function ordinaryHostConfigurationDefaults(
       ...defaultConfiguration.tools,
       ...[
         'files.read',
+        'files.view_images',
         'files.write',
         'files.edit',
         ...(shellAvailable ? shellToolIds : []),

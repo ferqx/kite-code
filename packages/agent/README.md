@@ -24,6 +24,10 @@
 
 设计原因、备选与代价保存在[工具反馈与任务质量决定](../../.agents/notes/implemented/architecture/2026-10-23-agent-feedback-and-task-quality.md)。模型指导已实施，真实样本中仍有冗长和超出证据的表述；机械执行断言与全文质量分别说明，不能据工具全部成功宣称模型结论全部正确。
 
+## 本地图片读取
+
+默认宿主注册 `builtin.files/files.view_images@1`，模型入口 `view_images({paths:[...]})` 一次1至10张，兼容单图`path`；两者互斥，整批PNG最多16MiB，失败不交付部分图片。它复用 Files 作用域、权限及完整字节读取，在受监督独立进程严格解码后发布原 Execution 的 PNG `modelImages`；下一次请求、冷历史和 Fork 继续使用现有 Tool/Artifact/ModelInput 链，既有工具和协议版本保持。[Files owner](src/tools/files/README.md#图片读取)维护格式、处理和资源预算、本地持久目录、实际性能及平台范围；[Model body](src/model-body/README.md#工具视觉结果)维护准确来源和请求累计预算。读取权限不因排队或缓存变成长期授权。
+
 ## 用户图片输入
 
 普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个附件，原消息正文保持用户原文。新上传沿 Artifact 流式发布原件，`0006-input-file-imports` 保存稳定导入 ID、准确 Store／Session／subject 与引用；消息准入事务同时核验并绑定，释放与绑定互斥。原件不另复制到 `inputs/`。模型只得到可按需读取的准确定位信息，Files 在读取时反查所选消息来源并校验完整字节；同 hash 不代表相同访问权。旧 `{name,uri}` 保持路径引用，不后台读取或迁移。文本、PDF 页读取及输出文件见 Files owner；[输入文件测试](test/isolated/artifacts/input-files.test.ts)覆盖删源、错会话、稳定重试及新 Store 恢复。

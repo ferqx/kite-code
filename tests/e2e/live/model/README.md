@@ -182,6 +182,24 @@ bun tests/e2e/live/model/session-anomalies-native-window.live.ts --output=/absol
 
 `--checkpoint` 为可选的外部人工观察暂停：查看证据目录的 `checkpoint.json`、对应 PNG、DOM 顺序轨迹及阶段事实后，在指定目录创建 `<name>.continue`。01 和 08 阶段持有实际 HTTP 响应，观察须在原 60 秒请求期限内完成，不延长产品超时。driver 同时记录窗口连续帧和 DOM Mutation／动画帧观察，检查消息因果位置及会话外异常文案；最终通过不能覆盖过程中发现的异常。报告或 workspace 已存在会拒绝，失败证据保持；该制品不是普通客户端的调试开关。本机执行结果与此前真实失败归[Desktop owner](../../../../apps/desktop/README.md#普通客户端与测试诊断)，不赋其他模型、平台或安装版资格。
 
+## 本地图片读取
+
+[图片视觉 runner](image-vision.live.ts)按现有用户配置选择单一模型／协议，默认上传1张随机六字符和柱图的合成 PNG；`--images=10`上传10张不同随机代码／柱图，要求真实模型只调用一次`view_images`，使用同序`paths`，逐图核最终JSON里的代码、红／蓝数值与顺序。两种模式都删除源路径后读取已保存原件，核后继实际视觉输入；最终回答单独解析，不从工具前正文补齐。需要 `KITE_RUN_LIVE_IMAGE_VISION=1`，最多5次HTTP、120秒总预算、45秒单次，不外围重试／换模型／协议；报告只保逐图布尔判定等有限事实，不含凭据、endpoint、请求正文或原始远端错误。
+
+```powershell
+$env:KITE_RUN_LIVE_IMAGE_VISION = '1'
+bun run test:model:image:live --output=C:/absolute/new-owned-directory/image-vision.json
+bun run test:model:image:live --images=10 --output=C:/absolute/new-owned-directory/image-vision-batch10.json
+```
+
+[性能 runner](image-reading.benchmark.ts)使用默认 Service、真实 SQLite/Artifact 和固定模型，零 Provider，原五组共54次单图调用覆盖界面 PNG、12MP噪声JPEG、32MP平坦PNG、透明WebP和30次连续界面图。每次新会话，分别记录工具耗时、包含后继模型输入封存的整链路耗时、主进程RSS与10ms计时观察；子进程内存不在主RSS中。新增`ui-batch10`组为6次调用、每次10张不同路径的相同合成界面图，核模型接收数量和metadata顺序；默认全部为60次调用／114张图。可用 `--case=ui|jpeg12mp|flat32mp|alpha|ui-soak|ui-batch10` 收窄复测。
+
+```powershell
+bun tests/e2e/live/model/image-reading.benchmark.ts --output=C:/absolute/new-owned-directory/image-performance.json
+```
+
+两个程序都要求报告和 `<output>.workspace` 不存在，保留自有合成源、持久数据与结果供复核，不改用户配置。[当前证据与限制](../../../../packages/agent/src/tools/files/README.md#当前验证与性能)限Windows本机，不代长期SLO、其他平台或完整Native安装资格。
+
 ## PDF 扫描页与图表
 
 [PDF 视觉 runner](pdf-vision.live.ts)读取当前配置的默认模型，或由 `--model-id=<已配置ID>` 明确选择单一模型。它只上传自造的随机代码／柱图栅格 PDF，在删除源文件后核真实 `read_file` 页图和最终回答；沿默认 Service Files 装配、实际 SQLite／Artifact 和 SDK，权限由隔离夹具明确允许。需要显式设置 `KITE_RUN_LIVE_PDF_VISION=1`，最多5次实际 HTTP、120秒总预算和45秒单请求，不外围重试、不换模型或协议。

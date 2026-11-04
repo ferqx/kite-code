@@ -1,14 +1,17 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('bounded Artifact streams publish and verify more than the old whole-blob limit without truncating or granting a foreign scope', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-artifact-stream-')));
+  const root = temporaryDirectory('kite-artifact-stream-');
   const profile = { dataRoot: root, profile: 'new' };
   const store = await openSqliteStore(profile);
   const artifacts = createArtifactStore({ profile, store });
@@ -87,6 +90,6 @@ test('bounded Artifact streams publish and verify more than the old whole-blob l
   } finally {
     await artifacts.close();
     await store.close();
-    rmSync(root, { recursive: true, force: true });
+    removeTemporaryDirectory(root);
   }
 });

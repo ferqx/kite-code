@@ -125,6 +125,36 @@ test('read Tool abort from a real macrotask interrupts its original complete-fil
   expect(reads).toBe(afterSibling);
 });
 
+test('binary image-source reads yield, cancel mid-file and close their native handles before a sibling read', async () => {
+  const { files } = fixture();
+  const controller = new AbortController();
+  let during = false;
+  firstRead = () => {
+    setImmediate(() => {
+      during = true;
+      controller.abort();
+    });
+  };
+  await expect(
+    files.readBytes('large.txt', {
+      maxBytes: 20 * 1024 * 1024,
+      signal: controller.signal,
+      sharedRead: true,
+    }),
+  ).rejects.toMatchObject({ name: 'AbortError' });
+  expect(during).toBe(true);
+  expect(reads).toBeLessThan(253);
+  expect(
+    (
+      await files.readBytes('sibling.txt', {
+        maxBytes: 20,
+        signal: new AbortController().signal,
+        sharedRead: true,
+      })
+    ).bytes.toString(),
+  ).toBe('sibling');
+});
+
 test('close drains an in-flight read before owner teardown and blocks further IO', async () => {
   const { files, root } = fixture();
   mkdirSync(join(root, 'nested'));
@@ -172,11 +202,9 @@ test('search cancellation interrupts one large file rather than waiting for its 
       controller.abort();
     });
   };
-  const tool = createFileTools(files).find((tool) => tool.id === 'files.search')!;
-  const result = await tool.execute({ text: 'not present', limit: 1 }, {
-    signal: controller.signal,
-  } as ToolContext);
-  expect(result.outcome).toBe('cancelled');
+  await expect(
+    files.search({ text: 'not present', limit: 1 }, { signal: controller.signal }),
+  ).rejects.toMatchObject({ name: 'AbortError' });
   expect(reads).toBeGreaterThan(0);
   expect(reads).toBeLessThan(253);
 });
@@ -192,12 +220,10 @@ test('search yields and observes cancellation during line matching after native 
       controller.abort();
     });
   };
-  const tool = createFileTools(files).find((tool) => tool.id === 'files.search')!;
-  const result = await tool.execute({ text: 'post-eof-unmatched-probe', limit: 1 }, {
-    signal: controller.signal,
-  } as ToolContext);
+  await expect(
+    files.search({ text: 'post-eof-unmatched-probe', limit: 1 }, { signal: controller.signal }),
+  ).rejects.toMatchObject({ name: 'AbortError' });
   completed = true;
   expect(abortedDuringMatching).toBe(true);
-  expect(result.outcome).toBe('cancelled');
   expect(reads).toBeGreaterThanOrEqual(253);
 });

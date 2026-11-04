@@ -5661,6 +5661,59 @@ body {
   border-radius: 0;
 }
 
+.kite-client .tool-image-thumbnails {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 8px;
+}
+.kite-client .tool-image-thumbnails:empty {
+  display: none;
+}
+.kite-client .tool-image-thumbnails .message-attachments-list {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+.kite-client .tool-image-thumbnails .message-attachments-navigation {
+  display: none;
+}
+.kite-client .tool-image-thumbnails .native-user-image {
+  width: 120px;
+  flex-basis: 120px;
+  border: 0;
+  background: transparent;
+}
+.kite-client .tool-image-thumbnails .composer-attachment-preview {
+  width: 120px;
+  height: 120px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+.kite-client .tool-image-thumbnails .native-user-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.kite-client .tool-image-thumbnails .composer-attachment-name {
+  display: none;
+}
+.kite-client .tool-image-thumbnails .composer-attachment-preview > button {
+  max-width: 100%;
+  color: #525252;
+}
+.kite-client
+  .tool-image-thumbnails
+  .composer-attachment-preview
+  > button:is(:hover, :focus-visible) {
+  background: #eee;
+  color: #222;
+}
+.kite-client .tool-image-activity > .tool-activity-summary .tool-activity-chevron {
+  opacity: 1;
+}
+
 .kite-client .conversation-cache-host,
 .kite-client .conversation-cache-container,
 .kite-client .conversation-cache-entry {

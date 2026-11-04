@@ -15,6 +15,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import type { ArtifactReferenceReadInput } from './artifact-port';
 import {
   artifactChunkBytes,
@@ -392,6 +393,17 @@ export function createArtifactStore(options: {
     }
     return use(accepted, async () => {
       signal?.throwIfAborted();
+      let blocks = 0,
+        deadline = performance.now() + 8;
+      const checkpoint = () => {
+        signal?.throwIfAborted();
+        if (++blocks < 64 && performance.now() < deadline) return;
+        return yieldToEventLoop().then(() => {
+          signal?.throwIfAborted();
+          blocks = 0;
+          deadline = performance.now() + 8;
+        });
+      };
       if ((await options.store.getMetadata()).storeId !== sealed.expectedStoreId)
         throw new AgentError('store_identity_mismatch');
       if (process.platform === 'win32') {
@@ -409,11 +421,16 @@ export function createArtifactStore(options: {
               if (size > 9223372036854775807n) throw new AgentError('artifact_size_invalid');
               digest.update(part);
               temporary.write(part);
+              const pause = checkpoint();
+              if (pause) await pause;
             }
           }
           signal?.throwIfAborted();
           const hash = digest.digest('hex');
-          temporary.publish(hash, String(size));
+          for (const _step of temporary.publishSteps(hash, String(size))) {
+            const pause = checkpoint();
+            if (pause) await pause;
+          }
           temporary.close();
           signal?.throwIfAborted();
           await verifyPublishedArtifactAsync(access.profilePath, hash, String(size), signal);
@@ -451,6 +468,8 @@ export function createArtifactStore(options: {
                 if (!written) throw new AgentError('artifact_write_incomplete');
                 offset += written;
               }
+              const pause = checkpoint();
+              if (pause) await pause;
             }
           }
           signal?.throwIfAborted();

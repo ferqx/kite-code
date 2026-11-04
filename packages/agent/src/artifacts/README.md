@@ -4,6 +4,8 @@
 
 `publishStream` 接受具 scope 的发布 metadata 和 Iterable/AsyncIterable<Uint8Array>；每次移交块在写入前复制为最多 64 KiB 的工作块。总大小使用 Decimal64，限制只来自 SQLite signed integer 表示资格与真实 IO，不设旧 16 MiB 或累计产物额度。source 异常、取消或非法 chunk 会清理临时文件且不登记引用。`publish(Uint8Array)` 是完整 bytes 的便利入口，会复制调用时数据，受真实内存能力影响。
 
+异步发布在64块或8ms工作预算后让出真实事件循环，并复核原取消信号；Windows 重复 Blob 采用的完整回读也由原 HANDLE／目录 owner 分片推进，同步维护调用仍消费同一完整证明。没有在最后权限／发布 CAS 内增加让出，也没有跳过完整 EOF/hash/identity。大图链路暴露的连续同步写入因此可取消；[发布回归](../../test/isolated/artifacts/nonblocking-publish.test.ts)核在物理发布前取消、无登记／无目标 Blob、后续成功和完整重复采用。[性能范围](../tools/files/README.md#当前验证与性能)不对同步系统调用承诺实时上限。
+
 `readStream` 先核准确 Store、Session、subject 和 scope，再 no-follow 打开只读不可变 Blob，逐块完整核 hash、size 和 FD 前后 identity。**只有成功 EOF 才证明完整内容**；提前停止、取消或末尾校验错误不能把已接收前缀称为全文。消费者必须完成迭代或调用 iterator.return，close 会排空真实在途操作后释放 profile 使用权。`read` 便利入口收集完整 bytes 并在成功完整校验后返回。
 
 POSIX [文件读取](../artifacts-files.ts)为三类消费者保持同一完整验证：公开chunks按剩余大小分配独占chunk，每块最多64KiB，已yield字节不复用；内部verify只持一个最多64KiB的scratch；完整read在opened真实大小／身份通过后直接填充一个目标buffer，不保chunk列表后再concat。三者到达声明大小后仍做1字节真实EOF探测，再核完整hash／size／ctime；增长、截断或元数据变化拒绝，异常及iterator.return／throw均关闭FD。完整read仅受运行时连续Buffer能力限制，无法分配时明确 `artifact_content_unavailable`，流式读取没有新增累计内容额度。Windows原生读取与完整read的原路径保持，本轮POSIX优化不构成Windows新资格。

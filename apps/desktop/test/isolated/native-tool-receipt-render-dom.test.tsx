@@ -10,6 +10,7 @@ import type {
   NativeState,
 } from '../../src/native-bridge';
 import { backgroundItem } from '../background-item.fixture';
+import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 import { nextDesktopPresentation, prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -35,8 +36,24 @@ const original = JSON.stringify({
   outcome: 'succeeded',
   nested: { preserved: true },
 });
-type Mode = 'known' | 'empty' | 'failed' | 'future' | 'future-unknown' | 'unsupported' | 'mixed';
+type Mode =
+  | 'known'
+  | 'empty'
+  | 'failed'
+  | 'future'
+  | 'future-unknown'
+  | 'unsupported'
+  | 'mixed'
+  | 'image'
+  | 'image-batch';
 function fixture(mode: Mode, testDiagnostics = false) {
+  const isImage = mode === 'image' || mode === 'image-batch';
+  const imageCount = mode === 'image-batch' ? 10 : 1;
+  const restoreWorker = isImage ? installImagePreviewWorker() : () => {};
+  const imageData =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VQAAAABJRU5ErkJggg==';
+  const imageBytes = Buffer.from(imageData, 'base64');
+  const imageHash = new Bun.CryptoHasher('sha256').update(imageBytes).digest('hex');
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -110,7 +127,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
             toolCalls: [
               {
                 id: 'call',
-                name: 'files.read',
+                name: isImage ? 'files.view_images' : 'files.read',
                 arguments: JSON.stringify({ path: 'MODEL_ARGS_SENTINEL' }),
               },
             ],
@@ -263,19 +280,34 @@ function fixture(mode: Mode, testDiagnostics = false) {
                         ]
                       : []
                   : request.method === 'toolMessages.list' &&
-                      ['known', 'future', 'future-unknown'].includes(mode)
+                      ['known', 'future', 'future-unknown', 'image', 'image-batch'].includes(mode)
                     ? [
                         {
                           messageId: 'receipt',
                           executionId: 'execution',
-                          definitionId: mode === 'known' ? 'files.read' : 'future.tool',
-                          definitionVersion: mode === 'known' ? '4' : '99',
+                          definitionId: isImage
+                            ? 'files.view_images'
+                            : mode === 'known'
+                              ? 'files.read'
+                              : 'future.tool',
+                          definitionVersion: isImage ? '1' : mode === 'known' ? '4' : '99',
                           status:
                             mode === 'future-unknown'
                               ? ('outcome_unknown' as const)
                               : ('succeeded' as const),
                           resultRevision: '1',
                           target: 'README.md',
+                          ...(isImage
+                            ? {
+                                images: Array.from({ length: imageCount }, (_, i) => ({
+                                  name: `scan-${i}.png`,
+                                  reference: {
+                                    mediaType: 'image/png',
+                                    size: String(imageBytes.length),
+                                  },
+                                })),
+                              }
+                            : {}),
                         },
                       ]
                     : [];
@@ -300,6 +332,23 @@ function fixture(mode: Mode, testDiagnostics = false) {
             }),
           );
         }
+        case 'input.image.open':
+          return {
+            kind: 'input.image.open',
+            readId: request.readId,
+            size: imageBytes.length,
+            hash: imageHash,
+            mediaType: 'image/png',
+          };
+        case 'input.image.read':
+          return {
+            kind: 'input.image.chunk',
+            readId: request.readId,
+            offset: 0,
+            nextOffset: imageBytes.length,
+            data: imageData,
+            done: true,
+          };
         case 'fileChanges.detail':
           return {
             kind: 'fileChanges.detail',
@@ -325,6 +374,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
   };
   return {
     host,
+    until,
     requests,
     render: async () => {
       await act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />));
@@ -383,6 +433,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
       await new Promise((resolve) => setTimeout(resolve, 0));
       dom.window.close();
       restore();
+      restoreWorker();
       Object.assign(globalThis, prior);
     },
   };
@@ -409,6 +460,28 @@ test('actual NativeDesktop keeps a raw tool receipt hidden while metadata reader
     await f.close();
   }
 });
+
+for (const count of [1, 10] as const)
+  test(`actual NativeDesktop renders ${count} verified view_images thumbnails in its counted disclosure and removes them on session switch`, async () => {
+    const f = fixture(count === 1 ? 'image' : 'image-batch');
+    try {
+      await f.render();
+      await f.flush();
+      await f.until(() => f.host.querySelectorAll('.tool-image-thumbnails img').length === count);
+      expect(f.host.textContent).toContain(`已查看 ${count} 张图像`);
+      expect(f.host.textContent).not.toContain(sentinel);
+      expect(f.host.querySelectorAll('.tool-image-thumbnails img')).toHaveLength(count);
+      await f.toggle();
+      await f.until(() => !f.host.querySelector('.tool-image-thumbnails img'));
+      expect(f.host.textContent).toContain(`已查看 ${count} 张图像`);
+      await f.toggle();
+      await f.until(() => f.host.querySelectorAll('.tool-image-thumbnails img').length === count);
+      await f.selectOther();
+      expect(f.host.querySelector('.tool-image-thumbnails img')).toBeNull();
+    } finally {
+      await f.close();
+    }
+  });
 
 for (const mode of ['empty', 'failed', 'unsupported'] as const) {
   test(`actual NativeDesktop ${mode} metadata withholds the complete tool row until its input and receipt identity can be verified`, async () => {
