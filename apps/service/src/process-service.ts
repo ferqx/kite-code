@@ -22,6 +22,7 @@ import { assertMcpSourceStdioAssetsClosed } from './mcp-source-configuration';
 import { windowsRuntimePinCloseUnknown } from './native-runtime-assets';
 import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-protection';
 import { encodeServiceStartupDiagnostic } from './startup-diagnostic';
+import { measureServiceStartup } from './startup-timing';
 import {
   borrowWindowsPairedArtifact,
   retainWindowsPairedArtifact,
@@ -182,21 +183,29 @@ export async function assembleProcessService(
   }
   let configuration: Awaited<ReturnType<ConfigureProcessHost>>;
   try {
-    configuration = configure
-      ? await configure(startup, hostContext)
-      : createDefaultProcessConfiguration({
-          ordinaryHostTools: true,
-          profile: selected,
-          observerSubjectId: subjectId,
-          hostConfiguration: startup.hostConfiguration,
-          desktopBrowser: startup.desktopBrowser,
-          mcpSources: { ...packagedMcpSourceAssets(), ...options.mcpSources },
-          ...(options.credentialBackend ? { credentialBackend: options.credentialBackend } : {}),
-          runtimeAssets,
-          shell: packagedShellAssets(selected, runtimeAssets),
-        });
-    if (options.decorateConfiguration)
-      configuration = await options.decorateConfiguration(configuration);
+    const shell = configure
+      ? undefined
+      : await measureServiceStartup('shell_runtime', () =>
+          packagedShellAssets(selected, runtimeAssets),
+        );
+    configuration = await measureServiceStartup('configuration', async () => {
+      const configured = configure
+        ? await configure(startup, hostContext)
+        : createDefaultProcessConfiguration({
+            ordinaryHostTools: true,
+            profile: selected,
+            observerSubjectId: subjectId,
+            hostConfiguration: startup.hostConfiguration,
+            desktopBrowser: startup.desktopBrowser,
+            mcpSources: { ...packagedMcpSourceAssets(), ...options.mcpSources },
+            ...(options.credentialBackend ? { credentialBackend: options.credentialBackend } : {}),
+            runtimeAssets,
+            shell,
+          });
+      return options.decorateConfiguration
+        ? await options.decorateConfiguration(configured)
+        : configured;
+    });
   } catch (error) {
     try {
       assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
@@ -222,10 +231,12 @@ export async function assembleProcessService(
   let artifacts: ReturnType<typeof createArtifactStore> | undefined;
   let workspaceSerialLocks: ReturnType<typeof createWorkspaceSerialLocks> | undefined;
   try {
-    store = await openSqliteStore({
-      dataRoot: selected.dataRoot,
-      profile: selected.profile,
-    });
+    store = await measureServiceStartup('store', () =>
+      openSqliteStore({
+        dataRoot: selected.dataRoot,
+        profile: selected.profile,
+      }),
+    );
   } catch {
     // Safe diagnostic HTTP survives Store failure; no replacement empty Store.
     process.stderr.write(`${JSON.stringify({ code: 'data_unavailable' })}\n`);
@@ -235,29 +246,31 @@ export async function assembleProcessService(
   }
   if (store) {
     try {
-      try {
-        artifacts = createArtifactStore({ profile: selected, store });
-      } catch (error) {
-        if (!(error instanceof AgentError) || error.code !== 'artifact_platform_unsupported')
-          throw error;
-        process.stderr.write(`${JSON.stringify({ code: 'artifact_platform_unsupported' })}\n`);
-      }
-      if (!runtimeConfiguration.workspaceSerialLocks)
-        workspaceSerialLocks = createWorkspaceSerialLocks(selected);
-      bindWorkspaceSerialLocks?.(
-        (runtimeConfiguration.workspaceSerialLocks ?? workspaceSerialLocks)!,
-      );
-      runtime = createRuntime({
-        ...runtimeConfiguration,
-        workspaceSerialLocks: runtimeConfiguration.workspaceSerialLocks ?? workspaceSerialLocks,
-        artifacts,
-        store,
-        instanceId: startup.instanceId,
-        permissions: configuration.permissions ?? {
-          async authorize() {
-            return { allowed: false, revision: 'unconfigured' };
+      await measureServiceStartup('runtime', () => {
+        try {
+          artifacts = createArtifactStore({ profile: selected, store });
+        } catch (error) {
+          if (!(error instanceof AgentError) || error.code !== 'artifact_platform_unsupported')
+            throw error;
+          process.stderr.write(`${JSON.stringify({ code: 'artifact_platform_unsupported' })}\n`);
+        }
+        if (!runtimeConfiguration.workspaceSerialLocks)
+          workspaceSerialLocks = createWorkspaceSerialLocks(selected);
+        bindWorkspaceSerialLocks?.(
+          (runtimeConfiguration.workspaceSerialLocks ?? workspaceSerialLocks)!,
+        );
+        runtime = createRuntime({
+          ...runtimeConfiguration,
+          workspaceSerialLocks: runtimeConfiguration.workspaceSerialLocks ?? workspaceSerialLocks,
+          artifacts,
+          store,
+          instanceId: startup.instanceId,
+          permissions: configuration.permissions ?? {
+            async authorize() {
+              return { allowed: false, revision: 'unconfigured' };
+            },
           },
-        },
+        });
       });
     } catch (error) {
       try {
@@ -278,35 +291,37 @@ export async function assembleProcessService(
     }
   }
   try {
-    return await startService({
-      subjectId,
-      runtime,
-      beforeResourceClose: async () => {
-        assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
-        await beforeResourceClose?.();
-        await workspaceSerialLocks?.close();
-      },
-      afterResourceClose: async () => {
-        runtimeAssetAccess?.release();
-      },
-      configurationManagement: configurationManagement?.(runtime),
-      permissionManagement: permissionManagement?.(runtime),
-      diagnosticSource,
-      skillCatalogue,
-      userMcpManagement: userMcpManagement?.(runtime),
-      sessionLogs: store
-        ? (query, observer) => readSessionLogs(store!, query, observer)
-        : undefined,
-      buildId: startup.buildId,
-      instanceId: startup.instanceId,
-      token: startup.token,
-      capabilities: startup.capabilities,
-      profile: {
-        dataRoot: selected.dataRoot,
-        name: selected.profile,
-        accessKey: selected.profileAccessKey,
-      },
-    });
+    return await measureServiceStartup('http', () =>
+      startService({
+        subjectId,
+        runtime,
+        beforeResourceClose: async () => {
+          assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
+          await beforeResourceClose?.();
+          await workspaceSerialLocks?.close();
+        },
+        afterResourceClose: async () => {
+          runtimeAssetAccess?.release();
+        },
+        configurationManagement: configurationManagement?.(runtime),
+        permissionManagement: permissionManagement?.(runtime),
+        diagnosticSource,
+        skillCatalogue,
+        userMcpManagement: userMcpManagement?.(runtime),
+        sessionLogs: store
+          ? (query, observer) => readSessionLogs(store!, query, observer)
+          : undefined,
+        buildId: startup.buildId,
+        instanceId: startup.instanceId,
+        token: startup.token,
+        capabilities: startup.capabilities,
+        profile: {
+          dataRoot: selected.dataRoot,
+          name: selected.profile,
+          accessKey: selected.profileAccessKey,
+        },
+      }),
+    );
   } catch (error) {
     try {
       assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
@@ -343,17 +358,17 @@ function packagedMcpSourceAssets() {
   }
 }
 
-function packagedShellAssets(
+async function packagedShellAssets(
   profile: ProfileSelection,
   runtimeAssets: readonly string[],
-): ShellConfigurationOptions | undefined {
+): Promise<ShellConfigurationOptions | undefined> {
   if (!['darwin', 'linux', 'win32'].includes(process.platform)) return;
   if (process.platform === 'win32' && !process.versions.bun) return;
   let supervisorPath: string;
-  let windows: ReturnType<typeof windowsShellAssets> | undefined;
+  let windows: Awaited<ReturnType<typeof windowsShellAssets>> | undefined;
   try {
     if (process.platform === 'win32')
-      windows = windowsShellAssets(join(profile.profilePath, 'windows-sandbox'));
+      windows = await windowsShellAssets(join(profile.profilePath, 'windows-sandbox'));
     supervisorPath =
       windows?.runner ??
       (process.platform === 'linux' ? linuxShellInitAsset() : shellSupervisorAsset());

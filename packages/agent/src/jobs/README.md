@@ -44,6 +44,8 @@ Store output paging preserves the one MiB JSON/row-overhead budget independently
 
 [准备层](windows-git-bash.ts)固定本机 Git 的私有运行时闭包。仓库 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)修复 MSYS 对象 ACL；Full／完整文件范围保另一份未修改映像，避免并发共享区冲突，不修改安装 Git。两份映像共用复制与校验流程，[准备层回归](../../test/isolated/jobs/windows-git-bash.test.ts)核冷创建、复用、缺失文件恢复和变更文件保留。构建携带 runner／兼容 DLL／Coreutils／rg，不创建账户或网络规则。未知关闭保 owner，冷读取不从 PID 重建或重跑。
 
+`stageWindowsGitBash`／`windowsShellAssets` 是异步准备入口，调用者须等待完成后才能装配 Shell。源文件仍每次完整读取校验；未修改映像复用同次源 SHA，目标父目录去重，副本复制与完整内容校验最多并行8个文件。已有文件不覆盖，缺失文件使用排他创建；失败先等待已开始的文件操作全部结算，不发布新清单或提前交出可执行资产。两套副本与派发前完整重核保持，不用 mtime 缓存或链接替代内容验证。
+
 [原生测试](../../test/isolated/jobs/windows-shell.test.ts)与 [Service 集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)覆盖检索、Git／fork／管道、范围与审批、并发、取消／宿主死亡、准确关闭和冷零重放；事实及安装资格范围归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
 
 ## 默认 macOS 宿主 Shell

@@ -39,7 +39,7 @@ try {
   write(compatibility, 'compatibility');
   Bun.which = command => { assert.equal(command, 'git'); return join(installation, 'cmd/git.exe'); };
   const state = join(root, 'state');
-  const staged = stageWindowsGitBash(state, coreutils, compatibility);
+  const staged = await stageWindowsGitBash(state, coreutils, compatibility);
   const runtime = join(dirname(staged.shell), '../..');
   const fullRuntime = join(dirname(staged.fullShell), '../..');
   const manifest = readFileSync(join(runtime, 'manifest.json'));
@@ -54,17 +54,17 @@ try {
     assert.equal(readFileSync(join(base, 'etc/ssl/certs/ca-bundle.crt'), 'utf8'), 'certificate');
     assert.equal(readFileSync(join(base, 'usr/bin/coreutils.exe'), 'utf8'), 'coreutils');
   }
-  assert.deepEqual(stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
   rmSync(staged.fullShell);
-  assert.deepEqual(stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
   assert.equal(readFileSync(staged.fullShell, 'utf8'), 'bash');
   for (const path of [staged.shell, staged.fullShell]) {
     writeFileSync(path, 'changed');
-    assert.throws(() => stageWindowsGitBash(state, coreutils, compatibility), /windows_git_bash_asset_changed/);
+    await assert.rejects(stageWindowsGitBash(state, coreutils, compatibility), /windows_git_bash_asset_changed/);
     assert.equal(readFileSync(path, 'utf8'), 'changed');
     writeFileSync(path, 'bash');
   }
-  assert.deepEqual(stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
   assert.deepEqual(readFileSync(join(runtime, 'manifest.json')), manifest);
   const verify = captureWindowsGitBashRuntime(staged.shell, staged.fullShell);
   verify(false); verify(true);

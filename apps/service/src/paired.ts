@@ -13,9 +13,11 @@ import {
 import { schemas } from './http/schema';
 import type { RuntimeProtection } from './runtime-protection';
 import { parseServiceStartupDiagnostic, type ServiceStartupDiagnostic } from './startup-diagnostic';
+import { parseServiceStartupTiming, type ServiceStartupTiming } from './startup-timing';
 import type { retainWindowsPairedArtifact } from './windows-paired-artifact';
 
 export { formatServiceStartupReport, type ServiceStartupDiagnostic } from './startup-diagnostic';
+export type { ServiceStartupTiming } from './startup-timing';
 
 export interface PairedServiceChild {
   readonly stdin: {
@@ -48,6 +50,8 @@ export interface PairedServiceOptions {
   desktopBrowser?: { readonly endpoint: string; readonly token: string };
   runtimeProtection?: RuntimeProtection;
   startupTimeoutMs?: number;
+  /** Trusted host observation only; never forwards raw stderr or changes admission. */
+  onStartupTiming?: (timing: ServiceStartupTiming) => void;
   /** Explicit hard stop for this owned child; ordinary close otherwise waits for durable drain. */
   shutdownTimeoutMs?: number;
   executable?: string;
@@ -240,7 +244,10 @@ export async function launchPairedService(options: PairedServiceOptions) {
   const stderrTask = (async () => {
     const reader = child.stderr.getReader();
     const decoder = new TextDecoder();
+    const timingDecoder = new TextDecoder();
     let retainedBytes = 0;
+    let timingLine = '';
+    let oversizedLine = false;
     try {
       while (true) {
         const chunk = await reader.read();
@@ -248,6 +255,26 @@ export async function launchPairedService(options: PairedServiceOptions) {
         const retained = chunk.value.subarray(0, Math.max(0, 16 * 1024 - retainedBytes));
         retainedBytes += retained.byteLength;
         stderr += decoder.decode(retained, { stream: true });
+        if (options.onStartupTiming) {
+          for (const part of timingDecoder.decode(chunk.value, { stream: true }).split(/(?<=\n)/)) {
+            if (!oversizedLine) {
+              oversizedLine = timingLine.length + part.length > 256;
+              timingLine += part.slice(0, 256 - timingLine.length);
+            }
+            if (part.endsWith('\n')) {
+              const timing = !oversizedLine && parseServiceStartupTiming(timingLine);
+              if (timing) {
+                try {
+                  options.onStartupTiming(timing);
+                } catch {
+                  // Host logging is independent of launch and stream cleanup.
+                }
+              }
+              timingLine = '';
+              oversizedLine = false;
+            }
+          }
+        }
       }
     } finally {
       reader.releaseLock();

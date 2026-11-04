@@ -257,6 +257,16 @@ async function openCaller(): Promise<NativeCaller> {
     if (process.platform !== 'win32')
       browserPageChannel ??= await listenBrowserPageHost(browserPages);
     paired = await launchPairedService({
+      ...(development
+        ? {
+            startupTimeoutMs: 30000,
+            onStartupTiming(timing: import('@kite-ai/service/paired').ServiceStartupTiming) {
+              process.stderr.write(
+                `[desktop:dev] Service ${timing.stage} ${timing.status} (${(timing.durationMs / 1000).toFixed(2)}s).\n`,
+              );
+            },
+          }
+        : {}),
       desktopBrowser: browserPageChannel?.startup,
       profile,
       entrypoint: activeAssets.serviceEntrypoint,

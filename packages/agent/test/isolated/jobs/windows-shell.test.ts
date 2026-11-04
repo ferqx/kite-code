@@ -120,7 +120,7 @@ native(
     writeFileSync(join(cwd, 'source.txt'), 'bundled-rg-needle\n');
     writeFileSync(join(privateRoot, 'secret.txt'), 'private-needle');
     writeFileSync(join(root, 'external.txt'), 'external-needle');
-    const runtime = windowsShellFixture();
+    const runtime = await windowsShellFixture();
     const built = runtime.built;
     const environment = withBundledRipgrep({
       ...Object.fromEntries(
@@ -334,7 +334,7 @@ native(
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
-    const runtime = windowsShellFixture();
+    const runtime = await windowsShellFixture();
     const built = runtime.built;
     const env = withBundledRipgrep(
       Object.fromEntries(
@@ -415,7 +415,7 @@ native(
     const cwd = join(root, 'workspace'),
       control = join(root, 'control');
     for (const path of [cwd, control]) mkdirSync(path);
-    const runtime = windowsShellFixture();
+    const runtime = await windowsShellFixture();
     const built = runtime.built;
     const job = createWindowsShellJob({
       cwd,

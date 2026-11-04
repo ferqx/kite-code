@@ -100,7 +100,11 @@ async function mainFixture(
   const browserRegistrations: BrowserRegistration[] = [];
   let callerState = (): NativeState => ({ generation: 1 }) as NativeState;
   let browserScope: NativeCaller['browserScope'] = () => undefined;
-  const browserStartups: { desktopBrowser?: { endpoint: string; token: string } }[] = [];
+  const browserStartups: {
+    desktopBrowser?: { endpoint: string; token: string };
+    startupTimeoutMs?: number;
+    onStartupTiming?: unknown;
+  }[] = [];
   let beforeServiceClose: (() => Promise<void>) | undefined;
   let windowDestroyed = false;
   let windowVisible = false;
@@ -365,8 +369,8 @@ async function mainFixture(
         },
       };
     },
-    async launchPairedService(options: { desktopBrowser?: { endpoint: string; token: string } }) {
-      browserStartups.push({ desktopBrowser: options.desktopBrowser });
+    async launchPairedService(options: (typeof browserStartups)[number]) {
+      browserStartups.push(options);
       const id = services.length + 1;
       trace.push(`${id}:service:launch`);
       const service: Service = {
@@ -1091,6 +1095,8 @@ test('Main registers its page host before renderer attachment starts the private
     else expect(host).toBeDefined();
     await f.open();
     expect(f.services).toHaveLength(1);
+    expect(f.browserStartups[0]?.startupTimeoutMs).toBe(30000);
+    expect(typeof f.browserStartups[0]?.onStartupTiming).toBe('function');
     expect(f.browserRegistrations[0]!.automation).toBe(host);
     if (process.platform === 'win32') expect(f.browserStartups[0]?.desktopBrowser).toBeUndefined();
     else {

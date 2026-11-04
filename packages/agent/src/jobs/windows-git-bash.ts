@@ -1,19 +1,37 @@
 import { createHash } from 'node:crypto';
 import {
-  copyFileSync,
   existsSync,
   lstatSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import { constants, copyFile, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { privateDirectory } from '../platform/windows-path-security';
 import { launchIdentity, verifyLaunchIdentities } from './launch-identity';
 
-const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+/** Keep file I/O bounded, and settle every in-flight write before reporting failure. */
+async function prepareFiles<T>(items: readonly T[], prepare: (item: T) => Promise<void>) {
+  let next = 0;
+  let failed = false;
+  const workers = await Promise.allSettled(
+    Array.from({ length: Math.min(8, items.length) }, async () => {
+      while (!failed && next < items.length) {
+        const item = items[next++]!;
+        try {
+          await prepare(item);
+        } catch (error) {
+          failed = true;
+          throw error;
+        }
+      }
+    }),
+  );
+  const failure = workers.find((worker) => worker.status === 'rejected');
+  if (failure?.status === 'rejected') throw failure.reason;
+}
 /** The staging manifest is the sole inventory for both runtime copies. Pin it
  * once; verify the selected copy against its digests before every dispatch. */
 export function captureWindowsGitBashRuntime(
@@ -126,7 +144,11 @@ export function msysCompatibilityImage(input: Uint8Array): Buffer {
 /** Copy the installed Git Bash DLL closure to an immutable, content-addressed runtime.
  * Git Bash is supplied by Git for Windows; the client only redistributes rg and its own helper.
  */
-export function stageWindowsGitBash(stateRoot: string, coreutils: string, compatibility: string) {
+export async function stageWindowsGitBash(
+  stateRoot: string,
+  coreutils: string,
+  compatibility: string,
+) {
   if (process.platform !== 'win32' || process.arch !== 'x64' || !isAbsolute(stateRoot))
     throw Error('windows_shell_unqualified');
   const git = Bun.which('git');
@@ -174,6 +196,7 @@ export function stageWindowsGitBash(stateRoot: string, coreutils: string, compat
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
     const original = readFileSync(path);
+    const sourceSha256 = createHash('sha256').update(original).digest('hex');
     return {
       source: realpathSync.native(path),
       name:
@@ -182,12 +205,10 @@ export function stageWindowsGitBash(stateRoot: string, coreutils: string, compat
           : path === compatibility
             ? 'usr/bin/ktipc.dll'
             : relative(installation, path).replaceAll('\\', '/'),
-      sourceSha256: createHash('sha256').update(original).digest('hex'),
-      sha256: createHash('sha256')
-        .update(
-          path.toLowerCase().endsWith('msys-2.0.dll') ? msysCompatibilityImage(original) : original,
-        )
-        .digest('hex'),
+      sourceSha256,
+      sha256: path.toLowerCase().endsWith('msys-2.0.dll')
+        ? createHash('sha256').update(msysCompatibilityImage(original)).digest('hex')
+        : sourceSha256,
     };
   });
   const identity = createHash('sha256').update(JSON.stringify(files)).digest('hex');
@@ -195,25 +216,48 @@ export function stageWindowsGitBash(stateRoot: string, coreutils: string, compat
   const runtime = join(stateRoot, 'runtime', identity);
   privateDirectory(runtime);
   const bin = join(runtime, 'usr/bin');
-  const installRuntime = (root: string, compatible: boolean) => {
-    mkdirSync(join(root, 'tmp'), { recursive: true });
-    for (const file of files) {
+  const installRuntime = async (root: string, compatible: boolean) => {
+    // Create each parent once, rather than issuing recursive mkdir for every file.
+    const directories = [...new Set(['tmp', ...files.map((file) => dirname(file.name))])];
+    await prepareFiles(directories, async (directory) => {
+      await mkdir(join(root, directory), { recursive: true });
+    });
+    await prepareFiles(files, async (file) => {
       const target = join(root, file.name);
       const expected = compatible ? file.sha256 : file.sourceSha256;
-      mkdirSync(dirname(target), { recursive: true });
-      if (existsSync(target)) {
-        const stat = lstatSync(target);
-        if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_changed');
-      } else if (compatible && file.name.toLowerCase() === 'usr/bin/msys-2.0.dll') {
-        writeFileSync(target, msysCompatibilityImage(readFileSync(file.source)), { flag: 'wx' });
-      } else copyFileSync(file.source, target);
-      if (hash(target) !== expected) throw Error('windows_git_bash_asset_changed');
-    }
+      const stat = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+        return undefined;
+      });
+      if (stat && (!stat.isFile() || stat.isSymbolicLink()))
+        throw Error('windows_git_bash_asset_changed');
+      if (!stat) {
+        // A racing preparation may create this same file; never overwrite its bytes.
+        try {
+          if (compatible && file.name.toLowerCase() === 'usr/bin/msys-2.0.dll')
+            await writeFile(target, msysCompatibilityImage(await readFile(file.source)), {
+              flag: 'wx',
+            });
+          else await copyFile(file.source, target, constants.COPYFILE_EXCL);
+        } catch (error) {
+          if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+        }
+      }
+      const current = await lstat(target);
+      if (
+        !current.isFile() ||
+        current.isSymbolicLink() ||
+        createHash('sha256')
+          .update(await readFile(target))
+          .digest('hex') !== expected
+      )
+        throw Error('windows_git_bash_asset_changed');
+    });
   };
-  installRuntime(runtime, true);
+  await installRuntime(runtime, true);
   // Full and Workspace need separate MSYS shared-memory namespaces. Keep
   // Full's image unchanged instead of widening its object ACLs.
-  installRuntime(join(runtime, 'full'), false);
+  await installRuntime(join(runtime, 'full'), false);
   const manifest = join(runtime, 'manifest.json');
   const bytes = JSON.stringify({ identity, files });
   if (existsSync(manifest)) {

@@ -12,6 +12,8 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 ## 当前新图与Windows资格
 
+Git Bash 准备入口异步等待两套副本完整校验，最多8个文件并发，未修改映像只复用本次读取所得的源摘要。现存资产不覆盖，排他创建缺失文件；失败等待所有已开始的读写结算后拒绝返回。清单格式、完整源／目标内容核验、所选副本的逐次派发核验和协议6保持；不以元数据缓存、硬链接或共享 MSYS 映像缩减安全边界。实现、回归与本机耗时范围归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)和 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+
 Job 只有在 READY 核验与 GO 写入确认后进入 running；失败准入仍把原 handle 交回 Core，清理未知不会丢失停止能力或释放资源。确认未派发的准备失败不虚构进程 owner，正常释放资源。运行时以原 manifest 固定完整所选副本的文件摘要，每次派发重核，包括 MSYS／兼容 DLL 和 Git helper；资产漂移先于 native 创建失败。原 runner 的 ACL 账本同步、关闭写句柄后再原子发布；Windows 临时访问／共享冲突仅在200ms内重试原替换，持续失败仍保原账本并拒绝启动。连续替换、短冲突恢复与持续冲突零损坏由 [原生回归](../../native/windows-sandbox-runner/src/direct_workspace.rs)核验。协议6与runner0.8.3不变，权限范围不扩。
 
 2026-11-02 已按用户确认的无账户 unelevated 边界，将原协议6 runner 接入普通 Job 和默认 Git Bash。工作区范围沿原 WRITE_RESTRICTED 令牌及 capability ACL 限制写入；读取沿宿主 ACL，离线范围提供代理及常用包管理器的环境提示，不承诺系统级断网或禁止读取路径。Full 明确绕过沙箱；准确批准的完整文件范围与网络范围分别传递，不能由联网批准隐式扩大文件权限。没有新增账户、WFP 规则或设置入口。

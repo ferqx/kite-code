@@ -39,7 +39,7 @@ const canonical = (value: unknown): string =>
       : JSON.stringify(value);
 
 /** Installed assets only. Source callers must explicitly select their built fixture. */
-export function windowsShellAssets(stateRoot: string) {
+export async function windowsShellAssets(stateRoot: string) {
   if (process.platform !== 'win32' || !import.meta.url.endsWith('.js'))
     throw Error('windows_shell_asset_unavailable');
   const module = dirname(fileURLToPath(import.meta.url));
@@ -59,7 +59,7 @@ export function windowsShellAssets(stateRoot: string) {
     if (digest(join(root, file)) !== hash) throw Error('windows_shell_asset_changed');
   return {
     runner: join(root, 'kite-windows-runner.exe'),
-    ...stageWindowsGitBash(stateRoot, join(root, 'coreutils.exe'), join(root, 'ktipc.dll')),
+    ...(await stageWindowsGitBash(stateRoot, join(root, 'coreutils.exe'), join(root, 'ktipc.dll'))),
   };
 }
 interface State {

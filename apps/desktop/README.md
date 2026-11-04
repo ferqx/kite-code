@@ -172,6 +172,12 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 ## 开发热更新与服务重载
 
+开发 Main 给配套 Service 的 bootstrap／连接阶段各30秒有限期限，正式 paired 默认仍各10秒，外层开发父控制保持45秒。Main 只将 Service 的闭合阶段／状态／毫秒计时打印为 `[desktop:dev] Service ...`，不透传私有 stderr；Shell 运行时、配置、Store、Runtime 和 HTTP 的开始／完成／失败可在超时时定位最后阶段。父宿主在真实准入后另报告 Electron／Service 握手耗时，原失败清理和就绪条件保持。
+
+2026-11-05，Windows x64／Bun1.4.4，隔离目录内交替正反顺序对照本机 Git 的1,139个文件／约303MiB：原同步 Git Bash 冷准备10.36／10.79秒，优化后3.56／4.01秒，清单摘要相同；热准备原2.91／3.33秒、优化后2.23／2.39秒。真实开发 builder 生成的 Service 由 Node 私有管道启动，全新隔离 HOME 下 bootstrap 为5.85秒，Shell 阶段4.03秒，原10秒探针期限内完成，父 EOF 后退出0。这是本机文件准备和 Service 启动证据，不承诺所有机器的耗时，也不代证实际窗口、模型或完整发行资格。
+
+同轮完整 `runDevelopmentDesktop` 使用隔离 HOME／Electron userData 实际启动：Shell 冷准备3.20秒，Electron／Service准入6.24秒，含构建总20.54秒；终端完整输出五阶段日志，父控制停止后入口返回143，原Electron已退出。此处只核终端就绪与所属退出，没有验收窗口交互。准备、原生Shell、Service计时／配对、开发入口与重载完整文件通过；Shell检索／只读子Agent集成首次12秒等待失败，保持原期限的独立复验通过。Main生命周期为40通过／4失败，四项Windows无page host的浏览器夹具失败在Git HEAD原Main中同样复现，未计为本轮通过或扩展修复范围。
+
 本次定向验证沿原隔离运行器逐文件执行 macOS runtime、普通／开发 renderer 构建、确认框 DOM、诊断构建、开发启动与开发重载六个完整文件，30项／373断言通过；最小夹具仅预热存在的页面，不引入缺文件预处理错误。UI 构建并实际导入新 compiled 确认出口，根／Desktop／UI类型、定向Biome、边界、测试归属与文档检查通过。普通生产主页面仍有原大chunk提示，不计为开发启动警告；本轮未取得Windows／Linux实机或安装发布资格。
 
 2026-11-03，macOS arm64／Bun1.4.2／Electron44.3.0，`6719ed84e` 加本次启动优化：同机按原准备顺序、独立数据目录测得基线 Service 就绪16106ms，其中 Electron 准备1899ms、Service 构建与加载343ms、Native 构建10747ms、Electron 到真实握手2929ms；最终普通开发函数的隔离 HOME／Profile 实测就绪5140ms，Main／preload 构建200ms，首个完整新对话正文／输入样本在6488ms。中间多次启动的就绪范围约5.1–6.6秒，属于本机现有依赖缓存状态，不是跨机器或首次安装性能承诺。连续20个Root样本、4个确认框样本与取消后画面核对无重复输入区或挂起，Full默认焦点为取消，取消保留自动审核及原未发送草稿；未请求模型。原加载动画实际名称正确且opacity变化，renderer无pageerror；SIGTERM沿原流程返回143，所属应用目录已清理。过程、终端日志及准确退出结果位于本机`.cache/desktop-startup-check-20261103-final4/`；早期私有观察脚本误选隐藏页／错误菜单筛选的失败保留，不计为通过。

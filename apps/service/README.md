@@ -197,6 +197,10 @@ heap／external／ArrayBuffer明显回落，但RSS仍较高，不能仅据此判
 
 `@kite-ai/service/paired` 提供 `launchPairedService`。调用者启动前通过只读 `@kite-ai/agent/profile` API 选定 profile，并传入选定 entrypoint、instance/build 身份、API major 和必要 capabilities。launcher 发送一行私有 startup JSON（最多 64 KiB），保持 stdin 作为独立父进程存活通道，并读取一行 bootstrap JSON（最多 16 KiB）。凭据和 token 不进入 argv、URL 或继承的模型凭据环境变量。Client 准入将 bootstrap 与认证 HTTP 身份和启动前选择逐项比较，不从响应推导预期 profile；启动失败只清理本次建立的 child。
 
+[启动计时](src/startup-timing.ts)由 Desktop 开发 builder 的构建常量开启，在 Service stderr 记录 Shell 运行时、配置、Store、Runtime 与 HTTP 五个阶段的开始、完成／失败和单调时钟耗时。普通源码／正式 Service 不产生该日志，不提供环境变量或请求开关。可信 paired 调用者可传 `onStartupTiming` 读取严格闭合的阶段／状态／整数毫秒；每行最多256字符，拒绝额外字段、未知阶段和非法数值，超长行丢弃后继续读取。原始 stderr 仍只按原16KiB上限保留，不透传到开发终端；观察回调失败不改变准入、超时或所属子进程关闭。默认 bootstrap／连接等待仍各10秒，Desktop 开发宿主的有限期限归 [Desktop owner](../desktop/README.md#开发热更新与服务重载)。[真实配对与分片回归](test/isolated/paired-startup-timing.test.ts)核阶段顺序、私密字段拒绝、日志回调失败隔离及超时清理。
+
+2026-11-05 Windows x64／Bun1.4.4：计时完整文件2项14断言通过，包含真实开发 builder 的冷启动和普通源码保持零阶段日志／空 stderr；原 paired 完整文件6项68断言通过。扩展执行的 [preparation cleanup](test/isolated/preparation-cleanup-ownership.test.ts)在数据不可用后提前退出并于父清理报 EPIPE，同一用例在 Git HEAD 原 Service 装配实现中复现；保留为既有 Windows 夹具失败，不计为本轮通过或完整恢复资格。
+
 paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只继承可信父进程的大小写 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `CODEX_HOME`，保留原值、空值和大小写，由 Bun 解释代理优先级、Codex owner 校验路径。模型 key／token、任意秘密和 NODE_OPTIONS／BUN_OPTIONS 等运行注入仍不继承，代理凭据不进入 bootstrap、serverInfo 或诊断。[实际代理回归](test/isolated/paired-proxy.test.ts)分别经默认 child 与显式 spawn port 验证 HTTP、HTTPS CONNECT、NO_PROXY 绕过、含空格的 Codex 路径与秘密过滤；只使用 loopback 和合成凭据。
 
 模型连接由 [model-transport.ts](src/model-transport.ts)补齐系统代理自动发现：有显式代理环境时继续由 Bun 解释原值、认证和 NO_PROXY；无环境代理时复用 [系统设置读取](src/web-fetch-proxy.ts)，选择 Windows HKCU／macOS 手动 HTTP(S) 代理及绕过名单，支持主机通配符、端口、IPv6 与 `<local>`。每个绑定复制系统设置并显式传给 fetch，不改写进程环境、不探测常用端口、不执行 PAC/WPAD、不在失败后直连重发。普通 Chat Completions／Responses、Codex 认证包装和显式提供商目录查询均消费该传输；`webFetch` 用户配置仍仅属于网页工具，MCP 的网络准入保持原边界。

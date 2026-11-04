@@ -265,6 +265,7 @@ export async function buildDevelopmentService(
       target: 'bun',
       packages: 'bundle',
       external: ['@kite-ai/*'],
+      define: { __KITE_SERVICE_STARTUP_TIMING__: 'true' },
       plugins: [
         {
           name: 'development-process-assets',

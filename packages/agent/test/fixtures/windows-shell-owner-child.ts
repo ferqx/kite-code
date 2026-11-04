@@ -4,7 +4,7 @@ import { createWindowsShellJob } from '../../src/jobs/windows-shell';
 import { windowsShellFixture } from './windows-shell-runtime';
 
 const root = process.argv[2]!;
-const assets = windowsShellFixture();
+const assets = await windowsShellFixture();
 const powershell = join(
   process.env.SystemRoot!,
   'System32/WindowsPowerShell/v1.0/powershell.exe',
