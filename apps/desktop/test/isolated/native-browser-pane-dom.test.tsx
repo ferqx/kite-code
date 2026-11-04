@@ -466,6 +466,12 @@ test('the same Root toolbar owns empty, navigation loading, drawable content and
     await f.update({ display: 'ready', loading: false });
     expect(document.querySelector('.native-browser-start')).toBeNull();
     expect(f.address()).toBe(input);
+    await f.update({ display: 'stopped', loading: false });
+    expect(document.querySelector('[role="status"]')?.textContent).toBe('已停止加载');
+    expect(document.querySelector('[role="alert"], [aria-label="网页加载中"]')).toBeNull();
+    expect(f.address()).toBe(input);
+    await f.update({ display: 'ready', loading: false });
+    expect(document.querySelector('.native-browser-start')).toBeNull();
     await f.update({ display: 'failed' });
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('网页显示尚未确认');
     expect(f.withdrawals.at(-1)?.bounds).toBeNull();

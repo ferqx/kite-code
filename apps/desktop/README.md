@@ -1975,11 +1975,28 @@ Main针对同选择刷新增设私有grantScope，只沿NativeCaller已保存且
 
 ### 浏览器加载失败页（2026-11-03）
 
+2026-11-04继续核对全部“网页显示尚未确认”来源：`prepareDocument`中的文档等待返回false只退休本次展示，不再推断网页失败；Agent Host／CDP detach只按attachment及读者current取消Agent读，普通显示继续等原文档。`did-stop-loading`退休当前读者但保留同epoch后续就绪资格；已提交页在没有新DOM-ready时，可由一次隔离世界`document.readyState`读取确认，回调核原epoch、frame、页面、真实错误及完整帧，导航／失败／关闭后的迟到结果不接管。主动停止且尚无可显示文档时，私有显示状态`stopped`呈现中性“已停止加载”；原页面就绪后正常显示，不重试导航。真实非取消的主框架provisional／load failure统一直接发布有界引擎错误页，普通loading通知不能擦除原失败；进程退出继续保留原故障反馈。
+
+| 提示来源 | 本轮核对后的触发边界 |
+| --- | --- |
+| 普通展示等待、停止、控制通道分离、Root／scope／几何变化 | 等待或退休，不写永久display failed；不设加载或首帧期限。16ms状态合并和100ms绘制机会回退只调度，不判失败 |
+| Main原生呈现 | 准确Root／页面层缺失、真实原生调用、帧订阅／清理故障保留可读失败；不以DOM-ready、URL或旧帧代替完整帧准入 |
+| Renderer的`browser_presentation_unavailable` | 仅展示revision无效／耗尽、草稿sessionStorage读取或写入失败等真实排序依据不可核实；该分支无倒计时，不降低原revision／owner检查 |
+| 网页网络／证书／引擎超时、进程退出 | 沿各自真实错误展示，不借通用“尚未确认”覆盖准确失败；Agent初始化／输入屏障原5秒预算不通向普通网页展示失败分支，保持原控制安全边界 |
+
+真实Electron对照还确认，提交前主动停止可由引擎报告`ERR_FAILED`而非`ERR_ABORTED`。Main只对已记录的准确原document generation把该通用取消及原loadURL拒绝归入主动停止；新导航、后退／前进和刷新清除这份停止依据，后继同URL的通用失败仍报错。具体网络／证书错误不因停止而被忽略，已有真实失败也不被停止清除。该状态仅为私有显示事实，不是执行成功、Agent操作资格或取消效果证明。
+
+同机Windows x64／Bun1.4.3／Electron44.3.0，`9855b3c56`加前述Root修复及本轮全路径补丁：capture、document-ready、Pane DOM、bridge、navigation与PageHost六个完整文件309项／2497条Bun断言通过；原生整链另通过提交前／后主动停止、原页接管、新导航、网络失败／重试及既有表单、阅读位置、scope、隔离与销毁。Host/CDP分离和停止晚就绪三例先红后绿；隔离真实Main／PageHost／preload／生产Pane的修前后对照在Host、CDP detach及已提交慢页停止三处重现同文案，修后等待原页并接管，提交前停止为中性状态，真实ERR_EMPTY_RESPONSE只显示原错误页且明确重试恢复。两路最终录像全部六张联系表已核对中间状态与结果，未见修后误报或重复错误页；只覆盖测试窗口及有界编码样本，不授完整Service／模型、安装版、逐屏幕帧或其他平台资格。材料归本机`.cache/browser-display-path-audit-20261104`，保留早期夹具必需回调／样式作用域遗漏、旧提交前停止预期不符及修中ERR_FAILED反例。Desktop类型、定向Biome、边界、测试归属、文档结构／影响检查通过；公共工具／HTTP协议与引擎版本保持，既有Main需完全重启。本次`iteration_complete`覆盖上述全路径排查与修复。
+
+2026-11-04补充：首帧准备时，Root暂时隐藏、尺寸未覆盖完整窗口，或等待中的页面frame／覆盖关系已经变化，只退休准确的paint并保留loading，不把这类展示失配写成永久display failed。Main监听真实Root `bounds-changed`，沿既有当前布局重新核文档、scope、Root、几何及完整原生帧；不轮询、不加倒计时、不刷新或重放导航。准确Root缺失、引擎／进程错误、真实帧订阅及清理故障仍保留失败。受控反例已证原Root仅差1像素就会产生用户所报“网页显示尚未确认，请刷新或重新输入地址”；这证明一条同文案误判路径，不据此认定用户现场的唯一原因。
+
+本机Windows x64／Bun1.4.3／原版Electron44.3.0，基于`9855b3c56`加本轮修复：bridge、Pane DOM、document-ready与capture四个完整文件205项／1954断言通过；[原生整链](test/isolated/native-browser.test.ts)另通过超过旧12秒的慢页、真实Root失配／恢复、失败页、导航、原表单／阅读位置与隔离。私有Profile中修前／修后窗口对照复现同一句提示：修前布局恢复仍失败，显式刷新才恢复；修后持续loading，真实Root恢复后原页接管且导航仅一次。两路最终录像的全部四张联系表已核对加载→失败或原页→真实网络错误→明确重试恢复，未见修后误报或重复错误页；录像是有界编码样本，不授每屏幕帧或用户现场唯一根因资格。过程、旧夹具刷新后未再次释放阻塞脚本的首次超时及修正后材料保留在本机`.cache/browser-root-layout-qa-20261104`。Desktop类型、定向Biome、Core边界、测试归属及文档结构／影响检查通过；未改变Agent／Service／公共协议、引擎版本或安装发布资格，现有开发Main需完全退出后重启。
+
 普通网页展示不设独立加载／首帧超时。`prepareDocument`直接等待现有引擎文档生命周期及准确当前完整原生帧，慢页继续loading；只有真实引擎加载失败、进程／订阅故障或已失效的展示上下文结束该等待。2026-11-03用户明确要求让引擎决定超时，已删除原12秒文档等待和2秒原生帧倒计时，不能再因这两个应用期限把仍可能成功的页面封为display failed。撤页、导航、隐藏、关闭、scope／Root／几何变化仍沿原AbortController退休准确等待和订阅，恢复Windows临时节流策略；不改Agent操作期限、控制权或截图证明。
 
 本轮基于`c82f0efea`加普通展示期限修复，在独立依赖工作树执行`bun test --parallel=1 --max-concurrency=1 apps/desktop/test/native-browser-bridge.test.ts apps/desktop/test/isolated/native-browser-pane-dom.test.tsx apps/desktop/test/isolated/native-browser-capture.test.ts apps/desktop/test/isolated/browser-document-ready.test.ts`，203项1898断言通过；超过旧12秒／2秒的两项用例先红后绿，当前完整帧及撤销／迟到回调断言保留，Desktop类型、定向Biome、边界及测试归属通过。原版Electron44.3.0／Windows150%缩放的原生对照让服务端挂起阻塞脚本：旧Main在12秒后出现与用户相同提示，引擎完成后仍失败；新Main继续loading并显示原页。新[维护中整链driver](test/native-browser-driver.fixture.ts)覆盖该慢页、网络失败页、重试／历史、隔离与原表单／阅读位置恢复，正常退出0。一次标准测试入口在UI构建阶段报内存分配失败，未计通过；随后复用本工作树已经独立构建且源码未变的生产UI／preload，重建最新Main与同一维护中driver完成整链，不把构建失败解释为浏览器失败。
 
-修后隔离窗口全过程录像137编码帧／约15.7秒，全部10张联系表已审看：起始页→标题先出现的慢页→跨旧阈值的loading→原生正文→真实ERR_EMPTY_RESPONSE失败页→百度正文，未见旧超时提示或重复失败页；请求10fps，不授逐屏幕帧／物理鼠标或OS原子合成资格。外部百度在本次宽窄与高窗口采样中正常加载，不据此认定复现了用户现场的全部条件。另核主动停止阻塞脚本：旧／新Main均由引擎停止事件得到“网页显示尚未确认”，并非此处删除的倒计时；该既有停止展示限制保留，不以慢页通过覆盖。材料归本机`.cache/browser-engine-lifetime-3da4f431-8ee6-4c5f-b92d-112cb1eb0956`，旧构建失败与停止对照均保留。普通网页没有引擎／工具／协议升级，也未取得安装或新增跨平台资格；开发客户端需完整重启。
+修后隔离窗口全过程录像137编码帧／约15.7秒，全部10张联系表已审看：起始页→标题先出现的慢页→跨旧阈值的loading→原生正文→真实ERR_EMPTY_RESPONSE失败页→百度正文，未见旧超时提示或重复失败页；请求10fps，不授逐屏幕帧／物理鼠标或OS原子合成资格。外部百度在本次宽窄与高窗口采样中正常加载，不据此认定复现了用户现场的全部条件。另核主动停止阻塞脚本：旧／新Main均由引擎停止事件得到“网页显示尚未确认”，并非此处删除的倒计时；这是当时保留的停止展示限制，已由本节2026-11-04全路径修复替代；旧反例继续保留，不以慢页通过覆盖。材料归本机`.cache/browser-engine-lifetime-3da4f431-8ee6-4c5f-b92d-112cb1eb0956`，旧构建失败与停止对照均保留。普通网页没有引擎／工具／协议升级，也未取得安装或新增跨平台资格；开发客户端需完整重启。
 
 网络导航失败时，[Pane](src/native-browser-pane.tsx)在内容区显示[浏览器错误页](src/native-browser-error.tsx)：蓝色图标、站点标题、目标主机、可读排查建议、次要的单行原生错误名和“重新加载”。沿应用深浅主题和原工具栏，窄栏允许换行与区域内滚动；不把异常栈、日志或响应正文渲染为错误说明。DNS、断网、拒绝连接／中断、超时及证书／安全连接按[Main有界分类](electron/browser-load-failure.ts)提供建议，未分类失败使用通用建议；只保留格式核验的ERR_名称。分类依据固定[Chromium152 net errors](https://github.com/chromium/chromium/blob/152.0.7977.78/net/base/net_error_list.h)，普通HTTP 404等网站响应继续显示站点自己的内容，不因状态码自动换页。
 

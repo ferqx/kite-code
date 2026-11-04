@@ -640,7 +640,7 @@ test('bounded display state does not turn ready or visible UI into observation o
     canGoBack: false,
     canGoForward: false,
   };
-  for (const display of ['loading', 'ready', 'failed'])
+  for (const display of ['loading', 'ready', 'stopped', 'failed'])
     expect(isNativeBrowserState({ ...base, display, pageToken: 'exact-Main-token' })).toBe(true);
   for (const invalid of [
     { ...base, display: 'first-paint-authorized-input' },

@@ -21,7 +21,7 @@ export const nativeBrowserMenuCancelChannel = 'kite:native:browser-menu-cancel';
 export interface NativeBrowserState {
   /** Opaque Main page/document and display-generation fence; never inferred from its URL. */
   readonly pageToken?: string;
-  readonly display?: 'loading' | 'ready' | 'failed';
+  readonly display?: 'loading' | 'ready' | 'stopped' | 'failed';
   readonly control?: {
     readonly phase: 'human' | 'armed' | 'acquiring' | 'agent' | 'revoking' | 'unknown';
     readonly incarnation: string;
@@ -644,7 +644,7 @@ export function isNativeBrowserState(value: unknown): value is NativeBrowserStat
         state.pageToken.length > 0 &&
         state.pageToken.length <= 1024)) &&
     (state.display === undefined ||
-      ['loading', 'ready', 'failed'].includes(String(state.display))) &&
+      ['loading', 'ready', 'stopped', 'failed'].includes(String(state.display))) &&
     typeof state.id === 'string' &&
     /^[A-Za-z0-9_-]{1,64}$/.test(state.id) &&
     typeof state.url === 'string' &&

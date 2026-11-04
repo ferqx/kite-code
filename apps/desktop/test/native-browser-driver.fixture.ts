@@ -229,7 +229,29 @@ try {
   assert.equal(await rail.getByRole('alert').count(), 0);
   assert.equal(await rail.getByText('网页显示尚未确认，请刷新或重新输入地址。').count(), 0);
   assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, false);
+  // A delayed application layout must retire the paint, not fail the engine's
+  // healthy document. Only the real Root bounds notification resumes display.
+  const rootBounds = await electron.evaluate(() => {
+    const root = globalThis.browserTabsHostFixture.rootView;
+    const bounds = root.getBounds();
+    root.setBounds({ ...bounds, width: bounds.width - 1 });
+    return bounds;
+  });
   await electron.evaluate(() => globalThis.browserTabsHostFixture.releaseSlowDocuments());
+  await electron.evaluate(
+    async ({ webContents }, id) =>
+      webContents
+        .fromId(id)!
+        .executeJavaScript(
+          'new Promise(resolve => document.readyState === "complete" ? resolve(true) : addEventListener("load", () => resolve(true), {once:true}))',
+        ),
+    slow.id,
+  );
+  assert.equal(await rail.getByRole('status', { name: '网页加载中', exact: true }).count(), 1);
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  await electron.evaluate((_, bounds) => {
+    globalThis.browserTabsHostFixture.rootView.setBounds(bounds);
+  }, rootBounds);
   await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
   assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, true);
   assert.equal(
@@ -240,7 +262,36 @@ try {
     ),
     'Slow document',
   );
-  await rail.getByRole('button', { name: '关闭标签页：Slow document', exact: true }).click();
+  // Explicitly stopping a second blocked document must not synthesize a
+  // display failure; its committed DOM may finish without another dom-ready.
+  await address().fill(`${origin}/slow-document`);
+  await address().press('Enter');
+  await electron.evaluate(async () => {
+    while ((globalThis.browserTabsHostFixture.hits['/pending-script'] ?? 0) < 2)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  await rail.getByRole('button', { name: '停止加载', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, true);
+  assert.equal(
+    await electron.evaluate(() => globalThis.browserTabsHostFixture.hits['/slow-document']),
+    2,
+  );
+  await address().fill(`${origin}/slow-response`);
+  await address().press('Enter');
+  await electron.evaluate(async () => {
+    while (!globalThis.browserTabsHostFixture.hits['/slow-response'])
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  await rail.getByRole('button', { name: '停止加载', exact: true }).click();
+  await rail.getByRole('status').filter({ hasText: '已停止加载' }).waitFor();
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  await address().fill(`${origin}/one`);
+  await address().press('Enter');
+  await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  await rail.getByRole('button', { name: '关闭标签页：Page One', exact: true }).last().click();
   await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
 
   // The browser error page keeps the native failed document and history;

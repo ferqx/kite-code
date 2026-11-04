@@ -885,6 +885,8 @@ export function NativeBrowserPane({
             {state.url || initialHint?.url ? (
               error ? (
                 <p role="alert">{error}</p>
+              ) : state.display === 'stopped' ? (
+                <p role="status">已停止加载</p>
               ) : (
                 <div className="native-browser-loading">
                   <Spinner aria-label="网页加载中" className="size-5" />

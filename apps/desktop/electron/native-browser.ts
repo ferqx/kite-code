@@ -41,6 +41,7 @@ type BrowserTab = {
   generation: number;
   documentNavigation: number;
   documentGeneration: number;
+  stoppedDocument?: number;
   notification?: ReturnType<typeof setTimeout>;
   unregister?: () => void;
   disposeDocument?: () => void;
@@ -454,6 +455,7 @@ export function registerNativeBrowserIpc(options: {
     if (contents && !contents.isDestroyed()) contents.close({ waitForBeforeUnload: false });
   };
   const navigate = (tab: BrowserTab, url: string) => {
+    delete tab.stoppedDocument;
     cancelPaint(tab);
     delete tab.resume;
     delete tab.drawable;
@@ -480,7 +482,11 @@ export function registerNativeBrowserIpc(options: {
         tabs.get(tab.state.id) !== tab
       )
         return;
-      if (cause?.errno === -3) return;
+      if (
+        cause?.errno === -3 ||
+        (cause?.errno === -2 && tab.stoppedDocument === tab.documentGeneration)
+      )
+        return;
       tab.state = {
         ...tab.state,
         loading: false,
@@ -590,6 +596,7 @@ export function registerNativeBrowserIpc(options: {
       delete tab.drawable;
       tab.documentNavigation++;
       tab.documentGeneration++;
+      delete tab.stoppedDocument;
       tab.sizeEpoch++;
       tab.view.setVisible(false);
       automation?.present(id, false);
@@ -655,13 +662,15 @@ export function registerNativeBrowserIpc(options: {
       committedFrame = contents.mainFrame;
       documentReady.commit(documentEpoch);
     });
-    contents.on('dom-ready', () => {
+    const displayDocumentReady = () => {
       if (committedFrame === contents.mainFrame) {
         readyEpoch = documentEpoch;
         documentReady.ready(documentEpoch);
+        if (tab.state.display === 'stopped') tab.state = { ...tab.state, display: 'loading' };
         if (active === id && tab.presentation) applyCurrentLayout(tab);
       }
-    });
+    };
+    contents.on('dom-ready', displayDocumentReady);
     const currentFailure = (
       code: number,
       url: string,
@@ -672,6 +681,7 @@ export function registerNativeBrowserIpc(options: {
       tabs.get(id) === tab &&
       mainFrame &&
       code !== -3 &&
+      !(code === -2 && tab.stoppedDocument === tab.documentGeneration) &&
       url === documentUrl &&
       ((processId === undefined && routingId === undefined) ||
         (Number.isSafeInteger(processId) &&
@@ -681,18 +691,53 @@ export function registerNativeBrowserIpc(options: {
     const failedDisplayDocument = (
       _event: unknown,
       code: number,
-      _description: string,
+      description: string,
       url: string,
       mainFrame: boolean,
       processId?: number,
       routingId?: number,
     ) => {
-      if (currentFailure(code, url, mainFrame, processId, routingId)) documentReady.stopped();
+      if (!currentFailure(code, url, mainFrame, processId, routingId)) return;
+      documentReady.fail();
+      cancelPaint(tab);
+      tab.view.setVisible(false);
+      automation?.present(id, false);
+      tab.state = {
+        ...tab.state,
+        ...(httpUrl(url) ? { url } : {}),
+        loading: false,
+        display: 'failed',
+        error: 'load_failed',
+        failure: browserLoadFailure(code, description),
+      };
+      publish(tab);
     };
     contents.on('did-fail-load', failedDisplayDocument);
     contents.on('did-fail-provisional-load', failedDisplayDocument);
     contents.on('did-stop-loading', () => {
-      if (contents.isLoadingMainFrame?.() === false) documentReady.stopped();
+      if (contents.isLoadingMainFrame?.() !== false) return;
+      documentReady.stopped();
+      // Chromium may finish a stopped, committed document without another
+      // dom-ready event. Read only its isolated readiness, never page effects.
+      const epoch = documentEpoch,
+        frame = committedFrame;
+      if (!frame || readyEpoch === epoch || tab.state.error) return;
+      void contents.executeJavaScriptInIsolatedWorld(1004, [{ code: 'document.readyState' }]).then(
+        (state) => {
+          if (
+            !disposed &&
+            tabs.get(id) === tab &&
+            !contents.isDestroyed() &&
+            epoch === documentEpoch &&
+            frame === committedFrame &&
+            frame === contents.mainFrame &&
+            !tab.state.error &&
+            (state === 'interactive' || state === 'complete')
+          )
+            displayDocumentReady();
+        },
+        () => {}, // A retired execution context is not evidence of page failure.
+      );
     });
     contents.on('render-process-gone', () => documentReady.fail());
     contents.on('destroyed', () => documentReady.dispose());
@@ -773,9 +818,9 @@ export function registerNativeBrowserIpc(options: {
           if (!contents.debugger.isAttached()) contents.debugger.attach('1.3');
         },
         async detach() {
-          documentReady.cancel();
           navigation.cancel();
           ++attachment;
+          documentReady.check();
           captureMeta = null;
           try {
             await annotationStyle.clear();
@@ -1152,7 +1197,8 @@ export function registerNativeBrowserIpc(options: {
         navigation.dispose();
       });
       contents.debugger.on?.('detach', () => {
-        documentReady.cancel();
+        ++attachment;
+        documentReady.check();
         navigation.cancel();
       });
       contents.on('did-navigate-in-page', (_event, _url, mainFrame) => {
@@ -1199,7 +1245,8 @@ export function registerNativeBrowserIpc(options: {
       publish(tab);
     });
     contents.on('did-start-loading', () => {
-      tab.state = { ...tab.state, loading: true, error: undefined, failure: undefined };
+      // Only a new main navigation or explicit reload clears its old failure.
+      tab.state = { ...tab.state, loading: true };
       publish(tab);
     });
     contents.on('did-stop-loading', () => {
@@ -1221,21 +1268,6 @@ export function registerNativeBrowserIpc(options: {
       };
       publish(tab);
     });
-    contents.on(
-      'did-fail-load',
-      (_event, code, _description, url, mainFrame, processId, routingId) => {
-        if (!currentFailure(code, url, mainFrame, processId, routingId)) return;
-        tab.state = {
-          ...tab.state,
-          ...(httpUrl(url) ? { url } : {}),
-          loading: false,
-          display: 'failed',
-          error: 'load_failed',
-          failure: browserLoadFailure(code, _description),
-        };
-        publish(tab);
-      },
-    );
     contents.on('render-process-gone', () => {
       if (tabs.get(id) !== tab) return;
       cancelPaint(tab);
@@ -1394,6 +1426,7 @@ export function registerNativeBrowserIpc(options: {
       ]),
     };
     tab.paint = job;
+    const cancelled = Error('browser_presentation_cancelled');
     const contextCurrent = () =>
       !disposed &&
       tab.paint === job &&
@@ -1427,15 +1460,18 @@ export function registerNativeBrowserIpc(options: {
         // still retires this exact wait and its native observer.
         const ready = await tab.waitForDisplayDocument!(job.controller.signal);
         if (!current()) throw Error('browser_presentation_cancelled');
-        if (!ready) throw Error('browser_presentation_unavailable');
+        if (!ready) throw cancelled;
         const pageFrame = contents.mainFrame;
         const root = rootView();
-        if (!root?.getVisible()) throw Error('browser_presentation_unavailable');
+        if (!root) throw Error('browser_presentation_unavailable');
         const children = window.contentView.children,
           rootIndex = children.indexOf(root);
         if (children.indexOf(tab.view) >= rootIndex)
           addNativeWindowView(window, tab.view, rootIndex);
-        if (!coveredByRoot(tab)) throw Error('browser_presentation_unavailable');
+        if (!coveredByRoot(tab)) {
+          job.controller.abort(cancelled);
+          throw cancelled;
+        }
         job.underlay = true;
         if (process.platform === 'win32') {
           // Chromium otherwise occludes this BaseWindow child under Root and
@@ -1464,25 +1500,25 @@ export function registerNativeBrowserIpc(options: {
                 try {
                   contents.endFrameSubscription();
                 } catch (cause) {
-                  error ??= cause;
+                  error = cause;
                 }
               }
             }
             if (error) reject(error);
             else resolve();
           };
-          const abort = () => finish(Error('browser_presentation_cancelled'));
+          const abort = () => finish(cancelled);
           job.stopFrame = abort;
           job.controller.signal.addEventListener('abort', abort, { once: true });
           if (!current() || !coveredByRoot(tab)) {
-            abort();
+            job.controller.abort(cancelled);
             return;
           }
           try {
             subscribed = true;
             contents.beginFrameSubscription(false, (image) => {
               if (!current() || contents.mainFrame !== pageFrame || !coveredByRoot(tab)) {
-                abort();
+                job.controller.abort(cancelled);
                 return;
               }
               if (fullFrameMatches(image, job.bounds)) finish();
@@ -1493,14 +1529,16 @@ export function registerNativeBrowserIpc(options: {
           }
         });
         if (!current()) throw Error('browser_presentation_cancelled');
-        if (contents.mainFrame !== pageFrame || !coveredByRoot(tab))
-          throw Error('browser_presentation_unavailable');
+        if (contents.mainFrame !== pageFrame || !coveredByRoot(tab)) {
+          job.controller.abort(cancelled);
+          throw cancelled;
+        }
         tab.drawable = { frame: pageFrame, document: tab.documentGeneration };
         tab.state = { ...tab.state, display: 'ready' };
         tab.paint = undefined;
         applyCurrentLayout(tab);
         publish(tab);
-      } catch {
+      } catch (cause) {
         if (
           tab.paint !== job ||
           disposed ||
@@ -1519,6 +1557,10 @@ export function registerNativeBrowserIpc(options: {
         tab.paint = undefined;
         tab.view.setVisible(false);
         automation?.present(tab.state.id, false);
+        // A transient Root cover or document mismatch retires only this paint.
+        // Keep the admitted layout for the next real layout notification; it
+        // must still pass every document/owner/full-frame gate before showing.
+        if (cause === cancelled) return;
         tab.state = { ...tab.state, display: 'failed' };
         publish(tab);
       } finally {
@@ -1967,6 +2009,7 @@ export function registerNativeBrowserIpc(options: {
         } else if (tab) {
           const contents = tab.view.webContents;
           if (['back', 'forward', 'reload'].includes(request.action)) {
+            delete tab.stoppedDocument;
             cancelPaint(tab);
             delete tab.drawable;
             tab.state = { ...tab.state, display: 'loading' };
@@ -1980,7 +2023,22 @@ export function registerNativeBrowserIpc(options: {
             tab.state = { ...tab.state, loading: true, error: undefined, failure: undefined };
             contents.reload();
           }
-          if (request.action === 'stop') contents.stop();
+          if (request.action === 'stop') {
+            tab.stoppedDocument = tab.documentGeneration;
+            cancelPaint(tab);
+            if (
+              !tab.state.error &&
+              !(
+                tab.drawable?.frame === contents.mainFrame &&
+                tab.drawable.document === tab.documentGeneration
+              )
+            ) {
+              tab.view.setVisible(false);
+              automation?.present(tab.state.id, false);
+              tab.state = { ...tab.state, loading: false, display: 'stopped' };
+            }
+            contents.stop();
+          }
           publish(tab);
         }
         return { ok: true, value: tab?.state ?? null };
@@ -2094,6 +2152,8 @@ export function registerNativeBrowserIpc(options: {
     owner.send(nativeBrowserPresentationChannel, true);
   };
   window.on('resize', resize);
+  const applicationRoot = rootView();
+  applicationRoot?.on('bounds-changed', resize);
   const unwatchWillShow = onNativeRootWillShow(window, beforeShow);
   window.on('hide', suspendWindow);
   window.on('minimize', minimize);
@@ -2122,6 +2182,7 @@ export function registerNativeBrowserIpc(options: {
     owner.off('render-process-gone', replaceRenderer);
     owner.off('preload-error', replaceRenderer);
     window.off('resize', resize);
+    applicationRoot?.off('bounds-changed', resize);
     unwatchWillShow();
     window.off('hide', suspendWindow);
     window.off('minimize', minimize);

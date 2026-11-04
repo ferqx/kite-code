@@ -61,6 +61,9 @@ void app.whenReady().then(async () => {
       response.end(
         '<!doctype html><title>Slow document</title><h1>Slow document</h1><script src="/pending-script"></script>',
       );
+    } else if (url.pathname === '/slow-response') {
+      slowScripts.add(response);
+      response.on('close', () => slowScripts.delete(response));
     } else if (url.pathname === '/pending-script') {
       response.setHeader('content-type', 'text/javascript');
       slowScripts.add(response);

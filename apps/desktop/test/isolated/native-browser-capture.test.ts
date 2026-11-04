@@ -65,6 +65,7 @@ class FakeContents extends EventEmitter {
   readMetrics: () => Promise<unknown> = async () => metrics;
   screenshot: (params: Record<string, unknown>) => Promise<unknown> = async () => image;
   paintWorld: (scripts: { code: string }[]) => Promise<void> = async () => {};
+  readDocumentState: () => Promise<unknown> = async () => 'loading';
   readonly debugger = Object.assign(new EventEmitter(), {
     isAttached: () => this.attached,
     attach: () => {
@@ -107,6 +108,7 @@ class FakeContents extends EventEmitter {
     this.frameCallbacks.push(this.frame);
   }
   endFrameSubscription() {
+    if (this.subscriptionEndError) throw this.subscriptionEndError;
     this.subscriptionEnds++;
     this.frame = undefined;
   }
@@ -124,6 +126,7 @@ class FakeContents extends EventEmitter {
   invalidateError?: Error;
   frameImage?: () => Electron.NativeImage;
   subscriptionError?: Error;
+  subscriptionEndError?: Error;
   subscriptionEnds = 0;
   lastCaptureImage?: Electron.NativeImage;
   invalidate() {
@@ -150,9 +153,11 @@ class FakeContents extends EventEmitter {
     return this.loadingMain;
   }
   loads = 0;
+  loadResult: () => Promise<void> = async () => {};
   readonly document = { value: '', clicks: 0 };
   async loadURL() {
     this.loads++;
+    return this.loadResult();
   }
   stops = 0;
   reloads = 0;
@@ -187,6 +192,7 @@ class FakeContents extends EventEmitter {
     return this.readMetrics();
   }
   async executeJavaScriptInIsolatedWorld(_world: number, scripts: { code: string }[]) {
+    if (scripts[0]?.code === 'document.readyState') return this.readDocumentState();
     return this.paintWorld(scripts);
   }
   async removeInsertedCSS() {}
@@ -196,7 +202,7 @@ class FakeContents extends EventEmitter {
     this.destroyed = true;
   }
 }
-class FakePlainView {
+class FakePlainView extends EventEmitter {
   visible = false;
   readonly visibility: boolean[] = [];
   bounds = { x: 0, y: 0, width: 0, height: 0 };
@@ -1852,6 +1858,248 @@ for (const invalid of ['empty', 'small', 'wrong-aspect'] as const)
     }
   });
 
+for (const detach of ['host', 'debugger'] as const)
+  test(`${detach} detach retires Agent reads while the same pending document can still display`, async () => {
+    const f = fixture({ ready: false });
+    try {
+      const reader = f.page.waitForDocument!(new AbortController().signal);
+      f.present(bounds);
+      await turn();
+      if (detach === 'host') await f.page.detach();
+      else f.contents.debugger.emit('detach');
+      expect(await reader).toBe(false);
+      await turn();
+      expect(f.pageState().display).toBe('loading');
+      f.state.phase = 'human';
+      f.page.changed();
+      f.completeDocument(f.view, f.contents.actualUrl, false);
+      await turn();
+      expect(f.pageState().display).toBe('ready');
+      expect(f.aboveRoot()).toBe(true);
+      expect(f.contents.loads).toBe(1);
+      expect(f.contents.reloads).toBe(0);
+    } finally {
+      f.close();
+    }
+  });
+
+test('a stop-loading notification does not fail a document whose DOM-ready arrives later', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.contents.emit('did-navigate', {}, f.contents.actualUrl);
+    f.present(bounds);
+    await turn();
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState().display).toBe('loading');
+    f.contents.emit('dom-ready');
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.loads).toBe(1);
+  } finally {
+    f.close();
+  }
+});
+
+test('explicit stop before commit remains a neutral stopped page and a later new navigation can display', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.present(bounds);
+    await turn();
+    f.invoke({ action: 'stop', id: 'page' });
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState()).toMatchObject({ display: 'stopped', loading: false });
+    expect(f.pageState().error).toBeUndefined();
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(f.contents.stops).toBe(1);
+    f.completeDocument(f.view, 'https://example.test/successor');
+    f.present(bounds);
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.reloads).toBe(0);
+  } finally {
+    f.close();
+  }
+});
+
+test('explicit stop owns its generic engine cancellation while a successor generic failure remains real', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.invoke({ action: 'stop', id: 'page' });
+    for (const event of ['did-fail-provisional-load', 'did-fail-load'])
+      f.contents.emit(event, {}, -2, 'ERR_FAILED', f.contents.actualUrl, true);
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState()).toMatchObject({ display: 'stopped', loading: false });
+    expect(f.pageState().error).toBeUndefined();
+    f.contents.emit('did-start-navigation', {}, f.contents.actualUrl, false, true);
+    f.contents.emit('did-fail-load', {}, -2, 'ERR_FAILED', f.contents.actualUrl, true);
+    expect(f.pageState()).toMatchObject({ display: 'failed', error: 'load_failed' });
+  } finally {
+    f.close();
+  }
+});
+
+test('a loadURL rejection caused by explicit stop cannot replace its neutral stopped state', async () => {
+  const f = fixture();
+  f.state.phase = 'human';
+  const load = deferred<void>();
+  f.contents.loadResult = () => load.promise;
+  try {
+    const url = 'http://localhost/stopping';
+    f.invoke({ action: 'navigate', id: 'page', input: url });
+    f.contents.actualUrl = url;
+    f.contents.emit('did-start-navigation', {}, url, false, true);
+    f.invoke({ action: 'stop', id: 'page' });
+    load.reject(Object.assign(Error('ERR_FAILED'), { errno: -2, code: 'ERR_FAILED' }));
+    await turn();
+    expect(f.pageState()).toMatchObject({ display: 'stopped', loading: false });
+    expect(f.pageState().error).toBeUndefined();
+    expect(f.contents.stops).toBe(1);
+  } finally {
+    f.close();
+  }
+});
+
+test('a stopped committed document can display its actual completed DOM without another DOM-ready', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  f.contents.readDocumentState = async () => 'complete';
+  try {
+    f.contents.emit('did-navigate', {}, f.contents.actualUrl);
+    f.present(bounds);
+    await turn();
+    f.invoke({ action: 'stop', id: 'page' });
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.loads).toBe(1);
+    expect(f.contents.reloads).toBe(0);
+    expect(f.contents.frameCallbacks).toHaveLength(1);
+  } finally {
+    f.close();
+  }
+});
+
+for (const retire of ['navigation', 'failure', 'close'] as const)
+  test(`a stopped-document readiness reply after ${retire} cannot authorize a successor`, async () => {
+    const f = fixture({ ready: false });
+    f.state.phase = 'human';
+    const reply = deferred<unknown>();
+    f.contents.readDocumentState = () => reply.promise;
+    try {
+      f.contents.emit('did-navigate', {}, f.contents.actualUrl);
+      f.present(bounds);
+      await turn();
+      f.contents.emit('did-stop-loading');
+      await turn();
+      if (retire === 'navigation')
+        f.contents.emit('did-start-navigation', {}, 'https://example.test/new', false, true);
+      if (retire === 'failure')
+        f.contents.emit(
+          'did-fail-provisional-load',
+          {},
+          -102,
+          'ERR_CONNECTION_REFUSED',
+          f.contents.actualUrl,
+          true,
+        );
+      if (retire === 'close') f.close();
+      reply.resolve('complete');
+      await turn();
+      expect(f.view.visible).toBe(false);
+      expect(f.contents.frameCallbacks).toHaveLength(0);
+      expect(f.contents.loads).toBe(1);
+      if (retire !== 'close') expect(f.pageState().display).not.toBe('ready');
+    } finally {
+      if (retire !== 'close') f.close();
+    }
+  });
+
+test('a real provisional failure goes directly to its bounded engine error without a generic display failure', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.present(bounds);
+    await turn();
+    f.contents.emit(
+      'did-fail-provisional-load',
+      {},
+      -102,
+      'ERR_CONNECTION_REFUSED',
+      f.contents.actualUrl,
+      true,
+    );
+    await turn();
+    expect(f.pageState()).toMatchObject({
+      display: 'failed',
+      error: 'load_failed',
+      failure: { kind: 'connection' },
+    });
+    f.contents.emit('did-start-loading');
+    f.contents.emit('did-stop-loading');
+    expect(f.pageState().error).toBe('load_failed');
+    f.completeDocument(f.view, f.contents.actualUrl, false);
+    await turn();
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(
+      f.owner.sent.some(
+        ({ value }) =>
+          (value as NativeBrowserState).display === 'failed' &&
+          (value as NativeBrowserState).error !== 'load_failed',
+      ),
+    ).toBe(false);
+  } finally {
+    f.close();
+  }
+});
+
+test('a delayed Root layout keeps the document loading and resumes on its actual bounds change', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  f.contents.document.value = 'retained input';
+  try {
+    f.present(bounds);
+    await turn();
+    const original = { ...f.root.bounds };
+    f.root.setBounds({ ...original, width: original.width - 1 });
+    f.completeDocument(f.view, 'https://example.test/late-layout', false);
+    await turn();
+    expect(f.pageState().display).toBe('loading');
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    f.root.setBounds(original);
+    f.root.emit('bounds-changed');
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.document.value).toBe('retained input');
+    expect(f.contents.loads).toBe(1);
+    expect(f.contents.reloads).toBe(0);
+    expect(f.contents.stops).toBe(0);
+    expect(f.contents.captureCalls).toBe(0);
+    expect(
+      f.owner.sent.some(({ value }) => (value as NativeBrowserState).display === 'failed'),
+    ).toBe(false);
+    f.present(null);
+    f.root.emit('bounds-changed');
+    await turn();
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.loads).toBe(1);
+  } finally {
+    f.close();
+    expect(f.root.listenerCount('bounds-changed')).toBe(0);
+  }
+});
+
 test('native frame subscription failure withdraws its underlay without replay or automatic retry', async () => {
   const f = fixture();
   f.state.phase = 'human';
@@ -1870,6 +2118,27 @@ test('native frame subscription failure withdraws its underlay without replay or
     expect(f.contents.stops).toBe(0);
     expect(f.armed).toEqual([]);
   } finally {
+    f.close();
+  }
+});
+
+test('a real frame subscription cleanup failure remains a failure when its paint is retired', async () => {
+  const f = fixture();
+  f.state.phase = 'human';
+  f.contents.autoPresentationFrame = false;
+  try {
+    f.present(bounds);
+    await turn();
+    f.contents.subscriptionEndError = Error('native frame cleanup failed');
+    f.root.setBounds({ ...f.root.bounds, width: 800 });
+    f.contents.frame!(nativeFrame(1600, 1200));
+    await turn();
+    expect(f.pageState().display).toBe('failed');
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.loads).toBe(1);
+    expect(f.contents.reloads).toBe(0);
+  } finally {
+    f.contents.subscriptionEndError = undefined;
     f.close();
   }
 });
@@ -2065,10 +2334,19 @@ for (const missing of ['hidden', 'cropped', 'absent'] as const)
       await turn();
       expect(f.view.visible).toBe(false);
       expect(f.contents.frameCallbacks).toHaveLength(0);
-      expect(f.pageState().display).toBe('failed');
+      expect(f.pageState().display).toBe(missing === 'absent' ? 'failed' : 'loading');
       expect(f.contents.captureCalls).toBe(0);
       expect(f.armed).toEqual([]);
       expect(f.contents.loads).toBe(1);
+      if (missing !== 'absent') {
+        f.root.setVisible(true);
+        f.root.setBounds({ x: 0, y: 0, width: 1600, height: 1200 });
+        f.present(bounds);
+        await turn();
+        expect(f.pageState().display).toBe('ready');
+        expect(f.aboveRoot()).toBe(true);
+        expect(f.contents.loads).toBe(1);
+      }
     } finally {
       f.close();
     }
@@ -2104,9 +2382,25 @@ for (const boundary of [
       await turn();
       expect(f.view.visible).toBe(false);
       expect(f.contents.frame).toBeUndefined();
-      expect(f.pageState().display).toBe('failed');
+      expect(f.pageState().display).toBe('loading');
       expect(f.contents.captureCalls).toBe(0);
       expect(f.armed).toEqual([]);
+      expect(f.contents.loads).toBe(1);
+      f.root.setVisible(true);
+      f.root.setBounds({ x: 0, y: 0, width: 1600, height: 1200 });
+      f.window.contentView.addChildView(f.root as unknown as Electron.View);
+      if (boundary === 'page-frame') f.completeDocument(f.view);
+      f.present(bounds);
+      await turn();
+      const current = f.contents.frame!;
+      expect(current).not.toBe(old);
+      old(nativeFrame(1600, 1200));
+      expect(f.contents.frame).toBe(current);
+      expect(f.aboveRoot()).toBe(false);
+      current(nativeFrame(1600, 1200));
+      await turn();
+      expect(f.pageState().display).toBe('ready');
+      expect(f.aboveRoot()).toBe(true);
       expect(f.contents.loads).toBe(1);
     } finally {
       f.close();

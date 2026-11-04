@@ -3,6 +3,7 @@ export function createBrowserDocumentReady() {
   let epoch = 0;
   let phase: 'ready' | 'started' | 'committed' | 'failed' = 'ready';
   let disposed = false;
+  let stopped = false;
   const waiting = new Set<{ current(): boolean; finish(ready: boolean): void }>();
   const cancel = () => {
     for (const waiter of [...waiting]) waiter.finish(false);
@@ -11,6 +12,7 @@ export function createBrowserDocumentReady() {
     start() {
       cancel();
       phase = 'started';
+      stopped = false;
       return ++epoch;
     },
     commit(expected: number) {
@@ -19,6 +21,7 @@ export function createBrowserDocumentReady() {
     ready(expected: number) {
       if (disposed || expected !== epoch || phase !== 'committed') return;
       phase = 'ready';
+      stopped = false;
       for (const waiter of [...waiting]) waiter.finish(waiter.current());
     },
     fail() {
@@ -27,7 +30,9 @@ export function createBrowserDocumentReady() {
     },
     stopped() {
       if (phase !== 'started' && phase !== 'committed') return;
-      phase = 'failed';
+      // Stopping a load retires reads, but does not prove that its committed
+      // document failed. A later engine readiness event still owns this epoch.
+      stopped = true;
       cancel();
     },
     check() {
@@ -40,7 +45,7 @@ export function createBrowserDocumentReady() {
     },
     wait(signal?: AbortSignal, current: () => boolean = () => true): Promise<boolean> {
       signal?.throwIfAborted();
-      if (disposed || phase === 'failed' || !current()) return Promise.resolve(false);
+      if (disposed || stopped || phase === 'failed' || !current()) return Promise.resolve(false);
       if (phase === 'ready') return Promise.resolve(true);
       return new Promise<boolean>((resolve, reject) => {
         const abort = () => {
