@@ -1874,26 +1874,26 @@ test('native frame subscription failure withdraws its underlay without replay or
   }
 });
 
-test('the first native frame has a finite deadline and its late callback cannot resurrect its underlay', async () => {
+test('the first native frame waits for the engine past two seconds without failing or replaying the page', async () => {
   const f = fixture();
   f.state.phase = 'human';
   f.contents.autoPresentationFrame = false;
   try {
     f.present(bounds);
     await turn();
-    const old = f.contents.frame!;
-    expect(typeof old).toBe('function');
+    const receive = f.contents.frame!;
+    expect(typeof receive).toBe('function');
     expect(f.aboveRoot()).toBe(false);
-    expect(f.invoke({ action: 'stop', id: 'page' })).toMatchObject({ ok: true });
-    expect(f.contents.stops).toBe(1);
     await Bun.sleep(2050);
-    expect(f.pageState().display).toBe('failed');
-    expect(f.view.visible).toBe(false);
-    expect(f.contents.frame).toBeUndefined();
-    old(nativeFrame(1600, 1200));
+    expect(f.pageState().display).toBe('loading');
+    expect(f.aboveRoot()).toBe(false);
+    expect(f.contents.frame).toBe(receive);
+    receive(nativeFrame(1600, 1200));
     await turn();
-    expect(f.view.visible).toBe(false);
-    expect(f.pageState().display).toBe('failed');
+    expect(f.view.visible).toBe(true);
+    expect(f.pageState().display).toBe('ready');
+    expect(f.contents.frame).toBeUndefined();
+    expect(f.contents.stops).toBe(0);
     expect(f.contents.captureCalls).toBe(0);
     expect(f.contents.loads).toBe(1);
   } finally {
@@ -1901,7 +1901,7 @@ test('the first native frame has a finite deadline and its late callback cannot 
   }
 });
 
-test('an uncommitted first document has a finite display deadline and late DOM-ready cannot start its native frame observer', async () => {
+test('a first document waits for engine readiness past twelve seconds and can still display the same page', async () => {
   const f = fixture({ ready: false });
   f.state.phase = 'human';
   try {
@@ -1911,14 +1911,15 @@ test('an uncommitted first document has a finite display deadline and late DOM-r
     expect(f.aboveRoot()).toBe(false);
     expect(f.pageState().display).toBe('loading');
     await Bun.sleep(12050);
-    expect(f.pageState().display).toBe('failed');
+    expect(f.pageState().display).toBe('loading');
     expect(f.view.visible).toBe(false);
     f.completeDocument(f.view, 'https://example.test/late', false);
     await turn();
-    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(f.contents.frameCallbacks).toHaveLength(1);
     expect(f.contents.captureCalls).toBe(0);
-    expect(f.view.visible).toBe(false);
-    expect(f.pageState().display).toBe('failed');
+    expect(f.view.visible).toBe(true);
+    expect(f.pageState().display).toBe('ready');
+    expect(f.contents.loads).toBe(1);
     expect(f.invoke({ action: 'stop', id: 'page' })).toMatchObject({ ok: true });
     expect(f.contents.stops).toBe(1);
   } finally {

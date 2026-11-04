@@ -1371,26 +1371,6 @@ export function registerNativeBrowserIpc(options: {
     syncInput();
     if (!drawable && !tab.state.error && tab.state.display !== 'failed') prepareDocument(tab);
   };
-  const boundedRead = async <T>(
-    read: Promise<T>,
-    milliseconds: number,
-    expired?: () => void,
-  ): Promise<T> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        read,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => {
-            expired?.();
-            reject(Error('browser_presentation_unavailable'));
-          }, milliseconds);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  };
   const prepareDocument = (tab: BrowserTab) => {
     if (
       tab.paint ||
@@ -1442,11 +1422,10 @@ export function registerNativeBrowserIpc(options: {
     // after its current full native frame. No screenshot is copied or cached.
     void (async () => {
       try {
-        const ready = await boundedRead(
-          tab.waitForDisplayDocument!(job.controller.signal),
-          12000,
-          () => job.controller.abort(),
-        );
+        // Loading has the engine's lifetime. A slow document or compositor is
+        // not an application failure; ownership/lifecycle cancellation below
+        // still retires this exact wait and its native observer.
+        const ready = await tab.waitForDisplayDocument!(job.controller.signal);
         if (!current()) throw Error('browser_presentation_cancelled');
         if (!ready) throw Error('browser_presentation_unavailable');
         const pageFrame = contents.mainFrame;
@@ -1460,7 +1439,7 @@ export function registerNativeBrowserIpc(options: {
         job.underlay = true;
         if (process.platform === 'win32') {
           // Chromium otherwise occludes this BaseWindow child under Root and
-          // never produces its first frame. Only this bounded preparation may
+          // never produces its first frame. Only this current preparation may
           // draw in the background; retained/hidden tabs keep their own policy.
           const previous = contents.getBackgroundThrottling();
           job.restoreThrottling = () => {
@@ -1472,51 +1451,47 @@ export function registerNativeBrowserIpc(options: {
         tab.view.setVisible(true);
         automation?.present(tab.state.id, false);
         syncInput();
-        await boundedRead(
-          new Promise<void>((resolve, reject) => {
-            let subscribed = false,
-              settled = false;
-            const finish = (error?: unknown) => {
-              if (settled) return;
-              settled = true;
-              job.controller.signal.removeEventListener('abort', abort);
-              if (job.stopFrame === abort) {
-                job.stopFrame = undefined;
-                if (subscribed && !contents.isDestroyed()) {
-                  try {
-                    contents.endFrameSubscription();
-                  } catch (cause) {
-                    error ??= cause;
-                  }
+        await new Promise<void>((resolve, reject) => {
+          let subscribed = false,
+            settled = false;
+          const finish = (error?: unknown) => {
+            if (settled) return;
+            settled = true;
+            job.controller.signal.removeEventListener('abort', abort);
+            if (job.stopFrame === abort) {
+              job.stopFrame = undefined;
+              if (subscribed && !contents.isDestroyed()) {
+                try {
+                  contents.endFrameSubscription();
+                } catch (cause) {
+                  error ??= cause;
                 }
               }
-              if (error) reject(error);
-              else resolve();
-            };
-            const abort = () => finish(Error('browser_presentation_cancelled'));
-            job.stopFrame = abort;
-            job.controller.signal.addEventListener('abort', abort, { once: true });
-            if (!current() || !coveredByRoot(tab)) {
-              abort();
-              return;
             }
-            try {
-              subscribed = true;
-              contents.beginFrameSubscription(false, (image) => {
-                if (!current() || contents.mainFrame !== pageFrame || !coveredByRoot(tab)) {
-                  abort();
-                  return;
-                }
-                if (fullFrameMatches(image, job.bounds)) finish();
-              });
-              contents.invalidate();
-            } catch (cause) {
-              finish(cause);
-            }
-          }),
-          2000,
-          () => job.controller.abort(),
-        );
+            if (error) reject(error);
+            else resolve();
+          };
+          const abort = () => finish(Error('browser_presentation_cancelled'));
+          job.stopFrame = abort;
+          job.controller.signal.addEventListener('abort', abort, { once: true });
+          if (!current() || !coveredByRoot(tab)) {
+            abort();
+            return;
+          }
+          try {
+            subscribed = true;
+            contents.beginFrameSubscription(false, (image) => {
+              if (!current() || contents.mainFrame !== pageFrame || !coveredByRoot(tab)) {
+                abort();
+                return;
+              }
+              if (fullFrameMatches(image, job.bounds)) finish();
+            });
+            contents.invalidate();
+          } catch (cause) {
+            finish(cause);
+          }
+        });
         if (!current()) throw Error('browser_presentation_cancelled');
         if (contents.mainFrame !== pageFrame || !coveredByRoot(tab))
           throw Error('browser_presentation_unavailable');

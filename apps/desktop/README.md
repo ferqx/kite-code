@@ -1975,6 +1975,12 @@ Main针对同选择刷新增设私有grantScope，只沿NativeCaller已保存且
 
 ### 浏览器加载失败页（2026-11-03）
 
+普通网页展示不设独立加载／首帧超时。`prepareDocument`直接等待现有引擎文档生命周期及准确当前完整原生帧，慢页继续loading；只有真实引擎加载失败、进程／订阅故障或已失效的展示上下文结束该等待。2026-11-03用户明确要求让引擎决定超时，已删除原12秒文档等待和2秒原生帧倒计时，不能再因这两个应用期限把仍可能成功的页面封为display failed。撤页、导航、隐藏、关闭、scope／Root／几何变化仍沿原AbortController退休准确等待和订阅，恢复Windows临时节流策略；不改Agent操作期限、控制权或截图证明。
+
+本轮基于`c82f0efea`加普通展示期限修复，在独立依赖工作树执行`bun test --parallel=1 --max-concurrency=1 apps/desktop/test/native-browser-bridge.test.ts apps/desktop/test/isolated/native-browser-pane-dom.test.tsx apps/desktop/test/isolated/native-browser-capture.test.ts apps/desktop/test/isolated/browser-document-ready.test.ts`，203项1898断言通过；超过旧12秒／2秒的两项用例先红后绿，当前完整帧及撤销／迟到回调断言保留，Desktop类型、定向Biome、边界及测试归属通过。原版Electron44.3.0／Windows150%缩放的原生对照让服务端挂起阻塞脚本：旧Main在12秒后出现与用户相同提示，引擎完成后仍失败；新Main继续loading并显示原页。新[维护中整链driver](test/native-browser-driver.fixture.ts)覆盖该慢页、网络失败页、重试／历史、隔离与原表单／阅读位置恢复，正常退出0。一次标准测试入口在UI构建阶段报内存分配失败，未计通过；随后复用本工作树已经独立构建且源码未变的生产UI／preload，重建最新Main与同一维护中driver完成整链，不把构建失败解释为浏览器失败。
+
+修后隔离窗口全过程录像137编码帧／约15.7秒，全部10张联系表已审看：起始页→标题先出现的慢页→跨旧阈值的loading→原生正文→真实ERR_EMPTY_RESPONSE失败页→百度正文，未见旧超时提示或重复失败页；请求10fps，不授逐屏幕帧／物理鼠标或OS原子合成资格。外部百度在本次宽窄与高窗口采样中正常加载，不据此认定复现了用户现场的全部条件。另核主动停止阻塞脚本：旧／新Main均由引擎停止事件得到“网页显示尚未确认”，并非此处删除的倒计时；该既有停止展示限制保留，不以慢页通过覆盖。材料归本机`.cache/browser-engine-lifetime-3da4f431-8ee6-4c5f-b92d-112cb1eb0956`，旧构建失败与停止对照均保留。普通网页没有引擎／工具／协议升级，也未取得安装或新增跨平台资格；开发客户端需完整重启。
+
 网络导航失败时，[Pane](src/native-browser-pane.tsx)在内容区显示[浏览器错误页](src/native-browser-error.tsx)：蓝色图标、站点标题、目标主机、可读排查建议、次要的单行原生错误名和“重新加载”。沿应用深浅主题和原工具栏，窄栏允许换行与区域内滚动；不把异常栈、日志或响应正文渲染为错误说明。DNS、断网、拒绝连接／中断、超时及证书／安全连接按[Main有界分类](electron/browser-load-failure.ts)提供建议，未分类失败使用通用建议；只保留格式核验的ERR_名称。分类依据固定[Chromium152 net errors](https://github.com/chromium/chromium/blob/152.0.7977.78/net/base/net_error_list.h)，普通HTTP 404等网站响应继续显示站点自己的内容，不因状态码自动换页。
 
 Main仍保留准确原WebContents与失败历史，不往网页注入应用HTML、不导航到data页，也不把错误文档当成成功。原生失败按当前URL与可用主frame process/routing身份核对，过期、子frame及取消事件不接管当前状态；正常首文档完整原生帧门、Agent文档／导航与截图证明继续保留。“重新加载”沿原id和权限门禁显式派发，开始即清旧失败详情；Agent控制中按钮禁用。输入格式或协议被拒绝时保原页；真实显示故障、进程退出与菜单故障仍沿原局部反馈。失败分类是有界展示元数据，不改变Core／Tool、工具／协议版本、控制授权或TLS验证。
@@ -2059,7 +2065,7 @@ Cmd+W父窗隐藏时推进visibilityEpoch与sizeEpoch，退休live展示、菜�
 
 已删除独立Chrome host／WebContentsView／preload／renderer、远端展示与动作ACK、Root物理裁左及CDP全窗逻辑metrics、呈现witness／nonce、关闭画布和普通切页／恢复截图缓存。Root构建入口保持原名；另产出固定应用确认专用的global-dialog HTML／Renderer／preload，不恢复旧Chrome。不保留双实现或公开开关。旧captureBrowserPresentation／capturePresentation和presentationKey显示API没有生产consumer，随旧链删除；真正注释仍由[AgentBrowserPanel](src/agent-browser-panel.tsx)的observer capture经[PageHost](electron/browser-page-host.ts)及准确原页port读取。模型截图独立captureId、导航、viewport／滚动、对象及控制证明保持；显示ready不授观察或输入资格。
 
-首开为Root空标签 → 保原地址和loading → 准确网页提交主文档及DOM ready → 当前尺寸页在完整Root下绘制 → 当前完整原生帧后升层。045实机发现隐藏新页无capturePage surface，故使用beginFrameSubscription(false)＋invalidate，不复制或缓存截图；文档和首帧均有期限。核原对象、frame、文档、scope、几何、取消与迟到回调；provider先变、旧frame先回只撤自身绑定，不把原页污染为永久failed。已可绘制原文档在普通切页、收展、会话返回、窗口重开及Root重载时复用；native完整帧和几何仍不等于WindowServer像素已提交。
+首开为Root空标签 → 保原地址和loading → 准确网页提交主文档及DOM ready → 当前尺寸页在完整Root下绘制 → 当前完整原生帧后升层。045实机发现隐藏新页无capturePage surface，故使用beginFrameSubscription(false)＋invalidate，不复制或缓存截图；文档与首帧沿引擎／展示生命周期等待，不另设应用倒计时。核原对象、frame、文档、scope、几何、取消与迟到回调；provider先变、旧frame先回只撤自身绑定，不把原页污染为永久failed。已可绘制原文档在普通切页、收展、会话返回、窗口重开及Root重载时复用；native完整帧和几何仍不等于WindowServer像素已提交。
 
 用户随后要求移除通用浮层隐藏策略。Pane已删除dialog/menu/popover/sheet相交扫描，不再把aria-hidden／inert当作视觉隐藏；Radix菜单对旁边内容设置aria-hidden不再撤下网页。真正hidden／display／visibility／opacity隐藏、明确visible、错误状态及owner退休继续校验。显式快照注释通过准确当前注释模式退出真实页，不再借通用DOM标记；返回后重新确认当前几何。原生页面菜单继续直接位于网页上方，普通DOM浮层跨原生层覆盖暂不迁移；整页设置仍因业务页面实际opacity0和显式不可见而撤页。没有截图轮询、模糊占位或固定视觉延时。页面、展示、Run／任务与控制租约分别退休；切页、会话、收起、后台及Cmd+W隐藏不刷新／销毁准确原页，真正X才关闭。Root重载先接Main清单按准确ID／token复用，Main重启不保其原文档。工具／协议版本、免审批、Loop、取消、输入互斥、普通失败交原Loop和未知不重放未改变。
 

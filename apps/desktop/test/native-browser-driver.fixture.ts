@@ -213,6 +213,36 @@ try {
   assert.deepEqual(isolation.globals, ['undefined', 'undefined', 'undefined']);
   assert.ok(!isolation.cookies.includes('app_only'));
 
+  // A genuinely pending engine document must outlive the former application
+  // deadline and display its exact page when the server finally completes it.
+  await rail.getByRole('button', { name: '新建标签页', exact: true }).click();
+  await address().fill(`${origin}/slow-document`);
+  await address().press('Enter');
+  await rail.getByRole('tab', { name: 'Slow document', exact: true }).waitFor();
+  await electron.evaluate(async () => {
+    while (!globalThis.browserTabsHostFixture.hits['/pending-script'])
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const slow = (await inspect()).find((v) => v.id !== first.id)!;
+  await new Promise((resolve) => setTimeout(resolve, 12100));
+  assert.equal(await rail.getByRole('status', { name: '网页加载中', exact: true }).count(), 1);
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.equal(await rail.getByText('网页显示尚未确认，请刷新或重新输入地址。').count(), 0);
+  assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, false);
+  await electron.evaluate(() => globalThis.browserTabsHostFixture.releaseSlowDocuments());
+  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, true);
+  assert.equal(
+    await electron.evaluate(
+      async ({ webContents }, id) =>
+        webContents.fromId(id)!.executeJavaScript('document.body.innerText'),
+      slow.id,
+    ),
+    'Slow document',
+  );
+  await rail.getByRole('button', { name: '关闭标签页：Slow document', exact: true }).click();
+  await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+
   // The browser error page keeps the native failed document and history;
   // website-supplied HTTP errors remain ordinary website content.
   await rail.getByRole('button', { name: '\u65B0\u5EFA\u6807\u7B7E\u9875', exact: true }).click();

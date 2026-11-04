@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { release } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import {
@@ -40,11 +40,13 @@ declare global {
     externalUrls: string[];
     forwardExternal: boolean;
     recoverEnginePage: boolean;
+    releaseSlowDocuments(): void;
     retained?: { contents: WebContents; view: WebContentsView; frame: WebFrameMain };
   };
 }
 void app.whenReady().then(async () => {
   const hits: Record<string, number> = {};
+  const slowScripts = new Set<ServerResponse>();
   const server = createServer((request, response) => {
     const url = new URL(request.url!, 'http://localhost');
     hits[url.pathname] = (hits[url.pathname] ?? 0) + 1;
@@ -54,6 +56,15 @@ void app.whenReady().then(async () => {
       response.end(
         `<!doctype html><html data-theme="dark" data-native-window="true"${platform ? ` data-platform="${platform}"` : ''} data-window-material="${material}"><head><link rel="stylesheet" href="/browser-ui.css"></head><body><div id="root"></div><script type="module" src="/browser-ui.js"></script></body></html>`,
       );
+    } else if (url.pathname === '/slow-document') {
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end(
+        '<!doctype html><title>Slow document</title><h1>Slow document</h1><script src="/pending-script"></script>',
+      );
+    } else if (url.pathname === '/pending-script') {
+      response.setHeader('content-type', 'text/javascript');
+      slowScripts.add(response);
+      response.on('close', () => slowScripts.delete(response));
     } else if (url.pathname === '/one' || url.pathname === '/two') {
       const title = url.pathname === '/one' ? 'Page One' : 'Page Two';
       response.setHeader('content-type', 'text/html');
@@ -156,6 +167,10 @@ void app.whenReady().then(async () => {
     externalUrls,
     forwardExternal: false,
     recoverEnginePage: false,
+    releaseSlowDocuments() {
+      for (const response of slowScripts) response.end('');
+      slowScripts.clear();
+    },
   };
   await window.loadURL(`${origin}/`);
   app.once('will-quit', () => {

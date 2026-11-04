@@ -30,7 +30,7 @@ Windows拖拽的可见边缘进一步交给Main：两个普通View只画侧栏�
 
 实际 consumer 核对确认 `captureBrowserPresentation`／`capturePresentation` 与 `presentationKey` 一次性提交没有生产调用者，属于旧显示截图交接 API，随本轮删除，不作为伪注释接口保留。真正注释由 AgentBrowserPanel 的 observer `capture` 经 PageHost 与准确原页 port 独立读取有限画面；模型截图也有自己的 captureId、导航、viewport／滚动及控制基准。两者的安全检查继续保留，不由显示 ready 或首文档内部帧授予资格。
 
-空标签只由 Root 绘制。首次输入 HTTPS 后，Root 保持原工具栏和 loading；Main 创建准确 ID 的隐藏页，等待真实主文档提交及 DOM ready，再把当前尺寸网页放到完整 Root 下方绘制。Root 的不透明网页区域持续盖住尚未就绪的真实页。Main 以 beginFrameSubscription(false) 与 invalidate 接收当前文档完整原生帧，核页面对象、incarnation、主 frame、文档代次、几何和准备序号后，才升到 Root 上方。文档等待与帧订阅均有期限，失败保留可读状态和明确停止／刷新入口。订阅不复制或缓存截图，不成为替身、模型观察或输入许可。已可绘制原文档在切页、侧栏开合、会话返回及窗口重开时复用；不为这些展示变化重复导航或刷新。
+空标签只由 Root 绘制。首次输入 HTTPS 后，Root 保持原工具栏和 loading；Main 创建准确 ID 的隐藏页，等待真实主文档提交及 DOM ready，再把当前尺寸网页放到完整 Root 下方绘制。Root 的不透明网页区域持续盖住尚未就绪的真实页。Main 以 beginFrameSubscription(false) 与 invalidate 接收当前文档完整原生帧，核页面对象、incarnation、主 frame、文档代次、几何和准备序号后，才升到 Root 上方。普通文档与首帧的独立应用期限已按[引擎生命周期决定](../bug-fix/2026-11-03-browser-engine-load-lifetime.md)部分替代，真实引擎结果与准确展示生命周期结束等待，失败仍保留可读状态和明确停止／刷新入口；本段其余结构与身份检查保持。订阅不复制或缓存截图，不成为替身、模型观察或输入许可。已可绘制原文档在切页、侧栏开合、会话返回及窗口重开时复用；不为这些展示变化重复导航或刷新。
 
 045 冻结运行实际发现：隐藏新页即使 DOM ready，也没有 capturePage 可复制的原生 surface。Electron 44.3.0 在增加 capturer 之前即拒绝复制，不能通过改 stayHidden 或延时重试取得可靠资格。既有 BaseWindow＋显式 Root WebContentsView 工厂扩到所有平台，使首文档可经公开 View API 在 Root 下方绘制。BrowserWindow 隐式主视图是 contentView 前面的 sibling，无法插到它下面，已归属窗口的 WebContents 也不能 adopt 到新 View。仍保留平台菜单、标题栏、材质及托盘分支；当前 UI 不消费 BrowserWindow 独有的 WCO Renderer 环境通知，Windows／Linux 实机资格并未因此取得。Root 和 Page 仍由各自应用 owner 明确关闭。
 
