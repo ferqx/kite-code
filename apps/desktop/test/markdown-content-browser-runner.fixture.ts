@@ -12,6 +12,61 @@ const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'markdown-content-browser-'));
 const output = path.join(artifact, 'dist');
+async function checkTypography(page: import('playwright').Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  const session = await page.context().newCDPSession(page);
+  try {
+    await session.send('DOM.enable');
+    await session.send('CSS.enable');
+    const { root } = await session.send('DOM.getDocument');
+    const fontsFor = async (selector: string) => {
+      const { nodeId } = await session.send('DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector,
+      });
+      return (await session.send('CSS.getPlatformFontsForNode', { nodeId })).fonts;
+    };
+    const italic = await fontsFor('.typeset-chat em');
+    const italicCode = await fontsFor('.typeset-chat em code');
+    const shell = await fontsFor('[data-typography-shell]');
+    const heading = await fontsFor('[data-typography-heading]');
+    assert.ok(italic.some((font) => font.postScriptName === 'Geist-Italic'));
+    assert.ok(italicCode.some((font) => font.postScriptName === 'Geist-Mono-Italic'));
+    assert.ok(shell.every((font) => font.familyName === 'Geist Mono'));
+    assert.equal(
+      await page
+        .locator('[data-typography-heading]')
+        .evaluate((node) => getComputedStyle(node).fontWeight),
+      '600',
+    );
+    assert.equal(
+      await page
+        .locator('[data-typography-body]')
+        .evaluate((node) => getComputedStyle(node).fontWeight),
+      '400',
+    );
+    if (process.platform === 'win32')
+      assert.ok(heading.some((font) => font.postScriptName === 'MicrosoftYaHeiUI-Bold'));
+    const chinese = page.locator('.typeset-chat em').filter({ hasText: '中文斜体' }).first();
+    const italicImage = await chinese.screenshot();
+    await chinese.evaluate((node) => {
+      (node as HTMLElement).style.fontStyle = 'normal';
+    });
+    const normalImage = await chinese.screenshot();
+    await chinese.evaluate((node) => {
+      (node as HTMLElement).style.removeProperty('font-style');
+    });
+    assert.ok(
+      !italicImage.equals(normalImage),
+      'Chinese emphasis visibly differs from upright text',
+    );
+    return { italic, italicCode, shell, heading };
+  } finally {
+    await session.detach();
+  }
+}
 async function checkDiagramSurface(page: import('playwright').Page) {
   const surface = await page.evaluate(() => {
     const root = document.querySelector('.typeset-chat')!;
@@ -249,6 +304,7 @@ if (process.argv.includes('--serve')) {
       assert.equal(await page.locator('.markdown-diagram img').count(), 0);
       assert.equal(await page.locator('.katex').count(), 2);
       const lightStyles = await checkMessageStyles(page);
+      const typography = await checkTypography(page);
       await page
         .locator('.markdown-code-block')
         .first()
@@ -417,7 +473,16 @@ if (process.argv.includes('--serve')) {
       assert.deepEqual(external, []);
       assert.deepEqual(errors, []);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-      cases.push({ width, errors, external, lightInk, darkInk, lightStyles, darkStyles });
+      cases.push({
+        width,
+        errors,
+        external,
+        lightInk,
+        darkInk,
+        lightStyles,
+        darkStyles,
+        typography,
+      });
       await page.close();
     }
     const report = { browser: browser.version(), artifact, cases };

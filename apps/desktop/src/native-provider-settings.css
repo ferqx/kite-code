@@ -216,7 +216,7 @@
   gap: 7px;
   margin: 0;
   font-size: var(--ui-text-size);
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 .kite-client
   .desktop-settings
