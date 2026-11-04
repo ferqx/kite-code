@@ -718,8 +718,20 @@ export class NativeCaller {
     if (clear) this.directory = undefined;
   }
   private directoryState(): NativeDirectory | undefined {
+    let readTurns: NativeDirectory['readTurns'];
+    if (this.directory) {
+      try {
+        readTurns = this.privateData?.readTurns(this.directory.storeId);
+      } catch {
+        /* Keep directory reading available without inventing unread facts. */
+      }
+    }
     return this.directory
-      ? { ...this.directory, unavailable: this.directoryUnavailable || this.observationUnavailable }
+      ? {
+          ...this.directory,
+          ...(readTurns !== undefined ? { readTurns } : {}),
+          unavailable: this.directoryUnavailable || this.observationUnavailable,
+        }
       : undefined;
   }
   private async readDirectory(): Promise<NativeDirectory> {
@@ -1422,6 +1434,30 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'session.markRead': {
+        const snapshot = this.selectScope(request.sessionId);
+        const run = snapshot.view.runs.find((run) => run.id === request.runId);
+        const latest = this.directory?.sessions.find((session) => session.id === request.sessionId)
+          ?.activity?.run;
+        if (
+          snapshot.view.storeId !== request.expectedStoreId ||
+          this.directory?.storeId !== request.expectedStoreId ||
+          this.directoryUnavailable ||
+          this.observationUnavailable ||
+          !run ||
+          run.isActive ||
+          run.status !== request.status ||
+          !latest ||
+          latest.isActive ||
+          latest.id !== run.id ||
+          latest.status !== run.status
+        )
+          throw new ClientError('turn_read_observation_changed');
+        this.requirePrivateData().markTurnRead(request);
+        result = this.state();
+        this.changed();
+        break;
+      }
       case 'input.queue.read':
         result = await this.inputQueue.read(request);
         break;

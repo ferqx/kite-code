@@ -930,6 +930,18 @@ Renderer按generation、Store和history epoch清空有界显示缓存，按会�
 
 ## Native 项目会话目录
 
+[完成提醒](src/native-turn-notifications.ts)沿完整目录中准确的最新 Run ID、inactive 与 terminal status 生成本机未读状态，通过共享 Sidebar 的 `hasUnreadTurn` 在右侧显示蓝色光点。[Main 私有库](electron/private-data.ts)在首次已读写入时惰性迁移到 DB12 的 `session_read_turns`，以 Store／Session 为主键，仅保存最后已读 Run ID 与终态；旧草稿、队列、定时任务及其他 journal 保留，沿原私有路径检查、FULL 与原子事务，不改变业务 Store、公开 API 或工具版本。选择此位置的理由归[取舍](../../.agents/notes/implemented/bug-fix/2026-11-04-native-turn-read-receipts.md)。
+
+目录的 `readTurns` 由 Main 从当前 Store 的私有库读取；首次读取未知时不把所有历史当作未读，后续失败保留该窗口已有的核实记录。[内部 IPC](electron/native-ipc.ts)的 `session.markRead` 沿原主 frame／generation 门禁，Main 再核当前选择、原 Store、准确 Run inactive／终态与最新目录一致后写库。renderer 只在实际会话页面可见、历史完整且读取资格有效时提交，SQLite 提交成功后才消点，保存失败保留提醒并可随后续观察重试。切换等待、失败、设置页及隐藏窗口不消费提醒；完整退出、开发随机端口或制品路径变化不影响数据库记录，下一 Run 或恢复后不同终态重新提醒，不写 Runtime、最近消息时间或执行状态。
+
+[整页回归](test/isolated/native-session-shell-dom.test.tsx)通过隔离 Bridge 核后台完成、运行指示交接、选择／模型／历史等待、数据库写入失败后恢复、隐藏／可见、下一轮及更换 origin 后重开的已读记录，同时保草稿和零业务提交。[真实 SQLite 回归](test/isolated/native-turn-read-store.test.ts)运行两个独立 Node 进程，核 DB7→12 原子迁移、Store 隔离、冷读、单会话覆盖、写入失败保原记录、同 Run 恢复后终态及原草稿／队列兼容；[Caller 回归](test/native-caller.test.ts)核准确选择／Run／Store、活动或猜测事实拒绝、封闭 IPC 与零业务写。原只在同一 DOM 重挂载的测试不证明跨启动 origin 的持久化。实际生产组件与编译样式的浏览器过程验收沿[原会话夹具](test/session-shell-browser.fixture.tsx)的隔离完成提醒场景；其控制按钮仅存在于测试制品，不进入普通 dev／prod 客户端。
+
+2026-11-04 首版 localStorage 实现，Windows x64／Bun1.4.3：当时逐文件运行 `bun test --parallel=1 --max-concurrency=1` 的 `native-session-shell-dom.test.tsx`、`native-directory.test.tsx` 与共享 `desktop-sidebar.test.tsx`，三个完整文件29项／640断言通过；该证据未覆盖完整进程退出或 origin 变化，不能证明当前 SQLite 实现。首版实际浏览器未验收：IAB 对沙箱内本机预览连接超时，改用本机静态服务后 webview attach 仍超时；期间发生一次环境内存不足。未将编译、DOM 或制品当作深浅主题、像素及实际操作过程通过。
+
+同日用户报告已读圆点重启后再次出现后，按本次 SQLite 修复工作树重验：12项／189断言的整页文件核跨 origin 与数据库失败，55项／604断言的 Caller 文件核主进程身份门禁，真实 SQLite 文件通过两个独立 Node 进程冷读；原草稿冷读和定时任务整文件也通过。原 `native-input-queue-journal.test.ts` 首次因 Windows 夹具缺 windowsAsset 失败，补齐既有 native asset 准备／交接后完整文件1项／4条 Bun 断言通过；45秒用例总期限包含原生资产构建，子进程15秒期限及全部原业务断言保持。本次 SQLite 回归还核 DB12 下原队列 journal 保存与另一进程读回。Desktop类型、定向Biome、边界、测试归属及文档检查通过。隔离 Electron 窗口已用当前生产 Sidebar／提醒 hook、真实 private-data 与独立 Profile 启动，操作观察被 Computer Use 应用授权超时阻断，未取得窗口退出重开或视觉验收；启动记录在本机 `.cache/turn-read-ui-live/`。真实模型、完整安装版及其他平台未重验。
+
+提交前在主工作区再次执行已读SQLite、输入队列journal、Caller、整页、目录及共享Sidebar六个完整文件，87项／1263条Bun断言通过，Node夹具另核原SQLite事实；UI／Desktop类型通过。额外未改的[旧私有文件整链](test/isolated/private-data.test.ts)在Windows未通过：其夹具没有交接windowsAsset，预期owner_busy的准入先得到windows_access_asset_unavailable，尚未进入数据库断言。以当前HEAD的旧private-data源码和本轮源码分别构建同一原夹具，在独立私有Profile下均复现该失败，未修改断言或把它计为通过；对照及失败环境保留于本机`.cache/commit-all-20261104`和原运行器路径。该既有夹具问题不由本轮DB12冷读通过取得原整链或完整Windows数据安全资格。
+
 正式目录直接复用 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx)，替代临时 NativeDirectory。适配器按公共 workspaceId 分组，项目默认展开，可独立收起；空项目显示“暂无聊天”。上下键只移动当前项目列表焦点，确认沿原 Session ID 读取；收起不调用 bridge、不改选或取消工作。首次发送等待不阻止阅读已有会话，原 NativeDesktop 仍保护迟到创建、后来选择和草稿。选择标记核同 Store，目录 Store 更换重置展示。侧栏先显示五项、“展开更多”每次增加十项只是展示完整已读目录，不改变公共分页或高水位。
 
 Workspace/Session 完整目录分别读取；其间新登记的项目可能还未进入项目上界。相应 Session 保留在“项目待读取的会话”，可读原历史，但不提供该未观察项目的新建入口。Session 目录使用公共 `listAllSessionDirectory` 穷尽同一观察，未选中会话也有实际 active／latest Run、排队及同主体当前 Store 的待输入数量。更新时间取原 Core 最后对话消息更新的封存时间，读取、改名和审批模式切换不修改它；未记录或未知格式保持缺席，原 Sidebar 按真实时间排序、悬浮显示本地时间。普通后台活动与人类待输入 Badge 分开；旧必需结果状态已移除。

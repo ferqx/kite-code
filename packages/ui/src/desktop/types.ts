@@ -212,6 +212,8 @@ export interface TurnActivity {
 }
 
 export interface SessionSummary {
+  /** Host-confirmed latest terminal turn has not been read in this client. */
+  readonly hasUnreadTurn?: boolean;
   readonly sessionId: string;
   readonly displayName: string;
   readonly status: string;

@@ -147,6 +147,7 @@ import {
   useNativeRuns,
 } from './native-transcript';
 import { NativeTranscriptDisplay } from './native-transcript-display';
+import { useNativeTurnNotifications } from './native-turn-notifications';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
 import { promptTextForSend } from './prompt-text';
@@ -3730,7 +3731,19 @@ function NativeDesktopContent({
       />
     </section>
   );
-  const workspaceModels = directory ? directoryProjection.project(directory, selection) : [];
+  const workspaceModels = useNativeTurnNotifications(
+    bridge,
+    state?.generation ?? generation.current,
+    directory,
+    directory ? directoryProjection.project(directory, selection) : [],
+    !preparing &&
+      !scheduledTasksView &&
+      !settingsOpen &&
+      selected.current === selection?.session.id &&
+      historyState.phase === 'complete'
+      ? selection
+      : undefined,
+  );
   const loadedWorkspaces = useMemo(
     () => workspaceModels.filter((workspace) => workspace.state === 'loaded'),
     [workspaceModels],

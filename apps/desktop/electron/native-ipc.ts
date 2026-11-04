@@ -34,6 +34,7 @@ import { saveStartupDiagnosticReport } from './startup-report';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'session.markRead': ['expectedStoreId', 'sessionId', 'runId', 'status'],
   'input.queue.read': ['readId', 'viewSelection', 'historyEpoch'],
   'input.queue.close': ['readId'],
   'input.queue.steer': ['observationId', 'targetCommandId'],
@@ -286,6 +287,13 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('native_request_too_large');
   const input = record(value),
     method = input.method;
+  if (
+    method === 'session.markRead' &&
+    (typeof input.runId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(input.runId) ||
+      !['completed', 'failed', 'cancelled', 'interrupted'].includes(String(input.status)))
+  )
+    throw Error('invalid_native_request');
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
   if (method.startsWith('input.files.')) {

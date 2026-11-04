@@ -19,6 +19,7 @@ export const control = sessionSwitchBridge({
   protocol: 'chat-completions',
   modelNames: { b: 'Model B Extended Reasoning Route' },
   replyParagraphs: new URL(location.href).searchParams.has('long') ? 40 : 0,
+  turnNotifications: new URL(location.href).searchParams.has('turn-notifications'),
 });
 declare global {
   interface Window {
@@ -220,6 +221,45 @@ createRoot(document.getElementById('root')!).render(
       </fieldset>
     </section>
   ) : (
-    <NativeDesktop nativeWindow={settingsGeometry} />
+    <>
+      <NativeDesktop nativeWindow={settingsGeometry} />
+      {new URL(location.href).searchParams.has('turn-notifications') && (
+        <section
+          aria-label="完成提醒测试夹具"
+          style={{ position: 'fixed', right: 8, top: 8, zIndex: 9999 }}
+        >
+          <button type="button" onClick={() => control.setTurn('b', 'completed')}>
+            结束 B
+          </button>
+          <button type="button" onClick={() => control.setTurn('b', 'running', 'next-b')}>
+            运行 B
+          </button>
+          <button type="button" onClick={() => control.setTurn('b', 'failed', 'next-b')}>
+            B 新一轮失败
+          </button>
+          <button type="button" onClick={() => control.setTurn('a', 'completed')}>
+            结束 A
+          </button>
+          <button type="button" onClick={() => control.hold()}>
+            暂停读取
+          </button>
+          <button type="button" onClick={() => control.release('selection')}>
+            释放选择
+          </button>
+          <button type="button" onClick={() => control.release('models')}>
+            释放模型
+          </button>
+          <button type="button" onClick={() => control.resume()}>
+            恢复读取
+          </button>
+          <button type="button" onClick={() => control.fail(true)}>
+            读取失败
+          </button>
+          <button type="button" onClick={() => control.fail(false)}>
+            读取恢复
+          </button>
+        </section>
+      )}
+    </>
   ),
 );

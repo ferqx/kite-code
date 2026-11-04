@@ -572,6 +572,15 @@ body {
   .session-row:hover:not(:disabled) {
     background: var(--control-hover);
   }
+  .session-unread-dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    margin-inline: 3px;
+    border-radius: 50%;
+    background: #3b82f6;
+    box-shadow: 0 0 6px rgb(59 130 246 / 65%);
+  }
   :is(.primary-navigation .button, .session-row, .profile-card):active:not(:disabled),
   .primary-navigation .button.selected:active:not(:disabled) {
     background: var(--control-pressed);

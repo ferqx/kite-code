@@ -431,6 +431,8 @@ export type NativeFileRecoveryObservation = {
 };
 export type NativeDirectory = {
   storeId: string;
+  /** Main's persisted local read receipts, independent of the renderer origin. */
+  readTurns?: readonly (readonly [string, string])[];
   workspaces: Workspace[];
   sessions: (Session & { activity?: SessionDirectoryActivity })[];
   unavailable?: boolean;
@@ -545,6 +547,14 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | {
+      method: 'session.markRead';
+      generation: number;
+      expectedStoreId: string;
+      sessionId: string;
+      runId: string;
+      status: 'completed' | 'failed' | 'cancelled' | 'interrupted';
+    }
   | NativeInputQueueRequest
   | NativeInputImageRequest
   | NativeScheduledRequest

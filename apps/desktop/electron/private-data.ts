@@ -20,6 +20,7 @@ import type {
   NativeCreation,
   NativeDraft,
   NativeRecoveryIntent,
+  NativeRequest,
 } from '../src/native-bridge';
 import {
   assertAnswerRecords,
@@ -83,6 +84,8 @@ export type PrivateData = NativeScheduledTaskData &
   WorkspaceRemovalData &
   NativeFileRecoveryJournal &
   NativeAnswerData & {
+    readTurns(storeId: string): [string, string][];
+    markTurnRead(input: Extract<NativeRequest, { method: 'session.markRead' }>): void;
     read(scope: DraftScope): NativeDraft;
     save(
       scope: DraftScope,
@@ -209,7 +212,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 8 &&
       version !== 9 &&
       version !== 10 &&
-      version !== 11
+      version !== 11 &&
+      version !== 12
     )
       failure();
     if (
@@ -268,8 +272,15 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         'model_routes',
         'recovery_intents',
         ...(version >= 10 ? ['scheduled_task_runs', 'scheduled_tasks'] : []),
+        ...(version >= 12 ? ['session_read_turns'] : []),
         ...(version >= 8 ? ['workspace_removal_intents'] : []),
       ])
+    )
+      failure();
+    if (
+      version >= 12 &&
+      db.prepare("SELECT sql FROM sqlite_master WHERE name='session_read_turns'").get()?.sql !==
+        'CREATE TABLE session_read_turns(store_id TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,status TEXT NOT NULL,PRIMARY KEY(store_id,session_id))'
     )
       failure();
     if (
@@ -789,6 +800,55 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     return withConsumption(result);
   };
   const port: PrivateData = {
+    readTurns(storeId) {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(storeId)) throw Error('turn_read_storage_unavailable');
+      if (Number(database().prepare('PRAGMA user_version').get()!.user_version) < 12) return [];
+      return database()
+        .prepare('SELECT session_id,run_id,status FROM session_read_turns WHERE store_id=?')
+        .all(storeId)
+        .map((row) => {
+          if (
+            typeof row.session_id !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,128}$/.test(row.session_id) ||
+            typeof row.run_id !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,128}$/.test(row.run_id) ||
+            !['completed', 'failed', 'cancelled', 'interrupted'].includes(String(row.status))
+          )
+            throw Error('turn_read_storage_unavailable');
+          return [row.session_id, JSON.stringify([row.run_id, row.status])];
+        });
+    },
+    markTurnRead(input) {
+      if (
+        [input.expectedStoreId, input.sessionId, input.runId].some(
+          (value) => typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value),
+        ) ||
+        !['completed', 'failed', 'cancelled', 'interrupted'].includes(input.status)
+      )
+        throw Error('turn_read_storage_unavailable');
+      transaction(() => {
+        const version = Number(database().prepare('PRAGMA user_version').get()!.user_version);
+        if (version < 12) {
+          if (version < 8)
+            database().exec(
+              'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+            );
+          if (version < 10) for (const schema of scheduledTaskSchemas) database().exec(schema);
+          if (version < 11)
+            database().exec(
+              'CREATE TABLE input_queue_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+            );
+          database().exec(
+            'CREATE TABLE session_read_turns(store_id TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,status TEXT NOT NULL,PRIMARY KEY(store_id,session_id)); PRAGMA user_version=12;',
+          );
+        }
+        database()
+          .prepare(
+            'INSERT INTO session_read_turns VALUES(?,?,?,?) ON CONFLICT(store_id,session_id) DO UPDATE SET run_id=excluded.run_id,status=excluded.status',
+          )
+          .run(input.expectedStoreId, input.sessionId, input.runId, input.status);
+      });
+    },
     ...createScheduledTaskData(database),
     workspaceRemovals: workspaceRemovalRows,
     saveWorkspaceRemoval(input) {

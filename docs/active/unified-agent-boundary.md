@@ -1,5 +1,7 @@
 # 通用 Agent 新执行边界
 
+Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desktop/README.md#native-项目会话目录)保存，Store／Session／Run 与终态仅作本机呈现依据，不是业务 receipt 或执行 authority。renderer 的 `session.markRead` 仍须原主 frame／generation、准确选择与 Main 已观察终态，写入不修改 Runtime、会话消息时间、Run、审批或命令，不授予 Service 写权；原业务 Store／公开工具协议版本保持。
+
 默认 Service 的模型代理选择归 [Service owner](../../apps/service/README.md)，不下沉到 AI／Core 或客户端。新 Run 的 `snapshot.modelTransport.digest` 只绑定宿主代理环境与系统选择的摘要；恢复前变化拒绝，旧无字段记录不追补。代理传输不改变模型请求、权限、工具身份、未知结果或零重放边界，也不把模型自动代理推广到 MCP 网络准入。
 
 模型启停的串行后继证明沿 [Service](../../apps/service/README.md#native-provider-与下一次模型绑定) → 原 [HostMutation journal](../../packages/agent/src/storage/sqlite/host-mutations-README.md) → [Client](../../packages/client/README.md) → [Native Main](../../apps/desktop/README.md#native-提供商与模型设置) 交接。仅已应用的模型更新可附完整 `postReadSet`，它绑定原发布候选与实际 ETag；Main 只有在同一热提交、完整 scope 和后续 GET 四字段一致时才生成后继观察。该证明不授权重放、跨身份续写或跳过 CAS；失败、未知、外部变化和冷 journal 不恢复旧队列。renderer 的正常连续交互、同模型合并和关闭设置后后台保存只管理未派发意图，不取消或修改活动 Run 的封存配置。管理页的异常自动恢复只执行GET或原HostMutation ID的结果查询，包含当前Store冷未决项；普通GET不能解除unknown或恢复已丢弃尾部。明确暂态网络错误可重试原afterCommandId校验，只有原scope与proof仍一致才能继续已接受队列。恢复不重发POST、密钥、原secret或远端发现，也不修改活动Run。默认模型与普通模型均可启停，用户配置可保留指向已禁用模型的默认ID；新运行仍须使用已启用且configured的路由，不能自动替代已禁用默认。活动Run及其后续模型请求继续按原封存配置运行，不因该偏好更新取消或重绑定。

@@ -25,9 +25,13 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, originals);
 bootstrap.window.close();
 
-function fixture(options?: Parameters<typeof sessionSwitchBridge>[0], diagnostics = false) {
+function fixture(
+  options?: Parameters<typeof sessionSwitchBridge>[0],
+  diagnostics = false,
+  url = 'http://localhost',
+) {
   const dom = new JSDOM('<div id="root"></div>', {
-    url: 'http://localhost',
+    url,
     pretendToBeVisual: true,
   });
   Object.defineProperty(dom.window.navigator, 'language', { value: 'zh-CN' });
@@ -45,8 +49,8 @@ function fixture(options?: Parameters<typeof sessionSwitchBridge>[0], diagnostic
   });
   const control = sessionSwitchBridge(options);
   Object.defineProperty(dom.window, 'kiteNative', { value: control.bridge });
-  const host = dom.window.document.getElementById('root')!,
-    root = createRoot(host);
+  const host = dom.window.document.getElementById('root')!;
+  let root = createRoot(host);
   const query = <T extends Element = HTMLElement>(selector: string) =>
     host.querySelector<T>(selector)!;
   const until = async (check: () => boolean) => {
@@ -83,6 +87,13 @@ function fixture(options?: Parameters<typeof sessionSwitchBridge>[0], diagnostic
       await click('a');
       await ready('a');
     },
+    async restart() {
+      await act(async () => root.unmount());
+      root = createRoot(host);
+      await act(async () => root.render(<NativeDesktop />));
+      await click('a');
+      await ready('a');
+    },
     edit: async (value: string) =>
       act(async () => {
         await setPromptText(query('.composer [role="textbox"]'), value);
@@ -115,6 +126,122 @@ const businessMethods = new Set([
   'background.stop',
   'draft.write',
 ]);
+
+test('terminal turn reminders survive failed reads and reopening, and clear only after visible reading', async () => {
+  const f = fixture({ turnNotifications: true });
+  const row = (id: string) => f.query(`[aria-label="Session ${id.toUpperCase()}"]`);
+  const unread = (id: string) => !!row(id)?.querySelector('.session-unread-dot');
+  try {
+    await f.render();
+    expect(f.host.querySelectorAll('.session-unread-dot')).toHaveLength(0);
+    expect(row('b').querySelector('[aria-label="会话运行中"]')).not.toBeNull();
+    await act(async () => f.setTurn('b', 'completed'));
+    await f.until(() => unread('b'));
+    expect(row('b').querySelector('[aria-label="会话运行中"]')).toBeNull();
+    expect(row('b').getAttribute('aria-description')).toContain('有新结束的回复');
+    await f.restart();
+    expect(unread('b')).toBe(true);
+    await f.edit('Keep private draft');
+    f.hold();
+    await f.click('b');
+    await f.until(() => f.pending('selection') > 0);
+    expect(unread('b')).toBe(true);
+    await f.release('selection');
+    await f.until(() => f.pending('models') > 0);
+    expect(unread('b')).toBe(true);
+    await f.release('models');
+    await f.until(() => f.pending('history') > 0);
+    expect(unread('b')).toBe(true);
+    await f.resume();
+    await f.ready('b');
+    await f.until(() => !unread('b'));
+    await f.click('a');
+    await f.ready('a');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Keep private draft');
+    await f.restart();
+    expect(unread('b')).toBe(false);
+    await act(async () => f.setTurn('b', 'running', 'second-b'));
+    await f.until(() => !!row('b').querySelector('[aria-label="会话运行中"]'));
+    expect(unread('b')).toBe(false);
+    await act(async () => f.setTurn('b', 'failed', 'second-b'));
+    await f.until(() => unread('b'));
+    await f.fail(true);
+    await f.click('b');
+    await f.until(() => !!f.query('.breadcrumb strong')?.textContent?.includes('Session B'));
+    expect(unread('b')).toBe(true);
+    await f.fail(false);
+    await f.ready('b');
+    await f.until(() => !unread('b'));
+    // A hidden current session cannot consume the next terminal result.
+    Object.defineProperty(f.host.ownerDocument, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    await act(async () => {
+      f.host.ownerDocument.dispatchEvent(new window.Event('visibilitychange'));
+      f.setTurn('b', 'cancelled', 'third-b');
+    });
+    await f.until(() => unread('b'));
+    Object.defineProperty(f.host.ownerDocument, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => f.host.ownerDocument.dispatchEvent(new window.Event('visibilitychange')));
+    await f.until(() => !unread('b'));
+    expect(f.requests.filter((request) => businessMethods.has(request.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a failed private database write retains the reminder until a later write commits', async () => {
+  const f = fixture({ turnNotifications: true });
+  const unread = () => !!f.query('[aria-label="Session B"] .session-unread-dot');
+  try {
+    await f.render();
+    await act(async () => f.setTurn('b', 'interrupted'));
+    await f.until(unread);
+    await act(async () => f.failReceipt(true));
+    await f.click('b');
+    await f.ready('b');
+    expect(unread()).toBe(true);
+    await act(async () => f.failReceipt(false));
+    await f.until(() => !unread());
+    await f.click('a');
+    await f.ready('a');
+    expect(unread()).toBe(false);
+    // Resuming the same Run changes its terminal fact and needs a fresh receipt.
+    await act(async () => f.setTurn('b', 'running'));
+    await act(async () => f.setTurn('b', 'completed'));
+    await f.until(unread);
+    expect(f.requests.filter((request) => businessMethods.has(request.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a new renderer origin restores the committed receipt and only a newer terminal turn lights again', async () => {
+  const readTurns = new Map<string, string>();
+  let f = fixture({ turnNotifications: true, readTurns }, false, 'http://127.0.0.1:31001');
+  try {
+    await f.render();
+    await act(async () => f.setTurn('b', 'completed'));
+    await f.until(() => !!f.query('[aria-label="Session B"] .session-unread-dot'));
+    await f.click('b');
+    await f.ready('b');
+    await f.until(() => !f.query('[aria-label="Session B"] .session-unread-dot'));
+    expect(readTurns.get('b')).toBe(JSON.stringify(['run-b', 'completed']));
+    await f.close();
+    f = fixture({ turnNotifications: true, readTurns }, false, 'http://127.0.0.1:31002');
+    f.setTurn('b', 'completed');
+    await f.render();
+    expect(f.query('[aria-label="Session B"] .session-unread-dot')).toBeNull();
+    await act(async () => f.setTurn('b', 'completed', 'new-b'));
+    await f.until(() => !!f.query('[aria-label="Session B"] .session-unread-dot'));
+  } finally {
+    await f.close();
+  }
+});
 
 test('the full Native shell retains observed controls and the old draft until Main confirms a session handoff', async () => {
   const f = fixture();

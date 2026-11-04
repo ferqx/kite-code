@@ -1,5 +1,6 @@
 import type {
   NativeBridge,
+  NativeDirectory,
   NativeEvent,
   NativeRequest,
   NativeResult,
@@ -17,6 +18,8 @@ export function sessionSwitchBridge(
     modelNames?: Record<string, string>;
     replyParagraphs?: number;
     protocol?: 'chat-completions' | 'responses';
+    turnNotifications?: boolean;
+    readTurns?: Map<string, string>;
   } = {},
 ) {
   const base = backgroundShellItem();
@@ -38,6 +41,8 @@ export function sessionSwitchBridge(
   const pending = new Map<string, (() => void)[]>();
   const listeners = new Set<(event: NativeEvent) => void>();
   const requests: NativeRequest[] = [];
+  const readTurns = options.readTurns ?? new Map<string, string>();
+  let receiptFailure = false;
   const send = () => {
     for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
   };
@@ -56,12 +61,44 @@ export function sessionSwitchBridge(
           pending.set(phase, queue);
         });
   const session = () => sessions.find((value) => value.id === selected)!;
+  const turns = new Map<
+    string,
+    {
+      id: string;
+      status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+      isActive: boolean;
+    }
+  >(
+    sessions.map((session) => [
+      session.id,
+      { id: `run-${session.id}`, status: 'running', isActive: true },
+    ]),
+  );
+  const directory = (): NativeDirectory => ({
+    storeId: 'store',
+    ...(options.turnNotifications ? { readTurns: [...readTurns] } : {}),
+    sessions: sessions.map((session) =>
+      options.turnNotifications
+        ? {
+            ...session,
+            activity: {
+              updatedAt: null,
+              run: turns.get(session.id)!,
+              queued: false,
+              pendingInteractions: 0,
+            },
+          }
+        : session,
+    ),
+    workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+  });
   const protocol = options.protocol;
   const run = () => ({
     ...base.run!,
     id: `run-${selected}`,
     sessionId: selected,
     isActive: options.active ?? true,
+    ...(options.turnNotifications ? turns.get(selected) : {}),
     configuration: {
       modelId: `model-${options.sameModel ? 'a' : selected}`,
       snapshot: {
@@ -87,6 +124,7 @@ export function sessionSwitchBridge(
     inputSubmissions: [],
     permissionSubmissions: [],
     interactionSubmissions: [],
+    ...(options.turnNotifications ? { directory: directory() } : {}),
     selection:
       selecting || withdrawn
         ? undefined
@@ -148,15 +186,18 @@ export function sessionSwitchBridge(
     async request(request) {
       requests.push(request);
       switch (request.method) {
+        case 'session.markRead':
+          if (receiptFailure) throw Error('turn_read_storage_unavailable');
+          return wait('receipt', () => {
+            readTurns.set(request.sessionId, JSON.stringify([request.runId, request.status]));
+            send();
+            return state();
+          });
         case 'attach':
         case 'state':
           return state();
         case 'directory':
-          return {
-            storeId: 'store',
-            sessions,
-            workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
-          };
+          return directory();
         case 'select': {
           selected = request.sessionId;
           view++;
@@ -347,6 +388,15 @@ export function sessionSwitchBridge(
       revision++;
       send();
     },
+    setTurn(
+      sessionId: string,
+      status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted',
+      id = `run-${sessionId}`,
+    ) {
+      turns.set(sessionId, { id, status, isActive: status === 'running' });
+      revision++;
+      send();
+    },
     refresh(value: boolean) {
       refreshing = value;
       revision++;
@@ -355,6 +405,11 @@ export function sessionSwitchBridge(
     fail(value: boolean) {
       failed = value;
       refreshing = false;
+      revision++;
+      send();
+    },
+    failReceipt(value: boolean) {
+      receiptFailure = value;
       revision++;
       send();
     },
