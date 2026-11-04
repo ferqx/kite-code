@@ -45,7 +45,7 @@
     "release:smoke": "bun run scripts/release/unified.ts smoke",
     "release:install": "bun run scripts/release/unified.ts install",
     "release:smoke:execution": "bun run scripts/release/unified-platform-probe.ts",
-    "typecheck": "tsc --noEmit && bun run scripts/run-runtime-workspace-script.ts typecheck",
+    "typecheck": "bun check -p tsconfig.json && bun run scripts/run-runtime-workspace-script.ts typecheck",
     "format": "biome check --write .",
     "format:check": "biome check .",
     "lint": "biome lint .",

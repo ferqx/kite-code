@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "bun build ./src/index.tsx --target=browser --packages=bundle --external=react --external=react-dom --external=@kite-ai/client --outdir=dist && bun scripts/build-tui.ts --outdir=dist/tui && bun run scripts/build-desktop.ts --outdir=dist/desktop",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "bun check -p tsconfig.json",
     "test": "bun test ./test"
   },
   "dependencies": {

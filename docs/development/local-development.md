@@ -2,7 +2,7 @@
 
 Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当前 guardian 与隔离代码 worker 资产；源码 locator 的拒绝规则保持，具体接线和验证范围见 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。锁定 CLI 运行组件及系统 Chrome／Chromium 仍须先准备；开发构建不自动下载浏览器、不导入现有 Profile，只读观察也不会启动 Browser Job。
 
-仓库使用 Bun；Linux/macOS CI 与正式 qualification 保持 Bun 1.4.2，Windows CI 固定 Bun 1.4.3，以采用固定 tsconfig 的上游修复。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
+仓库使用 Bun；本地类型检查与 Required 的 `quality` 作业使用 Bun 1.4.4。运行时测试和正式 qualification 的 Linux/macOS 基线保持 Bun 1.4.2，Windows 固定 Bun 1.4.3，以采用固定 tsconfig 的上游修复；质量工具升级不授予新的运行时或发布资格。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
 
 源码安装的 postinstall 会构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，期间显示三个构建阶段及实时 Cargo 诊断，完成后显示资产路径。需要 rustup／固定 Rust1.97.1 和本机 linker；Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C 工具链。使用 `--ignore-scripts` 安装后，先显式运行 `bun run build:files-native` 再执行文件工具测试。正式 Agent build 会把同一原生模块、ABI/hash manifest 和许可证放进制品；用户机器不需要 Rust。运行期缺失资产明确失败，不能依靠源码或即时编译回退。
 
@@ -21,10 +21,12 @@ Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当
 | Native 安装生命周期 | `bun run test:desktop:window` | 新完整 Native 的源码外安装、升级、强杀、回滚与卸载；具体资格见 Native owner |
 | 默认测试 | `bun run test` | 与 `test:unified-agent` 共用新八 workspace 和有限 root safety 计划，最多四槽；独占场景串行 |
 | TUI 系统测试 | `bun run test:tui:system` | 当前 112 个完整文件（原 52 个旅程及 60 个当前宿主文件）；支持 `--list` 和 `KITE_TUI_SYSTEM_SHARD=0/4` 至 `3/4`，详见测试 owner |
-| 类型检查 | `bun run typecheck` | 根与精确八 workspace |
+| 类型检查 | `bun run typecheck` | Bun 1.4.4；先检查根 tsconfig，再按原顺序检查精确八 workspace |
 | 工作区与依赖边界 | `bun run check:runtime-packages`、`bun run check:core-boundary` | 工作区清单、正式消费闭包与源代码依赖边界 |
 | 文档 | `bun run check:docs`、`bun run check:docs-impact` | 结构检查与实际影响语义核对 |
 | 首发证据 | `bun run check:plan-evidence` | 独立历史证据消费者，不代替当前 §35 资格 |
+
+类型检查执行 `bun check -p tsconfig.json`，再由[原 workspace runner](../../scripts/run-runtime-workspace-script.ts)逐包调用同名脚本；每个包仍显式选择自己的 `tsconfig.json`。不使用目录递归、逐文件参数或 `-b` 改变发现范围，原 include/exclude、严格选项与失败即停止保持。pre-commit 仍只检查根配置，不缩小为暂存文件。Bun 1.4.4 内置检查器标识为 TypeScript 7.0.2；保留项目的 TypeScript 5.9.3，供边界检查、测试发现使用 compiler API，并供编辑器使用，不再作为默认类型门禁。两种检查器的标准类型库和诊断语义不完全相同；仓库文件范围的对照与本次验证见[测试体系](../../tests/README.md#类型检查)。
 
 `check:runtime-packages` 检查八个工作区的清单、公开 exports、正式脚本和 CI 消费闭包，并调用与 `check:core-boundary` 相同的[依赖边界守卫](../../scripts/check-unified-agent-boundary.ts)。守卫在每次调用内复用已解析的模块依赖图，各入口仍按自己的策略遍历；仅在导入或违规处计算行号。下一次调用重新读取源码和清单。回归覆盖[共享与循环依赖及入口策略](../../tests/isolated/scripts/unified-agent-boundary.test.ts)、[工作区合同](../../tests/integration/scripts/unified-workspaces.test.ts)和[CI 消费闭包](../../tests/integration/scripts/unified-ci.test.ts)。
 

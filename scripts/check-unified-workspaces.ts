@@ -27,7 +27,8 @@ const formalScripts: Readonly<Record<string, string>> = {
   build: 'bun run scripts/run-runtime-workspace-script.ts build',
   test: 'bun run scripts/run-default-tests.ts',
   'test:all': 'bun run test',
-  typecheck: 'tsc --noEmit && bun run scripts/run-runtime-workspace-script.ts typecheck',
+  typecheck:
+    'bun check -p tsconfig.json && bun run scripts/run-runtime-workspace-script.ts typecheck',
   agent: 'bun run scripts/release/entrypoints/cli.ts',
   tui: 'bun run scripts/release/entrypoints/tui.ts',
   'prod:tui': 'NODE_ENV=production bun run scripts/release/entrypoints/tui.ts',

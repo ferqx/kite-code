@@ -1,5 +1,27 @@
 # 测试体系
 
+## 类型检查
+
+`bun run typecheck` 使用 Bun 1.4.4，仍先检查根配置，再经[原 runner](../scripts/run-runtime-workspace-script.ts)按精确八 workspace 顺序执行各包脚本；开发要求见[本地开发](../docs/development/local-development.md)。2026-11-04，Windows x64、源码基线 `4f29be4e0` 加本轮未提交改动，逐配置对照 `tsc --listFilesOnly -p <config>` 与 `bun check --listFilesOnly -p <config>`：排除外部依赖和检查器自带标准库后，仓库文件及本地声明的导入闭包完全相同，无新增或遗漏。九份 tsconfig 与原严格选项未修改；相同文件范围不表示 TypeScript 5.9.3 和 Bun 内置 7.0.2 的标准库或诊断语义完全相同。
+
+| 配置 | 两种检查器共同覆盖的仓库文件数 |
+| --- | ---: |
+| 根 | 1082 |
+| packages/ai | 12 |
+| packages/agent | 988 |
+| packages/client | 297 |
+| packages/ui | 555 |
+| apps/service | 894 |
+| apps/cli | 892 |
+| apps/desktop | 1229 |
+| apps/web | 145 |
+
+[并行 Tool 测试](../packages/agent/test/isolated/execution/parallel-tools.test.ts)的两组工具定义使用 `satisfies ToolDefinition[]` 恢复上下文参数和结果联合类型，消除原六处诊断；执行、故障注入及原断言保持。实际 `bun run typecheck` 的根与八 workspace 全部通过，该测试整文件 3 项／64 断言通过。CI 的 `quality` 使用 1.4.4；运行时与正式发布仍沿[原基线](../docs/active/release-control.md#当前发行与源身份)，不由本次本机检查取得 hosted CI 或完整产品资格。
+
+[CI 基线](integration/scripts/ci-bun-baseline.test.ts)与[工作区合同](integration/scripts/unified-workspaces.test.ts)两份整文件实际 12 项／177 断言通过；原 TypeScript 5.9.3 的 Agent 配置亦通过。附带执行[CI 消费闭包](integration/scripts/unified-ci.test.ts)整文件为 21 项通过、1 项失败：`shared TUI caller tests run whole on every OS after the current build` 的负例未得到预期拒绝。使用 HEAD 原检查器独立复现同一失败，相关 TUI workflow 和准入判断本轮未改；保留为原 CI 守卫问题，不将该整文件记为通过。
+
+## 当前测试范围
+
 图片读取的严格格式／进程取消／退出证明、源码树外闭包、实际 Service／冷历史／Fork 和两协议回归分别位于 [Agent Files](../packages/agent/test/isolated/files/images.test.ts)、[退出未知](../packages/agent/test/isolated/files/image-process-unknown.test.ts)、[闭包](../packages/agent/test/isolated/files/images-packaged.test.ts)和[Service](../apps/service/test/isolated/image-reading.test.ts)。[显式性能程序](e2e/live/model/image-reading.benchmark.ts)仅合成图片／固定模型，测真实持久化与下一次输入；[真实视觉程序](e2e/live/model/image-vision.live.ts)另需 opt-in，边界和命令见[live说明](e2e/live/model/README.md#本地图片读取)。Native 工具摘要沿[真实页面回归](../apps/desktop/test/isolated/native-tool-receipt-render-dom.test.tsx)和[明确浏览器制品](../apps/desktop/test/tool-image-preview-browser-runner.fixture.ts)观察全过程；这些入口不启用普通客户端诊断或扩展发版权限。
 
 Windows 每个正式测试作业使用自有私有 HOME 与其下私有 TEMP/TMP，源码外制品沿实际私有父目录准入，不读取用户应用配置或改变系统临时目录 ACL。仅成功作业清理隔离根，失败／中断保留准确路径和证据。清理仅接受当前运行器创建的规范根，在同一 PowerShell 内逐项核边界，遇 reparse 目录只解除入口，不遍历外部目标；私有只读 Artifact 通过父目录已有删除权清理，不放宽其 ACL。[运行器回归](isolated/scripts/test-suite-runner.test.ts)覆盖真实制品准入、只读文件和外部 junction 目标保全。

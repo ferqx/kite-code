@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 const repositoryRoot = join(import.meta.dir, '..', '..', '..');
 const workflowRoot = join(repositoryRoot, '.github', 'workflows');
 const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.2';
+const TYPECHECK_BUN_VERSION = '1.4.4';
 
 describe('CI Bun baseline', () => {
   test('pins every third-party workflow action to an immutable current-runtime commit', () => {
@@ -29,8 +30,9 @@ describe('CI Bun baseline', () => {
     }
   });
 
-  test('keeps the formal baseline and confines the upstream Windows fix to Windows runners', () => {
+  test('pins the quality checker separately and retains the formal and Windows runtime baselines', () => {
     expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.2');
+    expect(TYPECHECK_BUN_VERSION).toBe('1.4.4');
 
     const setupWorkflows = readdirSync(workflowRoot)
       .filter((name) => name.endsWith('.yml'))
@@ -39,17 +41,23 @@ describe('CI Bun baseline', () => {
 
     expect(setupWorkflows.length).toBeGreaterThan(0);
     for (const { name, source } of setupWorkflows) {
-      const jobs = Object.values(parse(source).jobs) as {
-        'runs-on': unknown;
-        strategy?: unknown;
-        steps?: { uses?: string; with?: Record<string, string> }[];
-      }[];
+      const jobs = parse(source).jobs as Record<
+        string,
+        {
+          'runs-on': unknown;
+          strategy?: unknown;
+          steps?: { uses?: string; with?: Record<string, string> }[];
+        }
+      >;
       let setupCount = 0;
-      for (const job of jobs) {
+      for (const [jobName, job] of Object.entries(jobs)) {
         const runners = JSON.stringify([job['runs-on'], job.strategy]).toLowerCase();
-        const expected = runners.includes('"windows-')
-          ? `\${{ runner.os == 'Windows' && '1.4.3' || '1.4.2' }}`
-          : FORMAL_QUALIFICATION_BUN_VERSION;
+        const expected =
+          name === 'required.yml' && jobName === 'quality'
+            ? TYPECHECK_BUN_VERSION
+            : runners.includes('"windows-')
+              ? `\${{ runner.os == 'Windows' && '1.4.3' || '1.4.2' }}`
+              : FORMAL_QUALIFICATION_BUN_VERSION;
         for (const step of job.steps ?? []) {
           if (!step.uses?.startsWith('oven-sh/setup-bun@')) continue;
           setupCount++;

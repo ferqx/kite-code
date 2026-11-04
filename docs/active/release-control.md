@@ -10,6 +10,8 @@
 
 ## 当前发行与源身份
 
+Required 的 `quality` 作业独立固定 Bun 1.4.4，运行根与八 workspace 的 `bun check` 以及原质量检查；其余运行时测试与正式资格作业保持下述基线。[CI 基线守卫](../../tests/integration/scripts/ci-bun-baseline.test.ts)仅允许这一明确的质量作业例外。类型检查范围与开发要求归[本地开发](../development/local-development.md)，不因质量工具升级变更候选 Bun、SQLite sourceId、安装或平台资格。
+
 Windows CI 固定 Bun 1.4.3；Linux/macOS CI 与 formal 资格基线保留 1.4.2。Windows 采用上游对 `--tsconfig-override` directory-mismatch 的修复；固定配置、零意外 stderr、PE/System32/no-delay 与 SQLite 精确来源门禁保留，未过滤原 1.4.2 警告。Windows 隔离输入的官方 ZIP SHA 为 `0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d`，实际内嵌 SQLite 3.53.4/sourceId 仍在原已审查集合内。旧 1.4.2 的构建/测试事实保历史范围；固定 1.4.2 的实验 resource-census 补丁未移植，也未替换正式运行时，不授 1.4.3 资源或跨平台资格。
 
 Windows 的原 HANDLE 内容读取、同进程完整 pin 复用、安全描述符查询和私有批量复制减少重复开销；每次完整内容验证保全库存/全 SHA；Bun 借用继续用原句柄复验全部内容，Main 的独立准入后则以持续强 pin、重新枚举、原 identity/ACL 与双 SH 代替同进程重复哈希，子 Service 仍独立完整准入。分享模式、每文件 Flush、严格关闭与原超时保持。普通 JS 依赖按各 workspace 明确声明内联，生成物拒绝残余 bare import，保原 manifest 字节、声明与许可全文；React/React DOM、动态资源、原生资产和 optional/peer 仍按真实图处理。理由与已拒绝的降门限/过滤警告/cwd pivot 方案归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。完整安装 caller 使用当前用户模型配置，并单独保旧 Profile 原字节作维护证据；新的 B manifest 目录在复制前私有创建，不修既有 ACL。当前真实资格与未通过门禁只由对应 Terminal/Native owner 的实测记录认定。

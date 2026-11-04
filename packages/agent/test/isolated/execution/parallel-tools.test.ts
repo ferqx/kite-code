@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
-import { defineExtension } from '../../../src/extensions';
+import { defineExtension, type ToolDefinition } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('parallel Tools retain actual reverse completion and original Model call-result order through cold history', async () => {
@@ -199,7 +199,7 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
           return { outcome: 'succeeded', content: 'Actual late result cannot be persisted' };
         },
       },
-    ],
+    ] satisfies ToolDefinition[],
   });
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'storage' });
   const db = new Database(join(root, 'data', 'storage/core.db'));
@@ -373,7 +373,7 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
           return { outcome: 'succeeded', content: 'Must never execute' };
         },
       },
-    ],
+    ] satisfies ToolDefinition[],
   });
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'denial' });
   const runtime = createRuntime({
