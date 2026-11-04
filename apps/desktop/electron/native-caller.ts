@@ -1386,6 +1386,8 @@ export class NativeCaller {
         'settings.skills.close',
         'settings.skills.open',
         'settings.skills.next',
+        'settings.skills.document',
+        'settings.skills.document.close',
         'jobOutput.open',
         'jobOutput.next',
         'jobOutput.close',
@@ -1665,6 +1667,13 @@ export class NativeCaller {
         break;
       case 'settings.skills.open':
         result = await this.skills.open(request);
+        break;
+      case 'settings.skills.document':
+        result = await this.skills.document(request);
+        break;
+      case 'settings.skills.document.close':
+        this.skills.closeDocument(request.readId);
+        result = null;
         break;
       case 'settings.skills.next':
         result = await this.skills.next(request.readId);

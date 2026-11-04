@@ -281,7 +281,7 @@ test('sidebar selection follows the visible page without highlighting a retained
     { label: '新对话', props: { newConversation: { ...newConversation, workspace: 'removed' } } },
     { label: '新对话', props: { newConversation } },
     {
-      label: '安排任务',
+      label: '定时任务',
       props: {
         newConversation: { ...newConversation, workspace: 'w' },
         scheduledTasks: { tasks: [], workspaces: shared.workspaces! },

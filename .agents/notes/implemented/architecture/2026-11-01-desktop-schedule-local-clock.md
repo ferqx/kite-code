@@ -1,10 +1,10 @@
-# Agent Note: 安排任务统一采用本地服务宿主时钟
+# Agent Note: 定时任务统一采用本地服务宿主时钟
 
 Status: implemented
 
 ## Problem
 
-用户要求移除安排任务的时区选项，以本地服务时间为准。仅隐藏字段仍会让旧任务沿原自选时区执行；直接删除持久字段则会破坏既有 DB10、备份白名单与冻结运行快照。需要让现行任务遵循宿主时钟，同时保留已经发生的运行事实及恢复身份。
+用户要求移除定时任务的时区选项，以本地服务时间为准。仅隐藏字段仍会让旧任务沿原自选时区执行；直接删除持久字段则会破坏既有 DB10、备份白名单与冻结运行快照。需要让现行任务遵循宿主时钟，同时保留已经发生的运行事实及恢复身份。
 
 ## Decision
 
@@ -12,7 +12,7 @@ renderer 保存频率、时分与可选星期，不提交时区；封闭 IPC 拒
 
 旧绑定与宿主不同，或宿主系统时区改变时，按新时区重算下一次未来发生；不把转换前的时间解释成新时区的漏跑。同一绑定的睡眠／重开最新一次补跑、DST gap／overlap和未知运行阻止后继的规则保持。保存、容量校验及重算沿原私有库事务，失败保持原字节并拒绝继续按旧绑定派发。
 
-此决定补充并限定[原本地调度决定](2026-10-15-desktop-local-scheduled-tasks.md)的时钟和补跑适用范围。原普通会话执行、权限、稳定身份、冷恢复零重放、Store隔离和容量边界继续适用。当前产品与实现分别归[Desktop手册](../../../../docs/handbook/clients/desktop/README.md)和[Native owner](../../../../apps/desktop/README.md#native-安排任务草稿)。
+此决定补充并限定[原本地调度决定](2026-10-15-desktop-local-scheduled-tasks.md)的时钟和补跑适用范围。原普通会话执行、权限、稳定身份、冷恢复零重放、Store隔离和容量边界继续适用。当前产品与实现分别归[Desktop手册](../../../../docs/handbook/clients/desktop/README.md)和[Native owner](../../../../apps/desktop/README.md#native-定时任务)。
 
 ## Alternatives considered
 

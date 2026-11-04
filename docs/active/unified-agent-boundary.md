@@ -158,7 +158,7 @@ Native 全局总览的[后台 Main](../../apps/desktop/electron/background.ts)�
 
 TUI 当前 Session 的[后台 reader](../../packages/ui/src/tui/executions.ts)分别封存当前准入 Store 与快照中原 Job 的 origin/definition/version；恢复历史可读但停止资格仍要求当前出处。完整 child 正文沿实际 carrier/父链及原 Message/Model Execution/Run 证明出处，公共 snapshot 表示当前 Store，封存阅读不借来源 Run 后来的状态改写结果。发布前复核原身份、Model revision 与 child selection；关闭或切选择只释放所属 GET。正式 CLI host 接真实 getRun，公共 API/SQL/Artifact 合同未改变；当前消费者范围及实际恢复证据归[TUI owner](../../packages/ui/src/tui/README.md)和[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-后台任务完整读取)，不代替完整平台/维护或阶段退出。
 
-Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/skill-catalogue-reads.ts)和公开 `SkillCataloguePage`。Main 从实际选中 Session 固定 Workspace/Store 与视图代次，open 核原选择/观察代次后立即登记所属取消域，不排在另一个刷新之后；原 read ID 的 close/next 不能重绑或关闭后复活读取。Main 保留原 revision/cursor，每页 128KiB，renderer 复用公共闭合 verifier 并在穷尽全部页后发布，没有累计条目截断。有限 source 仅为配置位置分类，禁用项不因此读取文件，不传路径、正文或授权；目录和页面关闭不创建 Run、改变 SSE 水位或提交业务取消。实际交付与平台证据归 [Desktop owner](../../apps/desktop/README.md#native-skills-目录迁移)。
+Native 全局 Skills 目录经 [Main 的有限 reader](../../apps/desktop/electron/skill-catalogue-reads.ts)和公开 `UserSkillCataloguePage`。Main 固定实际attach generation与Store，不接收Session／Workspace或执行authority，open立即登记所属取消域，不排在另一个刷新之后；原 read ID 的 close/next 不能重绑或关闭后复活读取。Main 保留原 revision/cursor，每页 128KiB，renderer 复用公共闭合 verifier 并在穷尽全部页后发布，没有累计条目截断。有限 source 仅为配置位置分类，禁用项不因此读取文件，目录不传路径、正文或授权；独立 `user_skill_document` 预览只接受Store、技能、正文版本和目录revision，沿同一可信用户来源返回最多1MiB UTF-8正文，不接受路径或资源。Main固定实际attach generation／Store并以独立read ID取消，关闭、替换及迟到不影响继任读取；Client和Renderer均核闭合身份。缺执行依赖可供人阅读说明，原模型加载与资源读取门禁保持，正文不进入模型或执行链；目录和页面关闭不创建 Run、改变 SSE 水位或提交业务取消。实际交付与平台证据归 [Desktop owner](../../apps/desktop/README.md#native-skills-目录迁移)。
 
 [本实例生命周期](../../packages/agent/src/lifecycle.README.md)以同步真实 busy 检查与封门实现 if_idle；status 采样不授权稍后的关闭。已受理准备、owner 接管、后台 operation 和未完成 cleanup 参与同一边界，重复关闭共用完成 Promise。只收束本实例真实拥有的工作，不因保存 command ID 就取消另一 Service 已接管的命令。普通 GET 不算执行 busy，但最终 Store 关闭等待原读取资源排空；Service 的窄 beforeResourceClose 回调先封最后业务资源入口再排空。未确认停止或清理失败保留原资源、profile 锁及诊断 HTTP，状态为 drain_failed，不伪造 completed。
 
@@ -206,7 +206,7 @@ Web 后台目录复用现有 `BackgroundExecutionQuery/Page`，仅增加 Cookie 
 
 原模型浮层接受宿主提供的准确 ID、名称与合法请求档位，再回调原选择；不根据 Provider 或模型能力标记隐藏思考调节。当前 Service 对所有配置可用模型提供 low/medium/high/xhigh/max/ultar 六档并透传，宿主稀疏列表只表示可编码的选择，远端效果由模型服务决定。Native catalogue、原作用域、Session route、临时 effort 与就绪判定仍归 Desktop，详见 [UI owner](../../packages/ui/README.md#原桌面展示层)及 [Native owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。展示重用不扩大公共管理或运行权限。
 
-原安排任务页只有现行手册定义的字段草稿，Native 不提供不存在的保存、调度或通知回调。页面导航与原 Session 的读取/写入意图分别管理，晚创建回执不能抢占后来页面；返回原会话不以持久草稿覆盖未保存原文。负责实现与当前验收归 [Native owner](../../apps/desktop/README.md#native-安排任务草稿)，不增加 Service 能力或执行权限。
+定时任务页复用公共表单，由Desktop Main持久化并按本地服务宿主时钟调度，具体运行边界见下文“Desktop 本地定时任务”。UI不自行调度、调用模型或提供未实现的通知入口。页面导航与原 Session 的读取/写入意图分别管理，晚创建回执不能抢占后来页面；返回原会话不以持久草稿覆盖未保存原文。负责实现与当前验收归 [Native owner](../../apps/desktop/README.md#native-定时任务)，不增加 Service 能力或执行权限。
 
 Native [新对话 Main](../../apps/desktop/electron/conversation.ts)只编排现有创建、私有草稿、permission controller、caller journal 与 input caller。全局准备模型只读观察独立于选中 Session，不授予 Settings 写权限；准备页选择 Workspace 只查询同代次／Store 已观察规范目录的 Git，有限结果不含路径或控制句柄。显式首次分支切换核实际根／HEAD／脏文件、全部活动工作和 trusted Main 的 Profile／制品保护根，不重启 Service。热首次链的原创建身份与新输入 Command 分别固定，权限 controller 不接管阅读选择；额外宿主 read scopes 仍需明确确认。私有原草稿在创建 POST 前保存，输入 journal 在输入 POST 前保存；未知创建／权限／输入仅原 GET，冷行不授予续写资格。UI 的等待消息按实际原 Command，或 sourceIds 加准确原 Run 证明接管，不从文本推导来源。公开 API、私有 SQLite 格式与运行授权保持。已保存草稿的消费与原回执同事务提交；选中草稿读取可带本进程有界、非持久的准确消费凭据，仅用于诊断保存的修订核对，不把其他写入者的空正文视作本次消费，也不授予命令执行权。负责行为和限定验证见 [Native owner](../../apps/desktop/README.md#native-新对话准备与首次发送)。
 
@@ -427,7 +427,7 @@ Native普通输入区可经已有Tool Message read lease读取该预测的有限
 
 ## Desktop 本地定时任务
 
-Desktop Main在应用存续期内触发本地定时任务，调度元数据属desktop-private DB10／closed manifest19；时钟取本地Service宿主的系统时间，renderer只提交墙钟字段，Main持有时区绑定。绑定变化只重算当前Store的未来安排，冻结运行快照和外来Store不改写；Agent业务执行仍只由普通Session创建与run.start拥有。每次新Session，运行前持久稳定原身份与完整快照，未知及冷恢复只查询原申请，不恢复POST权利；新Store不retag原任务，也不自动重放。权限、审批、Agent baseline与schema保持。精确实现和验证归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)与[maintenance DB10合同](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。
+Desktop Main在应用存续期内触发本地定时任务，调度元数据属desktop-private DB10／closed manifest19；时钟取本地Service宿主的系统时间，renderer只提交墙钟字段，Main持有时区绑定。绑定变化只重算当前Store的未来安排，冻结运行快照和外来Store不改写；Agent业务执行仍只由普通Session创建与run.start拥有。每次新Session，运行前持久稳定原身份与完整快照，未知及冷恢复只查询原申请，不恢复POST权利；新Store不retag原任务，也不自动重放。权限、审批、Agent baseline与schema保持。精确实现和验证归[Desktop owner](../../apps/desktop/README.md#native-定时任务)与[maintenance DB10合同](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。
 
 任务可选`reasoningEffort`与准确Model ID一起进入私有保存和每次运行快照，经原`run.start.reasoningEffort`传递并进入原请求摘要；保存前按当前模型目录核档位。旧任务无此字段时不造覆盖，原摘要不变；编辑后的值不重写已派发快照。DB10与manifest19行白名单仅增加受控可选枚举，原字节预算、坏行拒绝、新Store及冷零POST规则保持，不提升格式或API版本。
 

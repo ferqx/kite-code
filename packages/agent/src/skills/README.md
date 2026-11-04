@@ -4,6 +4,8 @@
 
 `list()` 返回 `SkillSummary[]` 与各 location 的局部错误；正文不在目录中。`load({id, version?, availableCapabilities?})` 按需返回正文及声明引用。ID 绑定规范位置，版本为正文 SHA-256，目录后的内容变化使旧 version 拒绝加载。资源 ID 绑定 Skill ID/版本/相对引用，`readResource({skillId,version,path,availableCapabilities?})` 返回资源自身正文 SHA-256；未声明路径不能读取。
 
+`readDocument({id,version,maxTextBytes})` 为人的只读预览返回已发现技能的准确正文，不读取引用资源，也不把正文加入模型上下文。版本变化继续拒绝，读取沿原可信根、文件身份与知识读取 owner；宿主必须提供正整数 UTF-8 字节预算，分配和读取前核对该预算及来源已有上限。它不要求执行依赖；`load/readResource` 的原能力门禁保持，预览不能扩大运行权限。
+
 知识目录只解析简单 frontmatter 的 `name`、`description` 和逗号分隔／单行数组 `required-capabilities`；缺字段使用目录名／首个正文段。缺依赖返回 `skill_capability_missing`，不影响无关 Agent。正文和资源始终是知识，不编译或执行 Workflow。
 
 [内置知识源](builtin.ts)把产品全局 `computer-use` 的正文与 Browser API 资源作为不可变代码资产发布，版本和资源 ID 继续绑定准确正文及资源 SHA；不读取项目目录、不扫描 home，也不写用户 Skill 配置。它只提供知识，不启动浏览器、解释器或新的 Agent Loop。[Service 同源目录](../../../../apps/service/README.md#同源-skill-知识目录)始终列出其安装元数据；不同 Workspace 和无 Workspace 的用户目录共享同一内置身份。实际加载仍要求当前已选且可用的 `browser.execute`，未选、禁用或缺执行器时准确 `skill_capability_missing`。宿主允许集与本次调用者能力继续相交，加载正文或资源不能扩大执行权限；全局内置事实与每个 Run 的可用能力、知识选择及冻结版本分别保存。

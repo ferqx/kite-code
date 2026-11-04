@@ -6,6 +6,7 @@ import {
   loadInteractionAttachment,
   requiresInteractionAttachment,
 } from './attachments';
+import { Button } from './desktop/ui';
 import { ActionInputForm } from './index';
 import { isMcpSourceReview, McpSourceReview } from './mcp-source-review';
 import { type PlanReviewDraft, PlanReviewPanel } from './plan-review';
@@ -140,8 +141,8 @@ function PlainInteractionCard({
         </p>
       )}
       {interaction.kind === 'approval' && !isMcpSourceReview(interaction) && (
-        <div>
-          <button
+        <div className="actions">
+          <Button
             type="button"
             disabled={disabled}
             onClick={() =>
@@ -163,9 +164,9 @@ function PlainInteractionCard({
             }}
           >
             Approve once
-          </button>
+          </Button>
           {sameCommand && (
-            <button
+            <Button
               type="button"
               disabled={disabled}
               onClick={() =>
@@ -187,9 +188,9 @@ function PlainInteractionCard({
               }}
             >
               本 Session 相同命令
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
             disabled={disabled}
             onClick={() => onAnswer?.(interaction, { kind: 'approval', decision: 'deny' })}
@@ -201,7 +202,7 @@ function PlainInteractionCard({
             }}
           >
             Deny
-          </button>
+          </Button>
         </div>
       )}
       {isMcpSourceReview(interaction) ? (
@@ -394,26 +395,28 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
       {identity === 'invalid' && <p>Attachment identity unavailable</p>}
       {!props.onReadAttachment && <p>Complete attachment reader unavailable</p>}
       {error && <p role="alert">{error}</p>}
-      <button
-        type="button"
-        disabled={!props.onReadAttachment || phase === 'loading' || identity === 'invalid'}
-        onClick={() => void load()}
-      >
-        Load complete attachment
-      </button>
-      {phase === 'loading' && (
-        <button
+      <div className="actions">
+        <Button
           type="button"
-          onClick={() => {
-            active.current?.abort();
-            active.current = undefined;
-            setPhase('idle');
-            setBody(undefined);
-          }}
+          disabled={!props.onReadAttachment || phase === 'loading' || identity === 'invalid'}
+          onClick={() => void load()}
         >
-          Cancel attachment loading
-        </button>
-      )}
+          Load complete attachment
+        </Button>
+        {phase === 'loading' && (
+          <Button
+            type="button"
+            onClick={() => {
+              active.current?.abort();
+              active.current = undefined;
+              setPhase('idle');
+              setBody(undefined);
+            }}
+          >
+            Cancel attachment loading
+          </Button>
+        )}
+      </div>
       {verified &&
         (props.interaction.kind === 'plan_review' ? (
           <details>

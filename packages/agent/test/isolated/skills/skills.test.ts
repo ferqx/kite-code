@@ -27,6 +27,16 @@ test('Skill discovery is summary only; explicit body/resource identity and no sc
     const entry = listed.entries[0]!;
     expect(entry.name).toBe('guide');
     expect('body' in entry).toBe(false);
+    const preview = await source.readDocument({
+      id: entry.id,
+      version: entry.version,
+      maxTextBytes: 1048576,
+    });
+    expect(preview.body).toContain('authorized tools');
+    expect('resources' in preview).toBe(false);
+    await expect(
+      source.readDocument({ id: entry.id, version: entry.version, maxTextBytes: 1 }),
+    ).rejects.toMatchObject({ code: 'skill_text_limit' });
     await expect(source.load({ id: entry.id })).rejects.toMatchObject({
       code: 'skill_capability_missing',
     });
@@ -49,6 +59,9 @@ test('Skill discovery is summary only; explicit body/resource identity and no sc
     });
     expect(existsSync(script)).toBe(false);
     writeFileSync(join(skill, 'SKILL.md'), 'changed');
+    await expect(
+      source.readDocument({ id: entry.id, version: entry.version, maxTextBytes: 1048576 }),
+    ).rejects.toMatchObject({ code: 'skill_version_changed' });
     await expect(
       source.load({ id: entry.id, version: entry.version, availableCapabilities: ['shell'] }),
     ).rejects.toMatchObject({ code: 'skill_version_changed' });

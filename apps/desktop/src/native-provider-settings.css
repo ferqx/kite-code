@@ -904,15 +904,7 @@
   min-width: 0;
 }
 .kite-client .desktop-settings .settings-content .settings-model-search {
-  min-height: 34px;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--button-radius);
-  color: var(--foreground);
-  background: var(--background);
-  padding: 6px 10px;
-  font: inherit;
-  font-size: 12px;
 }
 .kite-client .desktop-settings .connection-models-popover .connection-models-scroll {
   min-height: 0;

@@ -279,7 +279,7 @@ macOS真实代码版本链另由未修改的包内 `bin/kite maintenance backup/
 
 ## Desktop DB10 与 manifest v19
 
-真实Node恢复夹具的固定UTC时钟同时注入UTC时区，使重新绑定后的claim断言不依赖测试机器时区；生产宿主时钟行为仍由[Desktop owner](../../../../apps/desktop/README.md#native-安排任务草稿)维护。2026-11-01在上述Windows／Node环境复验同一整文件1项32断言通过，原字节、Store身份及零重放断言保持。
+真实Node恢复夹具的固定UTC时钟同时注入UTC时区，使重新绑定后的claim断言不依赖测试机器时区；生产宿主时钟行为仍由[Desktop owner](../../../../apps/desktop/README.md#native-定时任务)维护。2026-11-01在上述Windows／Node环境复验同一整文件1项32断言通过，原字节、Store身份及零重放断言保持。
 
 定时任务及嵌套运行快照可保留可选`reasoningEffort`，仅接受`none/minimal/low/medium/high/xhigh/max/ultar`字符串；无字段的旧记录继续有效，不补默认值。原字节备份／恢复保留该值与原Store绑定，数组、未知档位及其他未知字段仍拒绝。此为现有DB10／manifest19的受控可选元数据，不改schema或版本；实际Model覆盖与原请求摘要由Desktop沿既有run.start负责。
 

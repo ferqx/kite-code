@@ -2,6 +2,7 @@ import { isValidElement, type ReactNode, useContext, useMemo, useState } from 'r
 import type { ExtraProps } from 'react-markdown';
 import { useConversationReadActive } from '../conversation-activity';
 import { CodeCopyEligibilityContext } from './clipboard';
+import { Button } from './components/ui/button';
 import {
   CodeBlock,
   CodeBlockActions,
@@ -31,7 +32,9 @@ export function MarkdownCodeBlock({ children, node }: { children?: ReactNode } &
         {(canCopy || diagram) && (
           <CodeBlockActions>
             {diagram && (
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 type="button"
                 className="markdown-source-toggle"
                 aria-pressed={sourceVisible}
@@ -41,7 +44,7 @@ export function MarkdownCodeBlock({ children, node }: { children?: ReactNode } &
                 }}
               >
                 {sourceVisible ? '图表' : '源码'}
-              </button>
+              </Button>
             )}
             {canCopy && <CodeBlockCopyButton value={code} />}
           </CodeBlockActions>

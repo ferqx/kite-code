@@ -62,7 +62,7 @@ import type {
 import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
-import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
+import type { NativeSkillDocument, NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
   NativeContextUsagePage,
   NativeModelUsagePage,
@@ -850,6 +850,7 @@ export type NativeResult =
   | { kind: 'workspace.picked'; workspaceId: string }
   | NativeBackgroundResult
   | NativeSkillsPage
+  | NativeSkillDocument
   | NativeJobOutputPage
   | NativeUserMcpResult
   | NativeMcpResult

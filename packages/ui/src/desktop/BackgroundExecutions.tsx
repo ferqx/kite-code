@@ -127,13 +127,13 @@ export function BackgroundExecutions({
               <span>{execution.cleanupConfirmed ? '清理已确认' : '清理未确认'}</span>
               {execution.cursor !== undefined && <span>游标 {execution.cursor}</span>}
               {onStop && !stale && execution.status === 'running' && (
-                <button
+                <Button
                   type="button"
                   disabled={busy || stoppingExecutionId === execution.executionId}
                   onClick={() => onStop(execution)}
                 >
                   {stoppingExecutionId === execution.executionId ? '停止请求已受理' : '停止'}
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -201,7 +201,8 @@ function ExecutionGroup({
               <li key={execution.executionId} data-execution-id={execution.executionId}>
                 <span className="background-execution-identity">
                   {childSessionId ? (
-                    <button
+                    <Button
+                      variant="ghost"
                       type="button"
                       className="background-execution-detail"
                       title={name}
@@ -211,7 +212,7 @@ function ExecutionGroup({
                       {childIcon}
                       <span className="background-execution-name">{name}</span>
                       <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
-                    </button>
+                    </Button>
                   ) : execution.displayName || !diagnostics ? (
                     <span className="background-execution-label">
                       {childIcon}

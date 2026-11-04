@@ -77,6 +77,7 @@ import type {
   UserMcpOperationResult,
   UserMcpSettingsRequest,
   UserSkillCataloguePage,
+  UserSkillDocument,
   VerifySessionExportQuery,
   WithdrawPendingInputRequest,
   WorkspaceRemoval,
@@ -101,7 +102,11 @@ import {
   validateSessionLogTarget,
   verifySessionLogPage,
 } from './session-logs';
-import { verifySkillCataloguePage, verifyUserSkillCataloguePage } from './skill-catalogue';
+import {
+  verifySkillCataloguePage,
+  verifyUserSkillCataloguePage,
+  verifyUserSkillDocument,
+} from './skill-catalogue';
 import {
   parseCursorSequence,
   readSSE,
@@ -149,6 +154,7 @@ export {
   type SkillCatalogueVerificationOptions,
   verifySkillCataloguePage,
   verifyUserSkillCataloguePage,
+  verifyUserSkillDocument,
 } from './skill-catalogue';
 export type Json = ExtensionCommandRequest['input'];
 export type { SessionExportFrame, SessionExportSection } from './session-export';
@@ -1835,6 +1841,35 @@ export class AgentClient {
     );
   }
   /** Read knowledge and optional manual Workflow metadata; never activates or authorizes a Skill. */
+  async readUserSkillDocument(options: {
+    storeId: string;
+    skillId: string;
+    skillVersion: string;
+    revision: string;
+    signal?: AbortSignal;
+  }): Promise<UserSkillDocument> {
+    this.requireCapability('user_skill_document');
+    const { signal, ...input } = options;
+    const frozen = structuredClone(input);
+    validateRequest('UserSkillDocumentQuery', frozen);
+    if (this.lastServer!.storeId !== frozen.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    signal?.throwIfAborted();
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const document = await this.fetchJSON(
+      `/v1/config/user/skills/document?${new URLSearchParams(frozen)}`,
+      'UserSkillDocument',
+      { signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const verified = verifyUserSkillDocument(document, frozen);
+    await this.verifyConnection({ signal });
+    signal?.throwIfAborted();
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return verified;
+  }
   async listUserSkills(options: {
     storeId: string;
     afterId?: string;

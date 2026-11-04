@@ -204,10 +204,10 @@ test('Native page keeps original question drafts across sessions, missing pages 
     await click('会话工具');
     expect(mainInput() === null).toBe(true);
     await edit('  original A\n雪🙂  ');
-    await click('安排任务');
+    await click('定时任务');
     expect(text()).toBeNull();
     expect(mainInput()).toBeNull();
-    await click('返回会话');
+    await click('Question A');
     expect(text().value).toBe('  original A\n雪🙂  ');
     expect(posts).toBe(0);
     expect(

@@ -1,4 +1,5 @@
 import type { Execution, Run, SelectContextRequest, SelectedContextPage } from '@kite-ai/client';
+import { Button } from './desktop/ui';
 
 /** These are persisted facts; including a result does not start or authorize execution. */
 export function ContextPanel({
@@ -43,9 +44,9 @@ export function ContextPanel({
         Run checkpoint.
       </p>
       {onRewind && (
-        <button type="button" disabled={busy} onClick={() => onRewind(null)}>
+        <Button type="button" disabled={busy} onClick={() => onRewind(null)}>
           Rewind to empty selected history
-        </button>
+        </Button>
       )}
       <ul>
         {context.messages.map((message) => (
@@ -55,13 +56,13 @@ export function ContextPanel({
             </p>
             <pre>{message.content}</pre>
             {onRewind && (
-              <button
+              <Button
                 type="button"
                 disabled={busy || message.status !== 'complete'}
                 onClick={() => onRewind({ messageId: message.id, seq: message.seq })}
               >
                 Rewind through this exact message
-              </button>
+              </Button>
             )}
           </li>
         ))}
@@ -82,9 +83,9 @@ export function ContextPanel({
         {context.nextAfterSourceId ?? 'end'}
       </p>
       {onNextPage && (context.nextAfterSeq !== null || context.nextAfterSourceId !== null) && (
-        <button type="button" onClick={onNextPage}>
+        <Button type="button" onClick={onNextPage}>
           Read next pinned context page
-        </button>
+        </Button>
       )}
       {activeRun && <p>Include target Run: {activeRun.id}</p>}
       <ul>
@@ -107,7 +108,7 @@ export function ContextPanel({
               </p>
               <pre>{JSON.stringify(execution.result, null, 2)}</pre>
               {onInclude && (
-                <button
+                <Button
                   type="button"
                   disabled={
                     !storeId ||
@@ -135,7 +136,7 @@ export function ContextPanel({
                   }}
                 >
                   Include this exact historical result
-                </button>
+                </Button>
               )}
             </li>
           ))}

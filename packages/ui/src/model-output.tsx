@@ -6,6 +6,7 @@ import {
   type Run,
 } from '@kite-ai/client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from './desktop/ui';
 import { SafeMessageMarkdown } from './markdown';
 
 export interface ModelOutputMessageProps {
@@ -368,7 +369,7 @@ export function ModelOutputMessage({
       )}
       {render(full?.output.content ?? message.content)}
       {!autoRead && !full && (
-        <button
+        <Button
           type="button"
           disabled={
             (!onRead && !admittedSnapshot) ||
@@ -380,12 +381,12 @@ export function ModelOutputMessage({
           onClick={() => void read()}
         >
           查看完整回复
-        </button>
+        </Button>
       )}
       {!autoRead && (full || loading) && (
-        <button type="button" onClick={close}>
+        <Button type="button" onClick={close}>
           收起完整回复
-        </button>
+        </Button>
       )}
       {!onRead && !full && <p>暂时无法查看完整回复</p>}
       {body.readAvailability === 'unsupported' && <p>暂不支持此内容格式，已保留回复预览</p>}
@@ -393,14 +394,14 @@ export function ModelOutputMessage({
         <div role="alert">
           <p>{autoRead && !autoReadRetry ? '完整回复读取失败。' : '完整回复读取失败，请重试。'}</p>
           {autoRead && autoReadRetry && (
-            <button
+            <Button
               type="button"
               disabled={!onRead || suspended || loading || body.readAvailability === 'unsupported'}
               aria-disabled={!readActive || undefined}
               onClick={() => void read()}
             >
               重新读取
-            </button>
+            </Button>
           )}
         </div>
       )}

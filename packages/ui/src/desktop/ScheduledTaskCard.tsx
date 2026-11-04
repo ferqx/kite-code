@@ -1,6 +1,6 @@
 import {
+  AlarmClockIcon,
   ArrowDown01Icon,
-  CalendarClockIcon,
   Delete02Icon,
   Folder01Icon,
   MoreHorizontalIcon,
@@ -132,7 +132,7 @@ export function ScheduledTaskCard({
       <div className="scheduled-card-header">
         <div className="scheduled-card-identity">
           <span className="scheduled-task-icon">
-            <HugeiconsIcon icon={CalendarClockIcon} aria-hidden="true" />
+            <HugeiconsIcon icon={AlarmClockIcon} aria-hidden="true" />
           </span>
           <h2 title={task.name}>{task.name}</h2>
         </div>
@@ -203,7 +203,7 @@ export function ScheduledTaskCard({
           {task.workspaceLabel}
         </span>
         <span>
-          <HugeiconsIcon icon={CalendarClockIcon} aria-hidden="true" />
+          <HugeiconsIcon icon={AlarmClockIcon} aria-hidden="true" />
           {task.scheduleLabel}
         </span>
         {task.environment === 'worktree' && <span>独立工作树</span>}
@@ -214,9 +214,9 @@ export function ScheduledTaskCard({
         )}
       </div>
       {confirmDelete && (
-        <fieldset className="scheduled-delete-confirm" aria-label="确认删除任务">
+        <fieldset className="scheduled-delete-confirm" aria-label="确认删除定时任务">
           <div>
-            <strong>删除任务？</strong>
+            <strong>删除定时任务？</strong>
             <p>已有会话将保留。</p>
           </div>
           <div className="scheduled-confirm-actions">

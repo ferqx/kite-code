@@ -1,3 +1,4 @@
+import { Button } from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './native-message.css';
 
@@ -112,14 +113,16 @@ function MessageOccurrence({
         }}
       >
         <p>{message.text}</p>
-        <button
+        <Button
+          variant="ghost"
+          size="icon-xs"
           type="button"
           className="native-message-close"
           aria-label="关闭提示"
           onClick={() => dismiss.current(message.id)}
         >
           <span aria-hidden="true">×</span>
-        </button>
+        </Button>
       </div>
     </div>
   );

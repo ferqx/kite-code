@@ -525,7 +525,7 @@ export async function verifySettingsGeometry(browser: Browser, url: string, arti
         const skillsWidth = await railWidth();
         assert(Math.abs(skillsWidth - expectedWidth) < 1, 'Skills uses the same default');
         await page.getByRole('button', { name: '返回应用', exact: true }).click();
-        await page.getByRole('button', { name: '安排任务', exact: true }).click();
+        await page.getByRole('button', { name: '定时任务', exact: true }).click();
         await page.getByRole('button', { name: '新建', exact: true }).click();
         await page.waitForTimeout(260);
         const scheduledWidth = () =>

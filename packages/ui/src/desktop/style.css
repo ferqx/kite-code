@@ -166,7 +166,7 @@ body {
     display: none;
   }
   .button,
-  :where(.settings, .results, .interaction-area) button:where(:not(.ui-form-control)),
+  :where(.settings, .results, .interaction-area) button:where(:not(.ui-form-control, [data-slot])),
   input:where(:not(.ui-form-control)),
   select:where(:not(.ui-form-control)),
   textarea:where(:not(.ui-form-control)) {
@@ -174,9 +174,9 @@ body {
     color: inherit;
   }
   .button,
-  :where(.interaction-area) button,
+  :where(.interaction-area) button:where(:not([data-slot])),
   :where(.settings) button:where(:not([data-slot])),
-  :where(.results) button {
+  :where(.results) button:where(:not([data-slot])) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -187,7 +187,8 @@ body {
     transition: background-color 120ms;
   }
   .button:where(:not([data-size^="icon"])),
-  :where(.interaction-area, .results) button:where(:not([data-size^="icon"])),
+  :where(.interaction-area, .results)
+    button:where(:not([data-slot])):where(:not([data-size^="icon"])),
   :where(.settings) button:where(:not([data-slot])):where(:not([data-size^="icon"])) {
     gap: var(--control-gap);
     min-height: 32px;
@@ -195,9 +196,9 @@ body {
     border-radius: var(--button-radius);
   }
   .button:hover:not(:disabled),
-  :where(.interaction-area) button:hover:not(:disabled),
+  :where(.interaction-area) button:where(:not([data-slot])):hover:not(:disabled),
   :where(.settings) button:where(:not([data-slot])):hover:not(:disabled),
-  :where(.results) button:hover:not(:disabled) {
+  :where(.results) button:where(:not([data-slot])):hover:not(:disabled) {
     background: var(--control-hover);
   }
   .button:active:not(:disabled) {
@@ -215,13 +216,15 @@ body {
     background: var(--destructive-fill-pressed);
   }
   .button:disabled,
-  :where(.interaction-area) button:disabled,
+  :where(.interaction-area) button:where(:not([data-slot])):disabled,
   :where(.settings) button:where(:not([data-slot])):disabled,
-  :where(.results) button:disabled {
+  :where(.results) button:where(:not([data-slot])):disabled {
     opacity: 0.45;
     cursor: default;
   }
-  :where(button, input, select, textarea, summary, a):where(:not(.ui-form-control)):focus-visible {
+  :where(button, input, select, textarea, summary, a):where(
+      :not(.ui-form-control, [data-slot="tabs-trigger"], [data-slot="button"])
+    ):focus-visible {
     outline: 2px solid var(--ring, var(--input));
     outline-offset: 3px;
   }
@@ -1510,7 +1513,7 @@ body {
   .interaction-area .notice {
     margin: 0 0 12px;
   }
-  :where(.interaction-area) button {
+  :where(.interaction-area) button:where(:not([data-slot])) {
     margin: 4px 6px 4px 0;
   }
   .interaction-area textarea {
@@ -1736,19 +1739,7 @@ body {
     flex: 0 0 auto;
     margin-right: 10px;
   }
-  .questionnaire .questionnaire-info-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    min-height: 24px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--muted-foreground);
-    box-shadow: none;
-  }
+
   .questionnaire-tooltip {
     position: absolute;
     right: 0;
@@ -1779,12 +1770,10 @@ body {
     color: var(--muted-foreground);
   }
   .questionnaire .questionnaire-text-answer textarea {
-    width: 100%;
+    field-sizing: fixed;
     min-height: 88px;
+    max-height: 200px;
     margin: 8px 0 0;
-    padding: 10px 12px;
-    border-radius: var(--input-radius);
-    background: var(--background);
     resize: vertical;
   }
   .questionnaire-actions,
@@ -1798,29 +1787,13 @@ body {
     margin-left: auto;
   }
   .questionnaire-actions button {
-    min-height: 34px;
     margin: 0;
-    padding: 6px 12px;
-    font-size: var(--ui-text-size);
   }
-  .questionnaire .questionnaire-cancel {
-    padding-inline: 0;
-    border-color: transparent;
-    background: transparent;
-    color: var(--muted-foreground);
-    box-shadow: none;
-  }
-  .questionnaire .questionnaire-primary {
-    border-color: var(--foreground);
-    background: var(--foreground);
-    color: var(--background);
-  }
-  .questionnaire .questionnaire-primary:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--foreground) 88%, var(--background));
-  }
-  .questionnaire button:disabled,
+
   .questionnaire fieldset:disabled {
     cursor: default;
+  }
+  .questionnaire fieldset:disabled .questionnaire-choice {
     opacity: 0.5;
   }
   .questionnaire-error,
@@ -2162,28 +2135,11 @@ body {
 .kite-client .scheduled-editor :where(h3, p) {
   margin: 0;
 }
-.kite-client .scheduled-page-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 12px;
-}
 .kite-client .scheduled-page h1 {
   font-size: 26px;
   line-height: 36px;
   font-weight: 500;
   letter-spacing: -0.035em;
-}
-.kite-client .scheduled-page-heading p {
-  margin: 0;
-  font-size: 12px;
-  line-height: 21px;
-  color: var(--muted-foreground);
-}
-.kite-client .scheduled-page-heading > .button {
-  flex: none;
-  height: 28px;
 }
 .kite-client .scheduled-toolbar {
   display: flex;
@@ -2193,53 +2149,38 @@ body {
   gap: 12px;
   margin-bottom: 12px;
 }
-.kite-client .scheduled-filters {
-  display: flex;
-  min-width: 0;
-  margin: 0;
-  border: 0;
-  gap: 3px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--control-hover);
-}
-.kite-client .scheduled-filters .button {
-  height: 26px;
-  padding: 0 10px;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.kite-client .scheduled-filters .button[aria-pressed="true"] {
-  color: var(--foreground);
-  background: var(--card);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
-}
 .kite-client .scheduled-count {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
 }
-.kite-client .scheduled-search {
+.kite-client .scheduled-toolbar-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-inline-start: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.kite-client .scheduled-toolbar-actions > .button {
+  flex: none;
+  height: 32px;
+}
+.kite-client .scheduled-search {
+  position: relative;
+  display: block;
   width: 210px;
   min-width: 140px;
   color: var(--muted-foreground);
 }
 .kite-client .scheduled-search svg {
+  position: absolute;
+  inset-inline-start: 10px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 14px;
   height: 14px;
-  flex: none;
-}
-.kite-client .scheduled-search input {
-  width: 100%;
-  min-width: 0;
-  padding: 5px 0;
-  border: 0;
-  background: transparent;
-  font-size: 12px;
+  pointer-events: none;
 }
 .kite-client .scheduled-list {
   display: flex;
@@ -2552,9 +2493,9 @@ body {
 .kite-client .scheduled-setting-card {
   min-width: 0;
   padding-inline: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--card) 40%, var(--background));
+  border: 1px solid var(--input);
+  border-radius: var(--form-control-radius);
+  background: var(--card);
 }
 .kite-client .scheduled-editor-section.scheduled-setting-card {
   gap: 0;
@@ -2594,37 +2535,11 @@ body {
   flex-direction: column;
   gap: 7px;
 }
-.kite-client .scheduled-editor :is(input:not([type="radio"]), textarea) {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--card) 40%, var(--background));
-  color: var(--foreground);
-  font-size: 13px;
-  line-height: 20px;
-}
-.kite-client .scheduled-editor input:not([type="radio"]) {
-  min-height: 28px;
-  padding: 4px 2px;
-  border-color: transparent;
-  border-radius: 6px;
-  background: transparent;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.kite-client .scheduled-editor :is(input, textarea)::placeholder {
-  color: var(--directory-tertiary-foreground);
-}
-.kite-client .scheduled-editor .scheduled-title-input {
-  font-weight: 400;
-}
 .kite-client .scheduled-editor .scheduled-prompt-input {
+  field-sizing: fixed;
   min-height: 80px;
   max-height: 240px;
-  padding: 8px 10px;
   resize: vertical;
-  line-height: 20px;
 }
 .kite-client .scheduled-field-hint {
   color: var(--muted-foreground);
@@ -2716,12 +2631,17 @@ body {
   min-width: 140px;
 }
 .scheduled-task-menu [role="menuitem"] {
-  min-height: 30px;
-  font-size: 12px;
+  box-sizing: border-box;
+  min-height: var(--select-min-height);
+  padding: var(--select-padding-block) var(--select-padding-inline);
+  font-size: var(--select-font-size);
+  line-height: var(--select-line-height);
 }
 .kite-client .scheduled-editor input.time-picker-input {
   width: 80px;
   flex: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 @container (max-width: 480px) {
   .kite-client .scheduled-card-header {
@@ -2736,14 +2656,14 @@ body {
   .kite-client .scheduled-search {
     flex: 1;
   }
+  .kite-client .scheduled-toolbar-actions {
+    width: 100%;
+  }
 }
 @media (max-width: 700px) {
   .kite-client .scheduled-page {
     width: calc(100% - 32px);
     padding-block: 16px 24px;
-  }
-  .kite-client .scheduled-page-heading {
-    align-items: flex-start;
   }
   .kite-client .scheduled-page h1 {
     font-size: 22px;
@@ -3033,11 +2953,6 @@ body {
   --markdown-alert-accent: var(--destructive);
 }
 .kite-client .markdown-source-toggle {
-  padding: 2px 6px;
-  border: 0;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 12px;
   text-underline-offset: 3px;
 }
 .kite-client .markdown-source-toggle:hover,
@@ -3045,10 +2960,7 @@ body {
   color: var(--foreground);
   text-decoration: underline;
 }
-.kite-client .markdown-source-toggle:focus-visible {
-  outline: 1px solid var(--ring);
-  outline-offset: 2px;
-}
+
 .kite-client .typeset-chat .markdown-diagram-status {
   padding: 10px 16px 0;
   color: var(--muted-foreground);
@@ -5059,10 +4971,7 @@ body {
 .kite-client .environment-information .background-execution-detail:hover {
   text-decoration: underline;
 }
-.kite-client .environment-information .background-execution-detail:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
+
 .kite-client .environment-information .background-execution-error {
   padding-left: 26px;
   color: var(--destructive);

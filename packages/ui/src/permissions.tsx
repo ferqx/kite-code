@@ -1,5 +1,6 @@
 import type { PermissionModeState, WorkspaceTrustState } from '@kite-ai/client';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { Button } from './desktop/ui';
 
 function permissionLabel(mode: PermissionModeState['mode']) {
   return { accept_edits: '请求批准', auto: '自动审核', full: '完全访问' }[mode];
@@ -114,9 +115,9 @@ function PermissionChoices({
               />
               同时设为以后会话的默认模式
             </label>
-            <button type="submit" onKeyDown={keyboardClick} disabled={!mode}>
+            <Button type="submit" onKeyDown={keyboardClick} disabled={!mode}>
               保存模式选择
-            </button>
+            </Button>
           </fieldset>
         </form>
       )}
@@ -144,21 +145,23 @@ function PermissionChoices({
             />
             我已核对所显示的工作区与读取范围
           </label>
-          <button
-            type="button"
-            onKeyDown={keyboardClick}
-            disabled={!confirmed}
-            onClick={() => void submit(() => onSetTrust(true))}
-          >
-            信任所显示的范围
-          </button>
-          <button
-            type="button"
-            onKeyDown={keyboardClick}
-            onClick={() => void submit(() => onSetTrust(false))}
-          >
-            撤销工作区信任
-          </button>
+          <div className="actions">
+            <Button
+              type="button"
+              onKeyDown={keyboardClick}
+              disabled={!confirmed}
+              onClick={() => void submit(() => onSetTrust(true))}
+            >
+              信任所显示的范围
+            </Button>
+            <Button
+              type="button"
+              onKeyDown={keyboardClick}
+              onClick={() => void submit(() => onSetTrust(false))}
+            >
+              撤销工作区信任
+            </Button>
+          </div>
         </fieldset>
       ) : (
         <p>工作区信任只读。</p>
@@ -167,7 +170,7 @@ function PermissionChoices({
       {submitted && !error && <p role="status">回执已收到；当前显示的是提交前事实，请重新读取。</p>}
       {error && <p role="alert">{error}</p>}
       {onRefresh && (
-        <button
+        <Button
           type="button"
           disabled={busy || pending}
           onClick={() => {
@@ -177,7 +180,7 @@ function PermissionChoices({
           }}
         >
           重新读取权限事实
-        </button>
+        </Button>
       )}
     </section>
   );
@@ -289,9 +292,9 @@ function GrantDirectory({
             ))}
           </ul>
           {facts.page.nextAfterSeq !== null && onNext && (
-            <button type="button" disabled={pending} onClick={() => void onNext().catch(() => {})}>
+            <Button type="button" disabled={pending} onClick={() => void onNext().catch(() => {})}>
               下一页授权记录
-            </button>
+            </Button>
           )}
           {onClear ? (
             <fieldset disabled={disabled}>
@@ -303,14 +306,14 @@ function GrantDirectory({
                 />
                 我已核对实际会话与授权版本
               </label>
-              <button
+              <Button
                 type="button"
                 disabled={!confirmed}
                 onKeyDown={keyboardClick}
                 onClick={() => void clear()}
               >
                 清除当前会话授权
-              </button>
+              </Button>
               <p>清除该会话所显示版本的全部授权，不撤回已执行的效果；并发变化会拒绝这次选择。</p>
             </fieldset>
           ) : (
@@ -326,9 +329,9 @@ function GrantDirectory({
         <p role="alert">清除结果尚未核实。保留原选择，只查询原回执；冲突需重新读取后明确选择。</p>
       )}
       {onRead && (
-        <button type="button" disabled={pending} onClick={() => void onRead().catch(() => {})}>
+        <Button type="button" disabled={pending} onClick={() => void onRead().catch(() => {})}>
           读取当前会话授权
-        </button>
+        </Button>
       )}
     </section>
   );

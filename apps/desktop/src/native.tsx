@@ -4673,9 +4673,9 @@ function NativeDesktopContent({
               </p>
             )}
             {historyState.phase === 'unavailable' && (
-              <button type="button" onClick={() => void report(refresh)}>
+              <DesktopButton type="button" onClick={() => void report(refresh)}>
                 重新加载会话
-              </button>
+              </DesktopButton>
             )}
             {selection.runs
               .filter(() => diagnostics)

@@ -514,6 +514,19 @@ export type UserSkillCataloguePage = {
   complete: boolean;
   scope: 'user';
 };
+export type UserSkillDocumentQuery = {
+  storeId: string;
+  skillId: string;
+  skillVersion: string;
+  revision: string;
+};
+export type UserSkillDocument = {
+  storeId: string;
+  skillId: string;
+  skillVersion: string;
+  revision: string;
+  body: string;
+};
 export type UserMcpSettingsQuery = { storeId: string };
 export type UserMcpSettingsRequest = {
   commandId: string;

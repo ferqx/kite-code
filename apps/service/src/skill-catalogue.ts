@@ -21,6 +21,8 @@ import {
   skillUnavailableReasons,
   UserSkillCataloguePageSchema,
   type UserSkillCatalogueQuerySchema,
+  type UserSkillDocumentQuerySchema,
+  UserSkillDocumentSchema,
 } from './http/schema/skill-catalogue';
 import type { PermissionManagementPort } from './permission-management';
 import { createConfiguredSkillSource } from './skill-source';
@@ -29,6 +31,11 @@ import { type UserConfiguration, withoutProjectModels } from './user-configurati
 type Query = z.infer<typeof SkillCatalogueQuerySchema>;
 export type SkillCataloguePage = z.infer<typeof SkillCataloguePageSchema>;
 export type UserSkillCataloguePage = z.infer<typeof UserSkillCataloguePageSchema>;
+export type UserSkillDocument = z.infer<typeof UserSkillDocumentSchema>;
+export type UserSkillDocumentContext = z.infer<typeof UserSkillDocumentQuerySchema> & {
+  runtime: AgentRuntime;
+  subjectId: string;
+};
 export interface SkillCatalogueContext extends Query {
   runtime: AgentRuntime;
   permissions?: PermissionManagementPort;
@@ -43,6 +50,7 @@ export interface SkillCatalogueSource {
   list(context: SkillCatalogueContext): Promise<SkillCataloguePage>;
   /** Global knowledge metadata from trusted user locations, independent of a Workspace or Session. */
   listUser?(context: UserSkillCatalogueContext): Promise<UserSkillCataloguePage>;
+  readUserDocument?(context: UserSkillDocumentContext): Promise<UserSkillDocument>;
   /** Trusted host lifecycle; omitted by metadata-only sources without owned resources. */
   dispose?(): Promise<void>;
 }
@@ -129,7 +137,7 @@ export function createDefaultSkillCatalogueSource(options: {
   const explicit = options.explicit;
   const allowedCapabilities = [...(options.allowedCapabilities ?? [])];
   const knowledgeScope = createKnowledgeReadScope();
-  const pending = new Set<Promise<SkillCataloguePage | UserSkillCataloguePage>>();
+  const pending = new Set<Promise<unknown>>();
   const retainedPreparationFailures = new Set<
     ConfigurationPreparationCleanupError | KnowledgeReadCleanupError
   >();
@@ -225,7 +233,7 @@ export function createDefaultSkillCatalogueSource(options: {
     paginate(context, page, entries);
     return SkillCataloguePageSchema.parse(page);
   };
-  const listUser = async (context: UserSkillCatalogueContext): Promise<UserSkillCataloguePage> => {
+  const userCatalogue = async (context: UserSkillCatalogueContext) => {
     if (context.afterId && !context.revision) throw new AgentError('invalid_skill_catalogue_query');
     if ((await context.runtime.getMetadata()).storeId !== context.storeId)
       throw new AgentError('store_identity_mismatch');
@@ -237,7 +245,7 @@ export function createDefaultSkillCatalogueSource(options: {
         explicit: explicit(),
       });
     } catch {
-      return unavailableUserSkillCatalogue(context, 'configuration_unavailable');
+      return { page: unavailableUserSkillCatalogue(context, 'configuration_unavailable') };
     }
     const toolIds =
       effective.tools?.filter((tool) => tool.enabled !== false).map((tool) => tool.id) ?? [];
@@ -254,7 +262,7 @@ export function createDefaultSkillCatalogueSource(options: {
       listed = await source.list();
     } catch (error) {
       if (isCleanupFailure(error)) throw error;
-      return unavailableUserSkillCatalogue(context, 'configuration_unavailable');
+      return { page: unavailableUserSkillCatalogue(context, 'configuration_unavailable') };
     }
     const entries: UserSkillCataloguePage['entries'] = listed.states.map((entry) => {
       if (entry.source?.scope === 'project')
@@ -290,12 +298,33 @@ export function createDefaultSkillCatalogueSource(options: {
       nextAfterId: null,
       complete: true,
     };
-    paginate(context, page, entries);
+    return { page, source, entries };
+  };
+  const listUser = async (context: UserSkillCatalogueContext): Promise<UserSkillCataloguePage> => {
+    const { page, entries } = await userCatalogue(context);
+    if (entries) paginate(context, page, entries);
     return UserSkillCataloguePageSchema.parse(page);
   };
-  function admit<T extends SkillCataloguePage | UserSkillCataloguePage>(
-    operation: () => Promise<T>,
-  ) {
+  const readUserDocument = async (
+    context: UserSkillDocumentContext,
+  ): Promise<UserSkillDocument> => {
+    const { page, source, entries } = await userCatalogue(context);
+    if (!source || !entries) throw new AgentError('skill_unavailable');
+    if (page.revision !== context.revision) throw new AgentError('skill_catalogue_changed');
+    const entry = entries.find((entry) => entry.id === context.skillId);
+    if (!entry?.enabled || !entry.version) throw new AgentError('skill_unavailable');
+    if (entry.version !== context.skillVersion) throw new AgentError('skill_version_changed');
+    const document = await source.readDocument({ id: entry.id, version: entry.version });
+    if (Buffer.byteLength(document.body) > 1048576) throw new AgentError('skill_text_limit');
+    return UserSkillDocumentSchema.parse({
+      storeId: context.storeId,
+      skillId: entry.id,
+      skillVersion: document.version,
+      revision: page.revision,
+      body: document.body,
+    });
+  };
+  function admit<T>(operation: () => Promise<T>) {
     if (sealed) return Promise.reject(new AgentError('knowledge_source_closed'));
     if (retainedPreparationFailures.size)
       return Promise.reject(retainedPreparationFailures.values().next().value);
@@ -316,6 +345,9 @@ export function createDefaultSkillCatalogueSource(options: {
     },
     listUser(context: UserSkillCatalogueContext) {
       return admit(() => listUser(context));
+    },
+    readUserDocument(context: UserSkillDocumentContext) {
+      return admit(() => readUserDocument(context));
     },
     dispose() {
       if (disposal) return disposal;

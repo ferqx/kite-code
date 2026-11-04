@@ -1,5 +1,32 @@
 import { ClientError, decodeResponse } from './decode';
-import type { SkillCataloguePage, UserSkillCataloguePage } from './generated/api';
+import type {
+  SkillCataloguePage,
+  UserSkillCataloguePage,
+  UserSkillDocument,
+  UserSkillDocumentQuery,
+} from './generated/api';
+
+export function verifyUserSkillDocument(
+  value: unknown,
+  identity: UserSkillDocumentQuery,
+): UserSkillDocument {
+  let copy: unknown;
+  try {
+    copy = structuredClone(value);
+  } catch {
+    throw new ClientError('invalid_response');
+  }
+  const document = decodeResponse('UserSkillDocument', copy);
+  if (
+    Object.entries(identity).some(
+      ([key, value]) => document[key as keyof UserSkillDocument] !== value,
+    )
+  )
+    throw new ClientError('skill_catalogue_identity_mismatch');
+  if (new TextEncoder().encode(document.body).byteLength > 1048576)
+    throw new ClientError('skill_text_limit');
+  return document;
+}
 
 export interface SkillCatalogueVerificationOptions {
   readonly storeId?: string;

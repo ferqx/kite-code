@@ -6,6 +6,8 @@ import type { AgentRuntime } from '@kite-ai/agent';
 import type { JsonObject } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { createClient } from '@kite-ai/client';
+import { startService } from '../../src';
 import { createDefaultSkillCatalogueSource } from '../../src/skill-catalogue';
 import { createUserConfiguration } from '../../src/user-configuration';
 
@@ -73,6 +75,126 @@ function fixture() {
     },
   };
 }
+
+test('user Skill document HTTP preview is authenticated, version bound and readonly even when execution dependencies are unavailable', async () => {
+  const f = fixture();
+  f.skill(join(f.userRoot, 'guide'), 'guide', 'required-capabilities: [files.write]\n');
+  f.configure({
+    skills: [
+      { id: 'guide', path: 'guide' },
+      { id: 'disabled', path: '/never/read', enabled: false },
+    ],
+  });
+  const source = f.source();
+  const runtime = new Proxy(
+    {
+      getMetadata: () => f.runtime.getMetadata(),
+      getExtensionCatalogue: () => [],
+      getLifecycleState: () => ({ state: 'accepting', reasons: [] }),
+      tryBeginShutdown: (_mode: unknown, hooks: { beforeResourceClose: () => Promise<void> }) => ({
+        accepted: true,
+        completion: hooks.beforeResourceClose(),
+      }),
+    },
+    {
+      get(target, property) {
+        if (property in target) return Reflect.get(target, property);
+        return undefined;
+      },
+    },
+  ) as unknown as AgentRuntime;
+  let oversized = false;
+  const service = await startService({
+    runtime,
+    skillCatalogue: {
+      ...source,
+      async readUserDocument(context) {
+        const value = await source.readUserDocument!(context);
+        return oversized ? { ...value, body: '雪'.repeat(400000) } : value;
+      },
+    },
+    subjectId: 'owner',
+    buildId: 'skill-preview',
+    profile: {
+      dataRoot: f.profile.dataRoot,
+      name: f.profile.profile,
+      accessKey: f.profile.profileAccessKey,
+    },
+  });
+  const client = createClient({
+    endpoint: service.endpoint,
+    token: service.bootstrap.token,
+    expected: { apiMajor: 1, profile: service.bootstrap.profile, requiredCapabilities: [] },
+  });
+  try {
+    const info = await client.connect();
+    expect(info.capabilities).toContain('user_skill_document');
+    const catalogue = await client.listUserSkills({ storeId: 'owned-store' });
+    const row = catalogue.entries.find((row) => row.id === 'guide')!;
+    expect(row.state).toBe('unavailable');
+    const identity = {
+      storeId: 'owned-store',
+      skillId: row.id,
+      skillVersion: row.version!,
+      revision: catalogue.revision,
+    };
+    const document = await client.readUserSkillDocument(identity);
+    expect(document.body).toContain('PRIVATE_SKILL_BODY');
+    expect(Object.keys(document).sort()).toEqual([
+      'body',
+      'revision',
+      'skillId',
+      'skillVersion',
+      'storeId',
+    ]);
+    expect(
+      (await client.listUserSkills({ storeId: 'owned-store' })).entries.find(
+        (row) => row.id === 'guide',
+      )!.state,
+    ).toBe('unavailable');
+    await expect(
+      client.readUserSkillDocument({ ...identity, revision: 'f'.repeat(64) }),
+    ).rejects.toMatchObject({ code: 'skill_catalogue_changed' });
+    await expect(
+      client.readUserSkillDocument({ ...identity, skillId: 'disabled' }),
+    ).rejects.toMatchObject({ code: 'skill_unavailable' });
+    await expect(
+      client.readUserSkillDocument({ ...identity, skillId: '../outside' }),
+    ).rejects.toMatchObject({ code: 'skill_unavailable' });
+    const query = new URLSearchParams(identity);
+    const raw = await fetch(`${service.endpoint}/v1/config/user/skills/document?${query}`, {
+      headers: { authorization: `Bearer ${service.bootstrap.token}` },
+    });
+    expect(raw.headers.get('cache-control')).toBe('no-store');
+    expect(raw.status).toBe(200);
+    oversized = true;
+    await expect(client.readUserSkillDocument(identity)).rejects.toMatchObject({
+      code: 'skill_text_limit',
+    });
+    oversized = false;
+    expect(
+      (await fetch(`${service.endpoint}/v1/config/user/skills/document?${query}`)).status,
+    ).toBe(401);
+    query.set('path', '/outside');
+    expect(
+      (
+        await fetch(`${service.endpoint}/v1/config/user/skills/document?${query}`, {
+          headers: { authorization: `Bearer ${service.bootstrap.token}` },
+        })
+      ).status,
+    ).toBe(400);
+    writeFileSync(join(f.userRoot, 'guide', 'SKILL.md'), 'changed');
+    await expect(client.readUserSkillDocument(identity)).rejects.toMatchObject({
+      code: 'skill_catalogue_changed',
+    });
+    expect(f.calls.every((call) => call === 'getMetadata')).toBe(true);
+    expect(client.lastAppliedCursor).toBeUndefined();
+  } finally {
+    client.disposeNetwork();
+    await service.close();
+    f.close();
+  }
+});
 
 test('global Skills reads only merged user configuration and trusted user/Profile locations without Workspace authority', async () => {
   const f = fixture();
@@ -203,6 +325,18 @@ test('global user source lists the installed builtin without creating a missing 
       nextAfterId: null,
     });
     expect(existsSync(f.userRoot)).toBe(false);
+    const document = await source.readUserDocument!({
+      ...f.context,
+      skillId: 'computer-use',
+      skillVersion: first.entries[0]!.version!,
+      revision: first.revision,
+    });
+    expect(document.body).toContain('controlled');
+    expect(document.skillId).toBe('computer-use');
+    expect('resources' in document).toBe(false);
+    expect((await source.listUser!(f.context)).entries[0]!.missingCapabilities).toEqual([
+      'browser.execute',
+    ]);
     expect((await source.listUser!(f.context)).revision).toBe(first.revision);
     await expect(source.listUser!({ ...f.context, storeId: 'forged' })).rejects.toMatchObject({
       code: 'store_identity_mismatch',

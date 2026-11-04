@@ -1,5 +1,6 @@
 import type { Interaction } from '@kite-ai/client';
 import { useRef, useState } from 'react';
+import { Button } from './desktop/ui';
 import type { InteractionAnswer } from './interactions';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -184,27 +185,29 @@ export function McpSourceReview({
         permission.
       </p>
       <pre>{JSON.stringify(interaction.request, null, 2)}</pre>
-      {decisions.map((decision) => (
-        <button
-          key={decision}
-          type="button"
-          disabled={disabled}
-          onClick={async () => {
-            if (disabled || flight.current || !onAnswer) return;
-            flight.current = true;
-            setError('');
-            try {
-              await onAnswer(interaction, { kind: 'question', answers: { decision } });
-            } catch {
-              setError('Source Review answer unavailable; check the original submission.');
-            } finally {
-              flight.current = false;
-            }
-          }}
-        >
-          {decision}
-        </button>
-      ))}
+      <div className="actions">
+        {decisions.map((decision) => (
+          <Button
+            key={decision}
+            type="button"
+            disabled={disabled}
+            onClick={async () => {
+              if (disabled || flight.current || !onAnswer) return;
+              flight.current = true;
+              setError('');
+              try {
+                await onAnswer(interaction, { kind: 'question', answers: { decision } });
+              } catch {
+                setError('Source Review answer unavailable; check the original submission.');
+              } finally {
+                flight.current = false;
+              }
+            }}
+          >
+            {decision}
+          </Button>
+        ))}
+      </div>
       {error && <p role="alert">{error}</p>}
     </section>
   );

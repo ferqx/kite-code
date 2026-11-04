@@ -100,7 +100,15 @@ async function fixture(
   }
 }
 const bridgeOf = (request: (request: NativeSkillsRequest) => Promise<NativeSkillsPage | null>) =>
-  ({ request, watch: () => () => undefined }) as NativeBridge;
+  ({
+    request: (value: NativeSkillsRequest) => {
+      if (value.method === 'settings.skills.document.close') return Promise.resolve(null);
+      if (value.method === 'settings.skills.document')
+        return Promise.reject(Error('capability_unavailable'));
+      return request(value);
+    },
+    watch: () => () => undefined,
+  }) as NativeBridge;
 const refresh = async (host: HTMLElement) =>
   act(async () =>
     [...host.querySelectorAll('button')]
@@ -113,11 +121,103 @@ const openDetail = async (host: HTMLElement, name: string) =>
     host.querySelector<HTMLButtonElement>(`[aria-label="查看 ${name} 详情"]`)!.click(),
   );
 
+test('Skill details prioritize versioned Markdown, identify the builtin, and retire an old document without executing its content', async () =>
+  fixture(async (host, _root, render, panelHost, editorControl) => {
+    const calls: NativeSkillsRequest[] = [];
+    let release!: () => void;
+    let first = true;
+    const rows: UserSkillCataloguePage['entries'] = [
+      {
+        ...entries[0]!,
+        id: 'computer-use',
+        name: 'computer-use',
+        source: null,
+        state: 'unavailable' as const,
+        reason: 'skill_capability_missing' as const,
+        requiredCapabilities: ['browser.execute'],
+        missingCapabilities: ['browser.execute'],
+      },
+      entries[0]!,
+    ];
+    const bridge = {
+      request: async (request: NativeSkillsRequest) => {
+        calls.push(request);
+        if (
+          request.method === 'settings.skills.close' ||
+          request.method === 'settings.skills.document.close'
+        )
+          return null;
+        if (request.method !== 'settings.skills.document') return result(request, rows);
+        if (first) {
+          first = false;
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return {
+          kind: 'settings.skills.document',
+          readId: request.readId,
+          scope: { generation: 1, storeId: 'store' },
+          document: {
+            storeId: 'store',
+            skillId: request.skillId,
+            skillVersion: request.skillVersion,
+            revision: request.revision,
+            body: `---\nname: hidden frontmatter\n---\n# ${request.skillId}\n\n1. 保留正文🙂\n2. 使用说明\n\n<script>window.skillExecuted = true</script>\n`,
+          },
+        };
+      },
+    } as NativeBridge;
+    await render(bridge);
+    await openDetail(host, 'computer-use');
+    expect(panelHost.textContent).toContain('来源：内置技能');
+    expect(panelHost.querySelector('.skill-document')?.getAttribute('aria-busy')).toBe('true');
+    expect(panelHost.textContent).not.toContain('所需功能');
+    expect(host.querySelector('.provider-badge')).toBeNull();
+    expect(panelHost.querySelector('.provider-badge')).toBeNull();
+    expect(panelHost.textContent).not.toContain('当前环境未提供');
+    expect(panelHost.textContent).not.toContain('skill_capability_missing');
+    expect(panelHost.textContent).not.toContain('browser.execute');
+    await openDetail(host, 'Skill 0');
+    expect(panelHost.querySelector('.provider-badge')).toBeNull();
+    expect(panelHost.querySelector('.skill-document h1')?.textContent).toBe('skill-000');
+    expect(panelHost.querySelector('.skill-document ol')?.textContent).toContain('保留正文🙂');
+    expect(panelHost.querySelector('.skill-document')?.textContent).not.toContain(
+      'hidden frontmatter',
+    );
+    expect(panelHost.querySelector('script')).toBeNull();
+    expect(Reflect.get(host.ownerDocument.defaultView!, 'skillExecuted')).toBeUndefined();
+    await act(async () => release());
+    expect(panelHost.querySelector('.skill-document h1')?.textContent).toBe('skill-000');
+    await openDetail(host, 'computer-use');
+    expect(panelHost.querySelector('.skill-document h1')?.textContent).toBe('computer-use');
+    const document = panelHost.querySelector('.skill-document');
+    rows[0] = { ...rows[0]!, state: 'available', reason: null, missingCapabilities: [] };
+    await refresh(host);
+    expect(host.querySelector('.provider-badge')).toBeNull();
+    expect(panelHost.querySelector('.provider-badge')).toBeNull();
+    expect(panelHost.textContent).not.toContain('所需功能');
+    expect(panelHost.querySelector('.skill-document')).toBe(document);
+    expect(panelHost.textContent).not.toContain('已提供');
+    await act(async () => editorControl.current!.close());
+    expect(panelHost.textContent).toBe('');
+    expect(host.ownerDocument.activeElement?.getAttribute('aria-label')).toBe(
+      '查看 computer-use 详情',
+    );
+    expect(calls.filter((call) => call.method === 'settings.skills.document')).toHaveLength(3);
+    expect(calls.filter((call) => call.method === 'settings.skills.document.close')).toHaveLength(
+      3,
+    );
+    expect(calls.every((call) => call.method.startsWith('settings.skills.'))).toBe(true);
+  }));
+
 test('Skills DOM publishes all fixed-revision pages with useful details and no internal identifiers', async () =>
   fixture(async (host, _root, render, panelHost) => {
     const rows = structuredClone(entries);
     rows[299]!.source = undefined;
     rows[300]!.source = { scope: 'user', origin: '.kite-code' };
+    rows[300]!.state = 'unavailable';
+    rows[300]!.reason = 'skill_path_denied';
     rows[301] = {
       ...rows[301]!,
       enabled: false,
@@ -155,11 +255,11 @@ test('Skills DOM publishes all fixed-revision pages with useful details and no i
       expect(host.textContent).not.toContain(hidden);
     expect(host.querySelectorAll('li')).toHaveLength(303);
     expect(host.textContent).toContain('摘要 302 保留全文\n尾部🙂');
-    expect(host.textContent).toContain('配置来源：用户 · .agents');
-    expect(host.textContent).toContain('配置来源：用户 · .kite-code');
-    expect(host.textContent).toContain('配置来源：用户 · Profile Skills');
-    expect(host.textContent).toContain('来源无法确定');
-    expect(host.textContent).toContain('来源未记录');
+    expect(host.textContent).toContain('来源：个人 · .agents');
+    expect(host.textContent).toContain('来源：个人 · .kite-code');
+    expect(host.textContent).toContain('来源：个人 · Profile Skills');
+    expect(host.textContent).toContain('未提供来源信息');
+    expect(host.textContent).toContain('来源：未记录');
     expect(host.querySelectorAll('summary')).toHaveLength(0);
     expect(host.querySelectorAll('input, textarea, select')).toHaveLength(0);
     expect(host.querySelector('[aria-label="查看 skill-301 详情"]')?.textContent).toContain(
@@ -175,9 +275,13 @@ test('Skills DOM publishes all fixed-revision pages with useful details and no i
     await openDetail(host, 'Skill 302');
     expect(panelHost.querySelector('aside')?.getAttribute('aria-label')).toBe('Skill 302 详情');
     expect(panelHost.textContent).toContain('摘要 302 保留全文\n尾部🙂');
-    expect(panelHost.textContent).toContain('缺少能力：files.write');
-    expect(panelHost.textContent).toContain('需要能力：files.read、files.write');
-    expect(panelHost.textContent).toContain('原因：skill_capability_missing');
+    expect(panelHost.textContent).not.toContain('所需功能');
+    expect(panelHost.textContent).not.toContain('files.read');
+    expect(panelHost.textContent).not.toContain('files.write');
+    expect(panelHost.querySelector('.provider-badge')).toBeNull();
+    expect(panelHost.textContent).not.toContain('当前环境未提供');
+    expect(panelHost.textContent).not.toContain('已提供');
+    expect(panelHost.textContent).not.toContain('skill_capability_missing');
     expect(panelHost.querySelector('details')).toBeNull();
     for (const hidden of [
       '技术详情',
@@ -192,7 +296,14 @@ test('Skills DOM publishes all fixed-revision pages with useful details and no i
     await openDetail(host, 'skill-301');
     expect(panelHost.textContent).toContain('摘要未记录');
     expect(panelHost.textContent).not.toContain('版本：');
-    expect(panelHost.textContent).toContain('来源无法确定');
+    expect(panelHost.textContent).toContain('未提供来源信息');
+    expect(panelHost.querySelector('.provider-badge')?.textContent).toBe('已禁用');
+    expect(host.querySelector('[aria-label="查看 Skill 300 详情"]')?.textContent).toContain(
+      '需处理',
+    );
+    await openDetail(host, 'Skill 300');
+    expect(panelHost.querySelector('.provider-badge')?.textContent).toBe('需处理');
+    expect(panelHost.textContent).toContain('无法访问技能所在位置。');
     expect(calls.filter((call) => call.method === 'settings.skills.next')).toHaveLength(8);
     expect(calls.at(-1)?.method).toBe('settings.skills.close');
     expect(
@@ -230,6 +341,43 @@ test('same scope refresh failure retains the complete directory and detail witho
     expect(panelHost.querySelector('h3')?.textContent).toBe('Skill 0');
     expect(host.textContent).not.toContain('摘要 1 保留全文');
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('skill_catalogue_changed');
+  }));
+
+test('refresh retries a failed document at the same revision and does not reread a complete unchanged body', async () =>
+  fixture(async (host, _root, render, panelHost) => {
+    let reads = 0;
+    const bridge = {
+      request: async (request: NativeSkillsRequest) => {
+        if (request.method.endsWith('.close')) return null;
+        if (request.method !== 'settings.skills.document')
+          return result(request, entries.slice(0, 1));
+        if (++reads === 1) throw Error('temporary_read_failure');
+        return {
+          kind: 'settings.skills.document',
+          readId: request.readId,
+          scope: { generation: 1, storeId: 'store' },
+          document: {
+            storeId: 'store',
+            skillId: request.skillId,
+            skillVersion: request.skillVersion,
+            revision: request.revision,
+            body: '# 完整正文\n\n保留阅读',
+          },
+        };
+      },
+    } as NativeBridge;
+    await render(bridge);
+    await openDetail(host, 'Skill 0');
+    expect(panelHost.textContent).toContain('暂时无法读取技能正文');
+    await refresh(host);
+    expect(panelHost.querySelector('.skill-document h1')?.textContent).toBe('完整正文');
+    expect(reads).toBe(2);
+    const document = panelHost.querySelector<HTMLElement>('.skill-document')!;
+    document.scrollTop = 120;
+    await refresh(host);
+    expect(panelHost.querySelector('.skill-document')).toBe(document);
+    expect(document.scrollTop).toBe(120);
+    expect(reads).toBe(2);
   }));
 
 test('malformed user configuration retains the complete directory and selected detail until correction', async () =>
@@ -379,7 +527,7 @@ test('Skill details live only in the far-right host and close controls restore t
     await openDetail(host, 'Skill 0');
     await act(async () =>
       [...panelHost.querySelectorAll('button')]
-        .find((button) => button.textContent === '返回列表')!
+        .find((button) => button.textContent === '关闭')!
         .click(),
     );
     expect(host.ownerDocument.activeElement).toBe(first);

@@ -67,6 +67,7 @@ export {
   SelectTrigger,
   SelectValue,
 } from './components/ui/select';
+export { SelectField, type SelectFieldOption } from './components/ui/select-field';
 export {
   Sheet,
   SheetClose,

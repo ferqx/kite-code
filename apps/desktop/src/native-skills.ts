@@ -1,10 +1,70 @@
 import {
   ClientError,
   type UserSkillCataloguePage,
+  type UserSkillDocumentQuery,
   verifyUserSkillCataloguePage,
+  verifyUserSkillDocument,
 } from '@kite-ai/client';
 import type { NativeBridge } from './native-bridge';
 import type { NativeSkillsPage, NativeSkillsScope } from './skills-bridge';
+
+export async function readNativeSkillDocument(input: {
+  bridge: NativeBridge;
+  scope: NativeSkillsScope;
+  identity: UserSkillDocumentQuery;
+  signal: AbortSignal;
+}) {
+  const readId = crypto.randomUUID();
+  const scope = { ...input.scope },
+    identity = { ...input.identity };
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    void input.bridge
+      .request({ method: 'settings.skills.document.close', generation: scope.generation, readId })
+      .catch(() => {});
+  };
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    abort = () => {
+      close();
+      reject(new ClientError('skill_catalogue_view_changed'));
+    };
+  });
+  input.signal.addEventListener('abort', abort, { once: true });
+  try {
+    input.signal.throwIfAborted();
+    const result = await Promise.race([
+      input.bridge.request({
+        method: 'settings.skills.document',
+        generation: scope.generation,
+        readId,
+        skillId: identity.skillId,
+        skillVersion: identity.skillVersion,
+        revision: identity.revision,
+      }),
+      cancelled,
+    ]);
+    input.signal.throwIfAborted();
+    if (
+      !result ||
+      !('kind' in result) ||
+      result.kind !== 'settings.skills.document' ||
+      !('readId' in result) ||
+      !('scope' in result) ||
+      !('document' in result) ||
+      result.readId !== readId ||
+      result.scope.generation !== scope.generation ||
+      result.scope.storeId !== scope.storeId
+    )
+      throw new ClientError('skill_catalogue_identity_mismatch');
+    return verifyUserSkillDocument(result.document, identity);
+  } finally {
+    input.signal.removeEventListener('abort', abort);
+    close();
+  }
+}
 
 export async function readNativeSkillCatalogue(input: {
   bridge: NativeBridge;

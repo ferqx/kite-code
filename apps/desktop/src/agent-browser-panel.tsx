@@ -2,9 +2,12 @@ import type { Json } from '@kite-ai/client';
 import {
   BrowserAnnotationIcon,
   Button,
+  Input,
   Popover,
   PopoverContent,
   PopoverTrigger,
+  SelectField,
+  Textarea,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -68,6 +71,8 @@ export function AgentBrowserPanel({
   const [captureRevision, setCaptureRevision] = useState(0);
   const host = useRef<HTMLElement>(null);
   const fillNoticeId = useId();
+  const elementSelectId = useId();
+  const fillInputId = useId();
   const noteEditor = useRef<HTMLTextAreaElement>(null);
   const observer = useRef<AgentBrowserObservationOwner | undefined>(undefined);
   const [state, setState] = useState<AgentBrowserObservation & { scopeKey?: string }>({
@@ -312,7 +317,7 @@ export function AgentBrowserPanel({
         <strong>
           {noteTarget.role} · {noteTarget.name || noteTarget.ref}
         </strong>
-        <textarea
+        <Textarea
           ref={noteEditor}
           aria-label="注释说明"
           placeholder="描述你希望 Agent 关注的内容…"
@@ -490,7 +495,7 @@ export function AgentBrowserPanel({
                       }
                     }}
                   >
-                    <input
+                    <Input
                       aria-label="打开网址"
                       aria-describedby={!human ? 'agent-browser-address-help' : undefined}
                       title={view.url}
@@ -564,26 +569,27 @@ export function AgentBrowserPanel({
                           <p className="agent-browser-help">
                             点击编号区域只选取引用。网页操作需要使用下方明确按钮。
                           </p>
-                          <label>
+                          <label htmlFor={elementSelectId}>
                             页面元素
-                            <select
+                            <SelectField
+                              id={elementSelectId}
                               aria-label="页面元素"
                               disabled={!human}
                               value={selected?.ref ?? ''}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 invoke('select', {
                                   seq: view.seq,
-                                  ref: event.currentTarget.value || null,
+                                  ref: value || null,
                                 })
                               }
-                            >
-                              <option value="">选择一个元素</option>
-                              {view.annotations.map((item) => (
-                                <option key={item.ref} value={item.ref}>
-                                  {item.number}. {item.name || item.role} ({item.ref})
-                                </option>
-                              ))}
-                            </select>
+                              options={[
+                                { value: '', label: '选择一个元素' },
+                                ...view.annotations.map((item) => ({
+                                  value: item.ref,
+                                  label: `${item.number}. ${item.name || item.role} (${item.ref})`,
+                                })),
+                              ]}
+                            />
                           </label>
                           {selected && (
                             <div className="agent-browser-selection">
@@ -602,9 +608,10 @@ export function AgentBrowserPanel({
                               >
                                 点击所选元素
                               </Button>
-                              <label>
+                              <label htmlFor={fillInputId}>
                                 填入内容
-                                <input
+                                <Input
+                                  id={fillInputId}
                                   aria-label="填入内容"
                                   aria-describedby={fillNoticeId}
                                   maxLength={16384}

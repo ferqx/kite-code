@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Execution, SelectedContextPage } from '@kite-ai/client';
 import { ContextPanel } from '../src';
+import { Button } from '../src/desktop/ui';
 
 const page: SelectedContextPage = {
   selection: {
@@ -54,7 +55,7 @@ function buttons(element: unknown): Array<{ disabled: boolean; onClick: () => vo
   };
   const children = node.props?.children;
   return [
-    ...(node.type === 'button' ? [node.props] : []),
+    ...(node.type === Button ? [node.props] : []),
     ...(Array.isArray(children) ? children : [children]).flatMap(buttons),
   ];
 }

@@ -1,10 +1,11 @@
 import type { UserSkillCataloguePage } from '@kite-ai/client';
-import { Button, RightSidebar } from '@kite-ai/ui/desktop';
+import { Button, MessageContent, RightSidebar } from '@kite-ai/ui/desktop';
 import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NativeBridge, NativeSkillsScope } from './native-bridge';
 import { NativeSettingsListRow } from './native-settings-list-row';
-import { readNativeSkillCatalogue } from './native-skills';
+import { readNativeSkillCatalogue, readNativeSkillDocument } from './native-skills';
+import './native-skills-settings.css';
 
 const safeError = (cause: unknown) => {
   const code = (cause as { code?: string; message?: string })?.code ?? (cause as Error)?.message;
@@ -12,13 +13,56 @@ const safeError = (cause: unknown) => {
     ? code
     : 'skill_catalogue_unavailable';
 };
-const stateLabel = { available: '可用', disabled: '已禁用', unavailable: '不可用' } as const;
-const sourceLabel = (source: UserSkillCataloguePage['entries'][number]['source']) =>
-  source === undefined
-    ? '来源未记录'
-    : source === null
-      ? '来源无法确定'
-      : `用户 · ${source.origin === 'profile' ? 'Profile Skills' : source.origin === 'configured' ? '配置位置' : source.origin}`;
+type SkillEntry = UserSkillCataloguePage['entries'][number];
+function SkillStatus({ entry }: { entry: SkillEntry }) {
+  const label =
+    entry.state === 'disabled'
+      ? '已禁用'
+      : entry.state === 'unavailable' && entry.reason !== 'skill_capability_missing'
+        ? '需处理'
+        : undefined;
+  return label ? (
+    <span className="provider-badge">
+      <span className="provider-status-dot" />
+      {label}
+    </span>
+  ) : null;
+}
+const sourceLabel = ({ id, source }: SkillEntry) =>
+  id === 'computer-use' && source === null
+    ? '内置技能'
+    : source === undefined
+      ? '未记录'
+      : source === null
+        ? '未提供来源信息'
+        : `个人 · ${source.origin === 'profile' ? 'Profile Skills' : source.origin === 'configured' ? '自定义位置' : source.origin}`;
+const reasonLabel: Record<
+  Exclude<NonNullable<SkillEntry['reason']>, 'skill_capability_missing'>,
+  string
+> = {
+  invalid_skill_configuration: '技能配置无效。',
+  skill_path_denied: '无法访问技能所在位置。',
+  unsupported_skill_options: '不支持此技能的配置项。',
+  skill_unavailable: '暂时无法读取此技能。',
+  skill_version_changed: '技能内容已更新，请刷新目录。',
+  duplicate_skill_location: '多个配置指向同一技能。',
+  skill_metadata_limit: '技能摘要超出大小限制。',
+  skill_text_limit: '技能正文超出大小限制。',
+  skill_text_invalid: '技能正文格式无效。',
+  skill_path_changed: '技能所在位置已变化，请刷新目录。',
+};
+const documentError = (code?: string) =>
+  code === 'capability_unavailable'
+    ? '当前服务暂不支持查看技能正文。'
+    : code === 'skill_text_limit'
+      ? '技能正文较大，暂时无法在此预览。'
+      : code === 'skill_unavailable'
+        ? '此技能的正文当前不可读取。'
+        : code === 'skill_catalogue_changed' || code === 'skill_version_changed'
+          ? '技能内容已更新，请刷新目录后重新查看。'
+          : '暂时无法读取技能正文，请刷新目录后重试。';
+const markdownBody = (body: string) =>
+  body.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
 
 export function NativeSkillsSettings({
   bridge,
@@ -65,6 +109,64 @@ export function NativeSkillsSettings({
     facts?.availability === 'available'
       ? facts.entries.find((value) => value.id === detailId)
       : undefined;
+  const skillId = entry?.id,
+    skillVersion = entry?.enabled ? entry.version : undefined,
+    revision = facts?.revision;
+  const documentIdentity = useMemo(
+    () =>
+      scope && skillId && skillVersion && revision
+        ? {
+            ...scope,
+            skillId,
+            skillVersion,
+            revision,
+          }
+        : undefined,
+    [scope, skillId, skillVersion, revision],
+  );
+  const documentKey = documentIdentity ? JSON.stringify(documentIdentity) : '';
+  const [document, setDocument] = useState<{
+    key: string;
+    body?: string;
+    error?: string;
+    busy: boolean;
+  }>();
+  const currentDocument = document?.key === documentKey ? document : undefined;
+  const documentSnapshot = useRef(document);
+  documentSnapshot.current = document;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Explicit refresh retries a failed read even when its versioned identity has not changed.
+  useEffect(() => {
+    if (!documentIdentity || !scope) {
+      setDocument(undefined);
+      return;
+    }
+    if (
+      documentSnapshot.current?.key === documentKey &&
+      documentSnapshot.current.body !== undefined
+    )
+      return;
+    const abort = new AbortController();
+    setDocument({ key: documentKey, busy: true });
+    void readNativeSkillDocument({
+      bridge,
+      scope,
+      identity: {
+        storeId: documentIdentity.storeId,
+        skillId: documentIdentity.skillId,
+        skillVersion: documentIdentity.skillVersion,
+        revision: documentIdentity.revision,
+      },
+      signal: abort.signal,
+    })
+      .then((value) => {
+        if (!abort.signal.aborted) setDocument({ key: documentKey, body: value.body, busy: false });
+      })
+      .catch((cause) => {
+        if (!abort.signal.aborted)
+          setDocument({ key: documentKey, error: documentError(safeError(cause)), busy: false });
+      });
+    return () => abort.abort();
+  }, [bridge, documentIdentity, documentKey, scope, refresh]);
 
   useEffect(() => {
     if (!canRead || !scope) {
@@ -110,7 +212,7 @@ export function NativeSkillsSettings({
     return () => abort.abort();
   }, [bridge, identity, readIdentity, canRead, scope]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: A new read scope must discard the old detail selection even when skill IDs match.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new read scope discards the old detail even when skill IDs match.
   useEffect(() => {
     setDetail(undefined);
     origin.current = null;
@@ -146,7 +248,7 @@ export function NativeSkillsSettings({
       <header className="settings-page-heading">
         <div>
           <h2>Skills</h2>
-          <p>查看用户 Skills，以及它们的来源与可用状态。</p>
+          <p>查看内置和个人 Skills 的说明。</p>
         </div>
         <Button
           ref={refreshButton}
@@ -190,7 +292,7 @@ export function NativeSkillsSettings({
                           label={`查看 ${item.name || item.id} 详情`}
                           title={item.name || item.id}
                           description={item.description ?? '摘要未记录'}
-                          metadata={`配置来源：${sourceLabel(item.source)}`}
+                          metadata={`来源：${sourceLabel(item)}`}
                           selected={detailId === item.id}
                           controls={detailId === item.id ? panelId : undefined}
                           disabled={!panelHost}
@@ -198,14 +300,7 @@ export function NativeSkillsSettings({
                             origin.current = event.currentTarget;
                             setDetail({ identity, id: item.id });
                           }}
-                          status={
-                            <span
-                              className={`provider-badge${item.state === 'available' ? ' is-configured' : ''}`}
-                            >
-                              <span className="provider-status-dot" />
-                              {stateLabel[item.state]}
-                            </span>
-                          }
+                          status={<SkillStatus entry={item} />}
                         />
                       ))}
                     </ul>
@@ -236,20 +331,14 @@ export function NativeSkillsSettings({
               aria-busy={busy || undefined}
             >
               <div className="provider-editor right-sidebar-editor">
-                <header className="provider-editor-heading">
-                  <div>
+                <header className="provider-editor-heading skill-detail-heading">
+                  <div className="skill-detail-title">
                     <h3 ref={detailHeading} tabIndex={-1}>
                       {entry?.name || entry?.id || 'Skill 详情'}
                     </h3>
+                    <span>Skill</span>
                   </div>
-                  {entry && (
-                    <span
-                      className={`provider-badge${entry.state === 'available' ? ' is-configured' : ''}`}
-                    >
-                      <span className="provider-status-dot" />
-                      {stateLabel[entry.state]}
-                    </span>
-                  )}
+                  {entry && <SkillStatus entry={entry} />}
                 </header>
                 <div className="provider-editor-body right-sidebar-editor-body">
                   {error && (
@@ -258,42 +347,46 @@ export function NativeSkillsSettings({
                     </p>
                   )}
                   {entry ? (
-                    <div className="settings-catalogue-details">
-                      <section className="provider-form-section">
-                        <h4>摘要</h4>
-                        <p style={{ whiteSpace: 'pre-wrap' }}>
+                    <div className="skill-detail-content">
+                      <section>
+                        <p className="skill-detail-description">
                           {entry.description ?? '摘要未记录'}
                         </p>
                       </section>
-                      <section className="provider-form-section">
-                        <h4>目录信息</h4>
-                        <p>配置来源：{sourceLabel(entry.source)}</p>
-                        {entry.reason && <p>原因：{entry.reason}</p>}
+                      <section
+                        key={`${identity}/${entry.id}/${entry.version}`}
+                        className="skill-document"
+                        aria-label="技能正文"
+                        aria-busy={currentDocument?.busy || undefined}
+                        // biome-ignore lint/a11y/noNoninteractiveTabindex: The bounded document viewport needs keyboard scrolling without invoking any action.
+                        tabIndex={0}
+                      >
+                        {currentDocument?.body !== undefined ? (
+                          <MessageContent text={markdownBody(currentDocument.body)} />
+                        ) : currentDocument?.error ? (
+                          <p role="status">{currentDocument.error}</p>
+                        ) : !currentDocument?.busy ? (
+                          <p>此技能的正文当前不可读取。</p>
+                        ) : null}
                       </section>
-                      {(!!entry.requiredCapabilities.length ||
-                        !!entry.missingCapabilities.length) && (
-                        <section className="provider-form-section">
-                          <h4>能力要求</h4>
-                          {!!entry.requiredCapabilities.length && (
-                            <p>需要能力：{entry.requiredCapabilities.join('、')}</p>
-                          )}
-                          {!!entry.missingCapabilities.length && (
-                            <p>缺少能力：{entry.missingCapabilities.join('、')}</p>
-                          )}
-                        </section>
-                      )}
+                      <section className="skill-detail-metadata">
+                        <p className="skill-detail-source">来源：{sourceLabel(entry)}</p>
+                        {entry.reason && entry.reason !== 'skill_capability_missing' && (
+                          <p className="skill-detail-notice">{reasonLabel[entry.reason]}</p>
+                        )}
+                      </section>
                     </div>
                   ) : (
                     <p className="provider-notice" role="status">
                       {facts?.availability === 'unavailable'
                         ? `Skills 目录当前不可用：${facts.reason}。`
-                        : '此 Skill 已不在最新目录中，请返回列表重新选择。'}
+                        : '此 Skill 已不在最新目录中，请关闭详情后重新选择。'}
                     </p>
                   )}
                 </div>
                 <footer className="provider-editor-footer right-sidebar-editor-footer">
                   <Button className="provider-button" type="button" onClick={close}>
-                    返回列表
+                    关闭
                   </Button>
                 </footer>
               </div>

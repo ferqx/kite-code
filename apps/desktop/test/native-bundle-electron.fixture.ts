@@ -532,18 +532,18 @@ try {
   let page = await launch();
   const retainedDraft = 'source-free retained draft\n雪🙂';
   await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(retainedDraft);
-  await page.getByRole('button', { name: '安排任务', exact: true }).click();
-  await page.getByRole('main', { name: '安排任务', exact: true }).waitFor();
+  await page.getByRole('button', { name: '定时任务', exact: true }).click();
+  await page.getByRole('main', { name: '定时任务', exact: true }).waitFor();
   assert.equal(
     await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
     0,
   );
   assert.equal(await page.getByRole('button', { name: '工作台', exact: true }).count(), 0);
   await page.getByRole('button', { name: '创建第一个任务', exact: true }).click();
-  const scheduledEditor = page.getByRole('complementary', { name: '新建安排任务', exact: true });
+  const scheduledEditor = page.getByRole('complementary', { name: '新建定时任务', exact: true });
   await scheduledEditor.getByRole('textbox', { name: '名称', exact: true }).fill('原页面任务草稿');
   await scheduledEditor
-    .getByRole('textbox', { name: '任务说明', exact: true })
+    .getByRole('textbox', { name: '定时任务说明', exact: true })
     .fill('核对原项目\n🙂');
   const projectChoice = scheduledEditor.getByRole('combobox', { name: /^项目/ });
   await projectChoice.waitFor();

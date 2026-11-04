@@ -1,6 +1,6 @@
 import {
   Add01Icon,
-  CalendarClockIcon,
+  AlarmClockIcon,
   Delete02Icon,
   Folder01Icon,
   Folder02Icon,
@@ -396,8 +396,8 @@ export function Sidebar({
               aria-current={activePage === 'scheduledTasks' ? 'page' : undefined}
               onClick={actions.scheduledTasks}
             >
-              <HugeiconsIcon data-icon="inline-start" icon={CalendarClockIcon} />
-              <span>安排任务</span>
+              <HugeiconsIcon data-icon="inline-start" icon={AlarmClockIcon} />
+              <span>定时任务</span>
             </Button>
           )}
         </nav>

@@ -3,8 +3,6 @@ import type { Command, Interaction, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { verifyInteractionAnswerReceipt } from '../src/controller';
-import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../src/native-bridge';
 import { nextDesktopPresentation, prepareDesktopDom, promptValue } from './native-page-dom.fixture';
 
@@ -27,6 +25,8 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+  const { NativeDesktop } = await import('../src/native');
+  const { verifyInteractionAnswerReceipt } = await import('../src/controller');
   const sessions = ['a', 'b'].map((id) => ({
     id,
     workspaceId: 'w',
@@ -200,6 +200,8 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     });
   const text = () =>
     host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
+  const mode = () =>
+    host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Plan review mode"]')!;
   const mainInput = () =>
     host.querySelector<HTMLElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
   const edit = async (value: string) =>
@@ -215,10 +217,10 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     expect(mainInput() === null).toBe(true);
     await edit('  original A\n雪🙂  ');
     await act(async () => {
-      const choice = host.querySelector<HTMLSelectElement>(
-        'select[aria-label="Plan review mode"]',
-      )!;
-      choice.value = 'accept_edits';
+      const choice = mode().closest('form')!.querySelector('select')!;
+      choice.value = [...choice.options].find(
+        (option) => option.textContent === 'accept_edits',
+      )!.value;
       choice.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
     });
     // Plan denial and the explicit original-work cancellation are separate choices.
@@ -232,9 +234,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     await edit('other B');
     await click('Plan A');
     expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(
-      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
-    ).toBe('accept_edits');
+    expect(mode().textContent).toBe('accept_edits');
     omitted = true;
     await refresh();
     expect(text()).toBeNull();
@@ -244,9 +244,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     omitted = unavailable = false;
     await refresh();
     expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(
-      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
-    ).toBe('accept_edits');
+    expect(mode().textContent).toBe('accept_edits');
     await click('Request revision');
     expect(posts).toBe(1);
     expect(mainInput() === null).toBe(true);
@@ -259,9 +257,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     expect(text().value).toBe('other B');
     await click('Plan A');
     expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(
-      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
-    ).toBe('accept_edits');
+    expect(mode().textContent).toBe('accept_edits');
     expect(
       [...host.querySelectorAll('button')].find(
         (button) => button.textContent === 'Request revision',
@@ -295,9 +291,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     expect(text().value).toBe('other B');
     await click('Plan A');
     expect(text().value).toBe('');
-    expect(
-      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
-    ).toBe('');
+    expect(mode().textContent).toBe('Select a mode explicitly');
     await click('Plan B');
     expect(text().value).toBe('other B');
     cards.b = { ...cards.b!, revision: '2', inputDigest: 'replacement-input' };

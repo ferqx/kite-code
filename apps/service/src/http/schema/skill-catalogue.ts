@@ -11,6 +11,19 @@ export const SkillCatalogueQuerySchema = z.strictObject({
   byteLimit: positive.max(1048576).optional(),
 });
 export const UserSkillCatalogueQuerySchema = SkillCatalogueQuerySchema;
+export const UserSkillDocumentQuerySchema = z.strictObject({
+  storeId: id,
+  skillId: id,
+  skillVersion: digest,
+  revision: digest,
+});
+export const UserSkillDocumentSchema = z.strictObject({
+  storeId: id,
+  skillId: id,
+  skillVersion: digest,
+  revision: digest,
+  body: z.string().max(1048576),
+});
 export const skillUnavailableReasons = [
   'invalid_skill_configuration',
   'skill_path_denied',

@@ -1,5 +1,14 @@
-import { type AgentClient, ClientError, verifyUserSkillCataloguePage } from '@kite-ai/client';
-import type { NativeSkillsPage, NativeSkillsScope } from '../src/skills-bridge';
+import {
+  type AgentClient,
+  ClientError,
+  verifyUserSkillCataloguePage,
+  verifyUserSkillDocument,
+} from '@kite-ai/client';
+import type {
+  NativeSkillDocument,
+  NativeSkillsPage,
+  NativeSkillsScope,
+} from '../src/skills-bridge';
 
 type Lease = {
   readId: string;
@@ -14,6 +23,7 @@ type Lease = {
 /** Read-only view lease. Public pages stay bounded; the whole directory has no item quota. */
 export class NativeSkillCatalogueReads {
   private lease: Lease | undefined;
+  private documentLease: Pick<Lease, 'readId' | 'scope' | 'abort'> | undefined;
   private readonly client: AgentClient;
   private readonly current: () => NativeSkillsScope | undefined;
   constructor(client: AgentClient, current: () => NativeSkillsScope | undefined) {
@@ -21,10 +31,13 @@ export class NativeSkillCatalogueReads {
     this.current = current;
   }
 
-  private check(lease: Lease) {
+  private check(
+    lease: Pick<Lease, 'readId' | 'scope' | 'abort'>,
+    current = this.lease as Pick<Lease, 'readId' | 'scope' | 'abort'> | undefined,
+  ) {
     const scope = this.current();
     if (
-      this.lease !== lease ||
+      current !== lease ||
       lease.abort.signal.aborted ||
       !scope ||
       Object.keys(lease.scope).some(
@@ -40,7 +53,7 @@ export class NativeSkillCatalogueReads {
     if (!scope) throw new ClientError('native_generation_changed');
     if (!this.client.serverInfo?.capabilities.includes('user_skill_catalogue'))
       throw new ClientError('capability_unavailable');
-    this.release();
+    this.releaseCatalogue();
     const lease: Lease = {
       readId: input.readId,
       scope: { ...scope },
@@ -99,12 +112,63 @@ export class NativeSkillCatalogueReads {
   }
 
   close(readId: string) {
-    if (this.lease?.readId === readId) this.release();
+    if (this.lease?.readId === readId) this.releaseCatalogue();
   }
 
-  release() {
+  async document(input: {
+    readId: string;
+    skillId: string;
+    skillVersion: string;
+    revision: string;
+  }): Promise<NativeSkillDocument> {
+    const scope = this.current();
+    if (!scope) throw new ClientError('native_generation_changed');
+    if (!this.client.serverInfo?.capabilities.includes('user_skill_document'))
+      throw new ClientError('capability_unavailable');
+    this.releaseDocument();
+    const lease = { readId: input.readId, scope: { ...scope }, abort: new AbortController() };
+    this.documentLease = lease;
+    try {
+      const value = await this.client.readUserSkillDocument({
+        storeId: scope.storeId,
+        skillId: input.skillId,
+        skillVersion: input.skillVersion,
+        revision: input.revision,
+        signal: lease.abort.signal,
+      });
+      this.check(lease, this.documentLease);
+      const document = verifyUserSkillDocument(value, {
+        storeId: scope.storeId,
+        skillId: input.skillId,
+        skillVersion: input.skillVersion,
+        revision: input.revision,
+      });
+      return {
+        kind: 'settings.skills.document',
+        readId: lease.readId,
+        scope: { ...lease.scope },
+        document,
+      };
+    } catch (error) {
+      if (this.documentLease === lease) this.releaseDocument();
+      throw error;
+    }
+  }
+  closeDocument(readId: string) {
+    if (this.documentLease?.readId === readId) this.releaseDocument();
+  }
+  private releaseDocument() {
+    const lease = this.documentLease;
+    this.documentLease = undefined;
+    lease?.abort.abort();
+  }
+  private releaseCatalogue() {
     const lease = this.lease;
     this.lease = undefined;
     lease?.abort.abort();
+  }
+  release() {
+    this.releaseCatalogue();
+    this.releaseDocument();
   }
 }

@@ -108,6 +108,8 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'background.child.read': ['readId', 'offset', 'limit'],
   'background.child.close': ['readId'],
   'settings.skills.open': ['readId'],
+  'settings.skills.document': ['readId', 'skillId', 'skillVersion', 'revision'],
+  'settings.skills.document.close': ['readId'],
   'settings.skills.next': ['readId'],
   'settings.skills.close': ['readId'],
   'jobOutput.open': ['readId', 'executionId', 'viewSelection', 'historyEpoch'],
@@ -262,6 +264,17 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   }
   const candidate = record(value);
+  if (
+    candidate.method === 'settings.skills.document' &&
+    (typeof candidate.skillId !== 'string' ||
+      !candidate.skillId ||
+      candidate.skillId.length > 128 ||
+      typeof candidate.skillVersion !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(candidate.skillVersion) ||
+      typeof candidate.revision !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(candidate.revision))
+  )
+    throw Error('invalid_native_request');
   if (
     bytes >
     (candidate.method === 'caller.prepare' ||
@@ -685,6 +698,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     if (
       method !== 'interaction.answer' &&
       method !== 'grants.read' &&
+      !(method === 'settings.skills.document' && key === 'revision') &&
       fields[method as NativeRequest['method']].includes(key) &&
       (!Number.isSafeInteger(input[key]) || Number(input[key]) < 0)
     )

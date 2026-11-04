@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { PublicView } from '@kite-ai/client';
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { PublicViewCard, projectPublicView } from '../src';
+import { Button } from '../src/desktop/components/ui/button';
 
 test('unknown content versions retain the exact public object, future fields and actions', () => {
   const view = {
@@ -67,6 +68,6 @@ function findButtons(
   return Children.toArray(node).flatMap((item) => {
     if (!isValidElement<{ children?: ReactNode; onClick?: () => void; disabled?: boolean }>(item))
       return [];
-    return item.type === 'button' ? [item] : findButtons(item.props.children);
+    return item.type === Button ? [item] : findButtons(item.props.children);
   });
 }

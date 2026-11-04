@@ -1,3 +1,4 @@
+import { Button, Textarea } from '@kite-ai/ui/desktop';
 import { useState } from 'react';
 import type { BrowserAnnotationDrafts, BrowserNoteDraft } from './browser-annotation-drafts';
 
@@ -39,7 +40,7 @@ function NoteCard({
         </strong>
         <small title={item.source.url}>{item.source.title || item.source.url} · 历史快照</small>
         {editing ? (
-          <textarea
+          <Textarea
             aria-label="编辑注释"
             maxLength={2000}
             value={text}
@@ -53,7 +54,8 @@ function NoteCard({
         <div className="browser-note-actions">
           {editing ? (
             <>
-              <button
+              <Button
+                size="xs"
                 type="button"
                 disabled={locked}
                 onClick={() => {
@@ -61,13 +63,14 @@ function NoteCard({
                 }}
               >
                 保存
-              </button>
-              <button type="button" onClick={() => setEditing(false)}>
+              </Button>
+              <Button size="xs" type="button" onClick={() => setEditing(false)}>
                 取消
-              </button>
+              </Button>
             </>
           ) : (
-            <button
+            <Button
+              size="xs"
               type="button"
               disabled={locked}
               onClick={() => {
@@ -76,11 +79,16 @@ function NoteCard({
               }}
             >
               编辑
-            </button>
+            </Button>
           )}
-          <button type="button" disabled={locked} onClick={() => owner.remove(scope, item.id)}>
+          <Button
+            size="xs"
+            type="button"
+            disabled={locked}
+            onClick={() => owner.remove(scope, item.id)}
+          >
             删除
-          </button>
+          </Button>
         </div>
       </div>
     </article>

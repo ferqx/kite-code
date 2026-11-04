@@ -8,7 +8,7 @@
 @import "./native-provider-settings.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
-@source "../../../packages/ui/src/desktop";
+@source "../../../packages/ui/src";
 
 @custom-variant focus-visible (&:focus-visible:where(:root:not([data-input-modality="pointer"]) *));
 

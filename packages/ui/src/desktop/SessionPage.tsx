@@ -1055,8 +1055,8 @@ function SessionPageContent({
   ) : scheduledEditor && props.scheduledTasks ? (
     <RightSidebar
       key="scheduled-editor"
-      label={scheduledEditor.task ? '编辑安排任务' : '新建安排任务'}
-      title={scheduledEditor.task ? '编辑任务' : '新建任务'}
+      label={scheduledEditor.task ? '编辑定时任务' : '新建定时任务'}
+      title={scheduledEditor.task ? '编辑定时任务' : '新建定时任务'}
       onClose={closeRightSidebar}
     >
       <ScheduledTaskEditor
@@ -1256,7 +1256,7 @@ function SessionPageContent({
                       />
                       <div className="breadcrumb">
                         {props.scheduledTasks ? (
-                          <strong>安排任务</strong>
+                          <strong>定时任务</strong>
                         ) : props.workbench ? (
                           <strong>工作台</strong>
                         ) : props.newConversation ? (

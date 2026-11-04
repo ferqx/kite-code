@@ -623,6 +623,8 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 ## 同源 Skill 知识目录
 
+用户级正文预览使用独立 `user_skill_document` capability 与 `GET /v1/config/user/skills/document`，参数仅为 Store、技能ID、正文版本及目录revision。`readUserDocument` 沿同一用户配置和已核来源重新发现，拒绝旧revision、换版、已禁用、未发现及重复来源，只返回准确身份与最多1MiB UTF-8正文；不接收路径，不返回资源入口。缺少执行依赖仍可阅读说明，原 `load/resource` 的依赖检查保持。目录分页仍只传元数据，读取正文不创建 Session、Run、Command、模型请求或技能激活。实现与持续取舍见[正文预览决定](../../.agents/notes/implemented/feature/2026-11-04-native-skill-document-preview.md)。
+
 [assembly](src/assembly.ts) 的 `skills.load/resource` 只声明知识身份、可选版本及资源路径，不声明或要求 `description`；公开参数继续将 `id` 映射为 `skill_id`。多余字段沿闭合 schema 返回准确校验失败，未进入 SkillSource；后续调用使用当前 schema 继续。已有历史输入及封存请求保留原记录，不因字段移除而改写或重发，Tool／Protocol 版本保持。执行描述仅由 [Browser 工具](../../packages/agent/src/tools/browser/README.md)声明。
 
 2026-10-31 参数收窄验证：[装配](test/isolated/assembly.test.ts)与[paired SDK／HTTP](test/isolated/assembly-http.test.ts)核公开及内部 schema 均无该字段、无描述正常读取、多余字段零派发失败后继续，以及原输入在存储、后续模型历史和公开 GET 中保留。相关 Service／CLI／Builtin 8文件38项通过，Service／Agent／CLI类型、定向格式与文档检查通过；这些是本地受控 Provider 及真实 Service HTTP 证据，本轮未调用真实模型或操作用户客户端。
