@@ -12,7 +12,7 @@
 
 [处理进程](../images/child.ts)使用固定 `sharp@0.35.5`，关闭 libvips 缓存、并发为1。只支持 PNG/JPEG/WebP/GIF；完整容器、PNG CRC 与 native `failOn:warning` 都通过后才发布。源文件最多16MiB、3200万像素、单边16384；应用 EXIF、动画仅首帧，不放大，最长边2048；输出保透明 PNG、最多8MiB，超量时按实际大小确定性缩小并只重试一次。结果说明原格式、原／实际尺寸、方向、首帧及缩放。SVG、损坏或截断图片失败；不把 native 填充的缺失像素当完整图片。
 
-[监督器](../images/processor.ts)启动固定校验摘要的程序，stdin 只传字节，不传路径、URL、Provider 配置或凭据。入口显式选择系统空设备作为 Bun config 和 tsconfig，禁用自动 env／安装；[Bun 的目录 preload](https://bun.sh/docs/runtime/bunfig)不能在已核程序前执行或改写 Sharp 解析。单宿主只允许一个处理进程，30秒取消预算；Windows 使用原 Job owner，512MiB Job 内存和单进程限制，核原 HANDLE wait 与 Job tree 停止后才释放名额。退出／关闭无法确认时保 owner、返回 unknown 并停止新的图片处理；停止证明失败独立于 stdout／exit Promise 结算，不无限等待已经缺失的证明。普通失败确认退出后允许下一次读取。POSIX 使用固定单程序、原 ChildProcess 与管道 close 收口，没有本次实测或硬内存资格。合作取消不对单次慢磁盘调用承诺实时上限。
+[监督器](../images/processor.ts)启动固定校验摘要的程序，stdin 只传字节，不传路径、URL、Provider 配置或凭据。入口显式选择系统空设备作为 Bun config 和 tsconfig，禁用自动 env／安装；[Bun 的目录 preload](https://bun.sh/docs/runtime/bunfig)不能在已核程序前执行或改写 Sharp 解析。单宿主只允许一个处理进程，30秒取消预算；Windows 使用原 Job owner，512MiB Job 内存和单进程限制，核原 HANDLE wait 与 Job tree 停止后才释放名额。退出／关闭无法确认时保 owner、返回 unknown 并停止新的图片处理；停止证明失败独立于 stdout／exit Promise 结算，不无限等待已经缺失的证明。普通失败确认退出后允许下一次读取。POSIX 使用固定单程序、原 ChildProcess 与管道 close 收口，操作错误与 close 证明分开等待，无 PID 时不发送 kill；stdin 的结束回调拒绝写入失败，error 监听保留至管道 close，避免随后 EPIPE 成为未处理异常。输出越限先发起停止并退出迭代器关闭溢出管道，再等原退出证明，避免等待 close 与未消费管道相互阻塞。当前 Linux 的监督器、严格解码和 Service 链路验证见下文，没有硬内存资格。合作取消不对单次慢磁盘调用承诺实时上限。
 
 成功结果发布当前 Execution 的 PNG `artifactRefs/modelImages`，沿[完整模型正文链](../../model-body/README.md)进入下一次模型请求，保原 Tool 来源、调用顺序和完整 Artifact 校验；历史／冷重开／Fork 不重读源路径。所选历史中的新工具图片累计超过32MiB时，在展开越界图片前明确 `image_context_too_large`，不静默丢图；用户图片、PDF 和浏览器原预算保持。AI 两协议编码和版本保持，真实视觉能力由 Provider 决定。
 
@@ -36,7 +36,13 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 
 ### 当前验证与性能
 
-2026-11-04，Windows x64／Bun1.4.3，当前实现的[严格解码回归](../../../test/isolated/files/images.test.ts)覆盖真实像素、透明、EXIF、动画首帧、截断与伪装、尺寸和字节预算、排队／在途取消、超时、原生崩溃、输出超量、Job 内存耗尽及随后正常读取。[源码树外闭包](../../../test/isolated/files/images-packaged.test.ts)物理复制 Sharp 和 native 依赖，空 PATH/NODE_PATH、禁止自动安装，核资产删除／摘要篡改及每次恢复；正式 Agent build 已产出 child、摘要与原生文件资产。
+2026-11-04，Linux x64／Bun1.4.4，[POSIX 监督器回归](../../../test/isolated/files/image-process-posix.test.ts)在修复前分别复现无 PID 的启动失败误封后续读取、stdin 结束回调之后的未处理 EPIPE，以及大量输出越限后的 close 等待互锁；修复后5项27断言通过。覆盖独立延迟 close 后的排队／后续恢复、真实 Writable 的回调与 error 顺序、真实子进程提前退出时的16MiB输入写入、stdout／stderr 各9MiB越限及随后正常协议往返，并保留 close 证明缺失时的全局拒绝。故障注入不启动或遗留实际故障进程，协议往返使用固定 PNG，不代替 Sharp 解码。首次仅运行该监督器文件时未安装仓库依赖；后续完整验证见下一段。
+
+同日，在 `4f29be4e0fbd8baf49c7fc2b50617f2e16b4b34e` 加本次监督器修复的 Linux x64／Bun1.4.4 隔离目录中，使用 `bun install --frozen-lockfile --ignore-scripts` 安装锁定依赖，根 manifest／lock 字节未变；另以官方 Rust1.97.1 运行 `bun run build:files-native`，并由原构建器生成图片与 PDF 资产。沿[原测试运行器](../../../../../scripts/test-suite.ts)逐文件执行严格图片、POSIX监督器、源码外闭包、退出未知、Service图片和历史预算六文件，保留隔离 HOME、`--no-orphans` 与 Linux 原 `--timeout=30000`，结果18 pass／1 Windows平台skip／0 fail／194断言。外部读取、完整读取响应、原生 Files、PDF、Artifact及取消六个完整文件另33 pass／0 fail／248断言。最初裸 `bun test` 使用默认5秒时，高熵图片例超时并被测试器终止；按仓库原30秒预算重跑完整文件通过，未修改生产30秒处理预算或测试断言。首次失败日志保留，不表述为所有命令一次全绿。根及八 workspace 的 `bun run typecheck`、全仓 `bun run format:check`、边界／workspace／同源 API、测试归属、文档结构／影响和计划证据检查均通过；Biome 原有41 warnings／200 infos保留。workspace检查先因尚未构建的Web资产失败，执行原Web构建后通过，未修改检查器。这里只运行上述受影响整文件，不代表完整默认、TUI或CI作业已通过。
+
+本次未在 Windows 运行新的共享输出越限逻辑；下述 Windows 记录来自修复前基准，不能代替当前修复的 Windows 复验，也不由 Linux 通过推定 Windows Job／硬内存、真实模型、完整客户端或发行资格。
+
+2026-11-04，Windows x64／Bun1.4.3，修复前基准的[严格解码回归](../../../test/isolated/files/images.test.ts)覆盖真实像素、透明、EXIF、动画首帧、截断与伪装、尺寸和字节预算、排队／在途取消、超时、原生崩溃、输出超量、Job 内存耗尽及随后正常读取。[源码树外闭包](../../../test/isolated/files/images-packaged.test.ts)物理复制 Sharp 和 native 依赖，空 PATH/NODE_PATH、禁止自动安装，核资产删除／摘要篡改及每次恢复；正式 Agent build 已产出 child、摘要与原生文件资产。
 
 [默认 Service 联验](../../../../../apps/service/test/isolated/image-reading.test.ts)通过真实 SQLite/Artifact、两个不同像素调用的结果／来源配对、外部文件／有效原件、跨会话拒绝、冷重开和 Fork，并将实际请求交给两种 SDK 编码。[累计预算回归](../../../test/isolated/artifacts/tool-image-budget.test.ts)核最后越界图片未读正文、零后继模型请求。原 PDF、外部读取、异步完整读取、Windows Job 和 Artifact 原门禁继续通过。
 
