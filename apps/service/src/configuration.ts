@@ -858,6 +858,7 @@ export function createDefaultProcessConfiguration(options: {
       runIdentity: { runId: string; sessionId: string };
     },
   ) => {
+    let modelTransport: Awaited<ReturnType<typeof resolveModelTransport>> | undefined;
     try {
       recovery?.signal.throwIfAborted();
       const businessInputs = readBusinessRunInputs(command.request);
@@ -946,11 +947,12 @@ export function createDefaultProcessConfiguration(options: {
       // adapters. Skill rows are validated locally by discovery, then the exact
       // selected subset is included in the final immutable snapshot below.
       createConfigurationSnapshot({ ...effective, skills: [] });
-      const modelTransport = await resolveModelTransport();
+      modelTransport = await resolveModelTransport();
       if (selection?.modelOnly)
         return {
           model: await resolveModel(selected, modelTransport),
           modelId: selected.id,
+          dispose: modelTransport.close,
           toolIds: [],
           extensions: [],
           permissions: withInjectedCeiling(
@@ -1164,6 +1166,7 @@ export function createDefaultProcessConfiguration(options: {
           }),
           Promise.resolve().then(() => webBinding?.dispose()),
           Promise.resolve().then(() => browser.disposeCommand(session.id, command.id)),
+          Promise.resolve().then(() => modelTransport?.close()),
         ]).then((results) => {
           const failures = results.flatMap((result) =>
             result.status === 'rejected' ? [result.reason] : [],
@@ -1682,12 +1685,22 @@ export function createDefaultProcessConfiguration(options: {
           throw new ConfigurationPreparationCleanupError({
             originalError: error,
             cleanupError,
-            resources: { assembly, webBinding },
+            resources: { assembly, webBinding, modelTransport },
           });
         }
         throw error;
       }
     } catch (error) {
+      if (!(error instanceof ConfigurationPreparationCleanupError))
+        try {
+          await modelTransport?.close();
+        } catch (cleanupError) {
+          throw new ConfigurationPreparationCleanupError({
+            originalError: error,
+            cleanupError,
+            resources: { modelTransport },
+          });
+        }
       if (error instanceof KnowledgeReadCleanupError)
         throw new ConfigurationPreparationCleanupError({
           originalError: error,

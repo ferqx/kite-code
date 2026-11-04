@@ -8,6 +8,8 @@ Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desk
 
 默认 Service 的模型代理选择归 [Service owner](../../apps/service/README.md)，不下沉到 AI／Core 或客户端。新 Run 的 `snapshot.modelTransport.digest` 只绑定宿主代理环境与系统选择的摘要；恢复前变化拒绝，旧无字段记录不追补。代理传输不改变模型请求、权限、工具身份、未知结果或零重放边界，也不把模型自动代理推广到 MCP 网络准入。
 
+模型绑定在首次请求时创建独立 `Bun.FetchSession`，普通 Run、标题 model-only 绑定和模型目录查询沿原 owner 收尾关闭空闲池；关闭封住该绑定的新请求并复用原清理结果。原 AbortSignal 继续负责活跃请求取消，连接池关闭不冒充业务取消、成功或完整进程退出。代理选择、摘要字节和恢复拒绝仍用原规则；不共享其他绑定的连接，不因连接失败改出口或重放。具体接线与真实本地网络回归归[Service owner](../../apps/service/README.md#模型连接池与原取消恢复边界)。
+
 模型启停的串行后继证明沿 [Service](../../apps/service/README.md#native-provider-与下一次模型绑定) → 原 [HostMutation journal](../../packages/agent/src/storage/sqlite/host-mutations-README.md) → [Client](../../packages/client/README.md) → [Native Main](../../apps/desktop/README.md#native-提供商与模型设置) 交接。仅已应用的模型更新可附完整 `postReadSet`，它绑定原发布候选与实际 ETag；Main 只有在同一热提交、完整 scope 和后续 GET 四字段一致时才生成后继观察。该证明不授权重放、跨身份续写或跳过 CAS；失败、未知、外部变化和冷 journal 不恢复旧队列。renderer 的正常连续交互、同模型合并和关闭设置后后台保存只管理未派发意图，不取消或修改活动 Run 的封存配置。管理页的异常自动恢复只执行GET或原HostMutation ID的结果查询，包含当前Store冷未决项；普通GET不能解除unknown或恢复已丢弃尾部。明确暂态网络错误可重试原afterCommandId校验，只有原scope与proof仍一致才能继续已接受队列。恢复不重发POST、密钥、原secret或远端发现，也不修改活动Run。默认模型与普通模型均可启停，用户配置可保留指向已禁用模型的默认ID；新运行仍须使用已启用且configured的路由，不能自动替代已禁用默认。活动Run及其后续模型请求继续按原封存配置运行，不因该偏好更新取消或重绑定。
 
 Native MCP／Skills 全局设置沿[独立用户 API](../../apps/service/README.md#http-oauth-与原认证结果)读取用户配置，不获取当前 Session／Workspace、扫描项目或创建隐藏实体。Skills 只读 metadata；MCP 使用现有 HostMutation 的闭合 user marker 与明确 user transport owner 管理认证和设置连接，协议白名单不执行工具。原 Session Action、来源批准与实际 Tool／Job 权限保持，DB7 以显式记录版本保原 ID 的只读恢复，冷启动不重 POST。当前产品范围归[桌面手册](../handbook/clients/desktop/README.md)，长期理由归[用户级设置决定](../../.agents/notes/implemented/architecture/2026-10-24-user-global-extension-settings.md)。
@@ -103,6 +105,10 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。除 `apps/kite-cli` 历史源码外，其他旧架构模块及其独占测试已删除；保留目录不具有运行依赖闭包，不进入正式产物或默认调度。旧实现与原验证证据通过删除前固定 revision 追溯。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
 
 正式命令/CI 中 `bun test` 明确列出的 `*.test/spec.*` 文件必须存在，包含 `--cwd` 解析后的输入；缺失由 [workspace 守卫](../../scripts/check-unified-workspaces.ts)以 `formal-test-file-missing` 拒绝。此检查不把 build 尚未生成的输出当测试输入，不改变运行预算、选择范围或原资格要求。
+
+质量作业、提交 hook 和 pre-release architecture 统一通过该 workspace 守卫执行一次默认源码及正式消费入口的边界检查；独立 `check:unified-agent-boundary`／`check:core-boundary` 仍可诊断。合并结果保留 source-boundary 拒绝、覆盖计数、pending 与未完成发布资格提示，不将源码缺失或计算夹具当作实际运行通过。`tsconfig.typecheck.json` 仅聚合原根和精确八 workspace，原九份配置独立生效；清单守卫拒绝漏项、重复、越界及额外配置，文件和失败路径验证归[测试体系](../../tests/README.md#类型检查)。
+
+依赖解析只在一次守卫调用内缓存工作区 manifest 和候选文件的存在／类型／实际路径；不缓存跨入口策略的通过结论，不忽略条件导出的任何分支，也不沿越界链接继续寻找替代源码。下一次调用重新读取，包括新增／删除文件、清单修改及目录链接换向；原来源、循环依赖与 CLI 专属例外保持。quality 显式准备 Web 资产，缺失导出仍拒绝；禁用安装脚本只适用于该静态作业，不放宽运行时或发布的原生资产要求。相关[负例与冷安装记录](../../tests/README.md#质量作业冷安装与边界缓存)不表示三平台运行或发布资格。
 
 单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限与决策来源独立核实。人工／自动拒绝、工具失败、adapter 异常及已保存的 unknown 作为准确 ToolResult 交回下一 Model；拒绝和 unknown 只停止本批后继效果，已启动调用先完成原结算，不取消整 Run。非法工具返回的快照／序列化失败仍属于adapter结果边界，保守结算原unknown；后续只使用独立纯JSON，不执行返回对象中的getter／toJSON。下一模型可以说明失败与未知，不能重投效果或换工具绕过拒绝；回复 completed 不解决原 unknown。用户明确取消仍停止；原终态保存失败或 authority 损坏不能编造消息继续。Run 收口与 lease release 等待全部已启动调用，真正持久化失败保原错误。显式接续复用非前缀的已结算结果，只有已声明的内部 continuation 可恢复监督，普通未知效果不能自动重放。当前实现与验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)及[工具结果决定](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)。
 

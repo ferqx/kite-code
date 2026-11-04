@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 
 const repositoryRoot = join(import.meta.dir, '..', '..', '..');
 const workflowRoot = join(repositoryRoot, '.github', 'workflows');
-const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.2';
+const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.4';
 const TYPECHECK_BUN_VERSION = '1.4.4';
 
 describe('CI Bun baseline', () => {
@@ -17,6 +17,7 @@ describe('CI Bun baseline', () => {
       'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
       'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
       'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6',
+      'actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830',
     ]);
 
     for (const { name, source } of workflows) {
@@ -30,8 +31,8 @@ describe('CI Bun baseline', () => {
     }
   });
 
-  test('pins the quality checker separately and retains the formal and Windows runtime baselines', () => {
-    expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.2');
+  test('pins quality and runtime qualification to the compared Bun 1.4.4 baseline', () => {
+    expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.4');
     expect(TYPECHECK_BUN_VERSION).toBe('1.4.4');
 
     const setupWorkflows = readdirSync(workflowRoot)
@@ -51,13 +52,10 @@ describe('CI Bun baseline', () => {
       >;
       let setupCount = 0;
       for (const [jobName, job] of Object.entries(jobs)) {
-        const runners = JSON.stringify([job['runs-on'], job.strategy]).toLowerCase();
         const expected =
           name === 'required.yml' && jobName === 'quality'
             ? TYPECHECK_BUN_VERSION
-            : runners.includes('"windows-')
-              ? `\${{ runner.os == 'Windows' && '1.4.3' || '1.4.2' }}`
-              : FORMAL_QUALIFICATION_BUN_VERSION;
+            : FORMAL_QUALIFICATION_BUN_VERSION;
         for (const step of job.steps ?? []) {
           if (!step.uses?.startsWith('oven-sh/setup-bun@')) continue;
           setupCount++;

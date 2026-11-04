@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { checkUnifiedAgentBoundary } from '../../../scripts/check-unified-agent-boundary';
 import {
   checkUnifiedWorkspaces,
   UNIFIED_WORKSPACES,
@@ -20,8 +21,7 @@ function fixture() {
     build: 'bun run scripts/run-runtime-workspace-script.ts build',
     test: 'bun run scripts/run-default-tests.ts',
     'test:all': 'bun run test',
-    typecheck:
-      'bun check -p tsconfig.json && bun run scripts/run-runtime-workspace-script.ts typecheck',
+    typecheck: 'bun check -b -p tsconfig.typecheck.json',
     agent: 'bun run scripts/release/entrypoints/cli.ts',
     tui: 'bun run scripts/release/entrypoints/tui.ts',
     'prod:tui': 'NODE_ENV=production bun run scripts/release/entrypoints/tui.ts',
@@ -46,6 +46,12 @@ function fixture() {
     if (path) put(root, path, 'export {};');
   }
   put(root, 'scripts/release/source-terminal.ts', 'export {};');
+  put(root, 'tsconfig.typecheck.json', {
+    files: [],
+    references: ['.', ...UNIFIED_WORKSPACES].map((path) => ({
+      path: path === '.' ? './tsconfig.json' : `./${path}/tsconfig.json`,
+    })),
+  });
   for (const path of UNIFIED_WORKSPACES) {
     put(root, `${path}/package.json`, {
       name: `@kite-ai/${path.split('/')[1]}`,
@@ -89,6 +95,29 @@ test('exact eight manifests and trusted formal aliases pass without inspecting i
   expect(report.violations).toEqual([]);
   expect(report.checked).toEqual(UNIFIED_WORKSPACES);
 });
+test('generated Web asset export must exist even when its type branch is present', () => {
+  const root = fixture();
+  const path = 'apps/web/package.json';
+  const manifest = JSON.parse(readFileSync(resolve(root, path), 'utf8'));
+  manifest.exports['./assets'] = {
+    types: './src/assets-port.ts',
+    default: './dist/assets.js',
+  };
+  put(root, path, manifest);
+  put(root, 'apps/web/src/assets-port.ts', 'export {};');
+  const refusal = {
+    code: 'workspace-export-invalid',
+    path,
+    message: './assets:default: ./dist/assets.js',
+  };
+  expect(checkUnifiedWorkspaces(root).violations).toContainEqual(refusal);
+  const asset = 'apps/web/dist/assets.js';
+  put(root, asset, 'export {};');
+  expect(checkUnifiedWorkspaces(root).violations).toEqual([]);
+  rmSync(resolve(root, asset));
+  expect(checkUnifiedWorkspaces(root).violations).toContainEqual(refusal);
+});
+
 test('wildcard, order drift, unknown workspace and old root dependency reject', () => {
   for (const workspaces of [
     ['packages/*', 'apps/*'],
@@ -109,6 +138,52 @@ test('wildcard, order drift, unknown workspace and old root dependency reject', 
     ),
   ).toBe(true);
 });
+
+test('aggregate typecheck cannot omit projects, widen roots or override their compiler settings', () => {
+  const references = ['.', ...UNIFIED_WORKSPACES].map((path) => ({
+    path: path === '.' ? './tsconfig.json' : `./${path}/tsconfig.json`,
+  }));
+  for (const config of [
+    { files: [], references: references.slice(1) },
+    { files: [], references: references.slice(0, -1) },
+    { files: [], references: [...references].reverse() },
+    { files: [], references: [...references, references[0]] },
+    { files: [], references: [...references, { path: './apps/kite-cli/tsconfig.json' }] },
+    { files: ['unlisted.ts'], references },
+    { files: [], references, compilerOptions: { strict: false } },
+  ]) {
+    const root = fixture();
+    put(root, 'tsconfig.typecheck.json', config);
+    expect(
+      checkUnifiedWorkspaces(root).violations.some((v) => v.code === 'typecheck-projects-invalid'),
+    ).toBe(true);
+  }
+});
+
+test('combined boundary preserves standalone refusals and pending diagnostics', () => {
+  for (const [path, source] of [
+    ['packages/agent/src/permissions/check.ts', 'import "@kite-ai/service";'],
+    ['packages/agent/src/loop.ts', 'import "node:fs";'],
+    ['packages/ai/src/index.ts', 'import "@kite-ai/agent";'],
+    ['packages/ui/src/index.ts', 'import "node:fs";'],
+    ['apps/service/src/index.ts', 'export function createPermissionPolicy() { return {}; }'],
+    ['apps/desktop/electron/bridge.ts', 'import "@kite-ai/runtime-host";'],
+  ] as const) {
+    const root = fixture();
+    put(root, path, source);
+    const standalone = checkUnifiedAgentBoundary(root);
+    const combined = checkUnifiedWorkspaces(root);
+    expect(standalone.violations.length).toBeGreaterThan(0);
+    expect(combined.boundary).toEqual(standalone);
+    for (const violation of standalone.violations)
+      expect(combined.violations).toContainEqual({
+        code: 'source-boundary',
+        path: violation.file,
+        message: `${violation.rule}:${violation.line} ${violation.detail}`,
+      });
+  }
+});
+
 test('transitive new workspace cannot hide old or unknown internal package, export escape or missing scripts', () => {
   const root = fixture();
   edit(

@@ -248,58 +248,62 @@ export async function discoverProviderModels(
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const transport = await resolveModelTransport();
-    const response = await transport.fetch(endpoint, {
-      headers: {
-        accept: 'application/json',
-        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
-      },
-      // Observe and reject redirects; never forward a Vault key to another endpoint.
-      redirect: 'manual',
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
-      throw new AgentError(
-        response.status === 401 || response.status === 403
-          ? 'provider_discovery_auth_failed'
-          : 'provider_discovery_failed',
-      );
-    }
-    const reader = response.body?.getReader();
-    if (!reader) throw new AgentError('provider_discovery_invalid');
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
     try {
-      for (;;) {
-        const next = await reader.read();
-        if (next.done) break;
-        bytes += next.value.byteLength;
-        if (bytes > 2 * 1048576) throw new AgentError('provider_discovery_too_large');
-        chunks.push(next.value);
+      const response = await transport.fetch(endpoint, {
+        headers: {
+          accept: 'application/json',
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
+        // Observe and reject redirects; never forward a Vault key to another endpoint.
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        throw new AgentError(
+          response.status === 401 || response.status === 403
+            ? 'provider_discovery_auth_failed'
+            : 'provider_discovery_failed',
+        );
       }
-    } finally {
-      await reader.cancel().catch(() => {});
-    }
-    let body: unknown;
-    try {
-      body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
-    } catch {
-      throw new AgentError('provider_discovery_invalid');
-    }
-    if (
-      !body ||
-      typeof body !== 'object' ||
-      !('data' in body) ||
-      !Array.isArray(body.data) ||
-      body.data.some(
-        (item: unknown) =>
-          !item || typeof item !== 'object' || !('id' in item) || typeof item.id !== 'string',
+      const reader = response.body?.getReader();
+      if (!reader) throw new AgentError('provider_discovery_invalid');
+      const chunks: Uint8Array[] = [];
+      let bytes = 0;
+      try {
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+          bytes += next.value.byteLength;
+          if (bytes > 2 * 1048576) throw new AgentError('provider_discovery_too_large');
+          chunks.push(next.value);
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+      } catch {
+        throw new AgentError('provider_discovery_invalid');
+      }
+      if (
+        !body ||
+        typeof body !== 'object' ||
+        !('data' in body) ||
+        !Array.isArray(body.data) ||
+        body.data.some(
+          (item: unknown) =>
+            !item || typeof item !== 'object' || !('id' in item) || typeof item.id !== 'string',
+        )
       )
-    )
-      throw new AgentError('provider_discovery_invalid');
-    const names = providerModelNames(body.data.map((item: { id: string }) => item.id));
-    if (!names.length) throw new AgentError('provider_discovery_empty');
-    return names;
+        throw new AgentError('provider_discovery_invalid');
+      const names = providerModelNames(body.data.map((item: { id: string }) => item.id));
+      if (!names.length) throw new AgentError('provider_discovery_empty');
+      return names;
+    } finally {
+      await transport.close();
+    }
   } catch (error) {
     if (signal?.aborted) throw new AgentError('provider_discovery_cancelled');
     if (error instanceof AgentError) throw error;

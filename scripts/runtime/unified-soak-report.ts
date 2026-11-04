@@ -789,7 +789,7 @@ function verifyReport(
     if (
       value.environment.platform !== 'linux' ||
       value.environment.arch !== 'x64' ||
-      value.environment.bunVersion !== '1.4.2'
+      value.environment.bunVersion !== '1.4.4'
     )
       errors.push('formal_environment_invalid');
     if (value.durationMs < FORMAL_DURATION_MS || value.durationMs > GLOBAL_DEADLINE_MS)
@@ -825,7 +825,7 @@ export function verifyBlockedWorkloadCollection(value: UnifiedSoakReport): strin
       value.qualificationPreflight?.collectionMode !== 'full' ||
       value.environment.platform !== 'darwin' ||
       !['arm64', 'x64'].includes(value.environment.arch) ||
-      value.environment.bunVersion !== '1.4.2' ||
+      value.environment.bunVersion !== '1.4.4' ||
       !/^[a-f0-9]{40}$/.test(value.checkout.commit) ||
       value.artifact.source.commit !== value.checkout.commit ||
       (value.source !== null &&

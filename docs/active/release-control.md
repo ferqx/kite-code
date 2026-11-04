@@ -10,9 +10,11 @@
 
 ## 当前发行与源身份
 
-Required 的 `quality` 作业独立固定 Bun 1.4.4，运行根与八 workspace 的 `bun check` 以及原质量检查；其余运行时测试与正式资格作业保持下述基线。[CI 基线守卫](../../tests/integration/scripts/ci-bun-baseline.test.ts)仅允许这一明确的质量作业例外。类型检查范围与开发要求归[本地开发](../development/local-development.md)，不因质量工具升级变更候选 Bun、SQLite sourceId、安装或平台资格。
+Required quality 与运行时／正式资格 workflow 当前均固定 Bun1.4.4，由[CI 基线守卫](../../tests/integration/scripts/ci-bun-baseline.test.ts)核对。聚合类型检查仍覆盖原根与八 workspace，`check:runtime-packages` 一次完成清单／正式消费／默认及额外入口边界检查；pre-commit 与 pre-release architecture 同样去除重复扫描。独立边界命令及原拒绝条件保留，CI 负例逐项确认输入确实变异后再核拒绝。本机 Windows1.4.3→1.4.4定向对照及既有失败归[测试体系](../../tests/README.md#运行时升级与模型连接池)；版本 pin 和源码回归不授予 hosted、三平台、installed 或发布资格，候选仍须实际核对所选 Bun、SQLite sourceId 和完整 inventory。
 
-Windows CI 固定 Bun 1.4.3；Linux/macOS CI 与 formal 资格基线保留 1.4.2。Windows 采用上游对 `--tsconfig-override` directory-mismatch 的修复；固定配置、零意外 stderr、PE/System32/no-delay 与 SQLite 精确来源门禁保留，未过滤原 1.4.2 警告。Windows 隔离输入的官方 ZIP SHA 为 `0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d`，实际内嵌 SQLite 3.53.4/sourceId 仍在原已审查集合内。旧 1.4.2 的构建/测试事实保历史范围；固定 1.4.2 的实验 resource-census 补丁未移植，也未替换正式运行时，不授 1.4.3 资源或跨平台资格。
+quality 安装禁用 lifecycle scripts，并显式构建 Web 以准备公开资产导出；不运行 Files Rust 构建或全 workspace build，原全部质量检查及顺序保持在该准备之后。只缓存按平台、Bun和完整依赖输入隔离的下载目录，hit不跳过安装或门禁，不复用 workspace／原生构建产物。运行时／发布作业仍用原安装方式，Files 的固定编译、ABI／来源／binary hash 与许可证要求保持。冷安装步骤与守卫单次缓存边界归[本地开发](../development/local-development.md)，实际冷安装和负例证据归[测试体系](../../tests/README.md#质量作业冷安装与边界缓存)。
+
+此前 Windows CI 固定 Bun1.4.3、Linux/macOS及formal基线保留1.4.2，Windows采用上游对 `--tsconfig-override` directory-mismatch 的修复。该旧Windows隔离输入的官方 ZIP SHA 为 `0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d`；本轮同一ZIP已复核，1.4.3与1.4.4内嵌SQLite均实测为原已审查的3.53.4及同一sourceId，未扩展来源白名单。当前CI已按上述对照选择1.4.4；固定配置、零意外stderr、PE/System32/no-delay和SQLite精确来源门禁保持。旧构建/测试事实与固定1.4.2的实验resource-census补丁仍只代表其原历史范围，不授新基线的资源或跨平台资格。
 
 Windows 的原 HANDLE 内容读取、同进程完整 pin 复用、安全描述符查询和私有批量复制减少重复开销；每次完整内容验证保全库存/全 SHA；Bun 借用继续用原句柄复验全部内容，Main 的独立准入后则以持续强 pin、重新枚举、原 identity/ACL 与双 SH 代替同进程重复哈希，子 Service 仍独立完整准入。分享模式、每文件 Flush、严格关闭与原超时保持。普通 JS 依赖按各 workspace 明确声明内联，生成物拒绝残余 bare import，保原 manifest 字节、声明与许可全文；React/React DOM、动态资源、原生资产和 optional/peer 仍按真实图处理。理由与已拒绝的降门限/过滤警告/cwd pivot 方案归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。完整安装 caller 使用当前用户模型配置，并单独保旧 Profile 原字节作维护证据；新的 B manifest 目录在复制前私有创建，不修既有 ACL。当前真实资格与未通过门禁只由对应 Terminal/Native owner 的实测记录认定。
 
@@ -44,7 +46,7 @@ Native非development renderer的React／JSX模式由[builder](../../apps/desktop
 
 `release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 包含完整 Terminal 和实际 Electron。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
 
-候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.2。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。
+候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.4。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。当前 fault-soak 与完整 blocked collection 同样要求1.4.4，原迭代、期限、source／receipt／资源拒绝门禁不变；历史1.4.2记录保留其原环境，不能替代新基线证据。
 
 release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试](../../tests/isolated/unified-agent/terminal-bundle.test.ts)，包含实际 CLI/TUI、升级/回滚、lease 与卸载保数据；Linux 分支继续核 selected 引擎、双 Worker WAL 和实际安装 maintenance。正式消费者守卫要求双方平台及准确完整命令，拒绝 Mac-only、echo 与过滤到零案例。workflow 接入不表示该原生平台已执行通过。
 

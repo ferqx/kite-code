@@ -31,7 +31,6 @@ export async function resolveModelTransport(
   inputs: { env?: Environment; systemProxy?: () => Promise<Proxy>; fetch?: typeof fetch } = {},
 ) {
   const env = inputs.env ?? { ...process.env };
-  const transportFetch = inputs.fetch ?? globalThis.fetch;
   const environment = Object.fromEntries(
     [
       'http_proxy',
@@ -65,12 +64,31 @@ export async function resolveModelTransport(
   const snapshot = {
     digest: createHash('sha256').update(JSON.stringify({ environment, proxy })).digest('hex'),
   };
-  if (explicit) return { fetch: transportFetch, snapshot };
   const bypass = env.no_proxy ?? env.NO_PROXY ?? proxy.noProxy;
+  let session: Bun.FetchSession | undefined;
+  let closed = false;
+  let closing: Promise<void> | undefined;
   return {
     snapshot,
+    close() {
+      closed = true;
+      // Run disposal happens after Model settlement; aborting active requests remains
+      // the original caller Signal's job. Retain the same cleanup result on retries.
+      closing ??= Promise.resolve().then(() => session?.close());
+      return closing;
+    },
     fetch: Object.assign(
       (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        if (closed) return Promise.reject(new AgentError('model_transport_closed'));
+        let transportFetch: Bun.FetchSession['fetch'] | undefined = inputs.fetch;
+        if (!transportFetch) {
+          session ??= new Bun.FetchSession({
+            keepAlive: { idleTimeout: 30, maxIdleSockets: 8 },
+          });
+          transportFetch = session.fetch;
+        }
+        // An explicit environment keeps Bun's original proxy/NO_PROXY interpretation.
+        if (explicit) return transportFetch(input, init);
         const target = new URL(input instanceof Request ? input.url : String(input));
         const endpoint = bypassed(target, bypass)
           ? undefined
@@ -79,7 +97,7 @@ export async function resolveModelTransport(
             : proxy.http;
         return transportFetch(input, { ...init, proxy: endpoint ?? false } as RequestInit);
       },
-      { preconnect: transportFetch.preconnect },
+      { preconnect: (inputs.fetch ?? globalThis.fetch).preconnect },
     ),
   };
 }

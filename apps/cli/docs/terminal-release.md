@@ -24,7 +24,7 @@ Windows 的完整原文件 owner 现可由同进程 verifier/归档复用；每�
 
 根 `npm run agent`／`npm run tui` 使用固定 `dist/unified-terminal`，先执行 `npm run release:build`。缺候选路径现沿同一结构化资产错误返回 `terminal_bundle_unavailable` 并说明构建／开发命令；纯帮助、版本和非TTY拒绝仍先于候选与Profile访问。取锁、完整闭包验证和原finally释放保持，不自动构建或转向源码。日常源码调整使用 `npm run build` 后 `npm run cli:dev`／`npm run tui:dev`，步骤见[本地开发](../../../docs/development/local-development.md)。
 
-在已经安装仓库依赖的 checkout 中，Windows 使用 Bun 1.4.3，Linux/macOS 保持 Bun 1.4.2。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
+在已经安装仓库依赖的 checkout 中，当前 CI 使用 Bun 1.4.4；本轮 Windows 定向对照范围见[运行时升级记录](../../../tests/README.md#运行时升级与模型连接池)，各平台完整发行资格仍须独立取得。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
 
 ```sh
 bun run release:terminal build --directory /absolute/output/candidate
@@ -76,6 +76,8 @@ stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OP
 升级只影响后续启动，原进程保持原 candidate。回滚完整验证 previous 后交换指针；它不恢复旧数据库或回放业务意图，本轮只验证相同新基线格式的候选组合，不宣称任意未来格式均可回滚。用户应先通过原实例的公开 `server stop` 结束要卸载的 daemon。卸载完整枚举已管理内容、拒绝未知条目/坏 active/坏候选，取得所有候选 exclusive 使用锁后重命名安装根再删除；任何 live lease 都立即拒绝，不强杀或猜测进程。独立 profile 数据保留。
 
 ## Windows managed Terminal 当前实现
+
+当前CI基线已按[运行时对照](../../../tests/README.md#运行时升级与模型连接池)选择Bun1.4.4；实际Windows sealed Bun、固定配置与standalone verifier在原1.4.3和新1.4.4均通过。两版内嵌SQLite均为原已审查3.53.4/sourceId，精确来源及原PE／System32／no-delay规则未放宽。此定向结果不替代下述完整安装／维护、Native或三平台门禁；历史候选和旧资源census保持原环境范围。
 
 2026-10-17 范围审查按[因果分组](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md#scope-review)核对连续任务，撤回 Linux/macOS CI、formal soak 和实验 census 的版本迁移，只保 Windows Bun1.4.3；工具 smoke 恢复原每命令20秒。同进程借用新增库存反例先红后绿，许可记录补保完整原 manifest，不能以摘要代替仅在 manifest 内的声明。
 

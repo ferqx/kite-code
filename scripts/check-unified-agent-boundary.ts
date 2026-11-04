@@ -68,58 +68,74 @@ function exportTargets(value: unknown): string[] {
   const branches = Object.values(value).map(exportTargets);
   return branches.some((branch) => !branch.length) ? [] : branches.flat();
 }
-function localModules(root: string, file: string, specifier: string): string[] {
-  let targets: string[] = [];
-  if (specifier.startsWith('.') || isAbsolute(specifier))
-    targets = [resolve(dirname(file), specifier)];
-  const workspace = /^@kite-ai\/([^/]+)(?:\/(.*))?$/.exec(specifier);
-  if (workspace && workspacePaths[workspace[1]!]) {
-    const packageRoot = resolve(root, workspacePaths[workspace[1]!]!);
-    try {
-      const manifest = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8'));
-      const key = workspace[2] ? `./${workspace[2]}` : '.';
-      const exported = exportTargets(manifest.exports?.[key]);
-      if (
-        manifest.name !== `@kite-ai/${workspace[1]}` ||
-        !exported.length ||
-        exported.some(
-          (value) =>
-            !value.startsWith('./') ||
-            relative(packageRoot, resolve(packageRoot, value)).startsWith('..'),
+function createLocalModuleResolver(root: string) {
+  const manifests = new Map<string, { name?: unknown; exports?: Record<string, unknown> }>();
+  const resolvedFiles = new Map<string, string | undefined>();
+  return (file: string, specifier: string): string[] => {
+    let targets: string[] = [];
+    if (specifier.startsWith('.') || isAbsolute(specifier))
+      targets = [resolve(dirname(file), specifier)];
+    const workspace = /^@kite-ai\/([^/]+)(?:\/(.*))?$/.exec(specifier);
+    if (workspace && workspacePaths[workspace[1]!]) {
+      const packageRoot = resolve(root, workspacePaths[workspace[1]!]!);
+      try {
+        if (!manifests.has(packageRoot))
+          manifests.set(
+            packageRoot,
+            JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8')),
+          );
+        const manifest = manifests.get(packageRoot)!;
+        const key = workspace[2] ? `./${workspace[2]}` : '.';
+        const exported = exportTargets(manifest.exports?.[key]);
+        if (
+          manifest.name !== `@kite-ai/${workspace[1]}` ||
+          !exported.length ||
+          exported.some(
+            (value) =>
+              !value.startsWith('./') ||
+              relative(packageRoot, resolve(packageRoot, value)).startsWith('..'),
+          )
         )
-      )
+          return [];
+        targets = exported.map((value) => resolve(packageRoot, value));
+      } catch {
         return [];
-      targets = exported.map((value) => resolve(packageRoot, value));
-    } catch {
-      return [];
+      }
     }
-  }
-  return [
-    ...new Set(
-      targets.flatMap((target) => {
-        if (relative(root, target).startsWith('..')) return [];
-        const extensionless = target.replace(/\.[cm]?js$/, '');
-        const candidates = target.endsWith('.css')
-          ? [target]
-          : [
-              target,
-              `${extensionless}.ts`,
-              `${extensionless}.tsx`,
-              resolve(target, 'index.ts'),
-              resolve(target, 'index.tsx'),
-            ];
-        const found = candidates.find(
-          (candidate) =>
-            existsSync(candidate) &&
-            statSync(candidate).isFile() &&
-            /\.(?:[cm]?[jt]sx?|css)$/.test(candidate),
-        );
-        if (!found) return [];
-        const actual = realpathSync(found);
-        return relative(root, actual).startsWith('..') ? [] : [actual];
-      }),
-    ),
-  ];
+    return [
+      ...new Set(
+        targets.flatMap((target) => {
+          if (relative(root, target).startsWith('..')) return [];
+          const extensionless = target.replace(/\.[cm]?js$/, '');
+          const candidates = target.endsWith('.css')
+            ? [target]
+            : [
+                target,
+                `${extensionless}.ts`,
+                `${extensionless}.tsx`,
+                resolve(target, 'index.ts'),
+                resolve(target, 'index.tsx'),
+              ];
+          let actual: string | undefined;
+          for (const candidate of candidates) {
+            if (!resolvedFiles.has(candidate))
+              resolvedFiles.set(
+                candidate,
+                existsSync(candidate) &&
+                  statSync(candidate).isFile() &&
+                  /\.(?:[cm]?[jt]sx?|css)$/.test(candidate)
+                  ? realpathSync(candidate)
+                  : undefined,
+              );
+            actual = resolvedFiles.get(candidate);
+            if (actual) break;
+          }
+          if (!actual) return [];
+          return relative(root, actual).startsWith('..') ? [] : [actual];
+        }),
+      ),
+    ];
+  };
 }
 
 /** Checks source dependencies, including local barrels; it does not certify runtime or release. */
@@ -132,6 +148,8 @@ export function checkUnifiedAgentBoundary(
   const checked: string[] = [];
   const imports = new Map<string, ModuleReference[]>();
   const normalizedRoot = existsSync(root) ? realpathSync(resolve(root)) : resolve(root);
+  // File/manifest results belong to this invocation; later checks must observe edits and links.
+  const localModules = createLocalModuleResolver(normalizedRoot);
   const targets = [
     ...['ai', 'agent', 'client', 'ui'].map((owner) => ({
       owner,
@@ -232,7 +250,7 @@ export function checkUnifiedAgentBoundary(
         });
       if (specifier && ts.isStringLiteralLike(specifier)) {
         const line = lineOf(node);
-        const targets = localModules(normalizedRoot, file, specifier.text);
+        const targets = localModules(file, specifier.text);
         const target = targets[0];
         const targetPath = target
           ? relative(normalizedRoot, target).replaceAll('\\', '/')

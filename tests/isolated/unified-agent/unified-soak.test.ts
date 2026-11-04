@@ -848,6 +848,7 @@ function nativeMatrixPacket() {
 /** Synthetic closed verifier input, never an execution or qualification receipt. */
 function blockedCollectionPacket() {
   const report = nativeMatrixPacket();
+  report.environment.bunVersion = '1.4.4';
   report.profile = 'qualification';
   report.status = 'inconclusive';
   report.durationMs = FORMAL_DURATION_MS;
@@ -1081,6 +1082,13 @@ test('full blocked collection preserves formal rejection and all original worklo
     if (mode === 'foreign_source') report.artifact.source.commit = 'e'.repeat(40);
     if (mode === 'fake_bun_counter') report.attempts[0]!.lifecycle.points[0]!.before.handles = 0;
     expect(verifyBlockedWorkloadCollection(reseal(report)).length).toBeGreaterThan(0);
+  }
+  for (const version of ['1.3.14', '1.4.2', '1.4.3', '1.5.0']) {
+    const report = structuredClone(valid);
+    report.environment.bunVersion = version;
+    expect(verifyBlockedWorkloadCollection(reseal(report))).toContain(
+      'blocked_collection_configuration_invalid',
+    );
   }
 });
 for (const mode of [

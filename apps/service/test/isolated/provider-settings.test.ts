@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -424,6 +424,7 @@ test('public discovery reads the actual provider once, writes no credential/conf
 
 test('public read-only discovery returns accurate HTTP classes, cancels its source, and rejects stale metadata before contacting a provider', async () => {
   const f = await fixture();
+  const closedSessions = spyOn(Bun.FetchSession.prototype, 'close');
   let status = 401,
     requests = 0;
   let entered!: () => void, released!: () => void;
@@ -473,6 +474,7 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
     await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
       code: 'provider_discovery_auth_failed',
     });
+    expect(closedSessions).toHaveBeenCalledTimes(1);
     status = 403;
     await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
       code: 'provider_discovery_auth_failed',
@@ -481,6 +483,7 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
     await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
       code: 'provider_discovery_failed',
     });
+    expect(closedSessions).toHaveBeenCalledTimes(3);
     const cancelled = new AbortController();
     status = 200;
     const pending = f.client.discoverProviderSettings(input, { signal: cancelled.signal });
@@ -493,6 +496,9 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
         new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1000)),
       ]),
     ).toBe(true);
+    const cleanupDeadline = Date.now() + 1000;
+    while (closedSessions.mock.calls.length < 4 && Date.now() < cleanupDeadline) await Bun.sleep(5);
+    expect(closedSessions).toHaveBeenCalledTimes(4);
     expect(f.puts).toBe(0);
     expect(f.keys.size).toBe(0);
     const before = requests;
@@ -501,9 +507,14 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
       code: 'configuration_read_set_conflict',
     });
     expect(requests).toBe(before);
+    expect(closedSessions).toHaveBeenCalledTimes(4);
   } finally {
     provider.stop(true);
-    await f.close();
+    try {
+      await f.close();
+    } finally {
+      closedSessions.mockRestore();
+    }
   }
 }, 10_000);
 

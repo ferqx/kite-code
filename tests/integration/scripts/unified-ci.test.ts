@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { parse } from 'yaml';
 import { checkUnifiedAgentBoundary } from '../../../scripts/check-unified-agent-boundary';
 import {
   checkUnifiedFormalConsumers,
@@ -30,6 +31,99 @@ function fixture(command = 'bun run extra') {
 }
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+test('quality prepares Web exports without install scripts and retains every quality gate', () => {
+  const root = resolve(import.meta.dir, '../../..');
+  const workflow = parse(readFileSync(join(root, '.github/workflows/required.yml'), 'utf8'));
+  const commands = (workflow.jobs.quality.steps as { run?: string }[])
+    .map((step) => step.run)
+    .filter(Boolean);
+  expect(commands).toEqual([
+    'bun install --frozen-lockfile --ignore-scripts',
+    'bun run build',
+    'bun run typecheck',
+    'bun run format:check',
+    'bun run check:runtime-packages',
+    'bun run check:unified-api',
+    'bun run check:test-ownership',
+    'bun run check:docs',
+    'bun run check:plan-evidence',
+    'bun run check:docs-impact --scope=range',
+  ]);
+  expect(
+    workflow.jobs.quality.steps.find((step: { run?: string }) => step.run === 'bun run build')[
+      'working-directory'
+    ],
+  ).toBe('apps/web');
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    if (name === 'quality') continue;
+    const installs = (job as { steps: { run?: string }[] }).steps
+      .map((step) => step.run)
+      .filter((command) => command?.startsWith('bun install'));
+    for (const install of installs) expect(install).toBe('bun install --frozen-lockfile');
+  }
+});
+
+test('quality caches only Bun downloads by exact platform, runtime and dependency inputs', () => {
+  const root = resolve(import.meta.dir, '../../..');
+  const workflow = parse(readFileSync(join(root, '.github/workflows/required.yml'), 'utf8'));
+  const quality = workflow.jobs.quality;
+  expect(quality.env.BUN_INSTALL_CACHE_DIR).toBe('${{ runner.temp }}/kite-bun-install-cache');
+  const caches = quality.steps.filter((step: { uses?: string }) =>
+    step.uses?.startsWith('actions/cache@'),
+  );
+  expect(caches).toHaveLength(1);
+  const cache = caches[0];
+  expect(cache.with.path).toBe('${{ env.BUN_INSTALL_CACHE_DIR }}');
+  expect(cache.with.key).toStartWith('quality-bun-${{ runner.os }}-${{ runner.arch }}-1.4.4-');
+  for (const path of [
+    'bun.lock',
+    'package.json',
+    'bunfig.toml',
+    '.npmrc',
+    'patches/**',
+    ...UNIFIED_WORKSPACES.map((path) => `${path}/package.json`),
+  ])
+    expect(cache.with.key).toContain(`'${path}'`);
+  expect(cache.with['restore-keys']).toBeUndefined();
+  expect(cache.if).toBeUndefined();
+  const install = quality.steps.find(
+    (step: { run?: string }) => step.run === 'bun install --frozen-lockfile --ignore-scripts',
+  );
+  expect(install.if).toBeUndefined();
+  expect(quality.steps.indexOf(cache)).toBeLessThan(quality.steps.indexOf(install));
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    if (name === 'quality') continue;
+    expect(
+      (job as { steps: { uses?: string }[] }).steps.some((step) =>
+        step.uses?.startsWith('actions/cache@'),
+      ),
+    ).toBe(false);
+  }
+});
+
+test('quality and local gates retain one combined boundary check and independent diagnostic aliases', () => {
+  const root = resolve(import.meta.dir, '../../..');
+  const workflow = parse(readFileSync(join(root, '.github/workflows/required.yml'), 'utf8'));
+  const commands = (workflow.jobs.quality.steps as { run?: string }[]).map((step) => step.run);
+  expect(commands.filter((command) => command === 'bun run check:runtime-packages')).toHaveLength(
+    1,
+  );
+  expect(commands).not.toContain('bun run check:unified-agent-boundary');
+  const hook = parse(readFileSync(join(root, 'lefthook.yml'), 'utf8'));
+  expect(hook['pre-commit'].commands['unified-boundary'].run).toBe(
+    'bun run check:runtime-packages',
+  );
+  expect(hook['pre-commit'].commands.typecheck.run).toBe('bun check -p tsconfig.json');
+  const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts;
+  expect(scripts['check:pre-release-architecture']).toBe(
+    'bun run scripts/check-unified-workspaces.ts && bun run scripts/generate-unified-api.ts --check',
+  );
+  expect(scripts['check:unified-agent-boundary']).toBe(
+    'bun run scripts/check-unified-agent-boundary.ts',
+  );
+  expect(scripts['check:core-boundary']).toBe('bun run scripts/check-unified-agent-boundary.ts');
 });
 test('actual ten workflows and all recursive eight-workspace script consumers remain new; historical files do not imply execution', () => {
   const root = resolve(import.meta.dir, '../../..');
@@ -137,7 +231,7 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
     'utf8',
   );
   const command =
-    'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/file-recovery-pty.test.ts\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          apps/cli/test/isolated/tui-file-recovery.test.ts\n          apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts\n          apps/cli/test/isolated/tui-file-recovery-scopes.test.ts\n          apps/cli/test/isolated/tui-file-recovery-crash.test.ts\n          apps/cli/test/isolated/tui-recovery-host.test.ts\n          apps/cli/test/isolated/tui-preferences-host.test.ts\n          apps/cli/test/isolated/tui-mcp-connection-pty.test.ts\n          apps/cli/test/isolated/tui-composer-host.test.ts\n          apps/cli/test/isolated/tui-workflow-question-host.test.ts\n          apps/cli/test/isolated/tui-planning-host.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
+    'bun test --parallel=1 --max-concurrency=1\n          apps/cli/test/file-recovery-pty.test.ts\n          apps/cli/test/isolated/tui-drafts-host.test.ts\n          apps/cli/test/isolated/file-recovery-argv.test.ts\n          apps/cli/test/isolated/tui-file-recovery.test.ts\n          apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts\n          apps/cli/test/isolated/tui-file-recovery-scopes.test.ts\n          apps/cli/test/isolated/tui-file-recovery-crash.test.ts\n          apps/cli/test/isolated/tui-recovery-host.test.ts\n          apps/cli/test/isolated/tui-preferences-host.test.ts\n          apps/cli/test/isolated/tui-mcp-connection-pty.test.ts\n          apps/cli/test/isolated/tui-composer-host.test.ts\n          apps/cli/test/isolated/tui-planning-host.test.ts\n          tests/isolated/unified-agent/extension-upgrade.test.ts';
   for (const mutate of [
     (s: string) => s.replace('run: bun run build', 'run: bun run extra'),
     (s: string) =>
@@ -258,7 +352,6 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
       'apps/cli/test/isolated/tui-preferences-host.test.ts',
       'apps/cli/test/isolated/tui-mcp-connection-pty.test.ts',
       'apps/cli/test/isolated/tui-composer-host.test.ts',
-      'apps/cli/test/isolated/tui-workflow-question-host.test.ts',
       'apps/cli/test/isolated/tui-planning-host.test.ts',
     ].map((file) => (s: string) => s.replace(`          ${file}`, '')),
     (s: string) =>
@@ -276,7 +369,9 @@ test('shared TUI caller tests run whole on every OS after the current build', ()
   ]) {
     const root = fixture();
     put(root, 'scripts/release/prepare-windows-native-ci.ts', 'export {};');
-    put(root, '.github/workflows/runtime-transport-qualification.yml', mutate(source));
+    const changed = mutate(source);
+    expect(changed).not.toBe(source);
+    put(root, '.github/workflows/runtime-transport-qualification.yml', changed);
     expect(
       checkUnifiedFormalConsumers(root).violations.some(
         (v) => v.code === 'formal-ci-shared-caller-tests-missing',

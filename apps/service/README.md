@@ -201,6 +201,12 @@ paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只
 
 模型连接由 [model-transport.ts](src/model-transport.ts)补齐系统代理自动发现：有显式代理环境时继续由 Bun 解释原值、认证和 NO_PROXY；无环境代理时复用 [系统设置读取](src/web-fetch-proxy.ts)，选择 Windows HKCU／macOS 手动 HTTP(S) 代理及绕过名单，支持主机通配符、端口、IPv6 与 `<local>`。每个绑定复制系统设置并显式传给 fetch，不改写进程环境、不探测常用端口、不执行 PAC/WPAD、不在失败后直连重发。普通 Chat Completions／Responses、Codex 认证包装和显式提供商目录查询均消费该传输；`webFetch` 用户配置仍仅属于网页工具，MCP 的网络准入保持原边界。
 
+## 模型连接池与原取消恢复边界
+
+当前 Bun1.4.4 模型传输在绑定的首次真实请求时懒创建独立 `Bun.FetchSession`，配置 `idleTimeout:30` 与每类 `maxIdleSockets:8`。同一绑定的请求可复用连接，不与其他绑定或全局 fetch 共用；显式代理环境仍由 Bun 解释，系统代理和绕过名单仍按原绑定选择，失败不自动改出口。SDK 原 `fetch.preconnect` 兼容字段保留，实际 session 请求不消费全局预连接池，不增加主动预热请求。
+
+普通 Run、标题的 model-only 绑定及只读模型目录查询在原结算／失败／取消收尾中关闭自己的空闲池；`close` 同步封住该绑定的新 fetch 并复用同一清理 Promise。它不替代原 AbortSignal，不把连接关闭当作模型取消、效果成功或进程退出证明。准备失败继续保留原错误和必要清理 authority，关闭一个绑定不影响其他绑定。真实连接复用／隔离、取消原因与零重试归[代理整文件](test/isolated/model-transport.test.ts)，普通与标题绑定的实际清理归[标题整文件](test/isolated/session-title.test.ts)，目录拒绝／取消／陈旧读取集与池关闭归[提供商整文件](test/isolated/provider-settings.test.ts)。
+
 新绑定仅在原 Run snapshot 增加非秘密 `modelTransport.digest`，不保存代理凭据或原始环境，不升级工具、协议、存储或 SDK 转换版本。冷恢复在读取凭据／模型派发前核对摘要，变化拒绝 `recovery_configuration_changed`；没有该字段的旧记录不追补历史。[代理完整回归](test/isolated/model-transport.test.ts)核实际 SDK 两协议经过本地代理、绕过、取消、代理拒绝无回退、默认 Service 完成及原 SQLite Run 的恢复／变化拒绝；[Codex 回归](test/isolated/codex-auth.test.ts)核选定 transport 后仍保持原认证、请求与 Signal。取舍见[模型系统代理决定](../../.agents/notes/implemented/bug-fix/2026-11-03-model-system-proxy.md)。
 
 2026-11-03，Windows x64／Bun1.4.3／Electron44.3.0：上述代理、Codex、原模型选择、configuration、provider-settings、web-fetch-configuration、default-web-fetch 七个完整文件合计68项通过、1项原平台跳过，902断言；Service typecheck／build、定向 Biome、边界、测试归属及文档结构／影响核对通过。普通 `desktop:dev` 窗口未手动设置代理环境，新会话用真实 `gpt-6-luna`／Responses完成“连接正常”，原11:49失败会话的独立续轮也完成；逐步观察提交占位、消息保存接管、草稿清空、正在回复和终态，旧失败保持、无重复用户消息或工具执行。SQLite两新 Run 分别8856／6710毫秒 completed，各一次 succeeded Model且代理摘要相同；未自动重发原GitHub任务。这是当前开发窗口与本机Provider范围，不代表安装版或macOS/Linux实测。
