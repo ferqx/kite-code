@@ -11,7 +11,11 @@ import { constants, copyFile, lstat, mkdir, readFile, writeFile } from 'node:fs/
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { acquireFileLock, type FileLock, LockBusyError } from '../platform/locks';
 import { privateDirectory } from '../platform/windows-path-security';
-import { launchIdentity, verifyLaunchIdentities } from './launch-identity';
+import {
+  launchIdentityAsync,
+  mapAssetVerification,
+  verifyLaunchIdentitiesAsync,
+} from './launch-identity';
 
 /** Keep file I/O bounded, and settle every in-flight write before reporting failure. */
 async function prepareFiles<T>(items: readonly T[], prepare: (item: T) => Promise<void>) {
@@ -35,14 +39,19 @@ async function prepareFiles<T>(items: readonly T[], prepare: (item: T) => Promis
 }
 /** The staging manifest is the sole inventory for both runtime copies. Pin it
  * once; verify the selected copy against its digests before every dispatch. */
-export function captureWindowsGitBashRuntime(
+export async function captureWindowsGitBashRuntime(
   shell: string,
   fullShell: string,
-): (full: boolean) => void {
+  signal?: AbortSignal,
+): Promise<(full: boolean, signal?: AbortSignal) => Promise<void>> {
   const root = join(dirname(shell), '../..');
   const manifestPath = join(root, 'manifest.json');
-  const manifestIdentity = launchIdentity(manifestPath, true);
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const manifestIdentity = await launchIdentityAsync(manifestPath, true, signal);
+  const bytes = await readFile(manifestPath, { encoding: 'utf8', signal });
+  signal?.throwIfAborted();
+  if (createHash('sha256').update(bytes).digest('hex') !== manifestIdentity.digest)
+    throw Error('windows_git_bash_asset_changed');
+  const manifest = JSON.parse(bytes);
   if (
     !Array.isArray(manifest.files) ||
     !manifest.files.length ||
@@ -53,7 +62,14 @@ export function captureWindowsGitBashRuntime(
   )
     throw Error('windows_git_bash_asset_invalid');
   const names = new Set<string>();
-  const roots = [manifestIdentity, launchIdentity(root), launchIdentity(join(root, 'full'))];
+  const roots = [
+    manifestIdentity,
+    ...(await mapAssetVerification(
+      [root, join(root, 'full')],
+      (path, signal) => launchIdentityAsync(path, false, signal),
+      signal,
+    )),
+  ];
   const files: { name: string; sha256: string; sourceSha256: string }[] = [];
   for (const file of manifest.files) {
     if (
@@ -76,14 +92,19 @@ export function captureWindowsGitBashRuntime(
     )
   )
     throw Error('windows_git_bash_asset_invalid');
-  return (full) => {
-    verifyLaunchIdentities(roots);
+  return async (full, signal) => {
+    await verifyLaunchIdentitiesAsync(roots, signal);
     const base = full ? join(root, 'full') : root;
-    for (const file of files) {
-      const fact = launchIdentity(join(base, file.name), true);
-      if (fact.digest !== (full ? file.sourceSha256 : file.sha256))
-        throw Error('windows_git_bash_asset_changed');
-    }
+    await mapAssetVerification(
+      files,
+      async (file, signal) => {
+        const fact = await launchIdentityAsync(join(base, file.name), true, signal);
+        if (fact.digest !== (full ? file.sourceSha256 : file.sha256))
+          throw Error('windows_git_bash_asset_changed');
+      },
+      signal,
+    );
+    await verifyLaunchIdentitiesAsync(roots, signal);
   };
 }
 /** Redirect only the private MSYS image's import descriptor, without changing

@@ -1,9 +1,11 @@
 //! NTFS DACL manipulation for Windows sandbox filesystem enforcement.
 
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{LocalFree, HLOCAL, WIN32_ERROR};
+use windows::Win32::Foundation::{LocalFree, BOOL, HLOCAL, WIN32_ERROR};
 use windows::Win32::Security::Authorization::{
-    GetNamedSecurityInfoW, SetNamedSecurityInfoW, SE_FILE_OBJECT,
+    GetNamedSecurityInfoW, ProgressCancelOperation, ProgressInvokePrePostError,
+    SetNamedSecurityInfoW, TreeSetNamedSecurityInfoW, PROG_INVOKE_SETTING, SE_FILE_OBJECT,
+    TREE_SEC_INFO_SET,
 };
 use windows::Win32::Security::{
     AclSizeInformation, AddAccessAllowedAceEx, AddAccessDeniedAceEx, AddAce, GetAce,
@@ -22,6 +24,33 @@ pub const CONTAINER_AND_OBJECT_INHERIT: u32 = CONTAINER_INHERIT_ACE.0 | OBJECT_I
 pub struct AclError {
     pub path: String,
     pub message: String,
+}
+
+struct TreeProgress<'a> {
+    cancel: &'a dyn Fn() -> bool,
+    error: u32,
+    cancelled: bool,
+}
+
+unsafe extern "system" fn tree_progress(
+    _path: PCWSTR,
+    status: u32,
+    setting: *mut PROG_INVOKE_SETTING,
+    args: *const core::ffi::c_void,
+    _security_set: BOOL,
+) {
+    let progress = &mut *(args as *mut TreeProgress<'_>);
+    if status != 0 && progress.error == 0 {
+        progress.error = status;
+    }
+    // Never unwind through a Windows callback; failure stops admission too.
+    progress.cancelled |=
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(progress.cancel)).unwrap_or(true);
+    *setting = if progress.cancelled || progress.error != 0 {
+        ProgressCancelOperation
+    } else {
+        ProgressInvokePrePostError
+    };
 }
 
 impl std::fmt::Display for AclError {
@@ -253,6 +282,7 @@ fn write_dacl_with_ace(
     flags: u32,
     ace_type: u8,
     security_information: windows::Win32::Security::OBJECT_SECURITY_INFORMATION,
+    cancel: Option<&dyn Fn() -> bool>,
 ) -> Result<(), AclError> {
     unsafe {
         let (existing_dacl, owner, group, descriptor) = get_path_dacl(path)?;
@@ -331,16 +361,45 @@ fn write_dacl_with_ace(
             });
         }
 
-        let set_result = SetNamedSecurityInfoW(
-            PCWSTR(wide(path).as_ptr()),
-            SE_FILE_OBJECT,
-            security_information,
-            owner,
-            group,
-            Some(new_dacl as *const ACL),
-            None,
-        );
+        let mut progress = cancel.map(|cancel| TreeProgress {
+            cancel,
+            error: 0,
+            cancelled: false,
+        });
+        let set_result = if let Some(progress) = progress.as_mut() {
+            TreeSetNamedSecurityInfoW(
+                PCWSTR(wide(path).as_ptr()),
+                SE_FILE_OBJECT,
+                security_information,
+                owner,
+                group,
+                Some(new_dacl as *const ACL),
+                None,
+                TREE_SEC_INFO_SET,
+                Some(tree_progress),
+                ProgressInvokePrePostError,
+                Some((progress as *mut TreeProgress<'_>).cast()),
+            )
+        } else {
+            SetNamedSecurityInfoW(
+                PCWSTR(wide(path).as_ptr()),
+                SE_FILE_OBJECT,
+                security_information,
+                owner,
+                group,
+                Some(new_dacl as *const ACL),
+                None,
+            )
+        };
         let _ = LocalFree(descriptor);
+        if let Some(progress) = progress {
+            if progress.error != 0 {
+                return win32_ok(WIN32_ERROR(progress.error), "workspace inheritance", path);
+            }
+            if progress.cancelled {
+                return win32_ok(WIN32_ERROR(1223), "workspace inheritance cancelled", path);
+            }
+        }
         win32_ok(set_result, "SetNamedSecurityInfoW", path)
     }
 }
@@ -354,6 +413,26 @@ pub fn grant_access(path: &str, sid: PSID, access: u32) -> Result<(), AclError> 
         CONTAINER_AND_OBJECT_INHERIT,
         ACCESS_ALLOWED_ACE_TYPE,
         DACL_SECURITY_INFORMATION,
+        None,
+    )
+}
+
+/// Same inherited grant, with cancellation observed before/after each tree object.
+/// An interrupted persistent grant remains incomplete and must be replayed before execution.
+pub fn grant_access_cancellable(
+    path: &str,
+    sid: PSID,
+    access: u32,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), AclError> {
+    write_dacl_with_ace(
+        path,
+        sid,
+        access,
+        CONTAINER_AND_OBJECT_INHERIT,
+        ACCESS_ALLOWED_ACE_TYPE,
+        DACL_SECURITY_INFORMATION,
+        Some(cancel),
     )
 }
 
@@ -368,6 +447,7 @@ pub fn grant_identity_access(path: &str, sid: PSID, access: u32) -> Result<(), A
         0,
         ACCESS_ALLOWED_ACE_TYPE,
         DACL_SECURITY_INFORMATION,
+        None,
     )
 }
 
@@ -388,6 +468,7 @@ pub fn deny_access(path: &str, sid: PSID, access: u32) -> Result<(), AclError> {
         0,
         ACCESS_DENIED_ACE_TYPE,
         DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        None,
     )
 }
 
@@ -403,6 +484,7 @@ pub fn deny_identity_access(path: &str, sid: PSID, access: u32) -> Result<(), Ac
         0,
         ACCESS_DENIED_ACE_TYPE,
         DACL_SECURITY_INFORMATION,
+        None,
     )
 }
 

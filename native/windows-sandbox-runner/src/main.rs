@@ -8,7 +8,10 @@ use kite_windows_runner::{
     build_bash_command_line, build_busybox_sh_command_line, build_isksh_command_line, sha256_file,
 };
 use std::io::Write;
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
@@ -487,6 +490,18 @@ fn execute_restricted_token_invocation(
 ) -> Result<(), String> {
     let direct = &request.direct_workspace;
     let approved_filesystem = matches!(request.filesystem_scope, FilesystemScope::FullAccess);
+    // Listen before any ACL work or lock wait, including the first large Workspace.
+    let cancel_event = job::create_cancel_event().map_err(|error| error.to_string())?;
+    let cancel_watcher = CancelWatcher::spawn(cancel_event, name.to_string()).map_err(|error| {
+        unsafe {
+            let _ = CloseHandle(cancel_event);
+        }
+        error
+    })?;
+    let cancelled = || unsafe {
+        windows::Win32::System::Threading::WaitForSingleObject(cancel_event, 0)
+            == windows::Win32::Foundation::WAIT_OBJECT_0
+    };
     // Internet permission alone keeps the Workspace token. Only a command
     // with both complete filesystem and network scope bypasses restriction;
     // Schannel may remain unavailable under the restricted token.
@@ -512,8 +527,28 @@ fn execute_restricted_token_invocation(
         direct.approved_filesystem_guard_sid.as_deref(),
         requires_approved_filesystem_guard(request.network_mode),
         &deny_paths,
-    )
-    .map_err(|error| error.to_string())?;
+        &cancelled,
+    );
+    let security = match security {
+        Ok(security) => security,
+        Err(error)
+            if error.code == direct_workspace::PREPARATION_CANCELLED
+                && direct.ephemeral_workspace_capability_sid.is_none() =>
+        {
+            // No business process exists. The unique runtime grant was removed;
+            // the durable incomplete Workspace ledger is safe to resume later.
+            write_preparation_cancelled(request, name, &output_writer)?;
+            cancel_watcher.stop_and_join()?;
+            return Ok(());
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    if cancelled() {
+        security.finish().map_err(|error| error.to_string())?;
+        write_preparation_cancelled(request, name, &output_writer)?;
+        cancel_watcher.stop_and_join()?;
+        return Ok(());
+    }
     runner_debug("restricted-token direct workspace ACLs prepared");
     let mut cleanup = DirectInvocationCleanup::new(security);
 
@@ -619,24 +654,10 @@ fn execute_restricted_token_invocation(
         let _ = CloseHandle(stderr_write);
     }
 
-    let cancel_event = job::create_cancel_event().map_err(|error| error.to_string())?;
-    cleanup.track_handles(&[cancel_event]);
-    let cancel_watcher = CancelWatcher::spawn(cancel_event, name.to_string())?;
-    // From this point the watcher owns the right to use cancel_event. No
-    // error unwind may close it behind that thread; joined paths close it
-    // explicitly, detached paths leave it to process-exit cleanup.
-    cleanup.forget_handles(&[cancel_event]);
-
-    let stdout_forwarder = drain_and_forward(
-        stdout_read,
-        OutboundKind::Stdout,
-        output_writer.clone(),
-    );
-    let stderr_forwarder = drain_and_forward(
-        stderr_read,
-        OutboundKind::Stderr,
-        output_writer.clone(),
-    );
+    let stdout_forwarder =
+        drain_and_forward(stdout_read, OutboundKind::Stdout, output_writer.clone());
+    let stderr_forwarder =
+        drain_and_forward(stderr_read, OutboundKind::Stderr, output_writer.clone());
     let (timed_out, cancelled) =
         job::wait_for_process(child.process_handle(), cancel_event, request.timeout_ms)
             .map_err(|error| error.to_string())?;
@@ -711,6 +732,29 @@ fn execute_restricted_token_invocation(
 /// synthetic SID.
 fn requires_approved_filesystem_guard(network_mode: NetworkMode) -> bool {
     !matches!(network_mode, NetworkMode::AllowAll)
+}
+
+fn write_preparation_cancelled(
+    request: &InvocationRequest,
+    name: &str,
+    writer: &ControlFrameWriter,
+) -> Result<(), String> {
+    writer.write(
+        "exit",
+        &ExecutionReceipt {
+            version: PROTOCOL_VERSION,
+            exit_code: 130,
+            timed_out: false,
+            cancelled: true,
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            peak_processes: 0,
+            active_process_limit: request.max_processes,
+            cleanup_confirmed: true,
+            invocation_name: name.to_string(),
+            error: None,
+        },
+    )
 }
 
 fn can_use_current_user_network_token(
@@ -980,10 +1024,7 @@ struct CancelWatcher {
 }
 
 impl CancelWatcher {
-    fn spawn(
-        cancel_event: HANDLE,
-        invocation_id: String,
-    ) -> Result<Self, String> {
+    fn spawn(cancel_event: HANDLE, invocation_id: String) -> Result<Self, String> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         // windows::HANDLE is not Send. Transfer only its stable numeric value;
@@ -1324,5 +1365,4 @@ mod tests {
         assert!(text.contains("USERPROFILE=C:\\Users\\CurrentUser\0"));
         assert!(block.ends_with(&[0, 0]));
     }
-
 }

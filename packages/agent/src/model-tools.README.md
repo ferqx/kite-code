@@ -38,6 +38,8 @@
 
 `anyOf` 多个匹配分支产生不同字段映射时，该调用明确失败；`if/not` 谓词内的 `properties` 自身需要改名时，装配明确拒绝。只含 `required` 的条件和名称不变的 `kind` 判别仍支持。每份实际变换的 schema 独立校验，纯名称投影不重复编译远端 MCP schema，不合并不同工具的 `$id` 空间。
 
+[model-schema.ts](model-schema.ts)仅按完整 JSON 内容复用模型参数投影与分支匹配的 Ajv 编译结果；每个 schema 仍有独立 registry 和私有副本，同 `$id` 的不同正文及本地 `$ref` 不混用。缓存按 LRU 最多128项，键串 UTF-8 合计1MiB、单键64KiB；超出接纳预算、非纯 JSON／访问器等情况保原完整编译路径，不拒绝工具。实际调用只消费本次同步校验结果，不缓存参数、字段映射、权限或文件事实。新 Run 的 schema 改动产生新键，旧 caller 修改 schema 不能污染复用结果。[缓存回归](../test/isolated/execution/model-schema.test.ts)核内容复用、引用隔离、修改、数量／键字节淘汰与非缓存路径；[参数投影](../test/isolated/execution/model-tools.test.ts)和[分支回归](../test/isolated/execution/model-tools-branches.test.ts)继续拥有目录、碰撞和 opaque JSON 语义。
+
 显式公开名称须为最多 64 字符的 lowercase snake_case 标识。一次准确目录中的名称碰撞、同一对象的字段碰撞和不存在的显式字段路径均拒绝；`hidden:true` 只从模型声明目录移除，内部注册和可信调用资格仍由原合同核实，不通过隐藏授予额外权限。
 
 同一对象跨 `allOf` 的字段声明按来源及替代分支选择核对，碰撞检测不依赖分支遍历顺序，也不枚举组合；互斥分支可分别使用可逆映射。只有名称变化的 MCP/自定义工具直接深拷贝原 schema，不遍历或重编译远端字段，合法空字段和 opaque JSON 保持。

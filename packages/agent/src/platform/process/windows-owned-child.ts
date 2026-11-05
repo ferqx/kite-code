@@ -58,6 +58,7 @@ export interface WindowsOwnedProcessObservation {
 }
 
 const INVALID = 0xffffffffffffffffn;
+const CREATE_NO_WINDOW = 0x08000000;
 const retained = new Set<object>();
 const borrowedMemory = new Set<object>();
 const delay = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -831,7 +832,7 @@ export function startWindowsOwnedChild(input: {
     const startup = Buffer.alloc(112),
       info = Buffer.alloc(24);
     startup.writeUInt32LE(112, 0);
-    startup.writeUInt32LE(0x100, 60);
+    startup.writeUInt32LE(0x101, 60); // USESTDHANDLES | USESHOWWINDOW; zero wShowWindow = SW_HIDE.
     startup.writeBigUInt64LE(childStdin, 80);
     startup.writeBigUInt64LE(out.writer, 88);
     startup.writeBigUInt64LE(err.writer, 96);
@@ -847,7 +848,7 @@ export function startWindowsOwnedChild(input: {
         null,
         null,
         true,
-        0x80404,
+        CREATE_NO_WINDOW | 0x80404,
         ptr(environment),
         ptr(cwd),
         ptr(startup),

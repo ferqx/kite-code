@@ -28,6 +28,18 @@ use crate::sha256_hex;
 const LEDGER_VERSION: u32 = 3;
 const MUTEX_WAIT_MS: u32 = 30_000;
 const STATE_DIR_ENV: &str = "KITE_WINDOWS_RESTRICTED_TOKEN_STATE_DIR";
+pub const PREPARATION_CANCELLED: &str = "restricted_token_preparation_cancelled";
+
+fn check_cancel(cancel: &dyn Fn() -> bool) -> Result<()> {
+    if cancel() {
+        Err(error(
+            PREPARATION_CANCELLED,
+            "workspace preparation cancelled",
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub struct DirectWorkspaceError {
@@ -150,7 +162,9 @@ pub fn prepare_direct_workspace(
     approved_filesystem_guard_sid: Option<&str>,
     enforce_approved_filesystem_guard: bool,
     protected_paths: &[String],
+    cancel: &dyn Fn() -> bool,
 ) -> Result<DirectWorkspaceSecurity> {
+    check_cancel(cancel)?;
     let workspace_root = canonical_directory(workspace_root, "workspace")?;
     let runtime_root = canonical_directory(runtime_root, "runtime")?;
     if path_equal(&workspace_root, &runtime_root) || is_child_path(&workspace_root, &runtime_root) {
@@ -174,6 +188,7 @@ pub fn prepare_direct_workspace(
         .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
 
     let prepared = (|| -> Result<DirectWorkspaceSecurity> {
+        check_cancel(cancel)?;
         let mut capabilities = Vec::new();
         let mut ephemeral_workspace_capability_index = None;
         let mut ephemeral_snapshots = Vec::new();
@@ -207,8 +222,11 @@ pub fn prepare_direct_workspace(
                 ephemeral_workspace_capability_index = Some(capabilities.len());
                 capabilities.push(workspace_capability);
             } else {
-                let workspace_capability =
-                    ensure_persistent_workspace_capability(&workspace_root, protected_paths)?;
+                let workspace_capability = ensure_persistent_workspace_capability(
+                    &workspace_root,
+                    protected_paths,
+                    cancel,
+                )?;
                 capabilities.push(workspace_capability);
             }
         }
@@ -265,9 +283,10 @@ pub fn prepare_direct_workspace(
     })();
 
     if prepared.is_err() {
-        if let Ok(runtime_capability) = CapabilitySid::parse(runtime_capability_sid) {
-            let _ = acl::revoke_access(&rollback_runtime_root, runtime_capability.as_psid());
-        }
+        let runtime_capability = CapabilitySid::parse(runtime_capability_sid)
+            .map_err(|source| error("restricted_token_acl_cleanup_failed", source.to_string()))?;
+        acl::revoke_access(&rollback_runtime_root, runtime_capability.as_psid())
+            .map_err(|source| error("restricted_token_acl_cleanup_failed", source.to_string()))?;
     }
     prepared
 }
@@ -319,9 +338,19 @@ pub fn repair_persistent_workspace_capability(workspace_root: &str) -> Result<bo
 fn ensure_persistent_workspace_capability(
     workspace_root: &str,
     protected_paths: &[String],
+    cancel: &dyn Fn() -> bool,
 ) -> Result<CapabilitySid> {
-    with_workspace_lock(workspace_root, || {
-        let path = ledger_path(workspace_root)?;
+    let path = ledger_path(workspace_root)?;
+    ensure_persistent_workspace_capability_at(workspace_root, protected_paths, cancel, &path)
+}
+
+fn ensure_persistent_workspace_capability_at(
+    workspace_root: &str,
+    protected_paths: &[String],
+    cancel: &dyn Fn() -> bool,
+    path: &Path,
+) -> Result<CapabilitySid> {
+    with_workspace_lock_cancellable(workspace_root, cancel, || {
         // A Workspace capability has no allow ACE outside this Workspace, so
         // external protected paths are already unavailable in its restricted
         // write pass. Never mutate or persist those paths in a per-Workspace
@@ -354,10 +383,11 @@ fn ensure_persistent_workspace_capability(
         let setup_matches = ledger_setup_matches(&ledger, &paths_digest);
         let capability = CapabilitySid::parse(&ledger.capability_sid)
             .map_err(|source| error("restricted_token_ledger_invalid", source.to_string()))?;
-        let obsolete_snapshots = ledger
-            .protected_dacl_snapshots
-            .iter()
-            .any(|stored| !existing_paths.iter().any(|path| path_equal(path, &stored.path)));
+        let obsolete_snapshots = ledger.protected_dacl_snapshots.iter().any(|stored| {
+            !existing_paths
+                .iter()
+                .any(|path| path_equal(path, &stored.path))
+        });
         if !setup_matches || obsolete_snapshots {
             // Persist an incomplete marker before any ACL mutation. A crash leaves
             // the next invocation with an unambiguous instruction to revalidate
@@ -413,14 +443,24 @@ fn ensure_persistent_workspace_capability(
             acl::ACCESS_ALLOWED_ACE_TYPE,
         )
         .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
-        if !workspace_grant_present {
+        // A root ACE can survive an interrupted propagation. It is not proof
+        // that existing descendants inherited it; replay every incomplete setup.
+        if !workspace_grant_present || !ledger.setup_complete {
             ledger.setup_complete = false;
             write_ledger(&path, &ledger)?;
-            acl::grant_access(workspace_root, capability.as_psid(), WORKSPACE_ALLOW)
+            let granted = acl::grant_access_cancellable(
+                workspace_root,
+                capability.as_psid(),
+                WORKSPACE_ALLOW,
+                cancel,
+            );
+            check_cancel(cancel)?;
+            granted
                 .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
         }
 
         for protected_path in existing_paths {
+            check_cancel(cancel)?;
             let deny_present = acl::has_ace_for_sid(
                 &protected_path,
                 capability.as_psid(),
@@ -452,6 +492,7 @@ fn ensure_persistent_workspace_capability(
             }
         }
         if !ledger.setup_complete {
+            check_cancel(cancel)?;
             ledger.setup_complete = true;
             write_ledger(&path, &ledger)?;
         }
@@ -626,20 +667,29 @@ fn write_ledger(path: &Path, ledger: &WorkspaceCapabilityLedger) -> Result<()> {
         let destination = wide_path(path)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
         loop {
-            let moved = unsafe { MoveFileExW(
-                PCWSTR(source.as_ptr()),
-                PCWSTR(destination.as_ptr()),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            ) };
+            let moved = unsafe {
+                MoveFileExW(
+                    PCWSTR(source.as_ptr()),
+                    PCWSTR(destination.as_ptr()),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            };
             match moved {
                 Ok(()) => break,
-                Err(source) if matches!(source.code().0 as u32, 0x80070005 | 0x80070020)
-                    && std::time::Instant::now() < deadline => {
+                Err(source)
+                    if matches!(source.code().0 as u32, 0x80070005 | 0x80070020)
+                        && std::time::Instant::now() < deadline =>
+                {
                     // Short sharing conflicts (including file scanners) must not
                     // turn a complete ledger update into a lost invocation.
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
-                Err(source) => return Err(error("restricted_token_ledger_write_failed", source.to_string())),
+                Err(source) => {
+                    return Err(error(
+                        "restricted_token_ledger_write_failed",
+                        source.to_string(),
+                    ))
+                }
             }
         }
         Ok(())
@@ -685,6 +735,30 @@ fn wide_path(path: &Path) -> Result<Vec<u16>> {
 }
 
 fn with_workspace_lock<T>(workspace_root: &str, action: impl FnOnce() -> Result<T>) -> Result<T> {
+    with_workspace_lock_inner(
+        workspace_root,
+        &|| false,
+        Some(std::time::Duration::from_millis(MUTEX_WAIT_MS as u64)),
+        action,
+    )
+}
+
+fn with_workspace_lock_cancellable<T>(
+    workspace_root: &str,
+    cancel: &dyn Fn() -> bool,
+    action: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    // A legitimate first preparation can exceed 30s on a large tree. Ordinary
+    // invocations queue until it finishes or their existing cancel owner stops them.
+    with_workspace_lock_inner(workspace_root, cancel, None, action)
+}
+
+fn with_workspace_lock_inner<T>(
+    workspace_root: &str,
+    cancel: &dyn Fn() -> bool,
+    timeout: Option<std::time::Duration>,
+    action: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     let name = format!(
         "Local\\KiteCode.RestrictedToken.{}",
         sha256_hex(workspace_root.to_ascii_lowercase().as_bytes())
@@ -694,7 +768,21 @@ fn with_workspace_lock<T>(workspace_root: &str, action: impl FnOnce() -> Result<
         CreateMutexW(None, false, PCWSTR(name.as_ptr()))
             .map_err(|source| error("restricted_token_ledger_lock_failed", source.to_string()))?
     };
-    let wait = unsafe { WaitForSingleObject(mutex, MUTEX_WAIT_MS) };
+    let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
+    let wait = loop {
+        if let Err(error) = check_cancel(cancel) {
+            unsafe {
+                let _ = CloseHandle(mutex);
+            }
+            return Err(error);
+        }
+        let wait = unsafe { WaitForSingleObject(mutex, 25) };
+        if wait != WAIT_TIMEOUT
+            || deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
+        {
+            break wait;
+        }
+    };
     if wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED {
         unsafe {
             let _ = CloseHandle(mutex);
@@ -722,6 +810,146 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn interrupted_inheritance_with_a_root_ace_is_resumed_before_setup_completes() {
+        use std::cell::Cell;
+        let parent = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let root = parent.join(format!(
+            "kite-inheritance-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let workspace = root.join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let workspace = fs::canonicalize(workspace)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let files = (0..64)
+            .map(|i| Path::new(&workspace).join(format!("existing-{i}.txt")))
+            .collect::<Vec<_>>();
+        for file in &files {
+            fs::write(file, b"original").unwrap();
+        }
+        let ledger_path = root.join("state.json");
+        let checks = Cell::new(0);
+        let cancelled = || {
+            checks.set(checks.get() + 1);
+            checks.get() >= 16
+        };
+        let failed =
+            ensure_persistent_workspace_capability_at(&workspace, &[], &cancelled, &ledger_path);
+        assert_eq!(failed.err().unwrap().code, PREPARATION_CANCELLED);
+        let ledger = load_ledger(&ledger_path, &workspace).unwrap();
+        assert!(!ledger.setup_complete);
+        let sid = CapabilitySid::parse(&ledger.capability_sid).unwrap();
+        assert!(
+            acl::has_ace_for_sid(&workspace, sid.as_psid(), acl::ACCESS_ALLOWED_ACE_TYPE).unwrap()
+        );
+        assert!(files.iter().any(|file| !acl::has_ace_for_sid(
+            &file.to_string_lossy(),
+            sid.as_psid(),
+            acl::ACCESS_ALLOWED_ACE_TYPE
+        )
+        .unwrap()));
+        let resumed =
+            ensure_persistent_workspace_capability_at(&workspace, &[], &|| false, &ledger_path)
+                .unwrap();
+        assert_eq!(resumed.to_string(), ledger.capability_sid);
+        assert!(
+            load_ledger(&ledger_path, &workspace)
+                .unwrap()
+                .setup_complete
+        );
+        for file in &files {
+            assert!(acl::has_ace_for_sid(
+                &file.to_string_lossy(),
+                sid.as_psid(),
+                acl::ACCESS_ALLOWED_ACE_TYPE
+            )
+            .unwrap());
+            assert_eq!(fs::read(file).unwrap(), b"original");
+        }
+        assert_eq!(root.parent(), Some(parent.as_path()));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_waiting_workspace_setup_can_cancel_without_waiting_for_the_mutex_owner() {
+        let workspace = format!(
+            "C:\\KiteCancelLock\\{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        );
+        let holder_workspace = workspace.clone();
+        let (acquired_sender, acquired_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let holder = thread::spawn(move || {
+            with_workspace_lock(&holder_workspace, || {
+                acquired_sender.send(()).unwrap();
+                release_receiver.recv().unwrap();
+                Ok(())
+            })
+            .unwrap()
+        });
+        acquired_receiver.recv().unwrap();
+        let started = Instant::now();
+        let result: Result<()> = with_workspace_lock_cancellable(
+            &workspace,
+            &|| started.elapsed() >= Duration::from_millis(50),
+            || panic!("cancelled waiter acquired mutation authority"),
+        );
+        release_sender.send(()).unwrap();
+        holder.join().unwrap();
+        assert_eq!(result.err().unwrap().code, PREPARATION_CANCELLED);
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn preparation_cancellation_cannot_hide_a_runtime_acl_cleanup_failure() {
+        use std::cell::Cell;
+        let parent = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let root = parent.join(format!(
+            "kite-preparation-cleanup-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let workspace = root.join("workspace");
+        let runtime = root.join("runtime");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&runtime).unwrap();
+        let capability = CapabilitySid::generate().unwrap().to_string();
+        let checks = Cell::new(0);
+        let cancel = || {
+            checks.set(checks.get() + 1);
+            if checks.get() == 2 {
+                fs::remove_dir(&runtime).unwrap();
+                true
+            } else {
+                false
+            }
+        };
+        let result = prepare_direct_workspace(
+            &workspace.to_string_lossy(),
+            &runtime.to_string_lossy(),
+            FilesystemScope::WorkspaceWrite,
+            &capability,
+            None,
+            None,
+            false,
+            &[],
+            &cancel,
+        );
+        assert_eq!(
+            result.err().unwrap().code,
+            "restricted_token_acl_cleanup_failed"
+        );
+        assert_eq!(root.parent(), Some(parent.as_path()));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn path_child_check_is_segment_aware() {
         assert!(is_child_path("C:\\Work", "C:\\Work\\runtime"));
         assert!(is_child_path(r"\\?\C:\Work", r"C:\Work\runtime"));
@@ -747,19 +975,43 @@ mod tests {
         for revision in 0..64 {
             ledger.protected_paths_digest = revision.to_string();
             write_ledger(&path, &ledger).unwrap();
-            assert_eq!(load_ledger(&path, "C:\\Work").unwrap().protected_paths_digest, revision.to_string());
+            assert_eq!(
+                load_ledger(&path, "C:\\Work")
+                    .unwrap()
+                    .protected_paths_digest,
+                revision.to_string()
+            );
             assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         }
-        let reader = OpenOptions::new().read(true).share_mode(3).open(&path).unwrap();
-        let release = thread::spawn(move || { thread::sleep(Duration::from_millis(50)); drop(reader); });
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&path)
+            .unwrap();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            drop(reader);
+        });
         ledger.protected_paths_digest = "after-sharing-conflict".to_string();
         write_ledger(&path, &ledger).unwrap();
         release.join().unwrap();
-        assert_eq!(load_ledger(&path, "C:\\Work").unwrap().protected_paths_digest, "after-sharing-conflict");
+        assert_eq!(
+            load_ledger(&path, "C:\\Work")
+                .unwrap()
+                .protected_paths_digest,
+            "after-sharing-conflict"
+        );
         let before = fs::read(&path).unwrap();
-        let reader = OpenOptions::new().read(true).share_mode(3).open(&path).unwrap();
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&path)
+            .unwrap();
         ledger.protected_paths_digest = "must-not-publish".to_string();
-        assert_eq!(write_ledger(&path, &ledger).unwrap_err().code, "restricted_token_ledger_write_failed");
+        assert_eq!(
+            write_ledger(&path, &ledger).unwrap_err().code,
+            "restricted_token_ledger_write_failed"
+        );
         assert_eq!(fs::read(&path).unwrap(), before);
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         drop(reader);

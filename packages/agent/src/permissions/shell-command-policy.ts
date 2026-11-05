@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFile, realpath } from 'node:fs/promises';
 import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Language, type Node, Parser } from 'web-tree-sitter';
+import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
 import { AgentError } from '../storage/types';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -279,26 +280,33 @@ function scanDanger(
 export async function createShellCommandPolicy(input: {
   cwd: string;
   shellExecutable: string;
+  signal?: AbortSignal;
 }): Promise<{
   assets: readonly { path: string; digest: string }[];
   classify(
     command: string,
+    signal?: AbortSignal,
   ): Promise<{ plainCommands: readonly (readonly string[])[] | null; hardDenied: string | null }>;
 }> {
   let assets: readonly { path: string; digest: string }[];
   let language: Language;
   try {
-    const runtime = realpathSync(
+    input.signal?.throwIfAborted();
+    const runtime = await realpath(
       fileURLToPath(import.meta.resolve('web-tree-sitter/tree-sitter.wasm')),
     );
-    const grammar = realpathSync(
+    const grammar = await realpath(
       join(
         dirname(fileURLToPath(import.meta.resolve('tree-sitter-bash/package.json'))),
         'tree-sitter-bash.wasm',
       ),
     );
-    const runtimeBytes = readFileSync(runtime);
-    const grammarBytes = readFileSync(grammar);
+    const [runtimeBytes, grammarBytes] = await mapAssetVerification(
+      [runtime, grammar],
+      (path, signal) => readFile(path, { signal }),
+      input.signal,
+    );
+    if (!runtimeBytes || !grammarBytes) throw Error('missing_parser_asset');
     assets = Object.freeze([
       Object.freeze({ path: runtime, digest: digest(runtimeBytes) }),
       Object.freeze({ path: grammar, digest: digest(grammarBytes) }),
@@ -313,7 +321,9 @@ export async function createShellCommandPolicy(input: {
     loadedGrammarDigest = assets[1]!.digest;
     loadedLanguage ??= Language.load(grammarBytes);
     language = await loadedLanguage;
+    input.signal?.throwIfAborted();
   } catch {
+    input.signal?.throwIfAborted();
     throw new AgentError('shell_parser_asset_unavailable');
   }
   // Absolute analysis inputs retain their path syntax on every host. Relative
@@ -328,15 +338,15 @@ export async function createShellCommandPolicy(input: {
   );
   return {
     assets,
-    async classify(command) {
+    async classify(command, signal) {
       try {
-        for (const asset of assets)
-          if (
-            realpathSync(asset.path) !== asset.path ||
-            digest(readFileSync(asset.path)) !== asset.digest
-          )
+        for (const asset of assets) {
+          const current = await launchIdentityAsync(asset.path, true, signal);
+          if (current.canonical !== asset.path || current.digest !== asset.digest)
             throw Error('changed');
+        }
       } catch {
+        signal?.throwIfAborted();
         throw new AgentError('shell_parser_asset_changed');
       }
       if (!supported) return { plainCommands: null, hardDenied: null };

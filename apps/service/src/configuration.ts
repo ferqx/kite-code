@@ -94,6 +94,7 @@ import { defaultConfiguration, ordinaryHostConfigurationDefaults } from './confi
 import { createConfigurationManagement } from './configuration-management';
 import type { DesktopBrowserEndpoint } from './desktop-browser';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
+import { readHostState } from './host-read';
 import { createDefaultHostStatusSource } from './host-status';
 import { createMcpConfiguration } from './mcp-configuration';
 import { createMcpManagement } from './mcp-management';
@@ -871,7 +872,7 @@ export function createDefaultProcessConfiguration(options: {
       const skillSelection = selection
         ? (selection.skillSelection?.requested ?? undefined)
         : commandSkills(command.request);
-      const user = userConfiguration.read().value;
+      const user = (await readHostState(() => userConfiguration.read(), recovery?.signal)).value;
       let root: string;
       try {
         const uri = new URL(workspace.rootUri);
@@ -881,7 +882,12 @@ export function createDefaultProcessConfiguration(options: {
       } catch {
         throw new ConfigurationError('workspace_configuration_unavailable');
       }
-      const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
+      const project = (
+        await readHostState(
+          () => readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }),
+          recovery?.signal,
+        )
+      ).value;
       if (project.webFetch !== undefined)
         throw new ConfigurationError('web_configuration_user_only');
       if (user.browser !== undefined || project.browser !== undefined)
@@ -1115,6 +1121,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         toolIds,
         options: shellOptions,
+        signal: recovery?.signal,
       });
       const shellTools = new Map(
         shell.extensions.flatMap((extension) =>

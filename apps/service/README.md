@@ -458,6 +458,27 @@ Auto 分类只返回准确 invocation、effects 与 `readCheckContext` 的只读
 
 内置 rg 由 Agent 制品携带，通过固定资产及 Shell 子进程 PATH 提供，不依赖用户安装，也不在运行时下载。目录查看、文件查找和正文搜索统一使用 Shell；单条字面 rg／ls／pwd 可在计划批准前执行，只读子 Agent 同时保逐次参数限制。实际注册退役归[工具回归](test/isolated/tool-retirement.test.ts)，真实 Windows／Service／SQLite 检索、只读拒写与计划卡归[检索集成](test/isolated/shell-search-configuration.test.ts)，Windows 范围归[平台 active](../../docs/active/windows-shell-sandbox.md)。
 
+[Windows 跨会话回归](test/isolated/shell-concurrency-configuration.test.ts)使用默认可信装配、实际 Runtime／SQLite／Bash和固定本地模型，核同工作区两个会话实际并行、有限 process 名额排队、单独取消不停止其他会话、Full／另一工作区及下一轮环境重置。原 Job 和双流分别绑定会话，但 Workspace 文件仍共享；不据该回归宣称文件竞争、Git 索引隔离或完整 Native 窗口验收。执行与启动耗时的当前边界归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。
+
+[校验调度回归](test/isolated/shell-verification-scheduling.test.ts)在隔离测试子进程保持 B 的实际资产读取未完成，核 A 的原 Native Job 仍能取消、释放的 process 名额允许 C 完成；取消 B 后须等待读取关闭，B 没有 native reference 或业务写入。读取暂停仅在隔离夹具启用，普通 dev／prod 没有新增诊断入口。该例验证真实默认配置、Runtime 和 SQLite 的跨会话因果顺序，不依靠速度阈值猜测并发。
+
+显式[Windows 32会话压测](test/fixtures/windows-shell-load.ts)分别运行 `bun apps/service/test/fixtures/windows-shell-load.ts default`、`bun apps/service/test/fixtures/windows-shell-load.ts 32`，只改变隔离 Runtime 的 process 名额，正式默认值不变。2026-11-05 Windows x64／Bun1.4.4，本轮源码接真实默认配置／持久权限／SQLite／Git Bash、固定本地模型：默认4槽实见4条运行、28条排队，取消8条排队与1条运行任务后23条成功；32槽实见32条同时 running 且业务就绪，单独取消8条后其余24条成功。两例均核原 HANDLE 存活／死亡、独立 temp／输出／环境、取消后零完成写入、全部准确关闭与零残留控制目录。所有会话共用至多8个校验 FD／8MiB读缓冲；这不是整个 Service 或 Bash 后代的内存上限。
+
+配置捕获和 MCP 来源／选取复核经 [host-read.ts](src/host-read.ts) 每轮执行一个新鲜的同步检查单元，避免32个已就绪 Promise 连续执行原生权限／路径检查；不缓存内容、ETag、权限或来源证明。原 Native 检查与同步 publication／CAS 临界区保持，排队接受已有取消信号，正在执行的原子 Native 检查仍须完成。[调度回归](test/isolated/host-read.test.ts)核实际事件循环轮次、文件变化后的新读取、排队零读取取消及异常后继续。重复的模型工具 schema 编译复用归 [模型工具 owner](../../packages/agent/src/model-tools.README.md#字段转换规则)，Windows 临时目录异步清理与 unknown 归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。普通 Run 装配未新增取消合约，恢复装配继续使用原信号。
+
+压测通过 Core 异步后台目录观察，不在被测线程同步查询 SQLite。2026-11-05 同机、同夹具、无 profiler 的优化前后采样如下；配置与扩展装配不全部受 Shell process 名额约束，数据不构成其他机器的延迟上限。
+
+| 场景 | 最大心跳间隔 | p99 | 全场景耗时 |
+| --- | --- | --- | --- |
+| 4槽，优化前 | 1608ms | 152ms | 38秒 |
+| 4槽，优化后 | 598ms | 72ms | 29秒 |
+| 32槽，优化前 | 2858ms | 34ms | 48秒 |
+| 32槽，优化后 | 553ms | 32ms | 40秒 |
+
+两种优化后场景仍取得上述执行／取消／独立状态／全关闭断言，校验 FD 与缓冲上限不变。原始结果位于本机 `.cache/` 下的 `windows-shell-load-default-d1e7b227-ac44-4fa3-9a2f-f12fedc6e5ee`、`windows-shell-load-32-74669924-c7a9-4c31-90ff-48dc45196496`（优化前）及 `windows-shell-load-default-2bfc497e-e63f-45a1-8da5-a9e0d23397e2`、`windows-shell-load-32-cc905044-9533-4ed1-aa8b-fd4c8b216c0c`（优化后）的 `RESULT.json`。定位 profile 位于 `.cache/windows-shell-load-profile/`，其数据不混入无 profiler 比较。后续采样已不见原秒级 Ajv 编译／同步 Shell temp 删除峰值，剩余长峰主要落在会话锁路径复核、Store 请求序列化和 Artifact 权限／持久发布，尚未修复。因此本次交付限定三条路径的优化与32会话正确性验证，**不宣称完整32会话链路或 Native 窗口始终无卡顿**；压测没有 Native 窗口观察，原三会话界面资格独立保留。
+
+同轮相关18份完整测试文件143项通过；另两条既有断言失败分别是旧模型投影用例仍调用已退役的 `define_validation_checks`、Responses 400错误的请求次数预期3而实际8。前者替换为 Git HEAD 的修前模型工具模块、后者在隔离副本加载修前配置及模型工具模块，均复现同样失败，未改退役工具或 SDK 重试策略来通过本轮。缓存、分轮检查、来源／信任漂移、原 Run 封存、真实 Shell 清理等待与 unknown 的新断言通过；类型、八 workspace 构建、边界、测试归属及文档检查通过。上述两条旧断言仍保留，不把这份定向结果称为全仓测试通过。
+
 macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[Agent Shell 工厂](../../packages/agent/src/permissions/shell.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Windows 已接原 V6 runner、无账户受限 Git Bash 及 Full；Linux 和完整发布资格沿原门禁，不能互借通过。
 
 Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产及独立解析资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要和scope接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows 受限与 Full 已接原 Job/HANDLE 后端；Linux实机、installed维护／版本链及全部资源门禁继续pending。

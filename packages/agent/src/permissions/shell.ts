@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants, createReadStream } from 'node:fs';
+import { constants } from 'node:fs';
 import { access, lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute } from 'node:path';
 import {
@@ -12,6 +12,7 @@ import {
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
 import { JobStartError } from '../extensions';
+import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
 import { AgentError } from '../storage/types';
 import { shellToolCapability as describe } from './capabilities';
 import { dispatchScopeLeaves } from './dispatch-scope';
@@ -197,6 +198,7 @@ function commandRequest(request: AuthorizationRequest, scoped: boolean) {
 type ShellAsset = Awaited<ReturnType<typeof asset>>;
 export async function inspectShellAssets(
   options: ShellConfigurationOptions,
+  signal?: AbortSignal,
 ): Promise<ShellAsset[]> {
   assertShellConfiguration(options);
   const paths: [string, boolean][] = [
@@ -212,7 +214,11 @@ export async function inspectShellAssets(
       [`${dirname(options.windows.fullShellExecutable)}/coreutils.exe`, true],
       [`${dirname(options.shellExecutable)}/../../manifest.json`, true],
     );
-  return Promise.all(paths.map(([path, executable]) => asset(path, executable)));
+  return mapAssetVerification(
+    paths,
+    ([path, executable], signal) => asset(path, executable, signal),
+    signal,
+  );
 }
 function assertShellConfiguration(options: ShellConfigurationOptions) {
   if (
@@ -246,21 +252,23 @@ function assertShellConfiguration(options: ShellConfigurationOptions) {
   )
     throw new AgentError('invalid_shell_configuration');
 }
-async function asset(path: string, executable: boolean) {
+async function asset(path: string, executable: boolean, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   if (!isAbsolute(path)) throw new AgentError('shell_asset_unavailable');
   const selected = await realpath(path);
   const stat = await lstat(selected);
   if (!stat.isFile() || stat.size > 256 * 1024 * 1024)
     throw new AgentError('shell_asset_unavailable');
   if (executable) await access(selected, constants.X_OK);
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(selected)) hash.update(chunk);
-  return { path: selected, digest: hash.digest('hex') };
+  const fact = await launchIdentityAsync(path, true, signal);
+  if (fact.canonical !== selected) throw new AgentError('shell_asset_unavailable');
+  return { path: selected, digest: fact.digest! };
 }
 export async function createShellConfiguration(input: {
   workspaceRoot: string;
   toolIds: readonly string[];
   options?: ShellConfigurationOptions;
+  signal?: AbortSignal;
 }) {
   const selected = input.toolIds.filter((id) =>
     shellToolIds.includes(id as (typeof shellToolIds)[number]),
@@ -281,13 +289,17 @@ export async function createShellConfiguration(input: {
   try {
     const cwd = await realpath(input.workspaceRoot);
     if (!(await lstat(cwd)).isDirectory()) throw new AgentError('shell_workspace_unavailable');
-    const assets = await inspectShellAssets(options);
+    const assets = await inspectShellAssets(options, input.signal);
     const [supervisor, bun, shell, extra] = assets;
     const bubblewrap = options.platform === 'linux' ? extra : undefined;
     const coreutils = options.platform === 'win32' ? extra : undefined;
     if (!supervisor || !bun || !shell) throw new AgentError('shell_asset_unavailable');
-    const commandPolicy = await createShellCommandPolicy({ cwd, shellExecutable: shell.path });
-    const searchAsset = await asset(ripgrepAsset(), true);
+    const commandPolicy = await createShellCommandPolicy({
+      cwd,
+      shellExecutable: shell.path,
+      signal: input.signal,
+    });
+    const searchAsset = await asset(ripgrepAsset(), true, input.signal);
     const host = options.host && {
       ...options.host,
       readonlyAssets: [
@@ -311,14 +323,17 @@ export async function createShellConfiguration(input: {
     };
     const job =
       options.platform === 'win32' && coreutils && host
-        ? createWindowsShellJob({
-            ...jobOptions,
-            controlBase: host.controlBase,
-            coreutilsPath: coreutils.path,
-            fullShellExecutable: options.windows!.fullShellExecutable,
-            stateRoot: options.windows!.stateRoot,
-            executionScope: hostExecutionScope,
-          })
+        ? await createWindowsShellJob(
+            {
+              ...jobOptions,
+              controlBase: host.controlBase,
+              coreutilsPath: coreutils.path,
+              fullShellExecutable: options.windows!.fullShellExecutable,
+              stateRoot: options.windows!.stateRoot,
+              executionScope: hostExecutionScope,
+            },
+            input.signal,
+          )
         : options.platform === 'linux' && bubblewrap && host
           ? createLinuxHostShellJob({
               ...jobOptions,
@@ -362,14 +377,15 @@ export async function createShellConfiguration(input: {
           let dispatched = false;
           try {
             context.signal.throwIfAborted();
-            const actual = await Promise.all(
-              assets.map((item, index) =>
-                asset(item.path, index !== 0 || options.platform !== 'darwin'),
-              ),
+            const actual = await mapAssetVerification(
+              assets,
+              (item, signal, index) =>
+                asset(item.path, index !== 0 || options.platform !== 'darwin', signal),
+              context.signal,
             );
             if (actual.some((item, index) => item.digest !== assets[index]!.digest))
               throw new AgentError('shell_asset_changed');
-            if ((await asset(searchAsset.path, true)).digest !== searchAsset.digest)
+            if ((await asset(searchAsset.path, true, context.signal)).digest !== searchAsset.digest)
               throw new AgentError('shell_asset_changed');
             context.signal.throwIfAborted();
             const command =
@@ -377,7 +393,7 @@ export async function createShellConfiguration(input: {
                 ? value.command
                 : undefined;
             if (typeof command !== 'string') throw new AgentError('invalid_shell_arguments');
-            const classified = await commandPolicy.classify(command);
+            const classified = await commandPolicy.classify(command, context.signal);
             context.signal.throwIfAborted();
             const search = readOnlySearchCommand(
               classified.plainCommands,
@@ -488,6 +504,7 @@ export async function createShellConfiguration(input: {
       },
     };
   } catch (error) {
+    input.signal?.throwIfAborted();
     if (error instanceof AgentError) throw error;
     throw new AgentError('shell_asset_unavailable');
   }

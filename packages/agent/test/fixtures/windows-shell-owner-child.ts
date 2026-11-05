@@ -10,7 +10,7 @@ const powershell = join(
   'System32/WindowsPowerShell/v1.0/powershell.exe',
 ).replaceAll('\\', '/');
 const script = `$p=Start-Process -FilePath "${powershell}" -ArgumentList "-NoProfile -NonInteractive -Command Start-Sleep -Seconds 60" -PassThru -NoNewWindow;Write-Output ("PIDS "+$PID+" "+$p.Id);Start-Sleep -Seconds 60`;
-const job = createWindowsShellJob({
+const job = await createWindowsShellJob({
   cwd: join(root, 'workspace'),
   controlBase: join(root, 'control'),
   env: Object.fromEntries(

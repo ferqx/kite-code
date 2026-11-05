@@ -18,7 +18,13 @@ import {
   type WindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../platform/process/windows-owned-child';
-import { launchIdentity, removeRuntimeTemp, verifyLaunchIdentities } from './launch-identity';
+import {
+  launchIdentity,
+  launchIdentityAsync,
+  mapAssetVerification,
+  removeRuntimeTempAsync,
+  verifyLaunchIdentitiesAsync,
+} from './launch-identity';
 import { ripgrepAsset } from './ripgrep';
 import type { HostShellExecutionScopeResolver } from './shell-scope';
 import { captureWindowsGitBashRuntime, stageWindowsGitBash } from './windows-git-bash';
@@ -84,7 +90,10 @@ export interface WindowsShellOptions {
   maxQueuedBytes?: number;
 }
 /** Live native Job/HANDLE owner; durable references never reconstruct a process from a PID. */
-export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition {
+export async function createWindowsShellJob(
+  input: WindowsShellOptions,
+  signal?: AbortSignal,
+): Promise<JobDefinition> {
   const options = { ...input, env: { ...input.env } };
   if (
     process.platform !== 'win32' ||
@@ -101,17 +110,26 @@ export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition
     ].every(isAbsolute)
   )
     throw Error('windows_shell_unqualified');
-  const assets = [
-    options.supervisorPath,
+  const assets = await mapAssetVerification(
+    [
+      options.supervisorPath,
+      options.shellExecutable,
+      options.coreutilsPath,
+      options.fullShellExecutable,
+      join(dirname(options.fullShellExecutable), 'coreutils.exe'),
+    ],
+    (path, signal) => launchIdentityAsync(path, true, signal),
+    signal,
+  );
+  const roots = await mapAssetVerification(
+    [options.cwd, options.controlBase],
+    (path, signal) => launchIdentityAsync(path, false, signal),
+    signal,
+  );
+  const verifyRuntime = await captureWindowsGitBashRuntime(
     options.shellExecutable,
-    options.coreutilsPath,
     options.fullShellExecutable,
-    join(dirname(options.fullShellExecutable), 'coreutils.exe'),
-  ].map((path) => launchIdentity(path, true));
-  const roots = [options.cwd, options.controlBase].map((path) => launchIdentity(path));
-  const verifyRuntime = captureWindowsGitBashRuntime(
-    options.shellExecutable,
-    options.fullShellExecutable,
+    signal,
   );
   const states = new WeakMap<JobHandle, State>();
   const get = (handle: JobHandle) => {
@@ -132,7 +150,7 @@ export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition
       additionalProperties: false,
     },
     async start(value, context: JobContext) {
-      const { scope, shell, coreutils, searchDirectory, command } = (() => {
+      const { scope, shell, coreutils, searchDirectory, command } = await (async () => {
         try {
           context.signal.throwIfAborted();
           if (
@@ -145,9 +163,10 @@ export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition
             value.command.length > 262144
           )
             throw Error('invalid_shell_input');
-          verifyLaunchIdentities([...assets, ...roots]);
+          await verifyLaunchIdentitiesAsync([...assets, ...roots], context.signal);
           const scope = options.executionScope(context);
-          verifyRuntime(scope.filesystem === 'full_access');
+          await verifyRuntime(scope.filesystem === 'full_access', context.signal);
+          context.signal.throwIfAborted();
           const shell = scope.filesystem === 'full_access' ? assets[3]! : assets[1]!;
           const coreutils = scope.filesystem === 'full_access' ? assets[4]! : assets[2]!;
           if (basename(shell.canonical).toLowerCase() !== 'bash.exe')
@@ -164,8 +183,12 @@ export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition
       const invocation = `kitecode.${randomBytes(16).toString('hex')}`;
       const temp = realpathSync.native(mkdtempSync(join(options.controlBase, 'shell-')));
       const tempIdentity = launchIdentity(temp);
-      const cleanup = () => removeRuntimeTemp(tempIdentity);
+      const cleanup = () => removeRuntimeTempAsync(tempIdentity);
       const env = { ...options.env };
+      const inheritedPath = Object.hasOwn(env, 'PATH')
+        ? env.PATH
+        : Object.entries(env).find(([name]) => name.toUpperCase() === 'PATH')?.[1];
+      for (const name of Object.keys(env)) if (name.toUpperCase() === 'PATH') delete env[name];
       Object.assign(env, {
         TEMP: temp,
         TMP: temp,
@@ -175,7 +198,7 @@ export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition
           join(temp, 'kite-coreutils'),
           dirname(shell.canonical),
           join(dirname(shell.canonical), '../../mingw64/bin'),
-          env.PATH ?? '',
+          inheritedPath ?? '',
         ].join(';'),
       });
       delete env.BASH_ENV;
@@ -238,7 +261,7 @@ export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition
         if (error instanceof WindowsOwnedChildStartError) {
           await error.cleanup;
         }
-        cleanup();
+        await cleanup();
         throw error;
       }
       let sequence = 0,
@@ -396,7 +419,7 @@ export function createWindowsShellJob(input: WindowsShellOptions): JobDefinition
             evidence = owner.readEvidence();
             if (!evidence.closed || evidence.closeUnknown)
               throw Error('windows_shell_close_unconfirmed');
-            cleanup();
+            await cleanup();
           } catch {
             confirmed = false;
           }

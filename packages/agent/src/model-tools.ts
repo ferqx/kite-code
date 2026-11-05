@@ -1,6 +1,7 @@
 import type { ModelRequest, ModelTool, ModelToolCall } from '@kite-ai/ai';
-import Ajv from 'ajv';
+import type Ajv from 'ajv';
 import type { ToolDefinition } from './extensions';
+import { compileModelSchema } from './model-schema';
 import { AgentError, type Json, type JsonSchema, type ToolCall } from './storage/types';
 
 type Rename = NonNullable<ToolCall['model']>['parameters'];
@@ -124,15 +125,14 @@ function schemaProjection(schema: JsonSchema, model: NonNullable<ToolDefinition[
   const transformed =
     parameters.length > 0 || !!model.omitParameters?.length || !!model.requiredParameters?.length;
   if (!transformed) return { inputSchema, parameters };
-  const validator = new Ajv({ allErrors: false, strict: false });
-  const validate = validator.compile(inputSchema);
+  const validate = compileModelSchema(inputSchema);
   const branches = new WeakMap<object, ReturnType<Ajv['compile']>>();
   const matches = (branch: Json, value: Json): boolean => {
     if (typeof branch === 'boolean') return branch;
     if (!object(branch)) return false;
     let check = branches.get(branch);
     if (!check) {
-      check = new Ajv({ allErrors: false, strict: false }).compile(branch);
+      check = compileModelSchema(branch);
       branches.set(branch, check);
     }
     return !!check(value);
