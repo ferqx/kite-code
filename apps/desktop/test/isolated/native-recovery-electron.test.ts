@@ -69,7 +69,11 @@ for (const kind of ['run', 'interrupt', 'report'])
           {
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { HOME: join(f.root, 'home'), PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+            env: {
+              ...(f.userConfiguration?.homeEnvironment ?? { HOME: join(f.root, 'home') }),
+              PATH: '/usr/bin:/bin',
+              LANG: 'C.UTF-8',
+            },
           },
         );
         driver = processDriver;

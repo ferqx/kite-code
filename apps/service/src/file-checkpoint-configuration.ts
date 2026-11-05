@@ -13,10 +13,12 @@ import {
   type FileCheckpointCaptureProof,
   type SessionOutput,
   withExternalFileReads,
+  withFullAccessFiles,
   withInputFileReads,
   withPlanFileTools,
   withSessionOutputs,
 } from '@kite-ai/agent/files';
+import type { PermissionPolicySnapshot } from '@kite-ai/agent/permissions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import type {
   ContextSelection,
@@ -435,24 +437,30 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
     { includeTools: true },
   );
-  const externalReads = withExternalFileReads({
-    tools: extension.tools ?? [],
+  const fileScope = {
     protectedRoots: () => [
       options.profile.dataRoot,
       options.profile.coordinationPath,
       ...options.runtimeAssets(),
     ],
-    async workspaceRoot(request) {
+    async workspaceRoot(
+      request: Pick<
+        import('@kite-ai/agent/extensions').AuthorizationRequest,
+        'sessionId' | 'executionId' | 'signal'
+      >,
+    ) {
       const runtime = options.runtime();
       const session = await runtime.getSession(request.sessionId);
       const workspace = session && (await runtime.getWorkspace(session.workspaceId));
       if (!workspace) throw new AgentError('file_read_scope_unavailable');
       return fileURLToPath(workspace.rootUri);
     },
-  });
+  };
+  const externalReads = withExternalFileReads({ tools: extension.tools ?? [], ...fileScope });
+  const fullAccessFiles = withFullAccessFiles({ tools: externalReads.tools, ...fileScope });
   const inputFiles = withInputFileReads({
     profilePath: options.profile.profilePath,
-    tools: externalReads.tools,
+    tools: fullAccessFiles.tools,
     async resolve(request, uri) {
       const runtime = options.runtime();
       const actual = await runtime.getExecution(request.executionId);
@@ -494,28 +502,84 @@ export function createDefaultFileCheckpointConfiguration(options: {
         command.originStoreId !== metadata.storeId
       )
         throw new AgentError('plan_file_scope_denied');
-      const receipt = await runtime.invokeActionFromTool({
-        expectedStoreId: metadata.storeId,
-        sessionId: request.sessionId,
-        subjectId: command.subjectId,
-        parentExecutionId: actual.id,
-        commandId: `plan-file-${actual.id}`,
-        request: {
-          kind: 'extension.invoke',
-          extensionId: 'builtin.planning',
-          actionId: 'planning.write',
-          definitionVersion: '1',
-          input,
-        },
-      });
-      const id = object(receipt.receipt)?.executionId;
-      const completed = typeof id === 'string' ? await runtime.getExecution(id) : null;
-      if (completed?.status !== 'succeeded')
-        throw new AgentError(
-          completed?.status === 'outcome_unknown'
-            ? 'file_publish_outcome_unknown'
-            : 'plan_file_write_failed',
+      const commandId = `plan-file-${actual.id}`;
+      const uncertain = () =>
+        new AgentError(
+          'file_publish_outcome_unknown',
+          'The delegated Plan write result could not be verified. Its file or state may already have changed. Inspect the original execution and current plan. Do not repeat the write.',
         );
+      let completed: ExecutionRecord | null;
+      try {
+        const receipt = await runtime.invokeActionFromTool({
+          expectedStoreId: metadata.storeId,
+          sessionId: request.sessionId,
+          subjectId: command.subjectId,
+          parentExecutionId: actual.id,
+          commandId,
+          request: {
+            kind: 'extension.invoke',
+            extensionId: 'builtin.planning',
+            actionId: 'planning.write',
+            definitionVersion: '1',
+            input,
+          },
+        });
+        const id = object(receipt.receipt)?.executionId;
+        completed = typeof id === 'string' ? await runtime.getExecution(id) : null;
+      } catch {
+        throw uncertain();
+      }
+      if (
+        completed?.kind !== 'job' ||
+        completed.definitionId !== 'builtin.planning/planning.write' ||
+        completed.definitionVersion !== '1' ||
+        completed.parentExecutionId !== actual.id ||
+        completed.originCommandId !== commandId ||
+        completed.sessionId !== actual.sessionId ||
+        completed.originStoreId !== metadata.storeId ||
+        digest(completed.input) !== digest(input)
+      )
+        throw uncertain();
+      if (completed.status === 'succeeded') return;
+      const result = object(completed.result);
+      const content = typeof result?.content === 'string' ? result.content : undefined;
+      const details = result && object(result.details ?? null);
+      if (completed.status === 'failed') {
+        const code =
+          [
+            'permission_denied',
+            'approval_denied',
+            'authorization_check_unavailable',
+            'plan_version_conflict',
+            'plan_file_changed',
+            'plan_file_missing',
+            'plan_file_recovery_required',
+            'file_baseline_conflict',
+            'record_revision_conflict',
+            'plan_steps_invalid',
+            'planning_identity_conflict',
+          ].find((code) => details?.code === code || content === code) ?? 'plan_file_write_failed';
+        throw new AgentError(
+          code,
+          content ||
+            'The delegated Plan write failed; inspect its original execution for the saved result.',
+        );
+      }
+      if (
+        completed.status === 'cancelled' &&
+        completed.authorization?.dispatched === false &&
+        details?.adapterAttempted === false
+      )
+        throw new AgentError(
+          'plan_file_write_cancelled',
+          'The delegated Plan write was cancelled before dispatch; this Action did not publish the requested change.',
+        );
+      if (completed.status === 'outcome_unknown' || completed.status === 'cancelled')
+        throw new AgentError(
+          'file_publish_outcome_unknown',
+          `${content ? `${content}\n` : ''}${uncertain().message}`,
+        );
+      throw uncertain();
     },
     async current(request) {
       const runtime = options.runtime();
@@ -638,15 +702,48 @@ export function createDefaultFileCheckpointConfiguration(options: {
       };
     },
   });
+  const fileScopeDescription =
+    'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. In Request Approval and Auto, ordinary external files are read-only through Files: external write_file/edit_file requests are unsupported and do not open an approval card. Only effective Full access supports direct ordinary external writes and edits. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files and host-provided session output paths follow their separate declared scope. External files are outside workspace checkpoints.';
+  const descriptions: Readonly<Record<string, string>> = {
+    'files.read':
+      'Read UTF-8 file lines, at most 200 by default. start_line begins at 1; continue with the returned next_line. Workspace reads return a complete-file baseline. Ordinary external reads in Request Approval and Auto have no edit baseline; effective Full returns a complete baseline only for targets supported by safe native editing, with other readable targets remaining read-only. A baseline never grants write permission. A known missing ordinary file returns File does not exist with exists:false, not empty contents or a baseline. For workspace and non-PDF files, omit pages/mode and use start_line/max_lines. Saved PDF attachments use pages and mode=text|image, omit line parameters; default is page 1 text, at most 20 text pages or 4 images. Empty extracted text does not prove a blank page.',
+    'files.write':
+      'Create or replace a complete UTF-8 file. Use base:null only for a new file; missing accepted parent directories can be created through the original native boundary. Replacement requires the exact complete-file baseline and existing parents. Supply exactly one of content or content_artifact. Preserve the requested target and complete contents. Correct a reported cause before a separately authorized new attempt; never repeat a write with an unknown outcome.',
+    'files.edit':
+      'Replace exact non-overlapping literal text using the complete-file baseline. expected_matches must equal the actual count. Supply old_text/new_text or their corresponding immutable Artifact references. Preserve the requested target and intended replacement. A conflict does not reveal current contents or roll back other successful operations; use original receipts and authorized current reads before a separately authorized corrected edit.',
+  };
+  const tools = outputs.extension.tools!.map((tool) => {
+    const description = descriptions[tool.id];
+    if (!description) return tool;
+    return {
+      ...tool,
+      description: `${description} ${fileScopeDescription}`,
+      inputSchema: {
+        ...tool.inputSchema,
+        properties: {
+          ...(tool.inputSchema.properties as Record<string, Json>),
+          path: {
+            ...((tool.inputSchema.properties as Record<string, Json>).path as Record<string, Json>),
+            description:
+              'Workspace-relative or absolute file path, including ordinary external files. Ordinary external reads are supported in all modes; direct ordinary external writes/edits require effective Full access. Exact saved attachment, current Plan and host-provided session output paths retain their separate scope; other private/protected paths are denied.',
+          },
+        },
+      },
+    };
+  });
   return {
-    extension: outputs.extension,
-    tools: outputs.extension.tools!,
+    extension: { ...outputs.extension, tools },
+    tools,
     isPlanFileEdit: planFiles.isPlanFileEdit,
-    async describeRequest(request: import('@kite-ai/agent/extensions').AuthorizationRequest) {
+    async describeRequest(
+      request: import('@kite-ai/agent/extensions').AuthorizationRequest,
+      policy?: Readonly<PermissionPolicySnapshot>,
+    ) {
       return (
         (await outputs.describeRequest(request)) ??
         (await planFiles.describeRequest(request)) ??
         (await inputFiles.describeRequest(request)) ??
+        (await fullAccessFiles.describeRequest(request, policy)) ??
         (await externalReads.describeRequest(request))
       );
     },

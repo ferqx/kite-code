@@ -280,7 +280,7 @@ function toolTarget(message: Message): string | undefined {
     case 'glob':
       return argument('pattern');
     case 'shell_execute':
-      return argument('command');
+      return argument('description')?.replace(/\s+/gu, ' ').trim() || argument('command');
     case 'write_plan':
     case 'update_plan':
     case 'request_plan_review':
@@ -594,6 +594,8 @@ function createdChildTask(message: Message): boolean {
 
 function executionLabel(message: Message, diagnostics: boolean) {
   if (executionUnconfirmed(message)) return diagnostics ? '执行状态待核实' : '';
+  if (message.fileMissing && message.toolName === 'read_file' && message.status === 'completed')
+    return '文件不存在';
   if (message.status === undefined && !diagnostics) return '';
   // Confirmed approval failures already explain why the tool never started.
   // Independent unknown effects and timeouts must retain their result labels.
@@ -1063,10 +1065,10 @@ export function ToolActivity({
     : grouped
       ? undefined
       : shell
-        ? (shellCommand(message) ??
+        ? (toolTarget(message) ??
+          shellCommand(message) ??
           message.shell?.commandPreview ??
-          message.shell?.shellId ??
-          toolTarget(message))
+          message.shell?.shellId)
         : toolTarget(message);
   const status =
     ask && (ask.cancelled || message.status === 'cancelled')

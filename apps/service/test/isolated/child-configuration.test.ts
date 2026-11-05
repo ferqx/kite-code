@@ -427,11 +427,25 @@ test('parent policy denies a child write despite fresh child registration and le
     const child = await f.child();
     await f.childDone(child.id);
     expect(existsSync(join(f.workspace, 'forbidden.txt'))).toBe(false);
-    expect(
-      (await f.store.listExecutions(child.childSessionId!)).find(
-        (row) => row.definitionId === 'files.write',
-      )?.result,
-    ).toMatchObject({ content: 'permission_denied' });
+    const write = (await f.store.listExecutions(child.childSessionId!)).find(
+      (row) => row.definitionId === 'files.write',
+    )!;
+    expect(write).toMatchObject({
+      status: 'failed',
+      authorization: { dispatched: false },
+      result: {
+        outcome: 'failed',
+        details: {
+          code: 'permission_denied',
+          reason: 'parent_child_permission_denied',
+          adapterAttempted: false,
+          dispatchCommitted: false,
+        },
+      },
+    });
+    const content = (write.result as { content: string }).content;
+    expect(content).toContain('Permission denied; this tool was not executed.');
+    expect(content).toContain('Do not repeat');
   } finally {
     await f.close();
   }

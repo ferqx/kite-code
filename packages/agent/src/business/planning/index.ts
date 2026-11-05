@@ -682,43 +682,56 @@ export function createPlanningValidation(
             recover: recovering,
           });
         }
-        await write(
-          context,
-          key,
-          {
-            kind: 'plan_document',
-            ...plan,
-            digest: hash,
-            ...(file ? { file: file as unknown as Json } : {}),
-          },
-          true,
-        );
-        await writeAt(
-          context,
-          'plan.current',
-          {
-            kind: 'plan_current',
+        try {
+          await write(
+            context,
             key,
+            {
+              kind: 'plan_document',
+              ...plan,
+              digest: hash,
+              ...(file ? { file: file as unknown as Json } : {}),
+            },
+            true,
+          );
+          await writeAt(
+            context,
+            'plan.current',
+            {
+              kind: 'plan_current',
+              key,
+              planId: plan.planId,
+              version,
+              digest: hash,
+            },
+            original,
+          );
+          if (file)
+            await write(context, 'plan.file.publication', {
+              kind: 'plan_file_publication',
+              state: 'committed',
+              key,
+              digest: hash,
+              file: file as unknown as Json,
+            });
+          return result({
             planId: plan.planId,
             version,
             digest: hash,
-          },
-          original,
-        );
-        if (file)
-          await write(context, 'plan.file.publication', {
-            kind: 'plan_file_publication',
-            state: 'committed',
-            key,
-            digest: hash,
-            file: file as unknown as Json,
+            ...(file ? { filePath: planFiles!.path(file) } : {}),
           });
-        return result({
-          planId: plan.planId,
-          version,
-          digest: hash,
-          ...(file ? { filePath: planFiles!.path(file) } : {}),
-        });
+        } catch (error) {
+          if (!file) throw error;
+          const code =
+            error instanceof Error && knownPreflight.has(error.message)
+              ? error.message
+              : 'planning_operation_failed';
+          return {
+            outcome: 'outcome_unknown',
+            content: `plan_file_publish_unknown: Plan file publication completed, but updating its remaining Planning records did not finish. The file may already contain the requested change. Inspect the original execution and current plan before any further mutation. Do not resubmit this operation. Failure code: ${code}.`,
+            details: { code: 'plan_file_publish_unknown', failureCode: code },
+          };
+        }
       },
     },
     'planning.review': {
@@ -1824,9 +1837,9 @@ export function createPlanningValidation(
       originStoreId: run.originStoreId,
     });
     const content = [
-      `phase: ${state.status === 'pending' ? 'planning' : 'building'}`,
       `run: ${run.id}`,
-      `planning: ${canonical(state as unknown as Json)}`,
+      `plan_requirement: ${canonical(state as unknown as Json)}`,
+      'Planning is a plan mode, not an Agent execution phase. This observes the actual Run-specific plan approval requirement; approval does not grant tool permissions.',
       'This is Runtime-generated observation, not a user request or execution grant.',
     ].join('\n');
     return [

@@ -144,7 +144,7 @@ macTest(
             throw Error('explicit_denial');
           },
         }),
-      ).rejects.toThrow('explicit_denial');
+      ).rejects.toThrow('browser_executor_failed');
       expect(seen).toEqual(['denied']);
     } finally {
       expect(await executor.close()).toEqual({ confirmed: true });

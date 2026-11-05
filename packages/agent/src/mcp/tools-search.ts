@@ -50,11 +50,15 @@ export function createMcpToolsSearchTool(
         return { outcome: 'failed', content: 'mcp_search_scope_unverifiable' };
       const words = request.query.toLocaleLowerCase('en-US').split(/\s+/).filter(Boolean);
       const items: Json[] = [];
+      const unavailableSources: Json[] = [];
+      let omittedMatches = 0;
       for (const source of sources) {
         context.signal.throwIfAborted();
         try {
           await source.assertFresh();
         } catch {
+          context.signal.throwIfAborted();
+          unavailableSources.push({ serverId: source.serverId, code: 'mcp_catalogue_unavailable' });
           continue;
         }
         for (const tool of source.tools) {
@@ -74,14 +78,35 @@ export function createMcpToolsSearchTool(
             description: tool.description,
             inputSchema: structuredClone(tool.inputSchema),
           };
-          if (Buffer.byteLength(JSON.stringify([...items, row])) > 256 * 1024) continue;
+          if (Buffer.byteLength(JSON.stringify([...items, row])) > 256 * 1024) {
+            omittedMatches++;
+            continue;
+          }
           items.push(row as Json);
           if (items.length >= (request.limit ?? 10)) break;
         }
         if (items.length >= (request.limit ?? 10)) break;
       }
-      const details = { source: 'frozen_selected_mcp_catalogue', items };
-      return { outcome: 'succeeded', content: JSON.stringify(details), details };
+      const details = {
+        source: 'frozen_selected_mcp_catalogue',
+        items,
+        ...(unavailableSources.length || omittedMatches
+          ? {
+              complete: false,
+              unavailableSources,
+              omittedMatches,
+              error: {
+                code: 'mcp_search_incomplete',
+                message: `${unavailableSources.length ? 'Some selected MCP catalogues are unavailable or no longer current. ' : ''}${omittedMatches ? 'Some matching MCP tool descriptors exceed the search response budget and were omitted. ' : ''}These results are incomplete, not proof that no matching tool exists. Observe the current source or catalogue before choosing a callable tool. This search did not connect or invoke a remote tool.`,
+              },
+            }
+          : {}),
+      };
+      return {
+        outcome: unavailableSources.length || omittedMatches ? 'failed' : 'succeeded',
+        content: JSON.stringify(details),
+        details,
+      };
     },
   };
 }

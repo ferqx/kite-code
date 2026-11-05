@@ -119,7 +119,7 @@ try {
   assert.equal(trustReceipt.externalReadScopeDigest, trustRequest.externalReadScopeDigest);
   await pump();
   // Formal request approval admits workspace writes. Explicit Auto with an actual
-  // ask_user review exercises the original two independent same-command cards.
+  // high-risk review exercises one exact card; its own Job inherits that decision.
   await wait('❯ 自动审核');
   await key('\r');
   await wait('Confirm original');
@@ -146,32 +146,18 @@ try {
   await key('\r');
   await wait('interaction.answer: applied');
   await pump();
-  const end = Date.now() + 5000;
-  let card: { id: string } | undefined;
-  while (!card && Date.now() < end) {
-    card = rows(
-      "select id from interaction where definition_id='shell.command' and state='pending'",
-    )[0] as { id: string } | undefined;
-    await pump();
-  }
-  assert.ok(card);
-  await wait(`approval [${card.id}] original Session`);
-  await pump();
-  await key('\x1b[B');
-  await key('\x1b[B');
-  await wait('same command in original Session');
-  await key('\r');
   await wait('DONE owned-1');
   await pump();
+  assert.deepEqual(rows("select id from interaction where definition_id='shell.command'"), []);
   await send('/permissions');
-  await wait('Saved same_command grants: 2');
+  await wait('Saved same_command grants: 1');
   await key('\x1b');
   await wait('New Run >');
   await send('New task: owned-2');
   await wait('DONE owned-2');
   await pump();
   await send('/permissions');
-  await wait('Saved same_command grants: 2');
+  await wait('Saved same_command grants: 1');
   await key('c');
   await wait('Confirm original');
   await key('\r');
@@ -187,7 +173,7 @@ try {
   await send('New task: owned-4');
   await wait('same command in original Session');
   const pendingBeforeMode = rows(
-    "select id,run_id from interaction where definition_id='shell.launch' and state='pending'",
+    "select id,run_id from interaction where definition_id='shell.execute' and state='pending'",
   ) as { id: string; run_id: string }[];
   assert.equal(pendingBeforeMode.length, 1);
   const originalPending = pendingBeforeMode[0]!;

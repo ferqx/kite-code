@@ -93,11 +93,13 @@ for (const boundary of ['response', 'results'])
         .split('\n')
         .map((line) => JSON.parse(line));
       expect(io.map((item) => item.path).sort()).toEqual([
-        'apps',
-        'docs',
+        'apps/app-evidence.txt',
+        'docs/AGENTS.md',
         'package.json',
-        'packages',
+        'packages/package-evidence.txt',
       ]);
+      expect(io.every((item) => item.name === 'files.read')).toBe(true);
+      expect(new Set(io.map((item) => item.path)).size).toBe(4);
       const models = readFileSync(join(directory, 'models.jsonl'), 'utf8')
         .trim()
         .split('\n')

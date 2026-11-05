@@ -191,7 +191,6 @@ try {
     ...(shellAvailable
       ? ([
           ['shell.execute', 'shell_execute'],
-          ['shell.launch', 'shell_launch'],
           ['shell.read', 'shell_read'],
           ['shell.stop', 'shell_stop'],
           ['shell.wait', 'shell_wait'],

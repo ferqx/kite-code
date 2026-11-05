@@ -241,7 +241,14 @@ test('paired host streams saved attachments through scoped read_file and rejects
     );
     expect(requests).toHaveLength(4);
     expect(JSON.stringify(requests[3]!.messages)).not.toContain('SAVED_ATTACHMENT_BYTES');
-    expect(JSON.stringify(requests[3]!.messages)).toContain('permission_denied');
+    const foreignFeedback = (
+      requests[3]!.messages as { role: string; tool_call_id?: string; content?: string }[]
+    ).find((message) => message.role === 'tool' && message.tool_call_id === 'read-3')!;
+    expect(foreignFeedback).toBeDefined();
+    expect(foreignFeedback.content).toContain('not among the exact files selected');
+    expect(foreignFeedback.content).toContain('This request was not executed');
+    expect(foreignFeedback.content).toContain('do not bypass a refusal');
+    expect(foreignFeedback.content).not.toContain('input_file_scope_denied');
     const inspected = await openSqliteStore({
       dataRoot: f.profile.dataRoot,
       profile: f.profile.profile,
@@ -252,6 +259,7 @@ test('paired host streams saved attachments through scoped read_file and rejects
         (await inspected.listExecutions('foreign')).find((e) => e.kind === 'tool')?.result,
       ).toMatchObject({
         details: {
+          code: 'permission_denied',
           reason: 'input_file_scope_denied',
           adapterAttempted: false,
           dispatchCommitted: false,
@@ -318,11 +326,12 @@ test('ordinary host defaults select only available Shell and Task capabilities a
   expect(shellOnly.filter((id) => id.startsWith('shell.'))).toHaveLength(5);
 });
 
-test('ordinary paired host exposes public file schemas, edits with an exact baseline, preserves internal execution inputs, and respects explicit disable', async () => {
+test('ordinary paired default Auto host edits with an exact baseline without risk review, preserves public schemas and internal inputs, and respects explicit disable', async () => {
   const f = fixture();
   const marker = 'owned fresh-profile project source';
   writeFileSync(join(f.workspace, 'source.txt'), marker);
   const requests: Record<string, unknown>[] = [];
+  const reviews: Record<string, unknown>[] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -330,19 +339,28 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       const body = (await request.json()) as Record<string, unknown>;
       if (!Array.isArray(body.tools)) {
         const messages = body.messages as { role: string; content: string }[];
-        let authorizationCheck = false;
+        let purpose: string | undefined;
         try {
-          authorizationCheck =
-            JSON.parse(
-              messages
-                .slice()
-                .reverse()
-                .find((message) => message.role === 'user')?.content ?? '{}',
-            ).purpose === 'authorization_check';
+          const payload = JSON.parse(
+            messages
+              .slice()
+              .reverse()
+              .find((message) => message.role === 'user')?.content ?? '{}',
+          );
+          if (['authorization_check', 'shell_risk'].includes(payload.purpose)) {
+            purpose = payload.purpose;
+            reviews.push(payload);
+          }
         } catch {}
-        const content = authorizationCheck
-          ? JSON.stringify({ decision: 'ask_user', reason: 'Confirm this exact file edit.' })
-          : 'Project read';
+        const content =
+          purpose === 'shell_risk'
+            ? JSON.stringify({
+                risk: 'critical',
+                reason: 'Unexpected file risk review invocation.',
+              })
+            : purpose === 'authorization_check'
+              ? JSON.stringify({ decision: 'reject', reason: 'Unexpected file review invocation.' })
+              : 'Project read';
         const chunk = (delta: unknown, finish: string | null) =>
           `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
         return new Response(`${chunk({ content }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`, {
@@ -429,35 +447,27 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       ifRevision: trust.revision,
     });
     expect(await child.run('read-project')).toMatchObject({ status: 'applied' });
-    const pending = await until(
-      () =>
-        child!.handle.client.listInteractions('session', {
-          storeId: child!.storeId,
-          state: 'pending',
-        }),
-      (page) => page.interactions.some((card) => card.definitionId === 'files.edit'),
-    );
-    const approval = pending.interactions.find((card) => card.definitionId === 'files.edit')!;
-    expect(approval.request).toMatchObject({
-      definitionId: 'files.edit',
-      definitionVersion: '2',
-      input: { path: 'source.txt', find: 'owned', replace: 'verified', occurrences: 1 },
-    });
-    await child.handle.client.answerInteraction('session', approval.id, {
-      expectedStoreId: child.storeId,
-      commandId: 'approve-file-edit',
-      expectedRevision: approval.revision,
-      answer: { kind: 'approval', decision: 'approve' },
-    });
     const view = await child.finished('read-project');
     expect(view.commandRun.status).toBe('completed');
     expect(requests).toHaveLength(3);
+    expect(reviews).toHaveLength(0);
+    expect(
+      (await child.handle.client.listInteractions('session', { storeId: child.storeId }))
+        .interactions,
+    ).toHaveLength(0);
     reader = await openSqliteStore({
       dataRoot: f.profile.dataRoot,
       profile: f.profile.profile,
       mode: 'readonly',
     });
     const executions = await reader.listExecutions('session');
+    expect(executions.filter((row) => row.kind === 'model' && row.runId === null)).toHaveLength(0);
+    expect(
+      (
+        ((await reader.getView('session')).runs[0]!.configuration as Record<string, unknown>)
+          .snapshot as Record<string, unknown>
+      ).defaultAutoReview,
+    ).toBe('shell_risk');
     const read = executions.find((row) => row.definitionId === 'files.read')!;
     const edit = executions.find((row) => row.definitionId === 'files.edit')!;
     expect(read.input).toEqual({ path: 'source.txt', offset: 1, limit: 200 });
@@ -507,25 +517,25 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     const browserNames = browserViews.length
       ? []
       : browserToolIds.map((id) => id.replace('.', '_'));
-    expect(names).toHaveLength(11 + browserNames.length);
-    expect([...names].sort()).toEqual(
-      [
-        'ask_user',
-        'web_fetch',
-        'read_file',
-        'write_file',
-        'edit_file',
-        'spawn_agent',
-        'send_agent_message',
-        'follow_up_agent',
-        'wait_agent_events',
-        'list_agents',
-        'interrupt_agent',
-        ...browserNames,
-      ].sort(),
-    );
+    const expectedNames = [
+      'ask_user',
+      'read_execution_evidence',
+      'web_fetch',
+      'read_file',
+      'write_file',
+      'edit_file',
+      'spawn_agent',
+      'send_agent_message',
+      'follow_up_agent',
+      'wait_agent_events',
+      'list_agents',
+      'interrupt_agent',
+      ...browserNames,
+    ];
+    expect(names).toHaveLength(expectedNames.length);
+    expect([...names].sort()).toEqual([...expectedNames].sort());
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
-    expect(new Set(names).size).toBe(11 + browserNames.length);
+    expect(new Set(names).size).toBe(expectedNames.length);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
       (

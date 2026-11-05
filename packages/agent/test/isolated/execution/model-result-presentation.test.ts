@@ -245,8 +245,12 @@ test('unsupported, throwing or mutating formatters preserve the exact original a
             yield { type: 'tool_call', id: tool.id, name: tool.id, arguments: '{}' };
           yield { ...finish, reason: 'tool_calls' };
         } else {
-          for (const message of request.messages.filter((m) => m.role === 'tool'))
-            expect(message.content).toBe(`original ${message.toolCallId}`);
+          for (const message of request.messages.filter((m) => m.role === 'tool')) {
+            if (['failed', 'cancelled', 'outcome_unknown'].includes(message.toolCallId!)) {
+              expect(message.content).toContain(`original ${message.toolCallId}`);
+              expect(message.content).toContain(`Tool outcome: ${message.toolCallId}`);
+            } else expect(message.content).toBe(`original ${message.toolCallId}`);
+          }
           if (requestIndex === 2) {
             for (const tool of tools.slice(3))
               yield { type: 'tool_call', id: tool.id, name: tool.id, arguments: '{}' };

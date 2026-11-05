@@ -39,6 +39,13 @@ test.each([
     'https://example.com/page?q=private',
   ],
   ['shell.execute', '1', { command: 'pwd' }, 'pwd'],
+  [
+    'shell.execute',
+    '1',
+    { command: 'pwd', description: '  核对\n工作目录  ', background: true },
+    '核对 工作目录',
+  ],
+  ['shell.execute', '1', { command: 'pwd', description: '  ' }, 'pwd'],
   ['shell.launch', '1', { command: 'bun run dev' }, 'bun run dev'],
   ['shell.read', '1', { shellId: 'server' }, 'server'],
   ['shell.wait', '1', { shellId: 'server' }, 'server'],

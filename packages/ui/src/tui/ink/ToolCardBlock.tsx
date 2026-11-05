@@ -670,33 +670,42 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
       typeof resource.uri === 'string' &&
       resource.uri.length > 0,
   );
-  const displayName = isMultiQuestionAsk
-    ? block.status === 'done'
-      ? translate('tool.askUserAnsweredCount', { count: askQuestionCount })
-      : translate('tool.askUserCount', { count: askQuestionCount })
-    : block.name === 'ask_user'
-      ? translate('tool.askUser')
-      : block.name === 'tool_search'
+  const displayName =
+    block.fileMissing && block.status === 'done'
+      ? translate('tool.fileMissing')
+      : isMultiQuestionAsk
         ? block.status === 'done'
-          ? (toolSearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
-            ? 'Searched for tools'
-            : 'No matching tools found'
-          : 'Tool search failed'
-        : block.name === 'list_mcp_resources'
-          ? block.status === 'done'
-            ? 'Listed MCP resources'
-            : 'MCP resource listing failed'
-          : block.name === 'list_mcp_tools'
+          ? translate('tool.askUserAnsweredCount', { count: askQuestionCount })
+          : translate('tool.askUserCount', { count: askQuestionCount })
+        : block.name === 'ask_user'
+          ? translate('tool.askUser')
+          : block.name === 'tool_search'
             ? block.status === 'done'
-              ? 'Listed MCP tools'
-              : 'MCP tool listing failed'
-            : block.name === 'write_file'
-              ? (block.fileAction ?? writeFileActionName(block.summary, block.args))
-              : mcpToolDisplayName(block.name);
+              ? (toolSearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
+                ? 'Searched for tools'
+                : 'No matching tools found'
+              : 'Tool search failed'
+            : block.name === 'list_mcp_resources'
+              ? block.status === 'done'
+                ? 'Listed MCP resources'
+                : 'MCP resource listing failed'
+              : block.name === 'list_mcp_tools'
+                ? block.status === 'done'
+                  ? 'Listed MCP tools'
+                  : 'MCP tool listing failed'
+                : block.name === 'write_file'
+                  ? (block.fileAction ?? writeFileActionName(block.summary, block.args))
+                  : mcpToolDisplayName(block.name);
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={toolColor(block.status, dt)}>● </Text>
+        <Text
+          color={
+            block.fileMissing && block.status === 'done' ? dt.dim : toolColor(block.status, dt)
+          }
+        >
+          ●{' '}
+        </Text>
         <Text>{displayName}</Text>
         {!isMultiQuestionAsk && detail ? (
           <Text color={dt.dim}>{isAskUser ? ` · ${detail}` : ` ${detail}`}</Text>
@@ -877,16 +886,22 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
         </Box>
       )}
       {/* 其他工具 / Other tools */}
-      {isExpanded && !isPlan && !isAskUser && !isShell && !isFileTool && hasSummary && (
-        <Box paddingLeft={3} flexDirection="column">
-          {renderToolSummary(
-            block.summary!,
-            block.status === 'error' || block.status === 'exhausted',
-            dt,
-            translate,
-          )}
-        </Box>
-      )}
+      {isExpanded &&
+        !block.fileMissing &&
+        !isPlan &&
+        !isAskUser &&
+        !isShell &&
+        !isFileTool &&
+        hasSummary && (
+          <Box paddingLeft={3} flexDirection="column">
+            {renderToolSummary(
+              block.summary!,
+              block.status === 'error' || block.status === 'exhausted',
+              dt,
+              translate,
+            )}
+          </Box>
+        )}
     </Box>
   );
 }

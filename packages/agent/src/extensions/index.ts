@@ -127,6 +127,8 @@ export interface JobContext {
    * It explains the trusted host's decision; it never independently grants execution. */
   readonly dispatchAuthorization?: {
     readonly revision: string;
+    /** Accepted evidence reviewed the prepared risk material; never set for timeout continuation. */
+    readonly riskReviewApproved?: true;
     readonly snapshot?: { namespace: string; version: string; data: Json };
   };
 }
@@ -529,7 +531,16 @@ export interface PermissionDecision {
     commandDigest?: string;
   };
   /** Trusted host classification asks the finite durable authorization check; never itself grants execution. */
-  check?: { request: Json; requireApproval?: boolean };
+  check?: {
+    request: Json;
+    requireApproval?: boolean;
+    /** Host-derived equivalent operation, independent of logical call IDs. */
+    operationKey?: string;
+    /** Existing execution mechanism can enforce this Auto timeout ceiling. */
+    timeoutScope?:
+      | { filesystem: 'workspace_write' | 'full_access'; network: 'none' | 'internet' }
+      | 'governed';
+  };
 }
 export interface Permissions {
   /** Trusted owner policy; model/configuration data cannot select this scheduling contract. */

@@ -14,6 +14,211 @@ import {
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 
+test('capability refinement receives this authorization policy without a second control read', async () => {
+  const request: AuthorizationRequest = {
+    kind: 'tool',
+    sessionId: 's',
+    runId: 'r',
+    executionId: 'e',
+    definitionId: 'files.write',
+    definitionVersion: '3',
+    input: { path: '/owned/report.txt' },
+    signal: new AbortController().signal,
+  };
+  const source: PermissionPolicySnapshot = {
+    mode: 'auto',
+    workspaceTrust: true,
+    revision: 'original',
+    allowed: [{ kind: 'tool', definitionId: 'files.write', definitionVersion: '3' }],
+    controlReads: [{ kind: 'permission.mode', scope: 'session:s', revision: '1' }],
+  };
+  let reads = 0;
+  const permissions = createPermissionPolicy({
+    readPolicy() {
+      reads++;
+      return source;
+    },
+    describeCapability(actual, snapshot) {
+      expect(actual).toBe(request);
+      expect(snapshot).toEqual(source);
+      expect(snapshot).not.toBe(source);
+      // Host controls may change after this read; they cannot replace the bound snapshot.
+      Object.assign(source, { mode: 'full', revision: 'later' });
+      expect(snapshot?.mode).toBe('auto');
+      return {
+        kind: actual.kind,
+        definitionId: actual.definitionId,
+        definitionVersion: actual.definitionVersion,
+        revision: 'files',
+        effects: ['external'],
+        hardAllowed: true,
+        safeRead: false,
+      };
+    },
+  });
+  const decision = await permissions.authorize(request);
+  expect(reads).toBe(1);
+  expect(decision).toMatchObject({
+    allowed: false,
+    reason: 'auto_check_required',
+    snapshot: { data: { mode: 'auto', policyRevision: 'original' } },
+    controlReads: source.controlReads,
+  });
+});
+
+test('a capability callback cannot mutate the policy used for authorization', async () => {
+  const request: AuthorizationRequest = {
+    kind: 'tool',
+    sessionId: 's',
+    runId: 'r',
+    executionId: 'e',
+    definitionId: 'files.write',
+    definitionVersion: '3',
+    input: {},
+    signal: new AbortController().signal,
+  };
+  const identity = { kind: 'tool' as const, definitionId: 'files.write', definitionVersion: '3' };
+  for (const [mode, trust, allowed, reason] of [
+    ['auto', true, true, 'auto_check_required'],
+    ['full', false, true, 'workspace_untrusted'],
+    ['full', true, false, 'capability_not_allowed'],
+  ] as const) {
+    const source: PermissionPolicySnapshot = {
+      mode,
+      workspaceTrust: trust,
+      revision: 'actual',
+      allowed: allowed ? [identity] : [],
+      controlReads: [{ kind: 'permission.mode', scope: 'session:s', revision: '1' }],
+    };
+    const permissions = createPermissionPolicy({
+      readPolicy: () => source,
+      describeCapability(_request, snapshot) {
+        if (snapshot!.allowed[0]) Object.assign(snapshot!.allowed[0], { definitionId: 'mutated' });
+        Object.assign(snapshot!.controlReads![0]!, { revision: '2' });
+        Object.assign(snapshot!, {
+          mode: 'full',
+          workspaceTrust: true,
+          revision: 'mutated',
+          allowed: [identity],
+        });
+        return {
+          ...identity,
+          revision: 'file',
+          effects: ['external'],
+          safeRead: false,
+          hardAllowed: true,
+        };
+      },
+    });
+    expect(await permissions.authorize(request)).toMatchObject({
+      allowed: false,
+      reason,
+      snapshot: { data: { mode, workspaceTrust: trust, policyRevision: 'actual' } },
+    });
+    expect(source).toMatchObject({ mode, workspaceTrust: trust, revision: 'actual' });
+    expect(source.controlReads?.[0]?.revision).toBe('1');
+    expect(source.allowed).toEqual(allowed ? [identity] : []);
+  }
+});
+
+test('invalid mode is rejected before refinement and old one-argument callbacks remain valid', async () => {
+  const request: AuthorizationRequest = {
+    kind: 'tool',
+    sessionId: 's',
+    runId: 'r',
+    executionId: 'e',
+    definitionId: 'files.write',
+    definitionVersion: '3',
+    input: {},
+    signal: new AbortController().signal,
+  };
+  let calls = 0;
+  const permissions = createPermissionPolicy({
+    readPolicy: () =>
+      ({
+        mode: 'not-a-mode',
+        workspaceTrust: true,
+        revision: 'invalid',
+        allowed: [],
+      }) as unknown as PermissionPolicySnapshot,
+    describeCapability() {
+      calls++;
+      return null;
+    },
+  });
+  expect(await permissions.authorize(request)).toMatchObject({
+    allowed: false,
+    reason: 'permission_policy_invalid',
+  });
+  expect(calls).toBe(0);
+  const legacy = createPermissionPolicy({
+    readPolicy: () => ({
+      mode: 'full',
+      workspaceTrust: true,
+      revision: 'actual',
+      allowed: [{ kind: 'tool', definitionId: 'files.write', definitionVersion: '3' }],
+    }),
+    describeCapability(actual) {
+      calls++;
+      return {
+        kind: actual.kind,
+        definitionId: actual.definitionId,
+        definitionVersion: actual.definitionVersion,
+        revision: 'protected',
+        effects: ['external'],
+        safeRead: false,
+        hardAllowed: false,
+        denialReason: 'file_path_protected',
+      };
+    },
+  });
+  expect(await legacy.authorize(request)).toMatchObject({
+    allowed: false,
+    reason: 'file_path_protected',
+  });
+  expect(calls).toBe(1);
+});
+
+test('trusted Auto review selection skips business context but retains hard boundaries', async () => {
+  for (const selection of ['shell_risk', 'none'] as const) {
+    const f = await fixture('auto');
+    try {
+      f.capability = { ...f.capability, autoReview: selection };
+      const request: AuthorizationRequest = {
+        kind: 'tool',
+        sessionId: 's',
+        runId: null,
+        executionId: 'synthetic',
+        definitionId: 'fixture.effect',
+        definitionVersion: '1',
+        input: {},
+        signal: new AbortController().signal,
+      };
+      const decision = await f.permissions.authorize(request);
+      expect(f.reviews).toBe(0);
+      if (selection === 'none') expect(decision.allowed).toBe(true);
+      else {
+        expect(decision.allowed).toBe(false);
+        expect(decision.check?.request).toMatchObject({ reviewPurpose: 'shell_risk' });
+        expect(decision.check?.request).not.toHaveProperty('context');
+      }
+      f.capability = { ...f.capability, hardAllowed: false };
+      expect(await f.permissions.authorize(request)).toMatchObject({
+        allowed: false,
+        reason: 'capability_unavailable',
+      });
+      f.capability = { ...f.capability, hardAllowed: true };
+      f.policy = { ...f.policy, workspaceTrust: false };
+      expect(await f.permissions.authorize(request)).toMatchObject({
+        allowed: false,
+        reason: 'workspace_untrusted',
+      });
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 test('shared builtin facts do not grant a namesake extension', async () => {
   for (const extensionId of ['builtin.files', 'untrusted.namesake']) {
     const f = await fixture('accept_edits', 'files.read');
@@ -543,6 +748,40 @@ test('Browser control reduction still requires the exact selected and hard-allow
       expect(decision.approval).toBeUndefined();
     }
   }
+});
+
+test('normal Auto policy defaults reviewer timeout to the registered tool execution strategy', async () => {
+  const identity = {
+    kind: 'tool' as const,
+    definitionId: 'remote.operation',
+    definitionVersion: '1',
+  };
+  const policy = createPermissionPolicy({
+    readPolicy: () => ({
+      mode: 'auto',
+      workspaceTrust: true,
+      revision: 'current',
+      allowed: [identity],
+    }),
+    describeCapability: () => ({
+      ...identity,
+      revision: 'registered',
+      hardAllowed: true,
+      effects: ['network', 'unknown'],
+      safeRead: false,
+    }),
+  });
+  const result = await policy.authorize({
+    ...identity,
+    sessionId: 's',
+    runId: 'r',
+    executionId: 'e',
+    input: {},
+    signal: new AbortController().signal,
+  });
+  expect(result.allowed).toBe(false);
+  expect(result.check?.timeoutScope).toBe('governed');
+  expect(result.reason).toBe('auto_check_required');
 });
 
 test('registered builtin browser operations retain their effects and never request review or approval in any mode', async () => {

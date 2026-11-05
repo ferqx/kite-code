@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { withoutTaskProjectionMarker } from '../../authorization-check-input';
 import { semanticReviewContext } from '../../authorization-review-context';
 import {
   authorizationReviewAnswer,
@@ -22,6 +23,7 @@ import {
   type Json,
 } from '../types';
 import { authorizationCheckFact, transferAuthorizationCheckOwnership } from './authorization-check';
+import { authorizationPolicyObservation } from './authorization-policy-evidence';
 import { verifyModelBody } from './model-body';
 import { verifyModelOutput } from './model-output';
 import type { SqliteOperations } from './operations';
@@ -153,7 +155,14 @@ export function authorizationReviewSourceTarget(db: SqliteOperations, carrier: R
         authorizationReview: expectedPayload,
       },
     };
+    const originalRequest = object(JSON.parse(String(command.request_json)));
     const expectedRequest: Json = {
+      // Original producers also serialized these optional fields as two nulls.
+      // Match that exact representation without ignoring unknown request data.
+      ...(originalRequest.resultRequirement === null &&
+      originalRequest.resultRequirementSchema === null
+        ? { resultRequirement: null, resultRequirementSchema: null }
+        : {}),
       afterTurn: null,
       kind: 'authorization.review',
       definitionId: `agent/review.${payloadHash.slice(0, 40)}`,
@@ -638,6 +647,8 @@ export function executionAuthorizationObservation(
 ): ExecutionAuthorizationObservation | undefined {
   if (!['tool', 'job'].includes(String(target.kind))) return;
   const observed: ExecutionAuthorizationObservation = { dispatched: Boolean(target.dispatched) };
+  const policy = authorizationPolicyObservation(db, target);
+  if (policy) observed.policy = policy;
   try {
     const dispatch = target.dispatch_authorization_json
       ? object(JSON.parse(String(target.dispatch_authorization_json)))
@@ -780,7 +791,8 @@ export function getAuthorizationReview(
   );
   if (
     object(value.payload.target!).originStoreId !== input.expectedStoreId ||
-    canonicalJson(value.payload.request!) !== canonicalJson(input.request) ||
+    canonicalJson(value.payload.request!) !==
+      canonicalJson(withoutTaskProjectionMarker(input.request)) ||
     canonicalJson(value.payload.requestBody ?? null) !==
       canonicalJson(input.requestBody ? (input.requestBody as unknown as Json) : null) ||
     (value.payload.requireApproval === true) !== (input.requireApproval === true) ||

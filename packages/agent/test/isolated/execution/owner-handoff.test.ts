@@ -226,7 +226,7 @@ for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as cons
           ),
         ).toHaveLength(0);
         expect((await store.getCommand('next'))?.status).toBe('accepted');
-        expect(model.requests).toHaveLength(1);
+        expect(model.requests).toHaveLength(2);
         expect(effects).toBe(1);
         expect(denied).toBe(true);
         const unknown = (await store.listExecutions('s')).find(
@@ -234,6 +234,23 @@ for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as cons
         )!;
         expect(unknown.status).toBe('outcome_unknown');
         expect(unknown.resultRevision).toBe('1');
+        expect(unknown.callId).toBe('unknown');
+        const feedback = model.requests[1]!.messages.find(
+          (message) => message.toolCallId === 'unknown',
+        )!;
+        expect(feedback.sourceIds).toEqual([unknown.id]);
+        expect(feedback.content).toContain('actual unresolved fixture fact');
+        expect(feedback.content).toContain('may have produced effects');
+        const originalModels = (await store.listExecutions('s')).filter(
+          (execution) => execution.kind === 'model',
+        );
+        expect(originalModels).toHaveLength(2);
+        expect(
+          originalModels.every(
+            (execution) =>
+              execution.originCommandId === 'first' && execution.runId === unknown.runId,
+          ),
+        ).toBe(true);
       } else if (scenario === 'cancel') {
         await deadline(async () => (await store.getCommand('next'))?.status === 'rejected');
         expect(

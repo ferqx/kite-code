@@ -13,6 +13,15 @@ export const BrowserSessionLogQuerySchema = z.strictObject({
   limit: z.number().int().min(1).max(200).optional(),
 });
 export const SessionLogQuerySchema = BrowserSessionLogQuerySchema.extend({ storeId: id });
+export const AuthorizationScopeSchema = z.strictObject({
+  filesystem: z.enum(['workspace_write', 'full_access']),
+  network: z.enum(['none', 'internet']),
+});
+export const AuthorizationPolicyReasonSchema = z.enum([
+  'reused_approval',
+  'parent_review',
+  'timeout_continue',
+]);
 export const SessionLogDetailsSchema = z.strictObject({
   kind: z.enum(['model', 'tool', 'job']).optional(),
   definitionId: name.optional(),
@@ -22,6 +31,20 @@ export const SessionLogDetailsSchema = z.strictObject({
   executionId: id.optional(),
   interactionId: id.optional(),
   attempt: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+  policy: z
+    .strictObject({
+      targetExecutionId: id,
+      policyEvidenceId: id,
+      reason: AuthorizationPolicyReasonSchema,
+      source: z.strictObject({
+        kind: z.enum(['check', 'policy']),
+        id,
+        targetExecutionId: id.optional(),
+      }),
+      requestedScope: AuthorizationScopeSchema.nullable(),
+      effectiveScope: AuthorizationScopeSchema.nullable(),
+    })
+    .optional(),
 });
 export const SessionLogEntrySchema = z.strictObject({
   cursor: sequence,

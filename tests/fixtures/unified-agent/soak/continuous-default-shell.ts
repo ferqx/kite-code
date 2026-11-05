@@ -36,7 +36,14 @@ import {
   observeOwnedProcessExit,
 } from '../../../../scripts/runtime/unified-soak-native';
 import type { PairedServiceResources } from '../../../../scripts/runtime/unified-soak-service-resources';
+import { loopbackModelEnvironment } from '../../loopback-model-environment';
 import { privateDirectory } from '../../test-filesystem';
+import {
+  parseShellModelFeedback,
+  preDispatchRefreshFeedbackMatches,
+  type ShellModelFeedback,
+  shellModelFeedbackMatchesResult,
+} from '../shell-model-feedback';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -69,8 +76,14 @@ export async function selectContinuousParentTool(
     callId: string,
     name: string,
     input: unknown,
-    code: string,
+    content: string,
   ) => Promise<boolean>,
+  verifyShellResult: (
+    callId: string,
+    name: string,
+    input: unknown,
+    feedback: ShellModelFeedback,
+  ) => Promise<string | undefined>,
 ): Promise<ContinuousToolCall | undefined> {
   const originalCalls = new Map<string, { name: string; input: unknown }>();
   const paired: { id: string; name: string; input: unknown; content: string }[] = [];
@@ -106,19 +119,13 @@ export async function selectContinuousParentTool(
       if (result.name !== expected.name || !isDeepStrictEqual(result.input, expected.input))
         throw Error('continuous_original_tool_sequence_changed');
       if (
-        ['input_pending', 'context_refresh_required', 'capability_refresh_required'].includes(
-          result.content,
-        )
+        result.name === 'shell_execute' &&
+        (await verifyNonDispatch(result.id, result.name, result.input, result.content))
       ) {
-        if (
-          result.name !== 'shell_launch' ||
-          !(await verifyNonDispatch(result.id, result.name, result.input, result.content))
-        )
-          throw Error('continuous_tool_dispatch_unverified');
         continue;
       }
-      const body = JSON.parse(result.content);
-      if (body.error) throw Error('continuous_tool_effect_failed');
+      const body = completed === 2 ? undefined : JSON.parse(result.content);
+      if (body?.error) throw Error('continuous_tool_effect_failed');
       if (completed === 0 && body.path !== (expected.input as { path: string }).path)
         throw Error('continuous_original_file_result_changed');
       if (completed === 1) {
@@ -127,17 +134,17 @@ export async function selectContinuousParentTool(
         agentId = body.agent_id;
       }
       if (completed === 2) {
-        if (
-          body.accepted !== true ||
-          typeof body.shellId !== 'string' ||
-          body.shellId !== (expected.input as { key: string }).key ||
-          body.ref?.key !== body.shellId ||
-          body.ref?.extensionId !== 'builtin.shell' ||
-          typeof body.ref?.executionId !== 'string'
-        )
+        const feedback = parseShellModelFeedback(result.content);
+        const originalJobId = await verifyShellResult(
+          result.id,
+          result.name,
+          result.input,
+          feedback,
+        );
+        if (feedback.status !== 'accepted' || !originalJobId)
           throw Error('continuous_shell_launch_not_accepted');
-        shellId = body.shellId;
-        shellExecutionId = body.ref.executionId;
+        shellId = feedback.shellId;
+        shellExecutionId = originalJobId;
       }
       completed++;
       continue;
@@ -149,18 +156,12 @@ export async function selectContinuousParentTool(
       (result.input as { shell_id?: string }).shell_id !== shellId
     )
       throw Error('continuous_original_shell_observation_changed');
-    if (
-      ['input_pending', 'context_refresh_required', 'capability_refresh_required'].includes(
-        result.content,
-      )
-    ) {
-      if (!(await verifyNonDispatch(result.id, result.name, result.input, result.content)))
-        throw Error('continuous_tool_dispatch_unverified');
+    if (await verifyNonDispatch(result.id, result.name, result.input, result.content)) {
       continue;
     }
-    const observed = JSON.parse(result.content);
-    if (observed.error) throw Error('continuous_child_observation_failed');
     if (result.name === 'wait_agent_events') {
+      const observed = JSON.parse(result.content);
+      if (observed.error) throw Error('continuous_child_observation_failed');
       if (observed.next_seq !== undefined) afterSeq = observed.next_seq;
       if (
         observed.events?.some(
@@ -172,14 +173,16 @@ export async function selectContinuousParentTool(
       )
         childSettled = true;
     } else if (result.name === 'shell_wait') {
+      const observed = parseShellModelFeedback(result.content);
       if (
         (result.input as { shell_id?: string }).shell_id !== shellId ||
-        observed.ref?.key !== shellId ||
-        observed.execution?.id !== shellExecutionId
+        observed.shellId !== shellId ||
+        (await verifyShellResult(result.id, result.name, result.input, observed)) !==
+          shellExecutionId
       )
         throw Error('continuous_original_shell_observation_changed');
-      if (observed.execution.status === 'succeeded') shellSettled = true;
-      else if (['failed', 'cancelled', 'outcome_unknown'].includes(observed.execution.status))
+      if (observed.status === 'succeeded') shellSettled = true;
+      else if (['failed', 'cancelled', 'outcome_unknown'].includes(observed.status))
         throw Error('continuous_original_shell_not_succeeded');
     } else throw Error('continuous_original_tool_sequence_changed');
   }
@@ -263,11 +266,10 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
             input: { prompt: `load-child:${nonce}` },
           },
           {
-            name: 'shell_launch',
+            name: 'shell_execute',
             input: {
-              key: `shell-${nonce}`,
+              background: true,
               command: `${quote(join(candidate.root, candidate.manifest.entries.runtime))} -e ${quote(CONTINUOUS_SHELL_SOURCE)} ${quote(nonce)}`,
-              cancellation: 'detached',
             },
           },
         ];
@@ -276,9 +278,9 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
           : await selectContinuousParentTool(
               body.messages.slice(last + 1),
               calls,
-              async (callId, name, input, code) => {
+              async (callId, name, input, content) => {
                 const definitions: Record<string, string> = {
-                  shell_launch: 'shell.launch',
+                  shell_execute: 'shell.execute',
                   shell_wait: 'shell.wait',
                   wait_agent_events: 'task.events',
                 };
@@ -327,11 +329,67 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
                   execution.authorization?.dispatched === false &&
                   isDeepStrictEqual(execution.toolInput, coreInput) &&
                   result?.outcome === 'failed' &&
-                  result.content === code &&
-                  result.details?.code === code &&
-                  result.details.adapterAttempted === false &&
-                  result.details.dispatchCommitted === false
+                  preDispatchRefreshFeedbackMatches(content, result)
                 );
+              },
+              async (callId, name, input, feedback) => {
+                const operation = operations.find((operation) => operation.commandId === nonce);
+                if (!operation) return;
+                const view = await clients[0]!.getView(operation.sessionId);
+                const run = view.runs.find((run) => run.originCommandId === nonce);
+                const matches = view.executions.filter(
+                  (execution) =>
+                    execution.kind === 'tool' &&
+                    execution.runId === run?.id &&
+                    execution.toolCallId === callId,
+                );
+                if (view.storeId !== storeId || !run || matches.length !== 1) return;
+                const tool = matches[0]!;
+                const wireInput = input as Record<string, unknown>;
+                const expectedInput =
+                  name === 'shell_wait'
+                    ? { shellId: wireInput.shell_id, timeoutMs: wireInput.wait_timeout_ms }
+                    : input;
+                if (
+                  tool.definitionId !== (name === 'shell_wait' ? 'shell.wait' : 'shell.execute') ||
+                  tool.definitionVersion !== '1' ||
+                  tool.originStoreId !== storeId ||
+                  tool.rootWorkCommandId !== nonce ||
+                  !isDeepStrictEqual(tool.toolInput, expectedInput) ||
+                  !shellModelFeedbackMatchesResult(feedback, tool.result)
+                )
+                  return;
+                const result = tool.result as {
+                  details: {
+                    ref: {
+                      extensionId: string;
+                      executionId: string;
+                      sessionId: string;
+                      originStoreId: string;
+                    };
+                  };
+                };
+                const ref = result.details.ref;
+                const job = view.executions.find((execution) => execution.id === ref.executionId);
+                const starter = view.executions.find(
+                  (execution) => execution.id === job?.parentExecutionId,
+                );
+                if (
+                  ref.extensionId !== 'builtin.shell' ||
+                  ref.sessionId !== operation.sessionId ||
+                  ref.originStoreId !== storeId ||
+                  job?.kind !== 'job' ||
+                  job.definitionId !== 'shell.command' ||
+                  job.definitionVersion !== '1' ||
+                  job.sessionId !== operation.sessionId ||
+                  job.originStoreId !== storeId ||
+                  starter?.definitionId !== 'shell.execute' ||
+                  starter.definitionVersion !== '1' ||
+                  starter.runId !== run.id ||
+                  (name === 'shell_execute' && starter.id !== tool.id)
+                )
+                  return;
+                return job.id;
               },
             );
         const delta = selected
@@ -369,7 +427,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         ],
         tools: [
           { id: 'files.write', definitionVersion: '3' },
-          ...['task.spawn', 'task.events', 'shell.launch', 'shell.wait'].map((id) => ({
+          ...['task.spawn', 'task.events', 'shell.execute', 'shell.wait'].map((id) => ({
             id,
             definitionVersion: '1',
           })),
@@ -393,7 +451,11 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',
-            env: { ...options.env, ...userConfiguration.homeEnvironment },
+            env: {
+              ...options.env,
+              ...userConfiguration.homeEnvironment,
+              ...loopbackModelEnvironment(provider.url),
+            },
           });
           spawnObservation = observeNativeProcess(child.pid);
           return child;

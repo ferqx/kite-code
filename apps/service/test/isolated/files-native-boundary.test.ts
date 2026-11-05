@@ -180,21 +180,18 @@ test('actual default Service keeps native and compiler assets protected in Full 
     );
     for (const tool of tools.slice(1)) {
       expect(tool.status).toBe('failed');
-      if (tool.definitionId === 'files.write') {
-        expect(tool.result).toMatchObject({
-          outcome: 'failed',
-          details: { code: 'file_path_invalid' },
-        });
-        continue;
-      }
       expect(tool.result).toMatchObject({
-        content: 'permission_denied',
         details: {
+          code: 'permission_denied',
           reason: 'file_path_protected',
           adapterAttempted: false,
           dispatchCommitted: false,
         },
       });
+      expect((tool.result as { content: string }).content).toContain('file_path_protected');
+      expect((tool.result as { content: string }).content).not.toContain(
+        'This is a limitation of this tool entry',
+      );
     }
     expect(existsSync(deniedNew)).toBe(false);
     expect(readFileSync(metadata)).toEqual(original);

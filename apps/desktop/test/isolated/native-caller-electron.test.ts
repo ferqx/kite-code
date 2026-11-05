@@ -4,6 +4,8 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { directoryLink } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
+import { cleanupNativeCaller } from '../native-caller-cleanup.fixture';
+import { openNativeShellObservation } from '../native-shell-observation.fixture';
 
 const require = createRequire(import.meta.url);
 for (const kind of [
@@ -30,8 +32,11 @@ for (const kind of [
           : module.recoveryProfile(
               kind === 'input.follow_up' ? { holdModelCommandId: 'native-window-original' } : {},
             ));
-      let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+      let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+        observation: ReturnType<typeof openNativeShellObservation> | undefined,
+        completed = false;
       try {
+        observation = openNativeShellObservation();
         let contextSelectionId: string;
         if (kind === 'input.steer') {
           // A read-only warm Service followed by graceful close would cancel the
@@ -165,15 +170,33 @@ for (const kind of [
           expect(
             f.rows("SELECT count(*) AS n FROM command WHERE id='native-window-original'"),
           ).toEqual([{ n: 1 }]);
+          completed = true;
         } finally {
           clearTimeout(timer);
         }
       } finally {
-        if (driver?.exitCode === null) {
-          driver.kill('SIGKILL');
-          await driver.exited;
+        let cleanupConfirmed = false;
+        try {
+          if (driver?.exitCode === null) {
+            driver.kill('SIGKILL');
+            await driver.exited;
+          }
+          if (driver && observation)
+            await cleanupNativeCaller({
+              root: f.root,
+              kind,
+              electronExecutable: require('electron') as string,
+              serviceExecutable: f.artifact.executable,
+              serviceEntrypoint: f.artifact.entrypoint,
+              observation,
+            });
+          cleanupConfirmed = true;
+        } finally {
+          observation?.close();
+          const retainRoot = !completed || !cleanupConfirmed;
+          f.close({ retainRoot });
+          if (retainRoot) console.error('native_caller_failed_root_retained', f.root);
         }
-        f.close();
       }
     },
     60000,

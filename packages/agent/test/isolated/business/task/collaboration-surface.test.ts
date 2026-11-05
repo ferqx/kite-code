@@ -4,7 +4,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createRuntime } from '../../../../src/runtime';
@@ -1023,6 +1023,11 @@ test('command error projection distinguishes rejected and unverified receipts wi
     const result = await spawn.execute({ prompt: 'bounded child request' }, context);
     const body = JSON.parse(result.content);
     expect(body).toMatchObject({ accepted, error: { code, next_action: next } });
+    if (accepted === false) expect(body.error.message).toContain('was not accepted');
+    else {
+      expect(body.error.message).toContain('Acceptance of this Agent request is unknown');
+      expect(body.error.message).toContain('Do not repeat it or create a new operation identity');
+    }
     expect(result.content).not.toContain('private');
     expect(result.content).not.toContain('credential');
   }
@@ -1037,6 +1042,7 @@ test('command error projection distinguishes rejected and unverified receipts wi
     error: { code: 'invalid_cursor', next_action: 'restart_observation' },
   });
   expect(JSON.parse(result.content)).not.toHaveProperty('accepted');
+  expect(JSON.parse(result.content).error.message).toContain('cursor is invalid or ahead');
   const events = extension.tools!.find((tool) => tool.id === 'task.events')!;
   const cancelled = await events.execute({}, {
     operations: {
@@ -1055,6 +1061,110 @@ test('command error projection distinguishes rejected and unverified receipts wi
   expect(JSON.parse(cancelled.content)).not.toHaveProperty('accepted');
   expect(JSON.parse(cancelled.content)).not.toHaveProperty('diagnostic');
 });
+
+for (const unknown of [false, true])
+  test(`actual Task failure explains ${unknown ? 'unknown acceptance' : 'known nonacceptance'} to the next Model without private exception text`, async () => {
+    const { AgentError } = await import('../../../../src/storage/types');
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-task-failure-feedback-')));
+    const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'fixture' });
+    const expectedStoreId = (await store.getMetadata()).storeId;
+    const privateMarker = 'PRIVATE_TASK_RECEIPT_FAILURE_DO_NOT_PUBLISH';
+    let admissions = 0;
+    store.ensureOperation = async () => {
+      admissions++;
+      throw unknown ? new Error(privateMarker) : new AgentError('permission_denied', privateMarker);
+    };
+    const model = createFixedModel([
+      [
+        {
+          type: 'tool_call',
+          id: 'original-task-call',
+          name: 'spawn_agent',
+          arguments: '{"prompt":"Inspect without modifications"}',
+        },
+        { ...finish, reason: 'tool_calls' },
+      ],
+      [finish],
+    ]);
+    const runtime = createRuntime({
+      store,
+      model,
+      modelId: 'parent',
+      extensions: [
+        createTaskExtension({
+          roles: [
+            { id: 'worker', configurationId: 'worker', description: 'General trusted child' },
+          ],
+        }),
+      ],
+      permissions: { authorize: async () => ({ allowed: true, revision: 'owned-fixture' }) },
+      childConfigurations: [
+        {
+          id: 'worker',
+          version: '1',
+          model: createFixedModel([[finish]]),
+          modelId: 'child',
+          toolIds: [],
+          snapshot: {},
+        },
+      ],
+    });
+    try {
+      await runtime.createWorkspace({
+        expectedStoreId,
+        id: 'w',
+        rootUri: pathToFileURL(root).href,
+        name: 'fixture',
+      });
+      await runtime.createSession({
+        expectedStoreId,
+        commandId: 'create',
+        sessionId: 'root',
+        workspaceId: 'w',
+        subjectId: 'owner',
+        title: 'task receipt failure',
+      });
+      await runtime.submitCommand({
+        expectedStoreId,
+        commandId: 'work',
+        sessionId: 'root',
+        subjectId: 'owner',
+        request: { kind: 'run.start', content: 'Delegate one bounded inspection.' },
+      });
+      await runtime.waitForCommand('work', { timeoutMs: 5000 });
+      const execution = (await store.listExecutions('root')).find(
+        (item) => item.definitionId === 'task.spawn',
+      )!;
+      expect(execution.status).toBe('failed');
+      const raw = (execution.result as { content: string }).content;
+      expect(JSON.parse(raw)).toMatchObject({
+        accepted: unknown ? null : false,
+        error: { code: unknown ? 'receipt_unverifiable' : 'permission_denied' },
+      });
+      expect(model.requests).toHaveLength(2);
+      const message = model.requests[1]!.messages.find((entry) => entry.role === 'tool')!;
+      expect(message).toMatchObject({
+        toolCallId: 'original-task-call',
+        sourceIds: [execution.id],
+      });
+      expect(message.content).toContain(raw);
+      expect(message.content).toContain(
+        unknown
+          ? 'Acceptance of this Agent request is unknown'
+          : 'This Agent request was not accepted',
+      );
+      if (unknown)
+        expect(message.content).toContain('Do not repeat it or create a new operation identity');
+      expect(message.content).not.toContain(privateMarker);
+      expect(admissions).toBe(1);
+      expect(
+        (await store.listExecutions('root')).filter((item) => item.childSessionId),
+      ).toHaveLength(0);
+    } finally {
+      await runtime.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
 test('stable idle child mail queues without activation and is adopted once by the exact same-configuration follow-up', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-idle-mail-')));

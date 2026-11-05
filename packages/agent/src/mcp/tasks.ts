@@ -17,6 +17,11 @@ import type {
 } from '../extensions';
 import { isWorkerCleanupFailure } from '../platform/process/owned-worker';
 import { McpAdapterError } from './errors';
+import {
+  mcpTaskStatusContent,
+  mcpToolResultContent,
+  mcpUnconfirmedContent,
+} from './result-feedback';
 
 /** Private live adapter: no cold restoration and no I/O until the ordinary Job starts. */
 export function createTaskBinding(options: {
@@ -58,8 +63,8 @@ export function createTaskBinding(options: {
     ) as Promise<T>;
   const unknown = (code: string): ToolResult => ({
     outcome: 'outcome_unknown',
-    content: code,
-    details: { remoteStopConfirmed: false },
+    content: mcpUnconfirmedContent(code),
+    details: { code, remoteStopConfirmed: false },
   });
   function state(handle: JobHandle) {
     const value = states.get(handle);
@@ -140,12 +145,12 @@ export function createTaskBinding(options: {
             break;
           }
           active.signal.throwIfAborted();
-          const task = await wire<{ taskId: string; status: string; pollInterval?: number }>(
-            'tasks/get',
-            { taskId: active.taskId },
-            GetTaskResultSchema,
-            active.signal,
-          );
+          const task = await wire<{
+            taskId: string;
+            status: string;
+            pollInterval?: number;
+            statusMessage?: string;
+          }>('tasks/get', { taskId: active.taskId }, GetTaskResultSchema, active.signal);
           if (task.taskId !== active.taskId) throw new Error('mcp_task_identity_invalid');
           if (task.status === 'completed') {
             const value = await wire<{
@@ -160,7 +165,7 @@ export function createTaskBinding(options: {
                 ? unknown('mcp_task_output_invalid')
                 : {
                     outcome: value.isError ? 'failed' : 'succeeded',
-                    content: JSON.stringify(value.content),
+                    content: mcpToolResultContent(value),
                     details: JSON.parse(JSON.stringify(value)) as Json,
                   };
             break;
@@ -169,7 +174,16 @@ export function createTaskBinding(options: {
             active.ended = true;
             result = {
               outcome: task.status === 'cancelled' ? 'cancelled' : 'failed',
-              content: `mcp_task_${task.status}`,
+              content: mcpTaskStatusContent({
+                taskId: task.taskId,
+                status: task.status,
+                ...(task.statusMessage === undefined ? {} : { statusMessage: task.statusMessage }),
+              }),
+              details: {
+                taskId: task.taskId,
+                status: task.status,
+                ...(task.statusMessage === undefined ? {} : { statusMessage: task.statusMessage }),
+              },
             };
             break;
           }
@@ -210,7 +224,7 @@ export function createTaskBinding(options: {
       if (active.cancellation) return active.cancellation;
       active.cancellation = (async (): Promise<StopConfirmation> => {
         try {
-          const value = await wire<{ taskId: string; status: string }>(
+          const value = await wire<{ taskId: string; status: string; statusMessage?: string }>(
             'tasks/cancel',
             { taskId: active.taskId },
             CancelTaskResultSchema,
@@ -218,7 +232,23 @@ export function createTaskBinding(options: {
           if (value.taskId !== active.taskId) return { status: 'unknown' };
           if (value.status === 'cancelled') {
             active.ended = true;
-            active.terminal = { outcome: 'cancelled', content: 'mcp_task_cancelled' };
+            active.terminal = {
+              outcome: 'cancelled',
+              content: mcpTaskStatusContent({
+                taskId: value.taskId,
+                status: 'cancelled',
+                ...(value.statusMessage === undefined
+                  ? {}
+                  : { statusMessage: value.statusMessage }),
+              }),
+              details: {
+                taskId: value.taskId,
+                status: 'cancelled',
+                ...(value.statusMessage === undefined
+                  ? {}
+                  : { statusMessage: value.statusMessage }),
+              },
+            };
             return { status: 'stopped' };
           }
           if (value.status === 'completed' || value.status === 'failed') {

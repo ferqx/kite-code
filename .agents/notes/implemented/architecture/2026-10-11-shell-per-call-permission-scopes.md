@@ -33,4 +33,4 @@ macOS 正式入口已验证工作区写入无人工卡、外部写入与联网�
 
 本次原完整默认回归通过，定向与完整证据、真实失败及必要修复见[实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11shell-三策略与旧模式退役)。当前合同归[产品手册](../../../../docs/handbook/features/tools-and-approvals.md)、[Service](../../../../apps/service/README.md)、[Jobs](../../../../packages/agent/src/jobs/README.md)和[Store](../../../../packages/agent/src/storage/README.md)。
 
-固定危险扫描不证明任意动态脚本完全安全，未知命令仍由系统范围约束，越界失败可能已有其他部分效果，不能扩权重放。Full 保 Runtime authority 与资产保护。Linux 使用同一范围源码和原生 CI 用例，实际内核执行尚未验证；Windows 正式 Shell backend 缺口继续失败关闭。RSS 真失败、完整观测缺项及 V1.3 阶段退出仍未闭合，剩余资格见[切片](../../../../docs/plans/shell-permission-scopes.md)。
+固定危险扫描不证明任意动态脚本完全安全，未知命令仍由系统范围约束，越界失败可能已有其他部分效果，不能扩权重放。Full 保 Runtime authority 与资产保护。Linux 使用同一范围源码和原生 CI 用例，实际内核执行尚未验证；Windows 正式 Shell backend 缺口继续失败关闭。RSS 真失败、完整观测缺项及 V1.3 阶段退出仍未闭合，剩余资格见[Jobs owner](../../../../packages/agent/src/jobs/README.md)。

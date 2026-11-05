@@ -65,9 +65,7 @@ test('default Task roles preserve worker and bind implementation plus three read
     properties: {
       preset: {
         enum: ['code', 'explore', 'plan', 'review'],
-        description: expect.stringContaining(
-          'No modifications or arbitrary process/network dispatch',
-        ),
+        description: expect.stringContaining('Shell uses the inherited permissions and sandbox'),
       },
     },
   });

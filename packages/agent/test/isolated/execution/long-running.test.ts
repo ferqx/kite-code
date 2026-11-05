@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
+import { createArtifactStore } from '../../../src/artifacts';
 import type { ToolDefinition } from '../../../src/extensions';
 import { createProjectSources } from '../../../src/sources';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -28,6 +29,10 @@ async function fixture(
   const expectedStoreId = (await store.getMetadata()).storeId;
   const runtime = createRuntime({
     store,
+    artifacts: createArtifactStore({
+      profile: { dataRoot: join(root, 'data'), profile: 'test' },
+      store,
+    }),
     model,
     modelId: 'fixed',
     permissions: {

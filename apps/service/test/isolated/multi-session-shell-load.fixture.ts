@@ -48,7 +48,7 @@ await runServiceProcess({
     };
     timer = setInterval(sample, 100);
     sample();
-    const tools = ['task.spawn', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'];
+    const tools = ['task.spawn', 'shell.execute', 'shell.read', 'shell.wait', 'shell.stop'];
     const configuration = createDefaultProcessConfiguration({
       profile,
       observerSubjectId: host.subjectId,
@@ -59,7 +59,7 @@ await runServiceProcess({
           id: 'worker',
           version: '1',
           modelId: 'mixed-child',
-          toolIds: ['shell.launch', 'shell.read', 'shell.wait', 'shell.stop'],
+          toolIds: ['shell.execute', 'shell.read', 'shell.wait', 'shell.stop'],
         },
       ],
       permissionPolicy: {

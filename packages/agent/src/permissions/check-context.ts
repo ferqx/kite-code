@@ -201,6 +201,11 @@ export function createPermissionCheckContextReader(options: {
           : 'absent'
         : 'unknown';
     signal.throwIfAborted();
-    return { task, plan, rejectionReasons: [...new Set(rejectionReasons)] };
+    return {
+      reviewInput: 'task_authorization',
+      task,
+      plan,
+      rejectionReasons: [...new Set(rejectionReasons)],
+    };
   };
 }

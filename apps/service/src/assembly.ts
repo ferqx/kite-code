@@ -127,6 +127,19 @@ export async function createWorkspaceAssembly(options: {
       for (const id of options.inheritedSkillIds) {
         const matches = initial.entries.filter((entry) => (configuredId(entry) ?? entry.id) === id);
         if (matches.length !== 1) {
+          // Automatically discovered parent skills are optional after the child's
+          // capability ceiling narrows. Explicit requirements and bad IDs still fail.
+          if (
+            options.selectedSkills === undefined &&
+            matches.length === 0 &&
+            initial.states.some(
+              (entry) =>
+                entry.id === id &&
+                entry.state === 'unavailable' &&
+                entry.reason === 'skill_capability_missing',
+            )
+          )
+            continue;
           failSelected(id);
           throw new AgentError('skill_not_discovered');
         }

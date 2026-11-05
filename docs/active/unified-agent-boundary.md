@@ -10,7 +10,9 @@ Native消息历史在完整基线之后，可按`message_changes`能力用持久
 
 工具反馈不成为执行权威：[Shell leaf](../../packages/agent/src/tools/shell.README.md)仅在可确定的本地引用缺失预查返回 failed，Store 读取异常及派发后未知仍保守结算。`files.search@3` 的过滤、预览与当前页跳过范围归 [Files owner](../../packages/agent/src/tools/files/README.md)，其描述和结果不能放宽原路径、权限及恢复约束。公开预设说明来自实际注册目录，准确只读 definition/version 白名单与父能力交集保持；[行为合同](../../packages/agent/src/model-context.ts)只指导推进、取证和交付，不新增完成状态、自动重放或额外审批。Runtime 仍以原 Command/Run、真实派发和必要条件作为权威。
 
-Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不识别具体文件工具 ID，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型。
+普通 Files 的确定缺失由[原读取 owner](../../packages/agent/src/tools/files-tools.ts)及[外部读取适配器](../../packages/agent/src/tools/external-file-reads.ts)返回 `outcome:succeeded/details.exists:false`，没有正文或基线；只包住实际目标读取，Artifact 发布、私有引用、保护范围与取消失败不被通用 `ENOENT` 转成缺失。[Service 最终 Files 装配](../../apps/service/src/file-checkpoint-configuration.ts)统一模型说明和 path 文案，保留输入 schema 语义、定义版本及原 Full-only 外写策略，不让附件说明覆盖普通外部读取范围。[模型错误呈现](../../packages/agent/src/tool-failure-presentation.ts)只用已知公开原因生成英文解释，保原调用出处、审批和未知事实；[补充原因表](../../packages/agent/src/tool-failure-causes.ts)不改变分类或授权。原 stdout／stderr、MCP 业务数据与非英文业务正文不因移除解释中的内部执行术语而被翻译或裁剪，原持久回执仍完整保存。产品表现归[工具手册](../handbook/features/tools-and-approvals.md)，验收边界与取舍见[缺失观察及工具反馈记录](../../.agents/notes/implemented/bug-fix/2026-11-05-ordinary-missing-file-and-readable-tool-feedback.md)。
+
+Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。准确失败的子结果也保已取得的工具观察和 Shell 两流预览，原效果与失败状态不互相覆盖；不认识的证据限定保原完整 Source，不因错误简化丢失。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不按具体文件工具 ID 改写完成条件，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型。
 
 会话文件沿 Native 字节准备 → Service 流式导入 → Store 原消息事务绑定 → Files 精确对象权限 → Artifact／模型结果交接。Blob、可变工作文件和可重建缓存职责分开；会话路径不扩大 Shell／普通外部文件工具的 Profile 权限。Plan 文件编辑经原 Planning Action 保存新版本，文件事实不能替代原 Run／版本批准。PDF 页图由准确 Tool Execution 的不可变 Artifact 进入中立 tool 消息，协议视觉载体不产生人类授权。跨介质发布保留 pending／unknown；备份 v20 保存最新实际工作文件和明确缺失，恢复生成新 Store。详细合同分别归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)、[维护](../../packages/agent/src/maintenance/README.md)和 [AI](../../packages/ai/README.md#图片消息)。
 
@@ -142,7 +144,7 @@ QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完
 
 首输入的本地标题兜底独立于业务准入。可信宿主在 public/raw 耐久保存后、解释修订捕获前，通过受限 metadata 接点复用标题模块的 rename CAS；它不成为新的业务生命周期、事件总线或执行许可，解释轮仍零业务 Action。原输入、初始控制、空历史、保留的注册锚点和手动改名均须可核。后续标题 AI 只沿准确 public/raw/decision/business 链，在实际业务正常完成前执行；元数据失败不改变原输入的业务结果。当前负责入口归[Agent](../../packages/agent/README.md)与[Service](../../apps/service/README.md)。
 
-所属根当前 applied 权限模式通过持久 `permission.mode` revision 交给子孙策略、待审批/审核与资源等待、最终 SQL 派发；收紧和放宽均在原准确动作上重新判断，不共享兄弟/新轮批准，不因 Full 解除可信只读与工具硬上限。旧卡片追加失效事实而停用，原请求/答案保留；on* 通知不是可靠唤醒依据。当前权限读取失败阻挡新效果。协议与实际强杀/模式竞争证据归[授权契约](authorization.md#当前-v13-正式授权)及[权限 owner](../../packages/agent/src/permissions/README.md)。
+所属根当前 applied 权限模式通过持久 `permission.mode` revision 交给子孙策略、待审批/审核与资源等待、最终 SQL 派发；收紧和放宽均在原准确动作上重新判断，不共享兄弟/新轮批准，不因 Full 解除工具硬上限和主会话 Planning 约束；只读子角色的 Shell 继承普通权限，角色任务指导不另成禁写保证。旧卡片追加失效事实而停用，原请求/答案保留；on* 通知不是可靠唤醒依据。当前权限读取失败阻挡新效果。协议与实际强杀/模式竞争证据归[授权契约](authorization.md#当前-v13-正式授权)及[权限 owner](../../packages/agent/src/permissions/README.md)。
 
 可信 `readStepCapabilities` 在安全 Step 只选择缓存定义，Model 的实际工具版本与非秘密目录事实独立保存。旧未派发调用在目录变化后失效，下一模型请求同时更新 schema；已派发任务保留原 scope 和 lease。新版本 Tool 的自有 namespace 从准确成功 Model 的实际请求/绑定与原工作身份核实，不能靠调用者声明或替换旧 Run manifest 获得；真正执行仍走独立权限和最终派发事务。
 
@@ -229,6 +231,8 @@ Native 的[单次 Plan 入口与审核](../../apps/desktop/README.md#native-计�
 共享 TUI 的[恢复面板](../../packages/ui/src/tui/README.md)区分原生控制键批次与 literal bracketed paste：批次中的 Ctrl+C 只取消所属读取，Ctrl+L 完全忽略；粘贴中的控制字节不触发恢复或查询。原申请由自动观察只读核对，原 GET 取消后的迟到结果不发布；原 POST 结果仍按原身份保存，取消读取不撤销业务效果。不新增 HTTP、执行权限或 journal 结构；历史输入边界与当前替代范围见[恢复输入决定](../../.agents/notes/implemented/bug-fix/2026-10-06-recovery-native-controls-and-literal-paste.md)，当前客户端验证见 TUI owner。
 
 Model 的来源请求集与完整来源在同一检查点冻结；单个 Tool 复核该原请求集加本次准确输入，整批累计请求只供后续 Model 和持久恢复。可信文件工厂可声明 `contextDiscovery=read_only`，仅允许原模型依据完全未变时接纳宿主新发现的低权限项目指令；扩展来源、自报 kind、未知工具及副作用不获得此例外。原 Model 仍保原来源，下一 Model 记录新指令及工具真实结果。Core-only 条件读集冲突只重新评估纯条件；有序输入取代及完成治理刷新按真实未派发证明继续同 Run，拒绝、已派发失败与 unknown 不被转成成功。实现与回归归[Agent owner](../../packages/agent/README.md)。
+
+完成治理刷新只允许原 Run 中可信持久来源为 `completion_decision`、仍 planned 且未派发的 Tool 随引导原子退休，旧审批失效；新准备、新参数和新审批保各自身份。资源等待沿原输入检查点与 freshness 退出旧等待，不抢占其他工作持有的资源。退休在同事务撤销准确旧卡派生的会话授权，保留答案与已接纳历史，不清其他授权。最终派发事务阻止旧完成决定越过已受理引导；若派发先提交，则按真实效果结算并暂缓输入，不取消已开始调用或重放未知效果。普通模型工具批次的完整收尾合同保持。准确资格、消息格式和回滚边界归[输入 Store owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
 来源新鲜度由宿主采集真实决策输入。模型路径刷新后重新决定；Action 保留旧 attempt 后重新准备与重新授权。批准、资源许可与来源检查都不能代替最终具名事务中的取消、owner、版本和业务条件复核；FS 与 SQLite 的非原子边界不被描述为全局原子保证。
 

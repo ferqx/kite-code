@@ -20,6 +20,10 @@ import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  parseShellModelFeedback,
+  shellModelFeedbackMatchesResult,
+} from '../../../../tests/fixtures/unified-agent/shell-model-feedback';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -391,16 +395,45 @@ async function seedJob({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
-      const body = (await request.json()) as { messages: { role: string }[] };
-      const results = body.messages.filter((row) => row.role === 'tool').length;
+      const body = (await request.json()) as {
+        messages: { role: string; content?: string; tool_call_id?: string }[];
+      };
+      const receipts = body.messages.filter((row) => row.role === 'tool');
+      const results = receipts.length;
+      const started = receipts.length ? parseShellModelFeedback(receipts[0]!.content!) : undefined;
+      if (started && started.status !== 'accepted')
+        throw Error('output_fixture_shell_not_accepted');
+      const observed = results > 1 ? parseShellModelFeedback(receipts.at(-1)!.content!) : undefined;
+      if (
+        observed &&
+        (observed.shellId !== started!.shellId ||
+          !['planned', 'dispatching', 'running', 'succeeded'].includes(observed.status))
+      )
+        throw Error('output_fixture_original_shell_failed');
+      if (receipts.length) {
+        const originals = await store.listExecutions('job-output-window', 1000);
+        for (const receipt of receipts) {
+          const tool = originals.filter(
+            (execution) => execution.kind === 'tool' && execution.callId === receipt.tool_call_id,
+          );
+          if (
+            tool.length !== 1 ||
+            !shellModelFeedbackMatchesResult(
+              parseShellModelFeedback(receipt.content!),
+              tool[0]!.result,
+            )
+          )
+            throw Error('output_fixture_original_receipt_mismatch');
+        }
+      }
       const call =
         results === 0
           ? {
-              name: 'shell_launch',
-              input: { key: 'original', command: `/bin/sh '${script}'`, cancellation: 'detached' },
+              name: 'shell_execute',
+              input: { command: `/bin/sh '${script}'`, background: true },
             }
-          : results === 1
-            ? { name: 'shell_wait', input: { shell_id: 'original', wait_timeout_ms: 10000 } }
+          : observed?.status !== 'succeeded'
+            ? { name: 'shell_wait', input: { shell_id: started!.shellId, wait_timeout_ms: 10000 } }
             : undefined;
       const frame = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'fixed', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
@@ -432,7 +465,7 @@ async function seedJob({
     models: [
       { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${producer.url.href}v1` },
     ],
-    tools: ['shell.launch', 'shell.wait'].map((id) => ({ id, definitionVersion: '1' })),
+    tools: ['shell.execute', 'shell.wait'].map((id) => ({ id, definitionVersion: '1' })),
   };
   writeFileSync(userConfigurationPath(home), JSON.stringify(config));
   const supervisor = await Bun.build({

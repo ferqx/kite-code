@@ -68,10 +68,10 @@ function closedStartupFailure(view: BrowserView | undefined, target: BrowserTarg
     ? failed(view.error)
     : undefined;
 }
-const unknown = (code: string): ToolResult => ({
+const unknown = (code: string, cause?: string): ToolResult => ({
   outcome: 'outcome_unknown',
-  content: `${code}. The original action must not be retried; inspect this browser or close it.`,
-  details: { code },
+  content: `${code}.${cause ? ` Diagnostic cause: ${cause}.` : ''} The original action must not be retried; inspect this browser or close it.`,
+  details: { code, ...(cause ? { cause } : {}) },
 });
 const succeeded = (details: Json): ToolResult => ({
   outcome: 'succeeded',
@@ -108,6 +108,7 @@ interface Session {
   uncertain: boolean;
   startupFailure?: string;
   startupDiagnostic?: { phase: 'navigation'; cause?: string; dispatched?: boolean };
+  transportFailure?: string;
   enteredAgent?: true;
   recoveryObservationRequired?: true;
   transportAvailable: Promise<void>;
@@ -347,6 +348,7 @@ export function createBrowserController(options: {
                 confirmed
                   ? (state.view.error ?? 'browser_action_outcome_unknown')
                   : 'browser_stop_unconfirmed',
+                state.transportFailure,
               )
             : state.startupFailure
               ? failed(state.startupFailure)
@@ -358,14 +360,20 @@ export function createBrowserController(options: {
         );
         return { status: confirmed ? 'stopped' : 'unknown' };
       } catch {
-        terminal(state, unknown('browser_stop_unconfirmed'), false);
+        terminal(state, unknown('browser_stop_unconfirmed', state.transportFailure), false);
         return { status: 'unknown' };
       }
     })();
     return state.stopping;
   };
-  const lose = (state: Session, code: string, startup?: Session['startupDiagnostic']) => {
+  const lose = (
+    state: Session,
+    code: string,
+    startup?: Session['startupDiagnostic'],
+    cause?: string,
+  ) => {
     if (startup) state.startupDiagnostic = startup;
+    if (cause) state.transportFailure = cause;
     delete state.view.humanRequest;
     state.uncertain = true;
     state.view.state = 'outcome_unknown';
@@ -1218,8 +1226,9 @@ export function createBrowserController(options: {
         }
         if (error instanceof BrowserTransportError && error.dispatched === false)
           return failed(transportCode(error, 'browser_action_not_dispatched'));
-        lose(state, 'browser_action_outcome_unknown');
-        return unknown('browser_action_outcome_unknown');
+        const cause = transportCode(error, '') || undefined;
+        lose(state, 'browser_action_outcome_unknown', undefined, cause);
+        return unknown('browser_action_outcome_unknown', cause);
       }
     });
   };

@@ -184,6 +184,48 @@ test('an inactive Plan file changed externally is rejected before pending public
   }
 });
 
+test('a real Plan pointer CAS conflict after publication retains an unknown result and does not replay its original command', async () => {
+  const f = await fixture();
+  const originalWrite = f.store.writeExtensionRecord.bind(f.store);
+  let conflicts = 0;
+  try {
+    expect((await f.write('A', null, 'Original A')).status).toBe('succeeded');
+    const path = await f.path('plan/A/1');
+    f.store.writeExtensionRecord = async (input) => {
+      const value = input.write.value as Record<string, Json>;
+      if (
+        conflicts === 0 &&
+        input.extensionId === planningExtensionId &&
+        input.write.key === 'plan.current' &&
+        value.version === 2
+      ) {
+        conflicts++;
+        expect(readFileSync(path, 'utf8')).toBe('Published revised A');
+        // Apply an actual competing write, then let the original stale revision fail in SQLite.
+        await originalWrite(input);
+      }
+      return originalWrite(input);
+    };
+    const unknown = await f.write('A', 1, 'Published revised A', 'published-cas-conflict');
+    expect(conflicts).toBe(1);
+    expect(unknown.status).toBe('outcome_unknown');
+    expect((unknown.result as { content: string }).content).toContain('Do not resubmit');
+    expect(unknown.result).toMatchObject({
+      details: { code: 'plan_file_publish_unknown', failureCode: 'record_revision_conflict' },
+    });
+    expect(readFileSync(path, 'utf8')).toBe('Published revised A');
+    expect((await f.record('plan.current'))!.value).toMatchObject({ version: 2 });
+    expect((await f.record('plan.file.publication'))!.value).toMatchObject({ state: 'pending' });
+    const before = statSync(path);
+    expect(await f.write('A', 1, 'Published revised A', 'published-cas-conflict')).toEqual(unknown);
+    expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
+    expect(conflicts).toBe(1);
+  } finally {
+    f.store.writeExtensionRecord = originalWrite;
+    await f.close();
+  }
+});
+
 for (const fault of ['document', 'committed', 'committed-drift'] as const)
   test(`reused Plan publication preserves unknown and resumes its exact original bytes after ${fault} failure`, async () => {
     const f = await fixture();

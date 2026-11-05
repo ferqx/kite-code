@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { ExecutionRecord, Json } from './storage/types';
-import { toolObservation } from './tool-observations';
+import { toolFailurePresentation } from './tool-failure-presentation';
+import { isShellReceipt, type ShellReceipt, toolObservation } from './tool-observations';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -10,6 +11,37 @@ const text = (value: unknown): value is string => typeof value === 'string' && v
 const keys = (value: Record<string, unknown>, allowed: string[]) =>
   Object.keys(value).every((key) => allowed.includes(key));
 const count = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0;
+// Keep the retained receipt intact; only this model-facing copy uses public concepts.
+function commandReceipt(receipt: ShellReceipt) {
+  const { job, authorization, ...rest } = receipt;
+  const approval = (value: NonNullable<ShellReceipt['authorization']>['tool']) =>
+    value && {
+      ...(value.check ? { risk_review: value.check } : {}),
+      ...(value.human ? { user_response: value.human } : {}),
+      ...(value.policy
+        ? {
+            policy:
+              value.policy.reason === 'parent_review'
+                ? 'The command reused the approval basis of its own original request.'
+                : value.policy.reason === 'reused_approval'
+                  ? 'A matching earlier approval was reused.'
+                  : 'The approval check timed out; execution followed the existing timeout policy.',
+          }
+        : {}),
+    };
+  return {
+    ...rest,
+    execution: job,
+    ...(authorization
+      ? {
+          approval: {
+            request: approval(authorization.tool),
+            execution: approval(authorization.job),
+          },
+        }
+      : {}),
+  };
+}
 // A future producer may add material qualifications here. Preserve its raw format
 // instead of silently replacing unknown qualifications with today's shorter wording.
 const knownLimitation =
@@ -28,9 +60,11 @@ export function formatChildResult(input: {
   const { execution, result, origin, inclusion, body } = input;
   const details = object(result.details);
   const evidence = object(details?.evidence);
+  const failed = result.outcome === 'failed';
+  const outcome = failed ? 'failed' : 'succeeded';
   if (
     execution.kind !== 'job' ||
-    execution.status !== 'succeeded' ||
+    execution.status !== outcome ||
     !execution.childConfiguration ||
     !text(execution.childConfiguration.id) ||
     !text(execution.childConfiguration.version) ||
@@ -43,14 +77,16 @@ export function formatChildResult(input: {
     !['automatic', 'explicit'].includes(inclusion) ||
     !isDeepStrictEqual(execution.result, result) ||
     !keys(result, ['outcome', 'content', 'details', 'modelContent']) ||
-    result.outcome !== 'succeeded' ||
+    result.outcome !== outcome ||
     typeof result.content !== 'string' ||
     !details ||
     !keys(details, ['childSessionId', 'runId', 'status', 'reason', 'evidence']) ||
     details.childSessionId !== execution.childSessionId ||
     !text(details.runId) ||
-    details.status !== 'completed' ||
-    details.reason !== null ||
+    details.status !== (failed ? 'failed' : 'completed') ||
+    (failed
+      ? !text(details.reason) || details.reason !== (body ?? result.content)
+      : details.reason !== null) ||
     !evidence ||
     !keys(evidence, [
       'kind',
@@ -64,6 +100,8 @@ export function formatChildResult(input: {
       'toolCallsOmitted',
       'tools',
       'observations',
+      'shellReceipts',
+      'shellReceiptsOmitted',
     ]) ||
     evidence.kind !== 'recorded_tool_evidence' ||
     evidence.sessionId !== execution.childSessionId ||
@@ -101,6 +139,14 @@ export function formatChildResult(input: {
     )
       return;
   }
+  if (
+    (evidence.shellReceipts === undefined) !== (evidence.shellReceiptsOmitted === undefined) ||
+    (evidence.shellReceipts !== undefined &&
+      (!Array.isArray(evidence.shellReceipts) ||
+        !count(evidence.shellReceiptsOmitted) ||
+        !evidence.shellReceipts.every(isShellReceipt)))
+  )
+    return;
   for (const value of evidence.tools) {
     const tool = object(value);
     const outcomes = object(tool?.outcomes);
@@ -143,7 +189,9 @@ export function formatChildResult(input: {
     });
     if (excerpt) excerpts.push(excerpt.text);
   }
-  const report = body ?? result.content;
+  const report = failed
+    ? toolFailurePresentation({ result, ...(body === undefined ? {} : { body }) })!
+    : (body ?? result.content);
   const header = {
     format: 'child_result_source',
     version: 1,
@@ -162,6 +210,12 @@ export function formatChildResult(input: {
       toolCallsOmitted: evidence.toolCallsOmitted,
       tools: evidence.tools,
       observations,
+      ...(evidence.shellReceipts === undefined
+        ? {}
+        : {
+            shellReceipts: (evidence.shellReceipts as ShellReceipt[]).map(commandReceipt),
+            shellReceiptsOmitted: evidence.shellReceiptsOmitted,
+          }),
     },
     reportBytes: Buffer.byteLength(report),
   };

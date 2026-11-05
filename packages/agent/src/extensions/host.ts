@@ -42,6 +42,7 @@ import type {
   ToolDefinition,
 } from './index';
 import type { OutputOperations } from './output';
+import { childPreparationFailure } from './task/preparation-failure';
 
 const semanticDigestBytes = async (bytes: Uint8Array) =>
   createHash('sha256').update(bytes).digest('hex');
@@ -1609,7 +1610,8 @@ export class ExtensionHost {
             throw new AgentError('invalid_operation_admission');
           if (definition.resources?.serial || definition.resources?.slot)
             throw new AgentError('nested_resource_unsupported');
-          if (options.request.kind === 'agent') {
+          const readAgentOperation = async () => {
+            if (options.request.kind !== 'agent') return null;
             const prior = await this.options.store.getOperation({
               extensionId: extension.id,
               sessionId: scope.command.sessionId,
@@ -1632,19 +1634,41 @@ export class ExtensionHost {
                 (request.resultDelivery ?? null) !== (options.resultDelivery ?? null)
               )
                 throw new AgentError('operation_conflict');
-              return prior;
+            }
+            return prior;
+          };
+          const prior = await readAgentOperation();
+          if (prior) return prior;
+          let agent:
+            | Awaited<ReturnType<NonNullable<ExtensionHostOptions['resolveAgent']>>>
+            | undefined;
+          if (options.request.kind === 'agent') {
+            try {
+              agent = await this.options.resolveAgent?.(
+                options.request.configurationId,
+                scope,
+                executionId,
+                source,
+              );
+            } catch (error) {
+              if (
+                scope.signal.aborted ||
+                (error instanceof AgentError &&
+                  [
+                    'cancel_requested',
+                    'command_cancelled',
+                    'input_cancelled',
+                    'configuration_cleanup_unconfirmed',
+                  ].includes(error.code))
+              )
+                throw error;
+              // A concurrent ensure of this same identity may have been accepted.
+              const original = await readAgentOperation();
+              if (original) return original;
+              scope.signal.throwIfAborted();
+              throw childPreparationFailure(error);
             }
           }
-
-          const agent =
-            options.request.kind === 'agent'
-              ? await this.options.resolveAgent?.(
-                  options.request.configurationId,
-                  scope,
-                  executionId,
-                  source,
-                )
-              : undefined;
           try {
             if (admission === 'fail_if_full') {
               if (!agent?.reserveForCreation) throw new AgentError('agent_admission_unavailable');
@@ -2269,18 +2293,23 @@ export class ExtensionHost {
             extensionId: extension.id,
           })}`;
           // Recovery reads the original immutable receipt before resolving any current target.
-          const prior = await this.options.store.getCommand(commandId);
-          if (prior) {
-            const body = prior.request as Record<string, Json>;
-            if (
-              body.action !== input.kind ||
-              body.agentId !== input.agentId ||
-              body.content !== (input.content ?? null) ||
-              body.sourceExecutionId !== executionId
-            )
-              throw new AgentError('operation_conflict');
+          const readAgentCommand = async () => {
+            const prior = await this.options.store.getCommand(commandId);
+            if (prior) {
+              const body = prior.request as Record<string, Json>;
+              if (
+                body.action !== input.kind ||
+                body.agentId !== input.agentId ||
+                body.content !== (input.content ?? null) ||
+                body.sourceExecutionId !== executionId
+              )
+                throw new AgentError('operation_conflict');
+            }
+            return prior;
+          };
+          const prior = await readAgentCommand();
+          if (prior)
             return prior.receipt as unknown as import('../storage/agent-collaboration').AgentCommandReceipt;
-          }
           const page = await this.options.store.listStableAgents({
             expectedStoreId: scope.command.originStoreId,
             sessionId: scope.command.sessionId,
@@ -2294,18 +2323,42 @@ export class ExtensionHost {
           if (!sourceOperation?.childConfiguration) throw new AgentError('operation_unverifiable');
           // Only the immutable configuration identity is taken from this preliminary read.
           // The Store selects and pins the actual target after asynchronous resolution finishes.
-          const agent =
-            input.kind === 'follow_up' && (observed.runId !== null || observed.state === 'idle')
-              ? await this.options.resolveAgent?.(
-                  observed.configurationId,
-                  scope,
-                  executionId,
-                  source,
-                  observed.runId
-                    ? { executionId: observed.ref.executionId!, afterRunId: observed.runId }
-                    : undefined,
-                )
-              : undefined;
+          let agent:
+            | Awaited<ReturnType<NonNullable<ExtensionHostOptions['resolveAgent']>>>
+            | undefined;
+          if (
+            input.kind === 'follow_up' &&
+            (observed.runId !== null || observed.state === 'idle')
+          ) {
+            try {
+              agent = await this.options.resolveAgent?.(
+                observed.configurationId,
+                scope,
+                executionId,
+                source,
+                observed.runId
+                  ? { executionId: observed.ref.executionId!, afterRunId: observed.runId }
+                  : undefined,
+              );
+            } catch (error) {
+              if (
+                scope.signal.aborted ||
+                (error instanceof AgentError &&
+                  [
+                    'cancel_requested',
+                    'command_cancelled',
+                    'input_cancelled',
+                    'configuration_cleanup_unconfirmed',
+                  ].includes(error.code))
+              )
+                throw error;
+              const original = await readAgentCommand();
+              if (original)
+                return original.receipt as unknown as import('../storage/agent-collaboration').AgentCommandReceipt;
+              scope.signal.throwIfAborted();
+              throw childPreparationFailure(error);
+            }
+          }
           try {
             const configuration = agent?.configuration ?? sourceOperation.childConfiguration;
             let afterTurnAuthorization:

@@ -1,15 +1,27 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
-  authorizationCheckAnswer,
+  authorizationCheckInput,
+  withoutTaskProjectionMarker,
+} from '../../authorization-check-input';
+import {
+  authorizationCheckAnswerForContract,
   authorizationCheckOutput,
   authorizationCheckOutputMediaType,
   authorizationCheckOutputRefId,
 } from '../../authorization-check-output';
-import { semanticReviewContext } from '../../authorization-review-context';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
+import { isShellRiskRequest, shellRiskInstructions } from '../../shell-risk-review';
 import type { AuthorizationCheckResult, DispatchInput, Store } from '../port';
 import { AgentError, type Json } from '../types';
+import {
+  authorizationTaskContext,
+  usesTaskAuthorizationInput,
+} from './authorization-check-context';
+import {
+  autoAuthorizationContext,
+  verifyAutoAuthorizationDispatch,
+} from './authorization-policy-evidence';
 import { authorizationReviewFact, decisionContext } from './authorization-review';
 import { assertCurrentChildPurpose } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
@@ -76,6 +88,7 @@ function bound(
     throw new AgentError('authorization_check_unverifiable');
   const request = object(JSON.parse(String(command.request_json)));
   const payload = object(request.input);
+  const riskCheck = payload.reviewPurpose === 'shell_risk';
   const identity = object(payload.checker);
   const targetBinding = object(payload.target);
   const original = db.row('SELECT * FROM command WHERE id=?', target.origin_command_id!);
@@ -85,7 +98,8 @@ function bound(
     !original ||
     !rootWork ||
     payload.purpose !== 'authorization_check' ||
-    payload.instructions !== instructions ||
+    payload.instructions !== (riskCheck ? shellRiskInstructions : instructions) ||
+    (riskCheck && !isShellRiskRequest(payload.request!)) ||
     typeof payload.requireApproval !== 'boolean' ||
     !payload.policyRevision ||
     request.kind !== 'authorization.check' ||
@@ -110,12 +124,14 @@ function bound(
     targetBinding.attempt !== Number(target.attempt) ||
     targetBinding.definitionId !== target.adapter_id ||
     targetBinding.definitionVersion !== target.definition_version ||
+    (riskCheck && targetBinding.kind !== target.kind) ||
     !requestMatches(db, targetBinding.input!, String(target.intent_json), target) ||
     !requestMatches(db, targetBinding.source!, String(target.decision_source_json), target) ||
     !requestMatches(db, payload.originCommandRequest!, String(original.request_json), target) ||
     !requestMatches(db, payload.rootWorkRequest!, String(rootWork.request_json), target) ||
     check.decision_source_json !== target.decision_source_json ||
     (!observation &&
+      !riskCheck &&
       canonicalJson(payload.decisionContext!) !== canonicalJson(decisionContext(db, target)))
   )
     throw new AgentError('authorization_check_binding_changed');
@@ -188,6 +204,16 @@ export function ensureAuthorizationCheck(
     db.ancestors(input.owner, input.targetExecutionId);
     assertNoExecutionGroupFence(db, String(target.session_id));
     const checker = input.checker;
+    const riskCheck = isShellRiskRequest(input.request);
+    const preparation = input.riskReview;
+    if (
+      preparation != null &&
+      (!riskCheck ||
+        Object.keys(preparation).sort().join(',') !== 'fingerprint,material,reusable' ||
+        !/^[a-f0-9]{64}$/.test(preparation.fingerprint) ||
+        typeof preparation.reusable !== 'boolean')
+    )
+      throw new AgentError('authorization_check_binding_invalid');
     if (
       target.origin_store_id !== input.expectedStoreId ||
       !input.policyRevision ||
@@ -199,6 +225,15 @@ export function ensureAuthorizationCheck(
       !checker.modelId ||
       checker.modelId.length > 256 ||
       (input.requireApproval !== undefined && typeof input.requireApproval !== 'boolean')
+    )
+      throw new AgentError('authorization_check_binding_invalid');
+    if (
+      (input.operationKey !== undefined && !/^[a-f0-9]{64}$/.test(input.operationKey)) ||
+      (input.timeout !== undefined &&
+        (!Number.isSafeInteger(input.timeout.startedAt) ||
+          !Number.isSafeInteger(input.timeout.deadlineAt) ||
+          input.timeout.startedAt > Date.now() ||
+          input.timeout.deadlineAt <= input.timeout.startedAt))
     )
       throw new AgentError('authorization_check_binding_invalid');
     const rootWork = db.row('SELECT * FROM command WHERE id=?', target.root_work_command_id!);
@@ -223,6 +258,10 @@ export function ensureAuthorizationCheck(
       requireApproval: input.requireApproval === true,
       checker: { ...checker },
       policyRevision: input.policyRevision,
+      ...(input.operationKey
+        ? { operationKey: input.operationKey, autoContext: autoAuthorizationContext(db, target) }
+        : {}),
+      ...(input.timeout ? { timeout: { ...input.timeout } } : {}),
       request: input.request,
       ...(input.requestBody ? { requestBody: input.requestBody as unknown as Json } : {}),
       originCommandRequest:
@@ -230,9 +269,19 @@ export function ensureAuthorizationCheck(
         JSON.parse(String(origin.request_json)),
       rootWorkRequest:
         (input.rootWorkRequestBody as unknown as Json) ?? JSON.parse(String(rootWork.request_json)),
-      decisionContext: decisionContext(db, target),
-      instructions,
+      decisionContext: riskCheck ? null : decisionContext(db, target),
+      ...(riskCheck
+        ? {
+            reviewPurpose: 'shell_risk',
+            riskReview: preparation == null ? null : ({ ...preparation } as unknown as Json),
+          }
+        : {}),
+      ...(!riskCheck && usesTaskAuthorizationInput(input.request)
+        ? { authorizationContext: authorizationTaskContext(db, target, input.operationKey) }
+        : {}),
+      instructions: riskCheck ? shellRiskInstructions : instructions,
       target: {
+        ...(riskCheck ? { kind: String(target.kind) } : {}),
         executionId: String(target.id),
         sessionId: String(target.session_id),
         runId: target.run_id === null ? null : String(target.run_id),
@@ -250,23 +299,82 @@ export function ensureAuthorizationCheck(
         subjectId: String(origin.subject_id),
       },
     };
-    const legacyPayload = {
+    const legacyPayload: Record<string, Json> = {
       ...object(payload),
       purpose: 'authorization_review',
       reviewer: { ...checker },
     };
     delete (legacyPayload as Record<string, Json>).checker;
-    const legacy = db.row(
-      "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review' AND e.parent_execution_id=? AND c.operation_key=?",
-      target.id!,
-      `review/${hash(legacyPayload)}`,
-    );
+    // These fields did not exist in the frozen review payload. Their current
+    // values cannot change an original legacy identity or manufacture a review.
+    delete (legacyPayload as Record<string, Json>).operationKey;
+    delete (legacyPayload as Record<string, Json>).autoContext;
+    delete (legacyPayload as Record<string, Json>).timeout;
+    delete (legacyPayload as Record<string, Json>).authorizationContext;
+    legacyPayload.request = withoutTaskProjectionMarker(legacyPayload.request!);
+    const legacy = riskCheck
+      ? undefined
+      : db.row(
+          "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review' AND e.parent_execution_id=? AND c.operation_key=?",
+          target.id!,
+          `review/${hash(legacyPayload)}`,
+        );
     if (legacy) {
       authorizationReviewFact(db, String(target.id), String(legacy.id), input.policyRevision, true);
       return {
         execution: db.execution(legacy),
         commandId: String(legacy.origin_command_id),
         input: legacyPayload as Json,
+        source: JSON.parse(String(target.decision_source_json)) as Json,
+        created: false,
+      };
+    }
+    const withoutTimeout = (value: Record<string, Json>) => {
+      const { timeout: _timeout, ...identity } = value;
+      return canonicalJson(identity);
+    };
+    // A new clock observes the same target; it does not renew its saved budget.
+    // Retain all authority, source, request and operation/context fields exactly.
+    const candidates = db.rows(
+      "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.check' AND e.parent_execution_id=? AND e.session_id=? ORDER BY c.rowid DESC",
+      target.id!,
+      target.session_id!,
+    );
+    for (const candidate of candidates) {
+      const savedCommand = db.row('SELECT * FROM command WHERE id=?', candidate.origin_command_id!);
+      if (!savedCommand) throw new AgentError('authorization_check_unverifiable');
+      const saved = object(object(JSON.parse(String(savedCommand.request_json))).input);
+      const originalNative =
+        !Object.hasOwn(saved, 'operationKey') &&
+        !Object.hasOwn(saved, 'autoContext') &&
+        !Object.hasOwn(saved, 'timeout');
+      const current = { ...object(payload) };
+      const savedContext = saved.authorizationContext && object(saved.authorizationContext);
+      if (savedContext && current.authorizationContext) {
+        const currentContext = { ...object(current.authorizationContext) };
+        // These are sealed historical observations, not live authority. A later read
+        // or prior effect settling cannot restart this target's original check.
+        for (const field of ['recordedReads', 'priorEffects']) {
+          if (Object.hasOwn(savedContext, field)) currentContext[field] = savedContext[field]!;
+          else delete currentContext[field];
+        }
+        current.authorizationContext = currentContext;
+      }
+      if (!riskCheck && !Object.hasOwn(saved, 'authorizationContext')) {
+        delete current.authorizationContext;
+        current.request = withoutTaskProjectionMarker(current.request!);
+      }
+      if (!riskCheck && originalNative) {
+        delete current.operationKey;
+        delete current.autoContext;
+        delete current.timeout;
+      }
+      if (withoutTimeout(saved) !== withoutTimeout(current)) continue;
+      bound(db, candidate, true);
+      return {
+        execution: db.execution(candidate),
+        commandId: String(savedCommand.id),
+        input: saved,
         source: JSON.parse(String(target.decision_source_json)) as Json,
         created: false,
       };
@@ -383,12 +491,7 @@ export function prepareAuthorizationCheck(
       !(request.messages as Json[]).some((message) => {
         const value = object(message);
         return (
-          value.role === 'user' &&
-          value.content ===
-            canonicalJson({
-              ...payload,
-              decisionContext: semanticReviewContext(payload.decisionContext!),
-            })
+          value.role === 'user' && value.content === canonicalJson(authorizationCheckInput(payload))
         );
       })
     )
@@ -496,6 +599,7 @@ export function persistAuthorizationCheckPartial(
     }
     const result: Json = {
       content: input.content,
+      ...(input.usage === undefined ? {} : { usage: input.usage }),
       ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
       ...(input.firstOutput ? { firstOutput: input.firstOutput } : {}),
       ...(input.modelOutput ? { modelOutput: input.modelOutput as unknown as Json } : {}),
@@ -513,11 +617,16 @@ function answerFromResult(db: SqliteOperations, check: Row, result: Record<strin
     throw new AgentError('authorization_check_output_invalid');
   const intent = object(JSON.parse(String(check.intent_json))),
     body = bodyReference(intent.body);
+  const { payload } = bound(db, check, true);
+  const purpose = payload.reviewPurpose === 'shell_risk' ? 'shell_risk' : undefined;
   if (body && result.modelInputBodyHash !== body.reference.hash)
     throw new AgentError('model_body_receipt_invalid');
   if (!result.modelOutput) {
     try {
-      return authorizationCheckAnswer(JSON.parse(String(result.content)));
+      return (
+        authorizationCheckAnswerForContract(JSON.parse(String(result.content)), purpose)?.answer ??
+        null
+      );
     } catch {
       return null;
     }
@@ -531,6 +640,7 @@ function answerFromResult(db: SqliteOperations, check: Row, result: Record<strin
     !output.complete ||
     output.toolCallCount !== 0 ||
     !receipt ||
+    receipt.reviewPurpose !== purpose ||
     receipt.modelExecutionId !== check.id ||
     receipt.modelOutputDigest !== hash(output as unknown as Json)
   )
@@ -594,11 +704,58 @@ export function finishAuthorizationCheck(
     const { check } = owned(db, input, true);
     if (Object.hasOwn(input, 'message'))
       throw new AgentError('authorization_check_binding_invalid');
-    const result = object(input.result);
+    let result = object(input.result);
     if (['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(String(check.state))) {
       if (check.state !== input.status || check.result_json !== canonicalJson(input.result))
         throw new AgentError('terminal_conflict');
       return db.execution(check);
+    }
+    if (result.code === 'authorization_check_timeout') {
+      const { payload } = bound(db, check);
+      const timeout = object(payload.timeout);
+      if (
+        input.status !== 'failed' ||
+        result.deadlineAt !== timeout.deadlineAt ||
+        typeof timeout.deadlineAt !== 'number' ||
+        Date.now() < timeout.deadlineAt
+      )
+        throw new AgentError('authorization_check_timeout_invalid');
+      const prior = check.result_json ? object(JSON.parse(String(check.result_json))) : {};
+      const partial: Record<string, Json> = {};
+      for (const field of ['content', 'reasoning', 'firstOutput', 'modelOutput', 'usage'])
+        if (prior[field] !== undefined) partial[field] = prior[field]!;
+      const suppliedTiming =
+        result.timing && typeof result.timing === 'object' && !Array.isArray(result.timing)
+          ? result.timing
+          : {};
+      const stages: Record<string, Json> = {};
+      for (const field of ['prepareMs', 'queueMs', 'providerMs']) {
+        const value = suppliedTiming[field];
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+          stages[field] = value;
+      }
+      const elapsed = Math.max(0, Date.now() - Number(timeout.startedAt));
+      const sampledTotal = Object.values(stages).reduce<number>(
+        (sum, value) => sum + Number(value),
+        0,
+      );
+      const completeSample =
+        Object.keys(stages).length === 3 &&
+        sampledTotal <= elapsed &&
+        (suppliedTiming.totalMs === undefined || suppliedTiming.totalMs === sampledTotal);
+      result = {
+        ...partial,
+        code: 'authorization_check_timeout',
+        incomplete: true,
+        deadlineAt: timeout.deadlineAt,
+        timing: {
+          ...(completeSample ? stages : {}),
+          startedAt: timeout.startedAt!,
+          budgetMs: Number(timeout.deadlineAt) - Number(timeout.startedAt),
+          deadlineAt: timeout.deadlineAt,
+          totalMs: completeSample ? sampledTotal : elapsed,
+        },
+      };
     }
     if (input.status === 'succeeded') {
       bound(db, check);
@@ -635,7 +792,7 @@ export function finishAuthorizationCheck(
     db.run(
       'UPDATE execution SET state=?,result_json=?,result_revision=result_revision+1 WHERE id=?',
       input.status,
-      canonicalJson(input.result),
+      canonicalJson(result),
       check.id!,
     );
     db.event(String(check.session_id), String(check.id), 'execution.finished');
@@ -700,7 +857,13 @@ export function authorizationCheckFact(
       throw new AgentError('authorization_check_unverifiable');
     const answer = answerFromResult(db, check, object(JSON.parse(String(check.result_json))));
     result = answer
-      ? { ...answer, checkExecutionId: checkId }
+      ? {
+          ...answer,
+          checkExecutionId: checkId,
+          ...(payload.reviewPurpose === 'shell_risk' && payload.riskReview
+            ? { riskReviewApproved: true as const }
+            : {}),
+        }
       : { ...result, reason: 'check_output_invalid' };
   }
   return { payload, result, execution: check };
@@ -718,7 +881,12 @@ export function getAuthorizationCheck(
   );
   if (
     object(value.payload.target).originStoreId !== input.expectedStoreId ||
-    canonicalJson(value.payload.request!) !== canonicalJson(input.request) ||
+    canonicalJson(value.payload.request!) !==
+      canonicalJson(
+        value.payload.authorizationContext === undefined
+          ? withoutTaskProjectionMarker(input.request)
+          : input.request,
+      ) ||
     canonicalJson(value.payload.requestBody ?? null) !==
       canonicalJson((input.requestBody as unknown as Json) ?? null) ||
     canonicalJson(value.payload.checker!) !== canonicalJson(input.checker as unknown as Json) ||
@@ -728,6 +896,12 @@ export function getAuthorizationCheck(
   return value.result;
 }
 export function verifyAuthorizationCheckDispatch(db: SqliteOperations, input: DispatchInput) {
+  if (input.authorization.policyEvidenceId) {
+    if (input.authorization.checkExecutionId || input.authorization.reviewExecutionId)
+      throw new AgentError('permission_denied');
+    verifyAutoAuthorizationDispatch(db, input);
+    return;
+  }
   if (input.authorization.checkExecutionId && input.authorization.reviewExecutionId)
     throw new AgentError('permission_denied');
   const invalidated = (id: string) =>
@@ -747,6 +921,8 @@ export function verifyAuthorizationCheckDispatch(db: SqliteOperations, input: Di
     );
     if (
       value.result.decision !== 'approve_once' ||
+      (value.result.riskReviewApproved === true) !==
+        (input.authorization.riskReviewApproved === true) ||
       (value.payload.requireApproval === true && !input.authorization.interactionId) ||
       object(value.payload.target).originStoreId !== input.expectedStoreId ||
       invalidated(input.authorization.checkExecutionId)
@@ -767,8 +943,34 @@ export function verifyAuthorizationCheckDispatch(db: SqliteOperations, input: Di
       String(row.id),
       input.authorization.revision,
     );
-    if (value.payload.requireApproval === true && value.result.decision !== 'ask_user')
-      throw new AgentError('authorization_check_required');
+    const riskCheck = value.payload.reviewPurpose === 'shell_risk';
+    if (
+      riskCheck &&
+      ((value.result.riskReviewApproved === true) !==
+        (input.authorization.riskReviewApproved === true) ||
+        value.result.decision === 'reject')
+    )
+      throw new AgentError('permission_denied');
+    if (
+      (value.payload.requireApproval === true && value.result.decision !== 'ask_user') ||
+      (riskCheck && value.result.decision === 'unavailable')
+    ) {
+      const timeout = value.payload.timeout && object(value.payload.timeout);
+      const result =
+        value.execution.result_json && object(JSON.parse(String(value.execution.result_json)));
+      if (
+        value.execution.state !== 'failed' ||
+        !result ||
+        result.code !== 'authorization_check_timeout' ||
+        !timeout ||
+        typeof timeout.deadlineAt !== 'number' ||
+        result.deadlineAt !== timeout.deadlineAt ||
+        Date.now() < timeout.deadlineAt
+      )
+        throw new AgentError('authorization_check_required');
+      // This is only permission to retain the original independent human gate.
+      // verifyInteractionDispatch still requires its exact actual approval.
+    }
   }
 }
 export function invalidateAuthorizationCheck(

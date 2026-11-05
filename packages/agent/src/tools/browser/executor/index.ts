@@ -10,6 +10,7 @@ import {
 } from '../../../jobs/launch-identity';
 import { startDarwinBrowserOwner } from '../darwin-owner';
 import type { BrowserCodeExecutor, BrowserCodeResult } from '../execute';
+import { BrowserExecutorFailure } from '../executor-failure';
 import { createExecutorCpuBudget } from './cpu-budget';
 
 export { browserExecutorWorkerAsset } from './assets';
@@ -182,7 +183,8 @@ export async function createBrowserExecutor(options: {
         result.confirmed ? 'browser_executor_closed' : 'browser_executor_cleanup_unknown',
       );
       rejectReady(failure);
-      original?.reject(original.failed ?? failure);
+      if (original)
+        original.reject(new BrowserExecutorFailure(original.failed ?? failure, original.output));
       return result;
     })());
   const fail = (error: Error) => {

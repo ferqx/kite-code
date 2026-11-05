@@ -15,6 +15,7 @@ import {
 import type { JobDefinition, Json, ToolContext, ToolDefinition, ToolResult } from '../extensions';
 import { isWorkerCleanupFailure } from '../platform/process/owned-worker';
 import { McpAdapterError } from './errors';
+import { mcpToolResultContent, mcpUnconfirmedContent } from './result-feedback';
 import { createMcpSchemaValidation } from './schema-validation';
 import { createTaskBinding } from './tasks';
 import { BoundedStdioTransport, boundedFetch } from './transport';
@@ -642,8 +643,8 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                   if (context.signal.aborted)
                     return {
                       outcome: 'outcome_unknown',
-                      content: 'mcp_cancel_unconfirmed',
-                      details: { remoteStopConfirmed: false },
+                      content: mcpUnconfirmedContent('mcp_cancel_unconfirmed'),
+                      details: { code: 'mcp_cancel_unconfirmed', remoteStopConfirmed: false },
                     };
                   if (
                     descriptor.outputSchema &&
@@ -658,8 +659,9 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                   )
                     return {
                       outcome: 'outcome_unknown',
-                      content: 'mcp_output_invalid',
+                      content: `${mcpUnconfirmedContent('mcp_output_invalid')}\n${mcpToolResultContent(result)}`,
                       details: {
+                        code: 'mcp_output_invalid',
                         remoteStopConfirmed: false,
                         actualResult: JSON.parse(JSON.stringify(result)) as Json,
                       },
@@ -667,7 +669,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                   assertFresh();
                   return {
                     outcome: result.isError ? 'failed' : 'succeeded',
-                    content: JSON.stringify(result.content),
+                    content: mcpToolResultContent(result),
                     details: JSON.parse(JSON.stringify(result)) as Json,
                   };
                 } catch (error) {
@@ -699,11 +701,15 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                         ? 'cancelled'
                         : 'failed',
                     content: attempted
-                      ? 'mcp_call_unconfirmed'
+                      ? mcpUnconfirmedContent('mcp_call_unconfirmed')
                       : error instanceof McpAdapterError
                         ? error.code
                         : 'mcp_admission_rejected',
-                    details: { remoteStopConfirmed: false, adapterAttempted: attempted },
+                    details: {
+                      ...(attempted ? { code: 'mcp_call_unconfirmed' } : {}),
+                      remoteStopConfirmed: false,
+                      adapterAttempted: attempted,
+                    },
                   };
                 }
               },
@@ -898,11 +904,15 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                       ? 'cancelled'
                       : 'failed',
                   content: attempted
-                    ? 'mcp_refresh_unconfirmed'
+                    ? mcpUnconfirmedContent('mcp_refresh_unconfirmed')
                     : error instanceof McpAdapterError
                       ? error.code
                       : 'mcp_connection_unavailable',
-                  details: { adapterAttempted: attempted, remoteStopConfirmed: false },
+                  details: {
+                    ...(attempted ? { code: 'mcp_refresh_unconfirmed' } : {}),
+                    adapterAttempted: attempted,
+                    remoteStopConfirmed: false,
+                  },
                 };
               }
             },
@@ -1060,8 +1070,12 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                 if (options.signal.aborted)
                   return {
                     outcome: 'outcome_unknown',
-                    content: 'mcp_cancel_unconfirmed',
-                    details: { adapterAttempted: true, remoteStopConfirmed: false },
+                    content: mcpUnconfirmedContent('mcp_cancel_unconfirmed'),
+                    details: {
+                      code: 'mcp_cancel_unconfirmed',
+                      adapterAttempted: true,
+                      remoteStopConfirmed: false,
+                    },
                   };
                 return {
                   outcome: 'succeeded',
@@ -1080,11 +1094,12 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                       ? 'cancelled'
                       : 'failed',
                   content: attempted
-                    ? 'mcp_read_unconfirmed'
+                    ? mcpUnconfirmedContent('mcp_read_unconfirmed')
                     : error instanceof McpAdapterError
                       ? error.code
                       : 'mcp_arguments_invalid',
                   details: {
+                    ...(attempted ? { reason: 'mcp_read_unconfirmed' } : {}),
                     adapterAttempted: attempted,
                     remoteStopConfirmed: false,
                     ...(error instanceof McpAdapterError ? { code: error.code } : {}),

@@ -15,7 +15,12 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const reviewReason = 'Exact requested destination rejected by the safety reviewer';
-async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 'off' | 'ssrf') {
+async function fixture(
+  mode: PermissionMode,
+  decision = 'approve_once',
+  guard?: 'off' | 'ssrf',
+  trusted = true,
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-web-permission-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -55,7 +60,7 @@ async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 
             .reverse()
             .find((message) => message.role === 'user')?.content ?? '',
         );
-        if (parsed.purpose === 'authorization_check') payload = parsed;
+        if (['authorization_check', 'shell_risk'].includes(parsed.purpose)) payload = parsed;
       } catch {}
       let delta: unknown, finish: string;
       if (payload) {
@@ -178,7 +183,7 @@ async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 
     subjectId: 'owner',
     workspaceId: 'w',
     mode,
-    trusted: true,
+    trusted,
   });
   return {
     runtime,
@@ -253,36 +258,66 @@ test('Request Approval web_fetch waits before DNS/socket; original public approv
   }
 }, 15000);
 
-test('Auto web_fetch actual reviewer approves or rejects with the original reason and no human approval bypass', async () => {
-  for (const decision of ['approve_once', 'reject']) {
-    const f = await fixture('auto', decision);
+test('default Auto web_fetch skips risk review while actual fetch and network guards retain their original boundaries', async () => {
+  for (const guard of [undefined, 'off', 'ssrf'] as const) {
+    // A rejecting reviewer response is deliberately available: the default Web
+    // capability must use static admission without invoking that Model at all.
+    const f = await fixture('auto', 'reject', guard);
     try {
       await f.run();
       await f.done();
-      expect(f.reviews).toHaveLength(1);
-      expect(f.reviews[0]!.beforeNetwork).toEqual({ dns: 0, sockets: 0 });
-      expect((f.reviews[0]!.body as { tools?: unknown[] }).tools ?? []).toHaveLength(0);
-      expect(JSON.stringify(f.reviews[0]!.payload)).toContain(f.url);
+      expect(f.reviews).toHaveLength(0);
       expect((await f.cards()).interactions).toHaveLength(0);
-      if (decision === 'approve_once') {
+      expect(
+        (await f.store.listExecutions('s')).filter((e) => e.kind === 'model' && e.runId === null),
+      ).toHaveLength(0);
+      const run = (await f.runtime.getView('s')).runs[0]!;
+      expect(
+        ((run.configuration as Record<string, unknown>).snapshot as Record<string, unknown>)
+          .defaultAutoReview,
+      ).toBe('shell_risk');
+      if (!guard) {
         expect(await f.tool()).toMatchObject({ status: 'succeeded' });
+        expect(JSON.stringify((await f.tool())?.result)).toContain('complete approved body');
+        expect(f.counts().dns).toBeGreaterThan(0);
         expect(f.counts().sockets).toBeGreaterThan(0);
-        expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
       } else {
-        expect(f.counts()).toEqual({ dns: 0, sockets: 0, normal: 2 });
-        expect(await f.tool()).toMatchObject({
-          status: 'failed',
-          result: { outcome: 'failed', details: { code: 'permission_denied' } },
-        });
-        expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
-        const executions = await f.store.listExecutions('s', 200);
-        expect(JSON.stringify(executions)).toContain(reviewReason);
+        expect(f.counts().sockets).toBe(0);
+        expect((await f.tool())?.status).toBe('failed');
+        if (guard === 'off') expect(f.counts().dns).toBe(0);
+        else expect((await f.tool())?.result).toMatchObject({ content: 'web_destination_denied' });
       }
+      expect(run.status).toBe('completed');
     } finally {
       await f.close();
     }
   }
 }, 20000);
+
+test('default Auto cannot bypass untrusted workspace admission to reach Web DNS or sockets', async () => {
+  const f = await fixture('auto', 'approve_once', undefined, false);
+  try {
+    await f.run();
+    await f.done();
+    expect(f.reviews).toHaveLength(0);
+    expect(f.counts()).toEqual({ dns: 0, sockets: 0, normal: 2 });
+    expect((await f.cards()).interactions).toHaveLength(0);
+    expect(await f.tool()).toMatchObject({
+      status: 'failed',
+      authorization: { dispatched: false },
+      result: {
+        details: {
+          code: 'permission_denied',
+          reason: 'workspace_untrusted',
+          adapterAttempted: false,
+          dispatchCommitted: false,
+        },
+      },
+    });
+  } finally {
+    await f.close();
+  }
+}, 15000);
 
 test('Full web_fetch skips routine approval while explicit network-off and SSRF guards remain effective', async () => {
   for (const guard of [undefined, 'off', 'ssrf'] as const) {

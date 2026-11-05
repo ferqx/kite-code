@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-/** Explicit finite configured policy, actual default factory and confined supervisor. */
+import { launchPairedService } from '@kite-ai/service/paired';
+import {
+  parseShellModelFeedback,
+  shellModelFeedbackMatchesResult,
+} from '../../../tests/fixtures/unified-agent/shell-model-feedback';
+/** Explicit Shell selection, actual default permission controls and confined supervisor. */
 export async function nativeCallerJobsProfile() {
   const module = await import(
       resolve(import.meta.dir, '../../cli/test/fixtures/recovery-profile.ts')
@@ -49,15 +54,20 @@ export async function nativeCallerJobsProfile() {
             if (
               call.length !== 1 ||
               result.length !== 1 ||
-              call[0]!.function.name !== 'shell_launch'
+              call[0]!.function.name !== 'shell_execute'
             )
               return false;
-            const input = JSON.parse(call[0]!.function.arguments) as { key?: string };
-            const output = JSON.parse(result[0]!.content!) as {
-              accepted?: boolean;
-              shellId?: string;
-            };
-            return input.key === key && output.accepted === true && output.shellId === key;
+            const input = JSON.parse(call[0]!.function.arguments) as { background?: boolean };
+            const output = parseShellModelFeedback(result[0]!.content!);
+            const originals = f.rows(
+              `SELECT result_json FROM execution WHERE session_id='s' AND kind='tool' AND adapter_id='shell.execute' AND call_id='${id}'`,
+            ) as { result_json: string }[];
+            return (
+              input.background === true &&
+              output.status === 'accepted' &&
+              originals.length === 1 &&
+              shellModelFeedbackMatchesResult(output, JSON.parse(originals[0]!.result_json))
+            );
           })
         )
           throw Error('native_jobs_original_tool_results_unavailable');
@@ -70,11 +80,10 @@ export async function nativeCallerJobsProfile() {
               id: `native-launch-${key}`,
               type: 'function',
               function: {
-                name: 'shell_launch',
+                name: 'shell_execute',
                 arguments: JSON.stringify({
-                  key,
                   command: `printf 'NATIVE_JOB_${key}_中🙂\\n'; while :; do /bin/sleep 1; done`,
-                  cancellation: 'detached',
+                  background: true,
                 }),
               },
             })),
@@ -136,7 +145,7 @@ export async function nativeCallerJobsProfile() {
     });
     if (!supervisor.success) throw Error('native_job_supervisor_build');
     writeFileSync(
-      join(f.profile.profilePath, 'config.jsonc'),
+      f.userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
         models: [
@@ -147,14 +156,14 @@ export async function nativeCallerJobsProfile() {
             baseURL: `${provider.url.href}v1`,
           },
         ],
-        tools: [{ id: 'shell.launch', definitionVersion: '1' }],
+        tools: [{ id: 'shell.execute', definitionVersion: '1' }],
       }),
       { mode: 0o600 },
     );
     const source = join(f.root, 'artifact', 'native-caller-jobs-service.ts');
     writeFileSync(
       source,
-      `import{selectProfile}from'@kite-ai/agent/profile';import{createDefaultProcessConfiguration}from'@kite-ai/service/configuration';import{runServiceProcess}from'@kite-ai/service/main';await runServiceProcess({configure(startup){return createDefaultProcessConfiguration({userConfigurationPath:selectProfile(startup.profile).profilePath+'/config.jsonc',profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,shell:${JSON.stringify({ platform: 'darwin', configurationId: 'native-caller-confined-1', env: { PATH: '/usr/bin:/bin' }, supervisorPath: supervisor.outputs[0]!.path, bunExecutable: process.execPath, shellExecutable: '/bin/sh', graceMs: 20 })},permissionPolicy:{readPolicy(){return{mode:'full',workspaceTrust:true,revision:'explicit-native-caller-jobs-v1',allowed:[{kind:'model',definitionId:'fixed',definitionVersion:'1'},{kind:'tool',definitionId:'shell.launch',definitionVersion:'1'},{kind:'job',definitionId:'shell.command',definitionVersion:'1'}]};}}});}});`,
+      `import{selectProfile}from'@kite-ai/agent/profile';import{createDefaultProcessConfiguration}from'@kite-ai/service/configuration';import{runServiceProcess}from'@kite-ai/service/main';await runServiceProcess({configure(startup,context){return createDefaultProcessConfiguration({userConfigurationPath:${JSON.stringify(f.userConfiguration.path)},observerSubjectId:context.subjectId,profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,shell:${JSON.stringify({ platform: 'darwin', configurationId: 'native-caller-confined-1', env: { PATH: '/usr/bin:/bin' }, supervisorPath: supervisor.outputs[0]!.path, bunExecutable: process.execPath, shellExecutable: '/bin/sh', graceMs: 20 })}});}});`,
     );
     const compiled = await Bun.build({
       entrypoints: [source],
@@ -164,17 +173,85 @@ export async function nativeCallerJobsProfile() {
     });
     if (!compiled.success) throw Error('native_job_service_build');
     const entrypoint = compiled.outputs[0]!.path;
+    const artifact = {
+      ...f.artifact,
+      entrypoint,
+      entrypointSha256: createHash('sha256').update(readFileSync(entrypoint)).digest('hex'),
+    };
+    const launch = () =>
+      launchPairedService({
+        profile: f.profile,
+        ...artifact,
+        spawnChild: f.userConfiguration.spawnChild,
+        instanceId: crypto.randomUUID(),
+        requiredCapabilities: [
+          'sessions',
+          'commands',
+          'history',
+          'events',
+          'interactions',
+          'run_resume',
+          'session_recovery',
+          'permission_controls',
+        ],
+      });
+    // Native Shell adds its actual host read scope. Confirm that exact scope on
+    // this Service; the earlier Files-only host cannot supply its trust receipt.
+    const native = await launch();
+    try {
+      const trust = await native.client.getWorkspaceTrust('w', { storeId: f.storeId });
+      if (
+        trust.storeId !== f.storeId ||
+        trust.workspaceId !== 'w' ||
+        trust.status !== 'scope_changed' ||
+        trust.trusted ||
+        !trust.readScopes.some((scope) => scope.kind === 'native_shell_read')
+      )
+        throw Error('native_jobs_original_shell_trust_scope_unavailable');
+      const mutation = await native.client.setWorkspaceTrust('w', {
+        expectedStoreId: f.storeId,
+        commandId: 'native-jobs-current-shell-trust',
+        trusted: true,
+        canonicalIdentity: trust.canonicalIdentity,
+        externalReadScopeDigest: trust.externalReadScopeDigest,
+        ifRevision: trust.revision,
+      });
+      const accepted = await native.client.getWorkspaceTrust('w', { storeId: f.storeId });
+      const mode = await native.client.getPermissionMode('s', { storeId: f.storeId });
+      if (
+        mutation.state !== 'applied' ||
+        mutation.kind !== 'workspace.trust' ||
+        mutation.receipt?.status !== 'applied' ||
+        mutation.receipt.trusted !== true ||
+        accepted.storeId !== f.storeId ||
+        accepted.workspaceId !== 'w' ||
+        accepted.revision !== mutation.receipt.revision ||
+        !accepted.trusted ||
+        accepted.canonicalIdentity !== trust.canonicalIdentity ||
+        accepted.externalReadScopeDigest !== trust.externalReadScopeDigest ||
+        accepted.canonicalIdentity !== mutation.receipt.canonicalIdentity ||
+        accepted.externalReadScopeDigest !== mutation.receipt.externalReadScopeDigest ||
+        mode.storeId !== f.storeId ||
+        mode.sessionId !== 's' ||
+        mode.scopeSessionId !== 's' ||
+        mode.mode !== 'full'
+      )
+        throw Error('native_jobs_current_shell_controls_unavailable');
+      console.info(
+        'native_jobs_current_shell_controls',
+        JSON.stringify({ trust, mutation, accepted, mode }),
+      );
+    } finally {
+      await native.close();
+    }
     return {
       ...f,
-      artifact: {
-        ...f.artifact,
-        entrypoint,
-        entrypointSha256: createHash('sha256').update(readFileSync(entrypoint)).digest('hex'),
-      },
+      artifact,
+      launch,
       jobCalls: () => calls,
-      close() {
+      close(options: { retainRoot?: boolean } = {}) {
         provider.stop(true);
-        f.close();
+        f.close(options);
       },
     };
   } catch (error) {

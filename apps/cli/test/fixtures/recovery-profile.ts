@@ -11,8 +11,10 @@ import {
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { loopbackModelEnvironment } from '../../../../tests/fixtures/loopback-model-environment';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -33,7 +35,7 @@ export async function untilRecovery(check: () => Promise<boolean>) {
   }
 }
 
-/** Default compatible SDK, actual original Auto ask_user card, real SIGKILL and owned SQLite. */
+/** Explicit task-review checker, actual compatible SDK/Auto card, SIGKILL and owned SQLite. */
 export async function recoveryProfile(
   options: {
     holdModelSessionId?: string;
@@ -167,6 +169,14 @@ export async function recoveryProfile(
       throw error;
     }
   })();
+  // Keep the same proxy snapshot through the paired/daemon hosts, whose trusted
+  // environment forwards HTTP/HTTPS/NO_PROXY rather than ALL_PROXY.
+  const {
+    ALL_PROXY: _allProxy,
+    all_proxy: _allProxyLowercase,
+    ...modelEnvironment
+  } = loopbackModelEnvironment(provider.url);
+  Object.assign(userConfiguration.homeEnvironment, modelEnvironment);
   let warm: Awaited<ReturnType<typeof launchPairedService>> | undefined;
   try {
     writeFileSync(
@@ -191,7 +201,57 @@ export async function recoveryProfile(
       { mode: 0o600 },
     );
     await buildOwnedDaemon(join(root, 'artifact'));
-    const chosen = join(root, 'artifact/node_modules/@kite-ai/service/main.js');
+    // Default Auto reviews Shell risk only. This recovery fixture explicitly owns
+    // the existing task-review contract so its original Files approval survives
+    // the crash without changing the ordinary host's classification.
+    const chosen = join(root, 'artifact/recovery-service.js');
+    const daemonEntrypoint = join(root, 'artifact/recovery-daemon.js');
+    const configure = `import { selectProfile } from '@kite-ai/agent/profile';
+import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+function configure(startup, context) {
+    // The production daemon deliberately starts with a minimal environment.
+    // This owned entry pins the same local Provider transport for both hosts.
+    Object.assign(process.env, ${JSON.stringify(modelEnvironment)});
+    const model = createCompatibleModelBinding({
+      name: 'compatible', protocol: 'chat-completions',
+      modelId: 'fixed', baseURL: ${JSON.stringify(`${provider.url.href}v1`)},
+    });
+    return createDefaultProcessConfiguration({
+      ordinaryHostTools: true,
+      profile: selectProfile(startup.profile),
+      observerSubjectId: context.subjectId,
+      userConfigurationPath: ${JSON.stringify(userConfiguration.path)},
+      hostConfiguration: startup.hostConfiguration,
+      runtimeAssets: ${JSON.stringify([chosen, daemonEntrypoint])},
+      authorizationCheck: {
+        id: 'fixture.recovery.task-review', version: '1', modelId: 'fixed',
+        model: createSdkModelAdapter({
+          models: new Map([['fixed', model]]),
+          presets: new Map([['fixed', { maxOutputTokens: 256 }]]),
+        }),
+      },
+    });
+  }
+`;
+    const entrypoints = [
+      ['recovery-service', 'runServiceProcess', 'main'],
+      ['recovery-daemon', 'runDaemonProcess', 'daemon-main'],
+    ].map(([name, runner, module]) => {
+      const entrypoint = join(root, `artifact/${name}.ts`);
+      writeFileSync(
+        entrypoint,
+        `${configure}\nimport { ${runner} } from '@kite-ai/service/${module}';\nawait ${runner}({ configure });`,
+      );
+      return entrypoint;
+    });
+    const compiled = await Bun.build({
+      entrypoints,
+      target: 'bun',
+      packages: 'external',
+      outdir: join(root, 'artifact'),
+    });
+    if (!compiled.success) throw new AggregateError(compiled.logs, 'recovery_service_build_failed');
     const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
     const artifact: CLIServiceArtifact = {
       entrypoint: chosen,
@@ -273,6 +333,7 @@ export async function recoveryProfile(
       ) as { state: string; outcome: string | null; decision: string | null; target: string }[];
     if (
       reviews.length !== 1 ||
+      reviews[0]!.body.max_tokens !== 256 ||
       JSON.stringify(reviews[0]!.body.tools ?? []) !== '[]' ||
       existsSync(join(workspace, 'effect')) ||
       readFileSync(ledger, 'utf8') !== 'decision\n'
@@ -282,12 +343,34 @@ export async function recoveryProfile(
       executionId: string;
       sessionId: string;
       runId: string;
-      originCommandId: string;
+      definitionId: string;
+      definitionVersion: string;
+      input: Record<string, unknown>;
     };
+    const original = database()
+      .query(
+        'SELECT id,session_id,run_id,origin_command_id,adapter_id,definition_version,call_id,intent_json,dispatched FROM execution WHERE id=?',
+      )
+      .get(target.executionId) as Record<string, unknown> | null;
     if (
       target.sessionId !== 's' ||
       target.runId !== run.id ||
-      target.originCommandId !== 'work' ||
+      target.definitionId !== 'files.write' ||
+      target.definitionVersion !== '3' ||
+      !original ||
+      original.session_id !== target.sessionId ||
+      original.run_id !== target.runId ||
+      original.origin_command_id !== 'work' ||
+      original.adapter_id !== target.definitionId ||
+      original.definition_version !== target.definitionVersion ||
+      original.call_id !== 'original-file' ||
+      original.dispatched !== 0 ||
+      !isDeepStrictEqual(JSON.parse(String(original.intent_json)), target.input) ||
+      !isDeepStrictEqual(target.input, {
+        path: 'effect',
+        content: 'ORIGINAL_EFFECT_ONCE',
+        base: null,
+      }) ||
       JSON.stringify(reviewProof()) !==
         JSON.stringify([
           {
@@ -310,6 +393,7 @@ export async function recoveryProfile(
       workspace,
       profile,
       artifact,
+      daemonEntrypoint,
       storeId,
       run,
       card,
@@ -320,12 +404,12 @@ export async function recoveryProfile(
       rows,
       reviews,
       reviewProof,
-      close() {
+      close(options: { retainRoot?: boolean } = {}) {
         if (closed) return;
         closed = true;
         provider.stop(true);
         observer?.close();
-        rmSync(root, { recursive: true, force: true });
+        if (!options.retainRoot) rmSync(root, { recursive: true, force: true });
       },
     };
   } catch (error) {

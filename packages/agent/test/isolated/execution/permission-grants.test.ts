@@ -501,7 +501,10 @@ test('approve_once creates no session grant, and an existing same-command grant 
     expect(granted.effects).toHaveLength(1);
     const execution = await exactBusinessTool(granted.store, 'denied', granted.runtime);
     expect(execution.status).toBe('failed');
-    expect(execution.result).toMatchObject({ outcome: 'failed', content: 'permission_denied' });
+    expect(execution.result).toMatchObject({
+      outcome: 'failed',
+      content: expect.stringContaining('Permission denied; this tool was not executed.'),
+    });
   } finally {
     await granted.close();
   }

@@ -242,7 +242,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 ## 跨会话原 Job 目录
 
-`listBackgroundExecutions` 的可选 `includeSourceTool:true` 在原目录事务中投影直接父 Tool 的 `sourceTool:{id,definitionId,definitionVersion}`；只连接同 Session、原 origin Store 和 root work 的 Tool，不读取／输出其 input、result、reference 或授权正文。默认或显式 false 时不增加该字段，既有闭合目录响应保持。父级不是 Tool、缺少可核实来源或旧响应无此字段时，不补造来源。来源是只读事实，不授予操作权；Shell 的前后台由准确 `shell.launch`／`shell.execute` 区分，`cancelWithParent` 只表示取消边。SQL 格式和原 Job 生命周期保持。
+`listBackgroundExecutions` 的可选 `includeSourceTool:true` 在原目录事务中投影直接父 Tool 的 `sourceTool:{id,definitionId,definitionVersion,background?}`；只连接同 Session、原 origin Store 和 root work 的 Tool，仅对准确父 shell.execute@1 的原输入投影 background:true 这一有限事实，不输出 input、result、reference 或授权正文。默认或显式 false 时不增加该字段，既有闭合目录响应保持。父级不是 Tool、缺少可核实来源或旧响应无此字段时，不补造来源。来源是只读事实，不授予操作权；新 Shell 后台由准确 shell.execute 的 background:true 来源识别，旧 shell.launch 保持后台解释，字段缺失不猜后台，`cancelWithParent` 只表示取消边。SQL 格式和原 Job 生命周期保持。
 
 `listBackgroundExecutions` 在短只读事务按原 Execution rowid 的 Decimal64 顺序读取全部 `kind=job`，包括普通 Job、child/task carrier 和后代 Session 内的 Job。先按真实 root `session.create` 主体、原 source／root-work Command 主体、出处与序号、实际 parent ancestry 全程未删除状态与可选 Workspace/root/Execution 过滤，再按固定 upper 和最多200项分页；后代还核原 child-start request 与 carrier、来源和根工作绑定。当前 Store 用于准入；旧来源只在 root creator 原出处已经不同于当前 Store 的准确恢复根内接纳，不为普通根放宽来源。重复恢复保留期间各 Store 的真实来源。`limit+1` 判定准确 EOF。只返回原身份、状态、attempt、result revision、delivery、取消事实和有限 Session/Run metadata，不读取大 input/result/config/reference 正文。runless Job 的 `run` 沿原 parent Execution 链找到原父 Run；`childRun` 只查 `child-start-{execution.id}`，原 child-start Command／request 必须准确绑定载体，已有 reference runId 必须一致，不选择最新 Run。
 

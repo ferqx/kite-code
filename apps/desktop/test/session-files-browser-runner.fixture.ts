@@ -95,7 +95,8 @@ const provider = Bun.serve({
       });
     else {
       const user =
-        [...texts].reverse().find((text) => /^(UPLOAD|EDIT|PLAN|REOPEN)/.test(text)) ?? 'UPLOAD';
+        [...texts].reverse().find((text) => /^(UPLOAD|EDIT|PLAN|REOPEN|MISSING)/.test(text)) ??
+        'UPLOAD';
       const phase = user.split(/[\s\n]/)[0]!;
       const step = steps.get(phase) ?? 0;
       steps.set(phase, step + 1);
@@ -104,7 +105,22 @@ const provider = Bun.serve({
       try {
         previous = JSON.parse(String(tool?.content));
       } catch {}
-      if (phase === 'UPLOAD') {
+      if (phase === 'MISSING') {
+        const path = join(workspace, 'ordinary-missing.txt');
+        if (step === 0) call = { name: 'read_file', input: { path } };
+        else {
+          const original = (await store.listExecutions('s', 1000)).find(
+            (execution) =>
+              execution.kind === 'tool' &&
+              execution.definitionId === 'files.read' &&
+              (execution.input as { path?: string } | undefined)?.path === path,
+          );
+          console.log(JSON.stringify({ phase: 'missing-read-settled', execution: original }));
+          answer = String(tool?.content).includes(`File does not exist: ${JSON.stringify(path)}.`)
+            ? '已核对：指定文件不存在，未读取到文件内容。'
+            : '缺失文件验收收到不同回执，请核对原工具记录。';
+        }
+      } else if (phase === 'UPLOAD') {
         const attachmentText = texts.find((text) => text.includes('Attached file references'));
         const files = attachmentText
           ? (JSON.parse(
@@ -255,6 +271,8 @@ writeFileSync(
         provider: 'compatible',
         model: 'fixture',
         baseURL: `${provider.url.origin}/v1`,
+        protocol: 'chat-completions',
+        enabled: true,
       },
     ],
     tools: [
@@ -281,6 +299,44 @@ runtime = createRuntime({
   store,
   artifacts: createArtifactStore({ profile, store }),
   workspaceSerialLocks: locks,
+  async resolveRunConfiguration(input) {
+    const binding = await host.resolveRunConfiguration!(input);
+    return {
+      ...binding,
+      extensions: binding.extensions?.map((extension) =>
+        extension.id !== 'builtin.files'
+          ? extension
+          : {
+              ...extension,
+              tools: extension.tools?.map((tool) =>
+                tool.id !== 'files.read'
+                  ? tool
+                  : {
+                      ...tool,
+                      async execute(input, context) {
+                        const path =
+                          input && typeof input === 'object' && !Array.isArray(input)
+                            ? input.path
+                            : undefined;
+                        if (path === join(workspace, 'ordinary-missing.txt')) {
+                          console.log(
+                            JSON.stringify({
+                              phase: 'missing-read-running',
+                              execution: await store.getExecution(context.executionId),
+                            }),
+                          );
+                          // Only this standalone artifact delays its original operation for observation.
+                          await Bun.sleep(1200);
+                          context.signal.throwIfAborted();
+                        }
+                        return tool.execute(input, context);
+                      },
+                    },
+              ),
+            },
+      ),
+    };
+  },
 });
 host.permissionManagement?.(runtime);
 if (!resume) {
@@ -332,6 +388,13 @@ const client = createClient({
   },
 });
 await client.connect();
+const models = await client.getModelSettings('user', { storeId });
+if (!models.models.some((model) => model.id === 'fixture' && model.configured && model.enabled))
+  throw Error('fixture_model_unavailable');
+console.log(JSON.stringify({ phase: 'fixture-model-ready', models: models.models }));
+const privateData = memoryPrivateData();
+// This isolated artifact always uses its own loopback model, never a user choice.
+privateData.rememberModelRoute(storeId, 's', 'fixture');
 const listeners = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const caller = new NativeCaller(
   client,
@@ -343,7 +406,7 @@ const caller = new NativeCaller(
         listeners.delete(listener);
       }
   },
-  memoryPrivateData(),
+  privateData,
   [profile.dataRoot],
 );
 const output = join(root, 'dist');

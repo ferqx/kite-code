@@ -16,6 +16,7 @@ import {
 } from './human-work-control';
 import { admitInputFiles } from './input-file-imports';
 import type { SqliteOperations } from './operations';
+import { revokePermissionGrant } from './permission-grants';
 
 type Row = Record<string, string | number | bigint | null>;
 function request(command: Row): Record<string, Json> {
@@ -457,15 +458,16 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
       )
     )
       throw new AgentError('input_order_conflict');
-    const planned = db.rows(
+    const pendingTools = db.rows(
       // The Store also protects callers other than the live Loop checkpoint.
-      // Guidance is not a cancellation request for a pending foreground Tool.
-      "SELECT id FROM execution WHERE run_id=? AND kind='tool' AND state IN ('planned','dispatching','running') LIMIT 1",
+      // Only an unattempted completion decision can retire with its stale input.
+      // Ordinary foreground Tools and dispatched effects keep their batch boundary.
+      "SELECT id FROM execution WHERE run_id=? AND kind='tool' AND state IN ('planned','dispatching','running') AND (state!='planned' OR dispatched!=0 OR COALESCE(json_extract(decision_source_json,'$.kind'),'')!='completion_decision') LIMIT 1",
       input.runId,
     );
-    if (input.kind === 'steer' && planned.length) throw new AgentError('input_tools_pending');
+    if (input.kind === 'steer' && pendingTools.length) throw new AgentError('input_tools_pending');
     const supersedable = db.rows(
-      "SELECT id,kind,call_id,result_revision FROM execution WHERE run_id=? AND state='planned' AND dispatched=0 AND kind IN ('model','tool') ORDER BY id LIMIT 4097",
+      "SELECT id,kind,call_id,result_revision,decision_source_json FROM execution WHERE run_id=? AND state='planned' AND dispatched=0 AND kind IN ('model','tool') ORDER BY id LIMIT 4097",
       input.runId,
     );
     if (supersedable.length > 4096) throw new AgentError('input_scope_too_large');
@@ -493,20 +495,35 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
         id,
       )) {
         db.run("UPDATE interaction SET state='cancelled' WHERE id=?", card.id);
+        revokePermissionGrant(db, {
+          interactionId: String(card.id),
+          expectedStoreId: input.expectedStoreId,
+          subjectId: String(command.subject_id),
+          sessionId: String(command.session_id),
+        });
         db.event(String(card.presentation_session_id), String(card.id), 'interaction.superseded');
       }
       const original = supersedable.find((execution) => execution.id === id)!;
-      if (original.kind === 'tool')
+      if (original.kind === 'tool') {
+        const source = JSON.parse(String(original.decision_source_json)) as Json;
+        const completion =
+          source !== null &&
+          typeof source === 'object' &&
+          !Array.isArray(source) &&
+          source.kind === 'completion_decision';
         db.appendMessage(
           String(command.session_id),
           String(target.id),
           {
-            content: 'superseded_by_user_input',
-            toolCallId: String(original.call_id),
+            content: completion
+              ? `<execution_result trust="untrusted" executionId="${id}">superseded_by_user_input</execution_result>`
+              : 'superseded_by_user_input',
+            ...(completion ? {} : { toolCallId: String(original.call_id) }),
             sourceIds: [id],
           },
-          'tool',
+          completion ? 'user' : 'tool',
         );
+      }
       db.event(String(command.session_id), id, 'execution.superseded');
     }
     if (

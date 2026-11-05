@@ -1,18 +1,20 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient, type ModelSettingsRequest } from '@kite-ai/client';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../src/codex-auth';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 import { encodeFrames, responseFrames, type WireTurn } from '../fixtures/responses-wire';
 
 type Body = Record<string, unknown> & {
@@ -47,6 +49,7 @@ async function fixture(
   respond?: (body: Body, index: number) => WireTurn,
   hostShell = false,
   existing?: { root: string; codexHome?: string },
+  autoApproval = false,
 ) {
   const root = existing?.root ?? temporaryDirectory('kite-codex-connection-');
   const codexHome = existing?.codexHome ?? join(root, 'codex');
@@ -176,6 +179,17 @@ async function fixture(
   const host = createDefaultProcessConfiguration({
     profile,
     localCodex,
+    // This fixture explicitly selects the supported task-review contract.
+    // Ordinary default Auto reviews Shell risk, not known Files operations.
+    ...(autoApproval
+      ? {
+          permissions: {
+            async authorize() {
+              return { allowed: true, revision: 'fixture-login-task-review' };
+            },
+          },
+        }
+      : {}),
     ...(shell
       ? {
           ordinaryHostTools: true,
@@ -187,6 +201,7 @@ async function fixture(
       configuration: {
         tools: [
           ...(respond ? [{ id: 'files.read', definitionVersion: '5' }] : []),
+          ...(autoApproval ? [{ id: 'files.write', definitionVersion: '3' }] : []),
           ...(hostShell ? [{ id: 'shell.execute', definitionVersion: '1' }] : []),
         ],
       },
@@ -202,8 +217,10 @@ async function fixture(
     },
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
+  const workspaceSerialLocks = autoApproval ? createWorkspaceSerialLocks(profile) : undefined;
   const runtime = createRuntime({
     store,
+    ...(workspaceSerialLocks ? { workspaceSerialLocks } : {}),
     artifacts: createArtifactStore({ profile, store }),
     permissions: host.permissions!,
     extensions: host.extensions,
@@ -212,6 +229,7 @@ async function fixture(
   const permissionManagement = host.permissionManagement!(runtime);
   const service = await startService({
     runtime,
+    ...(workspaceSerialLocks ? { beforeResourceClose: () => workspaceSerialLocks.close() } : {}),
     configurationManagement: host.configurationManagement!(runtime),
     subjectId: 'owner',
     buildId: 'codex-local-test',
@@ -252,24 +270,37 @@ async function fixture(
       workspaceId: 'w',
       sessionId: 's',
     };
-    const trust = await permissionManagement.readTrust(permissionScope);
-    await permissionManagement.setTrust({
-      ...permissionScope,
-      commandId: 'trust-owned-workspace',
-      canonicalIdentity: trust.canonicalIdentity,
-      externalReadScopeDigest: trust.externalReadScopeDigest,
-      trusted: true,
-      ifRevision: trust.revision,
-    });
-    const mode = await permissionManagement.readMode(permissionScope);
-    await permissionManagement.setMode({
-      ...permissionScope,
-      commandId: 'full-owned-session',
-      mode: 'full',
-      makeDefault: false,
-      ifRevision: mode.revision,
-      ifDefaultRevision: mode.defaultRevision,
-    });
+    if (autoApproval)
+      // A custom permission host does not expose writable trust controls.
+      // Only this owned fixture initializes its durable test mode and scope.
+      await initializeLivePermissionFixture({
+        ...permissionScope,
+        runtime,
+        profile,
+        nativeShellRead: shell?.platform === 'darwin',
+        mode: 'auto',
+        trusted: true,
+      });
+    else {
+      const trust = await permissionManagement.readTrust(permissionScope);
+      await permissionManagement.setTrust({
+        ...permissionScope,
+        commandId: 'trust-owned-workspace',
+        canonicalIdentity: trust.canonicalIdentity,
+        externalReadScopeDigest: trust.externalReadScopeDigest,
+        trusted: true,
+        ifRevision: trust.revision,
+      });
+      const mode = await permissionManagement.readMode(permissionScope);
+      await permissionManagement.setMode({
+        ...permissionScope,
+        commandId: 'full-owned-session',
+        mode: 'full',
+        makeDefault: false,
+        ifRevision: mode.revision,
+        ifDefaultRevision: mode.defaultRevision,
+      });
+    }
   }
   const models = () => client.getModelSettings('user', { storeId });
   return {
@@ -498,6 +529,115 @@ test('the local reasoning preference reaches the SDK wire and an explicit model 
     expect((await f.run('manual-effort', route)).view.runs.at(-1)?.status).toBe('completed');
     expect(f.records[1]!.body.reasoning).toMatchObject({ effort: 'low' });
     expect(readFileSync(join(dirname(f.authFile), 'config.toml'), 'utf8')).toBe(config);
+    expect(f.credentialWrites).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('the local login custom task-review checker preserves unsupported output-limit transport and actual reasoning settings', async () => {
+  const hasNativeShell = process.platform === 'darwin';
+  const f = await fixture(
+    (_body, index) =>
+      index === 0
+        ? {
+            id: 'login-write',
+            calls: [
+              {
+                id: 'write-owned-report',
+                name: 'write_file',
+                arguments: JSON.stringify({
+                  path: 'reviewed.txt',
+                  content: 'OWNED_APPROVED_OUTPUT',
+                  base: null,
+                }),
+              },
+            ],
+          }
+        : index === 1
+          ? {
+              id: 'login-check',
+              text: [
+                JSON.stringify({
+                  decision: 'approve_once',
+                  reason: 'exact owned fixture write',
+                }),
+              ],
+            }
+          : { id: 'login-finished', text: ['Owned output complete'] },
+    hasNativeShell,
+    undefined,
+    true,
+  );
+  try {
+    writeFileSync(
+      join(dirname(f.authFile), 'config.toml'),
+      `model = "${secondModel}"\nmodel_reasoning_effort = "low"\n`,
+      { mode: 0o600 },
+    );
+    const result = await f.run('login-auto', (await f.models()).defaultModelId!);
+    expect(result.view.runs[0]).toMatchObject({ status: 'completed', reason: null });
+    expect(f.records).toHaveLength(3);
+    for (const { body } of f.records) {
+      expect(body).not.toHaveProperty('max_output_tokens');
+      expect(body.reasoning).toMatchObject({ effort: 'low' });
+    }
+    const checks = result.view.executions.filter(
+      (execution) => execution.kind === 'model' && execution.runId === null,
+    );
+    expect(checks).toHaveLength(1);
+    const check = checks[0]!;
+    expect(check).toMatchObject({
+      status: 'succeeded',
+      definitionId: (await f.models()).defaultModelId,
+    });
+    const input = await f.client.getModelInput('s', check.id, { expectedStoreId: f.storeId });
+    const payload = input.request.messages.find((message) => message.role === 'user')?.content;
+    if (typeof payload !== 'string') throw Error('login_checker_payload_unavailable');
+    const review = JSON.parse(payload);
+    const write = result.view.executions.find(
+      (execution) => execution.definitionId === 'files.write',
+    )!;
+    expect(write).toMatchObject({
+      kind: 'tool',
+      toolCallId: 'write-owned-report',
+      status: 'succeeded',
+      sessionId: 's',
+      originStoreId: f.storeId,
+    });
+    expect(check.parentExecutionId).toBe(write.id);
+    expect(input.request.tools).toEqual([]);
+    expect(review).toMatchObject({
+      purpose: 'authorization_check',
+      target: {
+        executionId: write.id,
+        definitionId: 'files.write',
+        definitionVersion: '3',
+        input: { path: 'reviewed.txt', content: 'OWNED_APPROVED_OUTPUT', base: null },
+      },
+    });
+    expect(write.authorization?.check).toMatchObject({
+      executionId: check.id,
+      decision: 'approve_once',
+      status: 'succeeded',
+    });
+    expect(review.authorizationContext.executionBase).toMatchObject({
+      cwd: realpathSync(join(f.root, 'workspace')),
+      source: hasNativeShell ? 'frozen_shell_configuration' : 'workspace_root',
+    });
+    expect(input.metadata.adapter).toMatchObject({
+      availability: 'available',
+      settings: { reasoningEffort: 'low' },
+    });
+    if (input.metadata.adapter.availability !== 'available')
+      throw Error('login_checker_metadata_unavailable');
+    expect(input.metadata.adapter.settings.maxOutputTokens).toBeUndefined();
+    expect(
+      result.view.executions.find((execution) => execution.definitionId === 'files.write')?.result,
+    ).toMatchObject({ outcome: 'succeeded' });
+    expect(readFileSync(join(f.root, 'workspace/reviewed.txt'), 'utf8')).toBe(
+      'OWNED_APPROVED_OUTPUT',
+    );
     expect(f.credentialWrites).toBe(0);
   } finally {
     await f.close();

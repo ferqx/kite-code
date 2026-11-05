@@ -6,9 +6,13 @@
 
 `createWorkspaceFiles.write` 只在 `base:null` 时通过原 `withParent` 逐段打开父链，准确 `ENOENT` 后才调用 native `create-directory`。新目录继续绑定原父句柄；POSIX 使用 cap-std 单组件创建、0700 和 no-follow 重开，Windows 使用原父 HANDLE 的 create-only `NtCreateFile`、本人私有 DACL 及原身份核对。`EEXIST` 只允许在同一父对象上 no-follow 重开一次；文件、链接、别名、受保护路径及 owner 检查不会因已审批而放宽。原生 ABI 升为 `kite-files:2/cap-std:4.0.3`，需重建 companion 并重启已加载旧模块的宿主。
 
-覆盖、edit、原字节 restore/remove 和绝对外部工具不补齐缺失父目录。创建后发生已知失败可以留下空目录；不自动删除或修改已有目录权限，不把目录纳入文件检查点恢复。句柄取得／关闭无法确认沿 `file_publish_outcome_unknown` 进入原 unknown 链路，禁止自动重放。检查点记录保留旧 `files.write@2`／`files.edit@2` 来源，并准确接受新增 `files.write@3`，不把旧审批变成新版本授权。
+覆盖、edit 和原字节 restore/remove 不补齐缺失父目录；Full 外部新建复用同一 `base:null` 创建路径。创建后发生已知失败可以留下空目录；不自动删除或修改已有目录权限，不把目录纳入文件检查点恢复。句柄取得／关闭无法确认沿 `file_publish_outcome_unknown` 进入原 unknown 链路，禁止自动重放。检查点记录保留旧 `files.write@2`／`files.edit@2` 来源，并准确接受新增 `files.write@3`，不把旧审批变成新版本授权。
 
-普通写入／编辑失败的 `content` 和 `details.next_action` 给出原因与下一步，`details.code/path` 保留准确码和原请求目标；`ENOENT` 不再被解释为空工作区不可用，`EACCES` 明示审批不覆盖系统权限。描述与失败结果都要求先纠正原因再尝试，未新增按重复次数拒绝调用的规则。安全取舍见[父目录创建决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-25-safe-write-parent-directories.md)。
+普通写入／编辑失败的 `content` 和 `details.next_action` 给出原因与下一步，`details.code/path` 保留准确码和原请求目标；`ENOENT` 不再被解释为空工作区不可用，`EACCES` 明示审批不覆盖系统权限。Workspace 与 Full 外部错误共享[Files 原因说明](../files-tools.ts)，按实际工具范围说明路径、目录身份和系统限制，不把 Full 外部路径误说成必须移回工作区。参数、行范围与精确编辑次数错误分别解释模型字段和修正条件；不能擅自更换目标、扩大替换范围或将说明当作新授权。原始裸码沿[通用模型失败呈现](../../tool-failure-presentation.ts)补充可理解说明，原回执的错误码与 outcome 保持。
+
+父目录残留提示只由底层真实创建结果产生：已成功创建过父目录，或创建尝试结果未知时，原错误消息保留可能残留目录的说明。非法路径／参数、保护范围、创建前取消和首次创建被明确拒绝不携带该提示。父链失败与随后 close 故障同时发生时，unknown 继续保留最初原因及 close 诊断；不把未知效果降成可重试失败。描述与失败结果都要求先纠正原因并遵守原任务权限，未新增按重复次数拒绝调用的规则。安全取舍见[父目录创建决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-25-safe-write-parent-directories.md)。
+
+2026-11-05，macOS ARM64／Bun1.4.2，当前任务未提交改动：[错误反馈](../../../test/isolated/files/feedback.test.ts)、[Full 外部文件](../../../test/isolated/files/full-access-files.test.ts)、[逐操作预览](../../../test/isolated/files/change-preview.test.ts)与[下一 Model 失败呈现](../../../test/isolated/execution/tool-failure-presentation.test.ts)四份整文件同次36项363断言通过，核参数与路径错误零文件效果、读取范围和精确编辑次数说明、Full 外部失败不虚构工作区限定、原始回执保真、真实部分父目录创建，以及原始失败与 close 故障共同保留 unknown。原生父目录／保护／CAS 相邻5项125断言通过；Agent typecheck 与变更 TS Biome 通过。该证据不代表付费模型任务稳定完成，也不取得其他平台资格。
 
 验证使用 [tool-paths](../../../test/isolated/files/tool-paths.test.ts)、[native-addon](../../../test/isolated/files/native-addon.test.ts)、[recovery-primitives](../../../test/isolated/files/recovery-primitives.test.ts)、[capture](../../../test/isolated/file-checkpoints/capture.test.ts) 与 crate 真实故障测试；结果范围为本机 Windows 和另行注明的目标编译，不推定完整客户端／安装或其他平台运行资格。
 
@@ -48,9 +52,13 @@ Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF W
 
 Windows 本机联验已覆盖附件→PDF→Artifact→后继模型 wire、输出编辑、历史快照、Fork 独立副本及备份恢复；两协议 wire 不等于真实视觉模型识别资格。测试入口为 [Service 文件／Plan 联验](../../../../../apps/service/test/isolated/planning-configuration.test.ts)、[真实 PDF Worker](../../../test/isolated/files/pdf.test.ts)与 [AI 图片协议](../../../../ai/test/input-images.test.ts)。
 
-模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file`；外部普通文件也由 `read_file` 读取，外部修改由 Shell 处理。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline、权限与检查点合同保持原样。目录、文件查找和正文搜索使用 Shell 与内置 rg。
+模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file`；外部普通文件也由 `read_file` 读取，最终有效 Full 权限允许 `write_file/edit_file` 直接修改外部绝对路径，其他模式保持原外部只读范围。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline 和权限合同保持原样，Workspace 检查点只覆盖原工作区。目录、文件查找和正文搜索使用 Shell 与内置 rg。
 
-公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
+公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将三个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。外部 Full 范围由下文适配器接入，不改变这个固定根。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
+
+普通 `read_file` 只在实际目标读取边界将确定缺失返回为正常观察：`outcome:succeeded`、`File does not exist: "<path>".`、`details:{path,exists:false}`；没有空正文、行窗口、Artifact 或编辑 baseline。既有空文件保真实空正文，工作区及 Full 安全可编辑目标仍有完整基线，其他外部只读不补造基线。`createFileTools` 的可信工厂选项 `missingRead:'error'` 由 input／plan／output 三个私有适配器显式选择，不成为模型参数。路径校验、权限／保护失败、取消、私有引用损坏和 Artifact 发布 `ENOENT` 不被通用转换；[纯结果呈现](model-result.ts)只识别准确缺失结构，未知扩展字段保原结果。
+
+[缺失读取回归](../../../test/isolated/files/missing-file.test.ts)经真实 native 核工作区／外部及 Full 缺失、空文件、保护路径及祖先别名、非法参数、取消、私有工厂和读取后 Artifact 失败；[Service 最终目录回归](../../../../../apps/service/test/isolated/full-external-files.test.ts)核三模式下一模型及最终说明。普通缺失的客户端颜色和真实模型继续行为须由相应客户端与实际测试另验，不能从这些固定回归推定。
 
 只读 `read` 的可信 options 可携带 `signal`；普通 `read_file` 和绝对 `read_user_file` 从实际 ToolContext 传入，不新增模型字段。完整文件读取仍以 64 KiB 块核 hash、UTF-8 解码及前后身份，在 8ms 或 64 块预算后通过真实 event loop 让出；行选区在块内统计完整 totalLines，只保留请求正文，不建立全文行起点数组。BOM、CRLF、跨块 UTF-8 和完整 baseline 不变，行窗口不构成字节截断。search 的单文件读取复用该异步读取，逐行匹配另按预算让出；底层未指定 limit 时保留全部命中和完整长行，模型默认改为有界预览，见下节。
 
@@ -62,7 +70,7 @@ Windows 本机联验已覆盖附件→PDF→Artifact→后继模型 wire、输�
 
 2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次查询 diff：同一仓库、同一原生后端的只读前后对照中，`packages/agent/**/README.md` 查找由2762ms降至289ms（均41项），`packages` 中的 `autoReview` 内容搜索由20017ms降至4809ms（均返回30条，实际检查文件由2348降至1172）；根 `AGENTS.md` 查找为1192ms，仅返回3个未忽略路径。忽略域变化意味着不承诺两种模式返回相同产物命中，`respect_ignore:false` 可明确读取原普通范围。入口与结果保留于本机 `.cache/file-query-performance.ts`／`.cache/file-query-performance.json`；这是当前本机文件查询对照，不代表所有工作区、完整客户端切换延迟或内存峰值。Files五份完整回归50项744断言通过，覆盖原生六工具、父规则继承／否定、分页、宏任务取消、目录联接拒绝与关闭边界；Windows 的链接夹具使用真实目录 junction，POSIX 保原 symlink。
 
-模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。统一外部只读沿同一呈现路径，不返回编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
+模型历史中的工作区 `read@4/search@5`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部读取沿同一呈现路径：Full 安全可编辑目标展示真实完整基线，其他只读结果不补造编辑基线。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
 
 内部 `WorkspaceFiles.search` 的 `path` 可选择普通文件或目录，省略、空字符串和 `.` 选择工作区根。它按字面文本匹配；文件名查找使用内部 `glob`。`mode:files` 每文件只返回一次路径、完整 baseline 与首命中行，`mode:content` 返回命中行及上下文。省略 mode 保持 `content`；`limit/maxLineChars` 可省略以保留全部命中及完整长行。这些内部参数和游标不是已退役模型工具的继续入口。
 
@@ -99,19 +107,29 @@ Agent／Service／Desktop typecheck、原包边界与 API／测试归属、文�
 
 ## 模型工具路径
 
-六个 Workspace 模型工具接受相对路径及当前 Workspace 内的绝对路径。`WorkspaceFiles.relativePath` 只按工厂固定的根转换，`createFileTools` 在实际 IO 和检查点 capture 前调用它；Shell 改变 cwd 不改变文件工具基准。list／glob／search 省略 path、传空字符串或 `.` 均选择根目录；Windows 另接受普通盘符绝对路径和相对路径的原生反斜杠。目录穿越段在转换前拒绝，其他盘符、UNC／设备路径和 Workspace 外目标不能借转换取得访问。
+三个 Files 模型工具的 Workspace 分支接受相对路径及当前 Workspace 内的绝对路径。`WorkspaceFiles.relativePath` 只按工厂固定的根转换，`createFileTools` 在实际 IO 和检查点 capture 前调用它；Shell 改变 cwd 不改变文件工具基准。低层 list／glob／search 省略 path、传空字符串或 `.` 均选择根目录；Windows 另接受普通盘符绝对路径和相对路径的原生反斜杠。目录穿越段在转换前拒绝，其他盘符、UNC／设备路径和 Workspace 外目标不能借转换取得访问。
 
-原 `WorkspaceFiles` IO 和字节恢复原语仍只接收相对路径，原目录对象锚定、reparse／symlink／短名、受保护路径和 baseline 检查继续生效。文件结果、变更预览与检查点 capture 使用转换后的相对路径；原模型调用、审批与执行记录保留原始参数。工具 schema 明确路径范围，统一外部只读适配器另处理工作区外绝对路径，不扩大原 Workspace IO。设计理由见[路径分层决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-16-workspace-tool-paths.md)。
+原 `WorkspaceFiles` IO 和字节恢复原语仍只接收相对路径，原目录对象锚定、reparse／symlink／短名、受保护路径和 baseline 检查继续生效。Workspace 文件结果、变更预览与检查点 capture 使用转换后的相对路径；原模型调用、审批与执行记录保留原始参数。工具 schema 明确路径范围，统一外部适配器另处理工作区外绝对路径，不扩大原 Workspace IO。设计理由见[路径分层决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-16-workspace-tool-paths.md)。
 
 [工具路径回归](../../../test/isolated/files/tool-paths.test.ts)实际调用全部六工具，核工作区绝对路径、目录默认、原生分隔符、准确 capture／结果及越界和保护拒绝；[真实 capture](../../../test/isolated/file-checkpoints/capture.test.ts)让同一路径的首个绝对调用和后续相对调用共用原 preimage／末 postimage。[Windows Core 用例](../../../test/isolated/files/windows.test.ts)经原 Runtime 实际列绝对工作区并读取绝对文件，将完整 Artifact 交给下一 Model。具体本机范围见下节。
 
-## 统一读取工作区外文件
+## 工作区外文件与 Full 直接修改
 
-[external-file-reads](../external-file-reads.ts) 将工作区外绝对路径接入同一个 `read_file`；没有单独的外部读写工具。外部只读使用普通 OS 文件读取，检查规则覆盖请求路径和解析后的实际路径；权限决定仍由统一权限模块负责，工具不再次遍历授权证明。外部读取不计算完整基线，不检查 owner 或硬链接数，保留 UTF-8、分页、取消和大正文 Artifact 交付。Workspace IO、检索和 mutation 仍限原根，外部写入使用 Shell；外部路径不加载项目指令。
+[external-file-reads](../external-file-reads.ts) 将工作区外绝对路径接入同一个 `read_file`；没有单独的外部读写工具。请求批准与 Auto 模式保留原普通 OS 只读路径：检查请求路径和解析后的实际路径，不计算完整基线、不检查 owner 或硬链接数，保留 UTF-8、分页、取消和大正文 Artifact 交付。普通外部读取仍由统一权限模块决定，外部路径不加载项目指令。
 
-保存的 input/plan/output 适配器位于外部读取层之上，仍只接受原准确私有引用。外部读取绕过 Workspace checkpoint capture，并保留 `fileScope:external_path/workspaceCheckpoint:false`；检查点恢复不会触及外部文件。Workspace 的原生平台、ACL、取消和完整数据校验合同保持；外部读取使用宿主 OS 权限，路径规则不承诺识别同一文件的所有硬链接别名。
+[withFullAccessFiles](../full-access-files.ts) 在此层之上复用同一个 `write_file/edit_file`，只允许最终有效 Full 权限下的准确外部绝对路径。`describeRequest(request, policy)` 使用新鲜可信策略描述范围；执行前复核每一个 `builtin.permissions` 派发叶的 Full、信任、工具定义／版本和已接纳目标 revision，父子权限交集、Planning 与工具集合限制仍由原链路落实。请求值、模型参数或工具名称都不能代替最终证明；请求批准与 Auto 不因本适配器增加外部修改能力。
+
+Full 外部普通文件读取改用原 native 引擎，返回可安全编辑的完整 baseline；窗口仍只返回所选正文。无法作为安全可编辑目标的普通符号链接、硬链接或 owner 不匹配文件保持原只读读取、不发基线，保护路径失败不回退。修改继续拒绝链接／不安全对象，使用完整基线、原 no-follow 目录对象与文件身份校验。预检绑定逻辑路径、实际路径及已存在父对象／目标身份；最终打开后再次核对，目录替换不取得新的写入资格。新建缺失父目录只沿原 native `base:null` 路径，不在 OS 可写共享父目录上额外要求父目录 owner。
+
+Full 外部写入／编辑复用原 `createFileTools` 的取消、逐操作 `fileChange` 和完整 postimage Artifact 发布；结果路径保持原准确绝对路径。发布或结果保存无法确认保留 `outcome_unknown` 和原诊断，后续 close 失败不降成普通失败，不为取回结果重放。该适配器不改变文件系统对非合作 writer 缺少原子 CAS 的既有边界。
+
+保存的 input/plan/output 适配器位于 Full 与普通外部读取层之上，仍只接受原准确私有引用。Service 动态提供 Profile、数据根、协调目录和 Runtime 资产保护路径，请求及实际路径均检查；Full 不解除这些保护。普通外部读取和 Full 外部修改都绕过 Workspace checkpoint capture，并保留 `fileScope:external_path/workspaceCheckpoint:false`；每次操作 Artifact 保留历史完整内容，Workspace 检查点恢复不会回写外部目标。Workspace 的原生平台、ACL、取消和完整数据校验合同保持；普通外部读取使用宿主 OS 权限，路径规则不承诺识别同一文件的所有硬链接别名。
+
+[Service 最终装配](../../../../../apps/service/src/file-checkpoint-configuration.ts)统一英文工具及 path 说明，避免附件层遮蔽普通外部读取：三种模式均支持普通外部读取，普通外部写入／编辑只支持有效 Full，其他模式不为 Files 外写打开审批卡；Files 没有 Shell 的文件／网络申请字段。Full 基线只用于可安全编辑的目标，准确附件、当前计划和宿主输出路径仍属各自范围。入口不支持本身不等于用户拒绝业务任务；原任务仍授权且工具／角色允许、没有真实拒绝或未知效果时，Shell 可接收独立请求并经过自身审批，不能据此扩权或重放原效果。
 
 [外部读取回归](../../../test/isolated/files/external-file-reads.test.ts)核同一定义、分页／BOM／CRLF、无外部基线、硬链接正常读取、私有路径及链接实际目标、完整大正文和取消；[真实 Service](../../../../../apps/service/test/isolated/configuration.test.ts)核模型仅使用 `read_file` 读取外部正文且不读取外部项目说明。
+
+2026-11-05，macOS ARM64／Bun1.4.2，当前任务未提交改动：[Full native 回归](../../../test/isolated/files/full-access-files.test.ts)13项75断言通过，覆盖外部创建／读取／替换／编辑、完整基线、缺失父目录、非 Full 与继承证明拒绝、保护路径与链接只读兼容、过期基线、最终打开前父目录替换、取消、发布与 close 双重故障保留 unknown、原 Workspace capture 以及共享父目录。[Service Full 回归](../../../../../apps/service/test/isolated/full-external-files.test.ts)与[原生资产保护](../../../../../apps/service/test/isolated/files-native-boundary.test.ts)同次9项82断言通过，覆盖默认装配、不可变 Artifact、无外部 checkpoint、请求批准／Auto 零效果拒绝、Profile／资产保护、派发前降权与信任变化，以及 code／explore 子 Agent 工具边界。Agent typecheck 和变更 TS 的 Biome 通过；这些确定性回归不代表真实模型任务稳定完成或 Windows／Linux 运行资格。持久取舍见[Full 外部修改决定](../../../../../.agents/notes/implemented/architecture/2026-11-05-full-mode-external-file-mutations.md)。
 
 
 ## Windows Workspace 文件源码
@@ -142,7 +160,7 @@ glob/search 的原生操作仍绑定原根及 FD 链；遍历每64项或累计8m
 
 文件写入先校验原完整基线、再临时发布。发布后同步/读取失败返回 file_publish_outcome_unknown；Tool 保留 outcome_unknown，不把已发生替换假报为零效果失败。
 
-`write/edit` 的 `file_baseline_conflict` 解释本次基线或仅创建前置条件被拒绝、本次没有发布，但不返回当前文件正文。基线描述完整文件的身份与版本；冲突不证明另一编辑修改了同一段文字，须按各次请求的修改和各自回执区分。此前读取只代表当时观察，不能从冲突推断文件仍保留旧值；其他已经成功的操作不会回滚。后续另获授权的新编辑先读取当前文件并使用新完整基线，错误说明本身不授权重读或重做。外部只读没有编辑基线；发布后确认失败仍保留原 unknown。
+`write/edit` 的 `file_baseline_conflict` 解释本次基线或仅创建前置条件被拒绝、本次没有发布，但不返回当前文件正文。基线描述完整文件的身份与版本；冲突不证明另一编辑修改了同一段文字，须按各次请求的修改和各自回执区分。此前读取只代表当时观察，不能从冲突推断文件仍保留旧值；其他已经成功的操作不会回滚。后续另获授权的新编辑先读取当前文件并使用新完整基线，错误说明本身不授权重读或重做。未提供完整基线的外部只读结果不能用于编辑；发布后确认失败仍保留原 unknown。
 
 ## 逐操作文件变更预览
 

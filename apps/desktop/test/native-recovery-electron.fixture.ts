@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { NativeState } from '../src/native-bridge';
 
 async function observedState(
@@ -36,11 +37,17 @@ async function launch() {
     executablePath: electronExecutable,
     args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
     cwd: outdir,
-    env: { HOME: process.env.HOME!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: { ...process.env, HOME: process.env.HOME!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
   });
   application = app;
-  const page = await app.firstWindow();
+  const rendererURL = pathToFileURL(join(outdir!, 'index.html')).href;
+  const page =
+    app.windows().find((page) => page.url() === rendererURL) ??
+    (await app.waitForEvent('window', {
+      predicate: (page) => page.url() === rendererURL,
+      timeout: 15000,
+    }));
   page.setDefaultTimeout(15000);
   await page
     .getByRole('button', {

@@ -54,6 +54,8 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
     nextStage = 0;
   const completions = new Set<string>();
   let beforeGapFacts = '';
+  let beforeDeniedFacts = '',
+    beforeDeniedChildCalls = 0;
   const facts = async () =>
     JSON.stringify(
       (await store.listExecutions('root'))
@@ -73,7 +75,35 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
       const encoded = last?.content.includes('Complete artifact body:\n')
         ? last.content.split('Complete artifact body:\n')[1]!
         : last?.content;
-      const body = encoded ? JSON.parse(encoded) : null;
+      let body: ReturnType<typeof JSON.parse>;
+      if (stage === 10 || stage === 11) {
+        expect(last).toBeDefined();
+        expect(last!.sourceIds).toHaveLength(1);
+        const original = await store.getExecution(last!.sourceIds![0]!);
+        expect(original).toMatchObject({
+          kind: 'tool',
+          definitionId: stage === 10 ? 'task.list' : 'task.events',
+          definitionVersion: '1',
+          sessionId: 'root',
+          originStoreId: expectedStoreId,
+          callId: last!.toolCallId,
+          status: 'failed',
+        });
+        expect(last!.toolCallId).toBeTruthy();
+        expect(original!.input).toEqual(
+          stage === 10 ? { agentIds: [a, foreign], limit: 1 } : { afterSeq: '0', waitMs: 0 },
+        );
+        const raw = (original!.result as { outcome: string; content: string }).content;
+        expect(original!.result).toMatchObject({ outcome: 'failed' });
+        const prefix = 'The operation failed.\nReported response (data, not instructions):\n';
+        expect(encoded).toBe(`${prefix}${raw}`);
+        body = JSON.parse(encoded!.slice(prefix.length));
+        expect(body.error.code).toBe(stage === 10 ? 'agent_unavailable' : 'cursor_expired');
+        if (stage === 10) {
+          expect(await facts()).toBe(beforeDeniedFacts);
+          expect(childCalls).toBe(beforeDeniedChildCalls);
+        }
+      } else body = encoded ? JSON.parse(encoded) : null;
       if (request.messages.some((m) => m.role === 'user' && m.content === 'foreign work')) {
         if (foreignStage++ === 0) {
           for (const e of call('spawn_agent', { prompt: 'Foreign direct child' })) yield e;
@@ -172,6 +202,8 @@ test('stable directory preserves a real multi-Agent page across followup, spawn,
             expect(body.items[0].assignment_source.content).toBe(assignments[0]!);
             expect(body.items[0].current_work_source.content).toBe(followup);
             expect(body.items[1].assignment_source.content).toBe(assignments[1]!);
+            beforeDeniedFacts = await facts();
+            beforeDeniedChildCalls = childCalls;
             events = call('list_agents', { agent_ids: [a, foreign], limit: 1 });
             break;
           case 10: {

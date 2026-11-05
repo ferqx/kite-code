@@ -332,34 +332,29 @@ test('name-only MCP projection preserves legal empty fields, composed schemas an
   expect(modelToolCall(saved)).toEqual({ id: 'remote-call', name: 'remote', arguments: args });
 });
 
-test('existing planning oneOf and file write composition remain callable', () => {
+test('current planning and file composition remain callable while retired validation is unavailable', () => {
   const planning = createPlanningValidation().extension.tools!;
   const files = createFileTools({} as WorkspaceFiles);
   const model = surface([...planning, ...files]);
-  const checks: Record<string, Json>[] = [
-    { kind: 'command', input: { expected_exit_code: 'opaque' }, expected_exit_code: 0 },
-    {
-      kind: 'mcp',
-      checker_id: 'checker',
-      input: { checker_id: 'opaque' },
-      target: {
-        execution_id: 'execution',
-        attempt: 1,
-        definition_id: 'fixture',
-        definition_version: '1',
-        input_digest: 'digest',
-        result_revision: 'revision',
-      },
-      schema: {},
-    },
-  ];
-  const saved = call(model, 'define_validation_checks', { run_id: 'run', checks });
+  const plan = {
+    plan_id: 'plan',
+    expected_version: null,
+    title: 'Original title',
+    body: 'Original body',
+    steps: [{ id: 'first', title: 'Inspect the original target' }],
+  };
+  const saved = call(model, 'write_plan', plan);
   expect(saved.model?.error).toBeUndefined();
-  expect(JSON.parse(saved.arguments).checks[0]).toEqual({
-    kind: 'command',
-    input: checks[0]!.input,
-    expectedExitCode: 0,
+  expect(JSON.parse(saved.arguments)).toEqual({
+    planId: plan.plan_id,
+    expectedVersion: null,
+    title: plan.title,
+    body: plan.body,
+    steps: plan.steps,
   });
+  expect(call(model, 'define_validation_checks', { run_id: 'run', checks: [] }).model?.error).toBe(
+    'tool_not_available',
+  );
   expect(
     call(model, 'write_file', { path: 'new.txt', content: 'hello', base: null }).model?.error,
   ).toBeUndefined();

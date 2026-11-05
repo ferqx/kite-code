@@ -21,6 +21,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { parseShellModelFeedback } from '../../../../tests/fixtures/unified-agent/shell-model-feedback';
 import { startService } from '../../src';
 import { createCodexLocalSource } from '../../src/codex-auth';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -46,11 +47,17 @@ function endpoint(
   background = false,
   child = false,
   review?: 'approve_once' | 'reject' | 'ask_user',
+  childPreset?: 'explore' | 'plan' | 'review',
+  reviewDelayMs = 0,
 ) {
   let actualCommand = command;
+  const childTask = childPreset
+    ? 'Inspect source read-only. Do not modify files.'
+    : 'child-shell-task';
   let permissions: RequestedScope | undefined;
+  let description: string | undefined;
   const reviews: Record<string, unknown>[] = [];
-  let beforeStop: (() => Promise<void>) | undefined;
+  let beforeStop: ((shellId: string) => Promise<void>) | undefined;
   const requests: Record<string, unknown>[] = [];
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -65,58 +72,68 @@ function endpoint(
           const parsed = JSON.parse(
             messages.filter((row) => row.role === 'user').at(-1)?.content ?? '',
           ) as Record<string, unknown>;
-          if (parsed.purpose === 'authorization_check') {
+          if (parsed.purpose === 'authorization_check' || parsed.purpose === 'shell_risk') {
             reviewPayload = parsed;
             reviews.push(parsed);
           }
         } catch {}
       }
+      if (reviewPayload && reviewDelayMs) await Bun.sleep(reviewDelayMs);
       const last = messages.reduce(
         (v, m, i) =>
           m.role === 'user' &&
           (/^新任务：(work|next|grant-[a-z-]+)$/.test(m.content) ||
-            (child && m.content === 'child-shell-task'))
+            (child && m.content === childTask))
             ? i
             : v,
         -1,
       );
       const results = messages.slice(last + 1).filter((row) => row.role === 'tool');
-      const isChild = child && messages[last]?.content === 'child-shell-task';
+      const isChild = child && messages[last]?.content === childTask;
       const key = isChild
         ? 'child-shell'
         : (messages[last]?.content.replace(/^新任务：/, '') ?? 'work');
+      let shellId: string | undefined;
+      try {
+        shellId = parseShellModelFeedback(results[0]?.content ?? '').shellId;
+      } catch {}
       const calls =
         child && !isChild
           ? [
               {
                 name: 'spawn_agent',
                 input: {
-                  prompt: 'child-shell-task',
+                  prompt: childTask,
+                  ...(childPreset ? { preset: childPreset } : {}),
                 },
               },
             ]
           : [
               {
-                name: 'shell_launch',
+                name: 'shell_execute',
                 input: {
-                  key,
                   command: actualCommand,
-                  cancellation: 'detached',
-                  ...(permissions ? { permissions } : {}),
+                  background: true,
+                  ...(description === undefined ? {} : { description }),
+                  ...(permissions ?? {}),
                 },
               },
               {
                 name: stop ? 'shell_stop' : 'shell_wait',
                 input: stop
-                  ? { shell_id: key, command_id: `stop-${key}` }
-                  : { shell_id: key, wait_timeout_ms: 4000 },
+                  ? { shell_id: shellId, command_id: `stop-${key}` }
+                  : { shell_id: shellId, wait_timeout_ms: 4000 },
               },
-              { name: 'shell_wait', input: { shell_id: key, wait_timeout_ms: 4000 } },
-              { name: 'shell_read', input: { shell_id: key, after_seq: '0', limit: 200 } },
+              { name: 'shell_wait', input: { shell_id: shellId, wait_timeout_ms: 4000 } },
+              { name: 'shell_read', input: { shell_id: shellId, after_seq: '0', limit: 200 } },
             ];
       const call =
-        reviewPayload || (background && results.length > 0) ? undefined : calls[results.length];
-      if (call?.name === 'shell_stop') await beforeStop?.();
+        reviewPayload ||
+        (background && results.length > 0) ||
+        (!(child && !isChild) && results.length > 0 && !shellId)
+          ? undefined
+          : calls[results.length];
+      if (call?.name === 'shell_stop') await beforeStop?.(shellId!);
       const chunk = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
       return new Response(
@@ -134,7 +151,19 @@ function endpoint(
               }
             : {
                 content: reviewPayload
-                  ? JSON.stringify({ decision: review, reason: 'scope rejected by reviewer' })
+                  ? JSON.stringify(
+                      reviewPayload.purpose === 'shell_risk'
+                        ? {
+                            risk:
+                              review === 'approve_once'
+                                ? 'ordinary'
+                                : review === 'reject'
+                                  ? 'critical'
+                                  : 'high',
+                            reason: 'scope rejected by reviewer',
+                          }
+                        : { decision: review, reason: 'scope rejected by reviewer' },
+                    )
                   : 'supervised Shell facts',
               },
           null,
@@ -151,7 +180,10 @@ function endpoint(
     permissions(value?: RequestedScope) {
       permissions = value;
     },
-    beforeStop(callback: () => Promise<void>) {
+    description(value?: string) {
+      description = value;
+    },
+    beforeStop(callback: (shellId: string) => Promise<void>) {
       beforeStop = callback;
     },
     command(value: string) {
@@ -165,6 +197,8 @@ async function fixture(
   options: {
     mode?: 'full' | 'accept_edits' | 'auto';
     review?: 'approve_once' | 'reject' | 'ask_user';
+    reviewDelayMs?: number;
+    reviewTimeoutMs?: number;
     deny?: 'tool' | 'job';
     missing?: boolean;
     badAsset?: boolean;
@@ -174,6 +208,7 @@ async function fixture(
     persistentPermissions?: boolean;
     hostBoundary?: boolean;
     child?: boolean;
+    childPreset?: 'explore' | 'plan' | 'review';
     codexHome?: 'missing' | 'present' | 'relative' | 'empty' | 'nul';
   } = {},
 ) {
@@ -198,13 +233,22 @@ async function fixture(
     options.command ??
     // biome-ignore lint/suspicious/noTemplateCurlyInString: actual POSIX parameter expansion, not JavaScript
     'printf \'%s|%s|%s\' "$PWD" "$FIXED_VALUE" "${HOME-unset}"; printf once >> effect';
-  const a = endpoint(command, options.stop, options.background, options.child, options.review),
+  const a = endpoint(
+      command,
+      options.stop,
+      options.background,
+      options.child,
+      options.review,
+      options.childPreset,
+      options.reviewDelayMs,
+    ),
     b = endpoint('printf next >> effect');
   const configuration = {
+    ...(options.reviewTimeoutMs ? { autoApproval: { timeoutMs: options.reviewTimeoutMs } } : {}),
     modelId: 'model',
     models: [{ id: 'model', provider: 'compatible', model: 'local-A', baseURL: a.baseURL }],
     tools: [
-      'shell.launch',
+      'shell.execute',
       'shell.read',
       'shell.wait',
       'shell.stop',
@@ -266,8 +310,8 @@ async function fixture(
               revision: 'trusted-shell-fixture',
               allowed: [
                 { kind: 'model' as const, definitionId: 'model', definitionVersion: '1' },
-                ...['shell.launch', 'shell.read', 'shell.wait', 'shell.stop']
-                  .filter((id) => options.deny !== 'tool' || id !== 'shell.launch')
+                ...['shell.execute', 'shell.read', 'shell.wait', 'shell.stop']
+                  .filter((id) => options.deny !== 'tool' || id !== 'shell.execute')
                   .map((id) => ({
                     kind: 'tool' as const,
                     definitionId: id,
@@ -542,7 +586,9 @@ nativeTest(
         }
         return undefined;
       });
-      expect(pending.map((card) => card.definitionId)).toEqual(['shell.launch']);
+      expect(pending.map((card) => card.definitionId)).toEqual(['shell.execute']);
+      expect(pending[0]!.presentationSessionId).toBe('s');
+      expect((await f.store.getExecution(pending[0]!.executionId))?.sessionId).not.toBe('s');
       expect(
         (await f.store.listExecutions('s')).filter(
           (row) =>
@@ -559,17 +605,14 @@ nativeTest(
           authorization: { dispatched: true },
         }),
       ]);
-      await f.approve('shell.launch', 'child-approve-launch');
-      const card = await f.card('shell.command');
-      expect(card.presentationSessionId).toBe('s');
-      expect((await f.store.getExecution(card.executionId))?.sessionId).not.toBe('s');
-      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('full');
-      await f.approve('shell.command', 'child-approve-job');
+      await f.approve('shell.execute', 'child-approve-launch');
       expect((await f.done('grant-child')).status).toBe('applied');
       expect(await childJob()).toMatchObject({
         status: 'succeeded',
+        authorization: { policy: { reason: 'parent_review' } },
         result: { details: { processTreeStopped: true } },
       });
+      expect(f.a.reviews).toHaveLength(1);
       expect(readFileSync(outside, 'utf8')).toBe('full');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('fullask');
       expect(snapshots).toEqual(
@@ -664,7 +707,7 @@ nativeTest(
     try {
       const configuration = await createShellConfiguration({
         workspaceRoot: f.workspace,
-        toolIds: ['shell.launch'],
+        toolIds: ['shell.execute'],
         options: {
           platform: 'darwin',
           configurationId: 'nested-scope-test',
@@ -784,20 +827,15 @@ nativeTest(
       await setMode('auto', 'host-auto');
       f.a.command(`printf denied > '${outside}'; printf workspace >> effect`);
       await f.submit('grant-workspace');
-      await f.approve('shell.launch', 'host-approve-tool');
-      const card = await f.card('shell.command');
-      expect((await f.store.getExecution(card.executionId))?.status).toBe('planned');
-      expect(readFileSync(outside, 'utf8')).toBe('full');
-      await f.approve('shell.command', 'host-approve-job');
+      await f.approve('shell.execute', 'host-approve-tool');
       await f.done('grant-workspace');
-      const job = await until(async () => {
-        const row = await f.store.getExecution(card.executionId);
-        return row && !['planned', 'dispatching', 'running'].includes(row.status) ? row : undefined;
-      });
+      const job = await finishedJob();
       expect(job).toMatchObject({
         status: 'succeeded',
+        authorization: { policy: { reason: 'parent_review' } },
         result: { details: { processTreeStopped: true } },
       });
+      expect(f.a.reviews).toHaveLength(1);
       expect(readFileSync(outside, 'utf8')).toBe('full');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('workspace');
       expect(snapshots).toEqual([
@@ -847,7 +885,7 @@ nativeTest(
       const job = executions.find((row) => row.definitionId === 'shell.command')!;
       expect(job.status).toBe('succeeded');
       expect(job.kind).toBe('job');
-      for (const id of ['shell.launch', 'shell.read', 'shell.wait'])
+      for (const id of ['shell.execute', 'shell.read', 'shell.wait'])
         expect(
           executions
             .filter((row) => row.definitionId === id)
@@ -895,6 +933,148 @@ nativeTest(
   15000,
 );
 nativeTest(
+  'read-only task children use ordinary mode review for cat and compound Shell reads',
+  async () => {
+    for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+      const f = await fixture({
+        mode,
+        hostBoundary: true,
+        persistentPermissions: true,
+        child: true,
+        childPreset: 'review',
+        review: 'approve_once',
+      });
+      try {
+        writeFileSync(join(f.workspace, 'input.txt'), 'owned-inspection\n');
+        f.a.command('cat input.txt && pwd');
+        await f.submit();
+        await f.done();
+        const carrier = await until(async () => {
+          const child = (await f.store.listExecutions('s')).find(
+            (row) => row.definitionId === 'agent/review',
+          );
+          return child?.childSessionId && child.status === 'succeeded' ? child : undefined;
+        });
+        const executions = await f.store.listExecutions(carrier.childSessionId!);
+        expect(executions.find((row) => row.definitionId === 'shell.execute')).toMatchObject({
+          status: 'succeeded',
+          authorization: { dispatched: true },
+        });
+        const jobs = executions.filter((row) => row.definitionId === 'shell.command');
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0]).toMatchObject({
+          status: 'succeeded',
+          authorization: { dispatched: true },
+          result: { details: { processTreeStopped: true } },
+        });
+        expect(JSON.stringify(f.a.requests)).toContain('owned-inspection');
+        expect(f.a.reviews).toHaveLength(mode === 'auto' ? 1 : 0);
+        if (mode === 'auto') expect(jobs[0]?.authorization?.policy?.reason).toBe('parent_review');
+        if (mode === 'auto') {
+          expect(JSON.stringify(f.a.reviews)).toContain('cat input.txt && pwd');
+          expect(JSON.stringify(f.a.reviews)).not.toContain(
+            'Inspect source read-only. Do not modify files.',
+          );
+          expect(JSON.stringify(f.a.requests)).toContain(
+            'Inspect source read-only. Do not modify files.',
+          );
+        }
+        expect(
+          (
+            await f.store.listInteractions({
+              ...f.base,
+              sessionId: carrier.childSessionId!,
+              state: 'pending',
+            })
+          ).interactions,
+        ).toHaveLength(0);
+      } finally {
+        await f.close();
+      }
+    }
+  },
+  20000,
+);
+nativeTest(
+  'read-only task children retain ordinary workspace and protected-path boundaries; Auto can reject actual writes',
+  async () => {
+    for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+      const f = await fixture({
+        mode,
+        hostBoundary: true,
+        persistentPermissions: true,
+        child: true,
+        childPreset: 'review',
+        review: 'reject',
+      });
+      try {
+        const outside = join(f.root, 'outside-role-effect');
+        const originalConfig = readFileSync(f.configPath, 'utf8');
+        f.a.command(
+          `printf role-effect > role-write.txt; printf outside > '${outside}'; printf blocked > '${f.configPath}'; printf scope-probe-done`,
+        );
+        await f.submit();
+        await f.done();
+        const carrier = await until(async () => {
+          const child = (await f.store.listExecutions('s')).find(
+            (row) => row.definitionId === 'agent/review',
+          );
+          return child?.childSessionId && child.status === 'succeeded' ? child : undefined;
+        });
+        const executions = await f.store.listExecutions(carrier.childSessionId!);
+        const launch = executions.find((row) => row.definitionId === 'shell.execute');
+        const jobs = executions.filter((row) => row.definitionId === 'shell.command');
+        expect(readFileSync(f.configPath, 'utf8')).toBe(originalConfig);
+        expect(f.a.reviews).toHaveLength(mode === 'auto' ? 1 : 0);
+        if (mode === 'auto') {
+          expect(launch).toMatchObject({
+            status: 'failed',
+            result: { details: { reason: 'scope rejected by reviewer' } },
+            authorization: {
+              dispatched: false,
+              check: { decision: 'reject', reason: 'scope rejected by reviewer' },
+            },
+          });
+          expect(jobs).toHaveLength(0);
+          expect(existsSync(join(f.workspace, 'role-write.txt'))).toBe(false);
+          expect(existsSync(outside)).toBe(false);
+          const review = JSON.stringify(f.a.reviews);
+          expect(review).not.toContain('Inspect source read-only. Do not modify files.');
+          expect(review).toContain('printf role-effect > role-write.txt');
+          expect(JSON.stringify(f.a.requests)).toContain('scope rejected by reviewer');
+        } else {
+          // A controlled adapter deliberately violates its read-only assignment.
+          // This tests ordinary policy/sandbox limits, not model compliance.
+          expect(launch).toMatchObject({
+            status: 'succeeded',
+            authorization: { dispatched: true },
+          });
+          expect(jobs).toHaveLength(1);
+          expect(jobs[0]).toMatchObject({
+            status: 'succeeded',
+            result: { details: { processTreeStopped: true } },
+          });
+          expect(readFileSync(join(f.workspace, 'role-write.txt'), 'utf8')).toBe('role-effect');
+          expect(existsSync(outside)).toBe(mode === 'full');
+          if (mode === 'full') expect(readFileSync(outside, 'utf8')).toBe('outside');
+        }
+        expect(
+          (
+            await f.store.listInteractions({
+              ...f.base,
+              sessionId: carrier.childSessionId!,
+              state: 'pending',
+            })
+          ).interactions,
+        ).toHaveLength(0);
+      } finally {
+        await f.close();
+      }
+    }
+  },
+  20000,
+);
+nativeTest(
   'trusted Shell grant digest preserves exact execution environment and default semantics while excluding only the operation key',
   async () => {
     const f = await fixture();
@@ -937,6 +1117,45 @@ nativeTest(
           input: { key: 'second', command: 'printf original', cancellation: 'detached' },
         }),
       ).not.toBe(digest);
+      const foreground: AuthorizationRequest = { ...original, definitionId: 'shell.execute' };
+      const withoutDeadline = first.commandDigest(foreground);
+      expect(withoutDeadline).toMatch(/^[a-f0-9]{64}$/);
+      expect(
+        first.commandDigest({
+          ...foreground,
+          input: { key: 'second', command: 'printf original', cancellation: 'attached' },
+        }),
+      ).toBe(withoutDeadline);
+      const tenMinutes = first.commandDigest({
+        ...foreground,
+        input: { key: 'first', command: 'printf original', timeoutMs: 600000 },
+      });
+      expect(tenMinutes).toMatch(/^[a-f0-9]{64}$/);
+      expect(tenMinutes).not.toBe(withoutDeadline);
+      expect(
+        first.commandDigest({
+          ...foreground,
+          input: { key: 'second', command: 'printf original', timeoutMs: 600000 },
+        }),
+      ).toBe(tenMinutes);
+      expect(
+        first.commandDigest({
+          ...foreground,
+          input: { key: 'second', command: 'printf original', timeoutMs: 1000 },
+        }),
+      ).not.toBe(tenMinutes);
+      for (const definitionId of ['shell.execute', 'shell.launch', 'shell.command']) {
+        expect(
+          await first.describeRequest({ ...original, kind: 'model', definitionId, input: {} }),
+        ).toBeUndefined();
+      }
+      expect(await first.describeRequest({ ...foreground, input: { key: 'invalid' } })).toEqual({
+        hardAllowed: false,
+        denialReason: 'invalid_shell_arguments',
+      });
+      expect(
+        await first.describeRequest({ ...foreground, definitionVersion: '2' }),
+      ).toBeUndefined();
       const explicitDefaults = await createShellConfiguration({
         ...configuration,
         options: {
@@ -981,7 +1200,7 @@ nativeTest(
     const f = await fixture({ mode: 'accept_edits' });
     try {
       await f.submit();
-      const tool = await f.card('shell.launch');
+      const tool = await f.card('shell.execute');
       expect(tool.request).toMatchObject({
         policy: { effects: ['process', 'unknown', 'record_write'] },
       });
@@ -989,7 +1208,7 @@ nativeTest(
       expect(
         (await f.store.listExecutions('s')).some((row) => row.definitionId === 'shell.command'),
       ).toBe(false);
-      await f.approve('shell.launch', 'approve-tool');
+      await f.approve('shell.execute', 'approve-tool');
       const job = await f.card('shell.command');
       expect(job.executionId).not.toBe(tool.executionId);
       expect(job.request).toMatchObject({ policy: { effects: ['process', 'unknown'] } });
@@ -1005,7 +1224,7 @@ nativeTest(
   15000,
 );
 nativeTest(
-  'real Shell same_command accepts two new operation keys, keeps independent Tool/Job grants and clears once after a lost HTTP receipt',
+  'real Shell same_command accepts new executions and changed descriptions, keeps independent Tool/Job grants and clears once after a lost HTTP receipt',
   async () => {
     const f = await fixture({ persistentPermissions: true });
     const serverProfile = {
@@ -1069,8 +1288,9 @@ nativeTest(
     });
     try {
       await client.connect();
+      f.a.description('Inspect initial workspace state');
       await f.submit('grant-first');
-      const tool = await f.card('shell.launch');
+      const tool = await f.card('shell.execute');
       expect(tool.request).toMatchObject({ grants: ['approve_once', 'same_command'] });
       await client.answerInteraction('s', tool.id, {
         expectedStoreId: f.base.expectedStoreId,
@@ -1108,10 +1328,16 @@ nativeTest(
       expect(grants.every((row) => /^[a-f0-9]{64}$/.test(row.commandDigest!))).toBe(true);
       expect((await f.store.getMetadata()).lastChangeCursor).toBe(beforeRead);
       expect(f.a.requests).toHaveLength(beforeProvider);
+      f.a.description('Inspect workspace state again');
       await f.submit('grant-second');
       expect((await f.done('grant-second')).status).toBe('applied');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
       const executions = await f.store.listExecutions('s');
+      expect(
+        executions
+          .filter((row) => row.definitionId === 'shell.execute')
+          .map((row) => (row.input as { description: string }).description),
+      ).toEqual(['Inspect initial workspace state', 'Inspect workspace state again']);
       expect(
         executions.filter(
           (row) => row.definitionId === 'shell.command' && row.status === 'succeeded',
@@ -1128,7 +1354,7 @@ nativeTest(
       ).toHaveLength(0);
       f.a.command('printf changed >> effect');
       await f.submit('grant-changed');
-      const changed = await f.card('shell.launch');
+      const changed = await f.card('shell.execute');
       expect(changed.id).not.toBe(tool.id);
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
       await client.answerInteraction('s', changed.id, {
@@ -1179,7 +1405,7 @@ nativeTest(
         'printf \'%s|%s|%s\' "$PWD" "$FIXED_VALUE" "${HOME-unset}"; printf once >> effect',
       );
       await f.submit('grant-after-clear');
-      const after = await f.card('shell.launch');
+      const after = await f.card('shell.execute');
       expect(after.id).not.toBe(tool.id);
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
       await client.answerInteraction('s', after.id, {
@@ -1217,12 +1443,12 @@ nativeTest(
   async () => {
     const f = await fixture({ stop: true, command: "trap '' TERM; sleep 30 & printf ready; wait" });
     try {
-      f.a.beforeStop(async () => {
+      f.a.beforeStop(async (shellId) => {
         await until(async () => {
           const original = await f.store.getExtensionRecord({
             sessionId: 's',
             extensionId: 'builtin.shell',
-            key: 'shell/work',
+            key: `shell/${shellId}`,
           });
           const value = original?.value;
           if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -1275,6 +1501,8 @@ nativeTest(
       expect(job.status).toBe('cancelled');
       const group = (job.reference as { processGroupId: number }).processGroupId;
       expect(() => process.kill(-group, 0)).toThrow();
+      const launch = rows.find((row) => row.definitionId === 'shell.execute')!;
+      const shellId = (launch.result as { details: { shell_id: string } }).details.shell_id;
       const stop = rows.find((row) => row.definitionId === 'shell.stop')!;
       expect(stop.result).toMatchObject({ details: { cancelRequested: true } });
       expect(
@@ -1286,7 +1514,7 @@ nativeTest(
           await f.store.getExtensionRecord({
             sessionId: 's',
             extensionId: 'builtin.shell',
-            key: 'shell/work',
+            key: `shell/${shellId}`,
           })
         )?.value,
       ).toMatchObject({ ref: { executionId: job.id, originStoreId: f.base.expectedStoreId } });
@@ -1329,7 +1557,7 @@ nativeTest(
           ...f.configuration,
           tools: [
             {
-              id: 'shell.launch',
+              id: 'shell.execute',
               definitionVersion: '1',
               options: { env: { HOME: 'attacker' }, shellExecutable: '/tmp/attacker' },
             },
@@ -1344,7 +1572,7 @@ nativeTest(
           ...f.configuration,
           tools: [
             {
-              id: 'shell.launch',
+              id: 'shell.execute',
               definitionVersion: '1',
               options: { shellExecutable: '/tmp/attacker' },
             },
@@ -1369,10 +1597,14 @@ nativeTest(
       await f.submit();
       await f.done();
       const original = (await f.store.getView('s')).runs[0]!.configuration;
+      const launch = (await f.store.listExecutions('s')).find(
+        (row) => row.definitionId === 'shell.execute',
+      )!;
+      const shellId = (launch.result as { details: { shell_id: string } }).details.shell_id;
       const record = await f.store.getExtensionRecord({
         sessionId: 's',
         extensionId: 'builtin.shell',
-        key: 'shell/work',
+        key: `shell/${shellId}`,
       });
       f.configuration.models[0]!.baseURL = f.b.baseURL;
       f.configuration.models[0]!.model = 'local-B';
@@ -1386,7 +1618,7 @@ nativeTest(
         await f.store.getExtensionRecord({
           sessionId: 's',
           extensionId: 'builtin.shell',
-          key: 'shell/work',
+          key: `shell/${shellId}`,
         }),
       ).toEqual(record);
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('oncenext');
@@ -1401,12 +1633,12 @@ test('Shell factory without selected tools is inert and unsupported platforms ar
     (await createShellConfiguration({ workspaceRoot: '/not-read', toolIds: [] })).extensions,
   ).toEqual([]);
   await expect(
-    createShellConfiguration({ workspaceRoot: '/not-read', toolIds: ['shell.launch'] }),
+    createShellConfiguration({ workspaceRoot: '/not-read', toolIds: ['shell.execute'] }),
   ).rejects.toMatchObject({ code: 'shell_unavailable' });
 });
 
 nativeTest(
-  'detached Shell keeps its original binding after parent finish; one process slot queues another Session until exact confirmed stop',
+  'attached background Shell preserves its binding and queues another Session until parent cancellation confirms the original stop',
   async () => {
     const f = await fixture({
       background: true,
@@ -1414,7 +1646,6 @@ nativeTest(
     });
     try {
       await f.submit();
-      await f.done();
       const first = await until(async () => {
         const row = (await f.store.listExecutions('s')).find(
           (item) => item.definitionId === 'shell.command',
@@ -1456,10 +1687,10 @@ nativeTest(
       });
       expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
       expect((await f.store.getExecution(first.id))?.status).toBe('running');
-      await f.runtime.cancelExecution({
+      await f.runtime.cancelCommand({
         ...f.base,
-        commandId: 'precise-stop',
-        executionId: first.id,
+        commandId: 'precise-parent-stop',
+        targetCommandId: 'work',
       });
       await until(async () => {
         const row = await f.store.getExecution(first.id);
@@ -1497,7 +1728,7 @@ nativeTest(
         .filter((row) => row.definitionId === 'shell.command')
         .at(-1)!;
     const approveBoth = async (prefix: string) => {
-      await f.approve('shell.launch', `${prefix}-tool`);
+      await f.approve('shell.execute', `${prefix}-tool`);
       const card = await f.card('shell.command');
       expect((await f.store.getExecution(card.executionId))?.status).toBe('planned');
       await f.approve('shell.command', `${prefix}-job`);
@@ -1525,7 +1756,7 @@ nativeTest(
       f.a.permissions({ filesystem: 'full_access', network: 'none' });
       f.a.command(`printf granted > '${outside}'; ${curl}; printf outside >> effect`);
       await f.submit('grant-outside');
-      const card = await f.card('shell.launch');
+      const card = await f.card('shell.execute');
       expect(card.request).toMatchObject({
         policy: { executionScope: { filesystem: 'full_access', network: 'none' } },
       });
@@ -1539,7 +1770,7 @@ nativeTest(
       f.a.permissions({ filesystem: 'workspace_write', network: 'internet' });
       f.a.command(`printf blocked > '${outside}'; ${curl}; printf network >> effect`);
       await f.submit('grant-network-denied');
-      const deny = await f.card('shell.launch');
+      const deny = await f.card('shell.execute');
       expect(connections).toBe(0);
       await f.runtime.answerInteraction({
         ...f.base,
@@ -1582,9 +1813,16 @@ nativeTest(
         command: 'printf reviewed >> effect',
       });
       try {
+        f.a.description('PURPOSE_ONLY_DO_NOT_USE_AS_AUTHORIZATION');
         await f.submit();
         await f.done();
         expect(f.a.reviews.length).toBeGreaterThan(0);
+        expect(JSON.stringify(f.a.reviews)).not.toContain(
+          'PURPOSE_ONLY_DO_NOT_USE_AS_AUTHORIZATION',
+        );
+        expect(
+          (await f.store.listExecutions('s')).find((row) => row.definitionId === 'shell.execute'),
+        ).toMatchObject({ input: { description: 'PURPOSE_ONLY_DO_NOT_USE_AS_AUTHORIZATION' } });
         expect(
           (await f.store.listInteractions({ ...f.base, state: 'pending' })).interactions,
         ).toHaveLength(0);
@@ -1599,7 +1837,7 @@ nativeTest(
         } else {
           expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
           expect(
-            (await f.store.listExecutions('s')).find((row) => row.definitionId === 'shell.launch'),
+            (await f.store.listExecutions('s')).find((row) => row.definitionId === 'shell.execute'),
           ).toMatchObject({
             status: 'failed',
             result: { details: { reason: 'scope rejected by reviewer' } },
@@ -1666,12 +1904,12 @@ nativeTest(
           expect(
             await f.runtime.getExecution(
               (await f.store.listExecutions('s')).find(
-                (row) => row.definitionId === 'shell.launch',
+                (row) => row.definitionId === 'shell.execute',
               )!.id,
             ),
           ).toMatchObject({
             result: {
-              content: 'permission_denied',
+              content: expect.stringContaining('Reason: shell_command_hard_denied'),
               details: {
                 reason: 'shell_command_hard_denied',
                 adapterAttempted: false,
@@ -1687,3 +1925,62 @@ nativeTest(
   },
   15000,
 );
+
+for (const expanded of [false, true])
+  nativeTest(
+    `Auto reviewer timeout defaults to allow within normal tool scope (expanded request: ${expanded})`,
+    async () => {
+      let connections = 0;
+      const remote = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        fetch() {
+          connections++;
+          return new Response('timeout-network-ok');
+        },
+      });
+      const request = `/usr/bin/curl --connect-timeout 1 --max-time 2 -fsS http://127.0.0.1:${remote.port}/timeout`;
+      const f = await fixture({
+        mode: 'auto',
+        review: 'reject',
+        reviewDelayMs: 300,
+        reviewTimeoutMs: 75,
+        hostBoundary: true,
+        command: `${request}; printf continued > timeout-local.txt`,
+      });
+      try {
+        const outside = join(f.root, 'outside-timeout.txt');
+        if (expanded) {
+          f.a.command(
+            `printf allowed > '${outside}'; printf forbidden > '${join(f.profile.profilePath, 'timeout-protected.txt')}'; ${request}; printf continued > timeout-local.txt`,
+          );
+          f.a.permissions({ filesystem: 'full_access', network: 'internet' });
+        }
+        await f.submit();
+        await f.done();
+        const rows = await f.store.listExecutions('s');
+        const launch = rows.find((e) => e.definitionId === 'shell.execute')!;
+        const job = rows.find((e) => e.definitionId === 'shell.command')!;
+        expect(launch.status).toBe('succeeded');
+        expect(launch.authorization?.policy?.reason).toBe('timeout_continue');
+        expect(job.authorization?.policy?.reason).toBe('parent_review');
+        expect(job.authorization?.policy?.effectiveScope).toEqual({
+          filesystem: expanded ? 'full_access' : 'workspace_write',
+          network: expanded ? 'internet' : 'none',
+        });
+        expect(f.a.reviews).toHaveLength(1);
+        expect(readFileSync(join(f.workspace, 'timeout-local.txt'), 'utf8')).toBe('continued');
+        expect(existsSync(outside)).toBe(expanded);
+        if (expanded) expect(readFileSync(outside, 'utf8')).toBe('allowed');
+        expect(existsSync(join(f.profile.profilePath, 'timeout-protected.txt'))).toBe(false);
+        expect(connections).toBe(expanded ? 1 : 0);
+        expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
+        expect(
+          (await f.runtime.listInteractions({ ...f.base, state: 'pending' })).interactions,
+        ).toHaveLength(0);
+      } finally {
+        await f.close();
+        remote.stop(true);
+      }
+    },
+  );

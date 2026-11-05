@@ -289,6 +289,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
         },
       ]);
       expect(request.tools.map((tool) => tool.function.name)).toEqual([
+        'read_execution_evidence',
         'edit_file',
         'read_file',
         'write_file',

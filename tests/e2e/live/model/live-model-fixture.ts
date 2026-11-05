@@ -1,12 +1,44 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { createCredentialVault, createOsCredentialBackend } from '@kite-ai/agent/config';
-import type { ModelAdapter, ModelRequest, ModelToolCall, ModelUsage } from '@kite-ai/ai';
-import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import type { Json } from '@kite-ai/agent/extensions';
+import {
+  type ModelAdapter,
+  ModelAttemptError,
+  type ModelRequest,
+  type ModelToolCall,
+  type ModelUsage,
+} from '@kite-ai/ai';
+import {
+  createCompatibleModelBinding,
+  createSdkModelAdapter,
+  type ReasoningEffort,
+} from '@kite-ai/ai/sdk';
 import { createUserConfiguration, parseModelPreset } from '@kite-ai/service/configuration';
+import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
+import { resolveModelTransport } from '../../../../apps/service/src/model-transport';
 
 function check(condition: unknown, code: string): asserts condition {
   if (!condition) throw Error(`live_model_${code}`);
+}
+
+export interface LiveModelAttemptFailure {
+  requestId: string;
+  eventCount: number;
+  reason: ModelAttemptError['reason'] | 'model_failed';
+}
+
+/** Preserve only the SDK's finite neutral classification, never an arbitrary error payload. */
+export function describeLiveModelAttemptFailure(
+  requestId: string,
+  eventCount: number,
+  error: unknown,
+): LiveModelAttemptFailure {
+  return {
+    requestId,
+    eventCount,
+    reason: ModelAttemptError.isInstance(error) ? error.reason : 'model_failed',
+  };
 }
 
 /** Export only names present in trusted request schemas; model-created names stay opaque. */
@@ -40,8 +72,15 @@ export function summarizeLiveToolCalls(
 
 /** Resolve the configured model in memory; never expose endpoint, keys, or payloads in metadata. */
 export async function createLiveModelFixture(options: {
-  requestLimit: number;
-  timeoutMs: number;
+  /** Omit to leave total logical and physical request counts unbounded. */
+  requestLimit?: number;
+  /** Omit to leave the whole fixture without an execution deadline. */
+  timeoutMs?: number;
+  /** Per-HTTP deadline; defaults to 60 seconds. null keeps only inherited cancellation. */
+  requestTimeoutMs?: number | null;
+  /** Explicit existing local ChatGPT model; absent retains the configured default provider. */
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
   signal?: AbortSignal;
   /** Explicit independent finite-output experiment; ordinary suites retain their 4096 cap. */
   outputTokenLimit?: 8192;
@@ -67,14 +106,28 @@ export async function createLiveModelFixture(options: {
     metadata: Readonly<Record<string, unknown>>;
   }): void;
 }) {
-  check(Number.isSafeInteger(options.requestLimit) && options.requestLimit > 0, 'limit_invalid');
-  check(Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0, 'timeout_invalid');
+  check(
+    options.requestLimit === undefined ||
+      (Number.isSafeInteger(options.requestLimit) && options.requestLimit > 0),
+    'limit_invalid',
+  );
+  check(
+    options.timeoutMs === undefined ||
+      (Number.isSafeInteger(options.timeoutMs) && options.timeoutMs > 0),
+    'timeout_invalid',
+  );
+  const requestTimeoutMs =
+    options.requestTimeoutMs === undefined ? 60_000 : options.requestTimeoutMs;
+  check(
+    requestTimeoutMs === null || (Number.isSafeInteger(requestTimeoutMs) && requestTimeoutMs > 0),
+    'request_timeout_invalid',
+  );
   check(
     options.outputTokenLimit === undefined || options.outputTokenLimit === 8192,
     'output_token_limit_invalid',
   );
   const deadline = AbortSignal.any([
-    AbortSignal.timeout(options.timeoutMs),
+    ...(options.timeoutMs === undefined ? [] : [AbortSignal.timeout(options.timeoutMs)]),
     ...(options.signal ? [options.signal] : []),
   ]);
   const requests: ModelRequest[] = [];
@@ -87,15 +140,32 @@ export async function createLiveModelFixture(options: {
     body: string;
     bytes: number;
   }[] = [];
+  const attemptFailures: LiveModelAttemptFailure[] = [];
   const requestContext = new AsyncLocalStorage<string>();
   const metadata: Record<string, unknown> = {};
   const observe = (event: string) => options.observe?.({ event, requests, wire, usage, metadata });
   const configuration = createUserConfiguration();
   const value = configuration.read().value;
-  const selected = (Array.isArray(value.models) ? value.models : []).find(
-    (model) =>
-      model && typeof model === 'object' && !Array.isArray(model) && model.id === value.modelId,
+  const localSource = options.model ? createCodexLocalSource() : undefined;
+  const discovery = localSource?.discover();
+  check(
+    !options.model || discovery?.models.some((entry) => entry.name === options.model),
+    'selected_model_unavailable',
   );
+  const selected: Json | undefined = options.model
+    ? {
+        id: 'live',
+        provider: 'codex',
+        model: options.model,
+        baseURL: CODEX_BASE_URL,
+        protocol: 'responses',
+        enabled: true,
+        options: options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {},
+      }
+    : (Array.isArray(value.models) ? value.models : []).find(
+        (model) =>
+          model && typeof model === 'object' && !Array.isArray(model) && model.id === value.modelId,
+      );
   check(selected && typeof selected === 'object' && !Array.isArray(selected), 'default_missing');
   check(selected.enabled !== false, 'default_disabled');
   check(
@@ -103,19 +173,24 @@ export async function createLiveModelFixture(options: {
     'model_invalid',
   );
   check(
-    ['openai', 'deepseek', 'compatible', 'ollama'].includes(String(selected.provider)),
+    ['openai', 'deepseek', 'compatible', 'ollama', ...(localSource ? ['codex'] : [])].includes(
+      String(selected.provider),
+    ),
     'provider_invalid',
   );
   const protocol = selected.protocol ?? 'chat-completions';
   check(protocol === 'chat-completions' || protocol === 'responses', 'protocol_invalid');
   const configuredPreset = parseModelPreset(selected.options);
-  const preset = {
-    ...configuredPreset,
-    maxOutputTokens:
-      options.outputTokenLimit ?? Math.min(configuredPreset.maxOutputTokens ?? 4096, 4096),
-  };
+  check(!localSource || options.outputTokenLimit === undefined, 'local_output_limit_unsupported');
+  const preset = localSource
+    ? configuredPreset
+    : {
+        ...configuredPreset,
+        maxOutputTokens:
+          options.outputTokenLimit ?? Math.min(configuredPreset.maxOutputTokens ?? 4096, 4096),
+      };
   metadata.model = selected.model;
-  metadata.provider = selected.provider;
+  metadata.provider = localSource ? 'chatgpt-local-session' : selected.provider;
   metadata.protocol = protocol;
   metadata.settings = preset;
   // Detect endpoint/model binding drift without disclosing endpoint or credentials.
@@ -137,19 +212,36 @@ export async function createLiveModelFixture(options: {
     selected.credentialRef === undefined || typeof selected.credentialRef === 'string',
     'credential_invalid',
   );
+  const localCredentials = localSource
+    ? await localSource.binding(discovery!.alias, (await resolveModelTransport()).fetch)
+    : undefined;
   const apiKey =
-    typeof selected.credentialRef === 'string'
+    localCredentials?.apiKey ??
+    (typeof selected.credentialRef === 'string'
       ? (configuration.resolveCredential(selected.credentialRef) ??
         (await vault.resolve(selected.credentialRef)))
-      : undefined;
+      : undefined);
   const fetchProvider: typeof fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      check(wire.length < options.requestLimit, 'request_budget_exhausted');
+      check(
+        options.requestLimit === undefined || wire.length < options.requestLimit,
+        'request_budget_exhausted',
+      );
       deadline.throwIfAborted();
       const body = JSON.parse(String(init?.body)) as {
         tools?: { type: string; name?: string; function?: { name: string } }[];
       };
       const tools = (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
+      if (options.model) {
+        const actual = body as Record<string, unknown>;
+        check(actual.model === options.model, 'selected_wire_model_changed');
+        check(
+          actual.reasoning &&
+            typeof actual.reasoning === 'object' &&
+            (actual.reasoning as Record<string, unknown>).effort === options.reasoningEffort,
+          'selected_wire_reasoning_changed',
+        );
+      }
       check(
         tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
         'wire_name_invalid',
@@ -171,12 +263,12 @@ export async function createLiveModelFixture(options: {
       wire.push(observation);
       observe('http_dispatch_intent');
       try {
-        const response = await fetch(input, {
+        const response = await (localCredentials?.fetch ?? fetch)(input, {
           ...init,
           redirect: 'error',
           signal: AbortSignal.any([
             deadline,
-            AbortSignal.timeout(60_000),
+            ...(requestTimeoutMs === null ? [] : [AbortSignal.timeout(requestTimeoutMs)]),
             ...(init?.signal ? [init.signal] : []),
           ]),
         });
@@ -203,6 +295,12 @@ export async function createLiveModelFixture(options: {
           modelId: selected.model,
           protocol,
           apiKey,
+          ...(localCredentials
+            ? {
+                headers: localCredentials.headers,
+                continuationIdentity: localCredentials.continuationIdentity,
+              }
+            : {}),
           fetch: fetchProvider,
         }),
       ],
@@ -213,11 +311,15 @@ export async function createLiveModelFixture(options: {
     describeRequest: sdk.describeRequest?.bind(sdk),
     async *stream(request, context) {
       deadline.throwIfAborted();
-      check(requests.length < options.requestLimit, 'request_budget_exhausted');
+      check(
+        options.requestLimit === undefined || requests.length < options.requestLimit,
+        'request_budget_exhausted',
+      );
       options.beforeModelRequest?.(request, metadata);
       requests.push(structuredClone(request));
       observe('model_started');
       const signal = AbortSignal.any([deadline, context.signal]);
+      let eventCount = 0;
       try {
         const iterator = sdk.stream(request, { signal })[Symbol.asyncIterator]();
         try {
@@ -225,6 +327,7 @@ export async function createLiveModelFixture(options: {
             const step = await requestContext.run(request.requestId, () => iterator.next());
             if (step.done) break;
             const event = step.value;
+            eventCount++;
             if (event.type === 'tool_call') calls.push(structuredClone(event));
             if (event.type === 'finish') {
               usage.push(event.usage);
@@ -236,6 +339,7 @@ export async function createLiveModelFixture(options: {
           await iterator.return?.();
         }
       } catch (error) {
+        attemptFailures.push(describeLiveModelAttemptFailure(request.requestId, eventCount, error));
         observe('model_attempt_failed');
         if (options.preserveSdkAttemptErrors) throw error;
         // Fail this live attempt immediately. Do not retry or change model/protocol.
@@ -253,6 +357,7 @@ export async function createLiveModelFixture(options: {
     usage,
     wire,
     wireRequests,
+    attemptFailures,
     metadata,
   };
 }

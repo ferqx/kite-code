@@ -312,6 +312,20 @@ export interface RunRecord {
 /** Read-only saved authorization facts. These are never accepted by dispatch as a grant. */
 export interface ExecutionAuthorizationObservation {
   dispatched: boolean;
+  policy?: {
+    evidenceId: string;
+    reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+    sourceExecutionId?: string;
+    checkExecutionId?: string;
+    requestedScope?: {
+      filesystem: 'workspace_write' | 'full_access';
+      network: 'none' | 'internet';
+    };
+    effectiveScope?: {
+      filesystem: 'workspace_write' | 'full_access';
+      network: 'none' | 'internet';
+    };
+  };
   check?: {
     executionId: string;
     status: ExecutionStatus;
@@ -899,7 +913,12 @@ export type BackgroundExecution = Omit<
 export interface BackgroundExecutionItem {
   seq: string;
   /** Read-only identity of the directly owning Tool, verified in the original execution scope. */
-  sourceTool?: { id: string; definitionId: string; definitionVersion: string };
+  sourceTool?: {
+    id: string;
+    definitionId: string;
+    definitionVersion: string;
+    background?: boolean;
+  };
   execution: BackgroundExecution;
   session: SessionRecord;
   rootSession: SessionRecord;
@@ -1163,6 +1182,21 @@ export interface SessionLogDetails {
   executionId?: string;
   interactionId?: string;
   attempt?: number;
+  /** Append-time policy facts only; a policy source id is not an Execution id. */
+  policy?: {
+    targetExecutionId: string;
+    policyEvidenceId: string;
+    reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+    source: { kind: 'check' | 'policy'; id: string; targetExecutionId?: string };
+    requestedScope: {
+      filesystem: 'workspace_write' | 'full_access';
+      network: 'none' | 'internet';
+    } | null;
+    effectiveScope: {
+      filesystem: 'workspace_write' | 'full_access';
+      network: 'none' | 'internet';
+    } | null;
+  };
 }
 export interface SessionLogEntry {
   cursor: string;

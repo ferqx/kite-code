@@ -71,6 +71,146 @@ test('literal search uses bundled rg through Bash with quoted arguments and no a
   }
 });
 
+test('rg consumes option values before recognizing an option terminator', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-rg-argv-')));
+  const shell =
+    process.platform === 'win32'
+      ? realpathSync.native(join(dirname(dirname(Bun.which('git')!)), 'usr/bin/bash.exe'))
+      : '/bin/bash';
+  try {
+    const policy = await createShellCommandPolicy({ cwd: root, shellExecutable: shell });
+    writeFileSync(join(root, 'input.txt'), '--\n');
+    writeFileSync(join(root, '--'), '--\n');
+    for (const name of ['--pre', '--hostname-bin', '--search-zip'])
+      writeFileSync(join(root, name), '--\n');
+    for (const candidate of [
+      'rg -n -F -e -- input.txt',
+      'rg -nF --regexp -- input.txt',
+      'rg -nFe -- input.txt',
+      'rg -nFe-- input.txt',
+      'rg -nF --regexp=-- input.txt',
+      'rg -nF -f -- input.txt',
+      'rg -nF -r -- -e -- input.txt',
+      'rg -nF -e -- -- --pre',
+      'rg -nF -e -- -- --hostname-bin',
+      'rg -nF -e -- -- --search-zip',
+      'rg -nF -- --pre',
+      "rg -nF '--pre-glob=*.txt' -e -- input.txt",
+      'rg --pretty --no-heading --no-column --color never -nF -e -- input.txt',
+      'rg -nF --no-search-zip -e -- input.txt',
+      'rg -nF --no-pre -e -- input.txt',
+      'rg -nF --no-heading --color never -e -- input.txt',
+    ]) {
+      const parsed = await policy.classify(candidate);
+      const command = readOnlySearchCommand(parsed.plainCommands, shell);
+      expect(parsed.hardDenied, candidate).toBeNull();
+      expect(command, candidate).toBeDefined();
+      const child = Bun.spawn([shell, '--noprofile', '--norc', '-c', command!], {
+        cwd: root,
+        env: { SystemRoot: process.env.SystemRoot ?? '', PATH: '' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exit, output, error] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      // The bare terminator leaves --pre as a literal pattern, not an execution hook.
+      expect(exit, `${candidate}: ${error}`).toBe(candidate === 'rg -nF -- --pre' ? 1 : 0);
+      expect(output, candidate).toBe(candidate === 'rg -nF -- --pre' ? '' : '1:--\n');
+    }
+    for (const candidate of [
+      'rg -e -- --pre helper input.txt',
+      'rg --regexp -- --pre=helper input.txt',
+      'rg -ne -- --pre helper input.txt',
+      'rg -ne-- --pre helper input.txt',
+      'rg --regexp=-- --pre helper input.txt',
+      'rg -f -- --pre helper input.txt',
+      'rg -g -- --pre helper input.txt',
+      'rg --glob -- --pre helper input.txt',
+      'rg --pre-glob -- --pre helper input.txt',
+      'rg -r -- --pre helper input.txt',
+      'rg --replace -- --hostname-bin helper input.txt',
+      'rg -e -- --hostname-bin=helper input.txt',
+      'rg -e -- --pr helper input.txt',
+      'rg -e -- --hostna helper input.txt',
+      'rg --reg -- --pre helper input.txt',
+      'rg --unknown -- --pre helper input.txt',
+      'rg -e -- --search-zip input.txt',
+      'rg -e -- -nz input.txt',
+      'rg -z -e -- input.txt',
+      'rg --search-zip -e -- input.txt',
+      'rg -e',
+      'rg --regexp',
+    ]) {
+      const parsed = await policy.classify(candidate);
+      expect(parsed.plainCommands, candidate).not.toBeNull();
+      expect(parsed.hardDenied, candidate).toBeNull();
+      expect(readOnlySearchCommand(parsed.plainCommands, shell), candidate).toBeUndefined();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(process.platform === 'win32')(
+  'bundled rg executes hooks and decompressors after a consumed -- value without receiving read-only qualification',
+  async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-rg-hooks-')));
+    try {
+      const policy = await createShellCommandPolicy({ cwd: root, shellExecutable: '/bin/bash' });
+      const helper = join(root, 'helper');
+      const script = '#!/bin/sh\nprintf called >> marker\nprintf "%s\\n" "--"\n';
+      writeFileSync(helper, script, { mode: 0o700 });
+      writeFileSync(join(root, 'gzip'), script, { mode: 0o700 });
+      writeFileSync(join(root, 'input.txt'), '--\n');
+      writeFileSync(join(root, 'input.gz'), new Uint8Array([0x1f, 0x8b, 0x08, 0]));
+      const { executable, env } = withBundledRipgrep({ PATH: root });
+      let calls = 0;
+      for (const args of [
+        ['-e', '--', '--pre', helper, 'input.txt'],
+        ['--regexp', '--', `--pre=${helper}`, 'input.txt'],
+        [
+          '-ne',
+          '--',
+          '--hostname-bin',
+          helper,
+          '--hyperlink-format=file://{host}{path}',
+          '--color=always',
+          '-H',
+          'input.txt',
+        ],
+        ['-e', '--', '-z', 'input.gz'],
+        ['-e', '--', '--search-zip', 'input.gz'],
+      ]) {
+        const command = ['rg', ...args].map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(' ');
+        const parsed = await policy.classify(command);
+        expect(parsed.plainCommands, command).toEqual([['rg', ...args]]);
+        expect(parsed.hardDenied, command).toBeNull();
+        expect(readOnlySearchCommand(parsed.plainCommands, '/bin/bash'), command).toBeUndefined();
+        // Execute only our own temporary fixture to verify the hidden option really can spawn.
+        const child = Bun.spawn([executable, '--no-config', ...args], {
+          cwd: root,
+          env,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        const [exit, output, error] = await Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+        ]);
+        expect(exit, `${command}: ${error}`).toBe(0);
+        expect(output, command).toContain('--');
+        expect(readFileSync(join(root, 'marker'), 'utf8'), command).toBe('called'.repeat(++calls));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
 test('loads the real packaged Bash WASM and accepts only literal argv sequences', async () => {
   const policy = await createShellCommandPolicy({
     cwd: '/tmp/kite-workspace',

@@ -205,7 +205,10 @@ for (const rejectSummary of [false, true])
         'Preserve uncertainty about missing or unknown outcomes',
       );
       expect(continuationContract.content).toContain(
-        'do not by themselves prove current external state, new effects or overall business completion',
+        'historical notes and summaries do not establish new effects',
+      );
+      expect(continuationContract.content).toContain(
+        'Acceptance, a terminal Run or a child success claim alone does not prove the user goal',
       );
       expect(
         summaryInput.request.messages.filter((message) =>

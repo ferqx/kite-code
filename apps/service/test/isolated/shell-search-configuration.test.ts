@@ -1,5 +1,13 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -29,7 +37,7 @@ const finish: ModelEvent = {
 };
 
 native(
-  'Service permits actual Shell searches before plan review and gives read-only children query access without mutation authority',
+  'Service permits Shell searches before plan review and children inherit ordinary workspace Shell permissions',
   async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-service-shell-search-')));
     const workspace = join(root, 'workspace'),
@@ -111,28 +119,26 @@ native(
       async *stream() {
         if (externalStep++ === 0)
           yield* call('shell_execute', {
-            key: 'approved-external',
             command: 'printf approved-external >> ../approved.txt',
-            permissions: { filesystem: 'full_access', network: 'none' },
+            filesystem: 'full_access',
+            network: 'none',
           });
         else yield finish;
       },
     };
     const childModel: ModelAdapter = {
       async *stream() {
-        if (childStep++ === 0)
-          yield* call('shell_execute', { key: 'child-files', command: 'rg --files' });
-        else if (childStep === 2)
-          yield* call('shell_execute', { key: 'child-directory', command: 'ls' });
+        if (childStep++ === 0) yield* call('shell_execute', { command: 'rg --files' });
+        else if (childStep === 2) yield* call('shell_execute', { command: 'ls' });
         else if (childStep === 3)
           yield* call('shell_execute', {
-            key: 'child-search',
             command: "rg search-needle '中文 source.txt'",
           });
+        // Deliberately violate the assignment to observe ordinary workspace
+        // permissions; this controlled adapter does not test model compliance.
         else if (childStep === 4)
           yield* call('shell_execute', {
-            key: 'denied-write',
-            command: 'printf forbidden > forbidden.txt',
+            command: 'printf role-effect > role-write.txt',
           });
         else yield finish;
       },
@@ -155,7 +161,6 @@ native(
       async *stream() {
         if (planningStep++ === 0)
           yield* call('shell_execute', {
-            key: 'plan-search',
             command: "rg search-needle '中文 source.txt'",
           });
         else if (planningStep === 2)
@@ -305,7 +310,7 @@ native(
           )!;
           expect(carrier.childSessionId).toBeTruthy();
           const executions = await store.listExecutions(carrier.childSessionId!);
-          expect(executions.filter((e) => e.definitionId === 'shell.command')).toHaveLength(3);
+          expect(executions.filter((e) => e.definitionId === 'shell.command')).toHaveLength(4);
           expect(executions.find((e) => e.definitionId === 'shell.command')?.status).toBe(
             'succeeded',
           );
@@ -314,12 +319,9 @@ native(
             'succeeded',
             'succeeded',
             'succeeded',
-            'failed',
+            'succeeded',
           ]);
-          expect(JSON.stringify(tools[3]!.result)).toContain(
-            'read_only_task_requires_literal_search',
-          );
-          expect(existsSync(join(workspace, 'forbidden.txt'))).toBe(false);
+          expect(readFileSync(join(workspace, 'role-write.txt'), 'utf8')).toBe('role-effect');
         } else {
           await until(async () =>
             (

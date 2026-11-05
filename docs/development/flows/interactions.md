@@ -4,6 +4,8 @@
 
 实现与局部验证：[权限](../../../packages/agent/src/permissions/README.md)、[普通问题](../../../packages/agent/src/tools/ask-user/README.md)、[计划](../../../packages/agent/src/business/planning/README.md)、[TUI](../../../packages/ui/src/tui/README.md)、[Desktop](../../../apps/desktop/README.md)。
 
+[审批交互图与原回执查看](../prototypes/execution-observability/README.md)可切换三种模式，关联人工卡、Auto 原决定和实际模型所见；它是离线开发原型，不提交审批。
+
 答案必须绑定原 Store/Session/Run/Interaction 和实际 revision，迟到答复不能继续后来工作。模式改变须经原持久控制与最终派发复核，界面移除卡片不表示批准。写入未知只查原申请；取消、unknown 和必要条件不能被交互显示覆盖。
 
 共同约束以[当前八 workspace 边界](../../active/unified-agent-boundary.md)及对应 owner 为准。定向测试、真实客户端过程和平台资格分别说明，不从源码存在或最终截图推定完整行为通过。

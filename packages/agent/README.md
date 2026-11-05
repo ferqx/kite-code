@@ -12,6 +12,10 @@
 
 [默认模型合同](src/model-context.ts)为主、子 Agent 提供已授权工作推进、可纠正失败、当前入口与可达调用链研究、父结果验收和收束指导。直接回答与适度交付前置，证据规则用于判断而非逐项打印成报告；委派不把约束扩展为额外报告任务。它保留原始要求、来源、压缩与未知结果约束，不添加业务完成状态或第二个 Loop。代码与符号存在不构成当前执行路径证明，子报告不因已接纳而成为正确性或权限证明。
 
+Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。模型观察中的 `plan_requirement` 表达准确原 Run 的计划批准事实；真实 `plan.required`、准确版本／原批准与独立工具权限仍在派发和完成边界核验。步骤 progress 不混入稳定计划来源，避免本批进度更新使普通兄弟工具失效或使旧成功 receipt 失效；压缩后进度不可见时通过 `read_plan` 找回，原操作引用或结果不可见时按需读当前任务执行证据，不为找结果重跑效果。
+
+工具异常与审批回执的模型可读说明归[结果呈现](src/model-tools.README.md#结果呈现)：原调用、回执和机器状态保留，明确未派发、失败、取消与效果未知分别解释。实际业务原因及部分效果由各工具 owner 提供，通用呈现不公开私有 details 或签发授权。
+
 [取证观察](src/tool-observations.ts)把 Files 工具的准确查询、文件版本和读取窗口作为低信任数据供决策使用。搜索在原结果中说明字面匹配、分页和未检查范围，读取附当前窗口的原文预览，完整 Artifact 正文保持。Agent 不根据搜索／读取次数注入额外收束提醒、不设累计额度或新完成判定；研究方法由共用合同说明，实际判断仍需任务证据。次数型提醒只作过隔离实验，未保留为默认机制，其收益与局限见[任务质量 owner](../../tests/e2e/live/model/README.md#工具反馈与任务质量)。
 
 成功子结果及历史可安全读取的失败子结果沿原 carrier 的 `details.evidence` 携带当前 child Run 的工具结果摘要和取证预览，原完整报告正文不改写。宿主核实际 execution、call、Session／Run／Store 后记录身份，observation 仍是具名工具数据；同一 child 的后续 Run 不混用旧取证。`reportVerification:not_verified` 明确整份子报告尚未被核验，这是原结果的数据说明而非新业务状态；父级只采用逐项查实的主张，不能把核对当前路径扩张为整份报告与原文完全一致。预览保留最多 64 种工具统计，观察正文总量最多 32 KiB，lookup 使用较小的 8 KiB 阈值为 inspection 留出空间；`toolCallsOmitted/observationsOmitted` 明示省略，完整回执仍在原执行历史。`coverage:selected_history` 不证明全部历史或已压缩工作。父级须核对决定答案的入口／配置与实现连接；该材料不证明语义正确、调用可达或未发生其他动作。自动结果 Source 保原不可变结果及接纳身份；目录中的纯结果正文不另冒充取证包。
@@ -54,6 +58,7 @@
 - [Agent Browser](src/tools/browser/README.md)：普通 Tool／Job／Query／Action、统一 `browser.execute` 与受 Job 监督的隔离持续环境；Native 新默认单入口按每次 API 沿原 Operations 权限执行，正式 PNG 复用工具图片合同。全局内置 `computer-use` 由 [Skills](src/skills/README.md)提供；固定后端、Linux／macOS 监督和旧显式配置保留，执行器当前仅 macOS 合格宿主可用，普通填写不适用于凭据。真实客户端资格归 Desktop owner。
 - [普通问题入口](src/tools/ask-user/README.md)：`@kite-ai/agent/ask-user` 的纯工厂通过原 `requestInput` 提供 1–3 题、原选项和自由回答，并将原答案解释为模型与历史文案；默认选择及 child 禁用归 Service。
 - [计划审阅与进度入口](src/business/planning/README.md)：真实用户计划审阅、来源绑定的步骤回执和唯一 Loop。专用验证工具、自动检查、checker 与 waiver 已退役。
+- [当前任务执行证据](src/business/execution-evidence/README.md)：`read_execution_evidence` 按真实 Session／Run 查询已有 Tool／Job、准确 receipt、已知目标与公开结果；固定水位分页，不读取私有模型正文、不把 Shell 或累计 diff 推导为本 Agent 的逐文件改动。
 - [Store 端口](src/storage/port.ts)：宿主使用的具名查询和事务；[记录](src/storage/types.ts)保存业务事实，非完整内存 State。
 - [上下文选择与结果](src/storage/sqlite/context/README.md)：当前选择、完整历史和准确结果引用分开保存；双游标读取固定同一选择与顺序上界。
 - [Profile 入口](src/profile.ts)：`selectProfile({dataRoot, profile})` 只读确定规范 data-root、逻辑名称与稳定 `profileAccessKey`，供 launcher 在启动前固定目标；import 与选择均不创建目录、取得锁或打开数据库。
@@ -85,6 +90,8 @@
 未提交普通Action的结果不以Command.applied视为完成；同Session后续普通派发须继续核原receipt主Execution。准确Store/owner观察、合法detached Job与未提交Action的区分，以及真实最终提交故障测试归[Store owner](src/storage/README.md#未提交普通-action-的串行边界)。
 
 MCP强制重连的建立失败收尾由[MCP leaf](src/mcp/README.md#强制重连持久发布与原事实)沿原operation有界等待真实Job终态，再核完整停止证明。运行中新holder的发布失败继续隔离；超时或迟到结算不追改原unknown，通用Execution与Query合同保持。
+
+自动审核的总期限覆盖准备、队列与 Provider。默认3秒，可由宿主选定的 `autoApproval.timeoutMs` 配置；超时与连接／响应技术失败分别保存。超时默认放行语义审核，交给工具原有执行策略兜底；Shell 保留本次文件和网络请求，与父子／宿主硬上限取交集，不另加超时专属收窄。默认请求仍为 `workspace_write/none`；显式 `full_access/internet` 可按原策略执行，不由超时隐式新增。记录 `timeout_continue`，不伪造审核模型批准，也不进入批准缓存。无可兑现执行边界时返回明确超时失败，独立必需人工审批仍须真实卡与原回答。仅靠任务提示和语义审核表达的业务限制不因此取得沙箱保证。已批准结论复用和父 Tool→准确 Job 的一次语义审查保留原凭据，任务、参数、相关状态或策略变化须重新核验；具体身份、事务与反例归[权限 owner](src/permissions/README.md)。
 
 ## 生命周期扩展
 
@@ -172,7 +179,7 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 纯 [ask_user](src/tools/ask-user/index.ts) 区分准确执行取消与整 Run 取消：只认相同本执行 signal.reason 的已定义取消代码，或 [InteractionGate](src/execution/interactions.ts) 从已保存、准确同 Scope 的 cancelled Question 生成的类型化证据。该叶返回真实取消信息并让同 Run 继续；空答案取消和整 Run Ctrl+C 保原行为，foreign／错误 kind／未确认的 abort 不借此变成成功。Core 通用已尝试适配器的 unknown 分类不变，不能将无副作用问答的有限证据推广到文件、Shell 或网络效果。
 
-自动审核属于权限系统，宿主注入 `authorizationCheck: {id, version, modelId, model}`，纯分类只返回 `check: {request, requireApproval?}`。Core 保存 `authorization.check` Command 与原 Session 内唯一的无 Run Model Execution，复用共享 Model 槽及原执行取消域；不创建 child Session、Run、Job carrier 或聊天 Message，不进入子 Agent 目录、配额、类别和生命周期。输入从真实原命令、根工作、目标及同组成功 Model 请求派生，排除 Provider 私有 continuation；实际准备请求和完成结果各自封存独立 digest，最终 SQL 继续核 Store／主体／owner／root work、attempt、定义、input/source、当前 policy/control revision、空工具、完整输入输出与有限决定。强制人工 ceiling 与批准检查构成双 proof；有效 ask_user 或未配置审核器时沿原人工回退，已配置审核器的技术失败作为未派发 Tool 结果交回下一 Model，明确拒绝保留原 reason。新请求含独立 system 指引，禁止将历史审核技术失败误当拒绝；可读错误、有限诊断与旧记录兼容归[权限 owner](src/permissions/README.md)。完整大正文继续经[Model 正文交接](src/model-body/README.md)验证。检查从准备前即登记并 retain 原配置，策略／取消竞争结束等待也不提前释放真实调用；Provider 前重新核取消，drain 等实际调用与配置释放后再关闭资源。旧 `authorization.review` child 历史只读保留原 proof、Inspector 与附件，原生产入口关闭，命中旧冷记录不重跑。`review` 只表示通用子 Agent 的代码审查类别。[主回归](test/isolated/execution/authorization-check.test.ts)、[完整输出](test/isolated/execution/authorization-check-complete-output.test.ts)、[旧历史](test/isolated/execution/authorization-history-compatibility.test.ts)与[默认 SDK](../../apps/service/test/isolated/auto-configuration.test.ts)分别核对应边界。
+自动审核属于权限系统，宿主注入 `authorizationCheck: {id, version, modelId, model}`，纯分类只返回 `check: {request, requireApproval?}`。Core 保存 `authorization.check` Command 与原 Session 内唯一的无 Run Model Execution，复用共享 Model 槽及原执行取消域；不创建 child Session、Run、Job carrier 或聊天 Message，不进入子 Agent 目录、配额、类别和生命周期。新默认 Shell 由可信 prepareRiskReview 提供受限材料，只将完整 operation 与 material 交风险模型，输出 risk／reason 后由 Core 固定映射原决定；旧合同仍从真实原命令、根工作、目标及同组成功 Model 请求派生，排除 Provider 私有 continuation；实际准备请求和完成结果各自封存独立 digest，最终 SQL 继续核 Store／主体／owner／root work、attempt、定义、input/source、当前 policy/control revision、空工具、完整输入输出与有限决定。强制人工 ceiling 与批准检查构成双 proof；有效 ask_user 或未配置审核器时沿原人工回退，已配置审核器的技术失败作为未派发 Tool 结果交回下一 Model，明确拒绝保留原 reason。新请求含独立 system 指引，禁止将历史审核技术失败误当拒绝；可读错误、有限诊断与旧记录兼容归[权限 owner](src/permissions/README.md)。完整大正文继续经[Model 正文交接](src/model-body/README.md)验证。新风险事实准备受原截止和取消控制，准备超时仍登记准确 timeout 终态而不等待慢取证；已知准备技术失败不因登记延迟改成超时。准备与模型调用 retain 原配置直至真实调用结算，策略／取消竞争结束等待也不提前释放真实调用；Provider 前重新核取消，drain 等实际调用与配置释放后再关闭资源。旧 `authorization.review` child 历史只读保留原 proof、Inspector 与附件，原生产入口关闭，命中旧冷记录不重跑。`review` 只表示通用子 Agent 的代码审查类别。[主回归](test/isolated/execution/authorization-check.test.ts)、[完整输出](test/isolated/execution/authorization-check-complete-output.test.ts)、[旧历史](test/isolated/execution/authorization-history-compatibility.test.ts)与[默认 SDK](../../apps/service/test/isolated/auto-configuration.test.ts)分别核对应边界。
 
 [输入事务](src/storage/sqlite/inputs/README.md)区分准确活动 Run 的 `input.steer` 与独立 `input.follow_up`。Core 在安全检查点按持久顺序应用 steer，尚未派发的旧模型、工具和审批保存 `superseded_by_user_input` 与准确的工具响应配对；已派发调用保留原参数、来源和真实结果。最终派发与 Run 完成事务复查 pending 输入，完成附近到达的 steer 仍继续同一个 Run。follow-up 保留自己的命令和原 afterRun 关系，不因后来工作或原 Run 取消而换目标；单独取消未应用输入不会生成消息。公开 child 输入目前仍限制在宿主受控路径，完整业务追加消息继续按方案实施。
 
@@ -196,6 +203,8 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 Tool 的 `failed`、人工／自动拒绝、adapter 抛异常与 `outcome_unknown` 必须先结算原 Execution 和配对消息，再作为原 call 的准确结果交给下一 Model；不以 Tool 异常或同参连续五次失败结束 Loop，也不新增自动重试。已调用 adapter 后抛异常仍保守保存 unknown，不宣称没有效果。[执行边界](src/execution/index.ts)在adapter catch内建立一次独立纯JSON快照，拒绝循环、BigInt、非有限值、accessor和可执行toJSON，且不运行getter／toJSON；非法返回以 `outcome_unknown / invalid_tool_result` 配对交回，后续校验、status、content与持久结果只用该快照。原失败序列按实际 dispatch 标记记录，来源／能力准备失效不冒充已派发失败；该记录不再是 Run 取消条件。明确用户取消仍停止，无法保存原终态或 authority／Store 损坏仍失败关闭，Loop 不编造结果。[Loop 真实回归](test/isolated/execution/loop-tool-results.test.ts)、[长任务回归](test/isolated/execution/long-running.test.ts)与[原 Run 接续](test/isolated/recovery/run-resume-runtime.test.ts)核原配对、五次以后正常解释、零自动重放及持久边界；决定与历史替代范围见[工具结果与 Loop](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)。
 
+[模型失败呈现](src/tool-failure-presentation.ts)只把工具拥有的解释整理为简洁英文，区分失败、取消、明确未执行与未知；[已知公开原因表](src/tool-failure-causes.ts)补参数和当前状态的原因，不授予重试、不从机器码推断效果，也不公开任意私有 Error。解释不使用内部 Run／Session／Job／carrier／dispatch 词汇代替原因；stdout／stderr、MCP 业务数据和非英文原业务正文保真，原完整错误码、身份、审批及恢复事实仍归持久回执。普通 Files 确定缺失是 `succeeded/exists:false` 的读取观察，不走失败呈现；私有文件、权限、损坏及未知保持原分类。固定 [Runtime 交接回归](test/isolated/execution/public-failure-causes.test.ts)核代表裸码到下一 Model 的解释及原始业务正文保留，不证明真实模型任务稳定完成。
+
 非法返回增量先在真实Runtime／SQLite得到7类红例，修后完整Loop结果16项133断言通过，保留原Store终态trigger失败与用户cancel语义。合法inline／artifact模型呈现3项77断言、正式PNG到下一Model1项9断言通过；formatter原仅一组调用的旧预期因Loop继续第三Model而失效，现精确核两组成功历史，失败结果仍不进入formatter。受影响的并行、派发、长任务、授权、Browser执行／页面／人工、Files与Task共10文件独立进程复验为146通过、0失败、1项Windows专用跳过、1678断言，Agent类型通过；固定模型与受控adapter不代证付费模型或Native客户端资格。
 
 普通来源发现与旧依据变化分别处理。[文件工具工厂](src/tools/files-tools.ts)仅为 read/list/glob/search 提供可信 `ToolDefinition.contextDiscovery=read_only`；Core 冻结原 Model 的 source requests，各 Tool 用原请求集加本次准确输入复核，不混入同批兄弟刚引入的目标。只有宿主捕获的低权限项目指令新增、原模型全部来源仍不变时，合格只读调用可以继续；下一 Model 同时取得新指令与真实结果，不追溯改写旧 Model。未知工具、扩展自报同 kind 和不透明来源没有该资格。[混合批次回归](test/isolated/context/tool-batch-freshness.test.ts)验证正常四项各一次及旧来源改写／删除保守拒绝；[真实 SIGKILL 恢复](test/isolated/recovery/source-discovery-resume.test.ts)核原 response 和下一 Model planned 两个边界，四个读取不重放。
@@ -210,13 +219,13 @@ Tool 的 `failed`、人工／自动拒绝、adapter 抛异常与 `outcome_unknow
 
 `resolveRunConfiguration` 在新 Run 激活前解析实际模型与工具选择，原子保存脱敏配置和准确 Tool 版本；旧 Run 继续使用自己的绑定。宿主可返回每 Run 的 `extensions/sources/dispose`，Core 复制并冻结 schema、资源声明及定义集合；模型目录、自有 namespace 和子操作使用同一绑定。后台 Job 保留该绑定 lease，最后一个真实任务结束后才释放资源，新 Run 的定义或来源不会替换旧任务。未知或重复选择在模型调用前局部拒绝，只有实际清理成功才释放失败准入资源；准备清理双失败通过 `ConfigurationPreparationCleanupError` 保原错误及资源并阻止关闭，具体五个接收点和可信producer合同归[生命周期owner](src/lifecycle.README.md)。权限请求明确区分 model/tool/job，模型权限不会因同名 Tool 被复用。普通 Tool 的 progress 合并为一个待写点，以 100ms 起测间隔写入，单点最多 32 KiB；终态前排空。观察写入失败记录在真实结果中，不把已知效果改写为未知或再次执行。
 
-宿主可选 `readStepCapabilities` 只读取已存在的目录缓存。每个 Model 安全边界固定额外 extensions、所选 tools 和最多 64 KiB 的非秘密 snapshot；全局注册由 Runtime 加入，调用者不能重复它们。实际 Model 保存准确 `toolBindings` 与 `capabilitySnapshot`，不会重写初始 Run manifest。审批或资源等待期间目录变更使尚未派发的旧调用明确 `capability_refresh_required`，下一 Model 重新选择；模型准入的有限刷新也同时重建 tools。已派发 Job 的 scope、来源和实现保持原绑定。定义版本负责标识实现，宿主负责让整个 Run 的 disposer 保留所有在途 Step 注册资源；Query/历史读取不调用该回调，回调不能建立连接或执行工具。
+宿主可选 `readStepCapabilities` 只读取已存在的目录缓存。每个 Model 安全边界固定额外 extensions、所选 tools 和最多 64 KiB 的非秘密 snapshot；全局注册由 Runtime 加入，调用者不能重复它们。子能力刷新与根能力刷新一样，先应用原 binding 的 `modelHiddenToolIds`，再核父冻结定义的完整身份；隐藏呈现不因刷新丢失，也不放宽工具交集。[默认子角色回归](../../apps/service/test/isolated/child-skill-capability-inheritance.test.ts)核实际 worker 启动与后续模型目录。实际 Model 保存准确 `toolBindings` 与 `capabilitySnapshot`，不会重写初始 Run manifest。审批或资源等待期间目录变更使尚未派发的旧调用明确 `capability_refresh_required`，下一 Model 重新选择；模型准入的有限刷新也同时重建 tools。已派发 Job 的 scope、来源和实现保持原绑定。定义版本负责标识实现，宿主负责让整个 Run 的 disposer 保留所有在途 Step 注册资源；Query/历史读取不调用该回调，回调不能建立连接或执行工具。
 
 Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execution 与稳定 key 发布，Query/prepare 只能读取原 subject/scope。终态声明的 Artifact refs 必须再次核实实际 Store、scope 和元数据；效果发生后伪造引用保留未知结果。真实内容下载由 Service/Client 的二进制协议负责，不通过 renderer 路径或 hash 自授权。
 
 显式 `resumeRun` 接续仍活动的同 Store 根 Run，支持原 `run.start/input.follow_up` 的三个持久边界：原 Model 派发前、完整 Model 的工具序列、完成判定。只读 `verifyRunResume` 核原身份和安全状态，再通过独立 `RunResumeLease` 封存检查点；准确重建原配置并复核选择、取消与 generation 后，才转成普通 owner，进入同一个 `executeRun/defaultLoop`。HTTP 的 generation 由 Service 内部派生，Core 可信入口仍要求准确 CAS。原 planned Model 使用完整封存请求，原 planned Tool 保留执行身份与审批，已完成调用跳过；完整无工具 stop 回复进入完成门禁，纯文本 length 段保留原响应并继续原任务。原 Model 输入/输出及大正文都从原作用域完整核验，不用预览重建参数；length 段含调用或没有有效正文不能取得恢复资格。
 
-累计已完成历史不以4096条拒绝接续。Store 在正常业务事务内维护增量审计证明；健康证明的首次冷读按索引核当前前沿和未认证变更，不扫描累计已认证历史。旧库一次性升级和失效证明仍完整审计回退。未变化的实际 SQLite 快照可跨准备阶段复用，任何写入使其失效。新 Model 在原来源封存版本化 continuation，用于恢复当前来源请求和五次失败 streak；大 checkpoint 沿原 sourceBody Artifact 完整核验。旧记录仍完整分页重建，不把有限 View 当全集；实际成本和未知边界见[冷恢复协议](src/storage/sqlite/run-resume.README.md)。
+累计已完成历史不以4096条拒绝接续。Store 在正常业务事务内维护增量审计证明；健康证明的首次冷读按索引核当前前沿和未认证变更，不扫描累计已认证历史。旧库一次性升级和失效证明仍完整审计回退。未变化的实际 SQLite 快照可跨准备阶段复用，任何写入使其失效。新 Model 在原来源封存版本化 continuation，用于恢复当前来源请求和原失败序列；失败序列不是次数型取消条件；大 checkpoint 沿原 sourceBody Artifact 完整核验。旧记录仍完整分页重建，不把有限 View 当全集；实际成本和未知边界见[冷恢复协议](src/storage/sqlite/run-resume.README.md)。
 
 有 Artifact 宿主时，continuation v3 以[来源请求增量链](src/source-request-journal.ts)引用每批首次出现的完整输入；后续 Model、摘要和重试只封存链头及准确失败 streak，不重复写入整个累计请求集。恢复完整核原 Artifact/hash、Store/Session/subject/Run、顺序和无环关系；v1/v2仍按原格式读取，无 Artifact 的小型 Core 保v2。热 Model 只共享 Core 已冻结请求，宿主每次捕获拿独立输入副本；压缩不丢弃早期新鲜性依据。[真实128轮回归](test/isolated/context/source-request-journal.test.ts)核增量保存量、全部原输入、宿主修改隔离及非法引用，原SIGKILL恢复回归继续核不重放。完整 `captureBatch` 现行合同仍要求保留一个准确输入集合；这里消除重复副本和累计重复封存，不承诺常量RSS。
 
@@ -273,7 +282,9 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 [引导组合边界回归](test/isolated/execution/steering-boundaries.test.ts)核真实首个内容 delta 之后的两波更正、完成事务与迟到原目标、human steer 与子最终结果两种到达顺序、引导已应用后停止／结果竞争、等待问题时的引导与准确／迟到答复，以及 Runtime 对重排、撤回后的实际消费。后继请求核完整原文和原 Command 来源，已派发效果不改写，停止与冷读不复活，邮件不能取得引导或批准权限。压缩、SIGKILL、引用资料、附件及多层委派的组合入口归 [压缩 owner](src/storage/sqlite/context/compression.README.md)。
 
-[完成边界回归](test/isolated/execution/completion-refresh.test.ts)另核引导退休旧审批后，迟到允许只保存到已取消的旧卡；新卡、原 revision 与准确调用保持 pending，零额外 Model 和工具效果。只有新卡获得自己的准确批准，原 Run 才能完成；实际执行授权和 interaction binding 均须指向新卡，不能从旧答复借权。
+[完成边界回归](test/isolated/execution/completion-refresh.test.ts)核可信 `completion_decision` 的未派发 Tool 在 Store 原事务内随新引导退休，原 Run 重新读取输入并准备准确新参数；普通模型工具批次仍完整收尾。迟到允许只保存到已取消的旧卡；新卡、原 revision 与准确调用保持 pending，零额外 Model 和工具效果。只有新卡获得自己的准确批准，原 Run 才能完成；实际执行授权和 interaction binding 均须指向新卡，不能从旧答复借权。最终派发事务也核尚未消费的引导；若旧调用先派发，引导暂缓至原效果结算，actual unknown 仍以 `operation_unverifiable` 收束且不重放。完成治理的结果保留原低信任 user 信封，没有孤立 tool 回执；事务与直接 Store 防线归[输入 owner](src/storage/sqlite/inputs/README.md)。
+
+同一回归另用真实串行资源锁核已批准完成调用在锁仍占用时接纳 steer、退出旧等待并重新请求审批，普通前台工具则保留原调用直至资源释放。已接纳的 `same_command` 旧卡退休后只保原答案与接纳历史，其派生 grant 同事务撤销；参数相同的新调用也能正常重新授权，不能借旧卡取得批准。
 
 短模型输出的首个非空正文 delta 立即保存 partial，包含先前已有 reasoning 且距上次保存不足100ms的情况；后续增量仍按原100ms／32KiB条件合并，`firstOutput` 继续表示原首频道。否则在首字后网络暂停时，客户端可能一直只读到 reasoning 并显示思考状态。[真实 Runtime／SQLite 首正文回归](test/isolated/execution/model-content-progress.test.ts)在首字已被消费、没有 finish 和后续事件的准确暂停点，核实际 Message、`readModelOutput`、后续节流和最终完整正文；纯正文对照不重复保存首段。
 

@@ -5,7 +5,12 @@ import type {
   Permissions,
 } from '../extensions';
 import { semanticDigest } from '../json';
-import type { ReadAuthorizationCheckInput, Store } from '../storage/port';
+import { isShellRiskRequest } from '../shell-risk-review';
+import type {
+  AutoAuthorizationEvidence,
+  ReadAuthorizationCheckInput,
+  Store,
+} from '../storage/port';
 import {
   AgentError,
   type InformationPermissionStamp,
@@ -38,6 +43,21 @@ export class AuthorizationCheckRejectedError extends AuthorizationDeniedError {
   }
 }
 
+const publicDenials = new WeakSet<AuthorizationDeniedError>();
+/** Only an actual gate decision may publish a reason; adapter-thrown lookalikes are private. */
+export function isPublicAuthorizationDeniedError(
+  error: unknown,
+): error is AuthorizationDeniedError {
+  return error instanceof AuthorizationDeniedError && publicDenials.has(error);
+}
+function publicDenial(reason: string, automatic = false) {
+  const error = automatic
+    ? new AuthorizationCheckRejectedError(reason)
+    : new AuthorizationDeniedError('permission_denied', reason);
+  publicDenials.add(error);
+  return error;
+}
+
 /** Exact saved cancellation of an information-only Question, never an effect result. */
 export class QuestionCancelledError extends AgentError {
   readonly interaction: Readonly<InteractionRecord>;
@@ -54,7 +74,7 @@ export interface InteractionScope {
   check?: (
     decision: PermissionDecision,
     signal: AbortSignal,
-  ) => Promise<ReadAuthorizationCheckInput | null>;
+  ) => Promise<ReadAuthorizationCheckInput | AutoAuthorizationEvidence | null>;
   expectedStoreId: string;
   owner: OwnerRef;
   executionId: string;
@@ -67,8 +87,10 @@ export interface InteractionScope {
   verifyApprovalRequest?: (saved: Json, actual: Json) => Promise<void>;
 }
 export type AcceptedAuthorization = PermissionDecision & {
+  riskReviewApproved?: true;
   grant?: { grantId: string; revision: string; commandDigest?: string };
   checkExecutionId?: string;
+  policyEvidenceId?: string;
   interactionId?: string;
   decisionRevision?: string;
 };
@@ -110,9 +132,17 @@ export class InteractionGate {
       const page = await this.changes(cursor, scope.signal);
       if (!page.events.length && !page.rescan) continue;
       cursor = page.events.at(-1)?.cursor ?? page.metadata.lastChangeCursor;
-      if (!page.rescan && !page.events.some((event) => event.type === 'host_control.changed'))
+      if (
+        !page.rescan &&
+        !page.events.some((event) =>
+          ['host_control.changed', 'command.accepted'].includes(event.type),
+        )
+      )
         continue;
+      // Input wakes only reach the existing owner checkpoint. Foreground batches
+      // defer steer there; stale completion decisions leave their resource wait.
       await scope.checkpoint?.();
+      await scope.checkFreshness?.();
       const current = await this.permissions.authorize(request);
       if (current.revision !== decision.revision) {
         if (modeControlsChanged(decision.controlReads, current.controlReads))
@@ -278,8 +308,26 @@ export class InteractionGate {
       if (original.policyRevision !== decision.revision)
         await this.refresh(scope, original, decision);
     }
+    const previous = scope.previousPolicy as AcceptedAuthorization | undefined;
+    if (
+      !execution.interactionBinding &&
+      previous?.policyEvidenceId &&
+      decision.check &&
+      previous.revision === decision.revision &&
+      (await semanticDigest(previous.check?.request ?? null)) ===
+        (await semanticDigest(decision.check.request))
+    )
+      return {
+        ...decision,
+        allowed: true,
+        policyEvidenceId: previous.policyEvidenceId,
+        ...(previous.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+        ...(previous.snapshot ? { snapshot: previous.snapshot } : {}),
+      };
     let reference = scope.previousCheck;
+    let policyEvidence: AutoAuthorizationEvidence | undefined;
     let checkedGrant: string | undefined;
+    let riskReviewApproved = false;
     if (
       reference &&
       (reference.policyRevision !== decision.revision ||
@@ -317,14 +365,19 @@ export class InteractionGate {
       }
     }
     if (request.kind === 'model') throw new AgentError('permission_denied', decision.reason);
-    if (decision.check && (!execution.interactionBinding || decision.check.requireApproval)) {
+    if (
+      decision.check &&
+      (!execution.interactionBinding ||
+        decision.check.requireApproval ||
+        (reference && isShellRiskRequest(decision.check.request)))
+    ) {
       if (!reference && scope.check && !scope.final) {
         const controller = new AbortController();
         const abort = () => controller.abort(scope.signal.reason);
         scope.signal.addEventListener('abort', abort, { once: true });
         if (scope.signal.aborted) abort();
         try {
-          reference =
+          const reviewed =
             (await Promise.race([
               scope.check(decision, controller.signal),
               this.policyChanged(
@@ -334,6 +387,8 @@ export class InteractionGate {
                 cursor,
               ),
             ])) ?? undefined;
+          if (reviewed && 'policyEvidenceId' in reviewed) policyEvidence = reviewed;
+          else reference = reviewed;
         } catch (error) {
           if (error instanceof AuthorizationRefreshRequired)
             await this.invalidateCheck(scope, decision, await this.permissions.authorize(request));
@@ -342,6 +397,24 @@ export class InteractionGate {
           controller.abort();
           scope.signal.removeEventListener('abort', abort);
         }
+      }
+      if (policyEvidence) {
+        const current = await this.permissions.authorize(request);
+        scope.signal.throwIfAborted();
+        await scope.checkFreshness?.();
+        if (
+          current.revision !== decision.revision ||
+          !current.check ||
+          current.check.requireApproval
+        )
+          throw new AuthorizationRefreshRequired();
+        return {
+          ...current,
+          allowed: true,
+          policyEvidenceId: policyEvidence.policyEvidenceId,
+          ...(policyEvidence.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+          ...(policyEvidence.snapshot ? { snapshot: policyEvidence.snapshot } : {}),
+        };
       }
       // Review/human waits are confined to the resource-free authorization phase.
       if (!reference && scope.final) throw new AgentError('authorization_refresh_required');
@@ -367,28 +440,47 @@ export class InteractionGate {
           throw new AgentError('authorization_check_binding_changed');
         }
         const checked = await this.store.getAuthorizationCheck(reference);
+        riskReviewApproved = checked.riskReviewApproved === true;
         // A configured checker that failed technically supplied no human decision.
         // Settle the undispatched operation so its caller can continue the Agent Loop.
         if (checked.decision === 'unavailable') {
           const check = await this.store.getExecution(checked.checkExecutionId);
           if (!check) throw new AgentError('authorization_check_unverifiable');
-          throw new AuthorizationCheckUnavailableError(
-            checked.checkExecutionId,
-            checked.reason,
-            check.result,
-          );
+          const timedOut =
+            check.result &&
+            typeof check.result === 'object' &&
+            !Array.isArray(check.result) &&
+            check.result.code === 'authorization_check_timeout';
+          if (!timedOut || !decision.check.requireApproval)
+            throw new AuthorizationCheckUnavailableError(
+              checked.checkExecutionId,
+              checked.reason,
+              check.result,
+            );
+          // The review budget never removes an independent human requirement.
+          decision = {
+            ...decision,
+            approval: {
+              ...decision.approval,
+              request: {
+                kind: 'approval_after_check_timeout',
+                checkExecutionId: checked.checkExecutionId,
+                originalRequest: decision.approval?.request ?? null,
+              },
+            },
+          };
         }
-        if (checked.decision === 'approve_once' && !decision.check.requireApproval)
+        if (checked.decision === 'approve_once' && !decision.check?.requireApproval)
           return {
             allowed: true,
             revision: decision.revision,
             checkExecutionId: checked.checkExecutionId,
+            ...(riskReviewApproved ? { riskReviewApproved: true as const } : {}),
             ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
             ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
           } satisfies AcceptedAuthorization;
         if (checked.decision === 'approve_once') checkedGrant = checked.checkExecutionId;
-        if (checked.decision === 'reject')
-          throw new AuthorizationCheckRejectedError(checked.reason);
+        if (checked.decision === 'reject') throw publicDenial(checked.reason, true);
         if (scope.final && !checkedGrant && !execution.interactionBinding)
           throw new AgentError('authorization_refresh_required');
       }
@@ -420,10 +512,7 @@ export class InteractionGate {
       !decision.approval &&
       !(decision.check && execution.interactionBinding)
     )
-      throw new AuthorizationDeniedError(
-        'permission_denied',
-        decision.reason ?? 'permission_denied',
-      );
+      throw publicDenial(decision.reason ?? 'permission_denied');
     if (scope.final && !execution.interactionBinding)
       throw new AgentError('authorization_refresh_required');
     const inputDigest = await semanticDigest(request.input);
@@ -503,7 +592,7 @@ export class InteractionGate {
     if (waited) decision = await this.permissions.authorize(request);
     scope.signal.throwIfAborted();
     if (!decision.allowed && !decision.approval && !decision.check)
-      throw new AgentError('permission_denied', decision.reason);
+      throw publicDenial(decision.reason ?? 'permission_denied');
     if (decision.revision !== interaction.policyRevision)
       await this.refresh(scope, interaction, decision);
     if (
@@ -557,6 +646,7 @@ export class InteractionGate {
       ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
       ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
       ...(checkedGrant ? { checkExecutionId: checkedGrant } : {}),
+      ...(riskReviewApproved ? { riskReviewApproved: true as const } : {}),
     } satisfies AcceptedAuthorization;
   }
 

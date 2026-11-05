@@ -91,6 +91,8 @@ export interface Message {
   readonly dispatchCommitted?: boolean;
   /** Host-verified Core freshness rejection before adapter dispatch; never inferred from text. */
   readonly decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
+  /** Host-verified successful builtin Files read with exists:false; no file content. */
+  readonly fileMissing?: true;
   readonly ask?: {
     /** Information cancellation is independent of the Tool or Run terminal state. */
     readonly cancelled?: boolean;

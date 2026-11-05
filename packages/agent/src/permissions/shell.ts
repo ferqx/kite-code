@@ -12,12 +12,14 @@ import {
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
 import { JobStartError } from '../extensions';
+import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
 import { shellToolCapability as describe } from './capabilities';
 import { dispatchScopeLeaves } from './dispatch-scope';
 import type { CapabilityDescription } from './index';
 import { createShellCommandPolicy } from './shell-command-policy';
 import { shellExplorationPresentation } from './shell-presentation';
+import { createShellRiskPreparer, type ShellRiskSnapshot } from './shell-risk-facts';
 import { readOnlySearchCommand } from './shell-search';
 
 export interface ShellConfigurationOptions {
@@ -120,78 +122,35 @@ export function hostExecutionScope(context: JobContext, definitionId = 'shell.co
 const permissionsSchema = {
   type: 'object',
   properties: {
-    filesystem: { enum: ['workspace_write', 'full_access'] },
-    network: { enum: ['none', 'internet'] },
+    filesystem: {
+      enum: ['workspace_write', 'full_access'],
+      description:
+        'Requested write scope. workspace_write is the default workspace and permitted private temporary-directory scope. full_access requests outside writes; it does not select Full approval mode or remove protected-resource restrictions.',
+    },
+    network: {
+      enum: ['none', 'internet'],
+      description:
+        'Requested network scope. none is the offline default; passing risk review does not grant network access. internet requests network access including localhost, 127.0.0.1, ::1, the local network and the Internet. Network and filesystem requests are independent.',
+    },
   },
   required: ['filesystem', 'network'],
   additionalProperties: false,
 };
+function shellCommandKind(request: AuthorizationRequest): 'tool' | 'job' | undefined {
+  if (request.definitionVersion !== '1') return undefined;
+  if (request.kind === 'tool' && ['shell.execute', 'shell.launch'].includes(request.definitionId))
+    return 'tool';
+  if (request.kind === 'job' && request.definitionId === 'shell.command') return 'job';
+  return undefined;
+}
 function commandRequest(request: AuthorizationRequest, scoped: boolean) {
-  const tool =
-    request.kind === 'tool' &&
-    ['shell.execute', 'shell.launch'].includes(request.definitionId) &&
-    request.definitionVersion === '1';
-  const job =
-    request.kind === 'job' &&
-    request.definitionId === 'shell.command' &&
-    request.definitionVersion === '1';
-  const value = request.input;
-  if (
-    (!tool && !job) ||
-    !value ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    typeof value.command !== 'string' ||
-    !value.command ||
-    value.command.length > 262144 ||
-    Object.keys(value).some(
-      (key) =>
-        !(
-          tool
-            ? [
-                'key',
-                'command',
-                'cancellation',
-                ...(request.definitionId === 'shell.execute' ? ['timeoutMs'] : []),
-                ...(scoped ? ['permissions'] : []),
-              ]
-            : ['command', ...(scoped ? ['permissions'] : [])]
-        ).includes(key),
-    ) ||
-    (request.definitionId === 'shell.execute' &&
-      value.timeoutMs !== undefined &&
-      (typeof value.timeoutMs !== 'number' ||
-        !Number.isInteger(value.timeoutMs) ||
-        value.timeoutMs < 1 ||
-        value.timeoutMs > 3600000)) ||
-    (tool &&
-      value.cancellation !== undefined &&
-      !['attached', 'detached'].includes(String(value.cancellation)))
-  )
-    return undefined;
-  const scope = value.permissions;
-  if (
-    scope !== undefined &&
-    (!scope ||
-      typeof scope !== 'object' ||
-      Array.isArray(scope) ||
-      Object.keys(scope).some((key) => !['filesystem', 'network'].includes(key)) ||
-      !['workspace_write', 'full_access'].includes(String(scope.filesystem)) ||
-      !['none', 'internet'].includes(String(scope.network)))
-  )
-    return undefined;
-  return {
-    command: value.command,
-    cancellation: tool ? (value.cancellation ?? 'attached') : null,
-    timeoutMs: request.definitionId === 'shell.execute' ? (value.timeoutMs ?? 600000) : null,
-    executionScope:
-      scope === undefined
-        ? { filesystem: 'workspace_write' as const, network: 'none' as const }
-        : {
-            filesystem: scope.filesystem as 'workspace_write' | 'full_access',
-            network: scope.network as 'none' | 'internet',
-          },
-  };
+  const kind = shellCommandKind(request);
+  if (!kind) return undefined;
+  return parseShellCommandInput(
+    request.input,
+    kind === 'job' ? 'job' : request.definitionId === 'shell.execute' ? 'execute' : 'launch',
+    scoped,
+  );
 }
 /** Read-only verification of trusted supervision assets; does not create a Job or process. */
 type ShellAsset = Awaited<ReturnType<typeof asset>>;
@@ -274,6 +233,7 @@ export async function createShellConfiguration(input: {
         _request: AuthorizationRequest,
       ): Promise<Partial<CapabilityDescription> | undefined> => undefined,
       commandDigest: (_request: AuthorizationRequest): string | undefined => undefined,
+      prepareRiskReview: async (_request: AuthorizationRequest) => null,
     };
   if (!input.options) throw new AgentError('shell_unavailable');
   const options = structuredClone(input.options);
@@ -297,6 +257,34 @@ export async function createShellConfiguration(input: {
         ...commandPolicy.assets.map((item) => item.path),
       ],
     };
+    const riskPreparer = createShellRiskPreparer({
+      cwd,
+      env: options.env,
+      rgPath: searchAsset.path,
+      interpreterPaths: [shell.path, bun.path],
+      protectedPaths: [
+        ...(host ? [host.controlBase, ...host.protectedRoots, ...(host.protectedFiles ?? [])] : []),
+        ...assets.map((item) => item.path),
+        ...commandPolicy.assets.map((item) => item.path),
+        searchAsset.path,
+      ],
+      binding: {
+        cwd,
+        env: Object.entries(options.env).sort(([a], [b]) => a.localeCompare(b)),
+        assets,
+        parserAssets: [...commandPolicy.assets],
+        configurationId: options.configurationId,
+      },
+      sanitizedEnvironment: !!host && !/zsh/i.test(shell.path),
+      classify: (command) => commandPolicy.classify(command),
+      rewritten: async (command) =>
+        readOnlySearchCommand(
+          (await commandPolicy.classify(command)).plainCommands,
+          shell.path,
+          coreutils?.path,
+        ) !== undefined,
+    });
+    const riskSnapshots = new Map<string, readonly ShellRiskSnapshot[]>();
     const jobOptions = {
       cwd,
       env: options.env,
@@ -360,8 +348,12 @@ export async function createShellConfiguration(input: {
           : {}),
         async start(value, context) {
           let dispatched = false;
+          const reviewedScripts = riskSnapshots.get(context.executionId);
+          riskSnapshots.delete(context.executionId);
           try {
             context.signal.throwIfAborted();
+            if (context.dispatchAuthorization?.riskReviewApproved && reviewedScripts)
+              await riskPreparer.verify(reviewedScripts, context.signal);
             const actual = await Promise.all(
               assets.map((item, index) =>
                 asset(item.path, index !== 0 || options.platform !== 'darwin'),
@@ -438,11 +430,29 @@ export async function createShellConfiguration(input: {
         job: { id: job.id, definitionVersion: job.version },
       },
       describe,
+      async prepareRiskReview(request: AuthorizationRequest) {
+        const kind = shellCommandKind(request);
+        if (!kind) return null;
+        const value = commandRequest(request, !!host);
+        if (!value) return null;
+        if (kind === 'job') riskSnapshots.delete(request.executionId);
+        const prepared = await riskPreparer.prepare(
+          value.command,
+          value.executionScope,
+          request.signal,
+        );
+        request.signal.throwIfAborted();
+        if (kind === 'job') riskSnapshots.set(request.executionId, prepared.snapshots);
+        return {
+          material: prepared.material,
+          fingerprint: prepared.fingerprint,
+          reusable: prepared.reusable,
+        };
+      },
       async describeRequest(
         request: AuthorizationRequest,
       ): Promise<Partial<CapabilityDescription> | undefined> {
-        if (!['shell.execute', 'shell.launch', 'shell.command'].includes(request.definitionId))
-          return undefined;
+        if (!shellCommandKind(request)) return undefined;
         const value = commandRequest(request, !!host);
         if (!value) return { hardAllowed: false, denialReason: 'invalid_shell_arguments' };
         const classified = await commandPolicy.classify(value.command);
@@ -452,7 +462,25 @@ export async function createShellConfiguration(input: {
           value.executionScope.network === 'none'
             ? { safeRead: true, effects: ['read'] as const }
             : {}),
-          ...(host ? { executionScope: value.executionScope } : {}),
+          ...(host
+            ? {
+                executionScope: value.executionScope,
+                autoTimeoutScope: value.executionScope,
+              }
+            : {}),
+          autoReviewKey: createHash('sha256')
+            .update(
+              JSON.stringify({
+                command: value.command,
+                cwd,
+                env: Object.entries(options.env).sort(([a], [b]) => a.localeCompare(b)),
+                assets,
+                parserAssets: commandPolicy.assets,
+                executionScope: host ? value.executionScope : null,
+                configurationId: options.configurationId,
+              }),
+            )
+            .digest('hex'),
           hardAllowed: classified.hardDenied === null,
           ...(classified.hardDenied ? { denialReason: 'shell_command_hard_denied' } : {}),
         };
@@ -474,6 +502,9 @@ export async function createShellConfiguration(input: {
               command: value.command,
               cancellation: value.cancellation,
               timeoutMs: value.timeoutMs,
+              ...(request.definitionId === 'shell.execute' && value.background
+                ? { background: true }
+                : {}),
               executionScope: host ? value.executionScope : null,
               cwd,
               env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),

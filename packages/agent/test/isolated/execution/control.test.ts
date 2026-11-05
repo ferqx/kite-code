@@ -98,7 +98,7 @@ const toolBase = {
   inputSchema: { type: 'object', additionalProperties: false },
 } as const;
 
-test('a tool that performs an effect then throws preserves outcome_unknown and cannot complete its Run', async () => {
+test('a tool that performs an effect then throws retains outcome_unknown through explanation without replay', async () => {
   const effects = mkdtempSync(join(tmpdir(), 'kite-external-effects-'));
   const ledger = join(effects, 'ledger');
   const data = await setup(
@@ -124,9 +124,12 @@ test('a tool that performs an effect then throws preserves outcome_unknown and c
     expect(readFileSync(ledger, 'utf8')).toBe('effect\n');
     expect(tool.status).toBe('outcome_unknown');
     expect(tool.result).toMatchObject({ outcome: 'outcome_unknown' });
-    expect(view.runs[0]!.status).toBe('failed');
+    expect(view.runs[0]!.status).toBe('completed');
     expect(view.runs[0]!.isActive).toBe(false);
-    expect(data.model.requests).toHaveLength(1);
+    expect(data.model.requests).toHaveLength(2);
+    const received = data.model.requests[1]!.messages.find((message) => message.role === 'tool');
+    expect(received?.content).toContain('unknown');
+    expect(received?.toolCallId).toBe(tool.callId);
     await data.submit('original');
     await data.runtime.waitForCommand('original');
     expect(readFileSync(ledger, 'utf8')).toBe('effect\n');
@@ -393,5 +396,108 @@ test('cancel commits during tool authorization before dispatch, then old cancel 
     authorizeSecondModel.release();
     await data.close();
     rmSync(effects, { recursive: true, force: true });
+  }
+}, 10_000);
+
+test('a Store-side execution cancellation retries a failed control read without another change event', async () => {
+  const entered = barrier();
+  const initiallyObserved = barrier();
+  const aborted = barrier();
+  const proceed = barrier();
+  let executionId = '';
+  let signal: AbortSignal | undefined;
+  let starts = 0;
+  let armed = false;
+  let failures = 0;
+  let readsAfterCancellation = 0;
+  let cursorAtRetry: string | undefined;
+  const data = await setup(
+    {
+      ...toolBase,
+      async execute(_input, context) {
+        starts++;
+        executionId = context.executionId;
+        signal = context.signal;
+        context.signal.addEventListener(
+          'abort',
+          () => {
+            aborted.release();
+            proceed.release();
+          },
+          { once: true },
+        );
+        entered.release();
+        await proceed.waiting;
+        return {
+          outcome: context.signal.aborted ? 'cancelled' : 'succeeded',
+          content: 'No external effect was attempted.',
+        };
+      },
+    },
+    {
+      async authorize() {
+        return { allowed: true, revision: 'fixture' };
+      },
+    },
+    [call, [finish]],
+  );
+  const getExecution = data.store.getExecution.bind(data.store);
+  data.store.getExecution = async (id) => {
+    if (id === executionId && executionId) {
+      if (!armed) initiallyObserved.release();
+      else {
+        readsAfterCancellation++;
+        if (!failures) {
+          failures++;
+          throw new AgentError('storage_error');
+        }
+        // Capture before returning the flags: the Tool cannot yet react and
+        // publish its terminal events, so this proves no later write woke retry.
+        cursorAtRetry = (await data.store.getMetadata()).lastChangeCursor;
+      }
+    }
+    return getExecution(id);
+  };
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error('control_cancel_retry_missing')), 3000);
+  });
+  try {
+    await data.submit('original');
+    await Promise.race([entered.waiting, deadline]);
+    await Promise.race([initiallyObserved.waiting, deadline]);
+    expect(signal!.aborted).toBe(false);
+    armed = true;
+    const { storeId: expectedStoreId } = await data.store.getMetadata();
+    // Direct Store write deliberately bypasses Runtime.cancelExecution and its
+    // immediate local abort notification; only durable control observation works.
+    const receipt = await data.store.cancelWork({
+      expectedStoreId,
+      commandId: 'store-stop',
+      sessionId: 'session',
+      subjectId: 'owner',
+      kind: 'execution.cancel',
+      executionId,
+    });
+    const stopCursor = (await data.store.getMetadata()).lastChangeCursor;
+    expect(receipt.receipt).toMatchObject({ outcome: 'cancel_requested' });
+    await Promise.race([aborted.waiting, deadline]);
+    expect(failures).toBe(1);
+    expect(readsAfterCancellation).toBeGreaterThanOrEqual(2);
+    expect(cursorAtRetry).toBe(stopCursor);
+    expect(signal!.reason).toMatchObject({ code: 'execution_cancel_requested' });
+    await data.runtime.waitForCommand('original');
+    expect(starts).toBe(1);
+    expect(await getExecution(executionId)).toMatchObject({
+      status: 'cancelled',
+      result: { outcome: 'cancelled' },
+    });
+    expect((await getExecution(executionId))!.cancelRequestedAt).not.toBeNull();
+    expect(data.model.requests).toHaveLength(2);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    data.store.getExecution = getExecution;
+    proceed.release();
+    await data.close();
   }
 }, 10_000);

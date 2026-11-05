@@ -18,6 +18,7 @@ async function fixture(
   checker: ModelAdapter,
   options: {
     cancelAtDispatchRead?: boolean;
+    requireApproval?: boolean;
     perRunDispose?(): Promise<void>;
     plannedCommandRead?: { entered(): void; released: Promise<void> };
   } = {},
@@ -104,7 +105,10 @@ async function fixture(
           ? {
               allowed: false,
               revision: 'policy',
-              check: { request: { task: 'exact operation', input: request.input } },
+              check: {
+                request: { task: 'exact operation', input: request.input },
+                ...(options.requireApproval ? { requireApproval: true } : {}),
+              },
             }
           : { allowed: true, revision: 'policy' };
       },
@@ -152,6 +156,7 @@ async function fixture(
     store,
     profile,
     runtime,
+    model,
     base,
     effects: () => effects,
     cancelledAtDispatchRead: () => cancelledAtDispatchRead,
@@ -161,62 +166,69 @@ async function fixture(
     },
   };
 }
-async function pendingApproval(f: Awaited<ReturnType<typeof fixture>>) {
-  const deadline = Date.now() + 3000;
-  while (Date.now() < deadline) {
-    const page = await f.runtime.listInteractions({
-      expectedStoreId: f.base.expectedStoreId,
-      sessionId: f.base.sessionId,
-      state: 'pending',
-    });
-    if (page.interactions[0]) return page.interactions[0];
-    await Bun.sleep(10);
-  }
-  throw new Error('Expected the real approval fallback');
-}
-
-test('metadata preparation failure settles its saved check without a Provider call and retains real human fallback', async () => {
-  let calls = 0;
-  const f = await fixture({
-    describeRequest() {
-      throw new Error('fixture metadata unavailable');
-    },
-    async *stream() {
-      calls++;
-      yield finish;
-    },
-  });
-  try {
-    const approval = await pendingApproval(f);
-    const checks = (await f.store.listExecutions('session')).filter(
-      (e) => e.kind === 'model' && e.runId === null,
+for (const requireApproval of [false, true])
+  test(`metadata preparation failure returns the original unexecuted result without inventing a human fallback (independent approval: ${requireApproval})`, async () => {
+    let calls = 0;
+    const f = await fixture(
+      {
+        describeRequest() {
+          throw new Error('fixture metadata unavailable');
+        },
+        async *stream() {
+          calls++;
+          yield finish;
+        },
+      },
+      { requireApproval },
     );
-    expect(checks).toHaveLength(1);
-    expect(checks[0]!.status).toBe('failed');
-    expect(calls).toBe(0);
-    expect(f.effects()).toBe(0);
-    await f.runtime.answerInteraction({
-      expectedStoreId: f.base.expectedStoreId,
-      commandId: 'approve',
-      presentationSessionId: 'session',
-      interactionId: approval.id,
-      expectedRevision: approval.revision,
-      subjectId: 'owner',
-      answer: { kind: 'approval', decision: 'approve' },
-    });
-    await f.runtime.waitForCommand('work');
-    expect(f.effects()).toBe(1);
-    expect(calls).toBe(0);
-    expect(
-      (await f.store.listExecutions('session')).filter(
-        (e) => e.kind === 'model' && e.runId === null,
-      ),
-    ).toHaveLength(1);
-    expect(await f.store.listSessions()).toHaveLength(1);
-  } finally {
-    await f.close();
-  }
-});
+    try {
+      await f.runtime.waitForCommand('work');
+      const executions = await f.store.listExecutions('session');
+      const checks = executions.filter((e) => e.kind === 'model' && e.runId === null);
+      expect(checks).toHaveLength(1);
+      expect(checks[0]!.status).toBe('failed');
+      expect(calls).toBe(0);
+      expect(f.effects()).toBe(0);
+      const tool = executions.find((execution) => execution.callId === 'effect')!;
+      expect(tool).toMatchObject({
+        status: 'failed',
+        authorization: { dispatched: false, check: { decision: 'unavailable', requireApproval } },
+        result: {
+          outcome: 'failed',
+          details: {
+            code: 'authorization_check_unavailable',
+            adapterAttempted: false,
+            dispatchCommitted: false,
+          },
+        },
+      });
+      expect(
+        (
+          await f.runtime.listInteractions({
+            expectedStoreId: f.base.expectedStoreId,
+            sessionId: 'session',
+          })
+        ).interactions,
+      ).toEqual([]);
+      expect(f.model.requests).toHaveLength(2);
+      const feedback = f.model.requests[1]!.messages.find(
+        (message) => message.toolCallId === 'effect',
+      )!;
+      expect(feedback.sourceIds).toEqual([tool.id]);
+      expect(feedback.content).toContain('could not complete');
+      expect(feedback.content).toContain('This operation was not executed');
+      expect(feedback.content).toContain('No approval or rejection decision was made');
+      expect(feedback.content).not.toContain('fixture metadata unavailable');
+      expect(
+        executions.filter(
+          (execution) => execution.runId === tool.runId && execution.kind === 'model',
+        ),
+      ).toHaveLength(2);
+      expect(await f.store.listSessions()).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
 
 test('a metadata hook receives an isolated request and cannot change the sealed input actually sent to the checker', async () => {
   let actual: ModelRequest | undefined;
@@ -248,7 +260,9 @@ test('a metadata hook receives an isolated request and cannot change the sealed 
     const saved = { ...(checks[0]!.input as Record<string, Json>) };
     delete saved.authorizationCheckBindingDigest;
     expect(actual as unknown).toEqual(saved);
-    const payload = JSON.parse(actual!.messages[0]!.content);
+    const payload = JSON.parse(
+      actual!.messages.find((message) => message.role === 'user')!.content,
+    );
     expect(payload).toMatchObject({
       purpose: 'authorization_check',
       target: { input: { value: 'exact' } },

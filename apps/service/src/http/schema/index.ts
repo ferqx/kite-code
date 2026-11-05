@@ -13,6 +13,8 @@ import {
 } from './file-checkpoints';
 import { HostStatusQuerySchema, HostStatusSchema } from './host-status';
 import {
+  AuthorizationPolicyReasonSchema,
+  AuthorizationScopeSchema,
   BrowserSessionLogQuerySchema,
   SessionLogDetailsSchema,
   SessionLogEntrySchema,
@@ -1075,6 +1077,16 @@ export const schemas = {
     authorization: z
       .object({
         dispatched: z.boolean(),
+        policy: z
+          .object({
+            evidenceId: id,
+            reason: AuthorizationPolicyReasonSchema,
+            sourceExecutionId: id.optional(),
+            checkExecutionId: id.optional(),
+            requestedScope: AuthorizationScopeSchema.optional(),
+            effectiveScope: AuthorizationScopeSchema.optional(),
+          })
+          .optional(),
         check: z
           .object({
             executionId: id,
@@ -1748,7 +1760,12 @@ const backgroundSession = schemas.Session.extend({
 export const BackgroundExecutionItemSchema = z.strictObject({
   seq: sequence,
   sourceTool: z
-    .strictObject({ id, definitionId: z.string(), definitionVersion: z.string() })
+    .strictObject({
+      id,
+      definitionId: z.string(),
+      definitionVersion: z.string(),
+      background: z.boolean().optional(),
+    })
     .optional(),
   execution: backgroundExecution,
   session: backgroundSession,

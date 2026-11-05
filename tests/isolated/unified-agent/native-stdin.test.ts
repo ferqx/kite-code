@@ -235,7 +235,6 @@ test.skipIf(process.platform !== 'darwin')(
         'search_content',
         'write_file',
         'shell_execute',
-        'shell_launch',
         'shell_read',
         'shell_stop',
         'shell_wait',

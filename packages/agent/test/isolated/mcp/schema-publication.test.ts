@@ -160,7 +160,8 @@ test('refresh cancellation after retiring original schemas invalidates the cache
     gate.release();
     expect(await refresh).toMatchObject({
       outcome: 'outcome_unknown',
-      content: 'mcp_refresh_unconfirmed',
+      content: expect.stringContaining('may still be running or have effects'),
+      details: { code: 'mcp_refresh_unconfirmed', adapterAttempted: true },
     });
     expect(f.adapter.getCatalogue().available).toBe(false);
     expect(f.scope.getCachedTools()).toEqual([]);
@@ -287,7 +288,11 @@ for (const operation of ['snapshot', 'refresh'] as const) {
       expect(await losing).toMatchObject(
         operation === 'snapshot'
           ? { code: 'mcp_catalogue_stale' }
-          : { outcome: 'outcome_unknown', content: 'mcp_refresh_unconfirmed' },
+          : {
+              outcome: 'outcome_unknown',
+              content: expect.stringContaining('may still be running or have effects'),
+              details: { code: 'mcp_refresh_unconfirmed', adapterAttempted: true },
+            },
       );
       expect(losingWorker.stopped).toBe(true);
       expect(winningWorker.stopped).toBe(false);

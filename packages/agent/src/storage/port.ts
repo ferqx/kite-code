@@ -110,6 +110,8 @@ export interface DispatchInput extends OwnedWrite {
     snapshot?: { namespace: string; version: string; data: Json };
     controlReads?: readonly PermissionControlRead[];
     checkExecutionId?: string;
+    policyEvidenceId?: string;
+    riskReviewApproved?: true;
     reviewExecutionId?: string;
     interactionId?: string;
     decisionRevision?: string;
@@ -237,6 +239,33 @@ export type AuthorizationCheckIdentity = AuthorizationReviewIdentity;
 export interface EnsureAuthorizationCheckInput
   extends Omit<EnsureAuthorizationReviewInput, 'reviewer'> {
   checker: AuthorizationCheckIdentity;
+  operationKey?: string;
+  /** Sealed host evidence for the explicit new Shell-risk contract only. */
+  riskReview?: import('../shell-risk-review').ShellRiskPreparation | null;
+  timeout?: { startedAt: number; deadlineAt: number };
+}
+export interface ResolveAutoAuthorizationInput extends OwnedWrite {
+  targetExecutionId: string;
+  decision: import('../extensions').PermissionDecision;
+  checker: AuthorizationCheckIdentity;
+  operationKey: string;
+  riskReview?: import('../shell-risk-review').ShellRiskPreparation | null;
+  timedOutCheckId?: string;
+}
+export interface ExecutionEvidenceStoreInput {
+  expectedStoreId: string;
+  sessionId: string;
+  runId: string;
+  callerExecutionId: string;
+  executionId?: string;
+  cursor?: string;
+  limit: number;
+}
+export interface AutoAuthorizationEvidence {
+  policyEvidenceId: string;
+  reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+  snapshot?: import('../extensions').PermissionDecision['snapshot'];
+  riskReviewApproved?: true;
 }
 export interface AuthorizationCheckFact {
   execution: ExecutionRecord;
@@ -254,6 +283,7 @@ export interface AuthorizationCheckResult {
   decision: AuthorizationReviewResult['decision'];
   reason: string;
   checkExecutionId: string;
+  riskReviewApproved?: true;
 }
 export interface PrepareAuthorizationCheckInput extends OwnedWrite {
   executionId: string;
@@ -269,6 +299,7 @@ export interface PersistAuthorizationCheckPartialInput extends OwnedWrite {
   content: string;
   reasoning?: string;
   firstOutput?: 'reasoning' | 'content';
+  usage?: Json;
   modelOutput?: import('../model-output').ModelOutputReference;
 }
 
@@ -786,6 +817,12 @@ export interface Store {
   persistInternalModelPartial(input: PersistAuthorizationCheckPartialInput): Promise<void>;
   finishInternalModel(input: Omit<FinishExecutionInput, 'message'>): Promise<ExecutionRecord>;
   ensureAuthorizationCheck(input: EnsureAuthorizationCheckInput): Promise<AuthorizationCheckFact>;
+  resolveAutoAuthorization(
+    input: ResolveAutoAuthorizationInput,
+  ): Promise<AutoAuthorizationEvidence | null>;
+  readExecutionEvidence(
+    input: ExecutionEvidenceStoreInput,
+  ): Promise<import('../business/execution-evidence').ExecutionEvidencePage>;
   prepareAuthorizationCheck(input: PrepareAuthorizationCheckInput): Promise<ExecutionRecord>;
   dispatchAuthorizationCheck(input: DispatchAuthorizationCheckInput): Promise<ExecutionRecord>;
   persistAuthorizationCheckPartial(input: PersistAuthorizationCheckPartialInput): Promise<void>;

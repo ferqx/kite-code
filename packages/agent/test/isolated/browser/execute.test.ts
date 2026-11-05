@@ -822,7 +822,9 @@ test.each([
     expect(f.states).toEqual([]);
     expect(
       f.model.requests[1]!.messages.some(
-        (message) => message.role === 'tool' && message.content.includes('invalid_tool_arguments'),
+        (message) =>
+          message.role === 'tool' &&
+          message.content.includes('arguments do not match the tool schema'),
       ),
     ).toBe(true);
   } finally {
@@ -1157,15 +1159,20 @@ test('an ordinary executor TypeError closes only its VM and the next Model conti
     const rows = await f.store.listExecutions('session');
     const batches = rows.filter((row) => row.definitionId === 'browser.execute');
     expect(batches.map((row) => row.status)).toEqual(['succeeded', 'failed', 'succeeded']);
-    expect((batches[1]!.result as unknown as ToolResult).content).toContain(
-      'fixture_vm_type_error',
-    );
-    expect(
-      f.model.requests[2]!.messages.find((message) => message.toolCallId === 'batch-1'),
-    ).toMatchObject({
-      sourceIds: [batches[1]!.id],
-      content: (batches[1]!.result as unknown as ToolResult).content,
+    expect((batches[1]!.result as unknown as ToolResult).details).toMatchObject({
+      code: 'browser_execution_failed',
     });
+    const failureFeedback = f.model.requests[2]!.messages.find(
+      (message) => message.toolCallId === 'batch-1',
+    );
+    expect(failureFeedback).toMatchObject({
+      role: 'tool',
+      sourceIds: [batches[1]!.id],
+    });
+    expect(failureFeedback!.content).toStartWith('The operation failed.');
+    expect(failureFeedback!.content).toEndWith(
+      (batches[1]!.result as unknown as ToolResult).content,
+    );
     expect(f.states).toHaveLength(2);
     expect(f.states[1]!.page).not.toBe(f.states[0]!.page);
     expect(rows.filter((row) => row.definitionId === 'browser.session')).toHaveLength(1);
@@ -1196,7 +1203,7 @@ test('process capacity one returns exact unavailable before either Job and the L
     const tool = executions.find((entry) => entry.definitionId === 'browser.execute')!;
     expect(tool).toMatchObject({
       status: 'failed',
-      result: { outcome: 'failed', content: 'browser_resource_capacity_unavailable' },
+      result: { outcome: 'failed', details: { code: 'browser_resource_capacity_unavailable' } },
     });
     expect(executions.filter((entry) => entry.kind === 'job')).toEqual([]);
     expect(f.authorizations).not.toContain('browser.code_session');
@@ -1209,7 +1216,7 @@ test('process capacity one returns exact unavailable before either Job and the L
     expect(f.model.requests[1]!.messages.find((entry) => entry.role === 'tool')).toMatchObject({
       toolCallId: tool.callId,
       sourceIds: [tool.id],
-      content: 'browser_resource_capacity_unavailable',
+      content: expect.stringContaining('requires more execution capacity'),
     });
     expect(await f.store.getRun(tool.runId!)).toMatchObject({ status: 'completed' });
     expect(
@@ -1395,15 +1402,21 @@ test('startup unknown after a visible starting page preserves the original Job r
       outer = rows.find((row) => row.definitionId === 'browser.execute')!;
     expect(original.status).toBe('outcome_unknown');
     expect(outer.status).toBe('outcome_unknown');
-    expect((outer.result as unknown as ToolResult).content).toContain(
-      (original.result as unknown as ToolResult).content,
-    );
+    expect((outer.result as unknown as ToolResult).details).toMatchObject({
+      diagnostic: { originalContent: (original.result as unknown as ToolResult).content },
+    });
     expect((outer.result as unknown as ToolResult).content).toContain(
       'did not confirm that automation stopped',
     );
     expect((outer.result as unknown as ToolResult).content).toContain(
-      'Diagnostic code: job_stop_unconfirmed; cause: browser_stop_unconfirmed',
+      'Open page request: accepted',
     );
+    expect((outer.result as unknown as ToolResult).content).not.toContain('Open page: completed');
+    expect((outer.result as unknown as ToolResult).details).toMatchObject({
+      code: 'job_stop_unconfirmed',
+      diagnostic: { code: 'browser_stop_unconfirmed' },
+    });
+    expect((outer.result as unknown as ToolResult).content).not.toContain('Diagnostic code:');
     expect((outer.result as unknown as ToolResult).content).not.toContain(
       'browser_startup_outcome_unknown',
     );
@@ -1415,7 +1428,10 @@ test('startup unknown after a visible starting page preserves the original Job r
     expect(rows.some((row) => row.definitionId === 'browser.snapshot')).toBe(false);
     expect(f.model.requests).toHaveLength(2);
     expect(f.model.requests[1]!.messages.find((row) => row.toolCallId === 'batch-0')).toMatchObject(
-      { sourceIds: [outer.id], content: (outer.result as unknown as ToolResult).content },
+      {
+        sourceIds: [outer.id],
+        content: expect.stringContaining((outer.result as unknown as ToolResult).content),
+      },
     );
     expect(f.native.filter((value) => obj(value).action === 'navigate')).toHaveLength(1);
     expect(f.executorCalls).toEqual(['0']);
@@ -1452,7 +1468,7 @@ test('an explicit read stays a known failure while its already bound Browser Job
       content: 'cancelled_before_dispatch',
       details: { adapterAttempted: false, dispatchCommitted: false },
     });
-    expect(outer.result).toMatchObject({
+    expect(structuredClone(outer.result)).toMatchObject({
       outcome: 'failed',
       content: expect.any(String),
       details: { executorStopped: true },
@@ -1470,7 +1486,10 @@ test('an explicit read stays a known failure while its already bound Browser Job
     ).toBe(true);
     expect(f.model.requests).toHaveLength(2);
     expect(f.model.requests[1]!.messages.find((row) => row.toolCallId === 'batch-0')).toMatchObject(
-      { content: (outer.result as unknown as ToolResult).content, sourceIds: [outer.id] },
+      {
+        content: expect.stringContaining((outer.result as unknown as ToolResult).content),
+        sourceIds: [outer.id],
+      },
     );
     expect(f.native.filter((value) => obj(value).action === 'snapshot')).toHaveLength(0);
     expect(f.native.filter((value) => obj(value).action === 'navigate')).toHaveLength(1);
@@ -1512,7 +1531,7 @@ for (const beforeNavigate of [true, false])
       expect((outer.result as unknown as ToolResult).content).toContain(
         beforeNavigate
           ? (original.result as unknown as ToolResult).content
-          : 'Diagnostic code: browser_startup_outcome_unknown',
+          : 'binding the target page or starting its navigation',
       );
       if (!beforeNavigate) {
         expect((outer.result as unknown as ToolResult).content).toContain('result remains unknown');
@@ -1864,7 +1883,7 @@ test('an ended nested Browser Job remains unknown while the original Tool result
         (entry) => entry.role === 'tool' && entry.toolCallId === 'batch-0',
       ),
     ).toMatchObject({
-      content: (outer.result as unknown as ToolResult).content,
+      content: expect.stringContaining((outer.result as unknown as ToolResult).content),
       sourceIds: [outer.id],
     });
     const messages = await f.store.listMessages('session');
@@ -1918,7 +1937,7 @@ for (const unconfirmedTransportClose of [false, true])
         expect(original.parentExecutionId).toBe(opened.id);
         expect(opened.parentExecutionId).toBe(outer.id);
         const originalResult = JSON.parse(JSON.stringify(original.result)) as Json;
-        expect(original.result).toMatchObject(
+        expect(structuredClone(original.result)).toMatchObject(
           unconfirmedTransportClose
             ? {
                 outcome: 'outcome_unknown',
@@ -1952,10 +1971,15 @@ for (const unconfirmedTransportClose of [false, true])
         const delivered = f.model.requests[1]!.messages.find(
           (message) => message.toolCallId === 'batch-0',
         )!;
-        expect(delivered).toMatchObject({ sourceIds: [outer.id], content: result.content });
+        expect(structuredClone(delivered)).toMatchObject({
+          sourceIds: [outer.id],
+          content: expect.stringContaining(result.content),
+        });
         if (unconfirmedTransportClose) {
           expect(delivered.content).toContain('did not confirm that automation stopped');
-          expect(delivered.content).toContain('cause: browser_stop_unconfirmed');
+          expect(result.details).toMatchObject({
+            diagnostic: { code: 'browser_stop_unconfirmed' },
+          });
           expect(delivered.content).not.toContain('browser_startup_outcome_unknown');
         } else {
           expect(delivered.content).toContain('binding the target page or starting its navigation');
@@ -1963,7 +1987,8 @@ for (const unconfirmedTransportClose of [false, true])
         }
         expect(delivered.content).toContain('may or may not have completed');
         expect(delivered.content).toContain('Do not replay');
-        expect(delivered.content).toContain(`Diagnostic code: ${diagnosticCode}`);
+        expect(delivered.content).not.toContain('Diagnostic code:');
+        expect(delivered.content).not.toContain(diagnosticCode);
         expect(delivered.content).not.toContain('user closed');
         expect(delivered.content).not.toContain('was not executed');
         expect(rows.filter((row) => row.definitionId === 'browser.session')).toHaveLength(1);
@@ -1981,12 +2006,19 @@ for (const unconfirmedTransportClose of [false, true])
         expect(interpreter.status).toBe('cancelled');
         expect(interpreter.result).toMatchObject({ outcome: 'cancelled' });
         const deliveredScope = f.model.requests[1]!.messages.find((message) =>
-          message.content.includes(interpreter.id),
+          message.content.includes('only the code environment lifecycle result'),
         )!;
         expect(deliveredScope.content).toContain('only the code environment lifecycle result');
         expect(deliveredScope.content).toContain('does not establish whether the user cancelled');
         expect(deliveredScope.content).toContain('whether any browser action completed');
-        expect(deliveredScope.content).toContain('"outcome":"cancelled"');
+        expect(deliveredScope.content).toContain('cancelled');
+        const selected = await f.store.getModelContext({
+          expectedStoreId: (await f.store.getMetadata()).storeId,
+          sessionId: 'session',
+        });
+        expect(
+          selected.resultSources.find((source) => source.id === deliveredScope.sourceIds?.[0]),
+        ).toMatchObject({ executionId: interpreter.id, result: interpreter.result });
         const saved = await f.store.getExecution(original.id);
         expect(saved?.resultRevision).toBe(original.resultRevision);
         expect(saved?.result).toEqual(originalResult);
@@ -2061,14 +2093,17 @@ for (const failure of [
           f.native.filter((value) => ['fill', 'click'].includes(String(obj(value).action))),
         ).toHaveLength(0);
         expect((batches[2]!.result as unknown as ToolResult).content).toContain('19');
-        expect(
-          f.model.requests[2]!.messages.find(
-            (entry) => entry.role === 'tool' && entry.toolCallId === batches[1]!.callId,
-          ),
-        ).toMatchObject({
+        const failureFeedback = f.model.requests[2]!.messages.find(
+          (entry) => entry.role === 'tool' && entry.toolCallId === batches[1]!.callId,
+        );
+        expect(failureFeedback).toMatchObject({
+          role: 'tool',
           sourceIds: [batches[1]!.id],
-          content: (batches[1]!.result as unknown as ToolResult).content,
         });
+        expect(failureFeedback!.content).toStartWith('The operation failed.');
+        expect(failureFeedback!.content).toEndWith(
+          (batches[1]!.result as unknown as ToolResult).content,
+        );
         expect(await f.store.getRun(batches[0]!.runId!)).toMatchObject({ status: 'completed' });
         expect(rows.filter((row) => row.definitionId === 'browser.code_session')).toHaveLength(1);
         expect(f.executorCloses).toBe(1);
@@ -2106,7 +2141,7 @@ realTest(
       ]);
       expect(batches[3]!.result).toMatchObject({
         outcome: 'failed',
-        content: 'browser_executor_code_limit',
+        details: { code: 'browser_executor_code_limit' },
       });
       expect(f.executorCalls).not.toContain(codes[3]!);
       expect(f.realBoundaries.slice(0, 4).map((entry) => entry.state)).toEqual([
@@ -2231,6 +2266,83 @@ realTest('real worker unknown remains original unknown and stops all dependent c
   }
 });
 
+for (const unknown of [false, true])
+  realTest(
+    `batch failure preserves prior output and exact operations for the next Model: unknown=${unknown}`,
+    async () => {
+      const originalOutput = '原始输出🪁 {"job":"客户单","metadata":{"dispatch":"业务值"}}';
+      const codes = [
+        realOpen,
+        unknown
+          ? `console.log("BEFORE_UNKNOWN"); console.log(${JSON.stringify(originalOutput)}); await page.fill(previousRef, "Ada"); console.log("AFTER_UNKNOWN_MUST_NOT_RUN");`
+          : `await page.fill(previousRef, "Ada"); console.log("COMPLETED_FILL"); console.log(${JSON.stringify(originalOutput)}); throw TypeError("fixture_evaluation_failure");`,
+      ];
+      const f = await fixture(
+        codes.map(() => async () => null),
+        {
+          realCodes: codes,
+          unknownFill: unknown,
+        },
+      );
+      try {
+        const rows = await f.store.listExecutions('session');
+        const batch = rows.filter((row) => row.definitionId === 'browser.execute')[1]!;
+        const child = rows.find(
+          (row) => row.parentExecutionId === batch.id && row.definitionId === 'browser.fill',
+        )!;
+        expect(batch.status).toBe(unknown ? 'outcome_unknown' : 'failed');
+        expect(child.status).toBe(unknown ? 'outcome_unknown' : 'succeeded');
+        const result = batch.result as unknown as ToolResult;
+        expect(result.content).toContain(unknown ? 'BEFORE_UNKNOWN' : 'COMPLETED_FILL');
+        expect(result.content).not.toContain('AFTER_UNKNOWN_MUST_NOT_RUN');
+        expect(obj(result.details!).operations).toContainEqual(
+          expect.objectContaining({ executionId: child.id, definitionId: 'browser.fill' }),
+        );
+        expect(result.content).toContain('Fill field:');
+        expect(result.content).not.toContain(child.id);
+        const delivered = [...f.model.requests.at(-1)!.messages]
+          .reverse()
+          .find((m) => m.role === 'tool')!;
+        expect(delivered.content).toContain(result.content);
+        expect(delivered.content).toContain(unknown ? 'result remains unknown' : 'evaluation');
+        expect(delivered.content).toContain(originalOutput);
+        expect(delivered.content).not.toContain('Browser batch observations');
+        expect(delivered.content).not.toContain(child.id);
+        expect(delivered.toolCallId).toBe('batch-1');
+        expect(delivered.sourceIds).toEqual([batch.id]);
+        if (!unknown) expect(delivered.content).toContain('TypeError: fixture_evaluation_failure');
+        expect(f.native.filter((value) => obj(value).action === 'fill')).toHaveLength(1);
+      } finally {
+        await f.close();
+      }
+    },
+    15000,
+  );
+
+test('an arbitrary executor exception cannot manufacture partial output or leak its private message', async () => {
+  const secret = 'PRIVATE_EXECUTOR_EXCEPTION_BODY';
+  const f = await fixture([
+    open,
+    async () => {
+      throw Object.assign(new Error(secret), { name: 'BrowserExecutorFailure', output: secret });
+    },
+  ]);
+  try {
+    const rows = await f.store.listExecutions('session');
+    const batch = rows.filter((row) => row.definitionId === 'browser.execute')[1]!;
+    expect(batch.status).toBe('failed');
+    expect(JSON.stringify(batch.result)).not.toContain(secret);
+    const delivered = [...f.model.requests.at(-1)!.messages]
+      .reverse()
+      .find((m) => m.role === 'tool')!;
+    expect(delivered.content).toContain('browser code could not complete');
+    expect(delivered.content).not.toContain('browser_execution_failed');
+    expect(delivered.content).not.toContain(secret);
+  } finally {
+    await f.close();
+  }
+});
+
 realTest(
   'real worker explicit observation failure keeps the opened page until normal final',
   async () => {
@@ -2284,12 +2396,17 @@ realTest(
       expect(obj((batches[1]!.result as unknown as ToolResult).details!).code).toBe(
         'browser_executor_timeout',
       );
-      expect(
-        f.model.requests[2]!.messages.find((message) => message.toolCallId === 'batch-1'),
-      ).toMatchObject({
+      const failureFeedback = f.model.requests[2]!.messages.find(
+        (message) => message.toolCallId === 'batch-1',
+      );
+      expect(failureFeedback).toMatchObject({
+        role: 'tool',
         sourceIds: [batches[1]!.id],
-        content: (batches[1]!.result as unknown as ToolResult).content,
       });
+      expect(failureFeedback!.content).toStartWith('The operation failed.');
+      expect(failureFeedback!.content).toEndWith(
+        (batches[1]!.result as unknown as ToolResult).content,
+      );
       expect(rows.filter((row) => row.definitionId === 'browser.code_session')).toHaveLength(2);
       expect(rows.filter((row) => row.definitionId === 'browser.session')).toHaveLength(1);
       expect(f.realBoundaries.map((entry) => entry.state)).toEqual(['agent', 'agent']);
@@ -2350,12 +2467,17 @@ for (const failure of ['read', 'code'] as const)
         const firstRun = await f.store.getRun(firstBatches[0]!.runId!);
         expect(firstRun).toMatchObject({ status: 'completed', isActive: false });
         const old = obj(obj((firstBatches[0]!.result as unknown as ToolResult).details!).value!);
-        expect(
-          f.model.requests[2]!.messages.find((message) => message.toolCallId === 'batch-1'),
-        ).toMatchObject({
+        const failureFeedback = f.model.requests[2]!.messages.find(
+          (message) => message.toolCallId === 'batch-1',
+        );
+        expect(failureFeedback).toMatchObject({
+          role: 'tool',
           sourceIds: [firstBatches[1]!.id],
-          content: (firstBatches[1]!.result as unknown as ToolResult).content,
         });
+        expect(failureFeedback!.content).toStartWith('The operation failed.');
+        expect(failureFeedback!.content).toEndWith(
+          (firstBatches[1]!.result as unknown as ToolResult).content,
+        );
         expect(f.model.requests).toHaveLength(3);
         expect(f.mainPage.clicks).toBe(1);
         expect(JSON.stringify(f.model.requests)).not.toContain(f.mainIdentity.pageId);
@@ -3255,8 +3377,12 @@ for (const code of ['browser_page_existing_missing', 'browser_page_existing_mism
         const delivered = f.model.requests[3]!.messages.find(
           (message) => message.toolCallId === 'batch-1',
         )!;
-        expect(delivered).toMatchObject({ sourceIds: [batch.id], content: result.content });
-        expect(delivered.content).toContain(`Diagnostic code: ${code}`);
+        expect(structuredClone(delivered)).toMatchObject({
+          sourceIds: [batch.id],
+          content: expect.stringContaining(result.content),
+        });
+        expect(delivered.content).not.toContain('Diagnostic code:');
+        expect(delivered.content).not.toContain(code);
         expect(rows.filter((row) => row.definitionId === 'browser.session')).toHaveLength(1);
         expect(
           rows.filter((row) => row.kind === 'tool' && row.parentExecutionId === batch.id),
@@ -3314,11 +3440,14 @@ realTest(
       const delivered = f.model.requests[3]!.messages.find(
         (message) => message.toolCallId === 'batch-1',
       )!;
-      expect(delivered).toMatchObject({ sourceIds: [batch.id], content: result.content });
+      expect(structuredClone(delivered)).toMatchObject({
+        sourceIds: [batch.id],
+        content: expect.stringContaining(result.content),
+      });
       expect(delivered.content).toContain('target page or its control connection may have ended');
       expect(delivered.content).toContain('may or may not have completed');
       expect(delivered.content).toContain('Do not replay');
-      expect(delivered.content).toContain('Diagnostic code: browser_action_outcome_unknown');
+      expect(delivered.content).not.toContain('browser_action_outcome_unknown');
       expect(delivered.content).not.toContain('was not executed');
       expect(delivered.content).not.toContain('user closed');
       expect(f.native.filter((value) => obj(value).action === 'fill')).toHaveLength(1);
@@ -3413,7 +3542,7 @@ realTest('UTF8 code limit is rejected before any environment or process admissio
     const rows = await f.store.listExecutions('session');
     expect(rows.filter((row) => row.definitionId === 'browser.execute')[0]!.result).toMatchObject({
       outcome: 'failed',
-      content: 'browser_executor_code_limit',
+      details: { code: 'browser_executor_code_limit' },
     });
     expect(rows.filter((row) => row.kind === 'job')).toEqual([]);
     expect(f.executorCalls).toEqual([]);

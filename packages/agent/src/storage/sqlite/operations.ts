@@ -49,6 +49,7 @@ import {
   prepareAuthorizationCheck,
   verifyAuthorizationCheckDispatch,
 } from './authorization-check';
+import { resolveAutoAuthorization } from './authorization-policy-evidence';
 import {
   ensureAuthorizationReview,
   executionAuthorizationObservation,
@@ -82,6 +83,7 @@ import {
 import { callContextSelection } from './context-selection-operations';
 import { readDirectory } from './directory';
 import { assertDispatchReadSet } from './dispatch-read-set';
+import { readExecutionEvidence } from './execution-evidence';
 import {
   assertNoExecutionGroupFence,
   readExecutionGroupSafetySnapshot,
@@ -1117,6 +1119,16 @@ export class SqliteOperations {
           this,
           args[0] as Parameters<Store['ensureAuthorizationCheck']>[0],
         );
+      case 'resolveAutoAuthorization':
+        return resolveAutoAuthorization(
+          this,
+          args[0] as Parameters<Store['resolveAutoAuthorization']>[0],
+        );
+      case 'readExecutionEvidence':
+        return readExecutionEvidence(
+          this,
+          args[0] as Parameters<Store['readExecutionEvidence']>[0],
+        );
       case 'prepareAuthorizationCheck':
         return prepareAuthorizationCheck(
           this,
@@ -1814,7 +1826,8 @@ export class SqliteOperations {
             verifyModelBody(this, parse(execution.intent_json), execution);
             verifyModelBody(this, parse(execution.model_snapshot_json), execution);
           }
-          verifyModelBody(this, parse(execution.decision_source_json), execution);
+          const decisionSource = parse(execution.decision_source_json);
+          verifyModelBody(this, decisionSource, execution);
           if (
             execution.state !== 'planned' ||
             execution.cancel_requested ||
@@ -1849,7 +1862,15 @@ export class SqliteOperations {
               this,
               String(execution.run_id),
               humanInputInterpretation(this, execution) ?? undefined,
-              execution.kind === 'tool',
+              // A completion decision is outside the Model's foreground batch;
+              // accepted input must win before this stale decision dispatches.
+              execution.kind === 'tool' &&
+                !(
+                  decisionSource !== null &&
+                  typeof decisionSource === 'object' &&
+                  !Array.isArray(decisionSource) &&
+                  decisionSource.kind === 'completion_decision'
+                ),
             );
           assertMutationIntent(this, execution);
           verifyPermissionGrantDispatch(this, input);

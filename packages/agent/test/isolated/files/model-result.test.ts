@@ -90,6 +90,45 @@ test('read presentation preserves exact body and the complete baseline remains u
   ).toBeUndefined();
 });
 
+test('external read presentation preserves an available native baseline without granting write authority', async () => {
+  const f = fixture();
+  f.put('external.txt', 'original\n');
+  const read = await f.execute('files.read', { path: 'external.txt' });
+  const body = { ...JSON.parse(read.content), path: join(f.root, 'external.txt') };
+  const result: ToolResult = {
+    ...read,
+    content: JSON.stringify(body),
+    details: { fileScope: 'external_path', workspaceCheckpoint: false },
+  };
+  const original = JSON.stringify(result);
+  const presented = formatFileReadResult({ result })!;
+  const baseline = JSON.parse(
+    presented
+      .split('\n')
+      .find((line) => line.startsWith('baseline='))!
+      .slice('baseline='.length),
+  );
+  expect(baseline).toEqual(body.baseline);
+  expect(presented).toContain('Baseline does not grant write permission');
+  expect(presentedBody(presented)).toBe('original\n');
+  const edit = await f.execute('files.edit', {
+    path: body.path,
+    base: baseline,
+    find: 'original',
+    replace: 'updated',
+    occurrences: 1,
+  });
+  expect(edit.outcome).toBe('succeeded');
+  expect((await f.files.read('external.txt')).content).toBe('updated\n');
+  expect(JSON.stringify(result)).toBe(original);
+  const { baseline: _baseline, ...legacy } = body;
+  const oldResult = formatFileReadResult({
+    result: { ...result, content: JSON.stringify(legacy) },
+  })!;
+  expect(oldResult).toContain('External read-only file; no edit baseline.');
+  expect(oldResult).not.toContain('baseline=');
+});
+
 test('read presentation distinguishes a suffix/window, an empty file and an empty EOF selection', async () => {
   const f = fixture();
   f.put('a', 'one\ntwo\nthree\n');

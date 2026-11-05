@@ -9,11 +9,41 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { shellProcessEvidenceEnded } from '@kite-ai/agent/jobs/shell';
+import { WebFetchError } from '@kite-ai/agent/web-fetch';
+import { resolveModelTransport } from '../../../apps/service/src/model-transport';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import type { ContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyPairedServiceResources } from '../../../scripts/runtime/unified-soak-service-resources';
+import { loopbackModelEnvironment } from '../../fixtures/loopback-model-environment';
 import { temporaryDirectory } from '../../fixtures/test-filesystem';
+
+test('the continuous local Provider route excludes unsupported OS proxy discovery without changing production transport', async () => {
+  let discoveries = 0;
+  const systemProxy = async () => {
+    discoveries++;
+    throw new WebFetchError('web_proxy_protocol_unsupported');
+  };
+  await expect(resolveModelTransport({ env: {}, systemProxy })).rejects.toMatchObject({
+    code: 'model_proxy_protocol_unsupported',
+  });
+  const before = { ...process.env };
+  const env = loopbackModelEnvironment(new URL('http://127.0.0.1:43123/'));
+  const transport = await resolveModelTransport({ env, systemProxy });
+  expect(transport.fetch).toBe(fetch);
+  expect(discoveries).toBe(1);
+  expect(env.NO_PROXY).toBe('127.0.0.1,localhost');
+  expect(env.no_proxy).toBe(env.NO_PROXY);
+  expect(env.HTTP_PROXY).toBe('http://127.0.0.1:43123');
+  expect(env.http_proxy).toBe(env.HTTP_PROXY);
+  expect(env.ALL_PROXY).toBe(env.HTTP_PROXY);
+  expect(env.all_proxy).toBe(env.HTTP_PROXY);
+  expect(process.env).toEqual(before);
+  for (const url of ['https://127.0.0.1', 'http://remote.test', 'http://user:secret@127.0.0.1'])
+    expect(() => loopbackModelEnvironment(new URL(url))).toThrow(
+      'loopback_model_provider_required',
+    );
+});
 
 test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'two default packaged Services run twenty original Sessions with real Files, child Agents and Shell work; cold facts cannot qualify padded elapsed time',

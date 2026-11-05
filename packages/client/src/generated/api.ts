@@ -301,6 +301,20 @@ export type SessionLogDetails = {
   executionId?: string;
   interactionId?: string;
   attempt?: number;
+  policy?: {
+    targetExecutionId: string;
+    policyEvidenceId: string;
+    reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+    source: { kind: 'check' | 'policy'; id: string; targetExecutionId?: string };
+    requestedScope: {
+      filesystem: 'workspace_write' | 'full_access';
+      network: 'none' | 'internet';
+    } | null;
+    effectiveScope: {
+      filesystem: 'workspace_write' | 'full_access';
+      network: 'none' | 'internet';
+    } | null;
+  };
 };
 export type SessionLogEntry = {
   cursor: string;
@@ -353,6 +367,20 @@ export type SessionLogEntry = {
     executionId?: string;
     interactionId?: string;
     attempt?: number;
+    policy?: {
+      targetExecutionId: string;
+      policyEvidenceId: string;
+      reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+      source: { kind: 'check' | 'policy'; id: string; targetExecutionId?: string };
+      requestedScope: {
+        filesystem: 'workspace_write' | 'full_access';
+        network: 'none' | 'internet';
+      } | null;
+      effectiveScope: {
+        filesystem: 'workspace_write' | 'full_access';
+        network: 'none' | 'internet';
+      } | null;
+    };
   };
   modelExecutionId: string | null;
 };
@@ -414,6 +442,20 @@ export type SessionLogPage = {
       executionId?: string;
       interactionId?: string;
       attempt?: number;
+      policy?: {
+        targetExecutionId: string;
+        policyEvidenceId: string;
+        reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+        source: { kind: 'check' | 'policy'; id: string; targetExecutionId?: string };
+        requestedScope: {
+          filesystem: 'workspace_write' | 'full_access';
+          network: 'none' | 'internet';
+        } | null;
+        effectiveScope: {
+          filesystem: 'workspace_write' | 'full_access';
+          network: 'none' | 'internet';
+        } | null;
+      };
     };
     modelExecutionId: string | null;
   }>;
@@ -2066,6 +2108,20 @@ export type Execution = {
   id: string;
   authorization?: {
     dispatched: boolean;
+    policy?: {
+      evidenceId: string;
+      reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+      sourceExecutionId?: string;
+      checkExecutionId?: string;
+      requestedScope?: {
+        filesystem: 'workspace_write' | 'full_access';
+        network: 'none' | 'internet';
+      };
+      effectiveScope?: {
+        filesystem: 'workspace_write' | 'full_access';
+        network: 'none' | 'internet';
+      };
+    };
     check?: {
       executionId: string;
       status:
@@ -2416,7 +2472,12 @@ export type BackgroundExecutionQuery = {
 };
 export type BackgroundExecutionItem = {
   seq: string;
-  sourceTool?: { id: string; definitionId: string; definitionVersion: string };
+  sourceTool?: {
+    id: string;
+    definitionId: string;
+    definitionVersion: string;
+    background?: boolean;
+  };
   execution: {
     id: string;
     sessionId: string;
@@ -2551,7 +2612,12 @@ export type BackgroundExecutionPage = {
   snapshotCursor: string;
   items: Array<{
     seq: string;
-    sourceTool?: { id: string; definitionId: string; definitionVersion: string };
+    sourceTool?: {
+      id: string;
+      definitionId: string;
+      definitionVersion: string;
+      background?: boolean;
+    };
     execution: {
       id: string;
       sessionId: string;
@@ -2871,6 +2937,20 @@ export type BrowserView = {
     id: string;
     authorization?: {
       dispatched: boolean;
+      policy?: {
+        evidenceId: string;
+        reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+        sourceExecutionId?: string;
+        checkExecutionId?: string;
+        requestedScope?: {
+          filesystem: 'workspace_write' | 'full_access';
+          network: 'none' | 'internet';
+        };
+        effectiveScope?: {
+          filesystem: 'workspace_write' | 'full_access';
+          network: 'none' | 'internet';
+        };
+      };
       check?: {
         executionId: string;
         status:
@@ -3613,6 +3693,20 @@ export type SessionView = {
     id: string;
     authorization?: {
       dispatched: boolean;
+      policy?: {
+        evidenceId: string;
+        reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
+        sourceExecutionId?: string;
+        checkExecutionId?: string;
+        requestedScope?: {
+          filesystem: 'workspace_write' | 'full_access';
+          network: 'none' | 'internet';
+        };
+        effectiveScope?: {
+          filesystem: 'workspace_write' | 'full_access';
+          network: 'none' | 'internet';
+        };
+      };
       check?: {
         executionId: string;
         status:

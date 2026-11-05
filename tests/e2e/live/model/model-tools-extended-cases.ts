@@ -3,10 +3,11 @@ import { join } from 'node:path';
 import type { ExecutionRecord, RunRecord, Store } from '@kite-ai/agent/storage';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
 import type { AgentClient } from '@kite-ai/client';
+import { originalShellJobHandle } from '../../../fixtures/unified-agent/shell-model-feedback';
 
 export const extendedToolGroups: Record<string, readonly string[]> = {
   'files-conflict': ['read_file', 'edit_file', 'shell_execute'],
-  'shell-isolation': ['shell_launch', 'shell_read', 'shell_wait', 'shell_stop', 'write_file'],
+  'shell-isolation': ['shell_execute', 'shell_read', 'shell_wait', 'shell_stop', 'write_file'],
   'execution-timeout': ['shell_execute'],
   'agents-parallel-mail': ['spawn_agent', 'send_agent_message', 'wait_agent_events', 'list_agents'],
   'agent-interrupt-reuse': ['spawn_agent', 'interrupt_agent', 'follow_up_agent', 'list_agents'],
@@ -122,7 +123,7 @@ export async function runExtendedToolCases(c: Context) {
 
   await c.run(
     'shell-isolation',
-    "Launch exactly TWO independent background Shells with distinct keys A-shell and B-shell. In this case use shell_launch/read/wait/stop and write_file only. NEVER call shell_execute, and never invent a placeholder command to represent a wait; zero observation means shell_wait with shell_id B-shell and wait_timeout_ms:0. Each uses workspace_write/no-network. A command: printf A_READY; while [ ! -f release-a ]; do sleep 0.1; done; printf A_DONE . B command: printf B_READY; while [ ! -f release-b ]; do sleep 0.1; done; printf B_DONE . Use shell_read to confirm both READY outputs, and shell_wait with wait_timeout_ms:0 for B to confirm that this observation does not stop it. Stop ONLY A with shell_stop command_id stop-A-only. Wait for A's actual cancelled terminal. Then shell_read B again and confirm it is still running. Create release-b with write_file base:null, then wait for B to complete naturally and read B_DONE. Do not stop or relaunch B, or create release-a. Report each distinct terminal and whether stopping A affected B.",
+    "Launch exactly TWO distinct background Shells using shell_execute with background:true, and keep the returned shell_id of A and B. Use shell_execute/read/wait/stop and write_file only. Never invent a placeholder command to represent a wait; zero observation means shell_wait with B's returned shell_id and wait_timeout_ms:0. Each uses workspace_write/no-network. A command: printf A_READY; while [ ! -f release-a ]; do sleep 0.1; done; printf A_DONE . B command: printf B_READY; while [ ! -f release-b ]; do sleep 0.1; done; printf B_DONE . Use shell_read to confirm both READY outputs, and shell_wait with wait_timeout_ms:0 for B to confirm that this observation does not stop it. Stop ONLY A with shell_stop command_id stop-A-only. Wait for A's actual cancelled terminal. Then shell_read B again and confirm it is still running. Create release-b with write_file base:null, then wait for B to complete naturally and read B_DONE. Do not stop or relaunch B, or create release-a. Report each distinct terminal and whether stopping A affected B.",
     false,
     {
       async verify(executions) {
@@ -140,9 +141,14 @@ export async function runExtendedToolCases(c: Context) {
           'both_shell_trees_closed',
         );
         const reads = executions.filter((entry) => entry.definitionId === 'shell.read');
+        const bTool = executions.find((entry) => entry.id === b.parentExecutionId);
+        const bHandle = originalShellJobHandle(bTool, b);
+        check(bHandle, 'original_B_runtime_handle');
         const bRunning = reads.filter(
           (entry) =>
-            object(entry.input).shellId === 'B-shell' &&
+            object(entry.input).shellId === bHandle &&
+            object(resultDetails(entry).ref).executionId === b.id &&
+            object(resultDetails(entry).execution).id === b.id &&
             object(resultDetails(entry).execution).status === 'running',
         );
         check(bRunning.length >= 2 && b.cancelRequestedAt === null, 'sibling_survived_stop');
@@ -157,7 +163,7 @@ export async function runExtendedToolCases(c: Context) {
 
   await c.run(
     'execution-timeout',
-    'Use shell_execute key timeout-once with command "printf TIMEOUT_STARTED; sleep 120", execution_timeout_ms:1500, workspace_write/no-network. This deliberately tests an execution deadline. Inspect the actual failed timeout result and original cancelled Job cleanup, do not retry it. Then issue a separate shell_execute key after-timeout with command "printf AFTER_TIMEOUT" and the same narrow permissions. Report the confirmed timeout and the later successful command.',
+    'Use shell_execute with command "printf TIMEOUT_STARTED; sleep 120", execution_timeout_ms:1500, workspace_write/no-network. This deliberately tests an execution deadline. Inspect the actual failed timeout result and original cancelled Job cleanup, do not retry it. Then issue a separate shell_execute with command "printf AFTER_TIMEOUT" and the same narrow permissions. Report the confirmed timeout and the later successful command.',
     false,
     {
       expectedFailure: (entry) =>
@@ -275,7 +281,7 @@ export async function runExtendedToolCases(c: Context) {
   const denied = join(c.root, 'denied-external.txt');
   await c.run(
     'approval-deny',
-    `Request exactly one shell_execute key deny-external with command ${JSON.stringify(`printf denied > '${denied.replaceAll('\\', '/')}'`)} and permissions full_access/no-network. The fixture will deny its real approval. Do not retry, widen or substitute the command.`,
+    `Request exactly one shell_execute with command ${JSON.stringify(`printf denied > '${denied.replaceAll('\\', '/')}'`)} and filesystem:full_access,network:none. The fixture will deny its real approval. Do not retry, widen or substitute the command.`,
     false,
     {
       mode: 'accept_edits',
@@ -308,7 +314,7 @@ export async function runExtendedToolCases(c: Context) {
   const approved = join(c.root, 'approved-external.txt');
   await c.run(
     'approval-external',
-    `Use shell_execute key approved-external with command ${JSON.stringify(`printf 'approved-${c.marker}' >> '${approved.replaceAll('\\', '/')}'`)} and explicit full_access/no-network. Wait for the real Tool and Job approval cards; do not retry or change the operation. After execution read that absolute file using read_file and report its actual token.`,
+    `Use shell_execute with command ${JSON.stringify(`printf 'approved-${c.marker}' >> '${approved.replaceAll('\\', '/')}'`)} and explicit filesystem:full_access,network:none. Wait for the real Tool and Job approval cards; do not retry or change the operation. After execution read that absolute file using read_file and report its actual token.`,
     false,
     {
       mode: 'accept_edits',
@@ -340,7 +346,7 @@ export async function runExtendedToolCases(c: Context) {
   const guidanceIds = ['guide-first', 'guide-correction'];
   await c.run(
     'active-guidance',
-    'First execute shell_execute key guidance-wait command "printf ready > guidance-ready; while [ ! -f guidance-release ]; do sleep 0.1; done; printf GUIDANCE_RELEASED" with workspace_write/no-network. The fixture will send two real user guidance messages during that operation. After it finishes, follow the latest user guidance and report both check codes and the final color. Do not create guidance-release, guess the codes or finish before the command completes.',
+    'First execute shell_execute command "printf ready > guidance-ready; while [ ! -f guidance-release ]; do sleep 0.1; done; printf GUIDANCE_RELEASED" with workspace_write/no-network. The fixture will send two real user guidance messages during that operation. After it finishes, follow the latest user guidance and report both check codes and the final color. Do not create guidance-release, guess the codes or finish before the command completes.',
     false,
     {
       async onTick(run) {
@@ -402,7 +408,7 @@ export async function runExtendedToolCases(c: Context) {
 
   await c.run(
     'client-reconnect',
-    `Remember the exact token RECONNECT-${c.marker}. Use shell_execute key reconnect-once with command "printf once >> reconnect-effect.txt" and workspace_write/no-network, then reply with the token. The initial HTTP response will be lost; do not repeat the command.`,
+    `Remember the exact token RECONNECT-${c.marker}. Use shell_execute with command "printf once >> reconnect-effect.txt" and workspace_write/no-network, then reply with the token. The initial HTTP response will be lost; do not repeat the command.`,
     false,
     {
       async verify(_executions, first) {

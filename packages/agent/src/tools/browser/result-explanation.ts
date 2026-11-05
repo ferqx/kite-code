@@ -1,6 +1,62 @@
 import type { Json, ToolResult } from '../../extensions';
 
 const explanations: Readonly<Record<string, string>> = {
+  permission_denied:
+    'A page operation reported a permission restriction. Check its recorded permission and page results; this error alone does not establish a user refusal or show whether earlier effects occurred.',
+  approval_denied:
+    'Approval was not obtained for a page operation. Respect a verified refusal and do not bypass it; inspect the original page result before continuing.',
+  browser_execution_run_required:
+    'The current task context is unavailable. Browser code cannot be started from this request.',
+  browser_resource_capacity_unavailable:
+    'Browser automation requires more execution capacity than is available. This request cannot start a browser code environment under the current limits.',
+  browser_executor_code_limit:
+    'The browser code is empty or exceeds the supported code size. Supply nonempty code within the declared limit; do not repeat earlier page actions while correcting it.',
+  browser_execution_scope_unavailable:
+    'The current browser operation could not be verified within this task. Do not reuse an older code environment or replay earlier page actions to recover it.',
+  browser_execution_cancelled:
+    'The browser code request was cancelled. Earlier page actions keep their recorded outcomes.',
+  browser_executor_ended_before_ready:
+    'The browser code environment ended before it became ready. No usable code environment was returned.',
+  browser_control_handed_off:
+    'Browser control was handed to the user. Automation cannot continue through the old page handles.',
+  browser_execution_failed:
+    'The browser code could not complete. No more specific public cause was confirmed; its private exception text is unavailable. Check earlier page results before continuing only the remaining work.',
+  browser_api_arguments:
+    'The browser API arguments are invalid. Use the declared methods and current page or element handles; do not repeat the same invalid call.',
+  browser_api_unavailable:
+    'The requested browser API is unavailable. Use only the declared browser and page methods.',
+  browser_image_limit:
+    'The browser image limit was reached or image storage is unavailable. No usable image was returned by this request.',
+  browser_image_stale:
+    'The image reference is no longer valid for the current page observation. Obtain a fresh authorized observation before using coordinates.',
+  browser_image_unavailable:
+    'The browser did not return a usable image. Do not infer page contents from a missing image.',
+  browser_control_is_human:
+    'The page is under user control. Automation cannot continue on its old control state.',
+  browser_executor_closed:
+    'The browser code environment closed before this batch completed. Earlier page actions keep their recorded outcomes.',
+  browser_executor_ended:
+    'The browser code environment ended before this batch completed. Earlier page actions keep their recorded outcomes.',
+  browser_executor_frame_limit:
+    'A browser code response exceeded the supported message size. Its complete result could not be received; earlier page actions are not undone.',
+  browser_executor_protocol:
+    'The browser code environment returned an invalid control response. This batch could not be verified; inspect earlier page results before continuing.',
+  browser_executor_call_limit:
+    'The browser code exceeded the allowed number of page calls. Earlier completed actions retain their effects; continue only the remaining authorized work.',
+  browser_executor_result_limit:
+    'The browser code returned more data than can be received. Its complete return value was not delivered; earlier page actions are not undone.',
+  browser_executor_output_limit:
+    'The browser code produced more output than can be retained. The available original output is incomplete; do not repeat page actions merely to recover output.',
+  browser_executor_unawaited_calls:
+    'The browser code left page calls unfinished. Await each page call before reporting a result, and inspect earlier outcomes before continuing.',
+  browser_executor_cancelled:
+    'The browser code was cancelled. This does not undo page actions already sent to the browser.',
+  browser_executor_api_failed:
+    'A browser API call failed. Inspect its original page result before continuing only the remaining authorized work.',
+  browser_executor_budget_unavailable:
+    'The browser code environment could not obtain its required execution resources. It cannot run this batch under the current resource limits.',
+  browser_executor_failed:
+    'The browser code environment failed. No more specific public cause was confirmed; its private exception text is unavailable. Inspect earlier page results before continuing.',
   browser_page_already_open:
     'Another page is already bound in this task. This attempt did not acquire the requested candidate; the rejection does not show that either page closed or disappeared. Continue only on the currently bound page. When finished, call page.close() to release automation while keeping the page, then give a normal final answer. A later user message can bind the intended retained page in a new task; do not replace, refresh or navigate another page to work around this limit.',
   browser_page_capacity:
@@ -50,7 +106,7 @@ const explanations: Readonly<Record<string, string>> = {
   browser_page_read_stale:
     'The target page or its control generation changed while this read was waiting or running. No current observation was returned, and old references cannot be used.',
   browser_page_preflight_failed:
-    'The browser could not prepare the target page before sending a Runtime command. That command was not sent, and no current observation was returned. Earlier operations keep their recorded outcomes. If control is still valid, obtain a fresh page observation before deciding the remaining work; do not repeat earlier navigation or input based on this failure.',
+    'The browser could not prepare the target page before sending the browser command. That command was not sent, and no current observation was returned. Earlier operations keep their recorded outcomes. If control is still valid, obtain a fresh page observation before deciding the remaining work; do not repeat earlier navigation or input based on this failure.',
   browser_page_state_invalid:
     'The browser could not verify the current address and title against the original page and control binding. No usable current page state was returned. This does not prove that the page closed. Preserve earlier results, release control and explain the limitation; do not open or refresh a replacement to bypass the unverified binding.',
   desktop_browser_page_state_invalid:
@@ -76,7 +132,7 @@ const explanations: Readonly<Record<string, string>> = {
   browser_startup_outcome_unknown:
     'The browser lost confirmation while binding the target page or starting its navigation. The target page may have closed or its control connection may have been interrupted.',
   browser_ended_before_ready:
-    'The browser session ended before the page binding was ready. No current page handle or observation is available from that session.',
+    'The browser connection ended before the page binding was ready. No current page handle or observation is available from that connection.',
   browser_startup_failed:
     'A usable browser page binding could not be established. The page or its browser connection may be unavailable; no confirmed current page handle was returned.',
   browser_page_control_unknown:
@@ -91,6 +147,16 @@ const explanations: Readonly<Record<string, string>> = {
     'The browser connection failed. The target page or browser process may be closed or unavailable.',
   browser_native_response_lost:
     'The browser connection ended before the operation response was received. The target page or browser process may be closed or unavailable.',
+  browser_native_request_timeout:
+    'The browser transport did not return a response within this operation’s deadline. A timeout does not establish whether a page action sent to the browser completed.',
+  browser_native_write_failed:
+    'The browser transport could not confirm delivery of the request. Some request bytes may already have been sent.',
+  browser_native_response_invalid:
+    'The browser transport returned an invalid response envelope, so the result of the original request could not be verified.',
+  browser_native_response_limit:
+    'The browser response exceeded its bounded transport limit, so its complete result was not returned.',
+  browser_native_aborted:
+    'The browser transport wait was cancelled. This does not undo a page action already sent to the browser.',
   desktop_browser_closed:
     'The browser control connection has ended. The target page may be closed or unavailable, so this operation cannot continue on its old handle.',
   browser_stop_unconfirmed:
@@ -115,12 +181,14 @@ const known = (value: Json | undefined): string | undefined =>
 export function explainBrowserExecutionResult(result: ToolResult): ToolResult {
   if (result.outcome === 'succeeded') return result;
   const details = record(result.details);
-  let code = known(result.content) ?? known(details?.code);
+  let originalCode = known(result.content) ?? known(details?.code);
+  let code = originalCode;
   let originalUnknown = false;
   let current = details;
   // Only the fixed owner envelopes are inspected. Page text and arbitrary nested
   // objects cannot supply an explanation or manufacture dispatch evidence.
   for (let depth = 0; current && depth < 4; depth++) {
+    originalCode ??= known(current.code);
     code = known(current.cause) ?? known(current.code) ?? code;
     const originalJob = record(current.originalJob);
     const originalResult = record(originalJob?.result);
@@ -172,7 +240,7 @@ export function explainBrowserExecutionResult(result: ToolResult): ToolResult {
       ' This existing-only binding did not create or refresh a replacement page or navigate back to the old address.';
   if (unknown)
     content +=
-      ' The last dispatched action may or may not have completed; its result remains unknown. Do not replay it, retry it under another key, or automatically create or refresh a replacement page.';
+      ' The last action sent to the browser may or may not have completed; its result remains unknown. Do not replay it, retry it under another key, or automatically create or refresh a replacement page.';
   else if (result.outcome === 'failed' && code === 'browser_page_existing_missing')
     content +=
       ' The old candidate is invalid. List browser.pages() once more to inspect the remaining candidates. If another candidate uniquely matches the page intended by the current user task, construct a fresh browser.page(candidate.id) handle and take a new snapshot. If no unique candidate matches, explain that limitation. Do not choose by list order, recency or visibility, guess between same-URL pages, navigate another page or replay earlier actions. If the current user task clearly requests opening a known URL and does not depend on the original page state, use a separate browser.open(theActualUrl) call and take a fresh snapshot of the new page. Do not replay earlier input or unknown actions. A connection failure or identity mismatch does not permit this recovery, and this result does not clear an unknown result or unconfirmed cleanup.';
@@ -182,8 +250,7 @@ export function explainBrowserExecutionResult(result: ToolResult): ToolResult {
     result.content === 'job_stop_unconfirmed' ||
     /^(?:browser_|desktop_browser_)[a-z0-9_]+$/.test(result.content)
       ? result.content
-      : (known(details?.code) ?? code);
-  content += `\nDiagnostic code: ${rawCode}${rawCode === code ? '' : `; cause: ${code}`}.`;
+      : (known(details?.code) ?? originalCode ?? code);
   return {
     ...result,
     content,

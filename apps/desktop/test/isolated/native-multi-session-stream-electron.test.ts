@@ -341,11 +341,10 @@ test.skipIf(process.platform !== 'darwin')(
                       id: `${original}-shell`,
                       type: 'function',
                       function: {
-                        name: 'shell_launch',
+                        name: 'shell_execute',
                         arguments: JSON.stringify({
-                          key: `shell-${original}`,
                           command: shell.shellCommand(original),
-                          cancellation: 'attached',
+                          background: true,
                         }),
                       },
                     },
@@ -409,9 +408,10 @@ test.skipIf(process.platform !== 'darwin')(
               modelCapabilities: { contextWindowTokens: 1_000_000 },
             },
           ],
-          tools: ['task.spawn', ...(shell ? ['shell.launch', 'shell.read', 'shell.stop'] : [])].map(
-            (id) => ({ id, definitionVersion: '1' }),
-          ),
+          tools: [
+            'task.spawn',
+            ...(shell ? ['shell.execute', 'shell.read', 'shell.stop'] : []),
+          ].map((id) => ({ id, definitionVersion: '1' })),
         }),
       );
       const serviceOutdir = join(root, 'apps/service/dist');

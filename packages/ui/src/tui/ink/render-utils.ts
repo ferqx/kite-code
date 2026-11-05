@@ -180,10 +180,12 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
       return p ? p.slice(0, 57) : undefined;
     }
     case 'shell_execute': {
+      const description = typeof args.description === 'string' ? args.description.trim() : '';
       const cmd = String(args.command ?? '');
-      if (!cmd) return undefined;
-      const flat = cmd.replace(/\s+/g, ' ').trim();
-      return flat.length > 60 ? `${flat.slice(0, 57)}...` : flat;
+      if (!description && !cmd) return undefined;
+      const flat = (description || cmd).replace(/\s+/g, ' ').trim();
+      const points = [...flat];
+      return points.length > 60 ? `${points.slice(0, 57).join('')}...` : flat;
     }
     case 'write_plan':
     case 'update_plan': {

@@ -13,7 +13,7 @@ export async function saveLiveCanonicalModelEvidence(options: {
   requests: readonly ModelRequest[];
   root: string;
   subjectId: string;
-  /** Compare actual captured dispatches with Store-decoded sealed requests while open. */
+  /** Compare public request content; opaque provider continuation is private by contract. */
   verifyRequests?: boolean;
 }) {
   const expectedStoreId = (await options.store.getMetadata()).storeId;
@@ -52,7 +52,17 @@ export async function saveLiveCanonicalModelEvidence(options: {
           input.storeId === expectedStoreId &&
           isDeepStrictEqual(
             input.request,
-            options.requests.find((request) => request.requestId === executionId),
+            (() => {
+              const captured = options.requests.find(
+                (request) => request.requestId === executionId,
+              )!;
+              return {
+                ...captured,
+                messages: captured.messages.map(
+                  ({ continuation: _continuation, ...message }) => message,
+                ),
+              };
+            })(),
           );
         requestIdentities.push({
           requestId: executionId,
@@ -92,6 +102,7 @@ export async function saveLiveCanonicalModelEvidence(options: {
     ...(options.verifyRequests
       ? {
           requestIdentity: {
+            comparison: 'public-request-without-opaque-continuation',
             matches:
               uniqueRequestIds.size === options.requests.length &&
               requestIdentities.length === options.requests.length &&

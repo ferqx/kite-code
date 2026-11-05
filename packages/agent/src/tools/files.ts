@@ -269,6 +269,7 @@ export function createWorkspaceFiles(options: {
     let failed = false;
     let failure: unknown;
     let parentCreationAttempted = false;
+    let parentCreated = false;
     let parentPath: string | undefined;
     try {
       for (const [index, part] of parts.slice(0, -1).entries()) {
@@ -282,6 +283,7 @@ export function createWorkspaceFiles(options: {
           parentCreationAttempted = true;
           try {
             fd = io.openAt(parent, part, 'create-directory', true);
+            parentCreated = true;
           } catch (creationError) {
             // Another writer may have created it. Reopen once through the same no-follow owner.
             if (!(creationError instanceof AgentError) || creationError.code !== 'EEXIST')
@@ -314,7 +316,7 @@ export function createWorkspaceFiles(options: {
           : parentPath && error instanceof AgentError
             ? new AgentError(
                 error.code,
-                `${error.code}: Parent directory ${JSON.stringify(parentPath)} for ${JSON.stringify(path)} could not be opened${createParents ? ' or created' : ''}.`,
+                `${error.message !== error.code ? `${error.message} ` : ''}${error.code}: Parent directory ${JSON.stringify(parentPath)} for ${JSON.stringify(path)} could not be opened${createParents ? ' or created' : ''}.`,
               )
             : error;
     } finally {
@@ -330,14 +332,28 @@ export function createWorkspaceFiles(options: {
           ) {
             failure =
               (completed && mutation) || parentCreationAttempted
-                ? new AgentError('file_publish_outcome_unknown', 'parent_close_unknown')
+                ? new AgentError(
+                    'file_publish_outcome_unknown',
+                    `${failed && failure instanceof Error ? `${failure.message}; ` : ''}parent_close_unknown: ${error instanceof Error ? error.message : String(error)}`,
+                  )
                 : error;
             failed = true;
           }
         }
       }
     }
-    if (failed) throw failure;
+    if (failed) {
+      if (
+        failure instanceof AgentError &&
+        (parentCreated ||
+          (parentCreationAttempted && failure.code === 'file_publish_outcome_unknown'))
+      )
+        throw new AgentError(
+          failure.code,
+          `${failure.message} Newly created empty parent directories may remain; this call attempted parent-directory creation and does not automatically remove those directories.`,
+        );
+      throw failure;
+    }
     return result!;
   }
   function trackRead<T>(work: () => Promise<T>): Promise<T> {

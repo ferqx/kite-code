@@ -44,6 +44,8 @@
 
 ## 只读授权观察
 
+生成 `Execution.authorization.policy` 保留 `evidenceId/reason/sourceExecutionId/checkExecutionId/requestedScope/effectiveScope`，Native 和 Browser 读取不将 `timeout_continue` 解释为批准。会话日志的 `details.policy` 保留原事件闭合 source；其中 `kind=policy` 的 ID 是策略证据，不是 Execution。缺失的历史字段不补造。字段与私密边界由[有限 DTO 回归](test/isolated/session-logs.test.ts)核验，真实 HTTP 与 Cookie Browser 传递见[Service 回归](../../apps/service/test/isolated/authorization-policy-observation.test.ts)；这些测试不代表普通客户端窗口的交互验收。
+
 `getExecution`／`getView` 的生成 Execution 类型可带有限 `authorization`，以 `check` 保存新自动权限检查，`review` 只保留旧审核历史；人工答案保存／accepted revision 与派发事实独立保留。生成 schema／validator 同步，不新增路由、写操作或 capability；缺字段不补审批结论，批准不等于执行成功，观察不能作派发资格。当前协议与 private 字段边界归 [Service owner](../../apps/service/README.md#只读授权观察)，原实时／历史证据见[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)。
 
 ## 完整已保存 Job 输出覆盖
@@ -260,7 +262,7 @@ Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettin
 
 `listBackgroundExecutions({storeId,workspaceId?,rootSessionId?,executionId?,afterSeq?,upperSeq?,snapshotCursor?,limit?,includeSourceTool?})` 读取公开 `/v1/background-executions` 的原 Job 目录。`listAllBackgroundExecutions({workspaceId?,rootSessionId?,includeSourceTool?,signal?})` 冻结当前连接 generation/Store，读取所有固定 Decimal64 upper 页面，并沿同一 snapshotCursor 核对。`directory_changed` 丢弃整个前缀后最多尝试3次完整扫描，两次重试前分别等待25／50ms，等待可被 AbortSignal 立即结束；持续变化明确失败，不无限重试，也不拼接不同快照的前缀。单次成功扫描无累计页数上限。返回 `BackgroundExecutionItem[]`，页面 Store 核当前准入；每项 Execution 保原 originStoreId，父 Run 与精确 child-start Run 按该原出处／root-work 核对，实际 Session/root/Workspace 保持。恢复根资格由 Store 的真实 root creator 与血缘证明决定，SDK不从旧来源推断控制许可。重复身份、错序、作用域和绑定冲突均拒绝完整结果。目录不包含 input/result/config/reference 正文，读取不发送 POST或推进ACK。 新权限检查和标题生成保存为 Model，沿该 Job 目录自然不产生 child 项，不依赖客户端隐藏。[有限 Client 测试](test/background-directory.test.ts)覆盖重扫上限、退避取消与完整身份反例；[真实 HTTP/Store](../../tests/isolated/unified-agent/background-directory.test.ts)覆盖超200原 Job、后代与公开物理恢复。
 
-原生和 Cookie Browser 的目录 reader 均可显式请求 `includeSourceTool:true`，完整扫描的每页保持该选择。可选 `sourceTool` 仅含直接父工具的 ID／定义／版本，ID 必须等于该 Job 的 `parentExecutionId` 且不能指向自身；闭合 validator 拒绝额外正文。缺字段的旧响应仍可读，不补后台身份；来源本身不授予停止或子会话读取权。默认请求不改变既有响应结构，实际事务与来源边界见[Store owner](../agent/src/storage/README.md#跨会话原-job-目录)。
+原生和 Cookie Browser 的目录 reader 均可显式请求 `includeSourceTool:true`，完整扫描的每页保持该选择。可选 `sourceTool` 含直接父工具的 ID／定义／版本，并可携带准确父 Shell 调用的 `background:true` 有限事实，ID 必须等于该 Job 的 `parentExecutionId` 且不能指向自身；闭合 validator 拒绝额外正文。缺字段的旧响应仍可读，不补后台身份；来源本身不授予停止或子会话读取权。默认请求不改变既有响应结构，实际事务与来源边界见[Store owner](../agent/src/storage/README.md#跨会话原-job-目录)。
 
 
 ## 终端展示的只读 metadata

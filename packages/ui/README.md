@@ -1,5 +1,7 @@
 `SessionPage.workspaceTab` 让宿主的受管网页内容进入原 `SessionTabs`：共用一条标签栏、同一个8项有界model和原可拖动分栏，不新增详情壳或放大／还原按钮。明确请求按scope／requestId去重并选择已有workspace标签；含该标签时首次调宽62%，后续tab切换保留用户拖动宽度。workspace内容保持挂载，只接收当前可见性；收起／切tab不赋予UI取消任务的权限。标签变更即时保留最新model容量，处理同一commit的并发打开；普通browser释放、child与变更读取仍遵循原owner。
 
+Shell 活动摘要采用原调用的可选 description，省略时沿用命令预览；展开仍显示完整命令和原执行结果。统一 shell_execute 的 background:true 显示后台受理，受理不代表成功或完成；历史 shell.launch 保持原解释。展示不参与风险判断、授权或操作身份。
+
 # UI
 
 应用确认框另有公开的 `@kite-ai/ui/desktop/confirmation` [专用入口](src/desktop/confirmation.ts)，只重新导出原 `ApplicationConfirmationDialog` 与 Full 确认组件；[Desktop 构建](scripts/build-desktop.ts)同步产出 `confirmation.js`。固定确认页面无需通过桌面总出口加载会话 Markdown／公式／高亮初始化，确认文案、样式、焦点与决定准入仍由原组件和宿主负责。共享加载动画 `conversation-loading-shimmer` 的关键帧位于顶层，保留原动画参数与减少动态效果覆盖，避免生产 CSS 优化器拒绝嵌套关键帧。
@@ -173,6 +175,8 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 `BackgroundExecutions` 的每个子 Agent 行在名称前复用 `ChildAgentIcon`；宿主通过 `childAgentIdentity` 交付稳定的原 Store／子 Session 身份，缺身份时使用通用图标，不以标题或任务状态分配外观。详情按钮只给右侧箭头应用辅助色，子 Agent 图标保留共享配色，文字继续单行省略；无详情回调时名称行也保留图标。原详情导航、停止和只读边界保持。
 
 `ToolActivity` 与轻量 `ToolRow` 显示宿主核实的目标文字，沿原单行布局省略长目标，原生 `title` 保留完整展示文本；网页目标先经原去敏规则再进入文字与悬停提示。目标本身不提供文件或执行权限，原文件打开回调仍由宿主单独授予。Native 的参数来源、版本白名单及父／子详情交接归 [Desktop owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
+
+宿主核实的普通文件缺失由读取明细显示灰色“文件不存在”，沿成功观察呈现，不生成空正文、假行数或失败红色。该显示只接受原 Files 结果及准确来源，不把真实失败或未知转成缺失；原文件打开资格独立核验。[Desktop 实际过程记录](../../apps/desktop/README.md#原工具过程与结果阅读)覆盖单次输入、读取、完成与刷新重开，不由组件最终截图代替全过程验收。
 
 [Conversation](src/desktop/Conversation.tsx)的主消息区采用可聚焦、具名的原生滚动section，保留原跟随／手动阅读／全选和缓存viewport身份，不再装配主消息区的Radix content包装、thumb轮询与scrollbar ResizeObserver。`SessionPage`在已有首次布局／窗口resize测量中按真实原生滚动条占位同步正文、输入区和准备页留白，overlay与传统滚动条不硬用同一宽度；只在值改变时写CSS变量，原工具详情的独立ScrollArea继续按各自reader规则工作。
 

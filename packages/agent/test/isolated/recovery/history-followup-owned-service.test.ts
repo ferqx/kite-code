@@ -107,11 +107,28 @@ finally:
         }))
         .sort((a, b) => a.target.localeCompare(b.target)),
     );
-    for (const [index, review] of f.reviews.entries())
-      expect(review.input.target).toMatchObject({
-        sessionId: 's',
-        originCommandId: businessRuns[index]!.origin_command_id,
+    const originalTargets = f.rows(
+      "SELECT e.id,e.session_id,e.run_id,e.origin_command_id,e.origin_store_id,e.intent_json,r.origin_command_id AS run_origin_command_id FROM execution e JOIN run r ON r.id=e.run_id WHERE e.kind='tool' AND e.adapter_id='files.write'",
+    ) as { id: string; intent_json: string }[];
+    for (const [index, review] of f.reviews.entries()) {
+      const target = review.input.target as {
+        executionId: string;
+        sessionId: string;
+        runId: string;
+        input: unknown;
+      };
+      expect(target.sessionId).toBe('s');
+      const originals = originalTargets.filter((row) => row.id === target.executionId);
+      expect(originals).toHaveLength(1);
+      expect(originals[0]).toMatchObject({
+        session_id: target.sessionId,
+        run_id: target.runId,
+        origin_store_id: f.storeId,
+        origin_command_id: businessRuns[index]!.origin_command_id,
+        run_origin_command_id: businessRuns[index]!.origin_command_id,
       });
+      expect(JSON.parse(String(originals[0]!.intent_json))).toEqual(target.input);
+    }
     const rows = readFileSync(network, 'utf8')
       .trim()
       .split('\n')

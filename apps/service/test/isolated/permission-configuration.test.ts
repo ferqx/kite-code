@@ -18,6 +18,7 @@ import type { PermissionPolicySnapshot } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
@@ -40,6 +41,7 @@ async function fixture(
   afterFinalToolAuthorization?: () => Promise<void>,
   injectedToolDecision?: PermissionDecision,
   scenario?: 'readonly-auto-reject',
+  options: { customTaskReview?: true } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-permission-')));
   const workspace = join(root, 'workspace');
@@ -81,7 +83,7 @@ async function fixture(
             .reverse()
             .find((message) => message.role === 'user')?.content ?? '',
         );
-        reviewing = input.purpose === 'authorization_check';
+        reviewing = ['authorization_check', 'shell_risk'].includes(input.purpose);
       } catch {}
       if (reviewing) authReviews.push(body);
       else requests.push(body);
@@ -156,8 +158,30 @@ async function fixture(
     ],
   };
   const host = createDefaultProcessConfiguration({
-    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    userConfigurationPath: `${profile.profilePath}/config.jsonc`,
     profile,
+    // These scenarios intentionally exercise the retained custom task-review contract.
+    ...(options.customTaskReview
+      ? {
+          authorizationCheck: {
+            id: 'fixture.custom-task-review',
+            version: '1',
+            modelId: 'local',
+            model: createSdkModelAdapter({
+              models: new Map([
+                [
+                  'local',
+                  createCompatibleModelBinding({
+                    name: 'compatible',
+                    baseURL: `http://127.0.0.1:${provider.port}/v1`,
+                    modelId: 'local',
+                  }),
+                ],
+              ]),
+            }),
+          },
+        }
+      : {}),
     ...(mode === null
       ? {}
       : {
@@ -328,8 +352,10 @@ async function fixture(
   };
 }
 
-test('a rejected placeholder write during project research stays undispatched while the real SDK continues read-only to its answer', async () => {
-  const f = await fixture('auto', true, false, undefined, undefined, 'readonly-auto-reject');
+test('custom task-review keeps a rejected project placeholder write undispatched while the real SDK continues read-only to its answer', async () => {
+  const f = await fixture('auto', true, false, undefined, undefined, 'readonly-auto-reject', {
+    customTaskReview: true,
+  });
   try {
     await f.run('work', '了解下这个项目');
     const command = await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
@@ -394,42 +420,41 @@ test('a rejected placeholder write during project research stays undispatched wh
   }
 });
 
-test('actual default-compatible Model file call uses actual Auto ask_user exact card/once or trusted Accept Edits; Full/default untrusted cannot be approved past trust', async () => {
-  for (const mode of ['auto', 'accept_edits', 'full', null] as const) {
-    const f = await fixture(mode, mode !== 'full');
+test('default risk-only Files calls skip review in trusted modes while Full/default untrusted cannot pass trust', async () => {
+  for (const [mode, trusted] of [
+    ['auto', true],
+    ['accept_edits', true],
+    ['full', true],
+    ['full', false],
+    [null, true],
+    [null, false],
+  ] as const) {
+    const f = await fixture(mode, trusted);
     try {
+      if (mode === null && trusted) await setManaged(f, 'auto');
       await f.run();
-      if (mode === 'auto') {
-        const card = await f.pending();
-        expect(card.request).toMatchObject({
-          input: { path: 'output.txt', content: 'exact first', base: null },
-          policy: { mode: 'auto', effects: ['workspace_write'] },
-        });
-        expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
-        expect(f.authReviews).toHaveLength(1);
-        expect(f.authReviews[0]!.tools ?? []).toEqual([]);
-        await f.approve(card);
-      }
       await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
-      const allowed = mode === 'auto' || mode === 'accept_edits';
-      expect(existsSync(join(f.workspace, 'output.txt'))).toBe(allowed);
-      if (allowed)
+      expect(existsSync(join(f.workspace, 'output.txt'))).toBe(trusted);
+      const execution = (await f.client.getView('s')).executions.find(
+        (execution) => execution.kind === 'tool',
+      )!;
+      expect(execution.status).toBe(trusted ? 'succeeded' : 'failed');
+      expect(execution.authorization?.dispatched ?? false).toBe(trusted);
+      if (trusted)
         expect(readFileSync(join(f.workspace, 'output.txt'), 'utf8')).toBe('exact first');
       else
-        expect(
-          (await f.client.getView('s')).executions.find((execution) => execution.kind === 'tool')!
-            .status,
-        ).toBe('failed');
+        expect(execution.result).toMatchObject({
+          details: { adapterAttempted: false, dispatchCommitted: false },
+        });
+      expect(f.authReviews).toHaveLength(0);
       expect(f.requests).toHaveLength(2);
       expect(
-        (await f.client.listInteractions('s', { storeId: f.expectedStoreId, state: 'pending' }))
-          .interactions,
+        (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
       ).toHaveLength(0);
       const original = await f.client.getCommand('work');
-      const reviewCount = f.authReviews.length;
       expect(await f.run()).toEqual(original);
       expect(f.requests).toHaveLength(2);
-      expect(f.authReviews).toHaveLength(reviewCount);
+      expect(f.authReviews).toHaveLength(0);
     } finally {
       await f.close();
     }
@@ -477,12 +502,16 @@ test('current workspace trust and injected trust ceilings independently block to
   }
 }, 15000);
 
-test('default and trusted injected policies follow a live root mode change in the original pending Run', async () => {
+test('custom task-review and trusted injected policies follow a live root mode change in the original pending Run', async () => {
   for (const injected of ['default', 'policy', 'permissions']) {
     const f = await fixture(
       injected === 'default' ? null : 'auto',
       true,
       injected === 'permissions',
+      undefined,
+      undefined,
+      undefined,
+      { customTaskReview: true },
     );
     try {
       if (injected === 'default') await setManaged(f, 'auto');
@@ -508,9 +537,11 @@ test('default and trusted injected policies follow a live root mode change in th
   }
 }, 15000);
 
-test('old default Run keeps actual selected definitions across JSONC disable, while current programmatic policy narrowing blocks its old card', async () => {
+test('custom task-review Run keeps actual selected definitions across JSONC disable, while current programmatic policy narrowing blocks its old card', async () => {
   for (const revoke of [false, true]) {
-    const f = await fixture('auto');
+    const f = await fixture('auto', true, false, undefined, undefined, undefined, {
+      customTaskReview: true,
+    });
     try {
       await f.run();
       const card = await f.pending();
@@ -667,8 +698,10 @@ test('default Runtime freshly reads durable Accept Edits and actual trusted scop
   }
 }, 15000);
 
-test('durable trust revocation invalidates old Auto ask_user card while injected hosts retain user mode control', async () => {
-  const f = await fixture(null);
+test('durable trust revocation invalidates custom task-review Auto ask_user card while injected hosts retain user mode control', async () => {
+  const f = await fixture(null, true, false, undefined, undefined, undefined, {
+    customTaskReview: true,
+  });
   try {
     const identity = await setManaged(f, 'auto');
     await f.run();
@@ -695,10 +728,18 @@ test('durable trust revocation invalidates old Auto ask_user card while injected
     )!;
     expect(execution.status).toBe('failed');
     expect(execution.result).toMatchObject({
-      content: 'permission_denied',
       outcome: 'failed',
-      details: { adapterAttempted: false, dispatchCommitted: false },
+      details: {
+        code: 'permission_denied',
+        reason: 'workspace_untrusted',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
     });
+    expect((execution.result as { content: string }).content).toContain(
+      'this tool was not executed',
+    );
+    expect((execution.result as { content: string }).content).toContain('workspace_untrusted');
     expect((await f.management.readTrust({ ...identity, workspaceId: 'w' })).trusted).toBe(false);
   } finally {
     await f.close();
@@ -827,30 +868,48 @@ async function setModeViaHttp(
   });
 }
 
-test('injected policy hosts apply HTTP tightening before final dispatch in the original Run', async () => {
-  for (const explicit of [false, true]) {
+test('default and injected hosts apply HTTP tightening before final dispatch in the original Run', async () => {
+  for (const injected of ['default', 'policy', 'permissions'] as const) {
+    const explicit = injected === 'permissions';
     let entered = false;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const f = await fixture('full', true, explicit, async () => {
+    const f = await fixture(injected === 'default' ? null : 'full', true, explicit, async () => {
       entered = true;
       await gate;
     });
     try {
+      if (injected === 'default') await setManaged(f, 'full');
       await f.run();
       await until(async () => (entered ? true : null));
       await setModeViaHttp(f, 'auto', 'tighten-root');
       release();
-      const card = await f.pending();
-      expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
-      const original = await f.store.getCommand('work');
-      const run = await f.store.getRun(card.runId!);
-      expect(run?.originCommandId).toBe(original?.id);
-      await f.approve(card);
+      if (explicit) {
+        const card = await f.pending();
+        expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
+        const original = await f.store.getCommand('work');
+        const run = await f.store.getRun(card.runId!);
+        expect(run?.originCommandId).toBe(original?.id);
+        await f.approve(card);
+      }
       await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
       expect(readFileSync(join(f.workspace, 'output.txt'), 'utf8')).toBe('exact first');
+      expect(f.authReviews).toHaveLength(explicit ? 1 : 0);
+      expect(
+        (
+          await f.management.readMode({
+            expectedStoreId: f.expectedStoreId,
+            subjectId: 'owner',
+            sessionId: 's',
+          })
+        ).mode,
+      ).toBe('auto');
+      expect(
+        (await f.client.listInteractions('s', { storeId: f.expectedStoreId, state: 'pending' }))
+          .interactions,
+      ).toHaveLength(0);
       expect(
         (await f.store.listExecutions('s')).filter((item) => item.kind === 'tool'),
       ).toHaveLength(1);

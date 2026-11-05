@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { ClientError, type Execution, type Message } from '@kite-ai/client';
+import { ClientError, type Execution, type Message, type Run } from '@kite-ai/client';
 import {
   type NativeShellInput,
   type NativeToolMessageFact,
@@ -57,16 +57,22 @@ function shellInput(
   input: Record<string, unknown> | undefined,
   offset: number,
 ): NativeShellInput | undefined {
-  const operation = execution.definitionId.slice('shell.'.length);
+  const declaredOperation = execution.definitionId.slice('shell.'.length);
   if (
     execution.definitionVersion !== '1' ||
     !execution.definitionId.startsWith('shell.') ||
-    !['execute', 'launch', 'read', 'wait', 'stop'].includes(operation)
+    !['execute', 'launch', 'read', 'wait', 'stop'].includes(declaredOperation)
   ) {
     if (offset) throw new ClientError('tool_message_command_offset_invalid');
     return;
   }
   const original = object(execution.toolInput);
+  const operation =
+    declaredOperation === 'execute' &&
+    input?.background === true &&
+    (!original || original.background === true)
+      ? 'launch'
+      : declaredOperation;
   const commandOperation = operation === 'execute' || operation === 'launch';
   const shellId = input?.[commandOperation ? 'key' : 'shellId'];
   const fact: NativeShellInput = {
@@ -81,7 +87,11 @@ function shellInput(
     typeof command !== 'string' ||
     !command ||
     [...command].length > 262144 ||
-    (original && (original.command !== command || original.key !== shellId))
+    (original &&
+      (original.command !== command ||
+        original.key !== shellId ||
+        original.background !== input?.background ||
+        original.description !== input?.description))
   ) {
     if (offset) throw new ClientError('tool_message_command_offset_invalid');
     return fact;
@@ -234,12 +244,14 @@ export function nativeToolMessageEligible(
 /** Pure presentation facts from the exact saved tool Execution and its receipt. */
 export function nativeToolMessageFact({
   execution,
+  run,
   message,
   messages,
   sessionId,
   commandOffset = 0,
 }: {
   execution: Execution;
+  run?: Run;
   message: Message;
   messages: Iterable<Message>;
   sessionId: string;
@@ -282,15 +294,52 @@ export function nativeToolMessageFact({
   )
     call = undefined;
   const details = object(result.details);
-  const shell = shellInput(execution, call, commandOffset);
+  const configuration = object(run?.configuration);
+  const registered = Array.isArray(configuration?.tools)
+    ? configuration.tools
+        .map(object)
+        .filter(
+          (tool) =>
+            tool?.id === execution.definitionId && tool.version === execution.definitionVersion,
+        )
+    : [];
+  const fileMissing =
+    execution.definitionId === 'files.read' &&
+    ['4', '5'].includes(execution.definitionVersion) &&
+    execution.status === 'succeeded' &&
+    run?.id === execution.runId &&
+    run.sessionId === execution.sessionId &&
+    run.originStoreId === execution.originStoreId &&
+    registered.length === 1 &&
+    registered[0]?.extensionId === 'builtin.files' &&
+    typeof call?.path === 'string' &&
+    details?.path === call.path &&
+    details.exists === false &&
+    Object.keys(details).every((key) =>
+      ['path', 'exists', 'fileScope', 'workspaceCheckpoint'].includes(key),
+    ) &&
+    Object.keys(result).every((key) => ['outcome', 'content', 'details'].includes(key)) &&
+    result.content === `File does not exist: ${JSON.stringify(call.path)}.`;
+  let shell = shellInput(execution, call, commandOffset);
   let shellResultVerified = false;
   if (shell && details) {
     try {
       const ref = object(details.ref);
+      // New calls do not supply a key. Only the exact saved builtin receipt can
+      // supply its returned handle; live inputs never invent the internal key.
+      const returnedShellId =
+        execution.definitionId === 'shell.execute' &&
+        call &&
+        !Object.hasOwn(call, 'key') &&
+        shell.command !== undefined &&
+        typeof details.shell_id === 'string'
+          ? details.shell_id
+          : undefined;
+      const shellId = shell.shellId ?? returnedShellId;
       shellResultVerified =
         isDeepStrictEqual(JSON.parse(message.content), details) &&
-        !!shell.shellId &&
-        ref?.key === shell.shellId &&
+        !!shellId &&
+        ref?.key === shellId &&
         ref.extensionId === 'builtin.shell' &&
         ref.sessionId === execution.sessionId &&
         ref.originStoreId === execution.originStoreId &&
@@ -298,6 +347,7 @@ export function nativeToolMessageFact({
         !!ref.commandId &&
         typeof ref.executionId === 'string' &&
         !!ref.executionId;
+      if (shellResultVerified && !shell.shellId) shell = { ...shell, shellId };
     } catch {
       // Original non-JSON failures retain their existing body reader and error text.
     }
@@ -332,6 +382,7 @@ export function nativeToolMessageFact({
     resultRevision: execution.resultRevision,
     ...(result.modelImages !== undefined ? { images: nativeToolImages(execution) } : {}),
     ...(decisionRefresh ? { decisionRefresh } : {}),
+    ...(fileMissing ? { fileMissing: true } : {}),
     target: requestTarget,
     ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),
     ...(shell ? { shellInput: shell } : {}),

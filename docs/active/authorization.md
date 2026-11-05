@@ -13,7 +13,23 @@
 
 三策略与 Shell 命令分析由 [Agent 独立权限模块](../../packages/agent/src/permissions/README.md)负责，正式宿主通过 `@kite-ai/agent/permissions` 与 `/permissions/shell` 装配。Service 保留接口、身份核对和当前宿主事实读取，不解释 Shell AST、签发命令摘要或实现模式分支；执行接纳、真实审核与最终控制 revision 复核仍归原 Core。模块与解析依赖 owner 的迁移不改变已有审批、恢复或系统沙箱合同。
 
-正式 Service/Client 经唯一 Agent 的原权限、人工/模型交互和最终 dispatch 事务执行。界面三策略为 `accept_edits` 请求批准、`auto` 自动审核、`full` 完全访问；正式类型、HTTP/IPC、持久控制和调用者均已退役 raw `ask`，旧输入/控制记录失败关闭，不映射为其他模式。正式 Shell 的范围请求与 `web_fetch` network 描述均经该链，固定危险拒绝先于所有模式；Scope 来自可信宿主描述与最终接纳快照，调用输入不能签发 grant。原审核拒绝原因由公共 Execution 的 `authorization.check`（旧记录为 `authorization.review`）与 Tool `result.details.reason` 保存，TUI 结果读取和 Native 原回执可展示，私有适配器错误正文不进入该 reason。实际产品、owner 与验证归[手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)与[切片](../plans/shell-permission-scopes.md)。
+能力身份以真实注册的 kind／定义／版本为准，Service 在同一注册项绑定所属描述器；普通权限和 Planning 共用路由，Model 使用静态描述，不向 Shell／Files／Task 广播请求。动态事实若改写身份则失败关闭，不能通过合并顺序覆盖另一能力的效果或硬限制。注册描述只提供事实，审批决定、工具交集与最终派发证明保持独立；具体装配及分支回归归[Service owner](../../apps/service/README.md#默认装配与业务规则归属)。
+
+能力描述可接收本次已经读取、校验的 policy 隔离副本，不能修改原授权判定，也不凭宿主根偏好重新推断模式。有效 Full 允许原 Files 工具直接写入／编辑普通外部绝对文件，但执行仍须核最终证明中所有父子／Planning 权限叶、准确能力与目标 revision；Full 不覆盖 trust、工具集合、硬限制或 Profile／运行资产保护。会话 Output／Plan／Input 的准确私有边界优先于通用外部适配，普通外部文件不纳入 Workspace checkpoint。原生 CAS、取消、发布未知与禁止重放合同保持，具体能力和验证范围归[权限 owner](../../packages/agent/src/permissions/README.md)与[Service 装配](../../apps/service/README.md#默认装配与业务规则归属)。
+
+Shell 只读证明按固定 rg 的实际参数取值消费，执行 hooks、外部解压及未知参数不能借 safeRead 绕过普通审核。该分类不再充当只读子角色的调用门禁。explore／plan／review 的只读要求作为冻结的可信任务指导传给子模型；Shell 继承父会话当前审批策略、权限交集和普通 OS 范围，不增加专属逐项语义审核或 OS 禁写／禁网上限。Full 下角色只读是任务约束，不是后端禁写保证；主会话 Planning 上限仍独立。准确命令授权区分无截止时限与显式期限，同名 Model 不参与 Shell 描述。源码与回归归[权限 owner](../../packages/agent/src/permissions/README.md)。
+
+正式 Service/Client 经唯一 Agent 的原权限、人工/模型交互和最终 dispatch 事务执行。界面三策略为 `accept_edits` 请求批准、`auto` 自动审核、`full` 完全访问；正式类型、HTTP/IPC、持久控制和调用者均已退役 raw `ask`，旧输入/控制记录失败关闭，不映射为其他模式。正式 Shell 的范围请求与 `web_fetch` network 描述均经该链，固定危险拒绝先于所有模式；Scope 来自可信宿主描述与最终接纳快照，调用输入不能签发 grant。原审核拒绝原因由公共 Execution 的 `authorization.check`（旧记录为 `authorization.review`）与 Tool `result.details.reason` 保存，TUI 结果读取和 Native 原回执可展示，私有适配器错误正文不进入该 reason。实际产品、owner 与验证归[手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)与[Jobs owner](../../packages/agent/src/jobs/README.md)。
+
+新默认 Auto 将 Shell 执行事实、模型风险分类和权限决定分开：Shell owner 提供有限语法事实和受限直接入口快照；审核模型输出 ordinary／high／critical 与短理由；Core 固定映射为 approve_once／ask_user／reject，并保原风险 JSON 与派生决定。模型不接收业务任务授权材料，不能通过风险分类扩张真实范围。Shell 网络仍仅 none／internet、文件仍仅 workspace_write／full_access，不产生按主机或路径的新范围。
+
+新默认合同仅用于实际可信注册的内置 Shell；其他可信内置工具沿原硬准入和独立人工规则，自定义审核器、完整自定义 Permissions、未知注册及旧 Run 保持原合同。新 Run 冻结 defaultAutoReview 与完整 prompt／固定映射 digest；恢复时两字段同缺才为 legacy，残缺、未知或不匹配不能静默降级。新输入只投影完整 operation 与取证 material，不构造任务上下文，也不回退完整窗口。旧 sealed 请求和结果不重写、不冷重发。支持接口的独立输出上限继续适用，真实截断仍是未派发技术失败。
+
+当前 Auto 审核采用默认3000毫秒总期限，覆盖准备、队列与 Provider；`autoApproval.timeoutMs` 可显式配置。超时默认放行语义审核，由工具原有执行策略兜底。Shell 文件和网络范围采用本次请求与父子／宿主硬上限交集，不增加超时专属收窄；显式 `full_access/internet` 请求可按原策略执行，省略请求仍为 `workspace_write/none`。记录 `timeout_continue` 而非审核模型批准，受保护资源和原独立人工要求保持；无可兑现边界时返回明确超时和未执行事实。仅由模型和语义审核表达的任务要求不因此获得沙箱保证。传输、空输出及无效答案仍为独立技术失败；超时、技术失败和真实拒绝不能互相冒充。独立人工批准义务继续等待准确原卡与 accepted 回答。
+
+上述拒绝保留指准确原调用与原审核终态不被改写。新调用单独求当前权限；本合同没有新增跨工具业务效果等价的硬拒绝索引，不能把超时分支描述为任务级语义拒绝不可绕过的技术保证。模型继续受原任务和拒绝指导，执行链继续检查真正的硬拒绝、原人工义务及当前派发证明。
+
+Auto 复用沿既有 Command／policy evidence，不新增授权账本。命令／cwd／环境／资产／范围／策略及风险材料 fingerprint 共同参与身份；不完整动态依赖不扩大独立调用缓存。准确 Tool→自身 Job 继续核原父链和实际当前权限，实际人工／模型材料批准标记经 Store 验证后才交 Shell 启动复核；timeout 及其继承不取得该标记。Auto 的有效相同命令人工 grant 仅在当前有效且准确自身 Job 下继承，不改变手动模式的分层授权。Planning 只为计划模式，原 Run 计划要求独立核实，不定义 Agent 阶段。
 
 用户2026-10-29进一步确认：准确内置浏览器能力免自动审核和用户审批，不受三种模式的常规逐项审批分支影响。可信capability工厂及policy双重核固定builtin.browser@1定义，保真实effects和硬能力、页面／任务／租约／取消／unknown约束；Service／Workflow不把审批重新加回，也不把网络输入伪装只读。Native新任务正常释放控制并final，不装配人工等待／Continue；新消息新Run在VM准入前等原Job准确收口，只以真实acquire保留的私有pageId／incarnation重新绑定原页，URL不代替身份，新引用重新取得；同URL别页、身份替换或缺页不能作为替代。Main网页所有权独立于租约／任务，观察切换不关闭网页。旧拒绝、Question和unknown不转为新控制权，原安全事实和历史格式保留。
 
@@ -21,19 +37,23 @@
 
 Tool 的失败、adapter 抛异常、人工／自动拒绝和 unknown 是原调用的结果，须先保存准确 Execution 与原 call ID 配对，再交给下一 Model 解释；Loop 不因这些结果或五次同参失败硬退出，不自动重试未知效果。人工 deny 保 `approval_denied` 并停止本批未开始后继，已开始调用须先清理；它不提交整 Run／Command 取消。明确用户取消仍停止，真实 Store／authority 故障和无法保存结果仍失败关闭。自动拒绝只作用于准确未派发目标的既有边界保持；[当前决定](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)部分替代旧人工拒绝终止工作语义，历史证据不改写。
 
+工具入口范围限制不能被解释为用户已经拒绝整个业务效果。准确内置 Files 的 `file_full_access_required` gate 回执可补充入口不可用说明，原错误码、原因、未派发事实与权限映射保持；其他工具的独立请求仍完整经过原审批，已有明确拒绝、unknown、父子／Planning 上限及保护资源继续生效。该说明不构成执行许可，具体身份检查与回归归[权限 owner](../../packages/agent/src/permissions/README.md)。
+
+策略硬拒绝的公开原因不仅保存在 `result.details.reason`，还须进入原 Tool 正文及下一模型请求；准确未启动的 Job／Action 同样保留拒因。只有 Core 确认未调用 adapter、未派发的分支才能声称未执行；已尝试 adapter 的私有异常正文不投影为公开拒因。等待人工时策略撤销使用同一公开拒因路径，原错误码、调用身份、派发和未知事实不改变。受控验证见[权限 owner](../../packages/agent/src/permissions/README.md)。
+
 SQLite `finishRun` 只对准确 `run_id` 中已落定 Tool unknown 允许解释 Run completed，原 unknown、revision、引用与效果未被解决。同范围 Model／Job unknown 和活动执行继续阻完成；nested Job 的监督、permit／binding、关闭及恢复门禁不由回复状态解除。可信 `ToolContext.resourceCapacity` 仅是冻结总容量事实，不是当前空闲量或批准；统一 Browser 执行要求 process 至少 2，容量不足在代码／Browser Job 创建前准确失败。容量足够时审批、资源与原启动等待沿原 Job 边界，不叠加 5 秒超时，也不释放仍活许可绕过等待。
 
 默认 `web_fetch` 的代理自动适配只选择传输出口，不授予网络权限：用户级设置、继承环境及系统已登记代理由 Service 封存到原 Run；项目、Tool 输入及页面不能修改它们。全部 Fake-IP DNS 才触发可信 HTTPS 解析，真实地址及每次跳转仍接受全候选公网检查。CONNECT 固定已验证 IP，保留原 Host、TLS 名称和证书校验；禁止代理失败后隐式直连。冷恢复先比较 `snapshot.web`，出口、解析策略或宿主资源策略变化先于凭据读取和模型派发失败；旧默认 Run 不会悄悄升级到新网络选择。具体范围与测试归 [Web Fetch owner](../../packages/agent/src/tools/web-fetch/README.md)。
 
 准确同 Store 原 Run 显式接续中，可核实的已结算私有审核 fencing 与零派发目标在同一事务交接；原回执、请求、输出凭据和独立人工审批保持，不生成新授权或重复审核。新检查的原目标、检查 Model 及当前权限仍须核对准确代次和封存绑定；旧审核历史另外核原 carrier／唯一 child Model 的相等代次与原闭包。身份失真整项回滚，冷记录不创建新检查；边界归[Store owner](../../packages/agent/src/storage/README.md#原-active-run-的显式恢复)。
 
-同一根会话下，child/grandchild 的工具审批模式动态读取根当前 applied `permission.mode` 与 revision，不冻结为创建时父模式。默认和可信注入的 child policy 都与当前根策略及原 capability ceiling 相交；局部根变更不修改其他根或用户默认。真实 `accept_edits/auto/full` 双向变化会唤醒原人工审批、自动权限检查、资源等待和未派发队列，准确原动作按新策略重新判断。Full 不能解除只读预设、工具交集、信任、明确拒绝/取消、工作控制和 unknown fence。
+同一根会话下，child/grandchild 的工具审批模式动态读取根当前 applied `permission.mode` 与 revision，不冻结为创建时父模式。默认和可信注入的 child policy 都与当前根策略及原 capability ceiling 相交；局部根变更不修改其他根或用户默认。真实 `accept_edits/auto/full` 双向变化会唤醒原人工审批、自动权限检查、资源等待和未派发队列，准确原动作按新策略重新判断。Full 不能解除工具交集、主会话 Planning 硬约束、信任、明确拒绝/取消、工作控制和 unknown fence；只读子角色的任务指导不另成 Shell 硬上限。
 
 Service 注入 `permissions`／`permissionPolicy` 时仍允许用户通过原 HTTP 控制修改根模式；注入只保留能力、信任、硬拒绝与明确人工要求上限，原宿主拥有的 trust／grants 管理边界不随模式入口开放。TUI／Desktop 仅将合法 applied 控制事件作为重读信号，按实际 Store、根 Session、Workspace 及明确 default 变更更新显示；首次子视图读取、在途保存和切会话的晚回包分别保留作用域与读取代次，事件正文或显示缓存不签发授权。TUI 的 Ctrl+P 可在问卷中打开权限面板，原答案和步骤保持，字面 slash 文本仍是回答。
 
 Native 普通工具审批采用输入组件上方的单卡分页，根和子待批均保留 Composer／模式入口；切 Auto／Full 仍通过原持久模式和最终 dispatch read-set 重判，不由移除卡片模拟执行。主名称隐藏、子名称与稳定彩色图标只作展示，不改变准确来源 Session／Run／Interaction。分体菜单“本次会话批准”只提交原卡实际提供的 `same_command`，不扩大为所有工具授权；紧凑附件仍须完整 EOF／hash／UTF-8 核对才有回答能力。问答、计划和 MCP 特殊授权保持独立门禁。排队消息的撤回／编辑／调序只影响尚未消费的输入，不授予工具权限、不取消已执行效果，准确跨层 authority 见[执行边界](unified-agent-boundary.md)与[Native owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
-子 Agent 的会话授权选项必须保留父子策略的共同范围、原命令摘要和策略 revision；独立必需权限检查不得因会话授权被跳过。可复用的人类批准按真实来源 Session 保存，父展示根、兄弟和后代均不能借用；Auto 每次审阅正文与持久会话授权的绑定分别核实，规则和反例由[权限 owner](../../packages/agent/src/permissions/README.md)维护。
+子 Agent 的会话授权选项必须保留父子策略的共同范围、原命令摘要和策略 revision；独立必需权限检查不得因会话授权被跳过。可复用的人类批准按真实来源 Session 保存，父展示根、兄弟和后代均不能借用；Auto 有效审阅的复用与持久会话授权的绑定分别核实，规则和反例由[权限 owner](../../packages/agent/src/permissions/README.md)维护。
 
 最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及权限检查 proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或检查结果不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant／检查 proof 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
 
@@ -316,7 +336,11 @@ bun test packages/runtime-host/test/policies/authorization-elevation.test.ts pac
 
 ## 内部权限检查与子 Agent 边界
 
-新 authorization.check 请求在 Runtime 封存前加入独立 system 指引，原用户请求只作为范围证据，任务／参数／历史工具正文不能签发授权。checker 技术失败是无决定而非 reject；历史失败次数、缺少先前批准与不可用本身不能成为新调用的拒绝或转人工依据，后续调用继续按准确目标和当前策略独立判断，真实拒绝仍有效。不可用 Tool、Action 与 Job 结果保留未派发／零 adapter 事实，并以可读正文和 details.authorizationCheck 的原检查身份及有限 Core failureCode 解释已知原因；私有 adapter 消息与不完整输出不投影为拒绝理由。旧封存输入、输出和 proof 不改写，冷记录不重发；实现与受控回归范围见[权限 owner](../../packages/agent/src/permissions/README.md)。
+authorization.check 请求在 Runtime 封存前加入其合同的独立 system 指引；旧任务授权合同的原用户请求只作为范围证据，新默认风险合同不发送该业务材料。任务／参数／历史工具正文不能签发授权。checker 技术失败是无决定而非 reject；历史失败次数、缺少先前批准与不可用本身不能成为新调用的拒绝或转人工依据，后续调用继续按准确目标和当前策略独立判断，真实拒绝仍有效。不可用 Tool、Action 与 Job 结果保留未派发／零 adapter 事实，并以可读正文和 details.authorizationCheck 的原检查身份及有限 Core failureCode 解释已知原因；私有 adapter 消息与不完整输出不投影为拒绝理由。旧封存输入、输出和 proof 不改写，冷记录不重发；实现与受控回归范围见[权限 owner](../../packages/agent/src/permissions/README.md)。
+
+内部审核的模型失败处理保留真实 SDK 已去敏的服务不可用、连接失败和流不完整固定分类，与普通 Model 链一致；只对白名单原因生成可读 Tool 反馈，不透传任意异常 message／cause。原 Tool 正文以准确 call／source 完整进入下一模型；未取得审核决定仍零派发、无新增人工卡，不因此获得自动重试或放行。原生 Provider 请求、有限诊断与历史故障的可追溯范围归[真实验收入口](../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)。
+
+通用失败可读性属于模型上下文呈现：只在核原 Tool／call／Session／Run／Store 后解释裸码、取消和 unknown，是否未派发取 Core 真实观察，原 receipt／outcome／批准和已封存 ModelInput 保持。完整公开拒绝原因不被通用说明覆盖，私有 details 不自动公开；后台 Source 保原完整 JSON 及既有投递／抑制边界，不因报错主动创建新模型。[呈现 owner](../../packages/agent/src/model-tools.README.md#结果呈现)与各工具 owner 负责具体安全原因、已完成动作和恢复说明，不在审批层重解释业务效果。
 
 自动审核统一命名 `authorization.check`／`authorizationCheck`，由权限系统保存原会话中的一次无 Run Model，不创建 child Session、Run 或子任务 carrier。最终派发核原 target／attempt／定义／input/source／policy/controlReads，以及准确请求与完整结果，强制人工要求继续保留双 proof。标题生成同属内部模型调用，记录为 `session.title`。 原标题 Model 的宿主与已解析 policy ceiling 仍须共同通过；准确用途不提供绕过权限的许可，资源等待后的当前控制和最终 SQL 证明继续独立核实。通用子 Agent 只以类别配置差异，`review` 只表示代码审查类别。旧 `authorization.review` 原记录与凭据只读保留，冷重开不重跑旧审核；[边界决定](../../.agents/notes/implemented/architecture/2026-10-22-internal-model-calls-without-child-agents.md)解释迁移理由。
 

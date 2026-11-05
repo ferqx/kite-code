@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ModelRequest } from '@kite-ai/ai';
 import { formatFileReadResult } from '../../../../packages/agent/src/tools/files/model-result';
 import { taskQualityResearchPrompt } from './agent-task-quality.live';
 import {
@@ -24,7 +25,7 @@ import { loadTaskQualityReplay } from './agent-task-quality-replay-fixture';
 test('offline replay rejects changed canonical bytes and never supplies a callable Provider', () => {
   const root = mkdtempSync(join(tmpdir(), 'quality-offline-integrity-'));
   try {
-    const request = {
+    const request: ModelRequest = {
       modelId: 'live',
       requestId: 'original',
       messages: [{ role: 'user', content: 'synthetic task' }],
@@ -448,8 +449,8 @@ async function probe(script: string, mode = '') {
       new Response(child.stderr).text(),
       child.exited,
     ]);
-    expect(code).toBe(0);
     expect(stderr).toBe('');
+    expect(code).toBe(0);
     return JSON.parse(stdout);
   } finally {
     clearTimeout(budget);
@@ -462,11 +463,15 @@ async function probe(script: string, mode = '') {
 test('wire evidence stays paired across concurrent requests and preflight blocks dispatch', async () => {
   const result = await probe(`
 import { mock } from 'bun:test';
+import * as configurationExports from '@kite-ai/agent/config';
+import * as sdkExports from '@kite-ai/ai/sdk';
+const actualConfiguration = { ...configurationExports };
+const actualSdk = { ...sdkExports };
 let fetches = 0, closes = 0;
 globalThis.fetch = Object.assign(async () => { fetches++; await Bun.sleep(2); return new Response('{}'); }, { preconnect() {} });
-mock.module('@kite-ai/agent/config', () => ({ createCredentialVault: () => ({ resolve: async () => { throw Error('credential_forbidden'); } }), createOsCredentialBackend: () => ({}) }));
+mock.module('@kite-ai/agent/config', () => ({ ...actualConfiguration, createCredentialVault: () => ({ resolve: async () => { throw Error('credential_forbidden'); } }), createOsCredentialBackend: () => ({}) }));
 mock.module('@kite-ai/service/configuration', () => ({ parseModelPreset: () => ({ reasoningEffort:'high' }), createUserConfiguration: () => ({ read: () => ({ value: { modelId:'owned', models:[{ id:'owned', model:'synthetic', provider:'compatible', baseURL:'https://owned.invalid' }] } }) }) }));
-mock.module('@kite-ai/ai/sdk', () => ({ createCompatibleModelBinding: value => value, createSdkModelAdapter: options => ({ async *stream(request) {
+mock.module('@kite-ai/ai/sdk', () => ({ ...actualSdk, createCompatibleModelBinding: value => value, createSdkModelAdapter: options => ({ async *stream(request) {
   try { await options.models.get('live').fetch('https://owned.invalid', { body:JSON.stringify({ model:'synthetic', input:request.requestId, tools:[] }) }); yield { type:'finish', reason:'stop', usage:{ inputTokens:2, outputTokens:1 } }; }
   finally { closes++; }
 } }) }));

@@ -240,7 +240,6 @@ export async function migrateOriginalToolCall(
       if (a.timeout !== undefined)
         throw Error('original_tool_shell_timeout_requires_scenario_migration');
       args = {
-        key: createHash('sha256').update(call.id).digest('hex'),
         command: text(a, 'command'),
       };
       break;

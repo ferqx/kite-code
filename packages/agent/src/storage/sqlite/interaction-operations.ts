@@ -13,7 +13,7 @@ import {
 } from '../types';
 import { verifyHostControlReads } from './host-control-dispatch';
 import type { SqliteOperations } from './operations';
-import { savePermissionGrant } from './permission-grants';
+import { revokePermissionGrant, savePermissionGrant } from './permission-grants';
 import { interactions } from './schema';
 
 type Row = Record<string, string | number | bigint | null | undefined>;
@@ -393,27 +393,12 @@ export function callInteraction(db: SqliteOperations, method: string, args: unkn
         'SELECT subject_id FROM command WHERE id=?',
         execution.origin_command_id!,
       )!;
-      if (
-        db.row(
-          'SELECT id FROM permission_grant WHERE id=? AND revoked_seq IS NULL',
-          input.interactionId,
-        )
-      ) {
-        db.run(
-          "INSERT INTO permission_grant_change(origin_store_id,subject_id,session_id,kind) VALUES(?,?,?,'clear')",
-          input.expectedStoreId,
-          origin.subject_id!,
-          execution.session_id!,
-        );
-        const revision = db.row(
-          'SELECT CAST(MAX(seq) AS TEXT) AS revision FROM permission_grant_change',
-        )!.revision!;
-        db.run(
-          'UPDATE permission_grant SET revoked_seq=? WHERE id=? AND revoked_seq IS NULL',
-          revision,
-          input.interactionId,
-        );
-      }
+      revokePermissionGrant(db, {
+        interactionId: input.interactionId,
+        expectedStoreId: input.expectedStoreId,
+        subjectId: String(origin.subject_id),
+        sessionId: String(execution.session_id),
+      });
       const request: Json = {
         kind: 'interaction.invalidate',
         interactionId: input.interactionId,

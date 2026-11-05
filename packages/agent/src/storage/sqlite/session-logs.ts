@@ -45,6 +45,7 @@ const name = (value: unknown): value is string =>
 const obj = (value: unknown): value is Record<string, Json> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const category = (type: string): SessionLogCategory => {
+  if (type === 'authorization.policy') return 'execution';
   const prefix = type.split('.')[0];
   return [
     'command',
@@ -61,6 +62,58 @@ const category = (type: string): SessionLogCategory => {
       ? 'execution'
       : 'other';
 };
+/** Pick only finite facts from the trusted policy event, never its private proof or snapshot. */
+function policyDetails(value: unknown): SessionLogDetails['policy'] | undefined {
+  if (
+    !obj(value) ||
+    !id(value.targetExecutionId) ||
+    !id(value.policyEvidenceId) ||
+    !['reused_approval', 'parent_review', 'timeout_continue'].includes(String(value.reason)) ||
+    !obj(value.source) ||
+    !['check', 'policy'].includes(String(value.source.kind)) ||
+    !id(value.source.id) ||
+    (value.source.targetExecutionId !== undefined && !id(value.source.targetExecutionId))
+  )
+    return;
+  const scope = (item: unknown) => {
+    if (item === null) return null;
+    if (
+      !obj(item) ||
+      !['workspace_write', 'full_access'].includes(String(item.filesystem)) ||
+      !['none', 'internet'].includes(String(item.network)) ||
+      typeof item.filesystem !== 'string' ||
+      typeof item.network !== 'string'
+    )
+      return;
+    return {
+      filesystem: item.filesystem as 'workspace_write' | 'full_access',
+      network: item.network as 'none' | 'internet',
+    };
+  };
+  const requestedScope = scope(value.requestedScope),
+    effectiveScope = scope(value.effectiveScope);
+  if (
+    requestedScope === undefined ||
+    effectiveScope === undefined ||
+    typeof value.reason !== 'string' ||
+    typeof value.source.kind !== 'string'
+  )
+    return;
+  return {
+    targetExecutionId: value.targetExecutionId,
+    policyEvidenceId: value.policyEvidenceId,
+    reason: value.reason as NonNullable<SessionLogDetails['policy']>['reason'],
+    source: {
+      kind: value.source.kind as 'check' | 'policy',
+      id: value.source.id,
+      ...(value.source.targetExecutionId !== undefined
+        ? { targetExecutionId: value.source.targetExecutionId as string }
+        : {}),
+    },
+    requestedScope,
+    effectiveScope,
+  };
+}
 export function unwrapChangePayload(value: Json): Json {
   if (!obj(value) || value.format !== 'kite.session-log') return value;
   // A reserved wrapper is never public payload, even when a future or malformed metadata version is unreadable.
@@ -184,6 +237,10 @@ export function sessionLogEnvelope(
       if (id(row.execution_id)) details.executionId = row.execution_id;
     }
   }
+  if (type === 'authorization.policy' && details.executionId === objectId) {
+    const policy = policyDetails(payload);
+    if (policy?.targetExecutionId === objectId) details.policy = policy;
+  }
   return {
     format: 'kite.session-log',
     version: 1,
@@ -247,6 +304,14 @@ function decodeSnapshot(value: unknown): {
       if (!name(item)) throw new AgentError('session_log_metadata_invalid');
     } else if (key === 'kind') {
       if (typeof item !== 'string' || !['model', 'tool', 'job'].includes(item))
+        throw new AgentError('session_log_metadata_invalid');
+    } else if (key === 'policy') {
+      const policy = policyDetails(item);
+      if (
+        !policy ||
+        policy.targetExecutionId !== value.details.executionId ||
+        canonicalJson(policy as unknown as Json) !== canonicalJson(item)
+      )
         throw new AgentError('session_log_metadata_invalid');
     } else if (key === 'attempt') {
       if (!Number.isSafeInteger(item) || Number(item) < 1)

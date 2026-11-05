@@ -1417,3 +1417,65 @@ test('historical completed plan receipt retains original approval source while c
     await f.close();
   }
 });
+
+test('plan progress updates preserve sibling tools and original successful receipts without Agent phases', async () => {
+  const f = await fixture({ requirePlan: true }, async (step, currentFixture) => {
+    if (step === 0) return call('write_plan', modelPlan(null));
+    const current = (await currentFixture.record('plan.current'))!.value as Record<string, Json>;
+    if (step === 1)
+      return call('request_plan_review', {
+        plan_id: 'p',
+        version: current.version!,
+        digest: current.digest!,
+      });
+    if (step === 2) return call('fixture.effect');
+    if (step === 3 || step === 4) {
+      const original = (await currentFixture.store.listExecutions('s')).find(
+        (execution) =>
+          execution.definitionId === 'fixture.effect' && execution.status === 'succeeded',
+      )!;
+      const progress = await currentFixture.record('progress/p/1');
+      const update = call('update_plan_progress', {
+        run_id: await currentFixture.runId(),
+        plan_id: 'p',
+        version: current.version!,
+        digest: current.digest!,
+        expected_progress_revision: progress?.revision ?? null,
+        step_id: 'a',
+        status: 'completed',
+        execution_id: original.id,
+        complete_plan: step === 4,
+      });
+      if (step === 3) return [...update.slice(0, -1), ...call('fixture.effect')];
+      return update;
+    }
+    return [finish];
+  });
+  try {
+    await f.submit();
+    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    expect((await f.done())!.status).toBe('completed');
+    expect(f.effects).toBe(2);
+    const executions = await f.store.listExecutions('s');
+    const effects = executions.filter((execution) => execution.definitionId === 'fixture.effect');
+    expect(effects.every((execution) => execution.status === 'succeeded')).toBe(true);
+    expect(
+      executions
+        .filter((execution) => execution.definitionId === 'planning.update')
+        .every((execution) => execution.status === 'succeeded'),
+    ).toBe(true);
+    const progress = (await f.record('progress/p/1'))!.value as {
+      steps: { a: { receipt: { executionId: string } } };
+      completePlan: boolean;
+    };
+    expect(progress.completePlan).toBe(true);
+    expect(progress.steps.a.receipt.executionId).toBe(effects[0]!.id);
+    for (const request of f.modelRequests) {
+      expect(
+        request.messages.some((message) => /phase: (?:building|planning)/.test(message.content)),
+      ).toBe(false);
+    }
+  } finally {
+    await f.close();
+  }
+});

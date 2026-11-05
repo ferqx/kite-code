@@ -67,11 +67,9 @@ const provider = Bun.serve({
     const call = shell
       ? shellCalls === 1
         ? {
-            name: 'shell_launch',
+            name: 'shell_execute',
             input: {
-              key: 'platform-shell',
               command: 'printf default-shell; printf default-stderr >&2',
-              cancellation: 'detached',
             },
           }
         : null
@@ -133,7 +131,7 @@ try {
       tools,
     });
   const configPath = userConfiguration.path;
-  writeFileSync(configPath, configuration([{ id: 'shell.launch', definitionVersion: '1' }]), {
+  writeFileSync(configPath, configuration([{ id: 'shell.execute', definitionVersion: '1' }]), {
     mode: 0o600,
   });
   service = await launchPairedService({

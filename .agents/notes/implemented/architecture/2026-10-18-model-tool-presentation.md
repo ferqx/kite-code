@@ -33,7 +33,19 @@ Status: implemented
 
 当前实现、全部公开名称与限制由 [模型工具 owner](../../../../packages/agent/src/model-tools.README.md)维护，产品行为归 [工具手册](../../../../docs/handbook/features/tools-and-approvals.md)。本轮不加入正则搜索或 apply_patch，不扩张 MCP 搜索范围。既有 MCP 完整目录承诺与当前 selected search 的差异在[扩展手册](../../../../docs/handbook/features/extensions.md)明确记录，不用新名称掩盖未实现能力。
 
+## Follow-up: 失败说明与原回执分离（2026-11-03）
+
+整体回执审查发现，模型实际收到的正文可能只有裸错误码，或缺少已完成动作、远端结构化错误及准确执行状态。把任意 details 全部交给模型会跨越私有数据边界；直接改写原机器回执则会影响状态判断、去重和恢复。
+
+因此在原模型上下文呈现边界补充有限失败说明，保留原存储回执、调用身份、机器 outcome、权限与协议版本。只有 Core 的真实派发观察才能说明本次未执行和本次 Tool 作用为零；leaf 自称未执行不能成为该事实。人工拒绝核原 human answer，已有公开原因不改写，私有 details／异常 cause 不自动公开。unknown 与取消分别说明效果和停止的已知边界，后台 Source 保完整原结果及既有投递时机。具体业务原因与部分输出仍由原工具 owner 提供，不把风险或授权判断移入呈现层。
+
+文字清晰不能保证任意模型始终解释正确。真实低思考样本曾把已知未执行称为效果未知，又把无效果推成可原样重投；原样本保留，回执据此明确“本次无 Tool 作用不授权另一次尝试”和“无效参数原样再交仍会失败”。实际模型输入、RPC 与写后故障回归分别证明投递、身份和效果，不能由文字关键词替代。当前实现与验证归[结果呈现 owner](../../../../packages/agent/src/model-tools.README.md#结果呈现)及[真实验收入口](../../../../tests/e2e/live/model/README.md#工具异常与审批回执理解)。
+
 ## Verification
+
+2026-11-04 的失败轨迹复核另发现父级取证缺口：三种模式下父模型曾使用正确 carrier ID 读取原子任务结果，当前任务 reader 却只识别普通 `operation.job`，把真实 `operation.agent` 错拒为范围外；已有预览也只带 Shell 成败计数，缺少命令和 stderr。按原当前任务边界补 carrier 的真实请求／回执／启动链核验，并在冻结 Shell 注册及真实 Tool→Job 绑定成立时附带有限中立执行事实。后续实测又出现已经 Auto 批准却被声称“未审批”，因此仅从现存公开授权观察附带审核决定、人类答案接纳和策略依据；不从派发或范围反推批准，不引入新的授权判断。原父子权限、Loop、源记录和完整报告保持；不增加任务完成判定器或把子报告变成可信结论。旧预览仍可呈现，未来未知字段继续回原完整格式。当前合同及回归归[执行证据 owner](../../../../packages/agent/src/business/execution-evidence/README.md)和[子任务 owner](../../../../packages/agent/src/extensions/task/README.md)。
+
+同模型低思考的原九格验证真实触发了父自有 carrier 读取、Shell 预览和同 child 续接；末次定向确认新增批准事实进入父模型，但业务仍未完成。修正夹具缺少正式继续工具、结果 reader 和事实呈现，不等于已经消除模型的工具选择、提前结束及语义核验错误；完整结果和范围由上述真实验收入口维护，不以机械通过或一次恢复成功承诺长期稳定。
 
 2026-10-18，本机 macOS/Bun 1.4.2。[真实 Runtime 投影](../../../../packages/agent/test/isolated/execution/model-tools.test.ts)与[组合分支](../../../../packages/agent/test/isolated/execution/model-tools-branches.test.ts)覆盖名称/字段冲突、非法旧字段零效果、opaque JSON、实际激活数组元素、大正文、公开历史、冷只读 Inspector 和实测 token 基线。[真实 paired Service](../../../../apps/service/test/isolated/configuration.test.ts)使用公开 read_file/edit_file 完成读取、准确原基线、真实审批、磁盘变更及下一轮历史，审批和持久记录仍为 files.edit 与原参数。Shell、Task、Responses 及原执行恢复用例分别核对原生命周期和零重放。
 

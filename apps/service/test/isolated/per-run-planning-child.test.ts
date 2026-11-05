@@ -52,6 +52,8 @@ async function fixture(
     | 'next'
     | 'cas_drift',
 ) {
+  // These cases deliberately exercise an independent task-review decision in addition to Planning.
+  const customTaskReview = ['ask', 'head_drift', 'proof_drift'].includes(scenario);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-per-run-plan-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -176,7 +178,7 @@ async function fixture(
       { id: 'files.write', definitionVersion: '3' },
       ...['task.spawn', 'task.events', 'task.list'].map((id) => ({ id, definitionVersion: '1' })),
       ...(scenario === 'pending_job'
-        ? ['shell.launch'].map((id) => ({
+        ? ['shell.execute'].map((id) => ({
             id,
             definitionVersion: '1',
           }))
@@ -189,6 +191,15 @@ async function fixture(
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend,
+    ...(customTaskReview
+      ? {
+          permissions: {
+            async authorize() {
+              return { allowed: true, revision: 'fixture-legacy-child-task-review' };
+            },
+          },
+        }
+      : {}),
     child: [
       { id: 'worker', version: '1', modelId: 'child', toolIds: ['files.read', 'files.write'] },
     ],
@@ -220,7 +231,7 @@ async function fixture(
             definitionId: id,
             definitionVersion: '1',
           })),
-          ...['task.spawn', 'task.events', 'task.list', 'shell.launch'].map((id) => ({
+          ...['task.spawn', 'task.events', 'task.list', 'shell.execute'].map((id) => ({
             kind: 'tool' as const,
             definitionId: id,
             definitionVersion: '1',
@@ -589,7 +600,10 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   const current = planRecord.value as Record<string, Json>;
   if (f.scenario === 'pending_job') {
     if (step === 1)
-      return { name: 'launch_shell', input: { command: 'printf forbidden > forbidden.txt' } };
+      return {
+        name: 'shell_execute',
+        input: { command: 'printf forbidden > forbidden.txt', background: true },
+      };
     return null;
   }
   if (step === 1)
@@ -656,8 +670,9 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
       expect(String(diagnostic.content)).toContain('plan_draft_pending');
       const denied = (await f.store.listExecutions('s')).find(
         (execution) =>
-          execution.definitionId === (scenario === 'pending_task' ? 'task.spawn' : 'shell.launch'),
+          execution.definitionId === (scenario === 'pending_task' ? 'task.spawn' : 'shell.execute'),
       )!;
+      expect(denied).toBeDefined();
       expect(denied.status).toBe('failed');
       expect(denied.authorization?.dispatched).toBe(false);
       expect(f.normal.filter((row) => row.model === 'child')).toHaveLength(0);
@@ -734,7 +749,7 @@ test('approved accept_edits under current Full independently challenges Task/car
     await f.close();
   }
 }, 15000);
-test('child dispatch remains parent AND current mode/trust despite accepted parent Full composition', async () => {
+test('child dispatch retains parent Planning AND current custom task-review or default trust denial', async () => {
   for (const scenario of ['ask', 'untrusted'] as const) {
     const f = await fixture(scenario);
     try {
@@ -746,6 +761,7 @@ test('child dispatch remains parent AND current mode/trust despite accepted pare
         expect(card.sessionId).not.toBe('s');
         expect(existsSync(join(f.workspace, 'child.txt'))).toBe(false);
         await f.approve('files.write');
+        expect(f.reviews).toHaveLength(1);
       }
       await f.done();
       expect(existsSync(join(f.workspace, 'child.txt'))).toBe(scenario === 'ask');
@@ -761,7 +777,7 @@ test('child dispatch remains parent AND current mode/trust despite accepted pare
     }
   }
 }, 20000);
-test('original parent head/proof drift during child approval refuses dispatch and next Run cannot borrow approval', async () => {
+test('original parent head/proof drift during custom child task-review refuses dispatch and next default Run cannot borrow approval', async () => {
   for (const scenario of ['head_drift', 'proof_drift'] as const) {
     const f = await fixture(scenario);
     try {
@@ -769,6 +785,7 @@ test('original parent head/proof drift during child approval refuses dispatch an
       await delegateApprovals(f);
       const card = await f.card('approval');
       expect(card.definitionId).toBe('files.write');
+      expect(f.reviews).toHaveLength(1);
       const db = new Database(join(f.profile.profilePath, 'core.db'));
       try {
         db.run('PRAGMA busy_timeout=100');

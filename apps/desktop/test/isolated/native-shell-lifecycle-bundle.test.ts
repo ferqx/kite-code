@@ -254,11 +254,10 @@ test.skipIf(process.platform !== 'darwin')(
                   id: `${marker}-${label}`,
                   type: 'function',
                   function: {
-                    name: 'shell_launch',
+                    name: 'shell_execute',
                     arguments: JSON.stringify({
-                      key: label,
                       command: `${quote(executable)} ${quote(join(workspace, `${label}.pids`))} ${quote(effects)} ${quote(label)} ${quote(provider.url.port)}`,
-                      cancellation: 'detached',
+                      background: true,
                     }),
                   },
                 }),
@@ -349,7 +348,7 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: [{ id: 'shell.launch', definitionVersion: '1' }],
+          tools: [{ id: 'shell.execute', definitionVersion: '1' }],
         }),
         { mode: 0o600 },
       );
@@ -366,7 +365,7 @@ test.skipIf(process.platform !== 'darwin')(
           installedCandidateRoot: candidateRoot,
           storeId,
           producer:
-            'ordinary workspace native program via actual Native Full selection and shell.launch',
+            'ordinary workspace native program via actual Native Full selection and shell.execute background',
         }),
       );
       const fixture = join(root, 'driver.ts');

@@ -1,6 +1,7 @@
 import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
 import type { Extension, Json, ToolContext, ToolResult } from '../index';
+import { isChildPreparationFailure } from './preparation-failure';
 
 export { createDefaultTaskRequestClassifier } from '../../permissions/task-request';
 export {
@@ -90,6 +91,28 @@ export function createTaskExtension(options: TaskOptions): Extension {
     operation_needs_review: ['recovery_required', 'request_recovery', false],
     operation_unverifiable: ['recovery_required', 'request_recovery', null],
   };
+  const errorMessages: Readonly<Record<string, string>> = {
+    invalid_request:
+      'The Agent request has invalid arguments or an unavailable role. Correct it using the declared tool schema and available presets.',
+    invalid_cursor:
+      'The observation cursor is invalid or ahead of the current mailbox or directory. Restart observation from a valid returned cursor; this does not cancel existing Agent work.',
+    cursor_expired:
+      'The observation cursor is no longer retained. Resume from resume_after_seq when provided, or restart observation. Do not infer that existing Agent work was lost or stopped.',
+    agent_unavailable:
+      'The requested Agent is unavailable in this parent scope. Check its exact agent_id against list_agents; do not invent an ID or create a replacement to recover an unknown result.',
+    target_changed:
+      'The selected Agent work changed or ended before this request could be accepted. Observe its current state before making a new request.',
+    operation_conflict:
+      'This operation conflicts with an existing request identity. Inspect the original receipt and result; do not reuse an identity for a different request or create a new identity to repeat an unconfirmed effect.',
+    permission_denied:
+      'Current permissions do not allow this Agent operation. Respect the restriction; changing an Agent or operation identity does not bypass it.',
+    operation_cancelled:
+      'This Agent request was cancelled. This does not confirm that a previously running child has stopped.',
+    recovery_required:
+      'The original Agent work requires recovery before it can continue. Inspect its recorded state and use the supported recovery action; do not restart it under a new identity.',
+    receipt_unverifiable:
+      'The original Agent operation receipt could not be verified. Inspect the original receipt and current Agent state before proceeding.',
+  };
   const safe =
     (command: boolean, execute: (input: Json, context: ToolContext) => Promise<ToolResult>) =>
     async (input: Json, context: ToolContext): Promise<ToolResult> => {
@@ -97,10 +120,35 @@ export function createTaskExtension(options: TaskOptions): Extension {
         return await execute(input, context);
       } catch (error) {
         const code = error instanceof AgentError ? error.code : '';
+        const preparationFailed = command && isChildPreparationFailure(error);
         const cancelledObservation = code === 'cancel_requested' && !command;
-        const projected = cancelledObservation
-          ? ['operation_cancelled', 'none', false]
-          : (errors[code] ?? ['receipt_unverifiable', 'inspect_original', null]);
+        const projected = preparationFailed
+          ? ['preparation_failed', 'resolve_configuration', false]
+          : cancelledObservation
+            ? ['operation_cancelled', 'none', false]
+            : (errors[code] ?? ['receipt_unverifiable', 'inspect_original', null]);
+        const preparationMessages: Readonly<Record<string, string>> = {
+          skill_capability_missing:
+            'A selected skill requires a capability unavailable to this collaborator.',
+          child_model_unavailable: 'The selected model is unavailable to this collaborator.',
+          child_configuration_unavailable:
+            'The selected collaborator configuration is unavailable.',
+          child_tool_scope_exceeds_parent:
+            'The selected collaborator tools exceed the available parent tools.',
+        };
+        const explanation = preparationFailed
+          ? `This request did not start new collaborator work or deliver new guidance. Existing collaborator work may still run or finish independently. ${Object.hasOwn(preparationMessages, code) ? preparationMessages[code] : 'The collaborator configuration could not be prepared.'} Check the selected skills, tools and model before deciding whether a separately authorized new request is appropriate.`
+          : cancelledObservation
+            ? 'Agent observation was cancelled.'
+            : !command && projected[0] === 'receipt_unverifiable'
+              ? 'The Agent observation could not be verified. Observe the current state again; this failure does not prove any child work stopped, failed or disappeared.'
+              : errorMessages[projected[0] as string]!;
+        const message =
+          command && projected[2] === false
+            ? `This Agent request was not accepted. ${explanation}`
+            : command && projected[2] === null
+              ? `Acceptance of this Agent request is unknown; it may already have been accepted. Do not repeat it or create a new operation identity to try again. ${explanation}`
+              : explanation;
         const details: Json = {
           ...(command ? { accepted: projected[2] } : {}),
           ...(code === 'cursor_expired'
@@ -113,9 +161,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
             : {}),
           error: {
             code: projected[0],
-            message: cancelledObservation
-              ? 'Agent observation was cancelled.'
-              : `Agent operation could not be verified (${projected[0]}).`,
+            message,
             next_action: projected[1],
           },
         };
@@ -173,7 +219,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.spawn',
         'spawn_agent',
-        `Delegate a concrete scoped prompt to a reusable child Agent. Default role ${defaultRole}: ${roles.get(defaultRole)!.description} Choose a registered preset whose capabilities can perform the required steps; a role never adds tools or permissions beyond the parent selection and child ceiling. Review the returned evidence for the current entry point and causal path before adopting conclusions; file or symbol existence alone does not establish that path. task_name is display only. Acceptance may remain queued. Parent normal completion does not cancel the child. No Provider, permission or Run identity can be supplied.`,
+        `Delegate a concrete scoped prompt to a reusable child Agent. Default role ${defaultRole}: ${roles.get(defaultRole)!.description} Choose a registered preset whose capabilities can perform the required steps; a role never adds tools or permissions beyond the parent selection and child ceiling. Include the exact targets, required content or format, once-only limits and fallback conditions the child needs; referring to user instructions not included in the prompt does not transmit them. Review the actual result against the original request before adopting completion claims. task_name is display only. Acceptance may remain queued. Parent normal completion does not cancel the child. No Provider, permission or Run identity can be supplied.`,
         object(
           {
             prompt: content,
@@ -215,7 +261,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.follow_up',
         'follow_up_agent',
-        'Continue the same owned collaborator, including from a later parent turn, subject to current tool authorization. Running or queued work receives guidance at a safe boundary; idle starts one ordinary new turn in the same Session. The same agent_id spans turns. accepted and state describe this request at admission, not its completion; earlier results or completed events for that agent do not prove this follow-up finished. No preset change.',
+        'Continue the same owned collaborator for concrete remaining work, including from a later parent turn, subject to current tool authorization. State the exact discrepancy and correction, preserving successful effects and once-only limits; do not restart completed work. Running or queued work receives guidance at a safe boundary; idle starts one ordinary new turn in the same Session. The same agent_id spans turns. accepted and state describe this request at admission, not its completion; earlier results or completed events for that agent do not prove this follow-up finished. No preset change.',
         object({ agentId, content }, ['agentId', 'content']),
         true,
         command('follow_up'),
@@ -231,7 +277,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.message',
         'send_agent_message',
-        'Queue a complete message to a direct child or parent. Idle recipients stay idle. Accepted/received/prepared are distinct. If a child needs a reply to proceed, wait at most one explicit finite 30000ms observation window; without a valid reply, finish with an honest pending-decision result containing the complete question and completed/unfinished facts. Do not wait indefinitely for an idle parent.',
+        'Queue a complete message to a direct child or parent. Idle recipients stay idle; use follow_up_agent when an idle child must resume concrete remaining work. Accepted/received/prepared are distinct. If a child needs a reply to proceed, wait at most one explicit finite 30000ms observation window; without a valid reply, finish with an honest pending-decision result containing the complete question and completed/unfinished facts. Do not wait indefinitely for an idle parent.',
         {
           ...object({ agentId, target: { enum: ['parent'] }, content }, ['content']),
           oneOf: [

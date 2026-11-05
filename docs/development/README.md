@@ -42,6 +42,8 @@
 
 [架构总览](architecture.md)、[workspace 依赖表](architecture/dependencies.md)、[拓扑](architecture/topology.md)及流程/子系统均按当前八 workspace 定位。旧实现与证据通过固定 revision 保留历史追溯；适用的安全与发布约束继续由当前 owner 和 active 维护。
 
+[执行、后台子 Agent 与审批交互图](prototypes/execution-observability/README.md)提供当前流程推演和代表性真实测试日志的离线 HTML 查看。
+
 追溯时区分静态 import、进程拓扑与请求/事件/提交时序；客户端缓存始终不能成为业务 authority。不得从旧计划、Note 状态或历史测试通过推导当前能力。
 
 ## 文档与验证维护

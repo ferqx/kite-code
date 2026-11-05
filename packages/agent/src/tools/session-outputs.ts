@@ -287,7 +287,11 @@ export function withSessionOutputs(options: {
                     throw new AgentError('output_file_operation_unavailable');
                   },
                 });
-                const result = await createFileTools(adapter, { capture, snapshot: false })
+                const result = await createFileTools(adapter, {
+                  capture,
+                  snapshot: false,
+                  missingRead: 'error',
+                })
                   .find((definition) => definition.id === tool.id)!
                   .execute(input, context);
                 if (!snapshot || result.outcome !== 'succeeded') return result;

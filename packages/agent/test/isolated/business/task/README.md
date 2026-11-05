@@ -5,6 +5,7 @@
 | 场景 | 测试与断言 |
 | --- | --- |
 | 六工具与身份 | [collaboration-surface](collaboration-surface.test.ts)：实际目录、丢响应重试、queued 引导、idle 复用、直接父子和错误三态 |
+| 创建／续作准备失败 | [preparation-failure](preparation-failure.test.ts)：可信未受理说明进入下一模型、原身份二次核对、并发唯一受理、原子结果保真；取消、清理未确认、读取失败和受理后异常不冒充未受理 |
 | 首次激活 | [collaboration-first-activation](collaboration-first-activation.test.ts)：取消前零派发证明、稳定 Session 复用、历史和实际输入 |
 | 邮件 | [mailbox](mailbox.test.ts)：父子双向全文、唯一低信任来源、事务回滚、未知／取消目标和冷只读 |
 | 统一邮箱 | [unified-inbox](unified-inbox.test.ts)：引导与 typed 邮件同轮汇合、active 结果唯一 Source、idle 通知权限及损坏 marker 拒绝 |
@@ -13,6 +14,7 @@
 | 观察 | [collaboration-observation](collaboration-observation.test.ts)：多 Agent 分页、压缩、完整来源、固定上界、游标缺口及冷读零重放 |
 | 后台结算 | [attached-job-settlement](attached-job-settlement.test.ts)：attached 排队／运行 Job 等待、detached 独立、取消和 close drain |
 | 文件协作 | [collaboration-files](collaboration-files.test.ts)：兄弟冲突、fresh read、部分成功及未知发布不重放 |
+| 交付纠错 | [delivery-correction](delivery-correction.test.ts)：准确原委派、错误文件读回后同 child 明确续作、真实 baseline 修正原目标、原 GET 仅一次、idle 消息不激活、旧结果不冒充本轮完成；正常交付、权限拒绝及未知效果均可按事实正常停止 |
 | 原配置继续 | [collaboration-config-continuation](collaboration-config-continuation.test.ts)：A/B 配置切换后原 A 结果、当前权限及唯一 Source |
 | 冷结果交接 | [collaboration-cold-report](collaboration-cold-report.test.ts)：结果订阅、明确继续和原历史来源 |
 | 公平预留 | [capacity](capacity.test.ts)：ChildSlots 预留与释放 |

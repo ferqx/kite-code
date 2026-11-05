@@ -157,8 +157,7 @@ function shellInputMissing(fact: NativeToolMessageFact | undefined) {
   const input = fact?.definitionVersion === '1' ? fact.shellInput : undefined;
   return (
     !!input &&
-    (!input.shellId ||
-      (['execute', 'launch'].includes(input.operation) && input.command === undefined))
+    (['execute', 'launch'].includes(input.operation) ? input.command === undefined : !input.shellId)
   );
 }
 function withoutToolInput(fact: NativeToolMessageFact): NativeToolMessageFact {
@@ -208,7 +207,12 @@ function shellCallCompatible(
     return ['execute', 'launch'].includes(fact.shellInput?.operation ?? '')
       ? fact.shellInput?.command !== undefined &&
           args.command === fact.shellInput.command &&
-          args.key === fact.shellInput.shellId
+          (Object.hasOwn(args, 'key')
+            ? args.key === fact.shellInput.shellId
+            : fact.definitionId === 'shell.execute') &&
+          (fact.definitionId !== 'shell.execute' ||
+            (args.background === true) === (fact.shellInput.operation === 'launch')) &&
+          nativeToolRequestTarget(args, fact.definitionId, fact.definitionVersion) === fact.target
       : args.shellId === fact.shellInput?.shellId;
   } catch {
     return false;
@@ -311,7 +315,13 @@ export function desktopToolMessage(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status' | 'target'> &
     Pick<
       Partial<NativeToolMessageFact>,
-      'ask' | 'authorization' | 'decisionRefresh' | 'shellInput' | 'shellResultVerified' | 'label'
+      | 'ask'
+      | 'authorization'
+      | 'decisionRefresh'
+      | 'fileMissing'
+      | 'shellInput'
+      | 'shellResultVerified'
+      | 'label'
     >,
   id: string,
   text: string,
@@ -326,6 +336,7 @@ export function desktopToolMessage(
     target: fact.target,
     ...(shell ? { shell } : {}),
     ...(fact.ask ? { ask: fact.ask } : {}),
+    ...(fact.fileMissing && fact.status === 'succeeded' ? { fileMissing: true } : {}),
     ...(fact.status === 'failed' && fact.decisionRefresh
       ? { decisionRefresh: fact.decisionRefresh }
       : {}),
@@ -363,14 +374,16 @@ function desktopShell(
     Pick<Partial<NativeToolMessageFact>, 'shellInput' | 'shellResultVerified' | 'target'>,
   text: string,
 ): DesktopMessage['shell'] {
-  const operation = fact.definitionId.slice('shell.'.length);
+  const declaredOperation = fact.definitionId.slice('shell.'.length);
   if (
     fact.definitionVersion !== '1' ||
     !fact.definitionId.startsWith('shell.') ||
-    !['execute', 'launch', 'read', 'wait', 'stop'].includes(operation)
+    !['execute', 'launch', 'read', 'wait', 'stop'].includes(declaredOperation)
   )
     return;
   const input = fact.shellInput;
+  const operation =
+    declaredOperation === 'execute' && input?.operation === 'launch' ? 'launch' : declaredOperation;
   const shell: NonNullable<DesktopMessage['shell']> = {
     operation: operation as NonNullable<DesktopMessage['shell']>['operation'],
     ...(input?.shellId ? { shellId: input.shellId } : {}),
@@ -607,7 +620,7 @@ export function liveToolMessages(
             `native-execution:${execution.id}`,
             '',
           ),
-          ...(input ? { shell: nativeShellInputPresentation(input) } : {}),
+          ...(input ? { shell: nativeShellInputPresentation(input), target: input.target } : {}),
           presentationKey: nativeToolPresentationKey(
             selection.storeId,
             selection.session.id,

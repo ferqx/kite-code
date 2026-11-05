@@ -3,6 +3,14 @@ export type {
   ArtifactReadInput,
   ArtifactReferenceReadInput,
 } from './artifact-port';
+export {
+  createExecutionEvidenceExtension,
+  type ExecutionEvidenceOptions,
+  type ExecutionEvidencePage,
+  type ExecutionEvidenceReadRequest,
+  type ExecutionEvidenceRecord,
+  executionEvidenceToolId,
+} from './business/execution-evidence';
 export type {
   CompressionInput,
   ContextCompressor,

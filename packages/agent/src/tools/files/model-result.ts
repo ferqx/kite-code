@@ -140,6 +140,20 @@ export function formatFileReadResult({
   readonly result: ToolResult;
   readonly body?: string;
 }): string | undefined {
+  const missing = object(result.details);
+  if (
+    keys(object(result)!, ['outcome', 'content', 'details']) &&
+    result.outcome === 'succeeded' &&
+    missing &&
+    keys(missing, ['path', 'exists']) &&
+    typeof missing.path === 'string' &&
+    missing.exists === false &&
+    result.content === `File does not exist: ${quote(missing.path)}.` &&
+    result.artifactRefs === undefined &&
+    result.modelContent === undefined &&
+    body === undefined
+  )
+    return result.content;
   const externalRead = isDeepStrictEqual(result.details, {
     fileScope: 'external_path',
     workspaceCheckpoint: false,
@@ -207,9 +221,9 @@ export function formatFileReadResult({
     (selected.toLine === selected.totalLines || selected.totalLines === 0);
   return (
     `Read ${quote(value.path)}; from_line=${selected.fromLine}; lines=${selected.toLine === null ? 'none' : `${selected.fromLine}-${selected.toLine}`}/${selected.totalLines}; next_line=${selected.nextOffset}; ${whole ? 'complete file' : 'selected window only'}.\n` +
-    (externalRead
+    (externalRead && value.baseline === undefined
       ? 'External read-only file; no edit baseline.\n'
-      : `baseline=${quote(value.baseline)}\n`) +
+      : `${externalRead ? 'External file; outside workspace checkpoints. Baseline does not grant write permission.\n' : ''}baseline=${quote(value.baseline)}\n`) +
     `Content (${Buffer.byteLength(content)} UTF-8 bytes; starts on next line):\n${content}`
   );
 }

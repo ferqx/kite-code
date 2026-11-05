@@ -252,14 +252,14 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
       {
         id: 'shell',
         name: 'shell.execute',
-        args: { key: 'original', command: 'echo safe', timeoutMs: 1000 },
+        args: { command: 'echo safe', execution_timeout_ms: 1000 },
       },
       request,
     ),
   ).toEqual({
     id: 'shell',
     name: 'shell_execute',
-    args: { key: 'original', command: 'echo safe', execution_timeout_ms: 1000 },
+    args: { command: 'echo safe', execution_timeout_ms: 1000 },
   });
 });
 

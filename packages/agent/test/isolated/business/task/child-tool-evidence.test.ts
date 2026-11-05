@@ -11,11 +11,14 @@ import {
   type ModelRequest,
 } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
+import type { JobDefinition, JobEvent } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createFileTools, createWorkspaceFiles } from '../../../../src/files';
+import { createPermissionPolicy } from '../../../../src/permissions';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
 import type { childToolEvidence } from '../../../../src/tool-observations';
+import { createShellExtension } from '../../../../src/tools/shell';
 
 const finish = {
   type: 'finish',
@@ -91,7 +94,23 @@ async function sourceResults(
             },
           };
         });
-        expect(header.evidence).toEqual({ ...metadata, observations: expectedObservations });
+        const { shellReceipts, ...otherMetadata } = metadata;
+        const { shellReceipts: presentedReceipts, ...presentedMetadata } = header.evidence;
+        expect(presentedMetadata).toEqual({ ...otherMetadata, observations: expectedObservations });
+        expect(presentedReceipts?.length).toBe(shellReceipts?.length);
+        for (const [index, receipt] of (shellReceipts ?? []).entries()) {
+          const { job, authorization, ...originalFields } = receipt;
+          const { execution, approval, ...presentedFields } = presentedReceipts[index];
+          expect(execution).toEqual(job);
+          expect(presentedFields).toEqual(originalFields);
+          expect(presentedReceipts[index]).not.toHaveProperty('job');
+          if (authorization) {
+            expect(approval.request.risk_review).toEqual(authorization.tool?.check);
+            expect(approval.execution.policy).toBe(
+              'The command reused the approval basis of its own original request.',
+            );
+          } else expect(approval).toBeUndefined();
+        }
         const boundary =
           '\nSelected-history preview only; omitted work is not proved absent. Tool observations do not verify the child report, call reachability or authorization.';
         const bytes = Buffer.from(message.content);
@@ -641,3 +660,341 @@ test('large child lookup receipts retain complete originals while bounded eviden
     rmSync(root, { recursive: true, force: true });
   }
 }, 30000);
+
+// Real SQLite / Shell Tool->Job orchestration; the Job adapter emits controlled public output,
+// never starts a subprocess or makes a network request.
+for (const registration of [
+  'builtin',
+  'same-name-extension',
+  'unknown-tool-version',
+  'auto-approved',
+] as const)
+  test(`parent Model receives only registered child Shell diagnostics (${registration}) without trusting the final report`, async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-child-shell-evidence-')));
+    const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
+    const storeId = (await store.getMetadata()).storeId;
+    const commands = ['./validate.sh', 'curl -sS http://127.0.0.1:53666/service'];
+    const trustedRegistration = registration === 'builtin' || registration === 'auto-approved';
+    const report =
+      registration === 'auto-approved'
+        ? 'Unverified child claim: no approval was requested.'
+        : 'Unverified child claim: everything succeeded.';
+    const child = createFixedModel([
+      call('shell_execute', { command: commands[0] }),
+      call('shell_execute', {
+        command: commands[1],
+        network: 'internet',
+      }),
+      [{ type: 'text_delta', text: report }, finish],
+    ]);
+    let calls = 0,
+      received = false,
+      childId = '';
+    const parent: ModelAdapter = {
+      async *stream(request) {
+        const last = request.messages.filter((message) => message.role === 'tool').at(-1);
+        let events: ModelEvent[];
+        switch (calls++) {
+          case 0:
+            events = call('spawn_agent', {
+              prompt: 'Inspect the exact controlled Shell receipts and report.',
+            });
+            break;
+          case 1:
+            childId = JSON.parse(last!.content).agent_id;
+            events = call('wait_agent_events', { wait_ms: 10000 });
+            break;
+          case 2: {
+            const sources = await sourceResults(request, store);
+            expect(sources).toHaveLength(1);
+            const evidence = sources[0]!.payload.result.details.evidence;
+            expect(evidence.shellReceipts).toHaveLength(trustedRegistration ? 2 : 0);
+            expect(evidence.shellReceiptsOmitted).toBe(0);
+            if (trustedRegistration) {
+              const [validator, service] = evidence.shellReceipts!;
+              expect(validator).toMatchObject({
+                tool: 'shell.execute',
+                command: { text: commands[0], truncated: false },
+                requestedPermissions: null,
+                job: {
+                  status: 'failed',
+                  exitCode: 17,
+                  effectiveScope:
+                    registration === 'auto-approved'
+                      ? { filesystem: 'workspace_write', network: 'none' }
+                      : null,
+                },
+                stderr: {
+                  text: 'SNAPSHOT_MISSING: registered snapshot was not found\n',
+                  truncated: false,
+                  omitted: false,
+                },
+              });
+              if (registration === 'auto-approved') {
+                expect(validator!.authorization).toEqual({
+                  tool: {
+                    check: {
+                      status: 'succeeded',
+                      decision: 'approve_once',
+                      requireApproval: false,
+                    },
+                  },
+                  job: { policy: { reason: 'parent_review' } },
+                });
+                expect(sources[0]!.message.content).toContain('approve_once');
+                expect(sources[0]!.message.content).toContain(
+                  'reused the approval basis of its own original request',
+                );
+                expect(sources[0]!.message.content).not.toContain('parent_review');
+              } else expect(validator!.authorization).toBeUndefined();
+              expect(service).toMatchObject({
+                requestedPermissions: { filesystem: 'workspace_write', network: 'internet' },
+                job: { status: 'succeeded', exitCode: 0 },
+                stdout: { text: 'actual-service-response\n', truncated: false, omitted: false },
+              });
+              for (const receipt of evidence.shellReceipts!) {
+                const tool = await store.getExecution(receipt.executionId);
+                const job = await store.getExecution(receipt.job.executionId);
+                expect(tool).toMatchObject({
+                  kind: 'tool',
+                  sessionId: childId,
+                  runId: evidence.runId,
+                  callId: receipt.callId,
+                });
+                expect(job).toMatchObject({
+                  kind: 'job',
+                  sessionId: childId,
+                  parentExecutionId: tool!.id,
+                  definitionId: 'shell.command',
+                });
+                expect(receipt.job.status).toBe(job!.status);
+              }
+              expect(sources[0]!.message.content).toContain('SNAPSHOT_MISSING');
+            } else expect(sources[0]!.message.content).not.toContain('SNAPSHOT_MISSING');
+            expect(sources[0]!.message.content).not.toContain('private-process-token');
+            expect(sources[0]!.payload.result.content).toBe(report);
+            expect(evidence.reportVerification).toBe('not_verified');
+            received = true;
+            events = [
+              {
+                type: 'text_delta',
+                text: 'Only qualified original receipts can substantiate the unverified child report.',
+              },
+              finish,
+            ];
+            break;
+          }
+          default:
+            throw Error('unexpected_parent_replay');
+        }
+        for (const event of events) yield event;
+      },
+    };
+    const job: JobDefinition = {
+      id: 'shell.command',
+      version: '1',
+      description: 'Controlled public Shell receipt fixture',
+      inputSchema: { type: 'object' },
+      async start(input) {
+        return {
+          reference: {
+            command: (input as { command: string }).command,
+            private: 'private-process-token',
+          },
+        };
+      },
+      async *observe(handle): AsyncIterable<JobEvent> {
+        const command = (handle.reference as { command: string }).command;
+        if (command === commands[0]) {
+          yield {
+            type: 'output',
+            stream: 'stderr',
+            content: 'SNAPSHOT_MISSING: registered snapshot was not found\n',
+          };
+          yield {
+            type: 'terminal',
+            result: { outcome: 'failed', content: 'Shell failed', details: { exitCode: 17 } },
+            supervision: 'ended',
+          };
+        } else {
+          yield { type: 'output', stream: 'stdout', content: 'actual-service-response\n' };
+          yield {
+            type: 'terminal',
+            result: { outcome: 'succeeded', content: 'Shell succeeded', details: { exitCode: 0 } },
+            supervision: 'ended',
+          };
+        }
+      },
+      async cancel() {
+        return { status: 'already_finished' };
+      },
+      async dispose() {},
+    };
+    const originalShell = createShellExtension({ job, permissionsSchema: { type: 'object' } });
+    const selectedShell =
+      registration === 'same-name-extension'
+        ? { ...originalShell, id: 'fixture.same-name-shell' }
+        : registration === 'unknown-tool-version'
+          ? {
+              ...originalShell,
+              tools: originalShell.tools!.map((tool) => ({ ...tool, version: '2' })),
+            }
+          : originalShell;
+    const extensions = [
+      selectedShell,
+      createTaskExtension({
+        roles: [
+          {
+            id: 'worker',
+            configurationId: 'shell-worker',
+            description: 'Controlled receipt reader',
+          },
+        ],
+      }),
+    ];
+    const policy = createPermissionPolicy({
+      readPolicy: () => ({
+        mode: 'auto',
+        workspaceTrust: true,
+        revision: 'controlled-auto',
+        allowed: [
+          { kind: 'model', definitionId: 'parent-fixed', definitionVersion: '1' },
+          { kind: 'model', definitionId: 'child-fixed', definitionVersion: '1' },
+          ...extensions
+            .flatMap((extension) => extension.tools ?? [])
+            .map((tool) => ({
+              kind: 'tool' as const,
+              definitionId: tool.id,
+              definitionVersion: tool.version,
+            })),
+          { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
+          { kind: 'job', definitionId: 'agent/shell-worker', definitionVersion: '1' },
+        ],
+      }),
+      describeCapability(request) {
+        const shell =
+          (request.kind === 'tool' || request.kind === 'job') &&
+          ['shell.execute', 'shell.command'].includes(request.definitionId);
+        const input = request.input as {
+          command?: string;
+          filesystem?: 'workspace_write' | 'full_access';
+          network?: 'none' | 'internet';
+          permissions?: {
+            filesystem: 'workspace_write' | 'full_access';
+            network: 'none' | 'internet';
+          };
+        };
+        const scope = input.permissions ?? {
+          filesystem: input.filesystem ?? 'workspace_write',
+          network: input.network ?? 'none',
+        };
+        return {
+          kind: request.kind,
+          definitionId: request.definitionId,
+          definitionVersion: request.definitionVersion,
+          revision: 'actual-controlled-configuration',
+          hardAllowed: true,
+          safeRead: !shell,
+          effects: shell ? ['process', 'unknown'] : [],
+          ...(shell
+            ? {
+                autoReview: 'shell_risk' as const,
+                executionScope: scope,
+                autoReviewKey: hash(JSON.stringify({ command: input.command, scope })),
+                commandDigest: hash(
+                  JSON.stringify({
+                    kind: request.kind,
+                    definitionId: request.definitionId,
+                    command: input.command,
+                  }),
+                ),
+              }
+            : {}),
+        };
+      },
+    });
+    const runtime = createRuntime({
+      store,
+      model: parent,
+      modelId: 'parent-fixed',
+      modelConcurrency: 1,
+      extensions,
+      permissions:
+        registration === 'auto-approved'
+          ? policy
+          : {
+              async authorize() {
+                return { allowed: true, revision: 'fixture' };
+              },
+            },
+      ...(registration === 'auto-approved'
+        ? {
+            authorizationCheck: {
+              id: 'controlled-risk',
+              version: '1',
+              modelId: 'review-fixed',
+              timeoutMs: 5000,
+              async prepareRiskReview(request) {
+                return {
+                  material: { command: (request.input as { command: string }).command },
+                  fingerprint: hash((request.input as { command: string }).command),
+                  reusable: false,
+                };
+              },
+              model: createFixedModel(
+                Array.from({ length: 2 }, () => [
+                  {
+                    type: 'text_delta' as const,
+                    text: '{"risk":"ordinary","reason":"Controlled ordinary fixture."}',
+                  },
+                  finish,
+                ]),
+              ),
+            },
+          }
+        : {}),
+      childConfigurations: [
+        {
+          id: 'shell-worker',
+          version: '1',
+          model: child,
+          modelId: 'child-fixed',
+          toolIds: ['shell.execute'],
+          snapshot: {},
+        },
+      ],
+    });
+    try {
+      await runtime.createWorkspace({
+        expectedStoreId: storeId,
+        id: 'w',
+        rootUri: pathToFileURL(root).href,
+        name: 'fixture',
+      });
+      await runtime.createSession({
+        expectedStoreId: storeId,
+        commandId: 'create',
+        sessionId: 'root',
+        workspaceId: 'w',
+        subjectId: 'owner',
+        title: 'Shell receipts',
+      });
+      await runtime.submitCommand({
+        expectedStoreId: storeId,
+        commandId: 'work',
+        sessionId: 'root',
+        subjectId: 'owner',
+        request: {
+          kind: 'run.start',
+          content: 'Compare the actual child Shell results, never replay effects.',
+        },
+      });
+      await runtime.waitForCommand('work', { timeoutMs: 25000 });
+      expect(received).toBe(true);
+      expect(calls).toBe(3);
+      expect(child.requests).toHaveLength(3);
+    } finally {
+      await runtime.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });

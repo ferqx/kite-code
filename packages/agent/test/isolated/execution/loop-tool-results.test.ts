@@ -138,8 +138,24 @@ for (const variant of [
       expect(results[0]).toMatchObject({
         toolCallId: 'original',
         sourceIds: [tools[0]!.id],
-        content: (tools[0]!.result as { content: string }).content,
       });
+      if (variant === 'succeeded') expect(results[0]!.content).toBe('succeeded');
+      else if (variant === 'approval_denied') {
+        expect(results[0]!.content).toContain('Approval was not obtained');
+        // A leaf claim is not the Core's verified human refusal or no-effect proof.
+        expect(results[0]!.content).not.toContain('The user denied');
+        expect(results[0]!.content).not.toContain('produced no effects');
+      } else if (variant === 'failed') expect(results[0]!.content).toContain('operation failed');
+      else {
+        expect(results[0]!.content).toContain('may have produced effects');
+        expect(results[0]!.content).toContain('do not repeat');
+        if (variant === 'outcome_unknown')
+          expect(results[0]!.content).toContain('Original effect is unknown');
+        else {
+          expect(results[0]!.content).toContain('private exception text is unavailable');
+          expect(results[0]!.content).not.toContain('Adapter failed after its possible effect');
+        }
+      }
       expect(run).toMatchObject({ status: 'completed' });
       expect(
         (await f.store.listMessages('s')).some(
@@ -238,9 +254,16 @@ for (const variant of [
       expect(results[0]).toMatchObject({
         toolCallId: 'original',
         sourceIds: [original.id],
-        content: 'invalid_tool_result',
       });
+      expect(results[0]!.content).toContain('returned an invalid result');
+      expect(results[0]!.content).toContain('claimed outcome could not be accepted');
+      expect(results[0]!.content).toContain('may have produced effects');
+      expect(results[0]!.content).toContain('do not repeat');
+      expect(results[0]!.content).not.toContain('invalid_tool_result');
+      expect(results[0]!.content).not.toContain('Unverified adapter claim');
+      expect(results[0]!.content).not.toContain('Forged success');
       expect(results[1]!.toolCallId).toBe('successor');
+      expect(results[1]!.sourceIds).toEqual([tools.find((row) => row.callId === 'successor')!.id]);
     } finally {
       await f.close();
     }

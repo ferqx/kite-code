@@ -341,10 +341,72 @@ async function fixture(
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
+async function askAfterFailure(f: Fixture, cause: string, question: string): Promise<Call> {
+  const messages = f.requests.at(-1)!.messages as {
+    role: string;
+    content: string;
+    tool_call_id?: string;
+  }[];
+  const receipt = messages.filter((message) => message.role === 'tool').at(-1)!;
+  expect(receipt).toBeDefined();
+  expect(typeof receipt.tool_call_id).toBe('string');
+  const tool = (await f.store.listExecutions('s')).find(
+    (execution) => execution.kind === 'tool' && execution.callId === receipt.tool_call_id,
+  )!;
+  expect(tool).toBeDefined();
+  expect(['failed', 'cancelled', 'outcome_unknown']).toContain(tool.status);
+  const raw = tool.result as { content: string; details?: { code?: string; reason?: string } };
+  expect([raw.content, raw.details?.code, raw.details?.reason]).toContain(cause);
+  const nextModel = (await f.store.listExecutions('s'))
+    .filter((execution) => execution.kind === 'model' && execution.runId === tool.runId)
+    .at(-1)!;
+  const canonical = await f.runtime.readModelInput({
+    ...f.base,
+    executionId: nextModel.id,
+  });
+  expect(
+    canonical.request.messages.find((message) => message.toolCallId === tool.callId),
+  ).toMatchObject({ sourceIds: [tool.id], content: receipt.content });
+  const publicCauses: Record<string, string> = {
+    plan_approval_required: 'The current plan requires approval before this action can run.',
+    plan_file_recovery_required:
+      'The plan file and saved plan state require reconciliation. Check the original update before further plan changes.',
+    plan_file_changed:
+      'The plan file changed from its expected contents or identity. Inspect the current file and original update before further plan changes.',
+  };
+  expect(receipt.content).toContain(publicCauses[cause] ?? cause);
+  return {
+    name: 'ask_user',
+    input: {
+      questions: [
+        {
+          question,
+          options: [
+            {
+              label: '核实后恢复',
+              description: '读取当前原件并重新取得准确批准。',
+              recommended: true,
+            },
+            { label: '停止任务', description: '保留当前文件和失败证据，停止本次执行。' },
+          ],
+        },
+      ],
+    },
+  };
+}
+async function pendingQuestion(f: Fixture) {
+  return until(
+    async () =>
+      (await f.store.listInteractions({ ...f.base, state: 'pending' })).interactions.find(
+        (value) => value.kind === 'question',
+      ) ?? null,
+  );
+}
+
 test('external Plan drift during review rejects late approval and blocks workspace effects', async () => {
   const f = await fixture(
     { requirePlan: true },
-    ['planning.write', 'planning.review', 'files.write'],
+    ['planning.write', 'planning.review', 'files.write', 'ask_user'],
     async (step, f): Promise<Call> => {
       if (step === 0)
         return {
@@ -368,6 +430,12 @@ test('external Plan drift during review rejects late approval and blocks workspa
           name: 'write_file',
           input: { path: 'must-not-exist.txt', content: 'forbidden stale effect', base: null },
         };
+      if (step === 3)
+        return askAfterFailure(
+          f,
+          'plan_approval_required',
+          '方案原件在审阅期间被外部修改，旧批准无效，项目写入未执行。是否先核实原件并重新审阅？',
+        );
       return null;
     },
     { mode: 'full' },
@@ -398,7 +466,14 @@ test('external Plan drift during review rejects late approval and blocks workspa
             ['failed', 'cancelled', 'outcome_unknown'].includes(value.status),
         ) ?? null,
     );
-    await f.done();
+    const question = await pendingQuestion(f);
+    expect(JSON.stringify(question.request)).toContain('旧批准无效');
+    await f.runtime.cancelCommand({
+      ...f.base,
+      commandId: 'cancel-drift-after-explanation',
+      targetCommandId: 'work',
+    });
+    expect((await f.done()).run?.status).toBe('cancelled');
     expect(
       (await f.store.listExecutions('s')).filter(
         (value) => value.definitionId === 'files.write' && value.status === 'succeeded',
@@ -846,7 +921,9 @@ test('default business catalogue is installed once; no host flags leaves ordinar
     expect(first.run?.status).toBe('completed');
     expect(first.run?.requirements).toEqual([]);
     expect(first.run?.configuration).toMatchObject({
-      snapshot: { planning: { policy: { completionGuidance: true } } },
+      snapshot: {
+        planning: { requirePlan: false, binding: { policy: { completionGuidance: true } } },
+      },
     });
     await f.runtime.submitCommand({
       ...f.base,
@@ -1019,7 +1096,7 @@ test('requirePlan initializes before first real Provider call; user review and a
   }
 }, 15000);
 
-test('global exact Planning Action uses trusted Request Approval/unqualified Auto record approval, Full bypass, and untrusted denial without any Model', async () => {
+test('global exact Planning Action requests approval in Request Approval, allows trusted Auto/Full, and denies untrusted work without any Model', async () => {
   for (const mode of ['auto', 'accept_edits', 'full'] as const) {
     const f = await fixture({}, [], async () => null, { mode });
     try {
@@ -1040,7 +1117,7 @@ test('global exact Planning Action uses trusted Request Approval/unqualified Aut
           },
         },
       });
-      if (mode !== 'full') {
+      if (mode === 'accept_edits') {
         const card = await until(
           async () =>
             (
@@ -1069,6 +1146,11 @@ test('global exact Planning Action uses trusted Request Approval/unqualified Aut
         String((done.receipt as Record<string, Json>).executionId),
       );
       expect(execution).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
+      expect(execution?.authorization?.check).toBeUndefined();
+      if (mode !== 'accept_edits') {
+        expect(execution?.authorization?.human).toBeUndefined();
+        expect((await f.store.listInteractions({ ...f.base })).interactions).toHaveLength(0);
+      }
       expect(await f.record('plan.current')).not.toBeNull();
       expect(f.requests).toHaveLength(0);
       expect((await f.store.getView('s')).runs).toHaveLength(0);
@@ -1101,7 +1183,18 @@ test('global exact Planning Action uses trusted Request Approval/unqualified Aut
       await denied.store.getExecution(
         String((command.receipt as Record<string, Json>).executionId),
       ),
-    ).toMatchObject({ status: 'failed', result: { content: 'permission_denied' } });
+    ).toMatchObject({
+      status: 'failed',
+      authorization: { dispatched: false },
+      result: {
+        content: expect.stringContaining('workspace_untrusted'),
+        details: {
+          code: 'permission_denied',
+          reason: 'workspace_untrusted',
+          adapterAttempted: false,
+        },
+      },
+    });
     expect(await denied.record('plan.current')).toBeNull();
     expect(denied.requests).toHaveLength(0);
   } finally {
@@ -1542,10 +1635,18 @@ test('Plan publication after physical write rejects pending approval and preserv
     };
     const f = await fixture(
       { requirePlan: true },
-      ['planning.write', 'planning.review', 'planning.update', 'files.write'],
+      ['planning.write', 'planning.review', 'planning.update', 'files.write', 'ask_user'],
       async (step, f): Promise<Call> => {
-        if (f.commandId === 'work')
-          return step === 0 ? { name: 'write_plan', input: planInput } : null;
+        if (f.commandId === 'work') {
+          if (step === 0) return { name: 'write_plan', input: planInput };
+          if (step === 1)
+            return askAfterFailure(
+              f,
+              'plan_file_publish_unknown',
+              '方案文件可能已经发布，但记录尚未提交，不能直接重投。是否先核实原操作后恢复发布？',
+            );
+          return null;
+        }
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
         if (f.commandId === 'pending-review')
           return step === 0
@@ -1557,7 +1658,13 @@ test('Plan publication after physical write rejects pending approval and preserv
                   digest: current.digest!,
                 },
               }
-            : null;
+            : step === 1
+              ? askAfterFailure(
+                  f,
+                  'plan_file_recovery_required',
+                  '方案发布尚未完成，不能请求批准。是否先核实并恢复原发布？',
+                )
+              : null;
         if (f.commandId === 'pending-effect')
           return step === 0
             ? {
@@ -1568,8 +1675,20 @@ test('Plan publication after physical write rejects pending approval and preserv
                   content: 'Must not be dispatched',
                 },
               }
-            : null;
+            : step === 1
+              ? askAfterFailure(
+                  f,
+                  'plan_approval_required',
+                  '方案发布及批准尚未完成，项目写入未执行。是否先恢复方案并审阅？',
+                )
+              : null;
         if (step === 0) return { name: 'write_plan', input: planInput };
+        if (step === 1 && externalChange)
+          return askAfterFailure(
+            f,
+            'plan_file_changed',
+            '外部方案字节已变化，同内容恢复失败。是否先核实外部原件，保留现有字节？',
+          );
         if (step === 1 && !externalChange)
           return {
             name: 'request_plan_review',
@@ -1626,7 +1745,13 @@ test('Plan publication after physical write rejects pending approval and preserv
     };
     try {
       await f.submit();
-      await f.done();
+      await pendingQuestion(f);
+      await f.runtime.cancelCommand({
+        ...f.base,
+        commandId: 'cancel-unknown-after-explanation',
+        targetCommandId: 'work',
+      });
+      expect((await f.done()).run?.status).toBe('cancelled');
       const first = (await f.store.listExecutions('s')).find(
         (e) => e.definitionId === 'planning.write',
       )!;
@@ -1641,6 +1766,7 @@ test('Plan publication after physical write rejects pending approval and preserv
               ['failed', 'outcome_unknown'].includes(e.status),
           ) ?? null,
       );
+      await pendingQuestion(f);
       await f.runtime.cancelCommand({
         ...f.base,
         commandId: 'cancel-pending-review',
@@ -1666,6 +1792,7 @@ test('Plan publication after physical write rejects pending approval and preserv
         },
       });
       expect(existsSync(join(f.workspace, 'pending-publication.txt'))).toBe(false);
+      await pendingQuestion(f);
       await f.runtime.cancelCommand({
         ...f.base,
         commandId: 'cancel-pending-effect',
@@ -1684,6 +1811,7 @@ test('Plan publication after physical write rejects pending approval and preserv
             ? true
             : null,
         );
+        await pendingQuestion(f);
         await f.runtime.cancelCommand({
           ...f.base,
           commandId: 'cancel-drifted-recovery',

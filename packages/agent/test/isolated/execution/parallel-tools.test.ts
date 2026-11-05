@@ -474,15 +474,18 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
     expect(disposed).toBe(1);
     expect(deniedCalls).toBe(0);
     expect(model.requests).toHaveLength(2);
-    expect(
-      model.requests[1]!.messages.filter((row) => row.role === 'tool').map((row) => [
-        row.toolCallId,
-        row.content,
-      ]),
-    ).toEqual([
-      ['attempted', 'Attempted external effect remains unknown'],
-      ['denied', 'approval_denied'],
-    ]);
+    const received = model.requests[1]!.messages.filter((row) => row.role === 'tool');
+    expect(received.map((row) => row.toolCallId)).toEqual(['attempted', 'denied']);
+    expect(received[0]!.content).toContain('Attempted external effect remains unknown');
+    expect(received[0]!.content).toContain('Outcome unknown.');
+    expect(received[0]!.content).toContain('do not repeat');
+    expect(received[1]!.content).toContain('The user denied this request');
+    expect(received[1]!.content).toContain('Do not resubmit it or bypass the refusal');
+    expect(received[1]!.content).toContain('It was not executed');
+    for (const row of received)
+      expect(row.sourceIds).toEqual([
+        executions.find((execution) => execution.callId === row.toolCallId)!.id,
+      ]);
     expect(effects).toEqual(['attempted', 'cleanup completed']);
     const messages = await store.listMessages('s');
     const cursor = (await store.getMetadata()).lastChangeCursor;

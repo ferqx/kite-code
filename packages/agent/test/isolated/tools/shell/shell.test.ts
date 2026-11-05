@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { JobDefinition, Json, ToolContext } from '@kite-ai/agent/extensions';
 import { createShellExtension } from '@kite-ai/agent/shell';
+import { AgentError } from '../../../../src/storage/types';
 
 function definition(): JobDefinition {
   return {
@@ -149,4 +150,197 @@ test('local reference storage failures and unverifiable original operations are 
       .tools!.find((tool) => tool.id === 'shell.read')!
       .execute({ shellId: 'original' }, context),
   ).rejects.toThrow('shell_unverifiable');
+});
+
+for (const id of ['shell.execute', 'shell.launch'])
+  test(`legacy ${id} input keeps its original Job request and reference readable`, async () => {
+    const extension = createShellExtension({
+      job: definition(),
+      permissionsSchema: {
+        type: 'object',
+        properties: {
+          filesystem: { enum: ['workspace_write', 'full_access'] },
+          network: { enum: ['none', 'internet'] },
+        },
+        required: ['filesystem', 'network'],
+        additionalProperties: false,
+      },
+    });
+    const ref = {
+      originStoreId: 'original-store',
+      sessionId: 's',
+      extensionId: 'builtin.shell',
+      key: 'historical-shell',
+      commandId: 'historical-operation',
+      executionId: 'historical-job',
+    };
+    const execution = {
+      id: ref.executionId,
+      originStoreId: ref.originStoreId,
+      sessionId: ref.sessionId,
+      kind: 'job',
+      definitionId: 'shell.command',
+      status: 'succeeded',
+      result: { outcome: 'succeeded', content: 'original terminal result' },
+    };
+    const records = new Map<string, unknown>();
+    const ensured: unknown[] = [];
+    const context = {
+      signal: new AbortController().signal,
+      records: {
+        async get(key: string) {
+          return records.get(key) ?? null;
+        },
+        async write(record: { key: string }) {
+          records.set(record.key, record);
+        },
+      },
+      operations: {
+        async ensure(request: unknown) {
+          ensured.push(request);
+          return ref;
+        },
+        async get(original: unknown) {
+          expect(original).toEqual(ref);
+          return execution;
+        },
+        async wait(original: unknown) {
+          expect(original).toEqual(ref);
+          return execution;
+        },
+        async readOutput(original: unknown) {
+          expect(original).toEqual(ref);
+          return { items: [], highWaterSeq: '0', nextAfterSeq: null };
+        },
+      },
+    } as unknown as ToolContext;
+    const result = await extension
+      .tools!.find((tool) => tool.id === id)!
+      .execute(
+        {
+          key: ref.key,
+          command: 'original command',
+          permissions: { filesystem: 'full_access', network: 'none' },
+          cancellation: 'detached',
+          ...(id === 'shell.execute' ? { timeoutMs: 100 } : {}),
+        },
+        context,
+      );
+    expect(result.outcome).toBe('succeeded');
+    expect(ensured).toEqual([
+      {
+        key: ref.key,
+        cancellation: 'detached',
+        request: {
+          kind: 'job',
+          definitionId: 'shell.command',
+          definitionVersion: '1',
+          input: {
+            command: 'original command',
+            permissions: { filesystem: 'full_access', network: 'none' },
+          },
+        },
+      },
+    ]);
+    expect(records.get(`shell/${ref.key}`)).toMatchObject({
+      contentType: 'application/vnd.kite.shell-reference+json',
+      contentVersion: 1,
+      value: { ref },
+    });
+    const reread = await extension
+      .tools!.find((tool) => tool.id === 'shell.read')!
+      .execute({ shellId: ref.key }, context);
+    expect(reread).toMatchObject({
+      outcome: 'succeeded',
+      details: { ref, execution: { id: ref.executionId, status: 'succeeded' } },
+    });
+    expect(ensured).toHaveLength(1);
+  });
+
+for (const id of ['shell.execute', 'shell.launch'])
+  test(`legacy ${id} key conflicts remain known failures without rewriting original references`, async () => {
+    const extension = createShellExtension({ job: definition() });
+    let ensures = 0;
+    const context = {
+      operations: {
+        async ensure() {
+          ensures++;
+          throw new AgentError('operation_conflict');
+        },
+      },
+      records: new Proxy(
+        {},
+        {
+          get() {
+            throw Error('must_not_rewrite_original_reference');
+          },
+        },
+      ),
+    } as unknown as ToolContext;
+    const result = await extension
+      .tools!.find((tool) => tool.id === id)!
+      .execute(
+        {
+          key: 'original-shell',
+          command: 'different command',
+        },
+        context,
+      );
+    expect(ensures).toBe(1);
+    expect(result).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'operation_conflict', shellId: 'original-shell' },
+    });
+    expect(result.content).toContain('did not start a new command');
+    expect(result.content).toContain('Do not restart an unknown or completed command');
+  });
+
+test('trusted execute rejects conflicting legacy and new arguments before ensure or reference writes', async () => {
+  const extension = createShellExtension({
+    job: definition(),
+    permissionsSchema: { type: 'object' },
+  });
+  const context = {
+    executionId: 'original-tool',
+    operations: new Proxy(
+      {},
+      {
+        get() {
+          throw Error('must_not_ensure');
+        },
+      },
+    ),
+    records: new Proxy(
+      {},
+      {
+        get() {
+          throw Error('must_not_write_reference');
+        },
+      },
+    ),
+  } as unknown as ToolContext;
+  const invalidInputs: Record<string, Json>[] = [
+    { background: true, timeoutMs: 1 },
+    { background: true, execution_timeout_ms: 1 },
+    { timeoutMs: 1, execution_timeout_ms: 1 },
+    { filesystem: 'full_access', permissions: { filesystem: 'full_access', network: 'none' } },
+    { network: 'internet', permissions: { filesystem: 'workspace_write', network: 'internet' } },
+    { execution_timeout_ms: 3600001 },
+  ];
+  for (const input of invalidInputs) {
+    const result = await extension
+      .tools!.find((tool) => tool.id === 'shell.execute')!
+      .execute(
+        {
+          command: 'must not execute',
+          ...input,
+        },
+        context,
+      );
+    expect(result).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'invalid_shell_arguments' },
+    });
+    expect(result.content).toContain('No command was started');
+  }
 });

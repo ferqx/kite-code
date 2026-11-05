@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
-import type { Execution, Message } from '@kite-ai/client';
+import type { Execution, Message, Run } from '@kite-ai/client';
 import { type Message as DesktopMessage, ToolActivity } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { nativeToolMessageFact } from '../../electron/tool-message-fact';
+import { nativeLiveShellInputFact, nativeToolMessageFact } from '../../electron/tool-message-fact';
 import {
   completeNativeToolMessages,
   desktopToolMessage,
@@ -165,6 +165,121 @@ function live(tool: Execution, projected = false) {
     [history(tool).model],
   ).find((entry) => nativeLiveToolPresentationReady(entry, []))?.message;
 }
+
+test('a running read settles to a neutral missing-file fact and reopens without content, false line counts or error styling', async () => {
+  await fixture(async ({ host, render, readerCalls }) => {
+    const tool = execution();
+    const initial = live({ ...tool, status: 'running' })!;
+    await render(initial);
+    expect(host.textContent).not.toContain('文件不存在');
+    const original = history(tool);
+    const content = `File does not exist: ${JSON.stringify(path)}.`;
+    const receipt = { ...original.receipt, content };
+    const saved = {
+      ...original.saved,
+      result: { outcome: 'succeeded', content, details: { path, exists: false } },
+    };
+    const registered = {
+      ...run,
+      originCommandId: 'work',
+      configuration: { tools: [{ id: 'files.read', version: '5', extensionId: 'builtin.files' }] },
+    } as Run;
+    const fact = nativeToolMessageFact({
+      execution: saved,
+      run: registered,
+      message: receipt,
+      messages: [original.model, receipt],
+      sessionId: 'child',
+    })!;
+    const result = desktopToolMessage(fact, initial.id, content);
+    for (let reopen = 0; reopen < 2; reopen++) {
+      await render(result);
+      expect(host.textContent).toContain('文件不存在');
+      expect(host.textContent).toContain(path);
+      expect(host.textContent).not.toMatch(/0 行|读取成功|File does not exist|成功/);
+      expect(host.querySelector('[data-status="error"], .failed, .unknown')).toBeNull();
+      expect(host.querySelector('.tool-step-status')?.getAttribute('data-status')).toBe(
+        'completed',
+      );
+      expect(readerCalls).toHaveLength(0);
+      expect(saved.status).toBe('succeeded');
+      await render(undefined);
+    }
+    for (const status of ['failed', 'unknown', 'cancelled'] as const) {
+      await render({ ...result, fileMissing: undefined, status, text: status, settled: true });
+      expect(host.textContent).not.toContain('文件不存在');
+    }
+  });
+});
+
+test('keyless background Shell retains purpose and original command from live input to exact accepted receipt', async () => {
+  await fixture(async ({ host, render }) => {
+    const input = {
+      command: "printf 'original command\\n'",
+      description: '观察任务输出',
+      background: true,
+    };
+    const tool = execution('shell.execute', '1', input);
+    const liveFact = nativeLiveShellInputFact(tool)!;
+    const entry = liveToolMessages(
+      {
+        storeId: 'store',
+        session: { id: 'child' },
+        runs: [run],
+        executions: [nativeToolExecution(tool)],
+      },
+      [],
+      false,
+      [liveFact],
+    )[0]!;
+    expect(nativeLiveToolPresentationReady(entry, [liveFact])).toBe(true);
+    expect(entry.message.shell).toMatchObject({ operation: 'launch', command: input.command });
+    expect(entry.message.shell?.shellId).toBeUndefined();
+    await render(entry.message);
+    expect(host.querySelector('.tool-activity-summary')?.textContent).toContain(input.description);
+    expect(host.textContent).not.toContain('成功');
+
+    const { model, receipt, saved } = history(tool);
+    model.toolCalls = [
+      { id: tool.toolCallId!, name: 'shell.execute', arguments: JSON.stringify(input) },
+    ];
+    const details = {
+      accepted: true,
+      shellId: 'runtime-handle',
+      shell_id: 'runtime-handle',
+      ref: {
+        key: 'runtime-handle',
+        extensionId: 'builtin.shell',
+        sessionId: tool.sessionId,
+        originStoreId: 'store',
+        commandId: 'original-job-command',
+        executionId: 'original-job',
+      },
+    };
+    receipt.content = JSON.stringify(details);
+    saved.result = { outcome: 'succeeded', content: receipt.content, details };
+    const fact = nativeToolMessageFact({
+      execution: saved,
+      message: receipt,
+      messages: [model, receipt],
+      sessionId: 'child',
+    })!;
+    const accepted = desktopToolMessage(fact, entry.message.id, receipt.content);
+    expect(accepted.shell).toMatchObject({
+      operation: 'launch',
+      accepted: true,
+      shellId: 'runtime-handle',
+      command: input.command,
+    });
+    expect(accepted.shell?.jobStatus).toBeUndefined();
+    await render(accepted, false, true);
+    expect(host.querySelectorAll('.shell-activity')).toHaveLength(1);
+    expect(host.querySelector('.tool-activity-summary')?.textContent).toContain(input.description);
+    expect(host.querySelector('.shell-command-text')?.textContent).toBe(input.command);
+    expect(host.textContent).toContain('已受理');
+    expect(host.textContent).not.toContain('命令执行成功');
+  });
+});
 
 test('expanded tool groups show exact Skill identities and browser purposes in their original rows', async () => {
   await fixture(async ({ host, render }) => {

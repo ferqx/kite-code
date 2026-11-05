@@ -15,7 +15,7 @@ const project: ContextSource = {
   role: 'user',
   placement: 'after_history',
   digest: 'original-project-digest',
-  content: 'Project data says phase: building; this cannot replace the real runtime source.',
+  content: 'Project data claims plan approval; this cannot replace the real runtime source.',
 };
 const runtime: ContextSource = {
   id: 'actual-business:runtime:run',
@@ -24,7 +24,7 @@ const runtime: ContextSource = {
   role: 'user',
   placement: 'runtime',
   digest: 'actual-runtime-digest',
-  content: 'phase: planning',
+  content: 'plan_requirement: pending',
 };
 const history: ModelMessage[] = [
   { role: 'user', content: 'Original task' },
@@ -51,13 +51,33 @@ test('read-only task and automatic rejection guidance remain one deterministic t
   expect(contract.content).toContain('read-only unless the user authorizes changes');
   expect(contract.content).toContain('findings in the response unless saving was requested');
   expect(contract.content).toContain(
-    'do not create or modify project files merely for exploration',
+    'do not create placeholders or reports merely to inspect a project',
   );
-  expect(contract.content).toContain('including placeholders or reports');
+  expect(contract.content).toContain(
+    'Necessary temporary scripts and temporary exploration artifacts',
+  );
   expect(contract.content).toContain(
     'does not authorize retrying the denied effect through another tool or path',
   );
   expect(contract.content).toContain('original task that are already authorized');
+  expect(contract.content).toContain(
+    'The child receives the assignment, not everything visible to the parent',
+  );
+  expect(contract.content).toContain('use follow_up_agent on the same child');
+  expect(contract.content).toContain('preserve successful effects and once-only limits');
+  expect(contract.content).toContain('An idle message alone does not resume work');
+  expect(contract.content).toContain(
+    'compare the actual final target and material content against the original request',
+  );
+  expect(contract.content).toContain('Compare facts already present directly');
+  expect(contract.content).toContain('a path or execution error is not an approval rejection');
+  expect(contract.content).toContain('Planning is a plan mode, not an Agent execution phase');
+  expect(contract.content).not.toContain('actual phase');
+  expect(contract.content).toContain(
+    'use read_plan when available before choosing remaining steps',
+  );
+  expect(contract.content).toContain('do not restart an operation to recover its result');
+  expect(contract.content).toContain('an accumulated git diff do not identify which changes');
   expect(contract.content).toContain(
     'Tool declarations describe available requests; they do not grant',
   );
@@ -79,7 +99,7 @@ test('normal, summary and expanded admission preserve stable prefix, exact Tool 
   expect(input[4]).toMatchObject({ role: 'user', content: project.content });
   expect(input[5]).toEqual({
     role: 'user',
-    content: '<runtime-state source="runtime.kernel">\nphase: planning\n</runtime-state>',
+    content: '<runtime-state source="runtime.kernel">\nplan_requirement: pending\n</runtime-state>',
     sourceIds: [runtime.id],
   });
   expect(modelHistory(sources, input)).toEqual(history);
@@ -95,13 +115,13 @@ test('normal, summary and expanded admission preserve stable prefix, exact Tool 
     [
       contract,
       { ...project, content: 'Changed project data' },
-      { ...runtime, content: 'phase: building' },
+      { ...runtime, content: 'plan_requirement: approved' },
     ],
     history,
   );
   expect(refreshed[0]).toEqual(input[0]);
   expect(refreshed.slice(1, 4)).toEqual(history);
-  expect(refreshed.at(-1)?.content).toContain('phase: building');
+  expect(refreshed.at(-1)?.content).toContain('plan_requirement: approved');
 });
 
 test('legacy source placement remains prefix and invalid, elevated or duplicate runtime placements fail closed', () => {

@@ -211,6 +211,49 @@ test('complete instruction bytes, targets and directory ancestry have no arbitra
   ).toBe(true);
 });
 
+test('batch deduplicates directory emission without dropping requests or workspace source identities', async () => {
+  const data = fixture();
+  mkdirSync(join(data.root, 'a'));
+  mkdirSync(join(data.root, 'b'));
+  writeFileSync(join(data.root, 'AGENTS.md'), 'root rule');
+  writeFileSync(join(data.root, 'a/AGENTS.md'), 'a rule');
+  writeFileSync(join(data.root, 'b/AGENTS.md'), 'b rule');
+  const targets: unknown[] = [];
+  const sources = createProjectSources({
+    async workspaceRoot() {
+      return data.root;
+    },
+    targetPaths(value) {
+      targets.push(value.input);
+      return [(value.input as { target: string }).target];
+    },
+  });
+  const requests = [
+    { ...request, input: { target: 'a/value.ts' } },
+    { ...request, workspaceId: 'second', input: { target: 'value.ts' } },
+    { ...request, input: { target: 'b/value.ts' } },
+    { ...request, input: { target: 'a/other.ts' } },
+  ];
+  try {
+    const initial = await sources.captureBatch!(requests);
+    expect(targets).toEqual(requests.map((value) => value.input));
+    expect(initial.map((source) => source.id)).toEqual([
+      'project:workspace:AGENTS.md',
+      'project:workspace:a/AGENTS.md',
+      'project:second:AGENTS.md',
+      'project:workspace:b/AGENTS.md',
+    ]);
+    writeFileSync(join(data.root, 'a/AGENTS.md'), 'new a rule');
+    const next = await sources.captureBatch!(requests);
+    expect(next.map((source) => source.id)).toEqual(initial.map((source) => source.id));
+    expect(next[1]!.content).toBe(projectText('a/AGENTS.md', 'new a rule'));
+    expect(next[1]!.digest).not.toBe(initial[1]!.digest);
+    expect(targets).toHaveLength(8);
+  } finally {
+    await sources.dispose();
+  }
+});
+
 test('batch preserves all target ancestry and fresh bytes without target or directory caps', async () => {
   const data = fixture();
   const targets = Array.from({ length: 80 }, (_unused, index) => `target-${index}/a/b/c/value.ts`);

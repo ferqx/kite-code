@@ -40,7 +40,10 @@ async function until<T>(read: () => Promise<T | null>) {
     await Bun.sleep(5);
   }
 }
-async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
+async function fixture(
+  script: (step: number, f: Fixture) => Promise<Call>,
+  customTaskReview = false,
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-per-run-plan-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -158,6 +161,15 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend,
+    ...(customTaskReview
+      ? {
+          permissions: {
+            async authorize() {
+              return { allowed: true, revision: 'fixture-legacy-task-review' };
+            },
+          },
+        }
+      : {}),
     permissionPolicy: {
       readPolicy: () => ({
         mode,
@@ -512,14 +524,19 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
   }
 }, 25000);
 
-test('chosen Auto remains a ceiling over Full; actual compatible reviewer runs for the original post-plan write', async () => {
-  const f = await fixture(planScript);
+test('chosen Auto remains a ceiling over Full with a custom task-review contract for the post-plan write', async () => {
+  const f = await fixture(planScript, true);
   try {
     await f.submit();
     await f.approvePlan('auto');
     expect((await f.done()).status).toBe('completed');
     expect(f.reviews).toHaveLength(1);
-    const payload = JSON.parse((f.reviews[0]!.messages as { content: string }[])[0]!.content);
+    const reviewMessage = (f.reviews[0]!.messages as { role: string; content: string }[]).find(
+      (message) => message.role === 'user',
+    );
+    expect(reviewMessage).toBeDefined();
+    const payload = JSON.parse(reviewMessage!.content);
+    expect(payload.purpose).toBe('authorization_check');
     expect(JSON.stringify(payload)).toContain('"mode":"auto"');
     expect(payload.target.definitionId).toBe('files.write');
     expect(readFileSync(join(f.workspace, 'after.txt'), 'utf8')).toBe('approved actual effect');
@@ -540,7 +557,7 @@ test('plan approval never overrides newly current Auto human decision or trust d
       await barrier;
     }
     return planScript(step, f);
-  });
+  }, true);
   try {
     await f.submit();
     await f.approvePlan('accept_edits');
@@ -561,7 +578,12 @@ test('plan approval never overrides newly current Auto human decision or trust d
     expect((await f.done()).status).toBe('failed');
     expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
     expect(f.reviews).toHaveLength(1);
-    const payload = JSON.parse((f.reviews[0]!.messages as { content: string }[])[0]!.content);
+    const reviewMessage = (f.reviews[0]!.messages as { role: string; content: string }[]).find(
+      (message) => message.role === 'user',
+    );
+    expect(reviewMessage).toBeDefined();
+    const payload = JSON.parse(reviewMessage!.content);
+    expect(payload.purpose).toBe('authorization_check');
     expect(payload.target.definitionId).toBe('files.write');
   } finally {
     release();

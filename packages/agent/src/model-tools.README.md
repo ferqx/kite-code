@@ -6,7 +6,13 @@
 
 工具可在定义顶层提供同步纯函数 `formatModelResult`，并声明 `model.resultVersion`。Runtime 在重建下一次模型历史时核原执行、调用、Session／Run／Store 与当前捕获定义的准确 ID/version，只向 formatter 传冻结的原 `ToolResult` 副本和已核完整读取的 Artifact 正文。未知定义、旧版本、不支持的形状或 formatter 异常保留原呈现；真实 Artifact 身份、读取和完整性失败继续拒绝，不能被展示 fallback 吞掉。
 
-目前 [Files](tools/files/README.md) 对工作区读取和搜索去除重复 envelope，保留正文、基线、行窗、分页和未检查范围。[child Source 呈现](model-result-presentation.ts)依据原持久 child 配置和执行身份，前置未核验状态、范围与实际原文预览，再给出完整子报告；未覆盖的工作不能被推断为未发生。失败、取消、未知或无法识别的来源沿原格式交付。
+原 owner、Shell 引用和证据正文的 Store／Artifact 读取在纯 formatter 的异常回退范围外完成。压缩后通过执行证据找回旧结果时，同样完整校验嵌套原正文，并沿本次模型准备的取消信号中止读取；缺失或损坏沿既有模型准备失败路径上报，不以成功目录 JSON 替代不可读正文。纯展示不支持某种形状时仍保留完整原结果，包括未知 evidence 限定和外部工具业务字段；有 Artifact 时同时保留已验证的完整正文，不只取 `content`。
+
+目前 [Files](tools/files/README.md) 对工作区读取和搜索去除重复 envelope，保留正文、基线、行窗、分页和未检查范围；普通确定缺失保准确路径及 `exists:false`，不造正文或基线。[child Source 呈现](model-result-presentation.ts)依据原持久 child 配置和执行身份，前置未核验状态、范围与实际原文预览，再给出完整子报告。准确失败的 child 也保此前工具观察、Shell 输出预览及遗漏限制，失败原因使用公开英文说明，不把失败称为此前零效果。未知证据结构保原完整 Source；未覆盖的工作不能被推断为未发生。成功专用 leaf formatter 不处理失败结果；child 呈现并非 leaf formatter。
+
+[失败说明](tool-failure-presentation.ts)在原 Tool／call／Session／Run／Store 已核实后，为失败、取消及效果未知标注准确状态；工具拥有的解释使用简洁英文，[固定公开原因表](tool-failure-causes.ts)替代裸码，不用内部执行术语代替原因。未知的非空公开 `ToolResult.content` 作为低信任返回正文保留，不按单词、JSON 或错误码形状删除；没有正文时明确说明未返回错误描述。原业务正文和完整 Artifact 继续保留，不靠正文是散文还是 JSON 猜测是否已经表达失败，也不翻译或删除 stdout／stderr、MCP 业务数据及其他非英文原文。是否未派发只取 Core 的实际派发观察，不信任 leaf 自称未执行；确有未派发证明时明确本次未执行、本次 Tool 作用为零，不能误述为本次效果未知，也不否定此前操作的作用。人工拒绝另核原 human answer，不从裸码猜用户决定；Auto 拒绝核原成功审核的拒绝原因。完成决策被新用户输入替代时，下一模型明确获知旧决策已过期，须按当前任务重新判断；不据此自动重放原请求。[真实交错回归](../test/isolated/context/store.test.ts)核原取消回执、同一调用与来源及零派发。取消不证明回滚或后台已停，unknown 明确可能已有作用、须核原操作且不得重投。不把任意 details、私有 Error 或 cause 自动加入模型。后台结果 Source 保原来源，已识别的 Shell 与 child 以公开结果呈现，未知结构继续保原完整 JSON；不主动创建新 Model。原存储回执、机器状态、工具／协议版本和准确封存的旧 ModelInput 不改写。[实际 Runtime 回归](../test/isolated/execution/tool-failure-presentation.test.ts)核下一模型、原回执不变、call/source、未派发与已尝试的区分、私有数据和完整错误 Artifact；[失败子结果回归](../test/isolated/business/task/partial-child-failure.test.ts)核此前真实写入、读取及 Shell 诊断仍交给父模型且无重放。
+
+准确内置 `read_execution_evidence` 的模型结果按当前任务、原 Store／Session／Run、执行 ID、状态及完整原结果重新核对，再复用原结果呈现；同名外部 owner 不借用这条能力。识别成功的目录及公开结果呈现不重复内部执行 envelope，不改变原 evidence Tool 的持久结果或原操作；不匹配的投影形状保原结果，实际正文完整性错误继续失败。原 Shell 输出内合法业务 `job` 等字段保持字节，不能按关键词清理。[实际证据读取回归](../test/isolated/execution/evidence-public-feedback.test.ts)覆盖准确原 Job／Tool、失败17、Unicode 两流、错误任务范围及同名外部 owner，以及压缩后完整、缺失、损坏和读取中取消的正文、未知子证据和外部业务字段保真，原操作只执行一次。
 
 呈现在 [Runtime.modelMessages](runtime.ts) 中完成，早于输入封存、预算估算、续写／重试及压缩；只读 Inspector 读取当时封存的真实输入，不用今天的 formatter 改写旧快照。原 Message、ToolResult、Source、Artifact、邮件携带判断及结果接纳保持原内容和身份。没有生产配置开关或按搜索次数注入的提醒。回归见[真实 Runtime 呈现](../test/isolated/execution/model-result-presentation.test.ts)及[子取证](../test/isolated/business/task/child-tool-evidence.test.ts)。
 
@@ -20,7 +26,7 @@
 4. `ToolCall.model` 只记录原公开名称、实际发生改名的字段路径和必要错误码；内部 `ToolCall.name/arguments` 仍保存规范形态。下一轮由 `modelToolCall`／`modelToolMessages` 重建原公开调用，不咨询今天的定义，也不为每条历史复制整份 schema。
 5. [Model metadata](model-snapshot.ts) 的 `context.toolSurface` 保存当时完整公开工具声明。内部 assembly 仍绑定原 ID/version；[Inspector 只读入口](runtime.ts) 从原请求和封存表面恢复当时模型所见，不拿当前目录补齐旧输入。完整正文、scope、EOF/hash 及原读取资格仍由 [Model body owner](model-body/README.md)核实。
 
-本次切换不提供旧会话工具消息的名称或参数兼容，不增加旧名称 alias。原操作 `key`、文件 `base` 和准确执行引用仍是必需合同；公开名称友好不代表执行去重、文件基线或授权可以省略。
+新目录不增加旧名称 alias；已保存模型调用按原 descriptor 还原名称和参数，不用今天的目录重写历史。内部操作身份、文件 `base` 和准确执行引用仍是必需合同；Shell 的新模型输入不含 key，改由原 Tool execution ID 派生，历史显式 key 和封存投影保持可解释；公开名称友好不代表执行去重、文件基线或授权可以省略。
 
 上下文估算和压缩同样使用公开名称、schema 与历史；原实测 token 基线和新增消息必须采用同一种表示，私有 `ToolCall.model` 不计入实际模型输入。持久取舍见[模型工具表面决定](../../../.agents/notes/implemented/architecture/2026-10-18-model-tool-presentation.md)。
 
@@ -48,7 +54,7 @@
 | --- | --- | --- |
 | `files.read` | `read_file` | `offset/limit → start_line/max_lines`；工作区相对路径或准确外部绝对路径 |
 | `files.write/edit` | `write_file`、`edit_file` | `base` 保留；`find/replace/occurrences → old_text/new_text/expected_matches` |
-| `shell.execute/launch/read/wait/stop` | `shell_execute`、`shell_launch`、`shell_read`、`shell_wait`、`shell_stop` | 前台执行时限 `execution_timeout_ms`；等待时限 `wait_timeout_ms`；其他声明字段转 snake_case |
+| `shell.execute/read/wait/stop` | `shell_execute`、`shell_read`、`shell_wait`、`shell_stop` | execute 默认前台，`background:true` 后台；顶层 filesystem/network；前台期限 `execution_timeout_ms`；key/cancellation/permissions/旧 timeoutMs 仅内部保留，旧 shell.launch 从新目录隐藏；等待时限 `wait_timeout_ms` 保持 |
 | 普通问题、网页 | `ask_user`、`web_fetch` | 问题保留闭合 `{questions}`；网页使用 `max_chars/timeout_ms` |
 | `task.spawn/message/follow_up/interrupt` | `spawn_agent`、`send_agent_message`、`follow_up_agent`、`interrupt_agent` | 创建使用 `prompt/task_name/preset`；后续协作使用稳定 `agent_id`，消息可明确 `target:parent`；不接受内部操作键、Provider 或 Run 身份 |
 | `task.events/list` | `wait_agent_events`、`list_agents` | 事件使用 `after_seq/wait_ms`；列表使用 `agent_ids/after_seq/upper_seq/limit` |
@@ -67,7 +73,7 @@ Files 的目录与检索 API 仍服务客户端文件候选等内部读取，不
 
 ## 工具选择与职责
 
-普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：不含可选 Browser 的基础目录在具备合格 Shell 时为16项，不具备时为11项，包括 Files 三项、问题、网页及协作六项；其中 read_file 支持准确工作区外只读路径。宿主允许 Browser 时另选择对应浏览器能力；新 Native 默认对模型提供 `browser_execute` 与两个 Skill 读取入口，原子依赖保持内部隐藏。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留内部兼容入口。
+普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：不含可选 Browser 的基础模型目录在具备合格 Shell 时为16项，不具备时为12项，包括 Files 三项、问题、网页、当前任务证据读取及协作六项；其中 read_file 支持准确工作区外路径，有效 Full 下的 write_file/edit_file 也支持普通外部修改。宿主允许 Browser 时另选择对应浏览器能力；新 Native 默认对模型提供 `browser_execute` 与两个 Skill 读取入口，原子依赖保持内部隐藏。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留内部兼容入口。
 
 工具按独立操作及可观察结果划分，不把模型填写的结论包装成事实来源。研究状态工具及其 records/context、权限例外和导出入口已撤回。计划工具管理步骤、批准和版本；专用验证工具已移除，检查通过普通 Shell 执行并如实报告。
 
@@ -82,4 +88,4 @@ Files 的目录与检索 API 仍服务客户端文件候选等内部读取，不
 [真实模型工具测试](../../../tests/e2e/live/model/README.md)另以显式门禁调用现有默认模型，使用合成工作区验证文件读改写、公开历史和单子任务的准确等待/结果。它不进入默认测试发现；运行次数、超时、凭据和报告边界归该入口。固定模型与本机 HTTP 的通过不能替代真实 Provider 结果，真实单模型通过也不外推其他模型。
 
 
-Skill Workflow 的六个工具和专用外部文件三个工具已移除定义及宿主装配；旧名称没有 alias。`read_file` 的外部读取由 [external-file-reads](tools/external-file-reads.ts) 在同一定义下核准确授权与原生身份，不提供外部写入或项目指令发现。
+Skill Workflow 的六个工具和专用外部文件三个工具已移除定义及宿主装配；旧名称没有 alias。`read_file` 的外部读取由 [external-file-reads](tools/external-file-reads.ts) 在同一定义下核准确授权与原生身份，不做外部项目指令发现；普通外部修改仅由 [Full 适配器](tools/full-access-files.ts)在最终有效 Full 下复用 write_file/edit_file，其他模式沿原 Shell 独立申请链路，不新增 Files 权限参数或审批入口。

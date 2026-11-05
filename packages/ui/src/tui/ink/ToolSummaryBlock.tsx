@@ -110,6 +110,7 @@ function failureSummary(step: { status: string; summary: string }, maxWidth: num
  *  Step verb: write_file distinguishes create/overwrite/append by result;
  *  other tools use the static ACTION_NAMES map */
 function stepActionName(step: ConsolidatedToolEntry): string {
+  if (step.fileMissing && step.status === 'done') return 'File does not exist';
   return step.name === 'write_file'
     ? writeFileActionName(step.summary, step.args)
     : actionName(step.name);
@@ -118,6 +119,7 @@ function stepActionName(step: ConsolidatedToolEntry): string {
 function latestActivityLabel(
   block: Extract<OutputBlock, { kind: 'tool_summary' }>,
   maxWidth: number,
+  missingLabel: string,
 ): string {
   const activity = block.latestActivity;
   if (!activity) return '';
@@ -126,6 +128,8 @@ function latestActivityLabel(
   }
   const step = block.tools.find((t) => t.callId === activity.callId);
   if (!step) return '';
+  if (step.fileMissing && step.status === 'done')
+    return truncateToFit(`${missingLabel} ${String(step.args.path ?? '')}`, maxWidth);
   const args = toolArgsLabel(step.name, step.args, step.totalLines);
   const label = args ? `${stepActionName(step)} ${args}` : stepActionName(step);
   return truncateToFit(label, maxWidth);
@@ -162,7 +166,11 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
   const { t: translate } = useInkI18n();
   const isError = step.status === 'error' || step.status === 'exhausted';
   const lineColor = isError ? dt.error : dt.dim;
-  const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
+  const rawLabel = toolArgsLabel(
+    step.name,
+    step.fileMissing ? { path: step.args.path } : step.args,
+    step.fileMissing ? undefined : step.totalLines,
+  );
   const stepPreW = stringWidth(`${connector}${stepActionName(step)}`);
   const failure = failureSummary(step, 32);
   const errSummary =
@@ -177,7 +185,11 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
   return (
     <Box paddingLeft={3}>
       <Text color={lineColor}>{connector}</Text>
-      <Text>{stepActionName(step)}</Text>
+      <Text>
+        {step.fileMissing && step.status === 'done'
+          ? translate('tool.fileMissing')
+          : stepActionName(step)}
+      </Text>
       {fitLabel && <Text color={lineColor}> {fitLabel}</Text>}
       {step.status === 'queued' && <Text color={dt.muted}> queued</Text>}
       {step.status === 'running' && <Text color={dt.warning}> …</Text>}
@@ -215,6 +227,7 @@ export default memo(function ToolSummaryBlock({
   finalReasoning,
 }: ToolSummaryBlockProps) {
   const dt = useInkTheme();
+  const { t: translate } = useInkI18n();
   const col = columns > 0 ? columns : (process.stdout.columns ?? 80);
 
   const { activityVerified } = useTuiPresentation();
@@ -227,7 +240,12 @@ export default memo(function ToolSummaryBlock({
       ? block.totalElapsedMs
       : (block.totalElapsedMs ?? 0) + Math.max(0, liveNow - block.liveModelStartedAt);
   const elapsedStr = elapsedMs === undefined ? '' : formatElapsed(elapsedMs);
-  const summaryLine = block.summaryLine;
+  const missing = block.tools.filter((tool) => tool.fileMissing && tool.status === 'done');
+  const summaryLine = missing.length
+    ? block.tools.length === missing.length
+      ? translate('tool.fileMissing')
+      : `${block.summaryLine} · ${translate('tool.fileMissing')}`
+    : block.summaryLine;
 
   // ── 折叠逻辑（running / settled 两态共享）──
   const steps = block.tools;
@@ -340,7 +358,9 @@ export default memo(function ToolSummaryBlock({
         ) && (
           <Box paddingLeft={3}>
             <Text color={dt.dim}>{visibleSteps.length === 0 && !hasSkipped ? '└─ ' : '   '}</Text>
-            <Text color={dt.muted}>{latestActivityLabel(block, Math.max(0, col - 9))}</Text>
+            <Text color={dt.muted}>
+              {latestActivityLabel(block, Math.max(0, col - 9), translate('tool.fileMissing'))}
+            </Text>
           </Box>
         )}
     </Box>

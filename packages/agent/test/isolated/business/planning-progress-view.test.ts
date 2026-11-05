@@ -91,6 +91,7 @@ async function fixture() {
   } as unknown as ReadContext;
   const query = business.extension.queries!.find((item) => item.id === 'planning.progress.view')!;
   return {
+    business,
     query,
     context,
     rows,
@@ -100,6 +101,37 @@ async function fixture() {
     },
   };
 }
+test('plan approval observations preserve exact Run requirements without Agent phases or mutable step progress', async () => {
+  const f = await fixture();
+  const request = {
+    sessionId: 'session',
+    runId: 'run',
+    workspaceId: 'workspace',
+    definitionId: 'fixed',
+    input: { kind: 'model_request' },
+  };
+  const capture = () => f.business.extension.context!.capture(request, f.context);
+  const approved = await capture();
+  const actual = approved.find((source) => source.placement === 'runtime')!;
+  expect(actual.content).toContain('plan_requirement:');
+  expect(actual.content).toContain('"status":"approved"');
+  expect(actual.content).toContain('"planId":"p"');
+  expect(actual.content).not.toContain('phase:');
+  expect(actual.content).not.toContain('building');
+  f.put('progress/p/1', {
+    ...(f.rows.get('progress/p/1')!.value as Record<string, Json>),
+    steps: { one: { status: 'completed', receipt: { executionId: 'original-effect' } } },
+  });
+  expect(await capture()).toEqual(approved);
+  f.rejectProof();
+  const pending = (await capture()).find((source) => source.placement === 'runtime')!;
+  expect(pending.content).toContain('"status":"pending"');
+  expect(pending.content).not.toContain('phase:');
+  f.rows.delete('run/run/plan.required');
+  const disabled = (await capture()).find((source) => source.placement === 'runtime')!;
+  expect(disabled.content).toContain('"status":"disabled"');
+  expect(disabled.content).not.toContain('phase:');
+});
 test('planning progress query verifies accepted original proof and exposes exact failed progress without changing status query', async () => {
   const f = await fixture(),
     parts = await f.query.execute({ runId: 'run' }, f.context);

@@ -3,6 +3,8 @@ import type { AuthorizationRequest, PermissionDecision, Permissions } from '../e
 import type { Json } from '../storage';
 import { isBuiltinBrowserApprovalExempt } from './capabilities';
 
+export { shellRiskReviewContractDigest } from '../shell-risk-review';
+
 export type PermissionMode = 'accept_edits' | 'auto' | 'full';
 export type CapabilityEffect =
   | 'read'
@@ -30,8 +32,17 @@ export interface PermissionPolicySnapshot {
 }
 /** Supplied by actual trusted host registration, never by a Tool description or remote text. */
 export interface CapabilityDescription extends CapabilityIdentity {
+  /** Trusted default-host review contract; absent preserves custom and historical policies. */
+  readonly autoReview?: 'shell_risk' | 'none';
   /** Trusted exact execution semantics, never a remote/Model supplied grant key. */
   readonly commandDigest?: string;
+  readonly autoReviewKey?: string;
+  readonly autoTimeoutScope?:
+    | 'governed'
+    | {
+        readonly filesystem: 'workspace_write' | 'full_access';
+        readonly network: 'none' | 'internet';
+      };
   /** Trusted Shell sandbox request, not an authorization supplied by a caller. */
   readonly executionScope?: {
     readonly filesystem: 'workspace_write' | 'full_access';
@@ -48,6 +59,8 @@ export interface CapabilityDescription extends CapabilityIdentity {
   readonly approvalExempt?: 'builtin.browser';
 }
 export interface AuthorizationCheckContext {
+  /** Host contract: Core may project verified task inputs instead of the business Model window. */
+  readonly reviewInput?: 'task_authorization';
   readonly task: Json;
   readonly plan: Json | null;
   readonly rejectionReasons: readonly string[];
@@ -58,6 +71,8 @@ export interface PermissionPolicyOptions {
   ): PermissionPolicySnapshot | Promise<PermissionPolicySnapshot>;
   describeCapability(
     request: AuthorizationRequest,
+    /** Isolated copy of this authorization's validated policy; never a second host read. */
+    policy?: Readonly<PermissionPolicySnapshot>,
   ): CapabilityDescription | null | Promise<CapabilityDescription | null>;
   /** Read-only host context. Review execution and its authority stay in Core, never this callback. */
   readCheckContext?(
@@ -120,6 +135,9 @@ function validDescription(description: CapabilityDescription) {
     text(description.revision) &&
     typeof description.hardAllowed === 'boolean' &&
     typeof description.safeRead === 'boolean' &&
+    (description.autoReview === undefined ||
+      description.autoReview === 'shell_risk' ||
+      description.autoReview === 'none') &&
     (description.denialReason === undefined || text(description.denialReason)) &&
     (description.approvalExempt === undefined ||
       (description.approvalExempt === 'builtin.browser' &&
@@ -173,10 +191,13 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.hardAllowed,
           description.safeRead,
           description.commandDigest ?? null,
+          description.autoReviewKey ?? null,
+          description.autoTimeoutScope ?? null,
           description.executionScope ?? null,
           description.denialReason ?? null,
           description.internalRecordOnly ?? null,
           ...(description.approvalExempt ? [description.approvalExempt] : []),
+          ...(description.autoReview ? [description.autoReview] : []),
         ],
       }),
     )
@@ -193,7 +214,9 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       request.signal.throwIfAborted();
       if (!validPolicy(policy))
         return { allowed: false, revision: 'invalid-policy', reason: 'permission_policy_invalid' };
-      let description = structuredClone(await options.describeCapability(request));
+      let description = structuredClone(
+        await options.describeCapability(request, structuredClone(policy)),
+      );
       request.signal.throwIfAborted();
       if (description !== null && !validDescription(description))
         return {
@@ -225,6 +248,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
                   effects: [...description.effects],
                   hardAllowed: description.hardAllowed,
                   safeRead: description.safeRead,
+                  ...(description.autoReview ? { autoReview: description.autoReview } : {}),
                   ...(description.internalRecordOnly ? { internalRecordOnly: true } : {}),
                   ...(description.approvalExempt
                     ? { approvalExempt: description.approvalExempt }
@@ -274,9 +298,13 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       )
         return { ...controlProof, allowed: true, revision: boundRevision };
       if (policy.mode === 'auto') {
-        const context = options.readCheckContext
-          ? structuredClone(await options.readCheckContext(request))
-          : undefined;
+        if (description.autoReview === 'none')
+          return { ...controlProof, allowed: true, revision: boundRevision };
+        const riskOnly = description.autoReview === 'shell_risk';
+        const context =
+          !riskOnly && options.readCheckContext
+            ? structuredClone(await options.readCheckContext(request))
+            : undefined;
         request.signal.throwIfAborted();
         const { signal: _signal, ...invocation } = request;
         return {
@@ -285,7 +313,10 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
           revision: boundRevision,
           reason: 'auto_check_required',
           check: {
+            ...(description.autoReviewKey ? { operationKey: description.autoReviewKey } : {}),
+            timeoutScope: description.autoTimeoutScope ?? 'governed',
             request: {
+              ...(riskOnly ? { reviewPurpose: 'shell_risk' } : {}),
               mode: policy.mode,
               effects: [...description.effects],
               ...(description.executionScope ? { executionScope: description.executionScope } : {}),

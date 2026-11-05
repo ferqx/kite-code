@@ -1,3 +1,5 @@
+import { type ShellRiskLevel, shellRiskAnswer, shellRiskDecision } from './shell-risk-review';
+
 export type AuthorizationCheckAnswer = {
   decision: 'approve_once' | 'reject' | 'ask_user';
   reason: string;
@@ -9,6 +11,8 @@ export type AuthorizationCheckOutput = {
   modelOutputDigest: string;
   contentHash: string;
   answer: AuthorizationCheckAnswer;
+  reviewPurpose?: 'shell_risk';
+  risk?: ShellRiskLevel;
 };
 export const authorizationCheckOutputMediaType =
   'application/vnd.kite.authorization-check-output+json';
@@ -33,12 +37,26 @@ export function authorizationCheckAnswer(value: unknown): AuthorizationCheckAnsw
     reason: value.reason,
   };
 }
+/** Preserve the raw Model JSON; only the selected trusted contract derives a decision. */
+export function authorizationCheckAnswerForContract(
+  value: unknown,
+  purpose?: 'shell_risk',
+): { answer: AuthorizationCheckAnswer; risk?: ShellRiskLevel } | null {
+  if (purpose === 'shell_risk') {
+    const risk = shellRiskAnswer(value);
+    return risk ? { answer: shellRiskDecision(risk), risk: risk.risk } : null;
+  }
+  const answer = authorizationCheckAnswer(value);
+  return answer ? { answer } : null;
+}
 /** Finite purpose-bound receipt; no private ModelOutput head or original subject is exposed. */
 export function authorizationCheckOutput(value: unknown): AuthorizationCheckOutput | null {
   if (
     !object(value) ||
-    Object.keys(value).sort().join(',') !==
-      'answer,contentHash,kind,modelExecutionId,modelOutputDigest,version' ||
+    ![
+      'answer,contentHash,kind,modelExecutionId,modelOutputDigest,version',
+      'answer,contentHash,kind,modelExecutionId,modelOutputDigest,reviewPurpose,risk,version',
+    ].includes(Object.keys(value).sort().join(',')) ||
     value.kind !== 'authorization_check_output' ||
     value.version !== 1 ||
     typeof value.modelExecutionId !== 'string' ||
@@ -52,6 +70,15 @@ export function authorizationCheckOutput(value: unknown): AuthorizationCheckOutp
     return null;
   const answer = authorizationCheckAnswer(value.answer);
   if (!answer) return null;
+  const risk =
+    value.reviewPurpose === 'shell_risk'
+      ? shellRiskAnswer({ risk: value.risk, reason: answer.reason })
+      : null;
+  if (
+    (Object.hasOwn(value, 'reviewPurpose') || Object.hasOwn(value, 'risk')) &&
+    (!risk || shellRiskDecision(risk).decision !== answer.decision)
+  )
+    return null;
   return {
     kind: value.kind,
     version: value.version,
@@ -59,5 +86,6 @@ export function authorizationCheckOutput(value: unknown): AuthorizationCheckOutp
     modelOutputDigest: value.modelOutputDigest,
     contentHash: value.contentHash,
     answer,
+    ...(risk ? { reviewPurpose: 'shell_risk' as const, risk: risk.risk } : {}),
   };
 }

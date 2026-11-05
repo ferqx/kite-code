@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
 import { decodeNativeRequest } from '../electron/native-ipc';
-import { nativeLiveShellInputFact } from '../electron/tool-message-fact';
+import { nativeLiveShellInputFact, nativeToolMessageFact } from '../electron/tool-message-fact';
 import { NativeToolMessages } from '../electron/tool-messages';
 import {
   authorizationApproval,
@@ -112,6 +112,82 @@ function fixture() {
     },
   };
 }
+
+test('a missing-file read keeps its original successful receipt and exact builtin registration through the Main reader and reopen', async () => {
+  const f = fixture();
+  f.add('absent', 'succeeded', 'absent', 'files.read');
+  const path = 'absent.txt';
+  const content = `File does not exist: ${JSON.stringify(path)}.`;
+  const receipt = { ...f.messages.get('absent')!, content };
+  f.messages.set(receipt.id, receipt);
+  const execution = {
+    ...f.executions.get('execution-absent')!,
+    definitionVersion: '5',
+    toolInput: { path },
+    result: { outcome: 'succeeded', content, details: { path, exists: false } },
+  };
+  f.executions.set(execution.id, execution);
+  const run = {
+    id: 'absent',
+    sessionId: 's',
+    originStoreId: 'store',
+    configuration: { tools: [{ id: 'files.read', version: '5', extensionId: 'builtin.files' }] },
+  } as unknown as Run;
+  f.client.getRun = async () => run;
+  const before = structuredClone(execution);
+  for (let reopen = 0; reopen < 2; reopen++) {
+    const page = await f.list(['absent']);
+    expect(page.entries).toHaveLength(1);
+    const fact = page.entries[0]!;
+    expect(fact.fileMissing).toBe(true);
+    const display = desktopToolMessage(fact, 'tool:absent', content);
+    expect(display.status).toBe('completed');
+    expect(display.fileMissing).toBe(true);
+    expect(display.text).toBe(content);
+  }
+  for (const invalid of [
+    { run: undefined },
+    { run: { ...run, originStoreId: 'other' } },
+    {
+      run: {
+        ...run,
+        configuration: { tools: [{ id: 'files.read', version: '5', extensionId: 'fixture' }] },
+      },
+    },
+    { execution: { ...execution, definitionVersion: 'future' } },
+    {
+      execution: {
+        ...execution,
+        status: 'failed',
+        result: { ...execution.result, outcome: 'failed' },
+      },
+    },
+    {
+      execution: {
+        ...execution,
+        result: { ...execution.result, details: { path, exists: false, baseline: {} } },
+      },
+    },
+    {
+      execution: {
+        ...execution,
+        result: { ...execution.result, details: { path: 'other.txt', exists: false } },
+      },
+    },
+  ]) {
+    const input = { execution, run, ...invalid };
+    expect(
+      nativeToolMessageFact({
+        ...input,
+        execution: input.execution as Execution,
+        message: receipt,
+        messages: f.messages.values(),
+        sessionId: 's',
+      })?.fileMissing,
+    ).toBeUndefined();
+  }
+  expect(execution).toEqual(before);
+});
 
 test('saved browser purposes survive large code and sealed Model calls through the Main reader', async () => {
   const f = fixture();
@@ -1798,6 +1874,72 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       shellId: launch.id,
       command: 'printf first\nprintf second\n',
     });
+
+    const background = receipt('execute', 'succeeded', { accepted: true });
+    const backgroundInput = {
+      command: 'printf first\nprintf second\n',
+      description: '启动输出任务',
+      background: true,
+    };
+    background.execution.toolInput = backgroundInput;
+    f.messages.get(`call-${background.id}`)!.toolCalls![0]!.arguments =
+      JSON.stringify(backgroundInput);
+    background.details.shellId = background.id;
+    background.details.shell_id = background.id;
+    delete background.details.execution;
+    background.save();
+    const backgroundResult = await background.read();
+    expect(backgroundResult.fact.target).toBe('启动输出任务');
+    expect(backgroundResult.message.shell).toEqual({
+      operation: 'launch',
+      accepted: true,
+      shellId: background.id,
+      command: backgroundInput.command,
+    });
+    expect(backgroundResult.message.shell?.jobStatus).toBeUndefined();
+    const liveBackground = nativeLiveShellInputFact({
+      ...background.execution,
+      toolCallId: 'repeated',
+    })!;
+    expect(liveBackground.shellInput).toMatchObject({
+      operation: 'launch',
+      command: backgroundInput.command,
+    });
+    expect(liveBackground.shellInput?.shellId).toBeUndefined();
+    f.messages.get(`call-${background.id}`)!.toolCalls![0]!.arguments = JSON.stringify({
+      ...backgroundInput,
+      description: 'conflicting purpose',
+    });
+    const conflicting = await background.read();
+    expect(conflicting.fact.target).toBeUndefined();
+    expect(conflicting.fact.inputPending).toBe(true);
+    expect(conflicting.message.shell?.command).toBeUndefined();
+
+    const keylessForeground = receipt('execute', 'succeeded', {
+      stdout: 'first\nsecond\n',
+      stderr: '',
+      stdoutBytes: '13',
+      stderrBytes: '0',
+      droppedBytes: '0',
+      truncated: false,
+      timedOut: false,
+    });
+    const keylessInput = { command: 'printf first\nprintf second\n', description: '核对输出' };
+    keylessForeground.execution.toolInput = keylessInput;
+    f.messages.get(`call-${keylessForeground.id}`)!.toolCalls![0]!.arguments =
+      JSON.stringify(keylessInput);
+    keylessForeground.details.shell_id = keylessForeground.id;
+    keylessForeground.save();
+    expect((await keylessForeground.read()).message.shell).toMatchObject({
+      operation: 'execute',
+      shellId: keylessForeground.id,
+      command: keylessInput.command,
+      jobStatus: 'succeeded',
+      stdout: 'first\nsecond\n',
+    });
+    keylessForeground.details.shell_id = 'unrelated-handle';
+    keylessForeground.save();
+    expect((await keylessForeground.read()).message.shell?.jobStatus).toBeUndefined();
 
     const read = receipt('read', 'succeeded');
     read.job.status = 'running';

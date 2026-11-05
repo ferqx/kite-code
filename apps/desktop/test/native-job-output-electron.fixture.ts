@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
@@ -25,7 +26,9 @@ const [candidate, home, storeId] = process.argv.slice(2) as string[];
 const started = Date.now(),
   pids: number[] = [],
   physical: Physical[] = [];
-let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
+let app: Awaited<ReturnType<typeof _electron.launch>> | undefined,
+  childPid: number | undefined,
+  renderer: import('playwright').Page | undefined;
 const stage = (name: string, facts = {}) =>
   console.log(JSON.stringify({ stage: name, elapsedMs: Date.now() - started, ...facts }));
 const original = JSON.parse(readFileSync(join(home!, 'original-job.json'), 'utf8')) as {
@@ -49,8 +52,19 @@ async function launch() {
     env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
   });
-  const page = await app.firstWindow();
+  const rendererURL = pathToFileURL(join(candidate!, 'app/index.html')).href;
+  const page =
+    app.windows().find((page) => page.url() === rendererURL) ??
+    (await app.waitForEvent('window', {
+      predicate: (page) => page.url() === rendererURL,
+      timeout: 15000,
+    }));
+  renderer = page;
   page.setDefaultTimeout(15000);
+  stage('root_renderer_selected', {
+    url: page.url(),
+    pages: app.windows().map((page) => page.url()),
+  });
   await page.getByRole('button', { name: 'Job Output Window', exact: true }).waitFor();
   await openSessionTools(page);
   childPid = Number(
@@ -110,6 +124,7 @@ async function close() {
   await owned.evaluate(({ app }) => app.quit());
   await exit;
   app = undefined;
+  renderer = undefined;
   assert.throws(() => process.kill(childPid!, 0));
   stage('ordinary_exit_service_absent', { childPid });
   childPid = undefined;
@@ -294,7 +309,7 @@ try {
 } catch (error) {
   if (app) {
     try {
-      const page = app.windows()[0]!;
+      const page = renderer!;
       writeFileSync(join(home!, 'window-failure.txt'), await page.locator('body').innerText());
       await page.screenshot({ path: join(home!, 'window-failure.png'), fullPage: true });
       await page.context().tracing.stop({ path: join(home!, 'window-failure-trace.zip') });

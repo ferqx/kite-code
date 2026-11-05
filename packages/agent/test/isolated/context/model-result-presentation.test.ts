@@ -12,7 +12,7 @@ function fixture() {
       childSessionId: 'child',
       runId: 'child-run',
       status: 'completed',
-      reason: null,
+      reason: null as string | null,
       evidence: {
         kind: 'recorded_tool_evidence',
         sessionId: 'child',
@@ -137,6 +137,50 @@ test('complete Artifact body replaces only the inline availability notice, retai
   expect(formatChildResult(input)).toBeUndefined();
 });
 
+test('an accurately failed child retains prior evidence with an English failure explanation, without changing its outcome or receipt', () => {
+  const input = fixture();
+  input.execution.status = 'failed';
+  input.result.outcome = 'failed';
+  input.result.content = 'execution_failed';
+  input.result.details.status = 'failed';
+  input.result.details.reason = 'execution_failed';
+  const before = structuredClone(input);
+  const formatted = formatChildResult(input)!;
+  expect(formatted).toBeDefined();
+  const header = JSON.parse(formatted.split('\n')[1]!);
+  expect(header.origin).toEqual(input.origin);
+  expect(header.child).toMatchObject({ status: 'failed', outcome: 'failed' });
+  expect(header.evidence.tools).toEqual(input.result.details.evidence.tools);
+  expect(header.evidence.observationsOmitted).toBe(2);
+  expect(formatted).toContain(input.excerpt);
+  expect(formatted).toContain('The operation failed.');
+  expect(formatted).not.toContain('execution_failed');
+  expect(formatted).not.toContain('produced no effects');
+  expect(formatted).toContain('no additional authorization');
+  expect(input).toEqual(before);
+  for (const mutate of [
+    (i: ReturnType<typeof fixture>) => {
+      i.result.details.reason = null;
+    },
+    (i: ReturnType<typeof fixture>) => {
+      i.result.details.status = 'completed';
+    },
+    (i: ReturnType<typeof fixture>) => {
+      i.result.content = 'different original reason';
+    },
+    (i: ReturnType<typeof fixture>) => {
+      i.result.details.evidence.limitation += ' New qualification.';
+    },
+    (i: ReturnType<typeof fixture>) => {
+      i.origin.resultRevision = 'other';
+    },
+  ]) {
+    const changed = structuredClone(input);
+    mutate(changed);
+    expect(formatChildResult(changed)).toBeUndefined();
+  }
+});
+
 test('unrecognized, mixed, non-success or mismatched child facts preserve the original presentation', () => {
   const mutations: ((input: ReturnType<typeof fixture>) => void)[] = [
     (i) => {
@@ -206,4 +250,83 @@ test('unrecognized, mixed, non-success or mismatched child facts preserve the or
     expect(formatChildResult(input)).toBeUndefined();
   }
   expect(formatChildResult({ ...fixture(), body: 'unexpected body' })).toBeUndefined();
+});
+
+test('known Shell receipt previews retain exact diagnostics while unknown qualifications keep the complete raw Source', () => {
+  const input = fixture();
+  const receipt = {
+    executionId: 'original-tool',
+    callId: 'original-call',
+    tool: 'shell.execute',
+    definitionVersion: '1',
+    command: { text: './validate.sh', bytes: 13, truncated: false },
+    requestedPermissions: { filesystem: 'workspace_write', network: 'internet' },
+    job: {
+      executionId: 'original-job',
+      definitionVersion: '1',
+      status: 'failed',
+      dispatched: true,
+      effectiveScope: null,
+      exitCode: 17,
+    },
+    stdout: { text: '', bytes: '0', truncated: false, omitted: false },
+    stderr: { text: 'SNAPSHOT_MISSING\n', bytes: '17', truncated: false, omitted: false },
+  };
+  Object.assign(receipt, {
+    authorization: {
+      tool: { check: { status: 'succeeded', decision: 'approve_once', requireApproval: false } },
+      job: { policy: { reason: 'parent_review' } },
+    },
+  });
+  const evidence = input.result.details.evidence as Record<string, Json>;
+  evidence.shellReceipts = [receipt];
+  evidence.shellReceiptsOmitted = 2;
+  const before = structuredClone(input);
+  const formatted = formatChildResult(input)!;
+  expect(formatted).toBeDefined();
+  const header = JSON.parse(formatted.split('\n')[1]!);
+  const presented = header.evidence.shellReceipts[0];
+  const { job, authorization, ...rest } = JSON.parse(JSON.stringify(receipt));
+  expect(presented).toEqual({
+    ...rest,
+    execution: job,
+    approval: {
+      request: { risk_review: authorization.tool.check },
+      execution: { policy: 'The command reused the approval basis of its own original request.' },
+    },
+  });
+  expect(presented).not.toHaveProperty('job');
+  expect(presented).not.toHaveProperty('authorization');
+  expect(formatted).not.toContain('parent_review');
+  expect(header.evidence.shellReceiptsOmitted).toBe(2);
+  expect(formatted.endsWith(input.report)).toBe(true);
+  expect(input).toEqual(before);
+  for (const change of [
+    () => {
+      (receipt as Record<string, unknown>).unrecognizedQualification = true;
+    },
+    () => {
+      delete (receipt as Record<string, unknown>).unrecognizedQualification;
+      receipt.job.status = 'invented';
+    },
+    () => {
+      receipt.job.status = 'failed';
+      (receipt as Record<string, unknown>).authorization = {
+        tool: {
+          check: {
+            status: 'succeeded',
+            decision: 'approve_once',
+            requireApproval: false,
+            unknownQualification: true,
+          },
+        },
+      };
+    },
+    () => {
+      delete evidence.shellReceiptsOmitted;
+    },
+  ]) {
+    change();
+    expect(formatChildResult(input)).toBeUndefined();
+  }
 });

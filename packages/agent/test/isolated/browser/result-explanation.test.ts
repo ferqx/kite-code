@@ -2,6 +2,49 @@ import { expect, test } from 'bun:test';
 import type { Json, ToolResult } from '../../../src/extensions';
 import { explainBrowserExecutionResult } from '../../../src/tools/browser/result-explanation';
 
+test('browser explanations use action language while retaining original diagnostics and uncertainty', () => {
+  for (const code of [
+    'browser_page_preflight_failed',
+    'browser_ended_before_ready',
+    'browser_native_request_timeout',
+    'browser_native_aborted',
+  ]) {
+    const input: ToolResult = { outcome: 'outcome_unknown', content: code };
+    const result = explainBrowserExecutionResult(input);
+    expect(result.outcome).toBe('outcome_unknown');
+    expect(result.content).not.toMatch(
+      /\b(?:Job|carrier|Run|Session|dispatch|dispatched|Runtime)\b/i,
+    );
+    expect(result.content).not.toContain(code);
+    expect(result.content).toContain('Do not replay');
+    expect(result.details).toMatchObject({ code, diagnostic: { originalContent: code } });
+    expect(input.content).toBe(code);
+  }
+});
+
+test('a dispatched transport timeout retains the original unknown code and its safe nested cause', () => {
+  const result = explainBrowserExecutionResult({
+    outcome: 'outcome_unknown',
+    content: 'browser_action_outcome_unknown. The original action must not be retried.',
+    details: {
+      original: { code: 'browser_action_outcome_unknown', cause: 'browser_native_request_timeout' },
+      operations: [{ definitionId: 'browser.fill', outcome: 'outcome_unknown' }],
+    },
+  });
+  expect(result.outcome).toBe('outcome_unknown');
+  expect(result.content).toContain('did not return a response within');
+  expect(result.content).toContain('result remains unknown');
+  expect(result.content).not.toContain('Diagnostic code:');
+  expect(result.details).toMatchObject({
+    code: 'browser_action_outcome_unknown',
+    diagnostic: { code: 'browser_native_request_timeout' },
+  });
+  expect(result.details).toMatchObject({
+    code: 'browser_action_outcome_unknown',
+    original: { cause: 'browser_native_request_timeout' },
+  });
+});
+
 test('an already bound page is distinguished from a missing retained page without changing dispatch facts', () => {
   const operations = [{ definitionId: 'browser.snapshot', outcome: 'succeeded' }];
   const input: ToolResult = {
@@ -17,7 +60,7 @@ test('an already bound page is distinguished from a missing retained page withou
   expect(result.content).toContain('does not show that either page closed or disappeared');
   expect(result.content).toContain('give a normal final answer');
   expect(result.content).toContain('A later user message can bind the intended retained page');
-  expect(result.content).toContain('Diagnostic code: browser_page_already_open');
+  expect(result.details).toMatchObject({ code: 'browser_page_already_open' });
   expect(input.content).toBe('browser_page_already_open');
 });
 
@@ -28,7 +71,8 @@ for (const code of ['browser_page_recovery_required', 'browser_page_observation_
     expect(result.outcome).toBe('failed');
     expect(result.content).toContain('snapshot');
     expect(result.content).toContain('remains unknown');
-    expect(result.content).toContain(`Diagnostic code: ${code}`);
+    expect(result.details).toMatchObject({ code });
+    expect(result.content).not.toContain('Diagnostic code:');
     expect(result.details).toMatchObject({ operations: [] });
     expect(input.content).toBe(code);
   });
@@ -54,7 +98,7 @@ for (const outcome of ['failed', 'outcome_unknown'] as const)
     expect(result.content).toContain('does not identify who closed');
     expect(result.content).toContain('undo earlier completed actions');
     expect(result.content).toContain('Do not create, refresh or navigate a replacement');
-    expect(result.content).toContain('Diagnostic code: browser_page_closed');
+    expect(result.details).toMatchObject({ code: 'browser_page_closed' });
     expect(result.content.includes('Do not replay')).toBe(outcome === 'outcome_unknown');
     expect(result.content).not.toContain('was not executed');
     expect(result.details).toMatchObject(input.details as Record<string, Json>);
@@ -99,7 +143,8 @@ for (const [code, description] of [
       const result = explainBrowserExecutionResult(input);
       expect(result.outcome).toBe(outcome);
       expect(result.content).toContain(description);
-      expect(result.content).toContain(`Diagnostic code: ${code}`);
+      expect(result.details).toMatchObject({ code });
+      expect(result.content).not.toContain('Diagnostic code:');
       expect(result.content).not.toContain('connection failed');
       expect(result.content).not.toContain('was not executed');
       expect(result.content.includes('Do not replay')).toBe(outcome === 'outcome_unknown');
@@ -144,7 +189,7 @@ for (const outcome of ['failed', 'outcome_unknown'] as const)
     expect(result.content).toContain('whether a partial page was created are not confirmed');
     expect(result.content).toContain('does not authorize overwriting');
     expect(result.content).not.toContain('capacity');
-    expect(result.content).toContain('Diagnostic code: browser_page_grant_create_failed');
+    expect(result.details).toMatchObject({ code: 'browser_page_grant_create_failed' });
     if (outcome === 'outcome_unknown') expect(result.content).toContain('Do not replay');
     expect(input).toEqual(before);
   });
@@ -162,7 +207,8 @@ for (const code of ['browser_page_capacity', 'browser_tab_limit'])
     expect(result.content).toContain('limit');
     expect(result.content).toContain('preserving the existing pages');
     expect(result.content).toContain('do not silently reuse or navigate a different page');
-    expect(result.content).toContain(`Diagnostic code: ${code}`);
+    expect(result.details).toMatchObject({ code });
+    expect(result.content).not.toContain('Diagnostic code:');
     expect(result.details).toMatchObject({
       code,
       dispatchCommitted: false,
@@ -211,9 +257,11 @@ test('an exact original Browser Job Runtime wrapper exposes its known stop uncer
   expect(result.content).toContain('did not confirm that automation stopped');
   expect(result.content).toContain('may or may not have completed');
   expect(result.content).toContain('Do not replay');
-  expect(result.content).toContain(
-    'Diagnostic code: job_stop_unconfirmed; cause: browser_stop_unconfirmed',
-  );
+  expect(result.content).not.toContain('Diagnostic code:');
+  expect(result.details).toMatchObject({
+    code: 'job_stop_unconfirmed',
+    diagnostic: { code: 'browser_stop_unconfirmed' },
+  });
   expect(result.content).not.toContain('browser_startup_outcome_unknown');
   expect(result.content).not.toContain('was not executed');
   expect(result.details).toMatchObject({
@@ -408,9 +456,10 @@ test('only fixed owner cause envelopes can refine an explanation; arbitrary page
   };
   const result = explainBrowserExecutionResult(input);
   expect(result.content).toContain('address, identity or navigation state changed');
-  expect(result.content).toContain(
-    'browser_page_grant_scope_invalid; cause: browser_page_existing_mismatch',
-  );
+  expect(result.details).toMatchObject({
+    code: 'browser_page_grant_scope_invalid',
+    diagnostic: { code: 'browser_page_existing_mismatch' },
+  });
   expect(result.details).toMatchObject({
     code: 'browser_page_grant_scope_invalid',
     diagnostic: { originalContent: input.content },
@@ -469,7 +518,8 @@ for (const code of [
     expect(result.outcome).toBe(outcome);
     expect(result.content).toContain('page');
     expect(result.content).not.toStartWith('browser_');
-    expect(result.content).toContain(`Diagnostic code: ${code}`);
+    expect(result.details).toMatchObject({ code });
+    expect(result.content).not.toContain('Diagnostic code:');
     expect(result.content).not.toContain('user closed');
     expect(result.content).not.toContain('was not executed');
     expect(result.details).toMatchObject({
@@ -508,7 +558,7 @@ for (const code of [
     expect(result.content).toContain('Do not use the old dialog reference');
     expect(result.content).toContain('may or may not have completed');
     expect(result.content).toContain('Do not replay');
-    expect(result.content).toContain(`Diagnostic code: browser_page_dialog_outcome_unknown`);
+    expect(result.details).toMatchObject({ code: 'browser_page_dialog_outcome_unknown' });
     expect(result.content).not.toContain('was not executed');
     expect(result.details).toMatchObject({
       code: 'browser_page_dialog_outcome_unknown',

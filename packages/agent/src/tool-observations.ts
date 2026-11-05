@@ -1,5 +1,7 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { ModelMessage } from '@kite-ai/ai';
-import type { ExecutionRecord } from './storage/types';
+import { parseShellCommandInput, shellOperationKey } from './shell-input';
+import type { ExecutionAuthorizationObservation, ExecutionRecord, Json } from './storage/types';
 
 /** Tool-owned observations are evidence data, never permission or a completion predicate. */
 export interface ToolObservation {
@@ -91,12 +93,300 @@ export function toolObservation(content: string): ToolObservation | undefined {
   };
 }
 
+/** Public, bounded original Shell receipt data; it does not certify task success. */
+type ShellAuthorization = {
+  check?: Pick<
+    NonNullable<ExecutionAuthorizationObservation['check']>,
+    'status' | 'decision' | 'requireApproval'
+  >;
+  human?: Pick<NonNullable<ExecutionAuthorizationObservation['human']>, 'accepted' | 'decision'>;
+  policy?: Pick<NonNullable<ExecutionAuthorizationObservation['policy']>, 'reason'>;
+};
+export interface ShellReceipt {
+  executionId: string;
+  callId: string;
+  tool: string;
+  definitionVersion: string;
+  command: { text: string; bytes: number; truncated: boolean };
+  requestedPermissions: Json;
+  /** Saved observations from the identified original Tool and Job; never a new grant. */
+  authorization?: { tool?: ShellAuthorization; job?: ShellAuthorization };
+  job: {
+    executionId: string;
+    definitionVersion: string;
+    status: string;
+    dispatched: boolean | null;
+    effectiveScope: Json;
+    exitCode: number | null;
+  };
+  stdout: { text: string; bytes: string | null; truncated: boolean; omitted: boolean };
+  stderr: { text: string; bytes: string | null; truncated: boolean; omitted: boolean };
+}
+const terminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'];
+const allowedKeys = (value: Record<string, unknown>, keys: string[]) =>
+  Object.keys(value).every((key) => keys.includes(key));
+const scope = (value: unknown) => {
+  const data = object(value);
+  return (
+    !!data &&
+    allowedKeys(data, ['filesystem', 'network']) &&
+    ['workspace_write', 'full_access'].includes(String(data.filesystem)) &&
+    ['none', 'internet'].includes(String(data.network))
+  );
+};
+/** Exact known presentation only; unknown fields fall back to the retained raw Source. */
+export function isShellReceipt(value: unknown): value is ShellReceipt {
+  const data = object(value),
+    command = object(data?.command),
+    job = object(data?.job);
+  if (
+    !data ||
+    !allowedKeys(data, [
+      'executionId',
+      'callId',
+      'tool',
+      'definitionVersion',
+      'command',
+      'requestedPermissions',
+      'authorization',
+      'job',
+      'stdout',
+      'stderr',
+    ]) ||
+    !['executionId', 'callId', 'definitionVersion'].every(
+      (key) => typeof data[key] === 'string' && data[key],
+    ) ||
+    !['shell.execute', 'shell.launch'].includes(String(data.tool)) ||
+    !command ||
+    !allowedKeys(command, ['text', 'bytes', 'truncated']) ||
+    typeof command.text !== 'string' ||
+    !Number.isSafeInteger(command.bytes) ||
+    Number(command.bytes) < Buffer.byteLength(command.text) ||
+    typeof command.truncated !== 'boolean' ||
+    !(data.requestedPermissions === null || scope(data.requestedPermissions)) ||
+    !job ||
+    !allowedKeys(job, [
+      'executionId',
+      'definitionVersion',
+      'status',
+      'dispatched',
+      'effectiveScope',
+      'exitCode',
+    ]) ||
+    typeof job.executionId !== 'string' ||
+    !job.executionId ||
+    typeof job.definitionVersion !== 'string' ||
+    !job.definitionVersion ||
+    !['planned', 'dispatching', 'running', ...terminal].includes(String(job.status)) ||
+    !(job.dispatched === null || typeof job.dispatched === 'boolean') ||
+    !(job.effectiveScope === null || scope(job.effectiveScope)) ||
+    !(job.exitCode === null || Number.isSafeInteger(job.exitCode))
+  )
+    return false;
+  if (data.authorization !== undefined) {
+    const authorization = object(data.authorization);
+    if (
+      !authorization ||
+      !Object.keys(authorization).length ||
+      !allowedKeys(authorization, ['tool', 'job']) ||
+      !Object.values(authorization).every(isShellAuthorization)
+    )
+      return false;
+  }
+  return ['stdout', 'stderr'].every((key) => {
+    const stream = object(data[key]);
+    return (
+      !!stream &&
+      allowedKeys(stream, ['text', 'bytes', 'truncated', 'omitted']) &&
+      typeof stream.text === 'string' &&
+      typeof stream.truncated === 'boolean' &&
+      typeof stream.omitted === 'boolean' &&
+      (stream.bytes === null ||
+        (typeof stream.bytes === 'string' && /^(0|[1-9][0-9]*)$/.test(stream.bytes)))
+    );
+  });
+}
+function isShellAuthorization(value: unknown): boolean {
+  const data = object(value);
+  if (!data || !Object.keys(data).length || !allowedKeys(data, ['check', 'human', 'policy']))
+    return false;
+  if (data.check !== undefined) {
+    const check = object(data.check);
+    if (
+      !check ||
+      !allowedKeys(check, ['status', 'decision', 'requireApproval']) ||
+      !['planned', 'dispatching', 'running', ...terminal].includes(String(check.status)) ||
+      !['approve_once', 'reject', 'ask_user', 'unavailable'].includes(String(check.decision)) ||
+      typeof check.requireApproval !== 'boolean'
+    )
+      return false;
+  }
+  if (data.human !== undefined) {
+    const human = object(data.human);
+    if (
+      !human ||
+      !allowedKeys(human, ['accepted', 'decision']) ||
+      typeof human.accepted !== 'boolean' ||
+      !(human.decision === null || ['approve', 'deny'].includes(String(human.decision)))
+    )
+      return false;
+  }
+  if (data.policy !== undefined) {
+    const policy = object(data.policy);
+    if (
+      !policy ||
+      !allowedKeys(policy, ['reason']) ||
+      !['reused_approval', 'parent_review', 'timeout_continue'].includes(String(policy.reason))
+    )
+      return false;
+  }
+  return true;
+}
+function shellAuthorization(
+  observation: ExecutionAuthorizationObservation | undefined,
+): ShellAuthorization | undefined {
+  if (!observation) return;
+  const { check, human, policy } = observation;
+  const result = {
+    ...(check
+      ? {
+          check: {
+            status: check.status,
+            decision: check.decision,
+            requireApproval: check.requireApproval,
+          },
+        }
+      : {}),
+    ...(human ? { human: { accepted: human.accepted, decision: human.decision } } : {}),
+    ...(policy ? { policy: { reason: policy.reason } } : {}),
+  };
+  return Object.keys(result).length ? result : undefined;
+}
+function preview(text: string, limit: number) {
+  // Never split a Unicode code point and inflate the preview with replacement characters.
+  let result = '';
+  let usedBytes = 0;
+  for (const character of text) {
+    const bytes = Buffer.byteLength(character);
+    if (usedBytes + bytes > limit) break;
+    result += character;
+    usedBytes += bytes;
+  }
+  return result;
+}
+async function recordedShellReceipt(
+  execution: ExecutionRecord,
+  getExecution: (id: string) => Promise<ExecutionRecord | null>,
+  isRegisteredShell: (tool: ExecutionRecord, job: ExecutionRecord) => boolean,
+): Promise<ShellReceipt | undefined> {
+  if (!['shell.execute', 'shell.launch'].includes(execution.definitionId)) return;
+  const input = object(execution.input),
+    result = object(execution.result),
+    details = object(result?.details);
+  const ref = object(details?.ref),
+    jobId = ref?.executionId;
+  if (
+    !input ||
+    typeof input.command !== 'string' ||
+    !ref ||
+    typeof jobId !== 'string' ||
+    ref.extensionId !== 'builtin.shell' ||
+    ref.key !== shellOperationKey(input.key as Json | undefined, execution.id) ||
+    ref.sessionId !== execution.sessionId ||
+    ref.originStoreId !== execution.originStoreId
+  )
+    return;
+  const toolCommand = parseShellCommandInput(
+    execution.input,
+    execution.definitionId === 'shell.execute' ? 'execute' : 'launch',
+    true,
+  );
+  if (!toolCommand) return;
+  const job = await getExecution(jobId);
+  if (
+    job?.kind !== 'job' ||
+    job.id !== jobId ||
+    job.definitionId !== 'shell.command' ||
+    job.sessionId !== execution.sessionId ||
+    job.originStoreId !== execution.originStoreId ||
+    job.parentExecutionId !== execution.id ||
+    job.originCommandId !== ref.commandId ||
+    job.rootWorkCommandId !== execution.rootWorkCommandId ||
+    job.rootWorkSeq !== execution.rootWorkSeq ||
+    !isRegisteredShell(execution, job)
+  )
+    return;
+  const jobInput = parseShellCommandInput(job.input, 'job', true);
+  if (
+    jobInput?.command !== input.command ||
+    !isDeepStrictEqual(jobInput.permissions ?? null, toolCommand.permissions ?? null)
+  )
+    return;
+  const requestedPermissions = toolCommand.permissions ?? null;
+  if (requestedPermissions !== null && !scope(requestedPermissions)) return;
+  const jobDetails = object(object(job.result)?.details);
+  const effectiveScope = job.authorization?.policy?.effectiveScope ?? null;
+  const toolAuthorization = shellAuthorization(execution.authorization);
+  const jobAuthorization = shellAuthorization(job.authorization);
+  const stream = (key: 'stdout' | 'stderr') => {
+    const original = typeof details?.[key] === 'string' ? (details[key] as string) : undefined;
+    const text = original === undefined ? '' : preview(original, 4096);
+    const count = details?.[`${key}Bytes`];
+    const bytes = typeof count === 'string' && /^(0|[1-9][0-9]*)$/.test(count) ? count : null;
+    return {
+      text,
+      bytes,
+      omitted: original === undefined,
+      truncated:
+        original !== undefined &&
+        (text !== original ||
+          details?.truncated === true ||
+          (bytes !== null && BigInt(bytes) > BigInt(Buffer.byteLength(text))) ||
+          (typeof details?.droppedBytes === 'string' &&
+            /^[0-9]+$/.test(details.droppedBytes) &&
+            BigInt(details.droppedBytes) > 0n)),
+    };
+  };
+  const receipt: ShellReceipt = {
+    executionId: execution.id,
+    callId: execution.callId,
+    tool: execution.definitionId,
+    definitionVersion: execution.definitionVersion,
+    command: {
+      text: preview(input.command, 8192),
+      bytes: Buffer.byteLength(input.command),
+      truncated: Buffer.byteLength(input.command) > 8192,
+    },
+    requestedPermissions: requestedPermissions as Json,
+    ...(toolAuthorization || jobAuthorization
+      ? {
+          authorization: {
+            ...(toolAuthorization ? { tool: toolAuthorization } : {}),
+            ...(jobAuthorization ? { job: jobAuthorization } : {}),
+          },
+        }
+      : {}),
+    job: {
+      executionId: job.id,
+      definitionVersion: job.definitionVersion,
+      status: job.status,
+      dispatched: job.authorization?.dispatched ?? null,
+      effectiveScope: effectiveScope as Json,
+      exitCode: Number.isSafeInteger(jobDetails?.exitCode) ? Number(jobDetails!.exitCode) : null,
+    },
+    stdout: stream('stdout'),
+    stderr: stream('stderr'),
+  };
+  return isShellReceipt(receipt) ? receipt : undefined;
+}
+
 /** Original execution identity is Host evidence; observations remain attributed Tool data.
  * The selected-history boundary is explicit: omitted/compacted work is not proved absent. */
 export async function childToolEvidence(
   history: readonly ModelMessage[],
   identity: { sessionId: string; runId: string; storeId: string },
   getExecution: (id: string) => Promise<ExecutionRecord | null>,
+  isRegisteredShell?: (tool: ExecutionRecord, job: ExecutionRecord) => boolean,
 ) {
   const calls = new Map<string, string>();
   const seen = new Set<string>();
@@ -105,6 +395,8 @@ export async function childToolEvidence(
   let observationBytes = 0;
   let observationsOmitted = 0;
   let toolCallsOmitted = 0;
+  const shellReceipts: ShellReceipt[] = [];
+  let shellReceiptsOmitted = 0;
   const observations: {
     executionId: string;
     tool: string;
@@ -141,6 +433,16 @@ export async function childToolEvidence(
       summary.outcomes[execution.status] = (summary.outcomes[execution.status] ?? 0) + 1;
       if (tools.has(key) || tools.size < 64) tools.set(key, summary);
       else toolCallsOmitted++;
+      if (isRegisteredShell) {
+        const receipt = await recordedShellReceipt(execution, getExecution, isRegisteredShell);
+        if (receipt) {
+          const bytes = Buffer.byteLength(JSON.stringify(receipt));
+          if (observationBytes + bytes <= 32 * 1024) {
+            shellReceipts.push(receipt);
+            observationBytes += bytes;
+          } else shellReceiptsOmitted++;
+        }
+      }
       const result = object(execution.result);
       const observation =
         execution.status === 'succeeded' && typeof result?.content === 'string'
@@ -175,5 +477,6 @@ export async function childToolEvidence(
     toolCallsOmitted,
     tools: [...tools.values()],
     observations,
+    ...(isRegisteredShell ? { shellReceipts, shellReceiptsOmitted } : {}),
   };
 }

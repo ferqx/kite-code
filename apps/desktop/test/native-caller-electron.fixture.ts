@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 import type { NativeCallerMetadata, NativeDraft, NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
 
@@ -28,25 +29,74 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-const [outdir, root, electronExecutable, requestJson, corePath, , packagePath] = process.argv.slice(
-  2,
-) as string[];
+const [outdir, root, electronExecutable, requestJson, corePath, workspace, packagePath] =
+  process.argv.slice(2) as string[];
 const { _electron } = createRequire(packagePath!)('playwright') as typeof import('playwright');
 const input = JSON.parse(readFileSync(requestJson!, 'utf8')),
   base = `${root}-native-caller-window-${input.kind}`;
 let application: Awaited<ReturnType<typeof _electron.launch>> | undefined;
-async function launch() {
+let renderer: import('playwright').Page | undefined;
+async function launch(cold = false) {
   const app = await _electron.launch({
     executablePath: electronExecutable,
     args: [outdir!, `--user-data-dir=${join(root!, 'caller-electron-data')}`],
     cwd: outdir,
-    env: { HOME: process.env.HOME!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: { ...process.env, HOME: process.env.HOME!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
   });
   application = app;
   writeFileSync(`${base}.pid.json`, JSON.stringify({ pid: app.process().pid }));
   console.error('caller checkpoint launch', app.process().pid);
-  const page = await app.firstWindow();
+  if (cold) {
+    // Keep later original-ID reads pending until the first real loss is observed.
+    // Automatic recovery may issue that first GET before a manual click.
+    await app.evaluate(`(() => {
+      const original = globalThis.fetch, http = process.getBuiltinModule('node:http');
+      let first = true;
+      const laterReads = new Promise(resolve => { globalThis.__releaseColdLookups = resolve; });
+      globalThis.__callerPosts = 0;
+      globalThis.__callerPostRequests = [];
+      globalThis.__callerGets = [];
+      globalThis.__callerFirstGetLost = false;
+      globalThis.fetch = async (url, init) => {
+        const method = init?.method ?? 'GET', path = new URL(String(url)).pathname;
+        if (method === 'POST') {
+          const body = JSON.parse(init.body);
+          globalThis.__callerPostRequests.push({ path, body });
+          if (body.commandId === ${JSON.stringify(input.commandId)}) globalThis.__callerPosts++;
+        }
+        if (method !== 'GET' || path !== ${JSON.stringify(`/v1/commands/${input.commandId}`)})
+          return original(url, init);
+        globalThis.__callerGets.push(path);
+        if (!first) { await laterReads; return original(url, init); }
+        first = false;
+        return new Promise((resolve, reject) => {
+          const request = http.request(String(url), { method: 'GET', headers: init?.headers }, response => {
+            const socket = response.socket;
+            const body = new ReadableStream({ start(controller) {
+              response.on('data', () => {
+                globalThis.__callerFirstGetLost = true;
+                socket.destroy();
+                controller.error(Error('owned_first_get_loss'));
+              });
+              response.on('error', error => controller.error(error));
+            }});
+            resolve(new Response(body, { status: response.statusCode, headers: { 'content-type': 'application/json' } }));
+          });
+          request.on('error', reject);
+          request.end();
+        });
+      };
+    })()`);
+  }
+  const rendererURL = pathToFileURL(join(outdir!, 'index.html')).href;
+  const page =
+    app.windows().find((page) => page.url() === rendererURL) ??
+    (await app.waitForEvent('window', {
+      predicate: (page) => page.url() === rendererURL,
+      timeout: 15000,
+    }));
+  renderer = page;
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Original recovery', exact: true }).click();
   await page.locator('.session-header').getByTitle('Original recovery', { exact: true }).waitFor();
@@ -91,6 +141,7 @@ const rows = (commandId: string = input.commandId) => {
 };
 try {
   let { app, page } = await launch();
+  let steerApproval: { id: string; revision: string } | undefined;
   if (input.kind === 'input.steer') {
     // Selection reconciles the seeded orphan. Steering needs a live owner, so
     // explicitly resume this same original Run before preparing its exact input.
@@ -112,6 +163,11 @@ try {
     assert.equal(live.selection!.runs.find((run) => run.id === input.targetRunId)!.isActive, true);
     assert.equal(typeof live.selection!.session.contextSelectionId, 'string');
     input.contextSelectionId = live.selection!.session.contextSelectionId;
+    const card = live.selection!.interactions.find(
+      (card) => card.runId === input.targetRunId && card.state === 'pending',
+    )!;
+    assert.equal(card.definitionId, 'files.write');
+    steerApproval = { id: card.id, revision: card.revision };
   }
   let siblingId: string | undefined;
   let parentBusiness: { runId: string; businessCommandId: string } | undefined;
@@ -187,8 +243,11 @@ try {
     input.executionId = jobs[0]!.id;
     siblingId = jobs[1]!.id;
   }
+  // Hold warm automatic lookups for steer until this process is killed. The
+  // original batch may finish, but this case must retain an unknown caller row
+  // so the cold original-ID lookup, rather than a warm GET, resolves the loss.
   await app.evaluate(
-    `(()=>{const original=globalThis.fetch,http=process.getBuiltinModule('node:http');globalThis.__callerPosts=0;globalThis.__callerGets=[];globalThis.fetch=async(url,init)=>{const path=new URL(String(url)).pathname;if(init?.method!=='POST'||path!=='/v1/sessions/s/commands'||JSON.parse(init.body).commandId!==${JSON.stringify(input.commandId)})return original(url,init);globalThis.__callerPosts++;return new Promise((resolve,reject)=>{const request=http.request(String(url),{method:'POST',headers:init.headers},response=>{const socket=response.socket;const body=new ReadableStream({start(controller){response.on('data',()=>{socket.destroy();controller.error(Error('owned_physical_response_loss'));});response.on('error',error=>controller.error(error));}});resolve(new Response(body,{status:response.statusCode,headers:{'content-type':'application/json'}}));});request.on('error',reject);request.end(init.body);});};})()`,
+    `(()=>{const original=globalThis.fetch,http=process.getBuiltinModule('node:http');globalThis.__callerPosts=0;globalThis.__callerGets=[];globalThis.fetch=async(url,init)=>{const path=new URL(String(url)).pathname;if(${JSON.stringify(input.kind === 'input.steer')}&&(init?.method??'GET')==='GET'&&path===${JSON.stringify(`/v1/commands/${input.commandId}`)})return new Promise(()=>{});if(init?.method!=='POST'||path!=='/v1/sessions/s/commands'||JSON.parse(init.body).commandId!==${JSON.stringify(input.commandId)})return original(url,init);globalThis.__callerPosts++;return new Promise((resolve,reject)=>{const request=http.request(String(url),{method:'POST',headers:init.headers},response=>{const socket=response.socket;const body=new ReadableStream({start(controller){response.on('data',()=>{socket.destroy();controller.error(Error('owned_physical_response_loss'));});response.on('error',error=>controller.error(error));}});resolve(new Response(body,{status:response.statusCode,headers:{'content-type':'application/json'}}));});request.on('error',reject);request.end(init.body);});};})()`,
   );
   let draft: { id: string; revision: string; textDigest: string } | undefined;
   if (input.kind === 'input.steer') {
@@ -244,6 +303,27 @@ try {
   assert.equal(await app.evaluate('globalThis.__callerPosts'), 1);
   assert.deepEqual(await readNativeCallerRequest(page, 1, input.commandId), input);
   assert.equal(rows().commands.length, 1);
+  if (steerApproval) {
+    // Steer waits behind the original ordinary Tool batch. Answer its original
+    // Files approval; the new input must not retire, bypass or replay that Tool.
+    await observedState(page, (state) =>
+      state.selection!.interactions.some(
+        (card) =>
+          card.id === steerApproval!.id &&
+          card.revision === steerApproval!.revision &&
+          card.state === 'pending',
+      ),
+    );
+    await page.evaluate(async ({ id, revision }) => {
+      await window.kiteNative!.request({
+        method: 'interaction.answer',
+        generation: 1,
+        interactionId: id,
+        revision,
+        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      });
+    }, steerApproval);
+  }
   if (input.kind === 'input.follow_up' || input.kind === 'input.steer') {
     // Capture the original input's first legitimate dispatch before crashing:
     // the steer has completed its successor Model; follow-up holds its own Model.
@@ -272,6 +352,15 @@ try {
       if (Date.now() >= deadline) throw Error('original_input_model_not_started');
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    if (input.kind === 'input.steer') {
+      assert.equal(readFileSync(join(workspace!, 'effect'), 'utf8'), 'ORIGINAL_EFFECT_ONCE');
+      const writes = rows().executions.filter(
+        (execution) =>
+          execution.run_id === input.targetRunId && execution.adapter_id === 'files.write',
+      );
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0]!.state, 'succeeded');
+    }
   }
   if (siblingId) {
     const originalParent = parentBusiness;
@@ -294,6 +383,13 @@ try {
     );
   }
   console.error('caller checkpoint original body verified');
+  const savedCaller = (await page.evaluate(async () =>
+    window.kiteNative!.request({ method: 'state', generation: 1 }),
+  )) as NativeState;
+  assert.equal(
+    savedCaller.callerSubmissions?.find((row) => row.request.commandId === input.commandId)?.phase,
+    'unknown',
+  );
   const before = (await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
   )) as NativeState;
@@ -315,10 +411,7 @@ try {
   await new Promise<void>((r) => app.process().once('exit', () => r()));
   application = undefined;
   console.error('caller checkpoint cold launch');
-  ({ app, page } = await launch());
-  await app.evaluate(
-    `(()=>{const original=globalThis.fetch,http=process.getBuiltinModule('node:http');let drop=true;globalThis.__callerPosts=0;globalThis.__callerGets=[];globalThis.fetch=async(url,init)=>{const method=init?.method??'GET',path=new URL(String(url)).pathname;if(method==='POST')globalThis.__callerPosts++;if(method!=='GET'||path!==${JSON.stringify(`/v1/commands/${input.commandId}`)})return original(url,init);globalThis.__callerGets.push(path);if(!drop)return original(url,init);drop=false;return new Promise((resolve,reject)=>{const request=http.request(String(url),{method:'GET',headers:init?.headers},response=>{const socket=response.socket;const body=new ReadableStream({start(controller){response.on('data',()=>{socket.destroy();controller.error(Error('owned_first_get_loss'));});response.on('error',error=>controller.error(error));}});resolve(new Response(body,{status:response.statusCode,headers:{'content-type':'application/json'}}));});request.on('error',reject);request.end();});};})()`,
-  );
+  ({ app, page } = await launch(true));
   console.error('caller checkpoint cold state');
   const cold = (await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
@@ -328,10 +421,30 @@ try {
     cold.callerSubmissions?.find((r) => r.request.commandId === input.commandId)?.phase,
     'unknown',
   );
-  console.error('caller checkpoint original GET click');
-  await page.getByRole('button', { name: `只查原申请 · ${input.commandId}`, exact: true }).click();
+  if (!(await app.evaluate('globalThis.__callerFirstGetLost'))) {
+    console.error('caller checkpoint first original GET click');
+    await page
+      .getByRole('button', { name: `只查原申请 · ${input.commandId}`, exact: true })
+      .click();
+  }
+  await app.evaluate(async () => {
+    const fault = globalThis as typeof globalThis & { __callerFirstGetLost: boolean };
+    const deadline = Date.now() + 15000;
+    while (!fault.__callerFirstGetLost) {
+      if (Date.now() >= deadline) throw Error('original_first_get_loss_not_observed');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  });
   await page.getByText(new RegExp(`原申请 ${input.commandId}.*unknown`)).waitFor();
+  await observedState(
+    page,
+    (state) =>
+      state.callerSubmissions?.find((row) => row.request.commandId === input.commandId)?.phase ===
+      'unknown',
+  );
+  assert.equal(await app.evaluate('globalThis.__callerFirstGetLost'), true);
   assert.equal(await app.evaluate('globalThis.__callerPosts'), 0);
+  await app.evaluate('globalThis.__releaseColdLookups()');
   console.error('caller checkpoint original GET click');
   await page.getByRole('button', { name: `只查原申请 · ${input.commandId}`, exact: true }).click();
   await page
@@ -339,6 +452,29 @@ try {
     .waitFor();
   assert.equal(await app.evaluate('globalThis.__callerPosts'), 0);
   const gets = (await app.evaluate('globalThis.__callerGets')) as string[];
+  const coldPosts = (await app.evaluate('globalThis.__callerPostRequests')) as {
+    path: string;
+    body: { commandId: string; expectedStoreId: string; expectedOwnerGeneration: string };
+  }[];
+  // Session selection performs its normal lifecycle reconciliation. This is
+  // separate from the caller mutation, which must never be submitted again.
+  assert.ok(coldPosts.length <= 1);
+  for (const post of coldPosts) {
+    assert.equal(post.path, '/v1/sessions/s/reconcile');
+    assert.equal(post.body.expectedStoreId, input.expectedStoreId);
+    assert.deepEqual(Object.keys(post.body).sort(), [
+      'commandId',
+      'expectedOwnerGeneration',
+      'expectedStoreId',
+    ]);
+    assert.match(post.body.expectedOwnerGeneration, /^\d+$/);
+    assert.equal(
+      post.body.commandId,
+      `session-reconcile-${createHash('sha256')
+        .update(JSON.stringify([input.expectedStoreId, 's', post.body.expectedOwnerGeneration]))
+        .digest('hex')}`,
+    );
+  }
   // The renderer may also reconcile the saved unknown row after its cold
   // selection completes. Every read must still query this one original ID.
   assert.ok(gets.length >= 2 && gets.length <= 3);
@@ -380,6 +516,7 @@ try {
       siblingId,
       originalRequest: input,
       gets,
+      coldPosts,
       posts: await app.evaluate('globalThis.__callerPosts'),
     }),
   );
@@ -392,10 +529,8 @@ try {
 } catch (error) {
   console.error('caller primary error', error);
   console.error('caller original persistent facts', JSON.stringify(rows()));
-  if (application) {
-    const page = await application.firstWindow();
-    console.error((await page.locator('body').innerText()).slice(-15000));
-  }
+  if (renderer && !renderer.isClosed())
+    console.error((await renderer.locator('body').innerText()).slice(-15000));
   throw error;
 } finally {
   if (application) {

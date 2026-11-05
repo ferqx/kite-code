@@ -925,6 +925,54 @@ test('ambiguous dispatch closes owned lifetime, records unknown and never repeat
   expect(fixture.controller.view('session-one')?.state).toBe('outcome_unknown');
 });
 
+test('dispatched transport failure retains its safe cause without claiming an action did not run', async () => {
+  const fixture = await started({
+    request: async (command): Promise<Json> => {
+      if (command.action === 'click')
+        throw new BrowserTransportError('browser_native_request_timeout', true);
+      return { success: true, data: {} };
+    },
+  });
+  await snapshot(fixture.controller);
+  const result = await fixture.controller.command(
+    'session-one',
+    current(fixture.controller),
+    { action: 'click', ref: '@e1', seq: fixture.controller.view('session-one')!.seq },
+    new AbortController().signal,
+  );
+  expect(result.outcome).toBe('outcome_unknown');
+  expect(result.details).toMatchObject({
+    code: 'browser_action_outcome_unknown',
+    cause: 'browser_native_request_timeout',
+  });
+  expect(result.content).toContain('browser_native_request_timeout');
+  expect(result.content).toContain('must not be retried');
+  expect(fixture.fake.requests.filter((value) => value.action === 'click')).toHaveLength(1);
+});
+
+for (const error of [
+  new Error('PRIVATE_BROWSER_TRANSPORT_BODY'),
+  new BrowserTransportError('PRIVATE_BROWSER_TRANSPORT_BODY with spaces', true),
+])
+  test(`dispatched ${error.constructor.name} cannot publish arbitrary text as a transport cause`, async () => {
+    const fixture = await started({
+      request: async (command): Promise<Json> => {
+        if (command.action === 'click') throw error;
+        return { success: true, data: {} };
+      },
+    });
+    await snapshot(fixture.controller);
+    const result = await fixture.controller.command(
+      'session-one',
+      current(fixture.controller),
+      { action: 'click', ref: '@e1', seq: fixture.controller.view('session-one')!.seq },
+      new AbortController().signal,
+    );
+    expect(result.outcome).toBe('outcome_unknown');
+    expect(result.details).toEqual({ code: 'browser_action_outcome_unknown' });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_BROWSER_TRANSPORT_BODY');
+  });
+
 test('same key preserves intent; pending durable intent returns unknown with no replay', async () => {
   const fixture = await started();
   await snapshot(fixture.controller);

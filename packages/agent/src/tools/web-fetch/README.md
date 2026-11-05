@@ -2,6 +2,8 @@
 
 模型工具名保持 `web_fetch`，可信 model 元信息启用声明属性的 snake_case 投影。`max_chars` 省略时返回完整提取正文，`timeout_ms` 省略时为60000毫秒；内部工具身份、网络审批与逐跳准入保持不变。
 
+非成功 HTTP 响应保留准确状态码及固定可读说明，区分未找到、认证／访问限制、限流和远端服务失败；不复制错误响应正文或 headers。初始 URL 格式错误与被禁止的地址分别保留 `web_url_invalid`／`web_url_denied`，说明纠正语法或尊重边界，不把参数错误误当权限拒绝。失败不代表已取得页面内容，也不自动重试。[核心回归](../../../test/isolated/web-fetch/core.test.ts)经真实 Runtime 核准确状态进入下一 Model，以及非法／禁止 URL 的零网络事实。
+
 `@kite-ai/agent/web-fetch` 导出 `createWebFetchExtension`、`createWebFetchBindingFactory`、`createPinnedWebNetworkPort`、`createPassiveWebExtractor` 及中立的宿主 port。导入和注册均不会解析 DNS、启动 Worker 或打开 socket。`builtin.web@1` 只注册 `web_fetch@1`；Core 必须授权并派发这个普通 Tool。远端内容和宿主资源准入都不能赋予 Tool 权限。
 
 输入是封闭的 `{url, max_chars?, timeout_ms?}`，默认返回完整正文。只有显式传入正整数 `max_chars` 才选择正文前缀，并通过 `details.truncated` 记录这一选择。没有 8K/16K 文本上限，也没有合法跳转次数上限；规范化 URL 构成的真实循环会失败，每个实际跳转都重新准入。URL user-info 和 metadata 名称被拒绝。响应解析的安全边界为实际解码后 5,000,000 字节，支持的 gzip/deflate/br 解压后也受此边界约束；这是单次响应的解析边界，不是累计 Run/Artifact 预算。默认 60 秒总时限从获准派发后的 Tool 入口开始，不包括审批等待，覆盖 parser asset 校验、robots、域名队列、传输和解析；显式正整数 `timeout_ms` 可覆盖默认值，较长的显式超时使用分段计时器。工厂以 `defaultTimeoutMs` 暴露同一运行默认值供 Service 封存，模型 schema 描述使用同一常量。robots 独立 3 秒宽松回退保持。取消仍立即传递至本请求的 socket/Worker，不等待总时限到期；不据此宣称远端服务器的工作已停止。

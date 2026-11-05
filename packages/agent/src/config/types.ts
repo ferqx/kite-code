@@ -33,6 +33,7 @@ export type EffectiveConfiguration = JsonObject & {
   mcp?: NamedConfiguration[];
   /** Explicit maintenance policy; no callbacks or execution authority. */
   compression?: { thresholdTokens?: number };
+  autoApproval?: { timeoutMs?: number };
 };
 export interface ConfigurationSnapshot {
   readonly version: 1;

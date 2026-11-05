@@ -3,6 +3,22 @@ import type { Json, OperationRef, PublicExecution, ToolContext, ToolResult } fro
 import { canonicalJson } from '../json';
 import { AgentError } from '../storage/types';
 
+function assertOriginalShell(
+  ref: OperationRef,
+  execution: PublicExecution | null,
+): asserts execution is PublicExecution {
+  if (
+    !execution ||
+    execution.id !== ref.executionId ||
+    execution.sessionId !== ref.sessionId ||
+    execution.originStoreId !== ref.originStoreId ||
+    execution.kind !== 'job' ||
+    execution.definitionId !== 'shell.command'
+  )
+    throw new AgentError('shell_unverifiable');
+}
+const terminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'];
+
 /** Read the original supervised Job after it is terminal. No receipt is promoted to completion. */
 async function readForegroundShell(
   ref: OperationRef,
@@ -10,13 +26,27 @@ async function readForegroundShell(
   timeoutMs: number | undefined,
   presentation: 'exploration' | 'standalone',
 ): Promise<ToolResult> {
-  const deadline =
-    timeoutMs === undefined ? Number.POSITIVE_INFINITY : performance.now() + timeoutMs;
+  let deadline = Number.POSITIVE_INFINITY;
+  let awaitingDispatch = timeoutMs !== undefined;
   let timedOut = false;
   let execution: PublicExecution;
   for (;;) {
     context.signal.throwIfAborted();
-    const remaining = deadline - performance.now();
+    if (awaitingDispatch) {
+      const current = await context.operations.get(ref);
+      assertOriginalShell(ref, current);
+      if (terminal.includes(current.status)) {
+        execution = current;
+        break;
+      }
+      if (current.status === 'dispatching' || current.status === 'running') {
+        // Observe only this exact Job. Approval and resource waits do not run the
+        // clock; once dispatch is observed, subsequent waits never reset it.
+        deadline = performance.now() + timeoutMs!;
+        awaitingDispatch = false;
+      }
+    }
+    const remaining = awaitingDispatch ? Number.POSITIVE_INFINITY : deadline - performance.now();
     if (!timedOut && remaining <= 0) {
       if (!context.operations.cancel) throw new AgentError('shell_stop_unavailable');
       await context.operations.cancel(ref, {
@@ -29,20 +59,19 @@ async function readForegroundShell(
     try {
       execution = await context.operations.wait(ref, {
         signal: context.signal,
-        timeoutMs: timedOut ? 30000 : Math.min(30000, Math.max(1, Math.floor(remaining))),
+        timeoutMs: awaitingDispatch
+          ? Math.min(25, Math.max(1, Math.floor(timeoutMs!)))
+          : timedOut
+            ? 30000
+            : Math.min(30000, Math.max(1, Math.floor(remaining))),
       });
       break;
     } catch (error) {
       if (!(error instanceof AgentError) || error.code !== 'wait_timeout') throw error;
     }
   }
-  if (
-    execution.id !== ref.executionId ||
-    execution.sessionId !== ref.sessionId ||
-    execution.originStoreId !== ref.originStoreId ||
-    !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status)
-  )
-    throw new AgentError('shell_unverifiable');
+  assertOriginalShell(ref, execution);
+  if (!terminal.includes(execution.status)) throw new AgentError('shell_unverifiable');
   const text = { stdout: '', stderr: '' };
   const bytes = { stdout: 0, stderr: 0 };
   let cursor = '0',
@@ -165,7 +194,13 @@ function cancellationUnknown(
 ): ToolResult {
   return {
     outcome: 'outcome_unknown',
-    content: 'shell_cancellation_unconfirmed',
-    details: { ref: ref as unknown as Json, presentation, cancellationObserved: false },
+    content:
+      'Stopping the command could not be confirmed. It may still be running or have produced effects. Use its original shell_id to check its state; do not restart it.',
+    details: {
+      code: 'shell_cancellation_unconfirmed',
+      ref: ref as unknown as Json,
+      presentation,
+      cancellationObserved: false,
+    },
   };
 }

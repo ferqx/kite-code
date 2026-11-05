@@ -78,6 +78,7 @@ function categoryOf(method: WorkerRequest['method']): Category {
   if (method === 'persistModelPartial' || method === 'appendExecutionOutput') return 'body';
   if (
     method === 'readRunResumeExecutionPage' ||
+    method === 'readExecutionEvidence' ||
     method.startsWith('get') ||
     method.startsWith('list')
   )

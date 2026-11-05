@@ -15,6 +15,9 @@ import {
   projectInkTool,
 } from '../../src/tui/execution-projection';
 import type { TuiChildLog } from '../../src/tui/executions';
+import ToolSummaryBlock from '../../src/tui/ink/ToolSummaryBlock';
+import { defaultTuiPreferences } from '../../src/tui/preferences';
+import { TuiPresentationProvider } from '../../src/tui/presentation';
 
 const execution = (id: string, extra: Partial<Execution> = {}): Execution => ({
   id,
@@ -81,6 +84,102 @@ const snapshot = (executions: Execution[], messages: Message[] = []): TuiSnapsho
   view: view('parent', { executions }),
   messages,
   interactions: [],
+});
+
+test('a verified absent Files read stays done and neutral across running, settlement, thought aggregation and restored projection', () => {
+  const path = 'missing 雪.txt';
+  const read = execution('missing', {
+    definitionId: 'files.read',
+    definitionVersion: '5',
+    toolCallId: 'read-call',
+    toolInput: { path, offset: 2, limit: 10 },
+    result: {
+      outcome: 'succeeded',
+      content: `File does not exist: ${JSON.stringify(path)}.`,
+      details: { path, exists: false },
+    },
+  });
+  const current = snapshot([read]);
+  current.view.runs[0]!.configuration = {
+    tools: [{ id: 'files.read', version: '5', extensionId: 'builtin.files' }],
+  };
+  const before = structuredClone(read);
+  const card = projectInkTool(read, current);
+  expect(card.fileMissing).toBe(true);
+  expect(card.status).toBe('done');
+  expect(card.detail).toBe(path);
+  expect(
+    projectInkTool({ ...read, status: 'running', result: null }, current).fileMissing,
+  ).toBeUndefined();
+  const view = render(
+    <TuiPresentationProvider
+      value={{ preferences: { ...defaultTuiPreferences, resolvedLanguage: 'zh-CN' } }}
+    >
+      <InkExecution execution={read} snapshot={current} expanded />
+    </TuiPresentationProvider>,
+  );
+  try {
+    expect(view.lastFrame()).toContain('文件不存在');
+    expect(view.lastFrame()).toContain(path);
+    expect(view.lastFrame()).not.toMatch(/File does not exist|lines 2-11|0 lines|ENOENT/);
+  } finally {
+    view.unmount();
+  }
+  const call = message('call', '1', {
+    content: '',
+    toolCalls: [{ id: 'read-call', name: 'files.read', arguments: JSON.stringify(read.toolInput) }],
+  });
+  const thought = projectInkThought(call, current);
+  expect(thought.tools[0]?.fileMissing).toBe(true);
+  expect(thought.summaryLine).not.toContain('read 1 file');
+  const thoughtView = render(
+    <TuiPresentationProvider
+      value={{ preferences: { ...defaultTuiPreferences, resolvedLanguage: 'zh-CN' } }}
+    >
+      <ToolSummaryBlock
+        block={{ ...thought, active: true, latestActivity: { kind: 'tool', callId: 'read-call' } }}
+        columns={80}
+      />
+    </TuiPresentationProvider>,
+  );
+  try {
+    expect(thoughtView.lastFrame()).toContain('文件不存在');
+    expect(thoughtView.lastFrame()).not.toContain('lines 2-11');
+  } finally {
+    thoughtView.unmount();
+  }
+  expect(projectInkTool(read, structuredClone(current))).toEqual(card);
+  for (const status of ['failed', 'cancelled', 'outcome_unknown'] as const)
+    expect(
+      projectInkTool(
+        { ...read, status, result: { ...(read.result as object), outcome: status } },
+        current,
+      ).fileMissing,
+    ).toBeUndefined();
+  const foreign = structuredClone(current);
+  foreign.view.runs[0]!.configuration = {
+    tools: [{ id: 'files.read', version: '5', extensionId: 'fixture' }],
+  };
+  expect(projectInkTool(read, foreign).fileMissing).toBeUndefined();
+  for (const details of [
+    { path: 'other', exists: false },
+    { path, exists: false, baseline: {} },
+    { path, code: 'ENOENT' },
+  ] as Record<string, string | boolean | Record<string, never>>[])
+    expect(
+      projectInkTool(
+        {
+          ...read,
+          result: {
+            outcome: 'succeeded',
+            content: `File does not exist: ${JSON.stringify(path)}.`,
+            details,
+          },
+        },
+        current,
+      ).fileMissing,
+    ).toBeUndefined();
+  expect(read).toEqual(before);
 });
 test('runless root Jobs use the same Session sequence without anchoring foreign, child or malformed scopes', () => {
   const job = execution('lifecycle', {

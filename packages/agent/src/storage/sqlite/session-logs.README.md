@@ -12,13 +12,15 @@ The snapshot stores only generic record category, bounded original IDs, actual c
 
 ## Public read contract
 
+`authorization.policy` 新事件归 `execution`，`details.policy` 仅保存原事件的目标 Execution、策略证据 ID、三种固定 reason、闭合 `source` 和可空 requested/effective 文件及网络范围。`source.kind=check` 的 ID 属于审核 Execution；`source.kind=policy` 的 ID 属于策略 Command，不能改标为 Execution。快照在原事务中捕获，回读不从当前授权投影补造；旧封存的 `other`／空 details 原样保留。私有 proof、输入、路径和任意 payload 字段不进入 DTO，坏的嵌套 metadata 继续局部 unavailable。[策略日志回归](../../../test/isolated/storage/session-log-policy.test.ts)核原 Source 身份、状态漂移、闭合集合、原 Change payload 和冷只读零写入。
+
 `Store.getSessionLogs({expectedStoreId,sessionId,subjectId,afterCursor,upperCursor?,limit?})` is an observer. The host supplies actual subject identity; the public query must not choose it. It reuses the original root-creator Session scope proof and checks current Store identity inside one BEGIN read snapshot. Parent and child Sessions are read independently, without root aggregation.
 
 All cursors are canonical Decimal64 strings (0 through 9223372036854775807). `afterCursor` is required and exclusive. The first page without upper freezes actual global last-change cursor; following pages must supply that exact upper. Later appends advance `snapshotCursor`, never the chosen upper. `limit` defaults to 200 and must be 1–200. Results contain at most 200 entries and 512 KiB; no truncation is called complete. `nextAfterCursor` is the final returned entry cursor when more scoped entries exist, otherwise null, with `complete:true`. There is no accumulated Session history quota.
 
 `after < replayFloor` always rejects `cursor_expired`, including `after=0` when floor>0. `after > upper` and `upper > snapshotCursor` reject `cursor_ahead`. Lost prefixes are never silently skipped or marked partial-ready. Scope filtering and upper bounds precede ordering/LIMIT, including Decimal64 values beyond Number's exact range. These reads perform no business write or transaction CAS mutation.
 
-The public page is `SessionLogPage` in [`types.ts`](../types.ts): current store/session IDs, fixed upper, next-after/null, replay floor, read snapshot cursor, entries and complete. Each entry has cursor, actual Session, safe object ID/type, original event revision, occurredAt number/null, category, recordedStatus string/null, fixed summary, closed `SessionLogDetails`, modelExecutionId string/null. Details allow only kind, definitionId/version, commandId/runId/executionId/interactionId and positive attempt. Public type/definition text is bounded and control-free; private reference/hash metadata is excluded.
+The public page is `SessionLogPage` in [`types.ts`](../types.ts): current store/session IDs, fixed upper, next-after/null, replay floor, read snapshot cursor, entries and complete. Each entry has cursor, actual Session, safe object ID/type, original event revision, occurredAt number/null, category, recordedStatus string/null, fixed summary, closed `SessionLogDetails`, modelExecutionId string/null. Details allow only kind, definitionId/version, commandId/runId/executionId/interactionId, positive attempt and the finite policy facts described above. Public type/definition text is bounded and control-free; private reference/hash metadata is excluded.
 
 ## Model navigation and read cancellation
 

@@ -241,14 +241,14 @@ test('successful original cleanup of the same invalid configuration has normal r
   }
 });
 
-test('child pre-return cleanup unknown stops the ordinary parent Tool and retains actual resources without child dispatch or next Model', async () => {
+test('child pre-return cleanup unknown reaches its original parent explanation and retains actual resources without child dispatch or replay', async () => {
   const f = await fixture(true, true);
   try {
     await f.rejectPreparation();
-    expect(f.model.requests).toHaveLength(1);
+    expect(f.model.requests).toHaveLength(2);
     expect(f.childModel.requests).toHaveLength(0);
     const executions = await f.store.listExecutions('s', 100);
-    expect(executions.filter((execution) => execution.kind === 'model')).toHaveLength(1);
+    expect(executions.filter((execution) => execution.kind === 'model')).toHaveLength(2);
     expect(executions.filter((execution) => execution.kind === 'job')).toHaveLength(0);
     const tools = executions.filter((execution) => execution.kind === 'tool');
     expect(tools).toHaveLength(1);
@@ -256,6 +256,20 @@ test('child pre-return cleanup unknown stops the ordinary parent Tool and retain
       status: 'outcome_unknown',
       result: { outcome: 'outcome_unknown', content: 'configuration_cleanup_unconfirmed' },
     });
+    const feedback = f.model.requests[1]!.messages.find(
+      (message) => message.toolCallId === 'delegate',
+    )!;
+    expect(feedback.sourceIds).toEqual([tools[0]!.id]);
+    expect(feedback.content).toContain('may have produced effects');
+    expect(
+      executions
+        .filter((execution) => execution.kind === 'model')
+        .every(
+          (execution) =>
+            execution.originCommandId === 'invalid-configuration' &&
+            execution.runId === tools[0]!.runId,
+        ),
+    ).toBe(true);
     expect(await f.store.listSessions()).toHaveLength(1);
     const runs = (await f.runtime.getView('s')).runs;
     expect(runs).toHaveLength(1);

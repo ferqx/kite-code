@@ -38,6 +38,7 @@ export type ToolDisplayStatus =
   | 'timeout'
   | 'exhausted';
 export interface ConsolidatedToolEntry {
+  fileMissing?: true;
   callId: string;
   name: string;
   args: Record<string, unknown>;
@@ -52,6 +53,7 @@ export interface ConsolidatedToolEntry {
 }
 export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool'; callId: string };
 export interface SubAgentStepRecord {
+  fileMissing?: true;
   fileNotice?: string;
   stepId: string;
   toolCallId: string;
@@ -66,6 +68,7 @@ export type OutputBlock =
   | {
       id: number;
       kind: 'tool_card';
+      fileMissing?: true;
       /** Qualified original file-mutation receipt; never inferred from text or arguments alone. */
       fileAction?: 'Create' | 'Write';
       fileNotice?: string;

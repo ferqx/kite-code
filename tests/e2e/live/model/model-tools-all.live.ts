@@ -68,7 +68,6 @@ const expected = [
   'write_file',
   'edit_file',
   'shell_execute',
-  'shell_launch',
   'shell_read',
   'shell_wait',
   'shell_stop',
@@ -778,7 +777,7 @@ try {
   });
   await runCase(
     'files-shell',
-    `Use the actual tools for this synthetic test. With shell_execute run ls, rg --files docs, and rg -n -F -- '[a-z]+' docs; use permissions {filesystem:"workspace_write",network:"none"}. Read source.txt via read_file, edit message=before to message=after using its exact complete-file baseline, and create result.txt containing exactly verified followed by a newline using write_file. Also use read_file to read the absolute external file ${JSON.stringify(join(root, 'external.txt'))}. Then shell_launch one command: echo BACKGROUND_STARTED; sleep 120 with the same workspace/no-network permissions. Using its returned shell_id, call shell_read, shell_wait with wait_timeout_ms:0, shell_stop with command_id:"stop-background-once" (a new cancellation intent ID, not ref.commandId), then shell_wait until its actual cancellation is terminal. Use all five Shell tools and all three file tools. Only shell_id and existing resource IDs must come from prior results; the cancellation command_id is the new literal specified above. Do not relaunch an existing command. Finally report observed search and file results, the external token, and confirmed background stop. Be concise.`,
+    `Use the actual tools for this synthetic test. With shell_execute run ls, rg --files docs, and rg -n -F -- '[a-z]+' docs; use filesystem:"workspace_write",network:"none". Read source.txt via read_file, edit message=before to message=after using its exact complete-file baseline, and create result.txt containing exactly verified followed by a newline using write_file. Also use read_file to read the absolute external file ${JSON.stringify(join(root, 'external.txt'))}. Then shell_execute with background:true one command: echo BACKGROUND_STARTED; sleep 120 with the same workspace/no-network permissions. Using its returned shell_id, call shell_read, shell_wait with wait_timeout_ms:0, shell_stop with command_id:"stop-background-once" (a new cancellation intent ID, not ref.commandId), then shell_wait until its actual cancellation is terminal. Use all four Shell tools and all three file tools. Only shell_id and existing resource IDs must come from prior results; the cancellation command_id is the new literal specified above. Do not relaunch an existing command. Finally report observed search and file results, the external token, and confirmed background stop. Be concise.`,
   );
   await runCase(
     'question',
@@ -831,7 +830,6 @@ try {
       'write_file',
       'edit_file',
       'shell_execute',
-      'shell_launch',
       'shell_read',
       'shell_wait',
       'shell_stop',

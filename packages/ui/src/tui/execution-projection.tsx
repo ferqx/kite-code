@@ -305,6 +305,27 @@ export function inkResultSummary(result: unknown): string {
   if (typeof result === 'string') return result;
   return result === null ? '' : (JSON.stringify(result, null, 2) ?? '');
 }
+/** An absent ordinary file is a recorded read result, never a prose error guess. */
+function inkMissingFileRead(execution: Execution, snapshot: TuiSnapshot): boolean {
+  const result = record(execution.result),
+    details = record(result?.details);
+  const input = record(execution.toolInput);
+  return (
+    execution.kind === 'tool' &&
+    execution.status === 'succeeded' &&
+    ['4', '5'].includes(execution.definitionVersion) &&
+    frozenBuiltin(execution, snapshot, 'builtin.files', 'files.read') &&
+    result?.outcome === 'succeeded' &&
+    typeof input?.path === 'string' &&
+    details?.path === input.path &&
+    details.exists === false &&
+    Object.keys(details).every((key) =>
+      ['path', 'exists', 'fileScope', 'workspaceCheckpoint'].includes(key),
+    ) &&
+    Object.keys(result).every((key) => ['outcome', 'content', 'details'].includes(key)) &&
+    result.content === `File does not exist: ${JSON.stringify(input.path)}.`
+  );
+}
 function actualCarrierParent(job: Execution, tool: Execution, snapshot: TuiSnapshot): boolean {
   return (
     job.originStoreId === tool.originStoreId &&
@@ -637,6 +658,7 @@ export function projectInkTool(
           .map(terminalText)
       : undefined;
   const fileChange = inkFileChangePresentation(execution, snapshot, args);
+  const fileMissing = inkMissingFileRead(execution, snapshot);
   return {
     id: 0,
     kind: 'tool_card',
@@ -644,6 +666,7 @@ export function projectInkTool(
     name,
     args,
     status: inkExecutionStatus(execution),
+    ...(fileMissing ? { fileMissing: true as const } : {}),
     ...(resourceReferences ? { resourceReferences } : {}),
     ...(fileChange
       ? { fileNotice: fileChange.notice, filePreviewTruncated: fileChange.truncated }
@@ -658,7 +681,9 @@ export function projectInkTool(
       terminalText(
         tail && ['succeeded', 'failed', 'cancelled'].includes(execution.status)
           ? tail.content
-          : summary,
+          : fileMissing
+            ? '文件不存在'
+            : summary,
       ),
     ...(tail
       ? {
@@ -667,7 +692,11 @@ export function projectInkTool(
         }
       : {}),
     preview: proxy ? discoveredName : getToolPreview(name, args),
-    detail: proxy ? discoveredName : getToolDetail(name, args),
+    detail: fileMissing
+      ? terminalText(String(args.path ?? ''))
+      : proxy
+        ? discoveredName
+        : getToolDetail(name, args),
     expanded,
     ...(confirmed
       ? {
@@ -770,7 +799,10 @@ export function projectInkChild(
               : item.status === 'cancelled'
                 ? ('cancelled' as const)
                 : ('pending' as const),
-        summary: inkResultSummary(item.result),
+        summary: inkMissingFileRead(item, childSnapshot)
+          ? '文件不存在'
+          : inkResultSummary(item.result),
+        ...(inkMissingFileRead(item, childSnapshot) ? { fileMissing: true as const } : {}),
         fileNotice: inkFileChangeSummary(
           item,
           childSnapshot,
@@ -933,6 +965,7 @@ export function projectInkThought(
       args: displayArguments(parsed(call.arguments) ?? {}),
       ok: source?.status === 'succeeded',
       summary: source ? inkResultSummary(source.result) : '',
+      ...(source && inkMissingFileRead(source, snapshot) ? { fileMissing: true as const } : {}),
       status: source ? inkExecutionStatus(source) : ('queued' as const),
     };
   });
@@ -1100,6 +1133,7 @@ export function projectInkExecutionGroups(
             status: card.status,
             ok: source.status === 'succeeded',
             summary: card.summary,
+            ...(card.fileMissing ? { fileMissing: true as const } : {}),
           };
         });
         const phase = projectInkThought(message, snapshot, loadedOutputs);

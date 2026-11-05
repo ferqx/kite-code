@@ -127,7 +127,9 @@ test('postwire output schema validation yields and preserves the actual invalid 
     expect(timer).toBe(true);
     await heartbeat;
     expect(result.outcome).toBe('outcome_unknown');
-    expect(result.content).toBe('mcp_output_invalid');
+    expect(result.details).toMatchObject({ code: 'mcp_output_invalid' });
+    expect(result.content).toContain('did not match the declared output schema');
+    expect(result.content).toContain('Do not repeat the operation');
     expect(result.details).toMatchObject({
       actualResult: { structuredContent: { text: `${'a'.repeat(26)}!` } },
     });
@@ -145,7 +147,8 @@ test('postwire cancellation during output validation stays unknown with one orig
     const result = await f.tool.execute({ text: 'legal' }, context(abort.signal));
     clearTimeout(timer);
     expect(result.outcome).toBe('outcome_unknown');
-    expect(result.content).toBe('mcp_call_unconfirmed');
+    expect(result.details).toMatchObject({ code: 'mcp_call_unconfirmed' });
+    expect(result.content).toContain('may still be running or have effects');
     expect(f.calls()).toBe(1);
   } finally {
     await f.close();

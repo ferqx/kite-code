@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 import type { PlanningState } from '../business/planning';
 import type { AuthorizationRequest, Json, PermissionDecision, Permissions } from '../extensions';
 import { AgentError } from '../storage/types';
-import { type CapabilityDescription, createPermissionPolicy } from './index';
+import { autoCheckOptions } from './auto-check';
+import {
+  type CapabilityDescription,
+  createPermissionPolicy,
+  type PermissionPolicySnapshot,
+} from './index';
 
 const object = (value: Json | undefined): value is Record<string, Json> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -92,6 +97,7 @@ function intersect(
     ...(checks.length
       ? {
           check: {
+            ...autoCheckOptions(checks.map((decision) => decision.check!)),
             request: {
               kind: 'planning_mode_ceiling',
               policies: decisions.map((decision, index) => ({
@@ -120,6 +126,7 @@ export function createPlanningPermissionPolicy(options: {
   current: Permissions;
   describe: (
     request: AuthorizationRequest,
+    policy?: Readonly<PermissionPolicySnapshot>,
   ) => CapabilityDescription | null | Promise<CapabilityDescription | null>;
   /** Trusted exact file-to-Planning adapter. This only relaxes the plan ceiling, never Tool permission. */
   isPlanFileEdit?: (request: AuthorizationRequest) => Promise<boolean>;

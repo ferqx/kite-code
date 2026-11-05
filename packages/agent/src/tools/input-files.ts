@@ -157,7 +157,7 @@ export function withInputFileReads(options: {
                     type: 'string',
                     maxLength: 4096,
                     description:
-                      'Workspace path, or exact saved attachment path provided in this conversation. Other private paths are denied.',
+                      'Workspace-relative or ordinary external absolute file path, or an exact saved attachment path provided in this conversation. Other private paths are denied.',
                   },
                 },
               },
@@ -290,7 +290,7 @@ export function withInputFileReads(options: {
                       throw new AgentError('input_file_read_only');
                     },
                   });
-                  return await createFileTools(adapter)
+                  return await createFileTools(adapter, { missingRead: 'error' })
                     .find((definition) => definition.id === 'files.read')!
                     .execute(input, context);
                 } catch (error) {

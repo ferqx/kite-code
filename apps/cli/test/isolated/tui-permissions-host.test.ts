@@ -11,6 +11,10 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  parseShellModelFeedback,
+  shellModelFeedbackMatchesResult,
+} from '../../../../tests/fixtures/unified-agent/shell-model-feedback';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
@@ -34,15 +38,21 @@ test('built Service and actual PTY permission controls preserve exact grants and
     reviewCalls = 0;
   let passed = false;
   let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let observer: Database | undefined;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
-      const body = (await request.json()) as { messages: { role: string; content: string }[] };
+      const body = (await request.json()) as {
+        messages: { role: string; content: string; tool_call_id?: string }[];
+      };
+      let riskReview = false;
       const review = body.messages.some((message) => {
         if (message.role !== 'user') return false;
         try {
-          return JSON.parse(message.content).purpose === 'authorization_check';
+          const purpose = JSON.parse(message.content).purpose;
+          riskReview = purpose === 'shell_risk';
+          return riskReview || purpose === 'authorization_check';
         } catch {
           return false;
         }
@@ -51,7 +61,7 @@ test('built Service and actual PTY permission controls preserve exact grants and
         reviewCalls++;
         const delta = {
           content: JSON.stringify({
-            decision: 'ask_user',
+            ...(riskReview ? { risk: 'high' } : { decision: 'ask_user' }),
             reason: 'Confirm the exact original same-command authorization',
           }),
         };
@@ -76,16 +86,47 @@ test('built Service and actual PTY permission controls preserve exact grants and
             m.role === 'user' && /^(?:New task: )?owned-[1234]$/.test(m.content) ? i : last,
           -1,
         ),
-        key = body.messages[last]!.content.replace(/^New task: /, ''),
+        taskLabel = body.messages[last]!.content.replace(/^New task: /, ''),
         results = body.messages.slice(last + 1).filter((m) => m.role === 'tool');
+      const started = results.length ? parseShellModelFeedback(results[0]!.content) : undefined;
+      if (started && started.status !== 'accepted')
+        throw Error('permission_fixture_shell_not_accepted');
+      const observed =
+        results.length > 1 ? parseShellModelFeedback(results.at(-1)!.content) : undefined;
+      if (
+        observed &&
+        (observed.shellId !== started!.shellId ||
+          !['planned', 'dispatching', 'running', 'succeeded'].includes(observed.status))
+      )
+        throw Error('permission_fixture_original_shell_failed');
+      if (results.length) {
+        // Retain the same read-only WAL observer until the writer has closed.
+        observer ??= new Database(profile.databasePath, { readonly: true });
+        const db = observer;
+        for (const receipt of results) {
+          const originals = db
+            .query(
+              "SELECT result_json FROM execution WHERE session_id='a' AND kind='tool' AND call_id=?",
+            )
+            .all(receipt.tool_call_id ?? '') as { result_json: string }[];
+          if (
+            originals.length !== 1 ||
+            !shellModelFeedbackMatchesResult(
+              parseShellModelFeedback(receipt.content),
+              JSON.parse(originals[0]!.result_json),
+            )
+          )
+            throw Error('permission_fixture_original_receipt_mismatch');
+        }
+      }
       const call =
         results.length === 0
           ? {
-              name: 'shell_launch',
-              input: { key, command: "printf 'owned\\n' >> effects", cancellation: 'attached' },
+              name: 'shell_execute',
+              input: { command: "printf 'owned\\n' >> effects", background: true },
             }
-          : results.length === 1
-            ? { name: 'shell_wait', input: { shell_id: key, wait_timeout_ms: 4000 } }
+          : observed?.status !== 'succeeded'
+            ? { name: 'shell_wait', input: { shell_id: started!.shellId, wait_timeout_ms: 4000 } }
             : undefined;
       const delta = call
         ? {
@@ -98,7 +139,7 @@ test('built Service and actual PTY permission controls preserve exact grants and
               },
             ],
           }
-        : { content: `DONE ${key}` };
+        : { content: `DONE ${taskLabel}` };
       const frame = (d: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta: d, finish_reason: reason }] })}\n\n`;
       return new Response(
@@ -112,7 +153,7 @@ test('built Service and actual PTY permission controls preserve exact grants and
       userConfiguration.path,
       JSON.stringify({
         modelId: 'fixed',
-        tools: ['shell.launch', 'shell.wait'].map((id) => ({ id, definitionVersion: '1' })),
+        tools: ['shell.execute', 'shell.wait'].map((id) => ({ id, definitionVersion: '1' })),
         models: [
           {
             id: 'fixed',
@@ -275,12 +316,12 @@ test('built Service and actual PTY permission controls preserve exact grants and
 
     expect(readFileSync(join(workspace, 'effects'), 'utf8')).toBe('owned\nowned\nowned\n');
     expect(calls).toBe(10);
-    expect(reviewCalls).toBe(4);
+    expect(reviewCalls).toBe(3);
     const db = new Database(profile.databasePath, { readonly: true });
     try {
       expect(
         db.query('SELECT count(*) AS n FROM interaction WHERE answer_json IS NOT NULL').get(),
-      ).toEqual({ n: 2 });
+      ).toEqual({ n: 1 });
       expect(
         db
           .query(
@@ -321,6 +362,7 @@ test('built Service and actual PTY permission controls preserve exact grants and
       JSON.stringify({ evidence, calls, reviewCalls, retainedRoot: passed ? null : root }),
     );
     provider.stop(true);
+    observer?.close();
     if (passed) rmSync(root, { recursive: true, force: true });
   }
 }, 40000);

@@ -82,6 +82,7 @@ async function fixture(
     modelOutput?: boolean;
     partialOutput?: boolean;
     restoredOutput?: boolean;
+    missingRead?: boolean;
   } = {},
 ) {
   const dom = new JSDOM(
@@ -169,6 +170,11 @@ async function fixture(
       if (state.readIdentityFailure) throw new ClientError('browser_identity_mismatch');
       if (state.fail) throw new ClientError('browser_read_unavailable');
       const result = view(id, state.active);
+      if (options.missingRead) {
+        result.executions[0]!.definitionId = 'files.read';
+        result.executions[0]!.definitionVersion = '5';
+        result.executions[0]!.status = 'succeeded';
+      }
       if (options.modelOutput && !state.omitModel)
         result.executions.push({
           id: 'model',
@@ -217,7 +223,15 @@ async function fixture(
                   }
                 : {}),
               ...(state.tool
-                ? { role: 'tool' as const, content: '# Tool output\n\nFull detail' }
+                ? {
+                    role: 'tool' as const,
+                    content: options.missingRead
+                      ? 'File does not exist: "missing.txt".'
+                      : '# Tool output\n\nFull detail',
+                    ...(options.missingRead
+                      ? { toolCallId: 'original-read', sourceIds: [`execution-${id}`] }
+                      : {}),
+                  }
                 : {}),
             },
             ...(state.extra ? [body(id, 202)] : []),
@@ -443,6 +457,31 @@ test('identity refusal renders a blocking read-only error with zero directory/hi
     expect(active.dom.window.document.getElementById('root')?.textContent).toBe('');
   } finally {
     await active.close();
+  }
+});
+
+test('Web keeps an absent read as its neutral original recorded result across open and Session reopen', async () => {
+  const f = await fixture({ missingRead: true });
+  try {
+    f.state.tool = true;
+    await f.click(f.button('Workspace'));
+    await settle(() => !!f.dom.window.document.querySelector('a[href="/sessions/a"]'));
+    for (const session of ['a', 'b', 'a']) {
+      await f.choose(session);
+      await settle(
+        () => !!f.dom.window.document.querySelector(`[data-message-id="${session}-201"] details`),
+      );
+      const article = f.dom.window.document.querySelector(`[data-message-id="${session}-201"]`)!;
+      const details = article.querySelector('details')!;
+      details.open = true;
+      await act(async () => details.dispatchEvent(new f.dom.window.Event('toggle')));
+      expect(article.querySelector('summary')!.textContent).toContain('Tool · complete');
+      expect(article.textContent).toContain('File does not exist: "missing.txt".');
+      expect(article.textContent).not.toMatch(/failed|outcome_unknown|0 lines|读取.*0.*行|ENOENT/);
+      expect(article.querySelector('.error, .failed, [data-status="error"]')).toBeNull();
+    }
+  } finally {
+    await f.close();
   }
 });
 

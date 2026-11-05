@@ -24,7 +24,11 @@ import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
 import { captureModelRequestMetadata, modelMetadataJson } from '../model-snapshot';
 import { createModelToolSurface, modelToolMessages } from '../model-tools';
 import type { AuthorizationCheckBinding } from '../runtime';
-import type { ReadAuthorizationCheckInput, Store } from '../storage/port';
+import type {
+  AutoAuthorizationEvidence,
+  ReadAuthorizationCheckInput,
+  Store,
+} from '../storage/port';
 import {
   AgentError,
   type CommandRecord,
@@ -49,8 +53,8 @@ import { hostRevocationAuthorization } from './host-control';
 import {
   type AcceptedAuthorization,
   AuthorizationCheckRejectedError,
-  AuthorizationDeniedError,
   InteractionGate,
+  isPublicAuthorizationDeniedError,
 } from './interactions';
 import { createProgressWriter } from './progress';
 import type { ExecutionResources } from './resources';
@@ -68,6 +72,17 @@ export interface ModelResponse {
 export interface ToolExecutionResult {
   result: ToolResult;
   dispatched?: boolean;
+}
+/** Policy reasons are public; arbitrary adapter error messages are not. */
+function authorizationDeniedContent(
+  kind: 'tool' | 'job' | 'action',
+  reason: string,
+  fileToolScopeUnavailable = false,
+) {
+  const fact = `Permission denied; this ${kind} was not executed. Reason: ${reason}`;
+  if (fileToolScopeUnavailable)
+    return `${fact}\nThis Files entry supports external writes only under effective Full access. This is a limitation of this tool entry, not a user rejection of the business task and not approval for another tool. Do not repeat this unsupported invocation. Only if the original task still authorizes the effect, no prior refusal or unknown outcome prohibits it, and another permitted tool supports the target, may a separate request use that tool under its existing approval rules. Preserve the original delivery target and once-only limits; protected resources and inherited restrictions still apply.`;
+  return `${fact}\nContinue only work allowed by the current task and policy. Do not repeat the rejected invocation or expand permissions to bypass the restriction.`;
 }
 /** Detach adapter-owned values before validation or persistence can inspect them. */
 function toolResultSnapshot(value: unknown): ToolResult {
@@ -215,7 +230,7 @@ export interface ExecutionOptions {
     request: AuthorizationRequest,
     source: Json,
     decision: import('../extensions').PermissionDecision,
-  ) => Promise<ReadAuthorizationCheckInput | null>;
+  ) => Promise<ReadAuthorizationCheckInput | AutoAuthorizationEvidence | null>;
   openModelInput?: (scope: ExecutionScope, input: Json) => Promise<ModelRequest>;
   sealModelInput?: (scope: ExecutionScope, request: ModelRequest) => Promise<Json>;
   publishModelOutput?: (
@@ -352,7 +367,7 @@ export class UnifiedExecution {
                     source,
                     decision,
                   );
-                  if (reference && !signal.aborted)
+                  if (reference && !('policyEvidenceId' in reference) && !signal.aborted)
                     this.authorizationChecks.set(request.executionId, reference);
                   return reference;
                 },
@@ -947,9 +962,11 @@ export class UnifiedExecution {
         ...(controlReads === undefined ? {} : { controlReads }),
         allowed: true,
         revision: decision.revision,
+        ...(decision.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
         definitionVersion,
         inputDigest: await semanticDigest(input),
         ...(decision.checkExecutionId ? { checkExecutionId: decision.checkExecutionId } : {}),
+        ...(decision.policyEvidenceId ? { policyEvidenceId: decision.policyEvidenceId } : {}),
         ...(decision.interactionId
           ? { interactionId: decision.interactionId, decisionRevision: decision.decisionRevision }
           : {}),
@@ -972,6 +989,7 @@ export class UnifiedExecution {
     }
     return {
       revision: decision.revision,
+      ...(decision.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
       ...(decision.snapshot === undefined ? {} : { snapshot: structuredClone(decision.snapshot) }),
     };
   }
@@ -1626,18 +1644,39 @@ export class UnifiedExecution {
         content:
           !attempted && !dispatched && error instanceof AuthorizationCheckUnavailableError
             ? error.message
-            : !attempted && !dispatched && error instanceof AuthorizationCheckRejectedError
+            : !attempted &&
+                !dispatched &&
+                isPublicAuthorizationDeniedError(error) &&
+                error instanceof AuthorizationCheckRejectedError
               ? `Automatic approval did not authorize this tool; it was not executed. Reason: ${error.reason}\nContinue only the originally authorized work. Do not bypass this refusal through another tool or path.`
               : !attempted &&
                   !dispatched &&
-                  error instanceof AuthorizationDeniedError &&
+                  isPublicAuthorizationDeniedError(error) &&
                   error.reason === 'plan_approval_required'
-                ? 'Plan mode is read-only. This Tool was not dispatched. No file was written by this call.'
-                : error instanceof ToolDispatchCancelledError
-                  ? error.code
-                  : error instanceof AgentError
+                ? `Plan mode is read-only. This Tool was not dispatched. No file was written by this call. Reason: ${error.reason}`
+                : !attempted && !dispatched && isPublicAuthorizationDeniedError(error)
+                  ? authorizationDeniedContent(
+                      'tool',
+                      error.reason,
+                      error.code === 'permission_denied' &&
+                        error.reason === 'file_full_access_required' &&
+                        ((definition.id === 'files.write' && definition.version === '3') ||
+                          (definition.id === 'files.edit' && definition.version === '2')) &&
+                        scope.bindings?.extensions.some(
+                          (extension) =>
+                            extension.id === 'builtin.files' &&
+                            extension.version === '1' &&
+                            extension.tools?.some(
+                              (tool) =>
+                                tool.id === definition.id && tool.version === definition.version,
+                            ),
+                        ) === true,
+                    )
+                  : error instanceof ToolDispatchCancelledError
                     ? error.code
-                    : 'tool_failed',
+                    : error instanceof AgentError
+                      ? error.code
+                      : 'tool_failed',
         details: {
           code:
             error instanceof AgentError || error instanceof ToolDispatchCancelledError
@@ -1648,7 +1687,9 @@ export class UnifiedExecution {
           ...(error instanceof AuthorizationCheckUnavailableError
             ? { authorizationCheck: error.check }
             : {}),
-          ...(error instanceof AuthorizationDeniedError ? { reason: error.reason } : {}),
+          ...(!attempted && !dispatched && isPublicAuthorizationDeniedError(error)
+            ? { reason: error.reason }
+            : {}),
         },
       };
     }
@@ -2023,15 +2064,20 @@ export class UnifiedExecution {
           content:
             !attempted && error instanceof AuthorizationCheckUnavailableError
               ? error.message
-              : error instanceof AgentError
-                ? error.code
-                : error instanceof JobStartError
-                  ? error.message
-                  : 'job_failed',
+              : !attempted && !input.resumedChild && isPublicAuthorizationDeniedError(error)
+                ? authorizationDeniedContent('job', error.reason)
+                : error instanceof AgentError
+                  ? error.code
+                  : error instanceof JobStartError
+                    ? error.message
+                    : 'job_failed',
           details: {
             adapterAttempted: attempted,
             ...(error instanceof AuthorizationCheckUnavailableError
               ? { code: error.code, authorizationCheck: error.check }
+              : {}),
+            ...(!attempted && !input.resumedChild && isPublicAuthorizationDeniedError(error)
+              ? { code: error.code, reason: error.reason }
               : {}),
             stopConfirmation: confirmation
               ? (JSON.parse(JSON.stringify(confirmation)) as Json)
@@ -2246,14 +2292,19 @@ export class UnifiedExecution {
         content:
           !attempted && error instanceof AuthorizationCheckUnavailableError
             ? error.message
-            : error instanceof AgentError
-              ? error.code
-              : 'action_failed',
+            : !attempted && isPublicAuthorizationDeniedError(error)
+              ? authorizationDeniedContent('action', error.reason)
+              : error instanceof AgentError
+                ? error.code
+                : 'action_failed',
         details: {
           code: error instanceof AgentError ? error.code : 'action_failed',
           adapterAttempted: attempted,
           ...(error instanceof AuthorizationCheckUnavailableError
             ? { authorizationCheck: error.check }
+            : {}),
+          ...(!attempted && isPublicAuthorizationDeniedError(error)
+            ? { reason: error.reason }
             : {}),
         },
       };

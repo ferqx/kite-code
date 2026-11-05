@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { PermissionDecision, Permissions } from '../extensions';
+import { autoCheckOptions } from './auto-check';
 
 /** Current root policy AND a trusted capability ceiling; neither can widen the other. */
 export function intersectPermissionPolicies(
@@ -61,6 +62,7 @@ export function intersectPermissionPolicies(
         ...(checks.length
           ? {
               check: {
+                ...autoCheckOptions(checks.map((decision) => decision.check!)),
                 request: {
                   policies: decisions.map((decision) => decision.check?.request ?? null),
                 },

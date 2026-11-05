@@ -29,6 +29,8 @@ export type NativeToolMessageFact = Pick<
   executionId: string;
   /** Core-confirmed pre-dispatch freshness rejection; the original Execution remains failed. */
   decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
+  /** Exact successful builtin Files read receipt: the requested file is absent. */
+  fileMissing?: true;
   /** Display only: verified original request fields, or its known version's directory default. */
   target?: string;
   /** Original request presentation is still being verified; never publish a partial tool row. */

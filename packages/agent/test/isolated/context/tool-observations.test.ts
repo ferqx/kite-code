@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { ModelMessage } from '@kite-ai/ai';
-import type { ExecutionRecord } from '../../../src/storage/types';
+import { shellOperationKey } from '../../../src/shell-input';
+import type { ExecutionRecord, Json } from '../../../src/storage/types';
 import {
   childToolEvidence,
   type ToolObservation,
@@ -182,4 +183,400 @@ test('tool summary overflow is disclosed without claiming absent calls or changi
   expect(evidence!.observations).toEqual([]);
   expect(evidence!.tools.every((tool) => tool.outcomes.failed === 1)).toBe(true);
   expect(evidence!.limitation).toContain('bounded preview');
+});
+
+function shellRecords(status: ExecutionRecord['status'] = 'failed') {
+  const command = 'curl -sS http://127.0.0.1:53666/service';
+  const permissions = { filesystem: 'workspace_write', network: 'internet' };
+  const tool = record('shell-tool', lookup(), {
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    status,
+    rootWorkCommandId: 'work',
+    rootWorkSeq: '2',
+    input: { command, key: 'one-get', permissions },
+    result: {
+      outcome: status,
+      content: 'public original',
+      details: {
+        ref: {
+          executionId: 'shell-job',
+          commandId: 'job-origin',
+          sessionId: identity.sessionId,
+          originStoreId: identity.storeId,
+          extensionId: 'builtin.shell',
+          key: 'one-get',
+        },
+        stdout: '',
+        stdoutBytes: '0',
+        stderr: "curl: (7) Failed to connect: Couldn't connect to server\n",
+        stderrBytes: String(
+          Buffer.byteLength("curl: (7) Failed to connect: Couldn't connect to server\n"),
+        ),
+        droppedBytes: '0',
+        truncated: false,
+      },
+    },
+  });
+  const job = {
+    ...tool,
+    id: 'shell-job',
+    kind: 'job',
+    runId: null,
+    definitionId: 'shell.command',
+    parentExecutionId: tool.id,
+    originCommandId: 'job-origin',
+    input: { command, permissions },
+    result: {
+      outcome: status,
+      content: 'Shell failed',
+      details: { exitCode: 7, privateGuardian: 'never expose' },
+    },
+    reference: { privateNonce: 'never expose' },
+    authorization: {
+      dispatched: true,
+      policy: { evidenceId: 'evidence', reason: 'parent_review', effectiveScope: permissions },
+    },
+  } as unknown as ExecutionRecord;
+  return { tool, job };
+}
+
+test('Shell preview preserves original failure, requested Internet and saved actual scope without inferring its cause', async () => {
+  const { tool, job } = shellRecords();
+  const evidence = await childToolEvidence(
+    pair(tool.id, tool.definitionId),
+    identity,
+    async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+    () => true,
+  );
+  expect(evidence!.shellReceipts).toHaveLength(1);
+  const receipt = evidence!.shellReceipts![0]!;
+  expect(receipt).toMatchObject({
+    executionId: tool.id,
+    callId: tool.callId,
+    tool: 'shell.execute',
+    command: { text: (tool.input as { command: string }).command, truncated: false },
+    requestedPermissions: { filesystem: 'workspace_write', network: 'internet' },
+    job: {
+      executionId: job.id,
+      status: 'failed',
+      dispatched: true,
+      exitCode: 7,
+      effectiveScope: { filesystem: 'workspace_write', network: 'internet' },
+    },
+    stderr: {
+      text: "curl: (7) Failed to connect: Couldn't connect to server\n",
+      omitted: false,
+      truncated: false,
+    },
+  });
+  expect(JSON.stringify(evidence)).not.toContain('never expose');
+  expect((job.result as { details: { privateGuardian: string } }).details.privateGuardian).toBe(
+    'never expose',
+  );
+});
+
+test('Shell preview binds flat execution scopes to the original nested Job input and preserves each default', async () => {
+  for (const [fields, permissions] of [
+    [{ filesystem: 'full_access' }, { filesystem: 'full_access', network: 'none' }],
+    [{ network: 'internet' }, { filesystem: 'workspace_write', network: 'internet' }],
+    [
+      { filesystem: 'workspace_write', network: 'none' },
+      { filesystem: 'workspace_write', network: 'none' },
+    ],
+  ] as const) {
+    const { tool, job } = shellRecords('succeeded');
+    const command = (tool.input as { command: string }).command;
+    tool.input = { key: 'one-get', command, description: 'Purpose is not authority', ...fields };
+    job.input = { command, permissions };
+    const evidence = await childToolEvidence(
+      pair(tool.id, tool.definitionId),
+      identity,
+      async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+      () => true,
+    );
+    expect(evidence!.shellReceipts).toHaveLength(1);
+    expect(evidence!.shellReceipts![0]!.requestedPermissions).toEqual(permissions);
+    // Requested scope is never substituted for the actual saved authorization.
+    expect(evidence!.shellReceipts![0]!.job.effectiveScope).toEqual({
+      filesystem: 'workspace_write',
+      network: 'internet',
+    });
+    expect(JSON.stringify(evidence!.shellReceipts)).not.toContain('Purpose is not authority');
+  }
+  const invalidFields: Record<string, Json>[] = [
+    {
+      filesystem: 'full_access',
+      permissions: { filesystem: 'workspace_write', network: 'internet' },
+    },
+    { network: 'all' },
+    { background: true, timeoutMs: 1000 },
+  ];
+  for (const fields of invalidFields) {
+    const { tool, job } = shellRecords('succeeded');
+    const command = (tool.input as { command: string }).command;
+    tool.input = { key: 'one-get', command, ...fields };
+    const evidence = await childToolEvidence(
+      pair(tool.id, tool.definitionId),
+      identity,
+      async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+      () => true,
+    );
+    expect(evidence!.shellReceipts).toEqual([]);
+  }
+});
+
+test('Shell preview verifies the persisted Tool-derived handle without inserting a model operation key', async () => {
+  const { tool, job } = shellRecords('succeeded');
+  const command = (tool.input as { command: string }).command;
+  tool.input = {
+    command,
+    background: true,
+    network: 'internet',
+    description: 'Read current status',
+  };
+  const details = (tool.result as { details: { ref: { key: string } } }).details;
+  details.ref.key = shellOperationKey(undefined, tool.id);
+  const originalInput = structuredClone(tool.input);
+  const read = () =>
+    childToolEvidence(
+      pair(tool.id, tool.definitionId),
+      identity,
+      async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+      () => true,
+    );
+  const evidence = await read();
+  expect(evidence!.shellReceipts).toHaveLength(1);
+  expect(evidence!.shellReceipts![0]!.requestedPermissions).toEqual({
+    filesystem: 'workspace_write',
+    network: 'internet',
+  });
+  expect(tool.input).toEqual(originalInput);
+  expect(tool.input).not.toHaveProperty('key');
+  details.ref.key = shellOperationKey(undefined, 'different-tool-execution');
+  expect((await read())!.shellReceipts).toEqual([]);
+});
+
+test('Shell preview rejects unregistered same-name tools, mismatched Jobs and altered scope/command ancestry', async () => {
+  const original = shellRecords();
+  const mutations: ((tool: ExecutionRecord, job: ExecutionRecord) => void)[] = [
+    (_t, j) => {
+      j.parentExecutionId = 'other-tool';
+    },
+    (_t, j) => {
+      j.sessionId = 'sibling';
+    },
+    (_t, j) => {
+      j.originStoreId = 'other-store';
+    },
+    (_t, j) => {
+      j.rootWorkCommandId = 'other-work';
+    },
+    (_t, j) => {
+      j.rootWorkSeq = '3';
+    },
+    (_t, j) => {
+      j.originCommandId = 'unrelated';
+    },
+    (_t, j) => {
+      j.kind = 'tool';
+    },
+    (_t, j) => {
+      (j.input as { command: string }).command = 'different';
+    },
+    (_t, j) => {
+      (j.input as { permissions: unknown }).permissions = {
+        filesystem: 'full_access',
+        network: 'internet',
+      };
+    },
+  ];
+  for (const mutate of mutations) {
+    const { tool, job } = structuredClone(original);
+    mutate(tool, job);
+    const evidence = await childToolEvidence(
+      pair(tool.id, tool.definitionId),
+      identity,
+      async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+      () => true,
+    );
+    expect(evidence!.shellReceipts).toEqual([]);
+  }
+  const { tool, job } = original;
+  for (const registered of [undefined, () => false]) {
+    const evidence = await childToolEvidence(
+      pair(tool.id, tool.definitionId),
+      identity,
+      async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+      registered,
+    );
+    expect(evidence!.shellReceipts ?? []).toEqual([]);
+  }
+});
+
+test('Shell success, unknown and asynchronous launch preserve uncertainty and never invent scope or missing output', async () => {
+  for (const status of ['succeeded', 'outcome_unknown'] as const) {
+    const { tool, job } = shellRecords(status);
+    delete job.authorization;
+    job.result = { outcome: status, content: 'actual outcome has no numeric exit' };
+    const evidence = await childToolEvidence(
+      pair(tool.id, tool.definitionId),
+      identity,
+      async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+      () => true,
+    );
+    expect(evidence!.shellReceipts![0]!.job).toMatchObject({
+      status,
+      exitCode: null,
+      effectiveScope: null,
+      dispatched: null,
+    });
+  }
+  const { tool, job } = shellRecords('succeeded');
+  tool.definitionId = 'shell.launch';
+  job.status = 'running';
+  delete (tool.result as { details: { stdout?: string; stderr?: string } }).details.stdout;
+  delete (tool.result as { details: { stdout?: string; stderr?: string } }).details.stderr;
+  delete (tool.result as { details: { stdoutBytes?: string } }).details.stdoutBytes;
+  const evidence = await childToolEvidence(
+    pair(tool.id, tool.definitionId),
+    identity,
+    async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+    () => true,
+  );
+  expect(evidence!.shellReceipts![0]!.job.status).toBe('running');
+  expect(evidence!.shellReceipts![0]!.stdout).toMatchObject({
+    text: '',
+    bytes: null,
+    omitted: true,
+  });
+});
+
+test('Shell output and command previews share the existing total budget and preserve Unicode and complete originals', async () => {
+  const records = new Map<string, ExecutionRecord>();
+  const history: ModelMessage[] = [];
+  for (let index = 0; index < 12; index++) {
+    const { tool, job } = shellRecords();
+    tool.id = `tool-${index}`;
+    tool.callId = `call-${tool.id}`;
+    job.id = `job-${index}`;
+    job.parentExecutionId = tool.id;
+    const details = (
+      tool.result as {
+        details: {
+          ref: { executionId: string };
+          stdout: string;
+          stdoutBytes: string;
+          stderr: string;
+        };
+      }
+    ).details;
+    details.ref.executionId = job.id;
+    details.stdout = '雪🙂'.repeat(4000);
+    details.stdoutBytes = String(Buffer.byteLength(details.stdout));
+    details.stderr = 'error'.repeat(4000);
+    if (index === 0) {
+      const command = '雪🙂'.repeat(4000);
+      (tool.input as { command: string }).command = command;
+      (job.input as { command: string }).command = command;
+    }
+    records.set(tool.id, tool);
+    records.set(job.id, job);
+    history.push(...pair(tool.id, tool.definitionId));
+  }
+  const before = structuredClone(records);
+  const evidence = await childToolEvidence(
+    history,
+    identity,
+    async (id) => records.get(id) ?? null,
+    () => true,
+  );
+  expect(evidence!.shellReceipts!.length).toBeGreaterThan(0);
+  expect(evidence!.shellReceiptsOmitted).toBeGreaterThan(0);
+  expect(Buffer.byteLength(JSON.stringify(evidence))).toBeLessThan(40 * 1024);
+  const first = evidence!.shellReceipts![0]!;
+  expect(first.command.truncated).toBe(true);
+  expect(Buffer.byteLength(first.command.text)).toBeLessThanOrEqual(8192);
+  expect(first.command.text).not.toContain('�');
+  const output = first.stdout;
+  expect(Buffer.byteLength(output.text)).toBeLessThanOrEqual(4096);
+  expect(output.text).not.toContain('�');
+  expect(output.truncated).toBe(true);
+  expect(records).toEqual(before);
+});
+
+test('Shell authorization is only saved Tool/Job check, human and policy facts, not an inference from successful dispatch', async () => {
+  const materialize = async (tool: ExecutionRecord, job: ExecutionRecord) =>
+    (await childToolEvidence(
+      pair(tool.id, tool.definitionId),
+      identity,
+      async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+      () => true,
+    ))!.shellReceipts![0]!;
+  const { tool, job } = shellRecords('succeeded');
+  tool.authorization = {
+    dispatched: true,
+    check: {
+      executionId: 'risk-check',
+      status: 'succeeded',
+      decision: 'approve_once',
+      reason: 'private risk reason must not be copied',
+      requireApproval: false,
+    },
+  };
+  const approved = await materialize(tool, job);
+  expect(approved.authorization).toEqual({
+    tool: { check: { status: 'succeeded', decision: 'approve_once', requireApproval: false } },
+    job: { policy: { reason: 'parent_review' } },
+  });
+  expect(JSON.stringify(approved.authorization)).not.toContain('private');
+  expect(JSON.stringify(approved.authorization)).not.toContain('risk-check');
+  for (const [accepted, decision] of [
+    [true, 'approve'],
+    [false, 'deny'],
+    [false, null],
+  ] as const) {
+    tool.authorization = {
+      dispatched: true,
+      human: {
+        interactionId: 'private-interaction',
+        state: decision === null ? 'pending' : 'answered',
+        revision: '1',
+        acceptedDecisionRevision: accepted ? '1' : null,
+        accepted,
+        decision,
+      },
+    };
+    delete job.authorization;
+    expect((await materialize(tool, job)).authorization).toEqual({
+      tool: { human: { accepted, decision } },
+    });
+  }
+  tool.authorization = {
+    dispatched: true,
+    check: {
+      executionId: 'timed-out',
+      status: 'cancelled',
+      decision: 'unavailable',
+      reason: 'timeout',
+      requireApproval: false,
+    },
+  };
+  job.authorization = {
+    dispatched: true,
+    policy: { evidenceId: 'private-timeout-proof', reason: 'timeout_continue' },
+  };
+  const timeout = await materialize(tool, job);
+  expect(timeout.authorization).toEqual({
+    tool: { check: { status: 'cancelled', decision: 'unavailable', requireApproval: false } },
+    job: { policy: { reason: 'timeout_continue' } },
+  });
+  expect(JSON.stringify(timeout.authorization)).not.toContain('approve_once');
+  // Full and legacy receipts have dispatch observations but no saved approval origin.
+  tool.authorization = { dispatched: true };
+  job.authorization = { dispatched: true };
+  expect(Object.hasOwn(await materialize(tool, job), 'authorization')).toBe(false);
+  delete tool.authorization;
+  delete job.authorization;
+  expect(Object.hasOwn(await materialize(tool, job), 'authorization')).toBe(false);
 });

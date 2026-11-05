@@ -167,10 +167,17 @@ export function withPlanFileTools(options: {
                       steps: selected!.current.steps,
                       fileBase: prior.baseline as unknown as Json,
                     });
-                    const after = await native.read(name, { signal: context.signal });
-                    if (after.content !== body)
-                      throw new AgentError('file_publish_outcome_unknown');
-                    return { ...after, path: selected!.current.path };
+                    try {
+                      const after = await native.read(name, { signal: context.signal });
+                      if (after.content !== body)
+                        throw new AgentError('file_publish_outcome_unknown');
+                      return { ...after, path: selected!.current.path };
+                    } catch {
+                      throw new AgentError(
+                        'file_publish_outcome_unknown',
+                        'The delegated Plan write completed, but its readback could not be confirmed. Its file or state may already have changed. Inspect the original execution and current plan before any further mutation.',
+                      );
+                    }
                   }
                   const adapter = new Proxy(native, {
                     get(_source, key) {
@@ -210,7 +217,7 @@ export function withPlanFileTools(options: {
                       throw new AgentError('plan_file_operation_unavailable');
                     },
                   });
-                  return await createFileTools(adapter)
+                  return await createFileTools(adapter, { missingRead: 'error' })
                     .find((definition) => definition.id === tool.id)!
                     .execute(input, context);
                 } catch (error) {

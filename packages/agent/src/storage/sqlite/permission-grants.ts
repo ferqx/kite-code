@@ -68,6 +68,33 @@ function change(
   );
   return epoch(db, storeId, subjectId, sessionId);
 }
+/** The caller owns the transaction that invalidates this exact approval. */
+export function revokePermissionGrant(
+  db: SqliteOperations,
+  input: {
+    interactionId: string;
+    expectedStoreId: string;
+    subjectId: string;
+    sessionId: string;
+  },
+): void {
+  if (
+    !db.row(
+      'SELECT id FROM permission_grant WHERE id=? AND origin_store_id=? AND subject_id=? AND session_id=? AND revoked_seq IS NULL',
+      input.interactionId,
+      input.expectedStoreId,
+      input.subjectId,
+      input.sessionId,
+    )
+  )
+    return;
+  const revision = change(db, input.expectedStoreId, input.subjectId, input.sessionId, 'clear');
+  db.run(
+    'UPDATE permission_grant SET revoked_seq=? WHERE id=? AND revoked_seq IS NULL',
+    revision,
+    input.interactionId,
+  );
+}
 function projection(row: Row): PermissionGrant {
   return {
     ...(row.command_digest === null ? {} : { commandDigest: String(row.command_digest) }),

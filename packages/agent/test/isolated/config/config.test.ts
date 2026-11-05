@@ -23,6 +23,7 @@ import {
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { maximumAuthorizationCheckTimeoutMs } from '../../../src/execution/authorization-timing';
 
 const create = () => {
   const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'kite-config-')));
@@ -696,4 +697,35 @@ test('model protocol is explicit snapshot identity with backward-compatible omis
         }),
       ),
     ).toThrow('model_protocol_unsupported');
+});
+
+test('Auto review timeout is an optional positive frozen configuration value', () => {
+  const baseline = createConfigurationSnapshot({ tools: [] });
+  const effective = resolveConfiguration({
+    defaults: { tools: [], autoApproval: { timeoutMs: 3000 } },
+    user: { autoApproval: { timeoutMs: 1500 } },
+  });
+  const snapshot = createConfigurationSnapshot(effective);
+  expect(snapshot.configuration.autoApproval).toEqual({ timeoutMs: 1500 });
+  expect(Object.isFrozen(snapshot.configuration.autoApproval)).toBe(true);
+  effective.autoApproval!.timeoutMs = 5000;
+  expect(snapshot.configuration.autoApproval?.timeoutMs).toBe(1500);
+  expect(createConfigurationSnapshot({ tools: [], autoApproval: {} }).digest).toBe(baseline.digest);
+  expect(
+    createConfigurationSnapshot({
+      autoApproval: { timeoutMs: maximumAuthorizationCheckTimeoutMs },
+    }).configuration.autoApproval?.timeoutMs,
+  ).toBe(maximumAuthorizationCheckTimeoutMs);
+  for (const timeoutMs of [
+    0,
+    -1,
+    0.5,
+    '3000',
+    null,
+    maximumAuthorizationCheckTimeoutMs + 1,
+    Number.MAX_SAFE_INTEGER,
+  ])
+    expect(() => createConfigurationSnapshot({ autoApproval: { timeoutMs } } as never)).toThrow(
+      'invalid_authorization_check_timeout',
+    );
 });

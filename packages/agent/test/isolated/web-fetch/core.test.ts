@@ -342,6 +342,64 @@ test('robots full rules, true redirect loop, per-hop denial and malformed input 
     await f.close();
   }
 }, 20000);
+test('HTTP errors preserve the exact status in the next Model without response bodies or headers', async () => {
+  const secret = 'HTTP_PRIVATE_RESPONSE_MARKER';
+  const f = await setup((request, response) => {
+    if (request.url === '/robots.txt') {
+      response.end('User-agent: *');
+      return;
+    }
+    response.writeHead(Number(request.url!.slice(1)), { 'x-private-fixture': secret }).end(secret);
+  });
+  try {
+    for (const status of [401, 404, 429, 503]) {
+      const result = await f.run({ url: `${f.url}/${status}` });
+      expect(result.execution?.status).toBe('failed');
+      expect(result.execution?.result).toMatchObject({
+        outcome: 'failed',
+        details: { code: 'web_http_failed', httpStatus: status },
+      });
+      const delivered = [...result.model.requests.at(-1)!.messages]
+        .reverse()
+        .find((m) => m.role === 'tool')!;
+      expect(delivered.content).toContain(`HTTP ${status}`);
+      expect(delivered.content).not.toContain('web_http_failed');
+      expect(delivered.content).not.toContain(secret);
+      expect(JSON.stringify(result.execution?.result)).not.toContain(secret);
+    }
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+test('invalid URL syntax and prohibited addresses remain distinct with zero DNS or network requests', async () => {
+  const f = await setup((_request, response) => response.end('MUST_NOT_BE_REQUESTED'));
+  try {
+    for (const [url, code] of [
+      ['not a valid URL', 'web_url_invalid'],
+      ['file:///PRIVATE_LOCAL_PATH', 'web_url_denied'],
+      ['http://user:PRIVATE_PASSWORD@fixture.test/', 'web_url_denied'],
+      ['http://metadata.google.internal/', 'web_url_denied'],
+    ] as const) {
+      const result = await f.run({ url });
+      expect(result.execution?.status).toBe('failed');
+      expect(result.execution?.result).toMatchObject({ details: { code } });
+      const delivered = [...result.model.requests.at(-1)!.messages]
+        .reverse()
+        .find((message) => message.role === 'tool')!;
+      expect(delivered.content).not.toContain(code);
+      expect(delivered.content).toContain('No network request was made');
+      expect(delivered.content).toContain(
+        code === 'web_url_invalid' ? 'Correct the URL' : 'Respect the address restriction',
+      );
+      expect(delivered.content).not.toContain('PRIVATE_');
+      expect(f.counts()).toEqual({ requests: 0, dns: 0 });
+    }
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
 test('ordinary Tool denial and corrupt built parser asset produce zero DNS/socket; no raw source fallback', async () => {
   const f = await setup((_req, res) => res.end('never'), { deny: true });
   try {

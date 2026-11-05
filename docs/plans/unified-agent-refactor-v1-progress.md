@@ -5011,7 +5011,7 @@ pending-cards的root-first通过，job-first在i=2的root question等待原目�
 
 同轮用户另报告启动页“启动未完成”及 Agent 收尾“操作未完成”。当前日志未保弹窗正文，原坏 Store 与跨版本私有草稿用例会有意触发对应提示，不能据此解释全部正常窗口。源码已核实 renderer 对旧会话/旧视图成功读取有 fencing，而迟到拒绝仍可进入新页面全局错误；该客户端缺口将作为本次仍需处理的修复单独交付。这里完整结果属于上述冻结输入，不能提前代证尚未实施的客户端修复或正常流程零误报。
 
-产品手册、Service/Jobs/Store、Client/UI/Native、授权/执行 active 与[已实施 Note](../../.agents/notes/implemented/architecture/2026-10-11-shell-per-call-permission-scopes.md)按实际边界同步；局部资格、[剩余平台计划](shell-permission-scopes.md)及本地提交门禁分别判断。Win/Linux 共享策略/独立范围源码及原生测试已接三 OS Actions，实际资格后置且未 dispatch；Windows 正式 Shell backend 仍缺、失败关闭。原 RSS 450秒/九采样 `178814976→299614208B`、`+115.203125MiB >32MiB` 的真实红与全 Runtime 出生后代、Bun activeResources/handles 观测缺项保持，没有重复参数对照。能力37行仍 partial，wholeDefault=true仅指本次冻结 macOS 默认、wholeV13=false/phaseExit=false，不宣布 P6/§35/P7或整体退出，无 push/PR/发布。
+产品手册、Service/Jobs/Store、Client/UI/Native、授权/执行 active 与[已实施 Note](../../.agents/notes/implemented/architecture/2026-10-11-shell-per-call-permission-scopes.md)按实际边界同步；局部资格、[平台当前边界](../../packages/agent/src/jobs/README.md)及本地提交门禁分别判断。Win/Linux 共享策略/独立范围源码及原生测试已接三 OS Actions，实际资格后置且未 dispatch；Windows 正式 Shell backend 仍缺、失败关闭。原 RSS 450秒/九采样 `178814976→299614208B`、`+115.203125MiB >32MiB` 的真实红与全 Runtime 出生后代、Bun activeResources/handles 观测缺项保持，没有重复参数对照。能力37行仍 partial，wholeDefault=true仅指本次冻结 macOS 默认、wholeV13=false/phaseExit=false，不宣布 P6/§35/P7或整体退出，无 push/PR/发布。
 
 ## 2026-10-11：客户端迟到读取误报
 

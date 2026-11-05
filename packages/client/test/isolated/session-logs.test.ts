@@ -268,3 +268,95 @@ test('only the exact Files point key is permitted as read-only extension log ide
     ),
   ).toThrow('invalid_session_log_page');
 });
+
+test('finite policy log metadata retains distinct source kinds and rejects private or malformed nested facts', () => {
+  const original = page();
+  for (const source of [
+    { kind: 'check', id: 'check', targetExecutionId: 'original' },
+    { kind: 'policy', id: 'policy-proof' },
+  ] as const) {
+    const policy: NonNullable<SessionLogPage['entries'][number]['details']['policy']> = {
+      targetExecutionId: 'tool',
+      policyEvidenceId: 'proof',
+      reason: 'parent_review',
+      source,
+      requestedScope: { filesystem: 'full_access', network: 'internet' },
+      effectiveScope: { filesystem: 'full_access', network: 'none' },
+    };
+    const value: SessionLogPage = {
+      ...original,
+      entries: [
+        {
+          ...original.entries[0]!,
+          objectId: 'tool',
+          type: 'authorization.policy',
+          category: 'execution',
+          modelExecutionId: null,
+          details: { executionId: 'tool', kind: 'tool', policy },
+        },
+      ],
+    };
+    const decoded = decodeResponse('SessionLogPage', value);
+    expect(
+      verifySessionLogPage(decoded, { storeId: 'store', sessionId: 'session' }, query),
+    ).toEqual(value);
+    expect(decoded.entries[0]!.details.policy!.source).toEqual(source);
+    for (const invalid of [
+      { ...policy, reason: 'approve_once' },
+      { ...policy, source: { kind: 'execution', id: 'wrong' } },
+      { ...policy, source: { ...source, privateSnapshot: 'SECRET' } },
+      { ...policy, requestedScope: { filesystem: 'anywhere', network: 'internet' } },
+      {
+        ...policy,
+        effectiveScope: { filesystem: 'full_access', network: 'none', path: '/secret' },
+      },
+      { ...policy, credential: 'SECRET' },
+    ])
+      expect(() =>
+        decodeResponse('SessionLogPage', {
+          ...value,
+          entries: [{ ...value.entries[0]!, details: { policy: invalid } }],
+        }),
+      ).toThrow('Invalid SessionLogPage');
+  }
+});
+
+test('Execution response validates and retains policy observations without adding approval conclusions', () => {
+  const execution = {
+    id: 'tool',
+    sessionId: 'session',
+    runId: 'run',
+    kind: 'tool',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    status: 'succeeded',
+    result: {},
+    resultRevision: '1',
+    cancelRequestedAt: null,
+  };
+  for (const reason of ['reused_approval', 'parent_review', 'timeout_continue'] as const) {
+    const policy = {
+      evidenceId: 'proof',
+      reason,
+      sourceExecutionId: 'original',
+      checkExecutionId: 'reviewer',
+      requestedScope: { filesystem: 'full_access', network: 'internet' },
+      effectiveScope: { filesystem: 'full_access', network: 'none' },
+    } as const;
+    const value = { ...execution, authorization: { dispatched: true, policy } };
+    expect(decodeResponse('Execution', value).authorization?.policy).toEqual(policy);
+    for (const invalid of [
+      { ...policy, reason: 'approved' },
+      { ...policy, checkExecutionId: '/private/path' },
+      { ...policy, effectiveScope: { filesystem: 'anywhere', network: 'internet' } },
+    ]) {
+      expect(() =>
+        decodeResponse('Execution', {
+          ...value,
+          authorization: { dispatched: true, policy: invalid },
+        }),
+      ).toThrow('Invalid Execution');
+    }
+  }
+  expect(decodeResponse('Execution', execution).authorization).toBeUndefined();
+});

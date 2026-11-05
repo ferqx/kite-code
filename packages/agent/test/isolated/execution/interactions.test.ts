@@ -239,11 +239,12 @@ test('refusing one exact approval preserves zero effects and returns its origina
     });
     expect((await f.store.getRun(record.runId!))?.status).toBe('completed');
     expect((await f.runtime.getCommand('work'))?.cancelRequestedAt).toBeNull();
-    expect(f.model.requests[1]!.messages.find((message) => message.role === 'tool')).toMatchObject({
-      toolCallId: execution!.callId,
-      sourceIds: [execution!.id],
-      content: 'approval_denied',
-    });
+    const feedback = f.model.requests[1]!.messages.find((message) => message.role === 'tool')!;
+    expect(feedback.toolCallId).toBe(execution!.callId);
+    expect(feedback.sourceIds).toEqual([execution!.id]);
+    expect(feedback.content).toContain('The user denied this request');
+    expect(feedback.content).toContain('It was not executed');
+    expect(feedback.content).toContain('Do not resubmit it or bypass the refusal');
     expect(
       (await f.store.listMessages('s')).some(
         (message) => message.role === 'assistant' && message.content === explanation,
@@ -296,7 +297,9 @@ test('permission withdrawal or policy revision change while answering never acce
       expect((await f.read(record))?.acceptedDecisionRevision).toBeNull();
       expect((await f.store.getExecution(record.executionId))?.status).toBe('failed');
       expect((await f.store.getExecution(record.executionId))?.result).toMatchObject({
-        content: withdrawal ? 'permission_denied' : 'interaction_binding_changed',
+        content: withdrawal
+          ? expect.stringContaining('Reason: permission_denied')
+          : 'interaction_binding_changed',
       });
     } finally {
       await f.close();

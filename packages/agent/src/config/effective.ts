@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { maximumAuthorizationCheckTimeoutMs } from '../execution/authorization-timing';
 import { canonicalJson } from '../json';
 import {
   assertJson,
@@ -108,6 +109,20 @@ export function createConfigurationSnapshot(
     throw new ConfigurationError('invalid_configuration');
   const configuration: EffectiveConfiguration = {};
   if (effective.modelId !== undefined) configuration.modelId = effective.modelId;
+  if (effective.autoApproval !== undefined) {
+    const autoApproval = object(effective.autoApproval);
+    if (autoApproval.timeoutMs !== undefined) {
+      const timeoutMs = autoApproval.timeoutMs;
+      if (
+        typeof timeoutMs !== 'number' ||
+        !Number.isSafeInteger(timeoutMs) ||
+        timeoutMs <= 0 ||
+        timeoutMs > maximumAuthorizationCheckTimeoutMs
+      )
+        throw new ConfigurationError('invalid_authorization_check_timeout');
+      configuration.autoApproval = { timeoutMs };
+    }
+  }
   if (effective.compression !== undefined) {
     const compression = object(effective.compression);
     if (compression.thresholdTokens !== undefined) {

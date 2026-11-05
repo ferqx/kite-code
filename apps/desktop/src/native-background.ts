@@ -418,7 +418,8 @@ export async function readNativeBackgroundChild(
                   key,
                 ),
             ) ||
-            shell.operation !== fact.definitionId.slice('shell.'.length) ||
+            (shell.operation !== fact.definitionId.slice('shell.'.length) &&
+              !(fact.definitionId === 'shell.execute' && shell.operation === 'launch')) ||
             (shell.shellId !== undefined && typeof shell.shellId !== 'string') ||
             (shell.command === undefined
               ? shell.commandOffset !== undefined || shell.commandNextOffset !== undefined

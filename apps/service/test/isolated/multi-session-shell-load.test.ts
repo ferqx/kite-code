@@ -181,8 +181,8 @@ function provider(shellCommand: (label: string) => string, slots: number) {
       if (!body.messages.some((message) => message.role === 'tool')) {
         const calls = [
           {
-            name: 'shell_launch',
-            args: { key: `shell-${label}`, command: shellCommand(label), cancellation: 'attached' },
+            name: 'shell_execute',
+            args: { command: shellCommand(label), background: true },
           },
           ...(!isChild
             ? Array.from({ length: 3 }, (_, i) => ({
@@ -326,7 +326,7 @@ for (const slots of [4, 16])
             // This finite load provider routes by original task markers; compression has its own fixtures.
             modelCapabilities: { contextWindowTokens: 1_000_000 },
           })),
-          tools: ['task.spawn', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].map(
+          tools: ['task.spawn', 'shell.execute', 'shell.read', 'shell.wait', 'shell.stop'].map(
             (id) => ({
               id,
               definitionVersion: '1',

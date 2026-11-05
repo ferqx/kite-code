@@ -415,6 +415,15 @@ export class NativeToolMessages {
         this.check(lease);
         const fact = nativeToolMessageFact({
           execution,
+          ...(execution.definitionId === 'files.read' &&
+          ['4', '5'].includes(execution.definitionVersion) &&
+          execution.status === 'succeeded' &&
+          object(object(execution.result)?.details)?.exists === false &&
+          execution.runId
+            ? {
+                run: await this.client.getRun(execution.runId, { signal: lease.abort.signal }),
+              }
+            : {}),
           message,
           messages: this.messages().values(),
           sessionId: scope.sessionId,

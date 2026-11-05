@@ -55,6 +55,8 @@ export function loadTaskQualityReplay(root: string) {
     modelId: requests[0]!.modelId,
     signal: new AbortController().signal,
     requests,
+    // Historical replay has no recorded attempt diagnostics; this does not prove no failure occurred.
+    attemptFailures: [],
     calls: [],
     usage: original.metrics.usage,
     metadata,

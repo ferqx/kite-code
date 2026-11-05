@@ -120,7 +120,11 @@ export function environmentDisplay(
       (!e.childSessionId &&
         (e.definitionId !== 'shell.command' ||
           item.sourceTool?.id !== e.parentExecutionId ||
-          item.sourceTool?.definitionId !== 'shell.launch' ||
+          !(
+            item.sourceTool?.definitionId === 'shell.launch' ||
+            (item.sourceTool?.definitionId === 'shell.execute' &&
+              item.sourceTool.background === true)
+          ) ||
           item.sourceTool?.definitionVersion !== '1'))
     )
       continue;

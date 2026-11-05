@@ -243,7 +243,7 @@ async function sample(id: CaseId, options: Options): Promise<Result> {
     };
     const originalShell = createShellExtension({ job: instrumented });
     const shellTools = originalShell
-      .tools!.filter((tool) => tool.id === 'shell.launch')
+      .tools!.filter((tool) => tool.id === 'shell.execute')
       .map(
         (tool): ToolDefinition => ({
           ...tool,
@@ -252,7 +252,8 @@ async function sample(id: CaseId, options: Options): Promise<Result> {
             branch(launchCalls === 1, 'Model_repeated_Shell_launch');
             assert(
               context.sessionId !== 'root' &&
-                object(input).cancellation === 'attached' &&
+                object(input).background === true &&
+                !Object.hasOwn(object(input), 'cancellation') &&
                 object(input).command === command,
               'actual_child_explicit_attached_original_Shell_command',
             );
@@ -358,7 +359,7 @@ async function sample(id: CaseId, options: Options): Promise<Result> {
       commandId: 'create',
       title: id,
     });
-    const childPrompt = `Call shell_launch exactly once with key="one", cancellation="attached", and command exactly these bytes:\n${command}\nThen give a truthful final answer that only launch acceptance is known, the attached Shell is still pending, and no business completion/cleanup is verified. Do not wait, read, cancel, re-launch, or use any other Tool. Do not claim stdout or terminal results you have not received.`;
+    const childPrompt = `Call shell_execute exactly once with background:true and command exactly these bytes:\n${command}\nThen give a truthful final answer that only launch acceptance is known, the attached Shell is still pending, and no business completion/cleanup is verified. Do not wait, read, cancel, re-launch, or use any other Tool. Do not claim stdout or terminal results you have not received.`;
     await runtime.submitCommand({
       expectedStoreId,
       sessionId: 'root',
@@ -399,8 +400,13 @@ async function sample(id: CaseId, options: Options): Promise<Result> {
       : undefined;
     branch(
       launchingTool?.kind === 'tool' &&
-        launchingTool.definitionId === 'shell.launch' &&
+        launchingTool.definitionId === 'shell.execute' &&
+        launchingTool.definitionVersion === '1' &&
         launchingTool.sessionId === childSessionId &&
+        launchingTool.originStoreId === job.originStoreId &&
+        object(launchingTool.input).background === true &&
+        object(launchingTool.input).command === command &&
+        job.cancelWithParent === true &&
         launchingTool.runId,
       'original_attached_Shell_missing_actual_launch_Tool_Run',
     );

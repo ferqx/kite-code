@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -11,9 +12,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
+import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
-import type { PermissionPolicySnapshot } from '@kite-ai/agent/permissions';
+import {
+  createPermissionCheckContextReader,
+  createPermissionPolicy,
+  type PermissionPolicySnapshot,
+} from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -21,6 +26,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { parseModelPreset } from '../../src/model-options';
 import { createPermissionManagement } from '../../src/permission-management';
 
 async function until<T>(read: () => Promise<T | null>) {
@@ -32,8 +38,17 @@ async function until<T>(read: () => Promise<T | null>) {
     await Bun.sleep(10);
   }
 }
-type CheckResponse = 'approve_once' | 'reject' | 'ask_user' | 'invalid' | 'failure';
-async function fixture(decision: CheckResponse = 'approve_once') {
+type CheckResponse = 'approve_once' | 'reject' | 'ask_user' | 'invalid' | 'failure' | 'length';
+async function fixture(
+  decision: CheckResponse = 'approve_once',
+  options: {
+    maxOutputTokens?: number;
+    reasoningEffort?: 'low';
+    authorizationCheck?: RuntimeOptions['authorizationCheck'];
+    /** Legacy task authorization is an explicit custom policy, not the new builtin default. */
+    defaultBuiltinPolicy?: true;
+  } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-auto-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -72,7 +87,7 @@ async function fixture(decision: CheckResponse = 'approve_once') {
           if (blockCheck) await new Promise<void>((resolve) => (releaseCheck = resolve));
           if (decision === 'failure') return new Response('fixture failure', { status: 503 });
           content = JSON.stringify({
-            decision: decision === 'invalid' ? 'approve_once' : decision,
+            decision: ['invalid', 'length'].includes(decision) ? 'approve_once' : decision,
             reason: 'exact original operation only',
             ...(decision === 'invalid' ? { executionId: 'self-reported-is-not-proof' } : {}),
           });
@@ -109,7 +124,17 @@ async function fixture(decision: CheckResponse = 'approve_once') {
         };
         const finish = {
           ...chunk,
-          choices: [{ index: 0, delta: {}, finish_reason: call ? 'tool_calls' : 'stop' }],
+          choices: [
+            {
+              index: 0,
+              delta: {},
+              finish_reason: call
+                ? 'tool_calls'
+                : payload && decision === 'length'
+                  ? 'length'
+                  : 'stop',
+            },
+          ],
         };
         return new Response(
           `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(finish)}\n\ndata: [DONE]\n\n`,
@@ -128,7 +153,15 @@ async function fixture(decision: CheckResponse = 'approve_once') {
       provider: 'compatible',
       model: `remote-${['a', 'b'][index]}`,
       baseURL: `http://127.0.0.1:${provider.port}/v1`,
-      options: { temperature: 0.25 },
+      options: {
+        temperature: 0.25,
+        ...(options.maxOutputTokens === undefined
+          ? {}
+          : { maxOutputTokens: options.maxOutputTokens }),
+        ...(options.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: options.reasoningEffort }),
+      },
     })),
     tools: [{ id: 'files.write', definitionVersion: '3' }],
   };
@@ -147,6 +180,29 @@ async function fixture(decision: CheckResponse = 'approve_once') {
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     permissionPolicy: { readPolicy: () => policy },
+    ...(options.defaultBuiltinPolicy
+      ? {}
+      : {
+          permissions: createPermissionPolicy({
+            readPolicy: () => policy,
+            describeCapability: (request) => ({
+              kind: request.kind,
+              definitionId: request.definitionId,
+              definitionVersion: request.definitionVersion,
+              revision: 'fixture-original-task-approval',
+              hardAllowed: true,
+              safeRead: false,
+              effects: request.kind === 'model' ? ['network'] : ['workspace_write'],
+            }),
+            readCheckContext: (request) =>
+              createPermissionCheckContextReader({
+                readRuntime: () => runtime,
+                originStoreId: expectedStoreId,
+                subjectId: 'owner',
+              })(request),
+          }),
+        }),
+    ...(options.authorizationCheck ? { authorizationCheck: options.authorizationCheck } : {}),
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -337,7 +393,31 @@ async function fixture(decision: CheckResponse = 'approve_once') {
   return f;
 }
 
-test('default Auto uses the selected actual SDK route and one tool-free durable permission check, preserving full task and exact once intent', async () => {
+test('default Auto delegates builtin file effects to their tool policy without a Shell risk check', async () => {
+  const f = await fixture('approve_once', { defaultBuiltinPolicy: true });
+  try {
+    await f.run();
+    await f.done();
+    expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
+    expect(f.checks).toHaveLength(0);
+    expect(f.normalRequests).toHaveLength(2);
+    expect(
+      (await f.store.listExecutions('s')).filter((e) => e.kind === 'model' && e.runId === null),
+    ).toHaveLength(0);
+    expect(
+      (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
+    ).toHaveLength(0);
+    const run = (await f.store.getView('s')).runs[0]!;
+    expect(
+      ((run.configuration as Record<string, unknown>).snapshot as Record<string, unknown>)
+        .defaultAutoReview,
+    ).toBe('shell_risk');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a custom task policy retains the selected SDK reviewer, durable check and exact once intent', async () => {
   const f = await fixture();
   try {
     const task = `Full task ${'完整授权上下文'.repeat(2048)}`;
@@ -352,6 +432,8 @@ test('default Auto uses the selected actual SDK route and one tool-free durable 
     expect(f.checks[0]!.route).toBe('a');
     expect(f.checks[0]!.body.model).toBe('remote-a');
     expect(f.checks[0]!.body.temperature).toBe(0.25);
+    expect(f.checks[0]!.body.max_tokens).toBe(256);
+    expect(f.normalRequests.every(({ body }) => body.max_tokens === undefined)).toBe(true);
     expect(f.checks[0]!.body.tools ?? []).toEqual([]);
     expect(f.checks[0]!.body.messages).toContainEqual({
       role: 'system',
@@ -418,14 +500,29 @@ test('default Auto uses the selected actual SDK route and one tool-free durable 
     expect(f.checks).toHaveLength(2);
     expect(f.checks[1]!.route).toBe('b');
     expect(f.checks[1]!.body.model).toBe('remote-b');
-    expect(f.checks[0]!.payload.checker).not.toEqual(f.checks[1]!.payload.checker);
+    // Checker identity stays bound in the immutable command, not reviewer context.
+    const persistedChecks = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.kind === 'model' && execution.runId === null,
+    );
+    const checker = async (modelId: string) => {
+      const saved = persistedChecks.find((execution) => execution.definitionId === modelId)!;
+      const command = (await f.store.getCommand(saved.originCommandId))!;
+      return (
+        command.request as { input: { checker: { id: string; version: string; modelId: string } } }
+      ).input.checker;
+    };
+    const [firstChecker, nextChecker] = await Promise.all([checker('a'), checker('b')]);
+    expect(firstChecker).toMatchObject({ id: 'builtin.auto', modelId: 'a' });
+    expect(nextChecker).toMatchObject({ id: 'builtin.auto', modelId: 'b' });
+    expect(firstChecker.version).not.toBe(nextChecker.version);
+    expect(f.checks.every(({ payload }) => payload.checker === undefined)).toBe(true);
     expect(readFileSync(join(f.workspace, 'work-two.txt'), 'utf8')).toBe('actual work-two');
   } finally {
     await f.close();
   }
 }, 20000);
 
-test('default Auto ask_user requires the actual original human card without rerunning permission check', async () => {
+test('custom task-policy ask_user requires the original human card without rerunning its check', async () => {
   const f = await fixture('ask_user');
   try {
     await f.run();
@@ -457,8 +554,102 @@ test('default Auto ask_user requires the actual original human card without reru
   }
 }, 30000);
 
-for (const decision of ['invalid', 'failure'] as const)
-  test(`default Auto ${decision} is a readable technical failure returned to the next Model without a human card or effects`, async () => {
+for (const maxOutputTokens of [32, 4096])
+  test(`the selected checker caps only its output without expanding the original ${maxOutputTokens} token preset`, async () => {
+    const f = await fixture('approve_once', { maxOutputTokens, reasoningEffort: 'low' });
+    try {
+      await f.run();
+      await f.done();
+      expect(f.checks).toHaveLength(1);
+      expect(f.checks[0]!.body).toMatchObject({
+        max_tokens: Math.min(maxOutputTokens, 256),
+        temperature: 0.25,
+        reasoning_effort: 'low',
+      });
+      expect(f.normalRequests).toHaveLength(2);
+      for (const { body } of f.normalRequests)
+        expect(body).toMatchObject({
+          max_tokens: maxOutputTokens,
+          temperature: 0.25,
+          reasoning_effort: 'low',
+        });
+      expect(f.configuration.models[0]!.options.maxOutputTokens).toBe(maxOutputTokens);
+      const check = (await f.store.listExecutions('s')).find(
+        (execution) => execution.kind === 'model' && execution.runId === null,
+      )!;
+      const original = f.configuration.models[0]!;
+      const uncappedVersion = createHash('sha256')
+        .update(
+          JSON.stringify({
+            provider: original.provider,
+            id: original.id,
+            model: original.model,
+            baseURL: original.baseURL,
+            credentialRef: null,
+            options: parseModelPreset(original.options),
+          }),
+        )
+        .digest('hex');
+      const command = (await f.store.getCommand(check.originCommandId))!;
+      const { version } = (command.request as { input: { checker: { version: string } } }).input
+        .checker;
+      // Changed actual reviewer settings must not retain an old cold-Run identity.
+      expect(version === uncappedVersion).toBe(maxOutputTokens <= 256);
+      const snapshot = await f.runtime.readModelInput({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'owner',
+        sessionId: 's',
+        executionId: check.id,
+      });
+      expect(snapshot.metadata.adapter).toMatchObject({
+        availability: 'available',
+        settings: { maxOutputTokens: Math.min(maxOutputTokens, 256), reasoningEffort: 'low' },
+      });
+      expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
+    } finally {
+      await f.close();
+    }
+  });
+
+test('an injected checker keeps its own adapter while ordinary model output settings remain unchanged', async () => {
+  const calls: string[] = [];
+  const model: NonNullable<RuntimeOptions['authorizationCheck']>['model'] = {
+    async *stream(request) {
+      calls.push(request.modelId);
+      yield {
+        type: 'text_delta',
+        text: JSON.stringify({ decision: 'approve_once', reason: 'custom exact task approval' }),
+      };
+      yield {
+        type: 'finish',
+        reason: 'stop',
+        usage: { inputTokens: null, outputTokens: null },
+      };
+    },
+  };
+  const f = await fixture('approve_once', {
+    maxOutputTokens: 4096,
+    authorizationCheck: { id: 'injected', version: 'own-version', modelId: 'own-route', model },
+  });
+  try {
+    await f.run();
+    await f.done();
+    expect(calls).toEqual(['own-route']);
+    expect(f.checks).toEqual([]);
+    expect(f.normalRequests).toHaveLength(2);
+    expect(f.normalRequests.every(({ body }) => body.max_tokens === 4096)).toBe(true);
+    const check = (await f.store.listExecutions('s')).find(
+      (execution) => execution.kind === 'model' && execution.runId === null,
+    )!;
+    expect(check).toMatchObject({ definitionId: 'own-route', status: 'succeeded' });
+    expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
+  } finally {
+    await f.close();
+  }
+});
+
+for (const decision of ['invalid', 'failure', 'length'] as const)
+  test(`custom task-policy ${decision} is a readable technical failure returned to the next Model without a human card or effects`, async () => {
     const f = await fixture(decision);
     try {
       await f.run();
@@ -476,7 +667,8 @@ for (const decision of ['invalid', 'failure'] as const)
       const tool = executions.find((execution) => execution.kind === 'tool')!;
       const content = (tool.result as { content: string }).content;
       expect(content).toContain('No approval or rejection decision was made');
-      expect(content).toContain('This tool was not executed');
+      expect(content).toContain('This operation was not executed');
+      if (decision === 'length') expect(content).toContain('output token limit');
       expect(content).not.toContain('Do not bypass this refusal');
       expect(tool).toMatchObject({
         status: 'failed',
@@ -490,13 +682,19 @@ for (const decision of ['invalid', 'failure'] as const)
               decision: 'unavailable',
               executionId: check.id,
               failureCode:
-                decision === 'invalid' ? 'authorization_check_output_invalid' : 'model_failed',
+                decision === 'failure'
+                  ? 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable'
+                  : decision === 'length'
+                    ? 'authorization_check_output_limit'
+                    : 'authorization_check_output_invalid',
             },
           },
         },
       });
       const messages = f.normalRequests[1]!.body.messages as { role: string; content: string }[];
-      expect(messages.find((message) => message.role === 'tool')?.content).toBe(content);
+      const received = messages.find((message) => message.role === 'tool')?.content ?? '';
+      expect(received).toContain(content);
+      expect(received).toContain('This request was not executed and produced no effects');
       expect(
         (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
       ).toEqual([]);
@@ -505,7 +703,7 @@ for (const decision of ['invalid', 'failure'] as const)
     }
   }, 20000);
 
-test('default Auto cannot check past untrusted, missing allowlist, policy revocation or original cancellation', async () => {
+test('custom task approval cannot pass untrusted, missing allowlist, policy revocation or cancellation', async () => {
   for (const change of ['untrusted', 'allowlist', 'revoke', 'cancel'] as const) {
     const f = await fixture();
     try {

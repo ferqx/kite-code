@@ -128,6 +128,13 @@ for (const shape of ['inline', 'artifact', 'artifact-ask'] as const)
         commandId: 'work',
         request: { kind: 'run.start', content: 'Run the harmless tools' },
       });
+      const publicApproval = {
+        definitionId: 'fixture.effect',
+        definitionVersion: '1',
+        grants: ['approve_once'],
+        input: {},
+        policy: { reason: 'authorization_check_unavailable', check: checkRequest },
+      };
       let publicAttachment: { id: string; scope: { kind: string; id: string } } | undefined;
       const download = (
         sessionId: string,
@@ -163,12 +170,12 @@ for (const shape of ['inline', 'artifact', 'artifact-ask'] as const)
             policy: { check: { reference: NonNullable<typeof publicAttachment> } };
           }
         ).policy.check.reference;
-        expect(publicAttachment.id).toStartWith('authorization-check-request-');
+        expect(publicAttachment.id).toStartWith('approval-body-');
         const beforeRead = (await store.getMetadata()).lastChangeCursor;
         const response = await download('s', publicAttachment);
         expect(response.status).toBe(200);
         const body = await response.text();
-        expect(JSON.parse(body)).toEqual(checkRequest);
+        expect(body).toBe(canonicalJson(publicApproval));
         expect(body).not.toContain(marker);
         expect((await store.getMetadata()).lastChangeCursor).toBe(beforeRead);
         expect(effects).toBe(0);
@@ -218,7 +225,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask'] as const)
               { headers: { authorization: `Bearer ${coldService.bootstrap.token}` } },
             );
             expect(response.status).toBe(200);
-            expect(await response.json()).toEqual(checkRequest);
+            expect(await response.text()).toBe(canonicalJson(publicApproval));
             const original = (await coldStore.listExecutions('s')).filter(
               (e) => e.kind === 'model',
             );
@@ -378,7 +385,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask'] as const)
           const before = (await store.getMetadata()).lastChangeCursor;
           const reread = await download('s', publicAttachment);
           expect(reread.status).toBe(200);
-          expect(await reread.json()).toEqual(checkRequest);
+          expect(await reread.text()).toBe(canonicalJson(publicApproval));
           expect((await store.getMetadata()).lastChangeCursor).toBe(before);
           expect(effects).toBe(1);
           expect(checker.requests).toHaveLength(1);

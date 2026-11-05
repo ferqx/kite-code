@@ -4,6 +4,8 @@
 
 Planning 先持久保存 publication pending，再发布文件、不可变版本和 `plan.current` CAS，最后标记 committed；未完成时阻断批准和新效果。同一预期版本与内容可查回／完成原发布，不以重试提交不同正文。pending 恢复只验证原正文已完整发布；若文件又有外部修改，保持 pending 和实际字节，不自动覆盖或据此批准。已完成发布后的显式外部修改恢复可使用 `fileBase`，必须是刚读取的完整原生基线，null 仅创建缺失文件；保存新版本不继承旧批准。当前上下文明确 `fileState`，外部漂移可能先使旧模型来源失效，刷新后再读取、编辑。审阅前后及实际派发都核文件与原版本，迟到答案不能掩盖漂移。
 
+文件已成功发布后，后续版本／指针记录即使以已知 CAS 冲突失败也保 `outcome_unknown`，明确已有发布、须核原操作与当前计划，不能当作未写入后重投。无文件发布的普通 CAS 拒绝保持原失败语义。Plan 文件适配器在委派写入完成后的读取失败、内容不符或取消同样保未知。[Plan 文件回归](../../../test/isolated/business/planning-files.test.ts)与[写后读取回归](../../../test/isolated/files/plan-file-feedback.test.ts)核真实已写字节、原竞争冲突与禁止重复写入说明。
+
 同一会话切回此前的 Plan ID 时，从当前准入的 Planning 命名空间分页读取该 ID 的不可变正文，按数字版本选择不晚于当前版本的最新记录，并核对记录身份与正文摘要。沿准确旧文件登记核实际字节和完整原生基线，再发布新的全局版本；当前方案及目标旧文件的外部漂移在新 pending 之前拒绝。文件继续绑定原 Session／Plan ID，新 Store 恢复后保留原 Store 目录；不因文件存在接纳任意路径或继承旧批准。
 
 Plan 原记录和历史审阅正文不随当前文件变化；恢复保留实际字节，不从旧记录覆盖新文件或恢复批准。新 Store 经独立权限设置后的实际读取与编辑证据归[维护 owner](../../maintenance/README.md#会话工作文件与-manifest-v20)，客户端与发布范围沿 [Desktop](../../../../../apps/desktop/README.md)及 [Terminal](../../../../../apps/cli/docs/terminal-release.md)分别核对。
@@ -26,7 +28,7 @@ Plan 原记录和历史审阅正文不随当前文件变化；恢复保留实际
 
 扩展的纯 `context.capture` 自动贡献当前计划与批准凭据的 canonical 数据，来源 ID 为 `builtin.planning:<session>:<plan>:<version>`，摘要覆盖完整当前计划和批准身份。贡献仅在记录指向的实际批准 Run 仍 active、同 Session、Run 专属证明与 accepted Interaction 全等时显示批准，否则 approval=null，不从 input 或模型猜目标。计划资料标为 `user/after_history`，不获得 system 权限。`sourcesFor` 是需要显式宿主组合时的同一贡献实现，不应再重复装配同一来源。
 
-内部 `SourceRequest.runId` 由 Core 以实际当前 Run 覆盖。`captureModelContext` 核实际 Run／Session，再复用 `readPlanningState` 的原记录与批准证明，贡献一个 `user/runtime` 来源：pending 显示 planning，未启用或已批准显示 building；完整原 state 与来源摘要保留。无 Run 的既有来源捕获只提供计划资料，不补造当前 phase。动态观察与静态 Agent 合同分开，普通请求、压缩和展开复用[同一组装](../../model-context.ts)，不增加 grant 或替代最终 record read-set、审批与派发门禁。
+内部 `SourceRequest.runId` 由 Core 以实际当前 Run 覆盖。`captureModelContext` 核实际 Run／Session，再复用 `readPlanningState` 的原记录与批准证明，以 `user/runtime` 来源的 `plan_requirement` 提供准确批准要求与当前结果；`disabled/pending/approved` 是计划要求的状态，不定义 Agent 的运行阶段。Planning 仅表示计划模式，批准计划也不授予独立工具权限。无 Run 的既有来源捕获只提供计划资料。动态观察与静态 Agent 合同分开，普通请求、压缩和展开复用[同一组装](../../model-context.ts)，不增加 grant 或替代最终 record read-set、审批与派发门禁。
 
 历史 receipt 校验独立于当前信息贡献：`matchesPlanSource` 从实际 Execution 的原 Session/Store/Run（runless Job 沿既有限父链）读取当前完整计划与该原 Run 不可变 accepted 审批，复用同一纯 canonical payload 重建执行时来源 digest。原 Run 已完成不会让准确原 receipt 失效，但不会恢复 inactive Run 的普通批准贡献；新 Run 不沿用旧审批，plan/head/accepted proof 或封存执行来源变化仍拒绝。同 Session 派生报告继承原 plan.required ref 后不能借原 Run 的待审批 Model 管理豁免，最后 completion 重读完整原计划、审批、progress 和原 receipt；这些 record 继续进入最终事务 read-set CAS。
 
@@ -37,6 +39,8 @@ Plan 原记录和历史审阅正文不随当前文件变化；恢复保留实际
 叶子在 `review.body/<actualExecutionId>` 保存不可变封存记录。request 前与接受答案后均通过原 scope 公共 reader 读取到完整 EOF，核 size、SHA-256、fatal UTF-8 与完整 canonical plan 全等；不能把 ref/hash 当已经阅读或当权限。原 accepted proof 仍须绑定同一精确 request 与实际 Run 批准 Execution。最后条件/`readPlanningState` 不取得物理文件或 SQL：重读完整原 plan 和 seal、核原记录 revision、原 scope、完整 hash/size、accepted Interaction 与 Run proof，收集最终 record read-set CAS。已接受的人类阅读事实不把外部文件修改与 SQL commit 冒称原子；物理正文损坏在实际读取边界拒绝，封存记录或 plan 在最后读后漂移则在 SQL 派发/完成事务拒绝。
 
 完整 plan 仍保存在既有 record；当前没有单 record 业务正文限额，但 SQLite Worker 保留既有 queuedBytes/pending 资源准入（普通队列 14 MiB/224、关键队列 16 MiB/256），不因本叶子扩大。真实资格覆盖超过 300 KiB 的 UTF-8 与 JSON escaped 大正文写入、原 Artifact 完整审阅、批准状态和真实 step receipt 完成；不宣称超过既有队列/平台容量的无界传输。贡献中的批准摘要仍只保留 decision identity/answer，不再次复制审阅附件正文。
+
+当前步骤进度由 `read_plan` 从原 `progress/<plan>/<version>` 记录读取；压缩后若进度已不在模型窗口，静态合同指导模型先核当前进度，再选择剩余步骤。进度不混入稳定的计划来源或批准摘要，避免同批步骤更新使普通后继工具刷新失败，也不使先前成功 receipt 随进度变化失效。[进度观察与批准事实](../../../test/isolated/business/planning-progress-view.test.ts)核准确要求、无阶段投影与进度变化后的稳定来源；[计划执行回归](../../../test/isolated/business/planning.test.ts)核同批普通工具及后续进度仍可引用原成功 receipt。该指导不等同于自动注入全部进度或保证模型永不遗忘。
 
 `planning.update@1` 要求准确当前 ID/version/digest、Run、step 与 progress revision。完成步骤必须引用该 Run 真实成功 Tool/Job 的原 Store、attempt、定义版本、input digest、result revision，并匹配该执行真正捕获的当前计划来源 ID/digest。Model 文本、计划/验证管理 Tool、旧 Run 或旧计划成功回执不能替代。完成候选需要全部 step 完成、当前批准和原计划义务；Core 最终仍重新读取相关记录并事务复核。compensated 保存原 receipt 与补偿 receipt，不成为 passed 或完整计划完成。用户 `planning.write/review/update` Actions 共用业务函数但有独立 Command 身份；活跃 Run 的同 Session Action 按当前串行队列等待，不能假装它已并发修改当前工作。
 

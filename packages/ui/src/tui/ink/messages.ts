@@ -269,6 +269,7 @@ export const enUS = {
   'tool.awaitingInput': '(awaiting input)',
   'tool.noAnswer': '(no answer)',
   'tool.noOutput': '(No output)',
+  'tool.fileMissing': 'File does not exist',
   'tool.filePreviewTruncated': 'File change preview truncated; full file was written.',
   'tool.resultPreviewTruncated':
     'Result preview truncated · Ctrl+E to read the complete recorded result',
@@ -535,6 +536,7 @@ export const zhCN: { [K in MessageKey]: string } = {
   'tool.awaitingInput': '（等待输入）',
   'tool.noAnswer': '（无回答）',
   'tool.noOutput': '（无输出）',
+  'tool.fileMissing': '文件不存在',
   'tool.filePreviewTruncated': '文件变更预览已截断；完整文件已写入。',
   'tool.resultPreviewTruncated': '结果预览已截断 · Ctrl+E 查看完整已保存结果',
   'tool.blocked': '已阻止（重复失败次数过多）',

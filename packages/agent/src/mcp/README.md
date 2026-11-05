@@ -22,6 +22,8 @@ Worker 是纯 schema 缓存，不持有 Model/process 资源许可。一秒空�
 
 工具执行不重试，不替调用者重新绑定远端连接。取消只让本地请求停止等待；MCP cancellation notification、断连、HTTP 失败和超时都不是远端已停止的证据，可能已派发的无确认结果返回 `outcome_unknown` 与 `remoteStopConfirmed:false`。有效 MCP `isError` 作为远端失败事实保存。输出 schema 由原快照验证；异常输出也不冒充已知零效果。普通宿主权限、输入验证与持久派发仍属于 UnifiedExecution，外部描述不扩权。
 
+同步调用与远端 Task 的 `content` 和存在的 `structuredContent` 一并交给模型，避免结构化错误仅留在 details 或空 text 被误读为空结果。远端 failed／cancelled 的 `statusMessage` 归属明确地保留为远端数据，终态不证明此前作用已回滚；unknown 说明可能已发送、仍运行或已有作用，不得重投。工具搜索遇来源失效或匹配 descriptor 超过原预算时保留可用匹配并返回 `complete:false`，明确不完整而非“无匹配”，不扩大预算或暴露省略的 schema。[失败回归](../../test/isolated/mcp/failure-feedback.test.ts)用真实 SDK 内存 RPC／Runtime／SQLite 核下一 Model 的完整结构化原因及原身份。普通 detached Task 终态在 idle 保 pending、不主动开 Model；下一活动检查点或普通 Run 由原 result Source 送达，测试核 idle 零请求、原 Job 一次及完整原因消费。
+
 多个 scope 共享一条连接。`release()` 幂等，只废弃本 scope 的后续调用；其他 scope 继续使用。最后一个 scope 等有界在途请求结束后关闭连接。`close()` 是明确宿主关闭整个 adapter 的动作，不能把一个页面卸载当全局 close。失联后，只有下一次显式目录/读取操作可建立新连接；既有工具调用不会自动重连重发。
 
 连接 Job 不占 Shell 的短任务 process slot，避免默认四条空闲长连接耗尽普通执行许可。连接自身的 key、scope、权限、原 Job 监督和真实 stop 证明保持独立；移除共享槽位声明不授予 wire 权限，也不把未知停止当成释放。[资源组合回归](../../test/isolated/resources/serial.test.ts)使用实际 MCP/Shell factory 和资源管理器验证长连接持有期间 Shell 与另一连接可继续申请，而普通 Shell 的并发上限与等待取消仍生效。

@@ -1,0 +1,4601 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>执行与审批 · 交互地图</title>
+    <style>
+    :root {
+      --bg: #f4f6f8;
+      --surface: #fff;
+      --ink: #1d2939;
+      --muted: #667387;
+      --line: #e3e8ee;
+      --primary: #087f76;
+      --soft: #e8f5f2;
+      --warn: #a45b10;
+      --warn-bg: #fff4e5;
+      --bad: #bb3c4a;
+      --bad-bg: #fceef0;
+      --blue: #3767b1;
+      --blue-bg: #eef3fc;
+      --purple: #7555a6;
+      --radius: 12px;
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+    }
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+    button,
+    a,
+    input,
+    select {
+      outline-offset: 3px;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:disabled {
+      cursor: default;
+      opacity: 0.42;
+    }
+    a {
+      color: var(--primary);
+      text-underline-offset: 3px;
+    }
+    button {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 7px;
+      padding: 8px 12px;
+      line-height: 1.3;
+    }
+    button:hover:not(:disabled) {
+      border-color: #a7b8c5;
+      background: #f8fafb;
+    }
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    button.primary:hover {
+      background: #096b64;
+    }
+    button.ghost {
+      background: transparent;
+      border-color: transparent;
+    }
+    button.small {
+      font-size: 12px;
+      padding: 5px 8px;
+    }
+    input,
+    select {
+      border: 1px solid #d5dde6;
+      border-radius: 7px;
+      background: #fff;
+      padding: 8px 10px;
+      color: var(--ink);
+      min-width: 0;
+    }
+    input[type="search"] {
+      width: 100%;
+    }
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+    h1 {
+      font-size: 24px;
+      letter-spacing: -0.6px;
+      font-weight: 650;
+    }
+    h2 {
+      font-size: 17px;
+      font-weight: 600;
+    }
+    h3 {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    p {
+      line-height: 1.7;
+    }
+    small,
+    .small {
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .mono,
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+    code {
+      font-size: 12px;
+      background: #f0f3f6;
+      padding: 2px 4px;
+      border-radius: 4px;
+      overflow-wrap: anywhere;
+    }
+    pre {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      background: #f7f9fb;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px;
+      max-height: 420px;
+      overflow: auto;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      flex-wrap: wrap;
+    }
+    .between {
+      justify-content: space-between;
+    }
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 550;
+      line-height: 1.45;
+      background: #eef1f5;
+      color: #536176;
+      white-space: nowrap;
+    }
+    .tag.real {
+      color: var(--primary);
+      background: var(--soft);
+    }
+    .tag.demo,
+    .tag.warn {
+      background: var(--warn-bg);
+      color: var(--warn);
+    }
+    .tag.bad {
+      background: var(--bad-bg);
+      color: var(--bad);
+    }
+    .tag.blue {
+      color: var(--blue);
+      background: var(--blue-bg);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      display: inline-block;
+      background: currentColor;
+      border-radius: 50%;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .card-pad {
+      padding: 18px;
+    }
+    .callout {
+      padding: 11px 13px;
+      border-radius: 8px;
+      border: 1px solid #e9d7bd;
+      background: #fffaf2;
+      font-size: 12px;
+      line-height: 1.7;
+      color: #795327;
+    }
+    .callout.info {
+      background: #f0f7fb;
+      border-color: #d6e6f2;
+      color: #3f6382;
+    }
+    .callout.neutral {
+      background: #f8fafb;
+      border-color: var(--line);
+      color: var(--muted);
+    }
+    .pillbar {
+      display: inline-flex;
+      gap: 3px;
+      background: #edf1f4;
+      padding: 3px;
+      border-radius: 8px;
+      flex-wrap: wrap;
+    }
+    .pillbar button {
+      border: 0;
+      background: transparent;
+      padding: 7px 12px;
+      font-size: 12px;
+    }
+    .pillbar button.active {
+      background: #fff;
+      color: var(--primary);
+      box-shadow: 0 1px 4px #23394b14;
+      font-weight: 600;
+    }
+    .topbar {
+      min-height: 65px;
+      padding: 12px 24px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+    .brandmark {
+      width: 28px;
+      height: 28px;
+      background: var(--primary);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 700;
+    }
+    .brand strong {
+      font-size: 13px;
+      letter-spacing: 1.7px;
+    }
+    .brand .divider {
+      height: 18px;
+      border-left: 1px solid var(--line);
+      margin: 0 5px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 214px minmax(0, 1fr);
+      min-height: calc(100vh - 65px);
+    }
+    .sidebar {
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 24px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+    .nav-label {
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      color: #8793a4;
+      padding: 0 12px;
+      margin-bottom: 9px;
+    }
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .nav button {
+      border: 0;
+      background: transparent;
+      text-align: left;
+      display: flex;
+      gap: 11px;
+      align-items: center;
+      padding: 11px 12px;
+      color: #536176;
+    }
+    .nav button.active {
+      background: var(--soft);
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .nav button .num {
+      font-size: 11px;
+      color: #8d9bad;
+      margin-left: auto;
+    }
+    .nav-symbol {
+      font-size: 17px;
+      width: 20px;
+      text-align: center;
+    }
+    .side-note {
+      margin-top: auto;
+      padding: 14px 11px;
+      border-top: 1px solid var(--line);
+      font-size: 11px;
+      line-height: 1.8;
+      color: var(--muted);
+    }
+    .main {
+      padding: 26px 28px 32px;
+      min-width: 0;
+    }
+    .heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .heading p {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 7px;
+      max-width: 760px;
+    }
+    .eyebrow {
+      color: var(--primary);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: 1.5px;
+      margin-bottom: 9px;
+    }
+    .factrow {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .fact {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+      padding: 13px 15px;
+      border-radius: 9px;
+    }
+    .fact .n {
+      color: #93a2b2;
+      font-size: 12px;
+    }
+    .fact strong {
+      font-size: 13px;
+      font-weight: 550;
+    }
+    .fact small {
+      color: var(--muted);
+      display: block;
+      font-size: 11px;
+      margin-top: 3px;
+    }
+    .controls {
+      padding: 14px 16px;
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--line);
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 130px;
+    }
+    .field label {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .field.grow {
+      flex: 1;
+    }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 338px;
+      gap: 16px;
+      align-items: start;
+    }
+    .graph-panel {
+      min-width: 0;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .panel-header p {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .graph-scroll {
+      height: 590px;
+      overflow: auto;
+      position: relative;
+      background-color: #fbfcfd;
+      background-image: radial-gradient(#d9e1e8 0.7px, transparent 0.7px);
+      background-size: 16px 16px;
+      scroll-behavior: smooth;
+    }
+    .graph {
+      position: relative;
+      min-width: 720px;
+      padding: 0 14px 24px;
+    }
+    .lanes {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      position: sticky;
+      top: 0;
+      z-index: 4;
+      background: #f6f8faef;
+      border-bottom: 1px solid var(--line);
+      margin: 0 -14px 10px;
+      padding: 10px 14px;
+      backdrop-filter: blur(8px);
+    }
+    .lane-label {
+      text-align: center;
+      font-size: 11px;
+      color: #6a7c8f;
+    }
+    .graph-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-auto-rows: minmax(68px, auto);
+      gap: 14px 9px;
+      z-index: 2;
+    }
+    .node {
+      width: 100%;
+      position: relative;
+      text-align: left;
+      min-height: 65px;
+      padding: 9px 10px;
+      border: 1px solid #dce4eb;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 2px 4px #29415c06;
+      font-size: 12px;
+      transition:
+        opacity 0.15s,
+        border-color 0.15s,
+        box-shadow 0.15s;
+    }
+    .node strong {
+      display: block;
+      font-size: 12px;
+      font-weight: 550;
+      line-height: 1.6;
+    }
+    .node .sub {
+      font-size: 10px;
+      color: #8190a0;
+      display: block;
+      line-height: 1.5;
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+    }
+    .node .step {
+      position: absolute;
+      top: -7px;
+      left: 8px;
+      font-size: 9px;
+      border-radius: 3px;
+      background: #e9eef3;
+      color: #7b899b;
+      padding: 1px 4px;
+    }
+    .node.past {
+      border-color: #a9c8bf;
+      background: #f5fbf9;
+    }
+    .node.future {
+      opacity: 0.56;
+    }
+    .node.selected {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px #087f7618;
+      opacity: 1;
+      background: #fff;
+    }
+    .node.bad-node {
+      background: #fff3f4;
+      border-color: #edbec3;
+    }
+    .node.warn-node {
+      background: #fff8ee;
+      border-color: #edd6b5;
+    }
+    .node.sink {
+      border-color: #c9bee4;
+      background: #f8f5fc;
+    }
+    .connectors {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .connectors path.edge {
+      fill: none;
+      stroke: #c8d4de;
+      stroke-width: 1.4;
+    }
+    .connectors path.edge.past {
+      stroke: #78a99c;
+    }
+    .connectors text {
+      font-size: 9px;
+      fill: #738397;
+      paint-order: stroke;
+      stroke: #fbfcfd;
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+    .playbar {
+      padding: 12px 16px;
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .playbar .progress {
+      flex: 1;
+      height: 4px;
+      background: #e9eef1;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .playbar .progress div {
+      height: 100%;
+      background: var(--primary);
+      transition: width 0.2s;
+    }
+    .step-count {
+      font-size: 11px;
+      color: var(--muted);
+      min-width: 46px;
+    }
+    .detail {
+      position: sticky;
+      top: 16px;
+      overflow: hidden;
+    }
+    .detail-top {
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-top h2 {
+      margin: 10px 0 6px;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    .detail-body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-height: 670px;
+      overflow: auto;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 94px minmax(0, 1fr);
+      gap: 8px 10px;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    .kv dt {
+      color: #8090a1;
+      overflow-wrap: anywhere;
+    }
+    .kv dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+    .detail-section h3 {
+      margin-bottom: 8px;
+      color: #47596c;
+      font-size: 12px;
+    }
+    .detail-section p {
+      font-size: 12px;
+      line-height: 1.8;
+    }
+    .detail-actions {
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      gap: 8px;
+    }
+    .source-link {
+      display: block;
+      font-size: 11px;
+      margin-bottom: 7px;
+      overflow-wrap: anywhere;
+      line-height: 1.7;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .summary-card {
+      padding: 18px;
+    }
+    .summary-card h3 {
+      margin-bottom: 10px;
+    }
+    .summary-card p {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .summary-card .value {
+      font-size: 25px;
+      font-weight: 600;
+      margin: 8px 0;
+    }
+    .catalog {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .tool-card {
+      padding: 18px;
+    }
+    .tool-card .names {
+      margin: 10px 0;
+      font-size: 11px;
+      line-height: 2;
+    }
+    .tool-card p {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.9;
+    }
+    .tool-card footer {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 9px;
+    }
+    .table-wrap {
+      overflow: auto;
+    }
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .matrix th,
+    .matrix td {
+      padding: 12px 14px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+      line-height: 1.8;
+    }
+    .matrix th {
+      background: #f7f9fa;
+      font-weight: 550;
+      color: #66778b;
+    }
+    .matrix td:first-child {
+      min-width: 150px;
+      font-weight: 500;
+    }
+    .log-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 386px;
+      gap: 16px;
+      align-items: start;
+    }
+    .log-filters {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 1fr;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .log-filters .search {
+      grid-column: 1 / -1;
+    }
+    .log-table {
+      width: 100%;
+      border-collapse: collapse;
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .log-table th {
+      text-align: left;
+      font-weight: 500;
+      color: #8290a0;
+      background: #f7f9fb;
+      padding: 10px 12px;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      border-bottom: 1px solid var(--line);
+    }
+    .log-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #eef1f4;
+      color: #5f6f81;
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .log-table tr {
+      cursor: pointer;
+    }
+    .log-table tbody tr:hover {
+      background: #f4f9f8;
+    }
+    .log-table tbody tr.chosen {
+      background: #e9f5f2;
+    }
+    .log-table .event-title {
+      font-size: 12px;
+      color: var(--ink);
+      display: block;
+    }
+    .log-table .event-id {
+      font-size: 10px;
+      color: #8a98a8;
+      display: block;
+      margin-top: 4px;
+    }
+    .log-table .session-pill {
+      padding: 2px 6px;
+      background: #eef2f6;
+      border-radius: 4px;
+    }
+    .log-list {
+      max-height: 560px;
+      overflow: auto;
+    }
+    .log-pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+    }
+    .log-detail {
+      position: sticky;
+      top: 16px;
+      overflow: hidden;
+      min-width: 0;
+    }
+    .tabs {
+      display: flex;
+      gap: 3px;
+      padding: 8px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+    }
+    .tabs button {
+      border: 0;
+      font-size: 11px;
+      padding: 7px 9px;
+      white-space: nowrap;
+      background: transparent;
+    }
+    .tabs button.active {
+      color: var(--primary);
+      background: var(--soft);
+      font-weight: 600;
+    }
+    .log-detail .content {
+      padding: 16px;
+      max-height: min(690px, calc(100vh - 220px));
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
+    }
+    .log-detail .content > * {
+      flex-shrink: 0;
+    }
+    .log-summary {
+      padding: 15px 16px;
+      background: #f9fbfc;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+    .log-summary strong {
+      font-size: 13px;
+    }
+    .empty {
+      padding: 40px 18px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.9;
+    }
+    .source-cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .list {
+      padding-left: 18px;
+      margin: 8px 0 0;
+      font-size: 12px;
+      line-height: 2;
+      color: #5d6d80;
+    }
+    .identity-tree {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      margin-top: 9px;
+    }
+    .identity-tree span {
+      background: #f0f3f6;
+      padding: 4px 7px;
+      border-radius: 5px;
+    }
+    .hidden {
+      display: none !important;
+    }
+    .mobile-nav {
+      display: none;
+    }
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #213d47;
+      color: #fff;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-size: 12px;
+      z-index: 100;
+      box-shadow: 0 5px 30px #0002;
+      max-width: 90vw;
+    }
+    .toast[hidden] {
+      display: none;
+    }
+    .footer-note {
+      font-size: 11px;
+      color: #8592a2;
+      margin-top: 16px;
+      line-height: 1.8;
+    }
+    .status-succeeded,
+    .status-completed {
+      color: var(--primary);
+    }
+    .status-failed,
+    .status-rejected {
+      color: var(--bad);
+    }
+    .status-outcome_unknown {
+      color: var(--purple);
+    }
+    .status-cancelled {
+      color: var(--warn);
+    }
+    .review-reason {
+      border-left: 3px solid #9dbab2;
+      padding: 8px 11px;
+      background: #f4f9f7;
+      font-size: 12px;
+      line-height: 1.85;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .stats-inline {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .stats-inline strong {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .jump-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .hint {
+      font-size: 11px;
+      color: #8190a2;
+      line-height: 1.8;
+    }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+    }
+    .edge-label {
+      font-size: 9px;
+      fill: #506579;
+      paint-order: stroke;
+      stroke: #fbfcfd;
+      stroke-width: 4px;
+    }
+    .edge.input {
+      stroke: #397aab !important;
+      stroke-dasharray: 9 3 2 3;
+    }
+    .graph-legend .input::before {
+      border-top: 2px dashed #397aab;
+    }
+    .edge.parallel {
+      stroke: #8b78b2 !important;
+      stroke-dasharray: 5 4;
+    }
+    .edge.return {
+      stroke: #209789 !important;
+      stroke-dasharray: 5 3;
+    }
+    .edge.observation {
+      stroke: #9aa7b5 !important;
+      stroke-dasharray: 2 4;
+    }
+    .graph-legend {
+      display: flex;
+      gap: 15px;
+      flex-wrap: wrap;
+      padding: 9px 16px;
+      border-top: 1px solid var(--line);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .graph-legend span::before {
+      content: "";
+      display: inline-block;
+      width: 22px;
+      border-top: 2px solid #93a5b6;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    .graph-legend .parallel::before {
+      border-top: 2px dashed #8b78b2;
+    }
+    .graph-legend .return::before {
+      border-top: 2px dashed #209789;
+    }
+    .graph-legend .observation::before {
+      border-top: 2px dotted #9aa7b5;
+    }
+    @media (min-width: 1650px) {
+      .workspace {
+        grid-template-columns: minmax(0, 1fr) 380px;
+      }
+      .main {
+        padding: 30px 38px;
+      }
+      .graph-scroll {
+        height: 660px;
+      }
+      .detail-body {
+        max-height: 745px;
+      }
+    }
+    @media (max-width: 1180px) {
+      .layout {
+        grid-template-columns: 180px minmax(0, 1fr);
+      }
+      .main {
+        padding: 22px 18px;
+      }
+      .workspace,
+      .log-layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .detail,
+      .log-detail {
+        position: static;
+      }
+      .detail-body {
+        max-height: none;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .detail-top {
+        padding: 15px;
+      }
+      .log-detail .content {
+        max-height: 560px;
+      }
+      .graph-scroll {
+        height: 560px;
+      }
+      .sidebar {
+        padding: 20px 9px;
+      }
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 700px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        display: none;
+      }
+      .topbar {
+        padding: 12px 14px;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .brand strong {
+        font-size: 11px;
+      }
+      .topbar .top-sub {
+        display: none;
+      }
+      .main {
+        padding: 19px 12px;
+      }
+      .mobile-nav {
+        display: block;
+        margin-bottom: 16px;
+        width: 100%;
+      }
+      .heading {
+        flex-direction: column;
+        margin-bottom: 16px;
+      }
+      h1 {
+        font-size: 21px;
+      }
+      .factrow {
+        grid-template-columns: 1fr;
+        gap: 7px;
+      }
+      .fact {
+        padding: 10px 12px;
+      }
+      .fact small {
+        display: inline;
+        margin-left: 8px;
+      }
+      .fact .n {
+        display: none;
+      }
+      .catalog,
+      .source-cards,
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+      .controls {
+        gap: 10px;
+      }
+      .field {
+        flex: 1;
+        min-width: 140px;
+      }
+      .field .pillbar button {
+        padding: 7px 8px;
+      }
+      .graph-scroll {
+        height: 480px;
+      }
+      .detail-body {
+        display: flex;
+        max-height: none;
+      }
+      .log-filters {
+        grid-template-columns: 1fr 1fr;
+      }
+      .log-filters .field:last-child {
+        grid-column: 1 / -1;
+      }
+      .log-pagination {
+        flex-wrap: wrap;
+      }
+      .playbar {
+        padding: 10px;
+      }
+      .playbar button {
+        padding: 7px 9px;
+      }
+      .log-layout {
+        gap: 12px;
+      }
+      .topbar .top-actions .tag {
+        display: none;
+      }
+      .log-detail .content {
+        max-height: 600px;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        scroll-behavior: auto !important;
+        transition: none !important;
+      }
+    }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brandmark" aria-hidden="true">K</span><strong>KITE CODE</strong
+        ><span class="divider"></span><span>执行与审批</span
+        ><span class="top-sub muted small"> / 运行链路交互原型</span>
+      </div>
+      <div class="row top-actions">
+        <span class="tag"><span class="dot"></span> 本地离线 · 只读查看</span
+        ><button type="button" id="import-btn" class="small">导入日志包</button
+        ><button type="button" id="export-btn" class="small">导出当前日志</button>
+      </div>
+      <input id="import-file" type="file" accept=".json,application/json" multiple hidden>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <div>
+          <div class="nav-label">RUNTIME MAP</div>
+          <nav class="nav" aria-label="原型视图">
+            <button type="button" data-view="loop" class="active">
+              <span class="nav-symbol">↻</span>项目 Agent Loop<span class="num">00</span>
+            </button>
+            <button type="button" data-view="tool">
+              <span class="nav-symbol">◇</span>单工具子图<span class="num">01</span>
+            </button>
+            <button type="button" data-view="child">
+              <span class="nav-symbol">⑂</span>后台子 Agent<span class="num">02</span>
+            </button>
+            <button type="button" data-view="approval">
+              <span class="nav-symbol">◎</span>审批策略<span class="num">03</span>
+            </button>
+            <button type="button" data-view="catalog">
+              <span class="nav-symbol">▤</span>全部工具路径<span class="num">04</span>
+            </button>
+            <button type="button" data-view="logs">
+              <span class="nav-symbol">≡</span>日志工作台<span class="num">05</span>
+            </button>
+            <button type="button" data-view="boundaries">
+              <span class="nav-symbol">⌘</span>记录与边界<span class="num">06</span>
+            </button>
+          </nav>
+        </div>
+        <div>
+          <div class="nav-label">READING GUIDE</div>
+          <div class="stack" style="padding:0 12px;gap:11px">
+            <span class="small muted">① 点击节点展开当前规则</span
+            ><span class="small muted">② 切换模式推演分支</span
+            ><span class="small muted">③ 关联原执行与模型回执</span>
+          </div>
+        </div>
+        <div class="side-note">
+          <span class="tag real">当前实现</span>
+          <p style="margin-top:9px">
+            流程依据源码与负责文档。<br>图内交互只推演，不执行工具、不提交审批。<br>日志来自已完成的合成项目实测。
+          </p>
+        </div>
+      </aside>
+      <main class="main">
+        <select id="mobile-nav" class="mobile-nav" aria-label="切换视图">
+          <option value="loop">项目 Agent Loop</option>
+          <option value="tool">单工具子图</option>
+          <option value="child">后台子 Agent</option>
+          <option value="approval">审批策略</option>
+          <option value="catalog">全部工具路径</option>
+          <option value="logs">日志工作台</option>
+          <option value="boundaries">记录与边界</option>
+        </select>
+        <div id="content"></div>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script id="evidence-data" type="application/json">
+    "__EVIDENCE_JSON__"
+    </script>
+    <script>
+    /*__LOOP_FLOW_FACTORY__*/
+    (() => {
+      'use strict';
+      const data = JSON.parse(document.getElementById('evidence-data').textContent);
+      const content = document.getElementById('content');
+      const esc = (value) =>
+        String(value ?? '').replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        );
+      const json = (value) => JSON.stringify(value, null, 2);
+      const short = (value, length = 12) =>
+        !value
+          ? '—'
+          : String(value).length > length
+            ? String(value).slice(0, length) + '…'
+            : String(value);
+      const modeNames = { accept_edits: '请求批准', auto: 'Auto', full: 'Full' };
+      const statusNames = {
+        planned: '待派发',
+        dispatching: '正在派发',
+        running: '运行中',
+        succeeded: '成功',
+        failed: '失败',
+        cancelled: '已取消',
+        outcome_unknown: '结果未知',
+        completed: '已完成',
+        accepted: '已受理',
+        applied: '已应用',
+        answered: '已答复',
+        rejected: '已拒绝',
+        pending: '待投递',
+        deferred: '暂缓投递',
+        consumed: '已接纳',
+        suppressed: '已抑制',
+        cancelling: '正在取消',
+      };
+      const repoPrefix = '../../../../';
+      const source = (path, line) =>
+        `<a class="source-link" href="${repoPrefix + esc(path)}" target="_blank" rel="noopener">${esc(path)}${line ? ':' + line : ''} ↗</a>`;
+      const stateBadge = (status) =>
+        `<span class="tag status-${esc(status)}">${esc(statusNames[status] || status || '不可用')}</span>`;
+      const node = (id, title, lane, description, extra = {}) => ({
+        id,
+        title,
+        lane,
+        description,
+        ...extra,
+      });
+      const state = {
+        view: 'loop',
+        loopScenario: 'batch_success',
+        loopActor: 'main',
+        mode: 'auto',
+        actor: 'main',
+        family: 'shell',
+        operation: 'execute',
+        branch: 'approve',
+        childBranch: 'active',
+        step: 0,
+        selectedNode: null,
+        playing: false,
+        caseId: data.cases[0]?.id,
+        session: 'all',
+        category: 'all',
+        eventFilter: 'all',
+        query: '',
+        page: 0,
+        logId: null,
+        detailTab: 'event',
+        showDemo: false,
+        evidenceContext: null,
+        focusReceipt: null,
+        focusSource: null,
+        executionFocus: null,
+        subflowContext: null,
+      };
+      let timer = null;
+      let currentFlow = [];
+      let currentEdges = [];
+      let currentFlowView = 'loop';
+      let toastTimer;
+      const toast = (message) => {
+        const el = document.getElementById('toast');
+        el.textContent = message;
+        el.hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => (el.hidden = true), 3400);
+      };
+      const families = [
+        {
+          id: 'files',
+          name: '工作区文件',
+          entry: 'read_file / write_file / edit_file',
+          kind: '直接 Tool',
+          policy: '只读可走安全读；写入按当前模式。原生路径、基线和发布边界仍检查。',
+          steps: ['核准确路径与文件身份', '读取 / 完整 baseline 比对', '原生发布与实际结果'],
+          proof: '原文件内容、baseline、变更记录；写入失败可能已有空目录或部分作用。',
+          failure: '发布后记录或确认失败，保留 outcome_unknown，不能声称未写。',
+          path: 'packages/agent/src/tools/files/README.md',
+        },
+        {
+          id: 'attachment',
+          name: '附件与 PDF',
+          entry: 'read_file（准确附件引用）',
+          kind: 'Tool → PDF / 读取 Worker',
+          policy: '选中附件范围、原件 hash/size 与只读边界；Worker 不等于独立审批 Job。',
+          steps: ['核所选消息附件与原件', '文本读取 / PDF 页处理', '正文或页图 Artifact'],
+          proof: '完整原件身份、准确页号 / 文本范围、Artifact 引用。',
+          failure: '上传原件只读；错误引用、未知或缺失正文不能补造。',
+          path: 'packages/agent/src/tools/files/README.md',
+        },
+        {
+          id: 'output',
+          name: '会话输出文件',
+          entry: 'write_file / edit_file',
+          kind: 'Tool → 文件发布 / 登记',
+          policy: '使用实际登记的 Session 输出范围；能力允许写入不等于用户授权任意目标。',
+          steps: ['核当前输出目录与范围', '发布实际文件', '登记输出与 Artifact'],
+          proof: '物理文件和原登记记录；两者的完成事实分别核实。',
+          failure: '已经写入但登记失败不能返回“无写入”。',
+          path: 'packages/agent/src/tools/files/README.md',
+        },
+        {
+          id: 'shell',
+          name: 'Shell 与后台进程',
+          entry: 'shell_execute / launch / read / wait / stop',
+          kind: 'Tool → 独立 shell.command Job',
+          policy: 'Tool 与 Job 保留各自派发核验；Auto 对准确同一 Shell 语义复用审核。workspace_write / none 是能力上限，不证明命令写入。',
+          steps: [
+            '确保准确 shell.command Job',
+            'Job 复核原权限与可复用语义审核',
+            '启动原生进程与监督',
+            '原序号 stdout / stderr / 停止证明',
+          ],
+          proof: '原 Job 终态、exitCode、输出及停止确认。launch 的 accepted 只证明受理。',
+          failure: 'read / wait 不重启进程；取消不等于停止，unknown 不可重放。',
+          path: 'packages/agent/src/tools/shell.README.md',
+        },
+        {
+          id: 'browser',
+          name: '内置浏览器',
+          entry: 'browser_execute（原子依赖内部隐藏）',
+          kind: '代码 VM + child Tool + Browser Job',
+          policy:
+            '准确内置 Browser 在三种模式免普通审核 / 人审；页面身份、控制权、取消和未知结果仍核实。',
+          steps: [
+            '取得本 Run 代码环境',
+            '页面 API 作为独立 child Tool',
+            '绑定 browser.session 与页面控制',
+            '保存前序动作、输出及批次终态',
+          ],
+          proof: 'VM、Browser Job、Main 网页是三种寿命；代码结束不等于网页关闭。',
+          failure: 'catch 不能绕过失败闩锁；已完成输入不会被后续错误撤销。',
+          path: 'packages/agent/src/tools/browser/README.md',
+        },
+        {
+          id: 'web',
+          name: '网页读取',
+          entry: 'web_fetch',
+          kind: 'Tool → 网络 / 提取 Worker',
+          policy: '普通网络审批在 DNS / 连接前；获批仍检查每跳 URL、全部 DNS 地址和 SSRF 边界。',
+          steps: ['检查 URL 与目的地', '建立实际请求 / 逐跳复核', '被动提取正文与 Artifact'],
+          proof: '准确 HTTP 状态、可核实正文和截断事实；失败不等于请求未发送。',
+          failure: '401 / 404 / 429 / 503 保留状态；禁用目的地不能换工具绕过。',
+          path: 'packages/agent/src/tools/web-fetch/README.md',
+        },
+        {
+          id: 'skills',
+          name: '技能知识读取',
+          entry: 'load_skill / read_skill_resource',
+          kind: '只读 Tool',
+          policy: '核可信目录、准确版本、声明资源与所需 capability；加载知识不授执行权限。',
+          steps: ['核可信目录及版本', '核声明资源 / capability', '读取完整知识文本'],
+          proof: '原目录、版本和完整声明内容；不会自动执行技能脚本。',
+          failure: '版本改变、资源未声明或能力缺失给有限可读失败。',
+          path: 'packages/agent/src/skills/README.md',
+        },
+        {
+          id: 'question',
+          name: '普通问题',
+          entry: 'ask_user',
+          kind: 'Tool → Question Interaction',
+          policy: '问题取得信息，不签发执行 grant；Full 也不替用户作信息答复。',
+          steps: ['创建原 Question', '用户答复 / 取消信息', '核原 Interaction 与 revision'],
+          proof: '原问题与准确答案；取消信息不等于取消整轮。',
+          failure: '迟到或不匹配的答复不能接到后来调用；根问题不下放子角色。',
+          path: 'packages/agent/src/tools/ask-user/README.md',
+        },
+        {
+          id: 'planning',
+          name: '计划与 Plan 文件',
+          entry: 'read_plan / write_plan / request_plan_review / update_plan_progress',
+          kind: 'Tool → 可独立 planning.write Action',
+          policy:
+            '计划审阅与工具权限分开。file edit 命中准确 Plan 时委派独立 Action；公开记录仍 kind:job。',
+          steps: [
+            '核 Plan 身份 / version / digest',
+            '独立 Action 授权与 publication pending',
+            '实际文件发布',
+            '不可变版本与 current CAS',
+          ],
+          proof: '真实文件、版本、批准及步骤引用的原 receipt；不是模型声称完成。',
+          failure: '发布后 CAS / 读回失败保 unknown，旧计划批准不覆盖新版本。',
+          path: 'packages/agent/src/business/planning/README.md',
+        },
+        {
+          id: 'mcp',
+          name: 'MCP 来源、目录与普通工具',
+          entry: 'list/connect/refresh/search + resources/prompts + 动态 Tool',
+          kind: '普通 Tool → 受监督 RPC',
+          policy:
+            '按准确冻结 schema、连接 generation 及当前权限；远端 annotations 和文字不授予能力。',
+          steps: ['核来源、目录与 schema', '准确 RPC 一次', '保 content 与 structuredContent'],
+          proof: '原连接、远端调用及完整结构化内容；搜索不完整不冒充零匹配。',
+          failure: '已发送后丢失确认保 unknown，不能重连重发同一效果。',
+          path: 'packages/agent/src/mcp/README.md',
+        },
+        {
+          id: 'mcp_task',
+          name: 'MCP 远端后台 Task',
+          entry: '动态 MCP Tool → <toolId>.task',
+          kind: 'Tool → detached Job',
+          policy: 'Job 单独派发后发送一次 task-form RPC，随后只观察原 taskId。',
+          steps: [
+            '确保原 detached Job',
+            'Job 独立审批 / RPC 一次',
+            '观察原 taskId 与 statusMessage',
+            'idle 暂存，下一普通检查点投递',
+          ],
+          proof: 'accepted、远端完成状态、原输出与本地 delivery 分别记录。',
+          failure: '没有 agent_completion，不因 idle 终态自动唤醒父模型。',
+          path: 'packages/agent/src/mcp/README.md',
+        },
+        {
+          id: 'task',
+          name: '子 Agent 六类协作',
+          entry: 'spawn / message / follow_up / events / list / interrupt',
+          kind: 'Tool → agent carrier → child Session',
+          policy: '父子策略、当前根模式及可信角色交集；子任务复用普通 Loop。',
+          steps: [
+            '原事务确保 child 与 carrier',
+            '独立 child Run / 普通工具链',
+            '等待 attached 执行结算',
+            '资格复核并交付 Source',
+          ],
+          proof: '稳定 agent_id 与当前 carrier / Run；旧完成结果不能冒充新轮完成。',
+          failure: '消息只排队；follow-up 才可开启 idle 新轮。观察超时不停止子任务。',
+          path: 'packages/agent/src/extensions/task/README.md',
+        },
+        {
+          id: 'execution-evidence',
+          name: '执行证据读取',
+          entry: 'read_execution_evidence / execution_evidence.read',
+          kind: '当前任务只读 Tool',
+          safe: true,
+          policy: '绑定实际当前Session、Run和读取调用，核原Tool/Job及准确父链；不接受外来任务或私有Model。',
+          steps: ['列表按真实固定范围分页，next_cursor=null才读完', '按准确execution_id读取原公开结果、Shell ID与已记录checkpoint', '只恢复证据，不重跑操作，不产生新授权'],
+          proof: 'Files目标和checkpoint只证明记录过；Shell缺逐文件前后像，不能凭累计git diff断言改动归属。',
+          failure: '错误scope、游标或原身份以可读失败返回；没有原回执时保持未知，不换key重跑。',
+          path: 'packages/agent/src/business/execution-evidence/README.md',
+        },
+        {
+          id: 'extension',
+          name: '第三方扩展',
+          entry: '当前实际注册的 Tool / Job / Action',
+          kind: '统一受控执行边界',
+          policy: '按准确 owner、kind、ID 与版本查注册；同名、描述及远端元数据不授能力。',
+          steps: ['核准确注册与 schema', '同一权限 / 条件 / 资源链', '原执行与结果接纳'],
+          proof: '原注册、输入摘要、执行身份及可信公开回执。',
+          failure: '未知定义 / 版本拒绝；原异常正文不自动作为公开原因。',
+          path: 'packages/agent/src/model-tools.README.md',
+        },
+      ];
+      const operations = {
+        'execution-evidence': [{ id: 'read', name: 'read_execution_evidence', definition: 'execution_evidence.read', safe: true, steps: ['核当前任务与原执行身份', '真实分页或准确原结果详情', '返回原公开证据及完整性／未知状态'] }],
+        files: [
+          {
+            id: 'read',
+            name: 'read_file',
+            definition: 'files.read',
+            safe: true,
+            steps: [
+              '核准确路径与文件身份',
+              '按范围读取并返回 baseline',
+              '返回真实内容 / 完整性事实',
+            ],
+          },
+          {
+            id: 'write',
+            name: 'write_file',
+            definition: 'files.write',
+            steps: [
+              '核准确目标 / 当前输出范围',
+              '创建、覆盖策略与原生发布',
+              '登记原结果与 Artifact',
+            ],
+          },
+          {
+            id: 'edit',
+            name: 'edit_file',
+            definition: 'files.edit',
+            steps: [
+              '核完整 baseline / 精确目标',
+              '普通文件原生编辑；Plan 目标转独立 Action',
+              '发布与原记录确认',
+            ],
+          },
+        ],
+        shell: [
+          {
+            id: 'execute',
+            name: 'shell_execute',
+            definition: 'shell.execute',
+            job: true,
+            steps: [
+              '确保原 shell.command Job',
+              'Job 独立派发并启动进程',
+              '等待实际终态与停止证明',
+              '返回原序号 stdout / stderr',
+            ],
+          },
+          {
+            id: 'launch',
+            name: 'shell_launch',
+            definition: 'shell.launch',
+            job: true,
+            steps: [
+              '确保原 shell.command Job',
+              'Job 独立授权后启动',
+              '返回 accepted / 原 Shell handle',
+            ],
+            proof: 'accepted 只证明受理；按原 handle read / wait / stop。',
+          },
+          {
+            id: 'read',
+            name: 'shell_read',
+            definition: 'shell.read',
+            safe: true,
+            steps: [
+              '核原 Shell handle 与归属',
+              '只读原 Job 状态与固定上界输出',
+              '返回原序号 / 缺失区间',
+            ],
+            proof: '不创建或重启 Job；Tool 成功不代表原 Job 成功。',
+          },
+          {
+            id: 'wait',
+            name: 'shell_wait',
+            definition: 'shell.wait',
+            safe: true,
+            steps: [
+              '核原 Shell handle',
+              '有限、可取消等待原 Job',
+              '超时返回 timedOut 与当前真实状态',
+            ],
+            proof: '等待超时不停止原 Job，不重新启动进程。',
+          },
+          {
+            id: 'stop',
+            name: 'shell_stop',
+            definition: 'shell.stop',
+            steps: [
+              '核原 Shell handle 与新取消意图 ID',
+              '请求取消准确原 Job',
+              '读取原状态与停止确认',
+            ],
+            proof: 'cancelRequested 不等于进程组已停止，不等于回滚。',
+          },
+        ],
+        task: [
+          {
+            id: 'spawn',
+            name: 'spawn_agent',
+            definition: 'task.spawn',
+            internal: true,
+            steps: [
+              '核可信原封不动的默认 preset',
+              '事务确保 child / carrier / 完成订阅',
+              '返回 accepted / agent_id / queued',
+            ],
+            proof:
+              '默认声明匹配才是内部登记快速通道；自定义或覆写角色重新走普通策略。accepted 不证明已激活或完成。',
+          },
+          {
+            id: 'message',
+            name: 'send_agent_message',
+            definition: 'task.message',
+            steps: ['核直接父子与原接收目标', '持久排队完整正文', '活动检查点接纳；idle 保留邮件'],
+            proof: '普通消息不建立新 Run，发送、接收和 prepared 是不同事实。',
+          },
+          {
+            id: 'follow_up',
+            name: 'follow_up_agent',
+            definition: 'task.follow_up',
+            steps: [
+              '事务选择准确当前 carrier',
+              'queued / running 返回 steer',
+              'idle 在原 Session 确保唯一后继轮',
+            ],
+            proof: '最终目标已变化返回 target_changed；旧引导不能投给后来工作。',
+          },
+          {
+            id: 'events',
+            name: 'wait_agent_events',
+            definition: 'task.events',
+            safe: true,
+            steps: [
+              '核原事件游标 / 固定边界',
+              '显式 0 快照；省略则有限可取消等待',
+              '返回摘要、seq / next_seq',
+            ],
+            proof: '观察不消费结果，不取消 child；cursor_expired 保留恢复边界。',
+          },
+          {
+            id: 'list',
+            name: 'list_agents',
+            definition: 'task.list',
+            safe: true,
+            steps: [
+              '核整体协作者归属',
+              '按稳定 child Session 与固定上界分页',
+              '分别返回当前工作 / 最近完整结果',
+            ],
+            proof: '上一轮终态不冒充当前轮完成，读取不改变接纳事实。',
+          },
+          {
+            id: 'interrupt',
+            name: 'interrupt_agent',
+            definition: 'task.interrupt',
+            steps: ['首次受理选定准确 carrier', '请求取消所选原工作', '返回受理与实际可核实状态'],
+            proof: '迟到中断不改投新 carrier；接受取消不证明停止。',
+          },
+        ],
+        planning: [
+          {
+            id: 'read',
+            name: 'read_plan',
+            definition: 'planning.read',
+            safe: true,
+            steps: ['核当前 Plan 指针', '读取原不可变版本 / digest', '返回当前步骤及真实批准事实'],
+          },
+          {
+            id: 'write',
+            name: 'write_plan',
+            definition: 'planning.write',
+            internal: true,
+            steps: [
+              'Tool 核原 Plan 写入意图',
+              'publication pending / 实际文件发布',
+              '保存不可变版本 / current CAS',
+            ],
+          },
+          {
+            id: 'review',
+            name: 'request_plan_review',
+            definition: 'planning.review',
+            internal: true,
+            steps: [
+              '冻结准确 Plan 版本 / digest',
+              '创建计划审阅 Interaction',
+              '接纳准确版本的审阅答案',
+            ],
+            proof: '计划审阅不是执行授权；修改版本后旧批准不覆盖新版本。',
+          },
+          {
+            id: 'update',
+            name: 'update_plan_progress',
+            definition: 'planning.update',
+            internal: true,
+            steps: [
+              '核原 Plan 版本与步骤引用',
+              '核真实 receipt / 结果证据',
+              '保存进度版本与原引用',
+            ],
+            proof: '模型声称完成不替代真实执行结果。',
+          },
+        ],
+        skills: [
+          { id: 'load', name: 'load_skill', definition: 'skills.load', safe: true },
+          {
+            id: 'resource',
+            name: 'read_skill_resource',
+            definition: 'skills.resource',
+            safe: true,
+          },
+        ],
+        mcp: [
+          {
+            id: 'sources',
+            name: 'list_mcp_sources',
+            definition: 'mcp.sources.list',
+            safe: true,
+            steps: ['读取有限来源目录', '返回准确来源 / 状态 / 有限身份'],
+            proof: '只读取来源，不建立连接，不是 authority。',
+          },
+          {
+            id: 'search',
+            name: 'search_mcp_tools',
+            definition: 'mcp.tools.search',
+            safe: true,
+            steps: ['只搜索本 Run 已选冻结目录', '返回可用匹配 / complete 事实'],
+            proof: '不连接或重新发现；不完整不能冒充无匹配。',
+          },
+          {
+            id: 'connect',
+            name: 'connect_mcp_server',
+            steps: [
+              '核来源选择与准确配置',
+              '独立受控连接 Job / 必要 Action',
+              '发布原 generation 与冻结目录',
+            ],
+            proof: '连接、来源批准和认证分别核实，管理端口不执行业务 RPC。',
+          },
+          {
+            id: 'refresh',
+            name: 'refresh_mcp_catalogue',
+            steps: ['核原 scope 与当前连接', '显式刷新目录 / generation', '下一安全边界装配新快照'],
+            proof: '旧定义失效后拒绝，不在原调用中静默热替换。',
+          },
+          {
+            id: 'resources',
+            name: 'list_mcp_resources / read_mcp_resource',
+            steps: [
+              'list 核连接 / 代次；read 另核目录 / descriptor / URI',
+              '准确 resources.list 或 resources.read RPC',
+              '完整正文作为正式工具结果',
+            ],
+            proof: '资源 URI 和目录摘要不授读取权限。',
+          },
+          {
+            id: 'prompts',
+            name: 'list_mcp_prompts / get_mcp_prompt',
+            steps: [
+              'list 核连接 / 代次；get 另核原目录与准确 prompt',
+              '准确 prompts.list 或 prompts.get RPC',
+              '保留原 arguments / 完整正文',
+            ],
+            proof: '远端 prompt 是数据，不覆盖可信系统或权限。',
+          },
+          {
+            id: 'dynamic',
+            name: 'mcp_<server>_<remote>_<hash8>',
+            steps: [
+              '核冻结 schema / generation',
+              '准确 tools.call 一次',
+              '保 content / structuredContent 与验证结果',
+            ],
+          },
+        ],
+      };
+      const operationList = () => operations[state.family] || [];
+      const family = () => {
+        const base = families.find((f) => f.id === state.family) || families[3];
+        const op = operationList().find((o) => o.id === state.operation) || operationList()[0];
+        return {
+          ...base,
+          ...op,
+          id: base.id,
+          name: base.name,
+          operationId: op?.id,
+          entry: op?.name || base.entry,
+        };
+      };
+      function availableBranches() {
+        const f = family();
+        return Object.entries(branches).filter(([k]) => {
+          if (
+            ['ask_user', 'unavailable', 'no_checker', 'auto_timeout', 'auto_reuse'].includes(k) &&
+            (state.mode !== 'auto' ||
+              f.safe ||
+              f.internal ||
+              ['browser', 'question', 'attachment'].includes(f.id))
+          )
+            return false;
+          if (
+            k === 'reject' &&
+            (state.mode === 'full' ||
+              f.safe ||
+              f.internal ||
+              f.id === 'browser' ||
+              f.id === 'question')
+          )
+            return false;
+          if (
+            k === 'job_reject' &&
+            (state.mode !== 'accept_edits' || !(f.job || f.id === 'mcp_task'))
+          )
+            return false;
+          if (
+            [
+              'grant_save',
+              'grant_reuse',
+              'grant_other_session',
+              'grant_revoked',
+              'injected_pair',
+            ].includes(k) &&
+            !(state.mode === 'accept_edits' && f.id === 'shell' && f.job)
+          )
+            return false;
+          if (['auto_timeout', 'auto_reuse'].includes(k) && !(f.id === 'shell' && f.job)) return false;
+          if (k === 'manual_ceiling' && ['accept_edits'].includes(state.mode)) return false;
+          if (
+            k === 'observed_failed' &&
+            !(f.id === 'shell' && ['read', 'wait', 'stop'].includes(f.operationId))
+          )
+            return false;
+          if (k === 'wait_timeout' && !(f.id === 'shell' && f.operationId === 'wait')) return false;
+          if (k === 'question_cancel' && f.id !== 'question') return false;
+          if (k === 'plan_not_approved' && !(f.id === 'planning' && f.operationId === 'review'))
+            return false;
+          if (k === 'plan_absent' && !(f.id === 'planning' && f.operationId === 'read'))
+            return false;
+          if (k === 'foreground_timeout' && !(f.id === 'shell' && f.operationId === 'execute'))
+            return false;
+          if (k === 'safe_read' && !(f.id === 'shell' && f.job)) return false;
+          if (k === 'plan_edit' && !(f.id === 'files' && f.operationId === 'edit')) return false;
+          if (k === 'workspace' && !((f.id === 'shell' && f.job) || (f.id === 'files' && !f.safe)))
+            return false;
+          return true;
+        });
+      }
+      function normalizeBranch() {
+        if (!availableBranches().some(([id]) => id === state.branch)) state.branch = 'approve';
+      }
+
+      const commonRefs = [
+        { path: 'packages/agent/src/execution/index.ts', line: 710 },
+        { path: 'packages/agent/src/execution/interactions.ts', line: 273 },
+      ];
+      function guardNodes() {
+        return [
+          node('intent', '登记准确调用', 1, '持久化原意图，再考虑是否执行。', {
+            raw: 'planned',
+            fields: {
+              kind: 'tool',
+              definitionId: family().definition || family().entry,
+              definitionVersion: '当前捕获版本',
+              session: state.actor === 'main' ? '主 Session' : '独立 child Session',
+              inputDigest: '原输入摘要',
+            },
+            refs: commonRefs,
+          }),
+          node(
+            'hard',
+            '检查硬边界',
+            2,
+            '当前信任、准确注册、定义版本、权限交集、必要条件与取消状态。Full 仍受这些边界约束。',
+            {
+              raw: 'planned',
+              facts: ['同名不等于相同能力。', '工具目录出现不等于获得权限。'],
+              refs: [{ path: 'packages/agent/src/permissions/index.ts', line: 246 }],
+            },
+          ),
+        ];
+      }
+      function policyNodes(prefix = '') {
+        const id = (x) => prefix + x;
+        if (state.branch === 'grant_reuse')
+          return [
+            node(
+              id('grant_lookup'),
+              '查原 Session 的命令批准',
+              2,
+              '仅复用同 Store、主体、实际 Session、Workspace、kind、定义版本与相同命令摘要的原人类授权；核 policy revision 与当前撤销 epoch。',
+              {
+                raw: 'planned',
+                recordKind: 'tool',
+                fields: { grant: 'same_command', scope: '只覆盖本 Tool；内部 Job 自行核准' },
+                refs: [
+                  { path: 'packages/agent/src/execution/interactions.ts', line: 316 },
+                  { path: 'packages/agent/src/storage/sqlite/permission-grants.ts', line: 199 },
+                ],
+              },
+            ),
+            node(
+              id('grant_match'),
+              '准确原批准匹配',
+              2,
+              '跳过本 Tool 的重复答复；最终 dispatch 仍核当前策略、批准与取消。不能借此批准另一个 Job 或另一个 Session。',
+              { raw: 'planned', recordKind: 'tool', refs: commonRefs },
+            ),
+          ];
+        const result = basePolicyNodes(prefix);
+        if (['grant_other_session', 'grant_revoked'].includes(state.branch))
+          result.unshift(
+            node(
+              id('grant_miss'),
+              state.branch === 'grant_revoked'
+                ? '原批准已撤销／策略改变'
+                : '当前 Session 不是原授权来源',
+              2,
+              state.branch === 'grant_revoked'
+                ? 'Session clear 的 CAS 提升原撤销 epoch。未派发的旧证明失效，按当前模式重新审查；已经发生的作用不回滚。'
+                : 'child A 获得的会话批准不能由父、兄弟或孙复用。展示卡位于父窗口也不改变授权 Session；当前调用必须取得自己的批准。',
+              {
+                raw: 'planned',
+                recordKind: 'tool',
+                refs: [
+                  { path: 'packages/agent/src/storage/sqlite/permission-grants.ts', line: 235 },
+                  { path: 'packages/agent/src/storage/sqlite/permission-grants.ts', line: 306 },
+                ],
+              },
+            ),
+          );
+        if (state.branch === 'injected_pair')
+          result.unshift(
+            node(
+              id('injected'),
+              '当前模式 AND 显式注入策略',
+              2,
+              '如当前实现所示：双方都需批准时，通用 injected 交集只合并 request，丢失共同 grants / commandDigest，卡片收窄为单次。未注入或一方已允许时不触发。',
+              {
+                raw: 'planned',
+                recordKind: 'tool',
+                tone: 'warn',
+                fields: {
+                  currentImplementation: '会话批准复用能力缺失，可能重复人审',
+                  childIntersection: 'Runtime.childPermissions 是另一条保留共同选项的路径',
+                },
+                refs: [
+                  { path: 'packages/agent/src/permissions/inheritance.ts', line: 53 },
+                  { path: 'apps/service/src/permission-configuration.ts', line: 480 },
+                  { path: 'packages/agent/src/runtime.ts', line: 1431 },
+                ],
+              },
+            ),
+          );
+        if (state.branch === 'grant_save') {
+          const answer = result.find((n) => n.id === id('answer'));
+          if (answer) {
+            answer.title = '准确接纳本次会话批准';
+            answer.description =
+              '只接纳原卡实际提供的 same_command 答案，Core 核原 Interaction / revision 后保存 grant；保存答案本身还不是可用授权。';
+            answer.fields = {
+              grant: 'same_command',
+              sourceSession: state.actor === 'main' ? '本根 Session' : '原 child Session',
+              presentation: '可在父窗口显示，不能跨来源复用',
+            };
+            answer.refs = [
+              { path: 'packages/agent/src/storage/sqlite/permission-grants.ts', line: 156 },
+            ];
+          }
+        }
+        if (state.branch === 'mode_change') return result.filter((n) => n.id !== id('answer'));
+        if (state.branch === 'manual_ceiling' && !result.some((n) => n.stop)) {
+          const allow = result.find((n) => n.id === id('allow'));
+          if (allow)
+            allow.description =
+              'Auto 仅满足当前审核方。check.requireApproval=true 表示另一可信策略仍要求人工，不直接派发。';
+          result.push(
+            node(
+              id('ceiling'),
+              '独立人工要求尚未满足',
+              2,
+              'Full／安全读／内置 Browser 豁免只满足其普通策略；显式注入的人工 ceiling 仍保留。Auto approve_once 保存 check proof 后继续原人工卡。',
+              {
+                raw: 'planned',
+                recordKind: 'tool',
+                fields: { requireApproval: true },
+                refs: [
+                  { path: 'packages/agent/src/execution/interactions.ts', line: 396 },
+                  { path: 'packages/agent/src/permissions/inheritance.ts', line: 67 },
+                ],
+              },
+            ),
+            node(
+              id('ceiling_human'),
+              '等待共同范围的原人工卡',
+              0,
+              '这张卡满足另一权限来源，不是 Auto 技术失败回退，也不是审批模型自己扩张范围。',
+              { raw: 'planned', recordKind: 'tool', derived: '等待人工审批', refs: commonRefs },
+            ),
+            node(
+              id('ceiling_answer'),
+              '接纳原人工证明',
+              2,
+              '审核证明、人工证明和最终输入绑定均保持；任何一方失效都不能派发。',
+              { raw: 'planned', recordKind: 'tool', refs: commonRefs },
+            ),
+          );
+        }
+        return result;
+      }
+      function basePolicyNodes(prefix = '') {
+        const id = (x) => prefix + x;
+        if (state.branch === 'hard_denial')
+          return [
+            node(
+              id('deny'),
+              '硬条件不成立',
+              2,
+              '保存可公开的拒绝原因。三种模式都不能覆盖硬边界。',
+              { raw: 'failed', tone: 'bad', stop: true, refs: commonRefs },
+            ),
+          ];
+        if (state.family === 'browser')
+          return [
+            node(
+              id('exempt'),
+              '准确内置 Browser',
+              2,
+              '三模式免普通 Auto / 人工审批；页、任务与控制权核查仍执行。',
+              {
+                raw: 'planned',
+                facts: ['仅准确内置能力匹配该分支。', '不是按名字给自定义同名工具豁免。'],
+                refs: [{ path: family().path, line: 27 }],
+              },
+            ),
+          ];
+        if (
+          family().safe ||
+          state.family === 'question' ||
+          state.family === 'attachment' ||
+          state.branch === 'safe_read'
+        )
+          return [
+            node(
+              id('safe'),
+              '安全读快速通道',
+              2,
+              '满足可信 safeRead 且 effects 全为 read，核当前准确范围后直接允许。Shell 仅有限字面量检索可获此证明；其他命令重新走普通策略。',
+              {
+                raw: 'planned',
+                facts: [
+                  '没有快速证明不等于命令被禁止。',
+                  '只读子角色没有 rg / ls / pwd 三命令硬门禁。',
+                ],
+                refs: [
+                  { path: 'packages/agent/src/permissions/index.ts', line: 294 },
+                  { path: 'packages/agent/src/permissions/shell-search.ts', line: 65 },
+                ],
+              },
+            ),
+          ];
+        if (family().internal)
+          return [
+            node(
+              id('internal'),
+              '可信内部登记快速通道',
+              2,
+              '仅准确已注册的内部 record-only 操作直接允许。默认 spawn 须匹配完整可信角色声明；Planning 内部登记也不批准实际文件 Action。',
+              {
+                raw: 'planned',
+                refs: [
+                  { path: 'packages/agent/src/permissions/task-request.ts', line: 6 },
+                  { path: 'packages/agent/src/permissions/capabilities.ts', line: 158 },
+                ],
+              },
+            ),
+          ];
+        if (state.mode === 'accept_edits' && state.branch === 'workspace')
+          return [
+            node(
+              id('workspace'),
+              '工作区范围直接允许',
+              2,
+              '当前操作满足 read / workspace_write 或明确 filesystem:workspace_write + network:none 范围，普通策略直接允许；执行仍在原沙箱上限内。',
+              {
+                raw: 'planned',
+                refs: [{ path: 'packages/agent/src/permissions/index.ts', line: 300 }],
+              },
+            ),
+          ];
+        if (state.mode === 'full')
+          return [
+            node(
+              id('full'),
+              'Full 普通策略允许',
+              2,
+              '跳过普通逐项审批；独立强制人工约束、保护资源与执行系统限制仍保持。',
+              {
+                raw: 'planned',
+                facts: [
+                  '不会让普通问题或计划审阅自动得到答案。',
+                  '已派发的范围不因后来切换模式而热修改。',
+                ],
+                refs: [{ path: 'packages/agent/src/permissions/index.ts', line: 288 }],
+              },
+            ),
+          ];
+        if (state.mode === 'accept_edits' && !['reject', 'job_reject'].includes(state.branch))
+          return [
+            node(
+              id('manual_policy'),
+              '普通策略判断',
+              2,
+              '本路径选择需要批准的外部范围；工作区内符合当前基线的调用可选择工作区分支直接允许。按实际 effects / scope 决策。',
+              {
+                raw: 'planned',
+                refs: [{ path: 'packages/agent/src/permissions/index.ts', line: 301 }],
+              },
+            ),
+            node(
+              id('human'),
+              '等待原卡答复',
+              0,
+              '本演示选择的是需要批准的范围。答复绑定原 Store、来源 Session、输入、attempt 与 revision。',
+              {
+                raw: 'planned',
+                derived: '等待人工审批',
+                facts: [
+                  'presentationSessionId 是展示 / 答复位置。',
+                  'card.sessionId 是真正发起与授权来源。',
+                ],
+                refs: [{ path: 'packages/agent/src/storage/types.ts', line: 700 }],
+              },
+            ),
+            node(
+              id('answer'),
+              '准确批准仅此次',
+              2,
+              '接纳原答案。批准没有改写原参数，也没有批准后来另一条 Job。',
+              {
+                raw: 'planned',
+                refs: [{ path: 'packages/agent/src/execution/interactions.ts', line: 440 }],
+              },
+            ),
+          ];
+        if (
+          state.mode === 'accept_edits' &&
+          ['reject', 'job_reject'].includes(state.branch) &&
+          !prefix
+        )
+          return [
+            node(
+              'human',
+              '人工 Tool 决定',
+              0,
+              '准确外部操作提出批准申请。Tool 层与 Job 层是不同的原申请。',
+              {
+                raw: 'planned',
+                derived: '等待人工审批',
+                refs: [{ path: 'packages/agent/src/execution/interactions.ts', line: 440 }],
+              },
+            ),
+            node(
+              'answer',
+              state.branch === 'reject' ? '用户拒绝 Tool' : '用户批准 Tool',
+              2,
+              state.branch === 'reject'
+                ? 'Tool 未派发，Shell Job 不会建立。模型收到拒绝后应继续已授权部分，不能绕过同一拒绝。'
+                : '这次批准仅覆盖原 Tool；内部 Job 还须独立授权。',
+              {
+                raw: state.branch === 'reject' ? 'failed' : 'planned',
+                tone: state.branch === 'reject' ? 'bad' : undefined,
+                stop: state.branch === 'reject',
+                refs: commonRefs,
+              },
+            ),
+          ];
+        if (state.mode === 'auto') {
+          if (state.branch === 'auto_reuse') return [node(id('review_reuse'), '复用仍有效的原批准', 2, '准确同一授权范围与语义绑定、当前 policy / freshness / 撤销事实均成立时复用。Shell Tool → Job 共享一个语义审核；Job 仍独立核派发资格，不重复请求审核模型。不能跨来源 Session 或范围借用。', { raw: 'planned', fields: { reason: 'reused_approval / parent_review', policyEvidenceId: '准确原证据 ID（此图无真实 ID）' }, refs: commonRefs })];
+          const nodes = [
+            node(
+              id('check'),
+              'Auto：准备、共享队列与调用',
+              2,
+              '有效原批准无法复用时，内部 tools-free Model 审核准确目标、当前 policy 与最小授权材料；不复制业务模型完整消息窗口。原任务、已生效纠正／委派和只读角色指导保持真实来源，助手计划与大段历史输出不授予权限。支持输出参数的接口使用审核专用最多256 token，原设置更小时保留；当前登录渠道不支持硬上限，仅应用短理由和总期限。默认 3000ms 总预算从准备开始，涵共享 Model FIFO 排队和调用；它不是子 Agent，也没有专用扩容池。',
+              {
+                raw: 'planned',
+                derived: '自动审核中',
+                fields: {
+                  output: '有效模型输出仅 decision + reason；reason 一句、最多30词',
+                  outputLimit: '支持接口 min(原上限,256)；登录渠道未提供该硬限',
+                  truncated: 'length → authorization_check_output_limit；已有批准JSON也不派发',
+                  context: '准确原任务／已生效纠正与委派／角色指导／必要事实；完整原件仍封存',
+                  budgetMs: 3000,
+                  timing: 'prepareMs / queueMs / providerMs / totalMs（须真实观测）',
+                  risk: '根据实际后果评估（说明维度，非持久评分）',
+                  authorization: '依据用户任务与现行限制评估（说明维度）',
+                },
+                refs: [
+                  { path: 'packages/agent/src/execution/authorization-check-feedback.ts', line: 5 },
+                ],
+              },
+            ),
+          ];
+          const branch = state.branch;
+          if (branch === 'auto_timeout')
+            nodes.push(node(id('review_timeout'), '审核超时，默认放行（工具策略兜底）', 2, '保留 timeout_continue，结束本次语义审核等待，交工具原正常执行策略；不额外缩减原请求 filesystem 或 network 范围，显式外写或 internet 仍须满足当前工具策略、父子上限、保护资源和独立人工要求。请求与有效范围分别记录；这是超时默认放行，不伪造审核模型批准，也不记作语义拒绝或审核技术失败，不能越过原硬边界。已落定reject不由late结果改写；不宣称新调用跨工具等价效果均可技术识别。已落定reject不能被late结果改写；独立人工要求与硬拒绝仍执行。新调用跨工具的业务等价性没有额外技术识别保证。晚到结果只保观察，不能覆盖已定超时、重发调用或改已派发范围；独立人工 ceiling 仍须满足。', { raw: 'planned', tone: 'warn', fields: { reason: 'timeout_continue', requestedScope: '本次原请求 filesystem / network', effectiveScope: '按工具正常策略、父子上限和宿主硬边界核实', lateReview: '不得改变已定结果' }, refs: [{ path: 'packages/agent/src/runtime.ts', line: 1217 }, { path: 'packages/agent/src/storage/sqlite/authorization-policy-evidence.ts', line: 378 }] }));
+          else if (branch === 'unavailable')
+            nodes.push(
+              node(
+                id('unavailable'),
+                '审核技术失败',
+                2,
+                '已配置审核器未形成有效决定。返回有限技术原因，工具未执行；不转额外人工审批。',
+                {
+                  raw: 'failed',
+                  tone: 'bad',
+                  stop: true,
+                  fields: {
+                    status: 'unavailable',
+                    decision: '没有有效决定',
+                    approval: '没有批准 / 拒绝决定',
+                  },
+                  refs: [
+                    {
+                      path: 'packages/agent/src/execution/authorization-check-feedback.ts',
+                      line: 33,
+                    },
+                  ],
+                },
+              ),
+            );
+          else if (branch === 'reject')
+            nodes.push(
+              node(
+                id('rejected'),
+                '审核明确拒绝',
+                2,
+                '保存原 decision 与公开 reason，原调用不派发。拒绝不等于取消整个任务。',
+                {
+                  raw: 'failed',
+                  tone: 'bad',
+                  stop: true,
+                  fields: {
+                    decision: 'reject',
+                    reason: '按实际效果与用户授权判断，不能只看能力上限',
+                  },
+                  refs: commonRefs,
+                },
+              ),
+            );
+          else if (branch === 'ask_user' || branch === 'no_checker') {
+            if (branch === 'no_checker') {
+              nodes.pop();
+              nodes.push(
+                node(
+                  id('no_checker'),
+                  '真正未配置审核器',
+                  2,
+                  '当前没有可用审核配置，沿普通人工回退；这不同于已配置审核器发生技术失败。',
+                  { raw: 'planned', tone: 'warn' },
+                ),
+              );
+            } else
+              nodes.push(
+                node(
+                  id('ask'),
+                  '审核请求用户决定',
+                  2,
+                  '存在用户可解决的实质目标 / 范围 / 授权选择。ask_user 不是批准。',
+                  { raw: 'planned', fields: { decision: 'ask_user' }, refs: commonRefs },
+                ),
+              );
+            nodes.push(
+              node(
+                id('human'),
+                '等待准确人工卡',
+                0,
+                '答复仅批准原参数，不能把 network:none 变成 internet。',
+                {
+                  raw: 'planned',
+                  derived: '等待人工审批',
+                  refs: [{ path: 'packages/client/src/index.ts', line: 2590 }],
+                },
+              ),
+            );
+            nodes.push(
+              node(
+                id('answer'),
+                '接纳原人工证明',
+                2,
+                '原 policy 与输入绑定仍须在最终派发时复核。',
+                { raw: 'planned', refs: commonRefs },
+              ),
+            );
+          } else
+            nodes.push(
+              node(
+                id('allow'),
+                '审核批准一次',
+                2,
+                '保存准确当前语义的有效批准与原证据；同输入、来源、policy 与有效范围仍成立时可复用。Shell Tool → Job 不重复语义审核，实际派发逐层核验。',
+                { raw: 'planned', fields: { decision: 'approve_once' }, refs: commonRefs },
+              ),
+            );
+          return nodes;
+        }
+        return [
+          node(
+            id('ordinary'),
+            '当前普通策略',
+            2,
+            '依据原范围和现行权限作决定，必要时建立原人工申请。',
+            { raw: 'planned', refs: commonRefs },
+          ),
+        ];
+      }
+      function receiptNodes(outcome = 'succeeded') {
+        const unknown = outcome === 'outcome_unknown';
+        return [
+          node(
+            'receipt',
+            '保存原机器回执',
+            4,
+            unknown
+              ? '可能已有作用，保留原执行及恢复事实；不自动重放。'
+              : '保存真实状态、公开内容、原身份与 resultRevision；失败不回滚先前成功。',
+            {
+              raw: outcome,
+              tone: unknown ? 'warn' : outcome === 'failed' ? 'bad' : undefined,
+              refs: [{ path: 'packages/agent/src/execution/index.ts', line: 1344 }],
+            },
+          ),
+          node(
+            'present',
+            '构造模型可读说明',
+            4,
+            '原 call / source / Session / Run / Store 绑定核实后补充说明，原机器回执保持不变。',
+            {
+              raw: outcome,
+              facts: [
+                '已知未派发只信 Core 的派发记录。',
+                '取消不证明回滚或后台已停。',
+                '不自动公开任意私有 Error / details。',
+              ],
+              refs: [{ path: 'packages/agent/src/tool-failure-presentation.ts', line: 104 }],
+            },
+          ),
+          node(
+            'next',
+            '交回原工具批次与 Loop',
+            0,
+            unknown
+              ? '保留未知作用并停止本批后继；整批结算后可交模型解释。已有未知不得重放，活动 Job 或执行权问题仍独立限制推进。'
+              : '等待本批所有调用真实结算并按原 call 配对，主 Loop 再决定下一模型、完成候选或取消／失败收束。单个回执不独自启动下一模型。',
+            {
+              derived: '本批结算后的控制边界',
+              facts: [
+                'Inspector 查看当时的真实输入，不用当前总结替代。',
+                '同一业务效果没有通用 Shell 语义硬识别器。',
+              ],
+              refs: [{ path: 'packages/agent/src/runtime.ts', line: 8926 }],
+            },
+          ),
+        ];
+      }
+      function buildToolFlow() {
+        const f = family();
+        const steps = [
+          node(
+            'command',
+            '本批原 Run / Step / Model',
+            0,
+            state.actor === 'main'
+              ? '单工具子图从原模型响应中的一个 ToolCall 展开，不会为每个调用新建 Run 或重调模型。'
+              : '独立 Session 与普通 Loop；根当前模式和父子策略交集仍生效。',
+            { refs: [{ path: 'packages/agent/src/runtime.ts' }] },
+          ),
+          node(
+            'catalog',
+            '核本步已捕获的工具目录',
+            1,
+            '按准确注册 owner / kind / ID / version 和父子工具交集装配；只读指导在模型输入中生效。',
+            { refs: [{ path: 'packages/agent/src/extensions/task/roles.ts', line: 49 }] },
+          ),
+        ];
+        const readOnlyAvailable =
+          f.id === 'attachment' ||
+          (f.id === 'files' && f.operationId === 'read') ||
+          (f.id === 'shell' && ['execute', 'launch', 'read', 'wait'].includes(f.operationId)) ||
+          (f.id === 'planning' && f.operationId === 'read') ||
+          f.id === 'skills';
+        if (
+          (state.actor !== 'main' && f.id === 'question') ||
+          (state.actor === 'readonly' && !readOnlyAvailable)
+        )
+          return steps.concat(
+            [
+              node(
+                'not_exposed',
+                '当前子角色目录未开放',
+                1,
+                '该准确工具不进入当前子角色的模型目录。即使调用同名入口也不能取得能力，三种模式均不改变此交集。',
+                {
+                  raw: 'failed',
+                  tone: 'bad',
+                  refs: [{ path: 'packages/agent/src/extensions/task/roles.ts', line: 49 }],
+                },
+              ),
+              node(
+                'unavailable_call',
+                '若模型仍提交不可用调用',
+                0,
+                '按 tool_not_available / 能力校验失败回传；不创建实际适配器调用或内部 Job。',
+                { raw: 'failed', tone: 'bad' },
+              ),
+            ],
+            receiptNodes('failed'),
+          );
+        steps.push(
+          node(
+            'model',
+            '完整响应中的准确 ToolCall',
+            0,
+            '完整 Model 回复已经保存。按其 callId、声明参数及本步实际目录还原准确内部定义；同批其他调用由主 Loop 管理。',
+            {
+              raw: 'running',
+              refs: [{ path: 'packages/agent/src/model-tools.README.md', line: 17 }],
+            },
+          ),
+          node(
+            'schema',
+            '参数 / 来源核验',
+            1,
+            '不完整流式参数不会派发；未知工具、非法 schema 或映射冲突成为 Tool 失败。',
+            { raw: 'planned', refs: [{ path: 'packages/agent/src/model-tools.ts' }] },
+          ),
+        );
+        if (state.branch === 'invalid')
+          return steps.concat(
+            [
+              node(
+                'invalid',
+                '参数校验失败',
+                1,
+                '没有调用适配器。返回具体校验类别与纠正方向；原样重交同样无效。',
+                { raw: 'failed', tone: 'bad' },
+              ),
+            ],
+            receiptNodes('failed'),
+          );
+        steps.push(...guardNodes());
+        if (state.actor === 'readonly')
+          steps.push(
+            node(
+              'readonly',
+              '只读任务与目录约束',
+              0,
+              '可信只读指导与工具目录交集在模型选工具前已生效。此节点说明约束来源；不是角色独立的 OS 禁写 / 禁网拦截。Shell 仍走继承的普通模式和沙箱。',
+              {
+                raw: 'planned',
+                tone: 'warn',
+                refs: [{ path: 'packages/agent/src/extensions/task/README.md', line: 18 }],
+              },
+            ),
+          );
+
+        if (state.branch === 'hard_denial')
+          return steps.concat(policyNodes(), receiptNodes('failed'));
+        steps.push(...policyNodes());
+        if (steps.some((x) => x.stop)) return steps.concat(receiptNodes('failed'));
+        if (state.branch === 'mode_change')
+          return steps.concat([
+            node(
+              'change',
+              '待派发时切换模式',
+              0,
+              '根模式持久 revision 更新，原待批证明不能复用；释放资源后按新 revision 重新进入权限分流。已派发操作不热改范围。',
+              {
+                raw: 'planned',
+                derived: '重新决策',
+                tone: 'warn',
+                refs: [{ path: 'packages/agent/src/execution/index.ts', line: 930 }],
+              },
+            ),
+            node(
+              'reroute',
+              '回到新模式的权限入口',
+              2,
+              '在上方切换目标模式查看新分支；只有新分流真正允许且最终复核通过才可派发。这里停止推演，不沿旧批准继续执行。',
+              { raw: 'planned', derived: '等待新决策' },
+            ),
+          ]);
+        steps.push(
+          node(
+            'resource',
+            '等待执行资源',
+            1,
+            '授权后申请资源。等待可取消，控制变更需在资源外重新决策。',
+            {
+              raw: 'planned',
+              derived: '资源排队',
+              refs: [{ path: 'packages/agent/src/execution/index.ts', line: 742 }],
+            },
+          ),
+          node(
+            'recheck',
+            '最终复核与提交',
+            2,
+            '重核原批准、输入、来源、必要条件、取消和当前 revision；事务提交真正 dispatch。',
+            {
+              raw: 'dispatching',
+              facts: ['此处不能新开审核或人工等待。', '授权观察不是可转交使用的 grant。'],
+              refs: [{ path: 'packages/agent/src/execution/index.ts', line: 930 }],
+            },
+          ),
+        );
+
+        if (state.family === 'question') {
+          steps.push(
+            node(
+              'question',
+              '创建原信息问题',
+              3,
+              '已派发的 ask_user 经 requestInput 创建 Question；取得信息，不签发执行 grant。',
+              { raw: 'running', recordKind: 'tool', refs: [{ path: f.path }] },
+            ),
+          );
+          if (state.branch === 'cancel')
+            return steps.concat(
+              [
+                node(
+                  'question_stopped',
+                  '原 Question／Tool 真正取消',
+                  2,
+                  'Interaction 被取消或当前 Tool 执行取消，保存该 Tool cancelled；后续 Loop 是否结束由 Run 控制信号决定。',
+                  {
+                    raw: 'cancelled',
+                    recordKind: 'tool',
+                    refs: [{ path: 'packages/agent/src/tools/ask-user/index.ts', line: 145 }],
+                  },
+                ),
+              ],
+              receiptNodes('cancelled'),
+            );
+          if (state.branch === 'failure' || state.branch === 'unknown')
+            return steps.concat(
+              receiptNodes(state.branch === 'unknown' ? 'outcome_unknown' : 'failed'),
+            );
+          steps.push(
+            node(
+              'information',
+              state.branch === 'question_cancel' ? '用户取消回答信息' : '取得准确原问题答复',
+              4,
+              state.branch === 'question_cancel'
+                ? 'requestInput 正常返回 null，Tool succeeded + cancelled:true。只是未取得信息，不取消整个 Run。'
+                : '核原 Interaction / revision，返回真实答案。Full 也不替用户填写信息。',
+              {
+                raw: 'succeeded',
+                recordKind: 'tool',
+                fields:
+                  state.branch === 'question_cancel'
+                    ? { cancelled: true }
+                    : { answer: '原人类信息' },
+                refs: [{ path: 'packages/agent/src/tools/ask-user/index.ts', line: 166 }],
+              },
+            ),
+          );
+          return steps.concat(receiptNodes());
+        }
+        if (state.branch === 'plan_edit')
+          steps.push(
+            node(
+              'plan_action',
+              '准确 Plan 目标委派 Action',
+              1,
+              '只有 file edit 命中准确 Plan 目标才 invokeActionFromTool；原生 write_plan 本身直接调用业务发布逻辑。',
+              {
+                raw: 'planned',
+                fields: { kind: 'job', parentExecutionId: '原 files.edit Tool' },
+                refs: [{ path: 'apps/service/src/file-checkpoint-configuration.ts', line: 505 }],
+              },
+            ),
+            node(
+              'plan_action_auth',
+              '独立 Action 权限与最后复核',
+              2,
+              '按原父绑定、当前 policy、准确输入和必要条件独立准入。Tool 的批准不能替代这次 Action 授权。',
+              { raw: 'dispatching', refs: commonRefs },
+            ),
+            node(
+              'plan_publish',
+              'Plan 实际发布与 CAS',
+              3,
+              'publication pending → 实际文件发布 → 不可变版本 / current CAS；发布后失败须保留已有作用或未知。',
+              {
+                raw: 'running',
+                refs: [{ path: 'packages/agent/src/business/planning/README.md' }],
+              },
+            ),
+          );
+        if ((f.operationId === 'launch' && f.id === 'shell') || f.id === 'mcp_task')
+          return buildAsyncJobFlow(steps, f);
+        if (f.job) {
+          steps.push(
+            node(
+              'tool_start',
+              'Tool 已进入执行',
+              3,
+              'Tool 确保原 Job。此时尚不能断言原生进程 / RPC 已发生。',
+              { raw: 'running' },
+            ),
+            node(
+              'job_intent',
+              '独立 Job 意图',
+              1,
+              f.id === 'shell'
+                ? 'shell.command@1 单独保存；只有 Job.start 启动进程。'
+                : '<toolId>.task 独立 detached Job，绑定原 task-form RPC。',
+              {
+                raw: 'planned',
+                fields: { kind: 'job', parentExecutionId: '原 Tool ID' },
+                refs: [{ path: f.path }],
+              },
+            ),
+          );
+          if (state.branch === 'job_reject') {
+            steps.push(
+              node(
+                'job_card',
+                '原 Job 单独审批',
+                2,
+                'Tool 已批准，Job 仍未派发。Job 的准入与原 Tool 是不同的检查。',
+                { raw: 'planned', derived: '等待 Job 审批' },
+              ),
+              node(
+                'job_deny',
+                'Job 被拒绝',
+                2,
+                '原 Job 不启动，外层 Tool 返回失败并携带原 Job 原因。不能由“Tool 已执行”推断进程已启动。',
+                {
+                  raw: 'failed',
+                  tone: 'bad',
+                  fields: { toolDispatched: true, jobDispatched: false },
+                },
+              ),
+            );
+            return steps.concat(receiptNodes('failed'));
+          }
+          steps.push(
+            node(
+              'job_auth',
+              'Job 授权 / 最终复核',
+              2,
+              '对准确 Job 仍核当前策略、资源、取消与最终提交。Auto 校验同一 Shell 语义的原证据后复用 parent_review / timeout_continue，不再重复问模型；手动和 Full 保持原准入规则。',
+              { raw: 'dispatching', refs: commonRefs },
+            ),
+          );
+        }
+        const executionSteps = f.job ? f.steps.slice(1) : f.steps;
+        executionSteps.forEach((text, i) => {
+          steps.push(
+            node(
+              'leaf_' + i,
+              text,
+              i === executionSteps.length - 1 ? 4 : 3,
+              i === executionSteps.length - 1 ? f.proof : i === 0 ? f.policy : f.failure,
+              { raw: 'running', refs: [{ path: f.path }] },
+            ),
+          );
+        });
+        if (state.branch === 'observed_failed')
+          steps.push(
+            node(
+              'observed_job',
+              '成功观察原 Job failed',
+              4,
+              '原 Job 的 failed 是被读取的数据；shell_read / wait / stop 的调用自身若正常完成，仍为 succeeded。',
+              {
+                raw: 'failed',
+                recordKind: 'job',
+                refs: [{ path: 'packages/agent/src/tools/shell.ts', line: 189 }],
+              },
+            ),
+          );
+        if (state.branch === 'wait_timeout')
+          steps.push(
+            node(
+              'wait_timeout',
+              '观察等待达到上限',
+              4,
+              'shell_wait 正常返回 timedOut:true 及原 Job 当前状态；不停止、不重启 Job。',
+              {
+                recordKind: 'tool',
+                fields: { timedOut: true, jobState: '仍取原真实状态' },
+                refs: [{ path: 'packages/agent/src/tools/shell.ts', line: 222 }],
+              },
+            ),
+          );
+        if (f.id === 'shell' && f.operationId === 'stop' && state.branch === 'approve')
+          steps.push(
+            node(
+              'cancel_requested',
+              '仅受理原 Job 取消请求',
+              4,
+              'shell_stop 调用成功 + cancelRequested:true，只报告当前持久事实。没有停止证明就不声称 Job cancelled。',
+              {
+                recordKind: 'tool',
+                fields: { cancelRequested: true, stopConfirmed: '由原 Job 后续证据决定' },
+                refs: [{ path: 'packages/agent/src/tools/shell.ts', line: 258 }],
+              },
+            ),
+          );
+        if (state.branch === 'plan_not_approved')
+          steps.push(
+            node(
+              'plan_not_approved',
+              '计划 revise / deny 正常答复',
+              4,
+              '原 request_plan_review 正常完成，Tool succeeded，业务 status:not_approved；这不是工具权限拒绝，不终止同批兄弟调用。',
+              {
+                recordKind: 'plan',
+                fields: { status: 'not_approved', decision: 'revise / deny' },
+                refs: [{ path: 'packages/agent/src/business/planning/index.ts', line: 795 }],
+              },
+            ),
+          );
+        if (state.branch === 'plan_absent')
+          steps.push(
+            node(
+              'plan_absent',
+              '正常读取：当前无 Plan',
+              4,
+              'read_plan 返回 succeeded；current / plan 为 null。这不是工具失败，也不是已经有计划。',
+              {
+                recordKind: 'plan',
+                fields: { current: null, plan: null },
+                refs: [{ path: 'packages/agent/src/business/planning/index.ts', line: 562 }],
+              },
+            ),
+          );
+        if (state.branch === 'foreground_timeout')
+          steps.push(
+            node(
+              'deadline',
+              '前台执行期限到达',
+              2,
+              '仅从首次观察原 Job dispatching / running 起算；审批及资源等待不扣预算。期限到仍只取消原 Job并等待停止确认。',
+              {
+                raw: 'running',
+                recordKind: 'job',
+                refs: [{ path: 'packages/agent/src/tools/shell-foreground.ts', line: 121 }],
+              },
+            ),
+            node(
+              'deadline_stopped',
+              '原 Job 已确认 cancelled',
+              4,
+              '本场景已取得停止证据；Job cancelled，前台 Tool failed + timedOut:true，不把期限到误当作业务成功。',
+              {
+                raw: 'cancelled',
+                recordKind: 'job',
+                fields: { toolOutcome: 'failed', timedOut: true },
+                refs: [{ path: 'packages/agent/src/tools/shell-foreground.ts', line: 121 }],
+              },
+            ),
+          );
+        if (state.branch === 'cancel')
+          steps.push(
+            node(
+              'cancel',
+              '请求停止原执行',
+              2,
+              '取消请求已受理，还须等原执行及后代的真实停止确认；不等于回滚。',
+              { raw: 'running', derived: '正在取消 · 尚未确认停止', tone: 'warn' },
+            ),
+            node(
+              'stop_confirmed',
+              '核实原执行停止',
+              1,
+              '本分支假设取得原执行及后代的终止证明，才能保存 cancelled；若无法确认，应选择结果未知路径。',
+              { raw: 'cancelled', tone: 'warn' },
+            ),
+          );
+        if (f.id === 'mcp_task')
+          steps.push(
+            node(
+              'mcp_delivery',
+              'idle 仅保 pending',
+              4,
+              '普通远端 Task 不创建 agent_completion。下次普通模型检查点才消费原结果，不主动新开父轮。',
+              {
+                raw: 'succeeded',
+                facts: ['与后台子 Agent 的订阅续轮不同。'],
+                refs: [{ path: f.path, line: 226 }],
+              },
+            ),
+          );
+        const outcome =
+          state.branch === 'unknown'
+            ? 'outcome_unknown'
+            : ['failure', 'foreground_timeout'].includes(state.branch)
+              ? 'failed'
+              : state.branch === 'cancel'
+                ? 'cancelled'
+                : 'succeeded';
+        return steps.concat(receiptNodes(outcome));
+      }
+      function buildAsyncJobFlow(steps, f) {
+        const shell = f.id === 'shell',
+          outcome =
+            state.branch === 'job_reject' || state.branch === 'failure'
+              ? 'failed'
+              : state.branch === 'unknown'
+                ? 'outcome_unknown'
+                : state.branch === 'cancel'
+                  ? 'cancelled'
+                  : 'succeeded';
+        steps.push(
+          node(
+            'tool_start',
+            'Tool 确保原后台 Job',
+            3,
+            '保存原 Job 引用和受理事实，不等待 Job 的批准、启动或终态。',
+            {
+              raw: 'running',
+              refs: [
+                {
+                  path: shell
+                    ? 'packages/agent/src/tools/shell.ts'
+                    : 'packages/agent/src/mcp/tasks.ts',
+                  line: shell ? 86 : undefined,
+                },
+              ],
+            },
+          ),
+          node(
+            'job_intent',
+            '独立 Job 已受理',
+            1,
+            shell
+              ? '原 shell.command 可以仍 planned；精确 ensure 不重新启动。'
+              : '原 detached Job 受理；实际 RPC 尚须独立派发。',
+            { raw: 'planned', fields: { kind: 'job', parentExecutionId: '原 Tool ID' } },
+          ),
+          node(
+            'accepted_tool',
+            'Tool 返回 accepted / ref',
+            4,
+            '这份 Tool 成功只证明受理；并不证明后台已获批、已启动或成功。Job 后续失败不改写此 Tool 成功。',
+            { raw: 'succeeded' },
+          ),
+          ...receiptNodes(),
+        );
+        steps.push(
+          node(
+            'job_auth',
+            '后台 Job 独立决策',
+            2,
+            '以下是并行的 Job 生命周期，可能与 Tool 回执交错。Auto 对同一 Shell 语义复用原证据，手动和 Full 保持原规则；各模式仍核必要条件、资源和最后复核。',
+            {
+              raw: 'planned',
+              derived: state.branch === 'job_reject' ? '等待原 Job 审批' : state.mode === 'auto' && shell ? '同语义审核复用 / 最终核验' : 'Job 单独准入',
+              refs: commonRefs,
+            },
+          ),
+        );
+        if (state.branch === 'job_reject')
+          steps.push(
+            node(
+              'job_deny',
+              '用户拒绝原 Job',
+              2,
+              '原 Job 未派发；已成功受理的 Tool 不回滚，后续读取原引用才能核实这次失败。',
+              { raw: 'failed', tone: 'bad', fields: { toolSucceeded: true, jobDispatched: false } },
+            ),
+          );
+        else {
+          steps.push(
+            node(
+              'job_dispatch',
+              'Job 真正派发',
+              3,
+              shell
+                ? '原生监督进程在此启动；shell_launch 没有前台 execution_timeout_ms。受理、实际运行和停止证明分开保存。'
+                : '发送一次 task-form RPC，随后只观察原 taskId，不重投。',
+              { raw: 'running' },
+            ),
+          );
+          if (state.branch === 'cancel')
+            steps.push(
+              node(
+                'cancel',
+                '请求取消准确原 Job',
+                2,
+                '仅保存取消意图；本路径取得真实停止证明后才结算 cancelled，未确认必须保留未知。',
+                { raw: 'running', derived: '正在取消' },
+              ),
+            );
+          steps.push(
+            node(
+              'job_terminal',
+              '保存后台 Job 原终态',
+              4,
+              'Tool 的受理状态、后台执行状态和真实业务结果分开保存。此前作用不会因为失败而回滚。',
+              {
+                raw: outcome,
+                tone:
+                  outcome === 'failed' ? 'bad' : outcome === 'outcome_unknown' ? 'warn' : undefined,
+              },
+            ),
+          );
+        }
+        steps.push(
+          node(
+            'later_observation',
+            shell ? '随后 read / wait 原 handle' : '原 result Source 等待检查点',
+            1,
+            shell
+              ? '模型可自然选择 shell_read / shell_wait；这些观察工具走自己的执行链，不会重新启动 Job。'
+              : '普通 MCP 远端 Task 没有 agent_completion；idle 只保 pending，下一普通模型检查点才投递，不主动建立新父轮。',
+            {
+              raw: 'planned',
+              derived: '后续独立观察 / 接纳',
+              refs: [{ path: f.path, line: shell ? undefined : 226 }],
+            },
+          ),
+          node(
+            'later_model',
+            '模型核原 Job 结果',
+            0,
+            '只有真实观察 / 接纳内容进入当时模型输入，才能讨论它是否理解原因；不能由先前 accepted 推断已完成。',
+            { derived: '后续模型仅消费真正接纳的原结果' },
+          ),
+        );
+        return steps;
+      }
+      function buildChildFlow() {
+        const b = state.childBranch;
+        const stopped = b === 'cancel';
+        const carrierState = stopped
+          ? 'cancelled'
+          : b === 'child_failed'
+            ? 'failed'
+            : b === 'child_unknown'
+              ? 'outcome_unknown'
+              : 'succeeded';
+        const steps = [
+          node(
+            'parent',
+            '父模型提交准确 spawn call',
+            0,
+            '这一 Tool 属于父模型的原批次；下列 child lifecycle 不是另一个专用 Agent Loop。',
+            { refs: [{ path: 'packages/agent/src/extensions/task/index.ts', line: 241 }] },
+          ),
+          node(
+            'spawn',
+            '原事务确保 child / carrier',
+            1,
+            '准确 invocation 绑定 child Session、原 Command、carrier、冻结配置和 agent_completion 订阅；重试查询原受理。',
+            {
+              raw: 'planned',
+              recordKind: 'job',
+              refs: [{ path: 'packages/agent/src/extensions/task/index.ts', line: 241 }],
+            },
+          ),
+          node(
+            'accepted',
+            'spawn Tool 返回 accepted / queued',
+            0,
+            '只证明受理。父前台批次可以结算并继续模型，也可完成自己的普通 Run；不会因此取消已受理 child。',
+            { raw: 'succeeded', recordKind: 'tool' },
+          ),
+          node(
+            'slot',
+            '原 carrier 等槽位 / 激活准入',
+            2,
+            '排队保持 planned；可信配置中的 child 期限从激活起计算，当前默认30分钟，不扣排队。',
+            { raw: 'planned', recordKind: 'job', derived: '等槽位 / 原权限准入' },
+          ),
+          node(
+            'child_model',
+            'child 调用同一个 defaultLoop',
+            3,
+            'Runtime.executeRun 为 child 装配普通 Loop；共用 step 输入、批次执行、完成与恢复边界，省略根显式输入的两个业务生命周期钩子。',
+            {
+              raw: 'running',
+              recordKind: 'run',
+              refs: [{ path: 'packages/agent/src/runtime.ts', line: 7744 }],
+            },
+          ),
+          node(
+            'parent_parallel',
+            b === 'idle' || b.startsWith('deferred') || b === 'idle_no_authority'
+              ? '父轮可先完成 / 排队用户输入'
+              : '父继续其他工作 / 只读观察',
+            0,
+            '这是独立支路。事件观察不消费完整报告，父轮完成不等于取消 child；新用户工作优先于 idle 报告续轮。',
+            {
+              recordKind: 'run',
+              derived: '与 child 并行',
+              refs: [
+                { path: 'packages/agent/src/storage/sqlite/job-report-operations.ts', line: 688 },
+              ],
+            },
+          ),
+        ];
+        if (stopped)
+          steps.push(
+            node(
+              'cancel_child',
+              '请求中断首次选中的原 carrier',
+              2,
+              'interrupt_agent 绑定准确当前工作；请求已受理不能证明原进程或 attached 后代已停止。',
+              {
+                raw: 'running',
+                recordKind: 'job',
+                derived: '请求取消，停止未确认',
+                refs: [{ path: 'packages/agent/src/extensions/task/README.md', line: 28 }],
+              },
+            ),
+            node(
+              'child_stop_confirmed',
+              '核实原工作停止',
+              1,
+              '本场景取得原终止证据后才结算 cancelled；没有证明应保留未知。',
+              { raw: 'cancelled', recordKind: 'run' },
+            ),
+          );
+        else
+          steps.push(
+            node(
+              'child_stop',
+              '普通 child Run 已收束',
+              3,
+              '模型无工具回复先经过 completion conditions 与最终事务；Run 收束还不等于 carrier 已结算。',
+              {
+                raw: b === 'child_failed' ? 'failed' : 'completed',
+                recordKind: 'run',
+                refs: [{ path: 'packages/agent/src/runtime.ts', line: 7744 }],
+              },
+            ),
+          );
+        steps.push(
+          node(
+            'attached',
+            '核 child 范围 attached 结算',
+            1,
+            'Model、Tool、attached Job（含排队）都须真实结算；等待不持 SQLite 事务或另占模型槽，unknown 不冒充已停止。',
+            {
+              recordKind: 'job',
+              derived: '等待实际结算',
+              refs: [{ path: 'packages/agent/src/runtime.ts', line: 2032 }],
+            },
+          ),
+          node(
+            'settle',
+            '保存 carrier 原终态',
+            1,
+            '执行终态与报告 delivery 是不同字段；后续投递暂缓或抑制不会改写这个原终态。',
+            {
+              raw: carrierState,
+              recordKind: 'job',
+              fields: { executionStatus: carrierState },
+              refs: [{ path: 'packages/agent/src/extensions/task/README.md', line: 34 }],
+            },
+          ),
+        );
+        if (b === 'detached')
+          steps.push(
+            node(
+              'independent',
+              'detached Job 保独立寿命',
+              3,
+              '独立支路，不阻止已满足 attached 结算的 carrier 交付；后台 Job 状态由其真实监督保存。',
+              { raw: 'running', recordKind: 'job', tone: 'parallel' },
+            ),
+          );
+        steps.push(
+          node(
+            'delivery_route',
+            '核准确报告来源与目标工作',
+            2,
+            '核原 carrier、结果版本、Store、Session、selection 和工作资格，先尝试 active 接纳；该校验不是 idle 唤醒授权。',
+            {
+              fields: { carrierState, delivery: 'pending' },
+              refs: [{ path: 'packages/agent/src/runtime.ts', line: 6082 }],
+            },
+          ),
+        );
+        if (b === 'child_unknown')
+          return steps.concat(
+            node(
+              'unknown_retained',
+              '保留原未知与恢复限制',
+              4,
+              'unknown 不证明停止、无作用或允许重跑。后续报告／续轮须核真实资格，不能用一条完成通知自动解除未知。',
+              {
+                raw: 'outcome_unknown',
+                recordKind: 'job',
+                fields: { delivery: '由原报告资格决定，不自动改为 consumed' },
+                tone: 'warn',
+                refs: [{ path: 'packages/agent/src/permissions/after-turn.ts' }],
+              },
+            ),
+          );
+        if (b === 'suppressed' || b === 'blocked')
+          return steps.concat(
+            node(
+              'suppressed',
+              '报告撤销 / 来源无法核实',
+              4,
+              '原报告 Command rejected，delivery suppressed。child 原执行终态保持，不能标成 child failed。',
+              {
+                recordKind: 'delivery',
+                derived: 'suppressed',
+                fields: { reportCommand: 'rejected', delivery: 'suppressed', carrierState },
+                tone: 'warn',
+                refs: [
+                  { path: 'packages/agent/src/storage/sqlite/job-report-operations.ts', line: 663 },
+                ],
+              },
+            ),
+          );
+        const deferredReasons = {
+          deferred_input: 'human_business_queued',
+          deferred_selection: 'work_not_selected',
+          deferred_busy: 'session_busy',
+          idle_no_authority: 'idle_authorization_required',
+        };
+        if (deferredReasons[b])
+          return steps.concat(
+            node(
+              'deferred',
+              '报告暂缓，保留 pending',
+              4,
+              '待用户队列、选择、Session 或 idle 授权条件变化后，重新核原报告；不重跑 child，不把暂缓改成失败。',
+              {
+                recordKind: 'delivery',
+                derived: 'deferred / pending',
+                fields: { reason: deferredReasons[b], delivery: 'pending', carrierState },
+                tone: 'warn',
+                refs: [
+                  { path: 'packages/agent/src/storage/sqlite/job-report-operations.ts', line: 683 },
+                ],
+              },
+            ),
+          );
+        if (b === 'idle')
+          steps.push(
+            node(
+              'idle_auth',
+              '仅 idle 续轮核 AfterTurnPolicy',
+              2,
+              '当前没有活动父 Run，可信当前 afterTurn 授权允许后，才能沿原订阅和配置创建普通报告 Run；观察到完成不产生唤醒权。',
+              { refs: [{ path: 'packages/agent/src/runtime.ts', line: 6118 }] },
+            ),
+            node(
+              'new_run',
+              '建立普通父报告 Run',
+              1,
+              '使用原配置与原来源运行同一个 executeRun/defaultLoop；省略根显式输入业务钩子。',
+              {
+                raw: 'running',
+                recordKind: 'run',
+                refs: [{ path: 'packages/agent/src/runtime.ts', line: 6150 }],
+              },
+            ),
+          );
+        else
+          steps.push(
+            node(
+              'checkpoint',
+              '活动父 Run 接纳原报告',
+              1,
+              '现有活动工作已有 Run authority，直接在安全检查点核原报告接纳；不先要求 idle afterTurn 授权。',
+              {
+                raw: 'running',
+                recordKind: 'run',
+                refs: [{ path: 'packages/agent/src/runtime.ts', line: 6082 }],
+              },
+            ),
+          );
+        steps.push(
+          node(
+            'source',
+            '事务接纳完整结果 Source',
+            4,
+            '按原 carrier/resultRevision/目标Run/selection 生成具名 Source，consume 与 ack 同事务核验；child 报告始终是低信任数据。',
+            {
+              recordKind: 'delivery',
+              derived: 'consumed',
+              fields: { carrierState, delivery: 'consumed' },
+              refs: [{ path: 'packages/agent/src/runtime.ts', line: 9473 }],
+            },
+          ),
+          node(
+            'verify',
+            '下一父 Model 输入 / 独立核查',
+            0,
+            '仅真正进入封存输入的 Source 才为该模型所见；父级核业务主张与真实文件，不把报告或接纳成功当作正确性或新授权。',
+            {
+              recordKind: 'model',
+              refs: [{ path: 'packages/agent/src/model-context.ts', line: 22 }],
+            },
+          ),
+        );
+        return steps;
+      }
+      function heading(eyebrow, title, description, extra = '') {
+        return `<div class="heading"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p>${description}</p></div>${extra}</div>`;
+      }
+      function facts() {
+        return `<div class="factrow"><div class="fact"><span class="n">01</span><div><strong>批准 ≠ 已执行</strong><small>最后复核与真实派发仍独立</small></div></div><div class="fact"><span class="n">02</span><div><strong>成功回执 ≠ 业务完成</strong><small>效果与验收分别核实</small></div></div><div class="fact"><span class="n">03</span><div><strong>父轮结束 ≠ 子任务结束</strong><small>原 carrier 与订阅继续管理</small></div></div></div>`;
+      }
+      function modeControl() {
+        return `<div class="field"><label>普通审批模式</label><div class="pillbar" aria-label="推演审批模式">${Object.keys(
+          modeNames,
+        )
+          .map(
+            (m) =>
+              `<button type="button" data-mode="${m}" class="${state.mode === m ? 'active' : ''}" aria-pressed="${state.mode === m}">${modeNames[m]}</button>`,
+          )
+          .join('')}</div></div>`;
+      }
+      const branches = {
+        approve: '正常完成（所选范围）',
+        manual_ceiling: '可信策略另有人工要求',
+        grant_save: '原卡选择本次会话批准',
+        grant_reuse: '同来源 Session 复用原命令批准',
+        grant_other_session: '父／兄弟／孙不能借用批准',
+        grant_revoked: '撤销批准后重新审查',
+        injected_pair: '现有注入交集收窄为单次',
+        observed_failed: '观察到目标 Job 失败',
+        wait_timeout: '等待超时，Job 仍运行',
+        question_cancel: '取消回答信息问题',
+        plan_not_approved: '计划要求修改／未批准',
+        plan_absent: '当前没有 Plan',
+        foreground_timeout: '前台期限到，确认原 Job 停止',
+        plan_edit: '编辑准确 Plan · 独立 Action',
+        workspace: '工作区写入 · 不联网',
+        safe_read: '安全读快速通道',
+        reject: 'Tool / Auto 拒绝',
+        job_reject: 'Tool 批准 · Job 拒绝',
+        ask_user: 'Auto 请求用户决定',
+        unavailable: 'Auto 审核技术失败',
+        auto_timeout: '审核超时，默认放行（工具策略兜底）',
+        auto_reuse: 'Auto 复用有效批准 · Shell 单语义审核',
+        no_checker: '未配置审核器',
+        invalid: '参数校验失败',
+        hard_denial: '三模式硬拒绝',
+        mode_change: '待派发时切换模式',
+        failure: '当前调用自身失败／已有部分作用',
+        cancel: '当前执行取消与停止确认',
+        unknown: '已尝试但结果未知',
+      };
+      function flowControls(child = false) {
+        return `<div class="controls">${child ? '' : modeControl()}${
+          child
+            ? `<div class="field grow"><label>后台任务路径</label><select id="child-branch">${Object.entries(
+                {
+                  active: '父活动时直接接纳结果',
+                  idle: '父先结束 · 合资格后续轮',
+                  detached: '附着结算与 detached 并行',
+                  cancel: '显式中断与停止确认',
+                  suppressed: '报告来源失真／工作撤销',
+                  deferred_input: '用户排队输入优先，报告暂缓',
+                  deferred_selection: '当前工作未选中，报告暂缓',
+                  deferred_busy: 'Session忙，报告暂缓',
+                  idle_no_authority: 'idle授权未满足，报告暂缓',
+                  child_failed: 'child失败结果作为低信任数据',
+                  child_unknown: 'carrier未知，保留恢复限制',
+                },
+              )
+                .map(
+                  ([k, v]) =>
+                    `<option value="${k}" ${state.childBranch === k ? 'selected' : ''}>${v}</option>`,
+                )
+                .join('')}</select></div>`
+            : `<div class="field"><label>实际执行者</label><select id="actor">${[
+                ['main', '主 Agent'],
+                ['child', '可写子 Agent'],
+                ['readonly', '只读子 Agent'],
+              ]
+                .map(
+                  ([k, v]) =>
+                    `<option value="${k}" ${state.actor === k ? 'selected' : ''}>${v}</option>`,
+                )
+                .join(
+                  '',
+                )}</select></div><div class="field grow"><label>工具家族</label><select id="family">${families.map((f) => `<option value="${f.id}" ${state.family === f.id ? 'selected' : ''}>${f.name}</option>`).join('')}</select></div>${
+                operationList().length
+                  ? `<div class="field grow"><label>具体操作</label><select id="operation">${operationList()
+                      .map(
+                        (o) =>
+                          `<option value="${esc(o.id)}" ${family().operationId === o.id ? 'selected' : ''}>${esc(o.name)}</option>`,
+                      )
+                      .join('')}</select></div>`
+                  : ''
+              }<div class="field grow"><label>观察分支</label><select id="branch">${availableBranches()
+                .map(
+                  ([k, v]) =>
+                    `<option value="${k}" ${state.branch === k ? 'selected' : ''}>${v}</option>`,
+                )
+                .join('')}</select></div>`
+        }</div>`;
+      }
+      function linearEdges(nodes) {
+        return nodes.slice(1).map((n, i) => ({ from: nodes[i].id, to: n.id, kind: 'control' }));
+      }
+      function toolEdges(nodes) {
+        if (!nodes.some((n) => n.id === 'accepted_tool')) return linearEdges(nodes);
+        const edges = [];
+        const add = (from, to, label, kind = 'control') => {
+          if (nodes.some((n) => n.id === from) && nodes.some((n) => n.id === to))
+            edges.push({ from, to, label, kind });
+        };
+        const split = nodes.findIndex((n) => n.id === 'job_intent');
+        edges.push(...linearEdges(nodes.slice(0, split + 1)));
+        add('job_intent', 'accepted_tool', 'Tool回执支路', 'parallel');
+        add('accepted_tool', 'receipt');
+        add('receipt', 'present');
+        add('present', 'next', '只等父前台批次，不等后台终态');
+        add('job_intent', 'job_auth', '独立Job生命周期', 'parallel');
+        const job = nodes.slice(nodes.findIndex((n) => n.id === 'job_auth'));
+        edges.push(...linearEdges(job));
+        return edges;
+      }
+      function childEdges(nodes) {
+        const edges = [];
+        const add = (from, to, label, kind = 'control') => {
+          if (nodes.some((n) => n.id === from) && nodes.some((n) => n.id === to))
+            edges.push({ from, to, label, kind });
+        };
+        add('parent', 'spawn');
+        add('spawn', 'accepted');
+        add('spawn', 'slot', 'ensure后独立child生命周期', 'parallel');
+        add('accepted', 'parent_parallel', '父可继续／正常完成', 'parallel');
+        add('slot', 'child_model');
+        if (nodes.some((n) => n.id === 'cancel_child')) {
+          add('child_model', 'cancel_child', '明确中断原工作');
+          add('cancel_child', 'child_stop_confirmed');
+          add('child_stop_confirmed', 'attached');
+        } else {
+          add('child_model', 'child_stop', '完成条件及事务核实后');
+          add('child_stop', 'attached');
+        }
+        add('attached', 'settle');
+        add('settle', 'delivery_route');
+        add('child_model', 'independent', 'detached独立支路', 'parallel');
+        add('delivery_route', 'unknown_retained', '原未知仍需核实');
+        add('delivery_route', 'suppressed', '撤销／来源不可核实');
+        add('delivery_route', 'deferred', '暂时不具资格');
+        add('deferred', 'delivery_route', '条件变化重核原报告', 'return');
+        add('delivery_route', 'idle_auth', '无活动父Run');
+        add('idle_auth', 'new_run', '可信当前授权允许');
+        add('new_run', 'source');
+        add('delivery_route', 'checkpoint', '已有活动父Run');
+        add('checkpoint', 'source');
+        add('source', 'verify', '该Source已进入封存输入');
+        return edges;
+      }
+      function prepareGraph(nodes, edges, view) {
+        if (currentFlowView !== view) {
+          state.step = 0;
+          state.selectedNode = null;
+        }
+        currentFlow = nodes;
+        currentEdges = edges;
+        currentFlowView = view;
+        state.step = Math.max(0, Math.min(state.step, nodes.length - 1));
+        const chosen = nodes.find((n) => n.id === state.selectedNode) || nodes[state.step];
+        state.selectedNode = chosen.id;
+        state.step = nodes.indexOf(chosen);
+        return chosen;
+      }
+      function graphPanel(controls, title, lanes, chosen) {
+        return `<div class="workspace"><section class="card graph-panel">${controls}<div class="panel-header"><div><h3>${esc(title)}</h3><p>节点编号是讲解顺序；箭头表示真实依赖，派生等待标签与持久状态分开。</p></div><button type="button" class="small" id="flow-log">查看代表性实测 ↗</button></div><div class="graph-scroll" id="graph-scroll"><div class="graph" id="graph"><div class="lanes">${lanes.map((t) => `<div class="lane-label">${esc(t)}</div>`).join('')}</div><svg class="connectors" id="connectors" aria-hidden="true"></svg><div class="graph-grid">${currentFlow.map((n, i) => `<button type="button" class="node ${i < state.step ? 'past' : i > state.step ? 'future' : ''} ${n.id === chosen.id ? 'selected' : ''} ${n.tone === 'bad' ? 'bad-node' : n.tone === 'warn' ? 'warn-node' : n.tone === 'sink' ? 'sink' : ''}" id="node-${esc(n.id)}" data-node="${esc(n.id)}" style="grid-column:${n.lane + 1};grid-row:${n.row || i + 1}"><span class="step">${String(i + 1).padStart(2, '0')}</span><strong>${esc(n.title)}</strong>${n.implementation ? `<span class="mono sub">${esc(n.implementation)}</span>` : ''}<span class="sub">${esc(n.recordKind ? n.recordKind + ' · ' : '')}${esc(n.derived || n.raw || '规则核验')}</span></button>`).join('')}</div></div></div><div class="graph-legend"><span>控制依赖</span><span class="parallel">并行分支</span><span class="return">重新进入原边界</span><span class="input">外部控制输入</span><span class="observation">旁路观察／证据对照</span></div><div class="playbar"><button type="button" class="small" id="previous" ${state.step === 0 ? 'disabled' : ''}>← 上一节点</button><button type="button" class="primary small" id="play">${state.playing ? '暂停' : '播放讲解'}</button><button type="button" class="small" id="next" ${state.step === currentFlow.length - 1 ? 'disabled' : ''}>下一节点 →</button><div class="progress"><div style="width:${((state.step + 1) / currentFlow.length) * 100}%"></div></div><span class="step-count">${state.step + 1} / ${currentFlow.length}</span></div></section><aside class="card detail" id="node-detail">${nodeDetail(chosen)}</aside></div>`;
+      }
+      function renderLoop() {
+        const g = createLoopOverview(node, state.loopScenario, state.loopActor);
+        if (g.actor) state.loopActor = g.actor;
+        const actorLimit = g.scenarios.find((c) => c.id === state.loopScenario)?.actors;
+        const chosen = prepareGraph(g.nodes, g.edges, 'loop');
+        const controls = `<div class="controls"><div class="field"><label for="loop-actor">项目运行入口</label><select id="loop-actor">${[
+          ['main', '根显式业务输入'],
+          ['child', '子 Agent Run'],
+          ['report', '后台报告续轮'],
+        ]
+          .map(
+            ([k, v]) =>
+              `<option value="${k}" ${actorLimit && !actorLimit.includes(k) ? 'disabled' : ''} ${state.loopActor === k ? 'selected' : ''}>${v}</option>`,
+          )
+          .join(
+            '',
+          )}</select>${actorLimit ? '<p class="hint" id="loop-actor-limit">此路径目前仅有根 Run 回归；先选择其他控制路径，再切换运行入口。</p>' : ''}</div><div class="field grow"><label for="loop-scenario">实际 Loop 控制路径</label><select id="loop-scenario">${g.scenarios.map((c) => `<option value="${c.id}" ${c.actors && !c.actors.includes(state.loopActor) ? 'disabled' : ''} ${state.loopScenario === c.id ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div></div>`;
+        content.innerHTML =
+          heading(
+            'PROJECT AGENT LOOP',
+            '项目当前 Agent Loop 的实际控制流程',
+            '对应 packages/agent 的 Runtime.executeRun → defaultLoop → UnifiedExecution → Store；主、子与自动报告 Run 共用这条实现。',
+            `<span class="tag demo">源码流程推演 · 非运行日志</span>`,
+          ) +
+          facts() +
+          `<div class="callout info" style="margin-bottom:14px">${esc(g.description)} <div class="jump-list" style="margin-top:8px"><button type="button" id="open-tool" class="small">展开单 Tool / Job 子图 →</button><button type="button" id="open-child" class="small">展开后台 child 与结果接纳 →</button></div></div>` +
+          graphPanel(controls, g.title, g.lanes, chosen) +
+          `<p class="footer-note">当前项目实现的分支与回环。原 Model/Step、批次、Run、结果投递和业务验收具有各自边界；图中观察通知不授予执行权。</p>`;
+        bindFlow();
+        document.getElementById('open-tool').onclick = () => {
+          state.step = 0;
+          state.selectedNode = null;
+          state.actor = state.loopActor === 'child' ? 'child' : 'main';
+          if (state.loopScenario === 'auto_timeout') {
+            state.family = 'shell';
+            state.operation = 'execute';
+            state.mode = 'auto';
+            state.branch = 'auto_timeout';
+            state.subflowContext = '从项目 Loop 的 Auto 总预算到期分支展开：仍核原请求 filesystem／network、工具正常策略、宿主与父子上限、取消与最终派发，晚到审核不改变已定结果。此推演没有真实调用 ID。';
+          } else if (['human_deny', 'auto_reject'].includes(state.loopScenario)) {
+            state.family = 'shell';
+            state.operation = 'execute';
+            state.mode = state.loopScenario === 'human_deny' ? 'accept_edits' : 'auto';
+            state.branch = 'reject';
+            state.subflowContext = '从主 Loop 的拒绝分支展开：本图对应一个 Shell Tool 的拒绝与原回执；没有这次推演的真实调用 ID。';
+          } else {
+            state.subflowContext = '从项目 Loop 展开独立的通用工具例子；下方工具、模式与分支是单独选择，不代表已继承刚才主 Loop 分支或某个真实调用。';
+          }
+          setView('tool');
+        };
+        document.getElementById('open-child').onclick = () => {
+          state.step = 0;
+          state.selectedNode = null;
+          setView('child');
+        };
+        for (const [id, key] of [
+          ['loop-scenario', 'loopScenario'],
+          ['loop-actor', 'loopActor'],
+        ])
+          document.getElementById(id).onchange = (e) => {
+            stopPlaying();
+            state[key] = e.target.value;
+            state.step = 0;
+            state.selectedNode = null;
+            renderLoop();
+          };
+        requestAnimationFrame(drawEdges);
+      }
+      function renderFlow(child = false, approval = false) {
+        normalizeBranch();
+        const nodes = child ? buildChildFlow() : buildToolFlow();
+        const chosen = prepareGraph(
+          nodes,
+          child ? childEdges(nodes) : toolEdges(nodes),
+          child ? 'child' : approval ? 'approval' : 'tool',
+        );
+        const title = child
+          ? 'child 共用普通 Loop，报告按原身份接纳'
+          : approval
+            ? '当前调用的审批、复用与范围'
+            : '一条原 ToolCall 的执行子图';
+        content.innerHTML =
+          heading(
+            child ? 'BACKGROUND LIFECYCLE' : approval ? 'PERMISSION ROUTING' : 'TOOL SUBFLOW',
+            title,
+            child
+              ? '展开项目后台 carrier、子 Run、附着执行与结果 Source 的实际生命周期。'
+              : approval
+                ? '默认 3 秒 Auto 总预算、有效证据复用；超时交工具正常策略，不额外缩减原请求 filesystem／network；手动、Full、可信 ceiling 与最终派发保持各自规则。'
+                : '从主 Loop 的已保存模型响应展开一个调用；完整批次如何结算与续接请回项目 Agent Loop。',
+            `<span class="tag demo">源码流程推演 · 非运行日志</span>`,
+          ) +
+          facts() +
+          `<div class="callout info" style="margin-bottom:14px"><button type="button" id="open-loop" class="small">↶ 返回项目 Agent Loop</button> ${child ? '活动接纳、idle续轮、暂缓和抑制分别展示；投递状态不改写child原执行终态。' : esc(state.subflowContext || '图中当前调用与其 Job / Plan / Question 分开；Auto 的 approve、reject、ask_user、timeout 与技术失败分别展示。有效证据可复用，原授权观察文本不是可转交 grant。')}</div>` +
+          graphPanel(
+            flowControls(child),
+            child ? '原carrier与父工作并行' : family().entry + ' · ' + modeNames[state.mode],
+            child
+              ? [
+                  '父模型／调用者',
+                  'Runtime / Store',
+                  '原资格／审批',
+                  'child / 后台执行',
+                  '原结果／接纳',
+                ]
+              : [
+                  '原批次／调用者',
+                  'Runtime / Store',
+                  '权限／交互',
+                  '实际 Tool / Job',
+                  '原回执／批次收束',
+                ],
+            chosen,
+          ) +
+          `<p class="footer-note">单工具与后台页面是当前项目主 Loop 的展开图；播放只改变讲解焦点，不执行调用或提交审批。</p>`;
+        bindFlow();
+        document.getElementById('open-loop').onclick = () => {
+          state.step = 0;
+          state.selectedNode = null;
+          setView('loop');
+        };
+        requestAnimationFrame(drawEdges);
+      }
+      function nodeDetail(n) {
+        return `<div class="detail-top"><div class="row between"><span class="tag demo">${esc(n.recordKind || '控制规则')}</span>${n.raw ? stateBadge(n.raw) : '<span class="tag">规则 / 观察</span>'}</div><h2>${esc(n.title)}</h2><span class="mono muted small">${esc(n.id)}</span></div><div class="detail-body"><section class="detail-section"><h3>当前规则</h3><p>${esc(n.description)}</p></section>${n.derived ? `<div class="callout neutral">展示状态：${esc(n.derived)}<br>对应原对象状态：${esc(n.raw || '本节点不另造持久状态')}</div>` : ''}${
+          n.fields
+            ? `<section class="detail-section"><h3>需要核对的事实</h3><dl class="kv">${Object.entries(
+                n.fields,
+              )
+                .map(
+                  ([k, v]) =>
+                    `<dt>${esc(k)}</dt><dd>${esc(typeof v === 'object' ? json(v) : v)}</dd>`,
+                )
+                .join('')}</dl></section>`
+            : ''
+        }${n.facts ? `<section class="detail-section"><h3>容易混淆的地方</h3><ul class="list">${n.facts.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></section>` : ''}<section class="detail-section"><h3>日志应从哪里取</h3><p>${n.id.includes('check') || n.id.includes('allow') ? '原 Execution 的 authorization.check → 精确审核 Model；decision / reason 是观察事实。' : n.id.includes('human') || n.id.includes('answer') ? '原 Interaction 卡及 answer / revision；展示 Session 与来源 Session 分开。' : n.id === 'next' || n.id === 'present' ? '原执行结果 + typed Model Input Inspector；确认实际 call/source 进入当时输入。' : 'SessionLog 只给状态 / ID 摘要。正文需关联 Execution、Output 或 Inspector。'}</p></section><section class="detail-section"><h3>实现出处</h3>${n.implementation ? `<p class="mono small">${esc(n.implementation)}</p>` : ''}${(n.refs || [{ path: state.view === 'loop' ? 'packages/agent/src/loop.ts' : family().path }]).map((r) => source(r.path, r.line)).join('')}</section></div><div class="detail-actions"><button type="button" class="primary small" id="node-real">查看代表性实测日志</button><button type="button" class="small" id="node-demo">查看示意事件</button></div>`;
+      }
+      function drawEdges() {
+        const graph = document.getElementById('graph'),
+          svg = document.getElementById('connectors');
+        if (!graph || !svg) return;
+        const bounds = graph.getBoundingClientRect();
+        svg.setAttribute('viewBox', `0 0 ${bounds.width} ${graph.offsetHeight}`);
+        let paths =
+          '<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L8 4L0 8" fill="#91a5b5"/></marker></defs>';
+        for (const e of currentEdges) {
+          const a = document.getElementById('node-' + e.from),
+            b = document.getElementById('node-' + e.to);
+          if (!a || !b) continue;
+          const ra = a.getBoundingClientRect(),
+            rb = b.getBoundingClientRect();
+          let x1 = ra.left - bounds.left + ra.width / 2,
+            y1 = ra.bottom - bounds.top,
+            x2 = rb.left - bounds.left + rb.width / 2,
+            y2 = rb.top - bounds.top;
+          let path, tx, ty;
+          if (e.kind === 'return' || y2 < y1) {
+            const side = bounds.width - 6;
+            x1 = ra.right - bounds.left;
+            y1 = ra.top - bounds.top + ra.height / 2;
+            x2 = rb.right - bounds.left;
+            y2 = rb.top - bounds.top + rb.height / 2;
+            path = `M${x1} ${y1}L${side} ${y1}L${side} ${y2}L${x2 + 3} ${y2}`;
+            tx = side - 6;
+            ty = (y1 + y2) / 2;
+          } else {
+            const mid = (y1 + y2) / 2;
+            path = `M${x1} ${y1}L${x1} ${mid}L${x2} ${mid}L${x2} ${y2 - 3}`;
+            tx = (x1 + x2) / 2;
+            ty = mid - 5;
+          }
+          paths += `<path class="edge ${esc(e.kind || 'control')}" data-edge-from="${esc(e.from)}" data-edge-to="${esc(e.to)}" data-edge-kind="${esc(e.kind || 'control')}" d="${path}" marker-end="url(#arrow)"/>`;
+          if (e.label)
+            paths += `<text class="edge-label" x="${tx}" y="${ty}" text-anchor="${e.kind === 'return' ? 'end' : 'middle'}">${esc(e.label)}</text>`;
+        }
+        svg.innerHTML = paths;
+      }
+      function selectNode(id, scroll = false) {
+        state.selectedNode = id;
+        state.step = currentFlow.findIndex((n) => n.id === id);
+        document.querySelectorAll('.node').forEach((e, i) => {
+          e.classList.toggle('selected', e.dataset.node === id);
+          e.classList.toggle('past', i < state.step);
+          e.classList.toggle('future', i > state.step);
+        });
+        document.getElementById('node-detail').innerHTML = nodeDetail(currentFlow[state.step]);
+        bindNodeDetail();
+        document.querySelector('.step-count').textContent =
+          `${state.step + 1} / ${currentFlow.length}`;
+        document.querySelector('.progress div').style.width =
+          `${((state.step + 1) / currentFlow.length) * 100}%`;
+        document.getElementById('previous').disabled = state.step === 0;
+        document.getElementById('next').disabled = state.step === currentFlow.length - 1;
+        if (scroll)
+          document.getElementById('node-' + id).scrollIntoView({
+            behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+            block: 'nearest',
+            inline: 'nearest',
+          });
+        drawEdges();
+      }
+      function advance(delta) {
+        const i = Math.max(0, Math.min(currentFlow.length - 1, state.step + delta));
+        selectNode(currentFlow[i].id, true);
+        if (i === currentFlow.length - 1) stopPlaying();
+      }
+      function stopPlaying() {
+        state.playing = false;
+        clearInterval(timer);
+        const p = document.getElementById('play');
+        if (p) p.textContent = '播放讲解';
+      }
+      function bindNodeDetail() {
+        document.getElementById('node-real')?.addEventListener('click', () => openRealLogs());
+        document.getElementById('node-demo')?.addEventListener('click', () => {
+          clearLogFocus();
+          state.showDemo = true;
+          state.executionFocus = null;
+          state.evidenceContext = null;
+          state.session = 'all';
+          state.category = 'all';
+          state.eventFilter = 'all';
+          state.query = '';
+          state.page = 0;
+          state.logId = null;
+          state.detailTab = 'event';
+          setView('logs');
+        });
+      }
+      function bindFlow() {
+        document.querySelectorAll('[data-mode]').forEach((b) => {
+          b.onclick = () => {
+            stopPlaying();
+            if (state.mode !== b.dataset.mode && state.branch === 'mode_change')
+              state.branch = 'approve';
+            state.mode = b.dataset.mode;
+            state.subflowContext = null;
+            normalizeBranch();
+            state.step = 0;
+            state.selectedNode = null;
+            render();
+          };
+        });
+        for (const key of ['family', 'operation', 'actor', 'branch'])
+          document.getElementById(key)?.addEventListener('change', (e) => {
+            stopPlaying();
+            state[key] = e.target.value;
+            state.subflowContext = null;
+            if (key === 'family') state.operation = operationList()[0]?.id || '';
+            normalizeBranch();
+            state.step = 0;
+            state.selectedNode = null;
+            render();
+          });
+        document.getElementById('child-branch')?.addEventListener('change', (e) => {
+          stopPlaying();
+          state.childBranch = e.target.value;
+          state.step = 0;
+          state.selectedNode = null;
+          render();
+        });
+        document.querySelectorAll('[data-node]').forEach((b) => {
+          b.onclick = () => {
+            stopPlaying();
+            selectNode(b.dataset.node);
+          };
+        });
+        document.getElementById('previous').onclick = () => {
+          stopPlaying();
+          advance(-1);
+        };
+        document.getElementById('next').onclick = () => {
+          stopPlaying();
+          advance(1);
+        };
+        document.getElementById('play').onclick = () => {
+          if (state.playing) {
+            stopPlaying();
+            return;
+          }
+          if (state.step === currentFlow.length - 1) selectNode(currentFlow[0].id);
+          state.playing = true;
+          document.getElementById('play').textContent = '暂停';
+          timer = setInterval(() => advance(1), 1250);
+        };
+        document.getElementById('flow-log').onclick = () => openRealLogs();
+        bindNodeDetail();
+      }
+      function openRealLogs() {
+        const f = family();
+        const childView = state.view === 'child',
+          loopView = state.view === 'loop',
+          actor = loopView ? state.loopActor : state.actor,
+          evidenceMode = loopView
+            ? state.loopScenario === 'human_deny' ? 'accept_edits' : 'auto'
+            : state.mode;
+        const prefer = childView
+          ? 'natural-child-auto'
+          : actor === 'readonly'
+            ? 'natural-explore-auto'
+            : actor === 'child' || actor === 'report'
+              ? evidenceMode === 'full'
+                ? 'natural-child-full'
+                : evidenceMode === 'accept_edits'
+                  ? 'natural-child-deny-tool'
+                  : 'natural-child-auto'
+              : (!loopView && state.branch === 'job_reject') || (loopView && state.loopScenario === 'human_deny')
+                ? 'natural-main-deny-job'
+                : evidenceMode === 'auto'
+                  ? 'natural-main-auto'
+                  : 'natural-main-accept_edits';
+        const c =
+          data.cases.find(
+            (c) =>
+              c.id === prefer &&
+              (!childView || (c.sourceMessageReceipts || []).some((r) => r.childSessionId)),
+          ) ||
+          (childView
+            ? data.cases.find((c) => (c.sourceMessageReceipts || []).some((r) => r.childSessionId))
+            : null) ||
+          data.cases[0];
+        const roleName =
+          actor === 'child' ? '子 Agent Run' : actor === 'report' ? '后台报告续轮' : actor === 'readonly' ? '只读子 Agent' : '主 Agent';
+        const scenario = createLoopOverview(node, state.loopScenario, state.loopActor).scenarios.find(
+          (item) => item.id === state.loopScenario,
+        );
+        const branchName = document.getElementById('child-branch')?.selectedOptions[0]?.textContent || state.childBranch;
+        const matching =
+          !childView &&
+          !loopView &&
+          c.mode === state.mode &&
+          c.executions.some((e) => {
+            const session = c.sessions.find((s) => s.id === e.sessionId),
+              roleMatches = actor === 'main' ? session?.parentSessionId === null : !!session?.parentSessionId;
+            return (
+              roleMatches &&
+              e.definitionId === f.definition &&
+              (state.branch === 'approve'
+                ? e.status === 'succeeded'
+                : state.branch === 'reject' &&
+                  (e.authorization?.human?.decision === 'deny' || e.authorization?.check?.decision === 'reject'))
+            );
+          });
+        state.evidenceContext = {
+          request: childView
+            ? '后台子 Agent · ' + branchName
+            : loopView
+              ? '项目 Loop · ' + (scenario?.label || state.loopScenario) + ' · ' + roleName
+              : f.entry + ' · ' + modeNames[state.mode] + ' · ' + roleName + ' · ' + branches[state.branch],
+          matching,
+          qualification:
+            '推演没有真实 Execution ID；代表案例不是刚才分支已执行的证明。' +
+            (childView
+              ? '以下优先打开准确 child Source → carrier → 接收 Model 的原件链；所选 active／idle／暂缓等生命周期分支仍以源码与对应回归核对，不能由该代表样本补证。'
+              : '未匹配的分支以本项目源码与受控回归为依据，不把其他入口、模式或执行者的样本算作同类实测。'),
+        };
+        state.caseId = c.id;
+        state.executionFocus = null;
+        clearLogFocus();
+        state.showDemo = false;
+        state.category = 'all';
+        state.eventFilter = 'all';
+        state.query = '';
+        state.session = 'all';
+        state.logId = null;
+        state.page = 0;
+        state.detailTab = 'event';
+        const childSource = (c.sourceMessageReceipts || []).find((r) => r.childSessionId);
+        if (childSource && (childView || (loopView && actor === 'report'))) {
+          state.focusSource = childSource.sourceId;
+          state.executionFocus = childSource.carrierExecutionId;
+          state.detailTab = 'model';
+        }
+        setView('logs');
+        if (state.executionFocus) revealLogInspector();
+      }
+      function renderCatalog() {
+        content.innerHTML =
+          heading(
+            'TOOL FAMILIES',
+            '所有工具，归入同一执行边界',
+            '展示当前支持的路径；实际 Run 只公开当时启用且获准的目录，不代表每次都有全部工具。',
+            `<span class="tag">${families.length} 类路径</span>`,
+          ) +
+          `<div class="catalog">${families.map((f) => `<article class="card tool-card"><div class="row between"><h2>${esc(f.name)}</h2><span class="tag">${esc(f.kind)}</span></div><div class="names"><code>${esc(f.entry)}</code></div><p>${esc(f.policy)}</p><ul class="list">${f.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ul><div class="callout neutral" style="margin-top:12px">${esc(f.failure)}</div><footer><span class="hint">由当前配置选择 / 精确身份核验</span><button type="button" data-open-family="${f.id}" class="small">展开交互路径 →</button></footer></article>`).join('')}</div>`;
+        document.querySelectorAll('[data-open-family]').forEach((b) => {
+          b.onclick = () => {
+            state.family = b.dataset.openFamily;
+            state.operation = operationList()[0]?.id || '';
+            state.branch = 'approve';
+            state.subflowContext = null;
+            state.selectedNode = null;
+            state.step = 0;
+            setView('tool');
+          };
+        });
+      }
+      function demoCase() {
+        const nodes = currentFlow.length
+          ? currentFlow
+          : createLoopOverview(node, state.loopScenario, state.loopActor).nodes;
+        return {
+          id: 'demo-current',
+          title: '当前路径 · 示意事件',
+          mode: state.mode,
+          origin: 'demo',
+          summary:
+            '这些是根据当前源码规则生成的推演步骤，不是持久 SessionLog。没有真实时间、执行或授权。',
+          sessions: [{ id: 'demo-session', parentSessionId: null }],
+          executions: [],
+          models: [],
+          toolMessageReceipts: [],
+          sourceMessageReceipts: [],
+          logs: nodes.map((n, i) => ({
+            cursor: String(i + 1),
+            sessionId: 'demo-session',
+            objectId: n.id,
+            objectType: 'illustration',
+            category: 'demo',
+            occurredAt: null,
+            recordedStatus: n.raw || null,
+            summary: n.title,
+            details: { explanation: n.description },
+            demo: true,
+          })),
+          approvals: [],
+          jobOutput: {},
+          source: {},
+          logReadProof: {},
+          finding: '不构成任何实际批准、执行或资格。',
+        };
+      }
+      function selectedCase() {
+        return state.showDemo
+          ? demoCase()
+          : data.cases.find((c) => c.id === state.caseId) || data.cases[0];
+      }
+      function sessionLabel(c, id) {
+        const s = c.sessions.find((s) => s.id === id);
+        return (
+          (!s || s.relationshipUnknown ? '未知 ' : s.parentSessionId ? '子 ' : '主 ') + short(id, 8)
+        );
+      }
+      function sourceForLog(c, log) {
+        if (!log) return null;
+        const sourceId = log.details?.sourceId || log.objectId;
+        return (c.sourceMessageReceipts || []).find(
+          (r) => r.sourceId === sourceId && r.sessionId === log.sessionId,
+        ) || null;
+      }
+      function executionFor(c, log) {
+        const id = log.details?.executionId || log.objectId;
+        const source = sourceForLog(c, log);
+        return (
+          c.executions.find((e) => e.id === id) ||
+          c.executions.find((e) => e.id === log.modelExecutionId) ||
+          (source && c.executions.find((e) => e.id === source.carrierExecutionId)) ||
+          null
+        );
+      }
+      function relatedExecutions(c, e) {
+        if (!e) return [];
+        return c.executions.filter(
+          (x) => x.parentExecutionId === e.id || x.id === e.parentExecutionId,
+        );
+      }
+      function normalizedLogs(c) {
+        return [...(c.logs || [])].sort((a, b) => {
+          try {
+            return BigInt(a.cursor) < BigInt(b.cursor)
+              ? -1
+              : BigInt(a.cursor) > BigInt(b.cursor)
+                ? 1
+                : 0;
+          } catch {
+            return String(a.cursor).localeCompare(String(b.cursor));
+          }
+        });
+      }
+      function filteredLogs(c) {
+        const q = state.query.trim().toLowerCase();
+        return normalizedLogs(c).filter((log) => {
+          const e = executionFor(c, log);
+          const scoped = state.session === 'all' || log.sessionId === state.session;
+          const cat = state.category === 'all' || log.category === state.category;
+          const filter =
+            state.eventFilter === 'all' ||
+            (state.eventFilter === 'failures' &&
+              ['failed', 'cancelled', 'outcome_unknown', 'rejected'].includes(
+                log.recordedStatus,
+              )) ||
+            (state.eventFilter === 'approvals' &&
+              (log.category === 'interaction' ||
+                e?.authorization?.check ||
+                e?.authorization?.human)) ||
+            (state.eventFilter === 'models' && (log.modelExecutionId || e?.kind === 'model'));
+          const text = JSON.stringify({
+            log,
+            input: e?.kind === 'tool' ? e.input : undefined,
+            definition: e?.definitionId,
+            callId: e?.callId,
+          }).toLowerCase();
+          return scoped && cat && filter && (!q || text.includes(q));
+        });
+      }
+      function logKey(log) {
+        return log.sessionId + ':' + log.cursor;
+      }
+      function date(value) {
+        return typeof value === 'number' &&
+          Number.isFinite(value) &&
+          !Number.isNaN(new Date(value).getTime())
+          ? new Intl.DateTimeFormat('zh-CN', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              fractionalSecondDigits: 3,
+              hour12: false,
+            }).format(new Date(value))
+          : '不可用';
+      }
+      function renderLogs(preserveScroll = false) {
+        const oldListScroll = preserveScroll
+          ? document.querySelector('.log-list')?.scrollTop || 0
+          : 0;
+        const oldDetailScroll = 0;
+        const c = selectedCase();
+        const logs = filteredLogs(c);
+        const perPage = 100;
+        state.page = Math.min(state.page, Math.max(0, Math.ceil(logs.length / perPage) - 1));
+        const page = logs.slice(state.page * perPage, (state.page + 1) * perPage);
+        const selected = state.executionFocus
+          ? null
+          : logs.find((l) => logKey(l) === state.logId) || page[0];
+        if (selected) state.logId = logKey(selected);
+        const categories = [...new Set((c.logs || []).map((l) => l.category))];
+        content.innerHTML =
+          heading(
+            'EVENTS & ORIGINAL RECEIPTS',
+            '按原身份，追到每一份决定和回执',
+            '事件元数据、原执行、审批与模型输入分层查看。父 / 子日志由本原型按真实身份关联，不存在新增的生产聚合接口。',
+            `<span class="tag ${c.origin === 'demo' ? 'demo' : 'real'}"><span class="dot"></span>${c.origin === 'demo' ? '示意数据 · 无实际执行' : c.origin === 'imported' ? '本地导入 · 来源未验证' : '真实测试证据 · 只读副本'}</span>`,
+          ) +
+          `${state.evidenceContext ? `<div class="callout info" style="margin-bottom:14px"><strong>从流程推演进入：${esc(state.evidenceContext.request)}</strong><br>${state.evidenceContext.matching ? '此案例包含同模式下的同类入口。' : '未核实此案例覆盖当前流程分支，以下展示代表案例。'} ${esc(state.evidenceContext.qualification)}</div>` : ''}<div class="card" style="margin-bottom:16px"><div class="controls"><div class="field grow"><label>证据来源</label><select id="log-case"><option value="demo-current" ${state.showDemo ? 'selected' : ''}>当前流程推演（非日志）</option>${data.cases.map((c) => `<option value="${esc(c.id)}" ${!state.showDemo && state.caseId === c.id ? 'selected' : ''}>${esc(c.title || c.id)} · ${esc(modeNames[c.mode] || c.mode || '未提供模式')}</option>`).join('')}</select></div><div class="stats-inline"><span><strong>${c.executions.length}</strong> 原执行快照</span><span><strong>${c.logs.length}</strong> 原事件</span><span class="tag">${esc(modeNames[c.mode] || c.mode || '未提供模式')}</span></div></div><div class="log-summary"><strong>${esc(c.title || c.id)}</strong><p>${esc(c.summary || '本地导入的只读证据')}</p>${c.finding ? `<div class="callout ${c.origin === 'demo' ? 'neutral' : ''}" style="margin-top:10px">${esc(c.finding)}</div>` : ''}${caseOutcome(c)}<details><summary>独立复核与连续压缩证据范围</summary>${pre(data.overview?.semanticReviewReferences || [])}<p class="hint">简化语义用例通过不能覆盖复杂原请求复现。真实staging原请求仍有误拒；不能宣称误判全部消除。连续压缩结论只适用于该有限Full单Run任务，证据列表不等于取回单项原结果全文。</p></details><div class="identity-tree">${c.sessions.map((s) => `<span>${s.relationshipUnknown ? '未核关系' : s.parentSessionId ? '↳ child' : 'root'} <code>${esc(short(s.id, 14))}</code></span>`).join('')}</div></div></div>` +
+          `<div class="log-layout"><section class="card"><div class="panel-header"><h3>${c.origin === 'demo' ? '示意步骤' : '原 SessionLog 事件'}</h3><span class="tag">${c.origin === 'demo' ? '无真实时间戳' : '按 Store Decimal64 游标排序'}</span></div><div class="log-filters"><div class="search"><label class="visually-hidden" for="log-search">搜索事件、身份或Tool参数</label><input type="search" id="log-search" placeholder="搜索定义、Execution ID、call 或 Tool 参数…" value="${esc(state.query)}"></div><div class="field"><label for="log-session">来源 Session</label><select id="log-session"><option value="all">主 / 子全部（原型关联）</option>${c.sessions.map((s) => `<option value="${esc(s.id)}" ${state.session === s.id ? 'selected' : ''}>${esc(sessionLabel(c, s.id))}</option>`).join('')}</select></div><div class="field"><label for="log-category">原事件类别</label><select id="log-category"><option value="all">全部类别</option>${categories.map((cat) => `<option value="${esc(cat)}" ${state.category === cat ? 'selected' : ''}>${esc(cat)}</option>`).join('')}</select></div><div class="field"><label for="log-filter">关联观察</label><select id="log-filter">${[
+            ['all', '全部事件'],
+            ['failures', '事件当时失败 / 取消 / 未知'],
+            ['approvals', '关联审批的原执行'],
+            ['models', '模型执行 / 导航'],
+          ]
+            .map(
+              ([k, v]) =>
+                `<option value="${k}" ${state.eventFilter === k ? 'selected' : ''}>${v}</option>`,
+            )
+            .join(
+              '',
+            )}</select></div></div><div class="log-list table-wrap"><table class="log-table"><thead><tr><th>游标 / 时间</th><th>事件对象</th><th>来源</th><th>事件当时状态</th></tr></thead><tbody>${
+            page
+              .map((log) => {
+                const e = executionFor(c, log);
+                return `<tr tabindex="0" role="button" aria-label="查看事件 ${esc(log.cursor)} ${esc(log.summary)}" data-log="${esc(logKey(log))}" class="${selected && logKey(selected) === logKey(log) ? 'chosen' : ''}"><td><span class="mono">#${esc(log.cursor)}</span><span class="event-id">${date(log.occurredAt)}</span></td><td><span class="event-title">${esc(log.summary || log.category)}</span><span class="event-id mono">${esc(e?.definitionId || log.type || log.objectType || log.category)} · ${esc(short(log.objectId, 16))}</span></td><td><span class="session-pill">${esc(sessionLabel(c, log.sessionId))}</span></td><td>${log.recordedStatus ? stateBadge(log.recordedStatus) : '<span class="muted">不可用</span>'}</td></tr>`;
+              })
+              .join('') ||
+            '<tr><td colspan="4"><div class="empty">没有匹配的原事件。<br>更换筛选或清空搜索；不会补造缺失日志。</div></td></tr>'
+          }</tbody></table></div><div class="log-pagination"><span class="hint">${logs.length ? state.page * perPage + 1 : 0}–${Math.min((state.page + 1) * perPage, logs.length)} / ${logs.length} · 每页100条</span><div class="row"><button type="button" id="log-prev" class="small" ${state.page === 0 ? 'disabled' : ''}>上一页</button><button type="button" id="log-next" class="small" ${(state.page + 1) * perPage >= logs.length ? 'disabled' : ''}>下一页</button></div></div></section><aside class="card log-detail"><div class="panel-header"><h3>原始记录检查器</h3><button type="button" class="small" id="copy-record" ${selected ? '' : 'disabled'}>复制原事件</button></div><div style="padding:10px 16px;border-bottom:1px solid var(--line)"><label class="hint" for="execution-picker">也可直接检查原执行快照（不补造事件）</label><select id="execution-picker" style="width:100%;margin-top:5px"><option value="">按所选事件关联</option>${c.executions.map((e) => `<option value="${esc(e.id)}" ${state.executionFocus === e.id ? 'selected' : ''}>${esc(e.kind)} · ${esc(e.definitionId)} · ${esc(short(e.id, 9))}</option>`).join('')}</select></div>${(c.sourceMessageReceipts || []).length ? `<div style="padding:0 16px 10px"><label class="hint" for="source-picker">后台结果 Source → 实际接收 Model</label><select id="source-picker" style="width:100%;margin-top:5px"><option value="">选择准确原 Source</option>${c.sourceMessageReceipts.map((r) => `<option value="${esc(r.sourceId)}" ${state.focusSource === r.sourceId ? 'selected' : ''}>${r.childSessionId ? 'child' : 'Job'} · ${esc(short(r.sourceId, 18))}</option>`).join('')}</select></div>` : ''}<div class="tabs" role="tablist">${[
+            ['event', '事件'],
+            ['execution', '执行'],
+            ['approval', '审批'],
+            ['model', '模型所见'],
+            ['output', '输出'],
+            ['raw', '原 JSON'],
+          ]
+            .map(
+              ([k, v]) =>
+                `<button type="button" role="tab" data-log-tab="${k}" aria-selected="${state.detailTab === k}" class="${state.detailTab === k ? 'active' : ''}">${v}</button>`,
+            )
+            .join(
+              '',
+            )}</div><div class="content" id="log-detail-content">${selected || state.executionFocus ? logDetail(c, selected) : '<div class="empty">选择一条事件查看原记录</div>'}</div></aside></div><p class="footer-note">真实数据读取证明：${esc(c.origin === 'demo' ? '无数据库读取' : c.origin === 'imported' ? '本地导入，无数据库读取证明' : `只读打开已关闭的测试 Store；${c.logReadProof?.beforeCursor === c.logReadProof?.afterCursor ? '读取前后 cursor 未改变' : '见读取证明'}。`)} 原事件缺失的时间和旧状态显示不可用，不用当前执行快照回填。</p>`;
+        bindLogs();
+        document.querySelector('.log-list').scrollTop = oldListScroll;
+        document.querySelector('.log-detail .content').scrollTop = oldDetailScroll;
+      }
+      function caseOutcome(c) {
+        if (!c.outcome) return '';
+        const outcome = c.outcome;
+        return `<section data-case-outcome><h3>Run、工具、业务断言分别观察</h3>${kv({ sourceCaseId: c.sourceCaseId || c.id, displayId: c.displayId || c.id, Run: Array.isArray(outcome.runs) && outcome.runs.length ? outcome.runs.map((run) => `${run.sessionId}: ${run.status} (active=${run.isActive})`).join('；') : '未提供原 Run 快照，不从断言推断', Tool: outcome.toolStatusCounts ? json(outcome.toolStatusCounts) : '见原工具执行快照', assertionStatus: outcome.assertionStatus || '未记录', failure: outcome.failure || '无已记录失败原因', manualReviewRequired: outcome.fixtureResult?.manualReviewRequired ?? '未记录', failedChecks: Array.isArray(outcome.failedChecks) ? outcome.failedChecks.join('；') || '无已记录失败断言' : '未提供完整断言清单' })}<div class="callout neutral">assertions_passed 只表示机械断言通过，仍须语义复核；manualReviewRequired 按原 fixtureResult 展示。Run completed 和工具成功均不证明完整业务验收。</div>${c.semanticReview ? `<h3>独立语义复核结论（不改原断言）</h3>${kv({ assessment: c.semanticReview.assessment || c.semanticReview.independentAssessment || '未记录', runnerStatus: c.semanticReview.runnerStatus || '未记录', runnerFailure: c.semanticReview.runnerFailure || '无已记录失败原因' })}<p>${esc(c.semanticReview.reason || '未提供简短理由；见原证据。')}</p><details data-semantic-review-original><summary>独立语义复核原证据</summary>${pre(c.semanticReview)}</details>` : '<p class="hint">未附逐例语义结论；不能把机械绿记成全验收通过。</p>'}<p class="hint">未执行的后续断言保持未覆盖，不补成通过。</p></section>`;
+      }
+      function pre(value) {
+        return `<pre>${esc(typeof value === 'string' ? value : json(value))}</pre>`;
+      }
+      function kv(obj) {
+        return `<dl class="kv">${Object.entries(obj)
+          .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v ?? '不可用')}</dd>`)
+          .join('')}</dl>`;
+      }
+      function receiptsFor(c, e) {
+        return (c.toolMessageReceipts || []).filter((r) => r.executionId === e?.id);
+      }
+      function approvalTrace(c, e) {
+        const a = e.authorization || {};
+        const check = a.check || {};
+        const policy = a.policy || {};
+        const checkId = check.executionId || policy.checkExecutionId;
+        const reviewer = checkId ? (c.executions || []).find((entry) => entry.id === checkId && entry.kind === 'model') : null;
+        const timing = check.timing || a.timing || reviewer?.result?.timing || {};
+        const missing = '未记录（历史原件不补造）';
+        const value = (v) => v === undefined || v === null ? missing : typeof v === 'object' ? json(v) : v;
+        return `<section data-approval-trace><h3>审核耗时、复用与执行范围</h3>${kv({ budgetMs: value(timing.budgetMs), prepareMs: value(timing.prepareMs), queueMs: value(timing.queueMs), providerMs: value(timing.providerMs), totalMs: value(timing.totalMs), startedAt: value(timing.startedAt), deadlineAt: value(timing.deadlineAt), policyEvidenceId: value(policy.evidenceId || a.policyEvidenceId || check.policyEvidenceId), reason: value(policy.reason || a.reason || check.reasonCode), sourceExecutionId: value(policy.sourceExecutionId), checkExecutionId: value(checkId), requestedScope: value(policy.requestedScope || a.requestScope || check.requestScope), effectiveScope: value(policy.effectiveScope || a.effectiveScope || check.effectiveScope) })}<p class="hint">只显示原记录实际提供的观测。默认 3000ms 是当前策略说明，不回填历史预算；reused_approval / parent_review 是来源关系，timeout_continue 表示审核超时，默认放行（工具策略兜底）；不伪造审核模型批准。只读任务指导仍存在，普通沙箱范围不构成角色独立的 OS 禁写保证。</p></section>`;
+      }
+      function logDetail(c, log) {
+        const e = state.executionFocus
+          ? c.executions.find((x) => x.id === state.executionFocus)
+          : log
+            ? executionFor(c, log)
+            : null;
+        const tab = state.detailTab;
+        if (!log && tab === 'raw')
+          return `<span class="tag">原执行快照 JSON · 没有补造事件</span>${pre(e)}`;
+        if (!log && tab === 'event')
+          return '<div class="callout neutral">当前直接检查原执行快照；未选择对应 SessionLog 事件。事件时间、旧状态和摘要均不补造。</div>';
+        if (tab === 'raw')
+          return `<span class="tag ${c.origin === 'demo' ? 'demo' : ''}">原事件 JSON</span>${pre(log)}<p class="hint">这只包含 SessionLog 原条目。下面各检查器关联别的原记录，不会写回该事件。</p>`;
+        if (tab === 'event') {
+          const source = sourceForLog(c, log);
+          return `<div class="row between"><span class="tag">${esc(log.category)}</span>${log.recordedStatus ? stateBadge(log.recordedStatus) : '<span class="tag">历史状态不可用</span>'}</div><h3>${esc(log.summary || '事件')}</h3>${kv({ cursor: log.cursor, occurredAt: date(log.occurredAt), session: log.sessionId, type: log.type || log.objectType, objectId: log.objectId, revision: log.revision, modelNavigation: log.modelExecutionId || '无 / 不可用' })}<div class="callout neutral">SessionLog 只记录闭合元数据。命令、stdout 和错误正文不在这份事件中。</div>${log.details?.policy ? `<section><h3>原策略事件</h3>${pre(log.details.policy)}<p class="hint">source.kind=policy 的 id 是策略 Command；不会当作 Execution 跳转。原目标与准确审核模型仅沿已有执行绑定导航。</p></section>` : ''}${pre(log.details || {})}${source ? `<section><h3>原 Source 的准确关联</h3>${kv({ sourceId: source.sourceId, carrier: source.carrierExecutionId, acceptedRun: source.acceptance?.runId })}<p class="hint">此事件的对象仍是原 Source；下面通过原接纳记录关联 carrier 和实际接收 Model，不把事件改写为执行事件。</p><button type="button" class="small" data-execution-jump="${esc(source.carrierExecutionId)}" data-show-source="${esc(source.sourceId)}">打开原 carrier / Source →</button>${receiverLinks(source, 'source')}</section>` : e ? `<button type="button" class="small" data-detail-switch="execution">关联原 Execution → ${esc(short(e.id))}</button>` : ''}${c.origin !== 'demo' ? `<details><summary class="small">只读读取证明 / 原件位置</summary>${pre({ source: c.source, logReadProof: c.logReadProof, omittedFields: c.omittedFields })}</details>` : ''}`;
+        }
+        if (!e)
+          return `<div class="empty">此事件没有可关联的 ${tab === 'model' ? '模型导航' : 'Execution'}。<br>保留缺失事实，不从名字或当前状态猜测。</div>`;
+        if (tab === 'execution')
+          return `<div class="row"><span class="tag">当前原执行快照</span>${stateBadge(e.status)}</div>${kv({ kind: e.kind, definition: e.definitionId + ' @ ' + e.definitionVersion, execution: e.id, parent: e.parentExecutionId, session: e.sessionId, run: e.runId, resultRevision: e.resultRevision, dispatchObserved: e.authorization?.dispatched === true ? '是' : e.authorization?.dispatched === false ? '否' : '不可用' })}<h3>原调用输入</h3><div class="callout neutral">${e.kind === 'tool' ? '真实 Tool 参数；公开 Execution 可关联 toolInput。' : '隔离合成夹具原件。生产 HTTP 不公开完整 Job 程序、Model 私有输入或恢复 manifest。'}</div>${e.kind === 'model' ? '<p class="hint">完整 System / Model 私有请求不在此数据包导出；实际工具回执见“模型所见”。</p>' : pre(e.input)}<h3>原结果</h3>${pre(e.result)}${
+            e.parentExecutionId || relatedExecutions(c, e).length
+              ? `<section><h3>原父子执行关联</h3><div class="jump-list">${relatedExecutions(c, e)
+                  .map(
+                    (r) =>
+                      `<button type="button" class="small" data-execution-jump="${esc(r.id)}">${esc(r.kind)} · ${esc(r.definitionId)} ${esc(short(r.id, 7))}</button>`,
+                  )
+                  .join('')}</div></section>`
+              : ''
+          }<p class="hint">展示快照不是事件发生时状态。授权观察不是可重用的批准凭证。</p>`;
+        if (tab === 'approval') {
+          const a = e.authorization;
+          if (!a?.check && !a?.human && !a?.policy)
+            return `<div class="callout neutral">原执行没有 Auto / 人工决定记录。可能直接允许、硬拒绝或属于特殊豁免；不能仅据这一缺项推断原因。</div>${pre(a || {})}${approvalTrace(c, e)}`;
+          const approval = (c.approvals || []).find(
+            (x) => (x.executionId || x.pending?.id || x.card?.executionId) === e.id,
+          );
+          return `<span class="tag">原授权观察 · 非 grant</span>${kv({ execution: e.id, sourceSession: e.sessionId, dispatched: a.dispatched })}${a.policy?.reason === 'timeout_continue' ? '<div class="callout info">审核超时，默认放行（工具策略兜底）。原审核尝试的failed/incomplete状态仍保留，不等于该工具未执行；实际派发和结果见原Execution。</div>' : ''}${a.check ? `<h3>Auto 原记录</h3>${kv({ modelExecutionId: a.check.executionId, status: a.check.status, decision: a.check.decision })}<div class="review-reason">${esc(a.check.reason)}</div><p class="hint">risk / authorization 是评估维度，没有独立持久评分。理由不能修改输入或系统范围。</p><button type="button" class="small" data-model-jump="${esc(a.check.executionId)}">打开审核模型原记录 →</button>` : ''}${a.policy ? `<h3>Auto 策略事实</h3>${pre(a.policy)}${a.policy.checkExecutionId ? `<button type="button" class="small" data-model-jump="${esc(a.policy.checkExecutionId)}">打开准确来源审核模型 →</button>` : ''}<p class="hint">policyEvidenceId 是策略 Command 身份，sourceExecutionId 才是原执行；parent_review 不产生第二次模型批准，timeout_continue 表示审核超时，默认放行（工具策略兜底），不伪造模型批准。</p>` : ''}${a.human ? `<h3>人工原决定</h3>${pre(a.human)}${approval ? pre(approval) : '<p class="hint">此包没有该卡正文；保留原 Interaction ID，可在原件定位。</p>'}` : ''}${approvalTrace(c, e)}<div class="callout info">这是原件当时的授权观察；历史 Tool / Job 分开审核的事实保留。当前 Auto 可对准确同一 Shell 语义复用，不能据新流程改写旧记录。答复位置与授权来源 Session 分开。</div>`;
+        }
+        if (tab === 'model') {
+          const isModel = e.kind === 'model',
+            m = (c.models || []).find((x) => x.requestId === e.id);
+          const receipts = isModel
+            ? (c.toolMessageReceipts || []).filter((r) => (r.receivedBy || []).includes(e.id))
+            : receiptsFor(c, e);
+          const sourceReceipts = (c.sourceMessageReceipts || []).filter((r) =>
+            isModel
+              ? (r.receivedBy || []).includes(e.id)
+              : r.carrierExecutionId === e.id,
+          );
+          const ordered = [...receipts].sort(
+            (a, b) =>
+              Number(b.executionId === state.focusReceipt) -
+                Number(a.executionId === state.focusReceipt) ||
+              Number(b.firstRequestId === e.id) - Number(a.firstRequestId === e.id),
+          );
+          return `<span class="tag real">实际封存输入关联</span>${isModel ? kv({ requestId: e.id, purpose: m?.purpose || '见原执行', session: e.sessionId }) : kv({ originalExecution: e.id, kind: e.kind, callId: e.callId })}${m ? modelOutput(m) : ''}${
+            sourceReceipts.length
+              ? `<h3>后台结果 Source · ${sourceReceipts.length} 条</h3>${sourceReceipts
+                  .sort(
+                    (a, b) =>
+                      Number(b.sourceId === state.focusSource) -
+                      Number(a.sourceId === state.focusSource),
+                  )
+                  .map((r) => sourceReceiptView(c, r, isModel, e.id))
+                  .join('')}`
+              : ''
+          }${ordered.length ? `<h3>原 Tool 消息 · ${ordered.length} 条</h3>` + ordered.map((r) => `<details ${!isModel || r.executionId === state.focusReceipt || r.firstRequestId === e.id ? 'open' : ''}><summary>${esc(r.executionId === state.focusReceipt ? '刚才选择的消息' : r.firstRequestId === e.id ? '本轮首次收到' : '历史上下文')} · ${esc(short(r.executionId, 12))}${r.complete === false ? ' · 正文已省略' : ''}</summary><section>${kv({ toolExecution: r.executionId, toolCall: r.callId, firstReceiver: r.firstRequestId || (r.receivedBy || [])[0], sourceIds: Array.isArray(r.message?.sourceIds) ? r.message.sourceIds.join(', ') : '不可用' })}${r.complete === false ? `<div class="callout neutral">此副本没有完整消息正文；不能据此判断模型当时未收到。原件仍在封存输入。</div>${pre({ complete: false, omittedFields: r.omittedFields })}` : pre(r.message?.content ?? r.message)}${receiverLinks(r, 'tool')}</section></details>`).join('') : ''}${!ordered.length && !sourceReceipts.length ? '<div class="callout neutral">本包未关联这份执行的 Tool 消息或后台 Source。保留缺失事实，不能推断没有投递。</div>' : ''}<p class="hint">Tool 回执与后台 Source 分别关联实际模型输入。Source 虽用 role=user 承载，正文是具名低信任结果，不是人类新指令或授权。省略内容、当前快照与旧输入不互相补造。</p>`;
+        }
+        if (tab === 'output') {
+          const out = c.jobOutput?.[e.id] || c.jobOutput?.[e.parentExecutionId];
+          const nested = e.result?.details?.execution?.id;
+          const ref = out || c.jobOutput?.[nested];
+          return `<h3>原执行输出</h3>${ref ? pre(ref) : '<div class="callout neutral">当前执行没有导出的输出流。Shell 的输出属于原 Job，可先跳转关联 Job；并非所有工具都有 stdout / stderr。</div>'}${relatedExecutions(
+            c,
+            e,
+          )
+            .map(
+              (r) =>
+                `<button type="button" class="small" data-execution-jump="${esc(r.id)}">${esc(r.definitionId)} · ${esc(short(r.id))}</button>`,
+            )
+            .join(
+              '',
+            )}<h3>交付 / 接纳事实</h3>${pre({ delivery: e.delivery, deliveryReason: e.deliveryReason, afterTurn: e.afterTurn, resultAcceptance: e.resultAcceptance })}<p class="hint">attached Job、独立后台 Job、child 报告的交付与生命周期不同。输出丢失区间不补造。</p>`;
+        }
+        return '';
+      }
+      function receiverLinks(r, kind) {
+        const ids = Array.isArray(r.receivedBy) ? r.receivedBy : [],
+          attr =
+            kind === 'source'
+              ? `data-source-id="${esc(r.sourceId)}"`
+              : `data-receipt-id="${esc(r.executionId)}"`;
+        const button = (id) =>
+          `<button type="button" class="small" data-model-jump="${esc(id)}" ${attr}>接收模型 ${esc(short(id, 10))} →</button>`;
+        return `${ids[0] ? button(ids[0]) : '<p class="hint">接收 Model 不可用</p>'}${ids.length > 1 ? `<details><summary>全部实际接收模型 · ${ids.length}</summary><div class="jump-list">${ids.map(button).join('')}</div></details>` : ''}`;
+      }
+      function sourceReceiptView(c, r, isModel, modelId) {
+        const reception = (r.receptions || []).find((x) => x.requestId === modelId),
+          open = !isModel || r.sourceId === state.focusSource || r.firstRequestId === modelId;
+        return `<details ${open ? 'open' : ''}><summary>${r.childSessionId ? '子 Agent 报告' : '后台 Job 结果'} · ${esc(short(r.sourceId, 16))}</summary>${kv({ sourceId: r.sourceId, carrier: r.carrierExecutionId, resultRevision: r.resultRevision, childSession: r.childSessionId, targetSession: r.sessionId, acceptedRun: r.acceptance?.runId, selection: r.acceptance?.selectionId, firstReceived: r.firstRequestId, relationship: reception?.relationship || '见原接纳事实' })}<div class="callout neutral">报告进入模型不改变原执行结果，也不产生授权；delivery 接纳成功不证明报告语义正确。</div>${r.complete === false ? `<div class="callout">正文已省略，见原件完整性范围。</div>${pre(r.omittedFields)}` : pre(r.message?.content ?? r.message)}<button type="button" class="small" data-execution-jump="${esc(r.carrierExecutionId)}" data-show-source="${esc(r.sourceId)}">打开原 carrier / Source →</button>${receiverLinks(r, 'source')}<details><summary>原 Source、接纳事实与读取证明</summary>${pre({ source: r.source, acceptance: r.acceptance, acceptedRun: r.acceptedRun, receptions: r.receptions, complete: r.complete, omittedFields: r.omittedFields, sourceEvidence: r.sourceEvidence })}</details></details>`;
+      }
+      function modelOutput(m) {
+        const calls =
+          Array.isArray(m.emittedToolCalls) && m.emittedToolCalls.length
+            ? m.emittedToolCalls
+            : Array.isArray(m.toolCalls)
+              ? m.toolCalls
+              : [];
+        const readable = calls.map((call) => {
+          let args = call.arguments;
+          try {
+            if (typeof args === 'string') args = JSON.parse(args);
+          } catch {}
+          return { callId: call.id, name: call.name, arguments: args };
+        });
+        const material = m.reviewInput?.authorizationContext;
+        const materialSummary = material ? `<section data-review-material><h3>本次审核材料</h3>${kv({ 材料状态: material.availability, 执行目录: material.executionBase?.cwd, 原任务与纠正: Array.isArray(material.taskInputs) ? material.taskInputs.length : '未记录', 已读材料: Array.isArray(material.recordedReads) ? material.recordedReads.map((read) => read?.path ?? '未记录路径').join('、') || '无' : '原记录未提供', 输出上限: m.reviewInput.settings?.maxOutputTokens ?? '原记录未提供该参数', 思考程度: m.reviewInput.settings?.reasoningEffort ?? '未记录' })}<p class="hint">输出上限的单位为token。只展示原审核实际提供的材料和设置；缺失不补成256。文件观察是历史资料，不授予权限，也不代表当前磁盘状态。</p></section>` : '';
+        return `${materialSummary}${m.reviewInput ? `<h3>封存审核目标与上下文（调用阶段见原记录）</h3><details><summary>展开原审核输入</summary>${pre(m.reviewInput)}</details>` : ''}<h3>${m.purpose === 'authorization_check' ? '审核模型原输出' : '该模型随后怎样继续'}</h3>${m.outputAvailability && m.outputAvailability !== 'canonical_output' ? `<div class="callout neutral">该次尝试没有完整封存输出；保留原失败或超时，不补成批准、拒绝或成功响应。</div>${kv({ status: m.status, code: m.code, incomplete: m.incomplete })}${pre(m.timing)}` : ''}${m.content ? pre(m.content) : '<p class="hint">封存输出无公开说明；不推断隐藏理由。</p>'}${readable.length ? `<h3>实际选择的工具 / 参数</h3>${pre(readable)}` : ''}${calls.length ? `<details><summary>原始工具事件与执行层规范化调用</summary><h3>模型原始事件</h3>${pre(m.emittedToolCalls || [])}<h3>封存规范化表示</h3>${pre(m.toolCalls || [])}</details>` : ''}<details><summary>输出来源与完整性范围</summary>${pre({ outputEvidence: m.outputEvidence, explanationAvailability: m.explanationAvailability })}</details>`;
+      }
+      function clearLogFocus() {
+        state.focusSource = null;
+        state.focusReceipt = null;
+      }
+      function revealLogInspector() {
+        if (!matchMedia('(max-width: 1180px)').matches) return;
+        const inspector = document.querySelector('.log-detail');
+        if (!inspector) return;
+        inspector.setAttribute('tabindex', '-1');
+        inspector.style.scrollMarginTop = '84px';
+        inspector.focus({ preventScroll: true });
+        inspector.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+      function bindLogs() {
+        document.getElementById('source-picker')?.addEventListener('change', (event) => {
+          const c = selectedCase(),
+            r = (c.sourceMessageReceipts || []).find((x) => x.sourceId === event.target.value);
+          if (!r) {
+            clearLogFocus();
+            state.executionFocus = null;
+            state.logId = null;
+            state.detailTab = 'event';
+            renderLogs(true);
+            revealLogInspector();
+            return;
+          }
+          state.focusSource = r.sourceId;
+          state.focusReceipt = null;
+          state.executionFocus = r.carrierExecutionId;
+          state.logId = null;
+          state.detailTab = 'model';
+          renderLogs(true);
+          revealLogInspector();
+        });
+        document.getElementById('execution-picker').onchange = (event) => {
+          clearLogFocus();
+          state.executionFocus = event.target.value || null;
+          state.logId = null;
+          state.detailTab = state.executionFocus ? 'execution' : 'event';
+          renderLogs(true);
+          revealLogInspector();
+        };
+        document.getElementById('log-case').onchange = (e) => {
+          clearLogFocus();
+          state.evidenceContext = null;
+          state.executionFocus = null;
+          state.showDemo = e.target.value === 'demo-current';
+          if (!state.showDemo) state.caseId = e.target.value;
+          state.session = 'all';
+          state.category = 'all';
+          state.eventFilter = 'all';
+          state.query = '';
+          state.page = 0;
+          state.logId = null;
+          state.detailTab = 'event';
+          renderLogs();
+        };
+        document.getElementById('log-search').oninput = (e) => {
+          const position = e.target.selectionStart;
+          state.query = e.target.value;
+          clearLogFocus();
+          state.executionFocus = null;
+          state.page = 0;
+          state.logId = null;
+          renderLogs();
+          const input = document.getElementById('log-search');
+          input.focus();
+          input.setSelectionRange(position, position);
+        };
+        for (const [id, key] of [
+          ['log-session', 'session'],
+          ['log-category', 'category'],
+          ['log-filter', 'eventFilter'],
+        ])
+          document.getElementById(id).onchange = (e) => {
+            state[key] = e.target.value;
+            clearLogFocus();
+            state.executionFocus = null;
+            state.page = 0;
+            state.logId = null;
+            renderLogs();
+          };
+        document.querySelectorAll('[data-log]').forEach((row) => {
+          const pick = () => {
+            clearLogFocus();
+            state.executionFocus = null;
+            state.logId = row.dataset.log;
+            renderLogs(true);
+            revealLogInspector();
+          };
+          row.onclick = pick;
+          row.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              pick();
+            }
+          };
+        });
+        document.querySelectorAll('[data-log-tab]').forEach((b) => {
+          b.onclick = () => {
+            state.detailTab = b.dataset.logTab;
+            renderLogs(true);
+            revealLogInspector();
+          };
+        });
+        document.getElementById('log-prev').onclick = () => {
+          clearLogFocus();
+          state.executionFocus = null;
+          state.page--;
+          state.logId = null;
+          renderLogs();
+        };
+        document.getElementById('log-next').onclick = () => {
+          clearLogFocus();
+          state.executionFocus = null;
+          state.page++;
+          state.logId = null;
+          renderLogs();
+        };
+        document.getElementById('copy-record').onclick = () => {
+          const c = selectedCase();
+          const log = filteredLogs(c).find((l) => logKey(l) === state.logId);
+          copy(json(log || {}));
+        };
+        bindDetailJumps();
+      }
+      function bindDetailJumps() {
+        document.querySelectorAll('[data-detail-switch]').forEach((b) => {
+          b.onclick = () => {
+            state.detailTab = b.dataset.detailSwitch;
+            renderLogs(true);
+            revealLogInspector();
+          };
+        });
+        document.querySelectorAll('[data-execution-jump],[data-model-jump]').forEach((b) => {
+          b.onclick = () => {
+            const id = b.dataset.executionJump || b.dataset.modelJump;
+            state.focusReceipt = b.dataset.receiptId || null;
+            state.focusSource = b.dataset.sourceId || b.dataset.showSource || null;
+            const c = selectedCase();
+            const log = normalizedLogs(c).find(
+              (l) => (l.details?.executionId || l.objectId) === id || l.modelExecutionId === id,
+            );
+            if (!log) {
+              if (c.executions.some((e) => e.id === id)) {
+                state.executionFocus = id;
+                state.detailTab =
+                  b.dataset.modelJump || b.dataset.showSource ? 'model' : 'execution';
+                renderLogs();
+                revealLogInspector();
+                toast('直接打开原执行；本包没有对应事件，不补造时间和旧状态');
+                return;
+              }
+              toast('此包没有该记录；保留原 ID，见原件位置');
+              return;
+            }
+            state.executionFocus = null;
+            state.query = '';
+            state.category = 'all';
+            state.eventFilter = 'all';
+            state.session = 'all';
+            state.logId = logKey(log);
+            state.page = Math.floor(normalizedLogs(c).indexOf(log) / 100);
+            state.detailTab = b.dataset.modelJump || b.dataset.showSource ? 'model' : 'execution';
+            renderLogs();
+            const row = document.querySelector('tr.chosen'),
+              list = document.querySelector('.log-list');
+            if (row && list) list.scrollTop = row.offsetTop - list.clientHeight / 2;
+            revealLogInspector();
+          };
+        });
+      }
+      function renderBoundaries() {
+        content.innerHTML =
+          heading(
+            'OBSERVABILITY CONTRACT',
+            '看见的是什么，没记录的就不补造',
+            '这份原型把现有记录关联起来，日志操作只读。来源层级和完整性边界保持分开。',
+          ) +
+          `<div class="source-cards">${[
+            [
+              '事件日志',
+              '真实 append-time 元数据',
+              'cursor、occurredAt（或不可用）、对象 ID、recordedStatus、闭合 summary、有限导航。每个 Session 单独读取，固定 upperCursor 分页。',
+              'packages/agent/src/storage/sqlite/session-logs.README.md',
+            ],
+            [
+              '原执行与决定',
+              '当前原记录 / 不是旧事件状态',
+              '精确 kind / 定义 / 版本 / attempt、原结果与公开授权观察。只有 Tool 的输入由公开 HTTP 暴露；本页 Job 程序是合成夹具原件。',
+              'apps/service/src/message-response.ts',
+            ],
+            [
+              '模型实际所见',
+              'typed Inspector / 实际封存内容',
+              '按原 Model ID、call 和 source 检查真实输入。失败呈现不改原机器回执，也不改旧封存输入；完整性错误不能用展示 fallback 吞掉。',
+              'packages/agent/src/model-tools.README.md',
+            ],
+            [
+              'Shell / Job 输出',
+              '原输出序号与固定上界',
+              'stdout / stderr / progress、丢失区间、真实停止确认。read / wait 成功只说明观察成功；不能变成目标 Job 成功。',
+              'packages/agent/src/tools/shell.README.md',
+            ],
+            [
+              '人工与 Auto',
+              '准确原操作 / 精确 revision',
+              '人工卡展示位置与来源不同；Auto 是内部 Model，不是 child。默认总预算 3000ms；超时交工具正常执行策略，原请求 filesystem／network 仍受父子与宿主硬边界约束，日志保 timeout，晚到不覆盖。判风险与授权不等于生成两份持久评分。',
+              'packages/agent/src/permissions/README.md',
+            ],
+            [
+              '原型数据与隐私',
+              '本机合成项目 / 非生产 telemetry',
+              '内置数据为已完成测试的只读证据。无 API key、请求 headers、bootstrap token 或 System prompt 导出；不会连接当前 Service、提交决定或执行导入命令。',
+              'docs/active/observability-privacy-operations.md',
+            ],
+          ]
+            .map(
+              ([title, tag, text, path]) =>
+                `<article class="card card-pad"><div class="row between"><h2>${title}</h2><span class="tag">${tag}</span></div><p class="small muted" style="margin:12px 0">${text}</p>${source(path)}</article>`,
+            )
+            .join(
+              '',
+            )}</div><section class="card card-pad" style="margin-top:16px"><h2>三组原始状态不能合成一个“已完成”</h2><table class="matrix" style="margin-top:12px"><tbody><tr><td>Command</td><td><code>accepted / applied / rejected / needs_review</code></td><td>受理和应用不是业务成功</td></tr><tr><td>Run</td><td><code>running / waiting_interaction / waiting_execution / cancelling / completed / failed / cancelled / interrupted</code></td><td>父普通完成不取消 child</td></tr><tr><td>Execution</td><td><code>planned / dispatching / running / succeeded / failed / cancelled / outcome_unknown</code></td><td>等待审核 / 资源是派生标签</td></tr></tbody></table></section><section class="card card-pad" style="margin-top:16px"><h2>这批实测能证明到哪里</h2><div class="summary-grid" style="margin-top:14px"><div class="summary-card card"><span class="small muted">测试请求记录</span><div class="value">433</div><p>gpt-6-luna / low；27个试次，含必要复验。</p></div><div class="summary-card card"><span class="small muted">失败 Tool 送达对应模型</span><div class="value">70 / 70</div><p>完整公开正文、call/source 均核到。送达不等于模型遵守。</p></div><div class="summary-card card"><span class="small muted">整体业务资格</span><div class="value" style="font-size:20px;color:var(--warn)">仍有实际问题</div><p>2026-11-03 历史试次中的误拦、绕过尝试、字段错误与未完成核验保留；不表示当前流程的实测结果。</p></div></div><div class="callout neutral" style="margin-top:14px">以上统计仅覆盖历史原报告。追加报告在日志工作台逐例保留Run、工具与业务断言状态；不并入旧统计，也不把历史缺项补成新实测。未自然触发的分支仍是源码／受控回归支持的推演。全工具目录亦不表示所有可选工具都在这批模型试验中启用。</div></section>`;
+      }
+      function render() {
+        document.querySelectorAll('[data-view]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.view === state.view);
+        });
+        document.getElementById('mobile-nav').value = state.view;
+        if (state.view === 'loop') renderLoop();
+        else if (state.view === 'catalog') renderCatalog();
+        else if (state.view === 'logs') renderLogs();
+        else if (state.view === 'boundaries') renderBoundaries();
+        else renderFlow(state.view === 'child', state.view === 'approval');
+      }
+      function setView(view) {
+        stopPlaying();
+        state.view = view;
+        render();
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      }
+      async function copy(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          toast('已复制原记录');
+        } catch {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          document.body.append(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          ta.remove();
+          toast(ok ? '已复制原记录' : '浏览器未允许复制，请在原 JSON 中选择文本');
+        }
+      }
+      document.querySelectorAll('[data-view]').forEach((b) => {
+        b.onclick = () => setView(b.dataset.view);
+      });
+      document.getElementById('mobile-nav').onchange = (e) => setView(e.target.value);
+      document.getElementById('import-btn').onclick = () =>
+        document.getElementById('import-file').click();
+      document.getElementById('import-file').onchange = async (event) => {
+        const files = [...event.target.files];
+        if (!files.length) return;
+        try {
+          const imported = [];
+          const loose = {
+            executions: [],
+            models: [],
+            logs: [],
+            sessions: [],
+            toolMessageReceipts: [],
+            sourceMessageReceipts: [],
+            approvals: [],
+            jobOutput: {},
+          };
+          for (const file of files) {
+            if (file.size > 30 * 1024 * 1024) throw Error('单文件超过30MB，请使用有限证据包');
+            const parsed = JSON.parse(await file.text());
+            if (!parsed || typeof parsed !== 'object')
+              throw Error('需要证据对象、执行数组或 SessionLogPage，不能导入空值或普通文本');
+            if (Array.isArray(parsed.cases)) {
+              for (const c of parsed.cases) {
+                if (
+                  !Array.isArray(c.logs) ||
+                  !Array.isArray(c.executions) ||
+                  !Array.isArray(c.sessions)
+                )
+                  throw Error('证据包缺少 logs / executions / sessions');
+                imported.push({
+                  ...c,
+                  id: 'import-' + Date.now() + '-' + imported.length,
+                  title: '本地导入 · ' + (c.title || c.id || file.name),
+                  origin: 'imported',
+                });
+              }
+            } else if (Array.isArray(parsed) && parsed.every((x) => x.kind && x.definitionId)) {
+              loose.executions.push(...parsed);
+            } else if (Array.isArray(parsed.entries)) {
+              loose.logs.push(...parsed.entries);
+              if (parsed.sessionId)
+                loose.sessions.push({ id: parsed.sessionId, parentSessionId: null });
+            } else
+              throw Error(
+                '支持本页导出的证据包、evidence.json、executions.json或SessionLogPage；不把任意JSON猜成日志',
+              );
+          }
+          if (loose.executions.length || loose.logs.length) {
+            const ids = [
+              ...new Set(
+                [
+                  ...loose.executions.map((e) => e.sessionId),
+                  ...loose.logs.map((e) => e.sessionId),
+                ].filter(Boolean),
+              ),
+            ];
+            loose.sessions = ids.map((id) => ({
+              id,
+              parentSessionId: null,
+              relationshipUnknown: true,
+            }));
+            imported.push({
+              ...loose,
+              id: 'import-' + Date.now(),
+              title: '本地导入记录',
+              mode: 'unknown',
+              origin: 'imported',
+              summary:
+                '只导入了所选文件；未提供的模型输入、审批或事件正文保持不可用。来源关系未验证，不猜父子身份。',
+              finding: '导入数据仅显示，不执行命令、不当作授权。',
+              source: { files: files.map((f) => f.name) },
+              omittedFields: ['未选择的原件'],
+            });
+          }
+          if (!imported.length) throw Error('没有可导入的有限记录');
+          for (const c of imported) {
+            for (const key of [
+              'logs',
+              'executions',
+              'sessions',
+              'models',
+              'toolMessageReceipts',
+              'sourceMessageReceipts',
+              'approvals',
+            ]) {
+              c[key] = c[key] ?? [];
+              if (
+                !Array.isArray(c[key]) ||
+                c[key].some((x) => !x || typeof x !== 'object' || Array.isArray(x))
+              )
+                throw Error(key + ' 必须是记录数组');
+            }
+            if (
+              c.logs.some(
+                (x) =>
+                  typeof x.sessionId !== 'string' ||
+                  !/^\d+$/.test(String(x.cursor)) ||
+                  typeof x.objectId !== 'string',
+              )
+            )
+              throw Error('事件缺少有效 sessionId / cursor / objectId');
+            if (c.executions.some((x) => typeof x.id !== 'string' || typeof x.kind !== 'string'))
+              throw Error('执行缺少有效 id / kind');
+            if (c.sessions.some((x) => typeof x.id !== 'string'))
+              throw Error('Session 缺少有效 id');
+            if (
+              c.models.some((m) =>
+                ['toolCalls', 'emittedToolCalls'].some(
+                  (key) =>
+                    m[key] != null &&
+                    (!Array.isArray(m[key]) || m[key].some((x) => !x || typeof x !== 'object')),
+                ),
+              )
+            )
+              throw Error('模型工具调用必须是对象数组');
+            if (
+              (c.sourceMessageReceipts || []).some(
+                (r) =>
+                  typeof r.sourceId !== 'string' ||
+                  typeof r.carrierExecutionId !== 'string' ||
+                  !Array.isArray(r.receivedBy) ||
+                  r.receivedBy.some((id) => typeof id !== 'string') ||
+                  (r.receptions != null &&
+                    (!Array.isArray(r.receptions) ||
+                      r.receptions.some((entry) => !entry || typeof entry !== 'object'))),
+              )
+            )
+              throw Error('Source缺少有效身份／接收模型数组');
+            if (
+              c.toolMessageReceipts.some(
+                (x) => x.receivedBy != null && !Array.isArray(x.receivedBy),
+              )
+            )
+              throw Error('receivedBy 必须是数组');
+            c.jobOutput = c.jobOutput || {};
+            if (typeof c.jobOutput !== 'object' || Array.isArray(c.jobOutput))
+              throw Error('jobOutput 必须是对象');
+          }
+          data.cases.push(...imported);
+          clearLogFocus();
+          state.caseId = imported[0].id;
+          state.executionFocus = null;
+          state.evidenceContext = null;
+          state.executionFocus = null;
+          state.showDemo = false;
+          state.logId = null;
+          state.session = 'all';
+          state.category = 'all';
+          state.query = '';
+          state.eventFilter = 'all';
+          state.page = 0;
+          setView('logs');
+          toast('本地导入完成；没有联网或执行任何内容');
+        } catch (error) {
+          toast('导入失败：' + error.message);
+        } finally {
+          event.target.value = '';
+        }
+      };
+      document.getElementById('export-btn').onclick = () => {
+        const c = selectedCase();
+        if (!c) {
+          toast('没有当前记录');
+          return;
+        }
+        const selected = filteredLogs(c);
+        const bundle = {
+          format: 'kite-execution-prototype',
+          exportedAt: new Date().toISOString(),
+          qualification: '本地只读原型导出；不是授权或实时日志连接',
+          cases: [{ ...c, logs: selected }],
+        };
+        const url = URL.createObjectURL(new Blob([json(bundle)], { type: 'application/json' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'execution-evidence-view.json';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 500);
+        toast('已导出当前筛选事件及关联证据；不改变原记录');
+      };
+      window.addEventListener('resize', () => requestAnimationFrame(drawEdges));
+      render();
+      window.__prototypeInspect = () => ({
+        view: state.view,
+        mode: state.mode,
+        family: state.family,
+        loopScenario: state.loopScenario,
+        loopActor: state.loopActor,
+        flowView: currentFlowView,
+        edges: currentEdges,
+        nodeFacts: currentFlow.map((n) => ({
+          id: n.id,
+          raw: n.raw,
+          recordKind: n.recordKind,
+          derived: n.derived,
+        })),
+        nodes: currentFlow.map((n) => n.id),
+        step: state.step,
+        cases: data.cases.map((c) => ({
+          id: c.id,
+          logs: c.logs.length,
+          executions: c.executions.length,
+          sources: (c.sourceMessageReceipts || []).length,
+        })),
+        selectedLog: state.logId,
+      });
+    })();
+    </script>
+  </body>
+</html>

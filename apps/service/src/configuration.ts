@@ -10,6 +10,7 @@ import {
   ConfigurationPreparationCleanupError,
   type ContextCompressor,
   type ContextSource,
+  createExecutionEvidenceExtension,
   type RunConfiguration,
   type RuntimeOptions,
 } from '@kite-ai/agent';
@@ -27,7 +28,7 @@ import {
   readConfigurationFile,
   resolveConfiguration,
 } from '@kite-ai/agent/config';
-import type { Json, Permissions } from '@kite-ai/agent/extensions';
+import type { Json } from '@kite-ai/agent/extensions';
 import { filesNativeAssets, pdfAssets } from '@kite-ai/agent/files';
 import { ripgrepAsset } from '@kite-ai/agent/jobs/shell';
 import {
@@ -37,18 +38,9 @@ import {
   mcpSchemaWorkerAssets,
 } from '@kite-ai/agent/mcp';
 import {
-  builtinCapability,
-  type CapabilityDescription,
-  type CapabilityIdentity,
-  createDefaultAfterTurnPolicy,
-  createPermissionCheckContextReader,
-  createPermissionPolicy,
-  createPlanningPermissionPolicy,
   hostReadOnlyTool,
-  intersectPermissionPolicies,
   type PermissionPolicyOptions,
-  type PermissionPolicySnapshot,
-  requireFileRestoreApproval,
+  shellRiskReviewContractDigest,
 } from '@kite-ai/agent/permissions';
 import {
   createShellCommandPolicy,
@@ -66,14 +58,10 @@ import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { createSessionTitleExtension } from '@kite-ai/agent/session-title';
 import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
-import { createDefaultTaskRequestClassifier } from '@kite-ai/agent/task';
 import { WebFetchError, webExtractorAssets } from '@kite-ai/agent/web-fetch';
-import {
-  createCompatibleModelBinding,
-  createSdkModelAdapter,
-  type ReasoningEffort,
-} from '@kite-ai/ai/sdk';
+import { createCompatibleModelBinding, type ReasoningEffort } from '@kite-ai/ai/sdk';
 import { createWorkspaceAssembly } from './assembly';
+import { createRunModelAdapters } from './authorization-check-model';
 import type { ProcessHostConfiguration } from './bootstrap';
 import {
   type BrowserConfigurationOptions,
@@ -104,13 +92,15 @@ import {
 import { parseModelPreset } from './model-options';
 import { isSupportedModelProvider, modelProtocol } from './model-providers';
 import { resolveModelTransport } from './model-transport';
-import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
+import {
+  createDefaultPermissionConfiguration,
+  defaultAutoReviewContract,
+  parentAutoReviewContract,
+} from './permission-configuration';
 import {
   planningSnapshotDigest,
-  readBoundPlanningSuccessor,
   readBusinessRunInputs,
   readPlanningIntent,
-  readPlanningPermissionState,
 } from './planning-configuration';
 import { assertSessionModelProtocol } from './session-model-protocol';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
@@ -147,6 +137,42 @@ export { userConfigurationPath } from './user-configuration-path';
 export type { WebFetchConfigurationOptions } from './web-fetch-configuration';
 
 const assemblyKeys = ['modelId', 'models', 'tools', 'skills', 'mcp'];
+function readOnlyTaskGuidanceSource(root: string, description?: string): ContextSource {
+  const content = [
+    'This is a read-only task assignment: do not create, modify, or delete business files, make unauthorized network connections, or disclose task data outside its authorized scope.',
+    'Necessary exploration may create temporary scripts and temporary artifacts within the inherited tool permissions, preferably in the private temporary directory. Keep business source, configuration and data unchanged; a temporary-looking name does not establish safety or permission.',
+    'Read-only is a task constraint, not a separate approval mode or execution sandbox. You inherit the current parent permission mode and ordinary Shell sandbox; the actual permission checks and host restrictions still apply.',
+    'Complete read-only Shell commands, including cat, command chains such as &&, and pipelines may be used when they fit the authorized task and current permissions. Command names or the number of commands do not establish their actual effects. Inspect the complete command, including scripts, substitutions, redirects, hooks, targets, and outgoing data.',
+    'Use the actual Tool feedback to distinguish a task restriction, an approval refusal, a sandbox limit, and a technical failure. Do not replay unknown effects or bypass a real refusal. Correct a known unexecuted request only within the original authorized task and the applicable restriction.',
+    ...(description ? [`Role assignment: ${description}`] : []),
+  ].join('\n');
+  return {
+    id: 'builtin.task:read-only-assignment',
+    kind: 'task_role',
+    scope: root,
+    role: 'system',
+    content,
+    digest: createHash('sha256').update(content).digest('hex'),
+  };
+}
+function frozenReadOnlyTaskSource(root: string, value: Json): ContextSource {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).some(
+      (key) => !['id', 'kind', 'scope', 'role', 'content', 'digest'].includes(key),
+    ) ||
+    value.id !== 'builtin.task:read-only-assignment' ||
+    value.kind !== 'task_role' ||
+    value.scope !== root ||
+    value.role !== 'system' ||
+    typeof value.content !== 'string' ||
+    value.digest !== createHash('sha256').update(value.content).digest('hex')
+  )
+    throw new AgentError('recovery_configuration_unavailable');
+  return structuredClone(value) as unknown as ContextSource;
+}
 function assertSelectedToolVersions(
   toolIds: readonly string[],
   configurations: readonly NamedConfiguration[] | undefined,
@@ -255,7 +281,7 @@ export function createDefaultProcessConfiguration(options: {
   explicitConfiguration(explicit);
   const planningOptions = structuredClone({ completionGuidance: true, ...options.planning });
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
-  const describeDefaultTask = createDefaultTaskRequestClassifier(options.child ? [] : childRoles);
+  const classifyDefaultTasks = !options.child;
   const browser = createBrowserConfiguration({
     runtime: () => {
       if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
@@ -305,45 +331,7 @@ export function createDefaultProcessConfiguration(options: {
     };
   const afterTurn = options.afterTurn
     ? Object.freeze({ authorize: options.afterTurn.authorize.bind(options.afterTurn) })
-    : createDefaultAfterTurnPolicy({
-        roles: childRoles,
-        async readCurrent(input) {
-          input.signal.throwIfAborted();
-          if (options.permissions && !options.permissionPolicy)
-            return { workspaceTrust: false, revision: 'after-turn-current-policy-unavailable-1' };
-          const request = {
-            kind: 'tool' as const,
-            sessionId: input.session.id,
-            runId: input.run.id,
-            executionId: input.execution.id,
-            definitionId: input.execution.definitionId,
-            definitionVersion: input.execution.definitionVersion,
-            input: input.execution.input,
-            signal: input.signal,
-          };
-          const current = await currentPolicy(request, [], {
-            sessionId: input.session.id,
-            expectedStoreId: input.run.originStoreId,
-            subjectId: input.command.subjectId,
-          });
-          input.signal.throwIfAborted();
-          return {
-            workspaceTrust: current.workspaceTrust,
-            revision: createHash('sha256')
-              .update(
-                JSON.stringify({
-                  mode: current.mode,
-                  trust: current.workspaceTrust,
-                  revision: current.revision,
-                  allowed: current.allowed,
-                  controlReads: current.controlReads ?? null,
-                }),
-              )
-              .digest('hex'),
-            controlReads: current.controlReads,
-          };
-        },
-      });
+    : undefined;
   const selectedCompressor = options.compressor;
   const compressor: ContextCompressor | undefined =
     selectedCompressor &&
@@ -404,7 +392,15 @@ export function createDefaultProcessConfiguration(options: {
     },
   );
   const askUser = createAskUserExtension();
-  const askUserTools = new Map((askUser.tools ?? []).map((tool) => [tool.id, tool]));
+  const executionEvidence = createExecutionEvidenceExtension({
+    read: (request) => {
+      if (!policyRuntime) throw new AgentError('execution_evidence_scope_denied');
+      return policyRuntime.readExecutionEvidence(request);
+    },
+  });
+  const builtinReadTools = new Map(
+    [...(askUser.tools ?? []), ...(executionEvidence.tools ?? [])].map((tool) => [tool.id, tool]),
+  );
   const vault = createCredentialVault({
     backend:
       options.credentialBackend ??
@@ -485,6 +481,7 @@ export function createDefaultProcessConfiguration(options: {
   const fileTools = new Map(files.tools.map((tool) => [tool.id, tool]));
   const builtinExtensions = [
     askUser,
+    executionEvidence,
     planning.extension,
     files.extension,
     browser.extension,
@@ -591,192 +588,70 @@ export function createDefaultProcessConfiguration(options: {
       };
     },
   });
-  let managed: PermissionManagementPort | undefined;
-  const permissionManagement = (runtime?: AgentRuntime) => {
-    if (policyRuntime && runtime !== policyRuntime)
-      throw new AgentError('permission_host_already_bound');
-    policyRuntime = runtime;
-    managed = createPermissionManagement({
-      runtime,
-      profile: options.profile,
-      writable: !externalPermissionAuthority,
-      allowModeChanges: true,
-      nativeShellRead: shellOptions?.platform === 'darwin' && process.platform === 'darwin',
-    });
-    return managed;
-  };
-  async function persistedPolicy(
-    request: Parameters<NonNullable<RuntimeOptions['permissions']>['authorize']>[0],
-    allowed: readonly CapabilityIdentity[],
-    original?: { sessionId: string; expectedStoreId: string; subjectId: string },
-  ): Promise<PermissionPolicySnapshot> {
-    if (!policyRuntime || !managed)
-      return { mode: 'auto', workspaceTrust: false, revision: 'unbound-auto-untrusted-1', allowed };
-    if (!original) {
-      const execution = await policyRuntime.getExecution(request.executionId);
-      if (!execution || execution.sessionId !== request.sessionId)
-        throw new AgentError('execution_scope_unavailable');
-      const command = await policyRuntime.getCommand(execution.originCommandId);
-      if (!command || command.originStoreId !== execution.originStoreId)
-        throw new AgentError('execution_scope_unavailable');
-      original = {
-        sessionId: execution.sessionId,
-        expectedStoreId: execution.originStoreId,
-        subjectId: command.subjectId,
-      };
-    }
-    const selected = await policyRuntime.getSession(original.sessionId);
-    if (!selected) throw new AgentError('session_not_found');
-    const [mode, trust] = await Promise.all([
-      managed.readMode(original),
-      managed.readTrust({
-        expectedStoreId: original.expectedStoreId,
-        subjectId: original.subjectId,
-        workspaceId: selected.workspaceId,
-      }),
-    ]);
-    return {
-      mode: mode.mode,
-      workspaceTrust: trust.trusted,
-      controlReads: [
-        {
-          kind: 'permission.mode',
-          scope: `session:${mode.scopeSessionId}`,
-          revision: mode.revision,
-        },
-        { kind: 'permission.mode', scope: 'user', revision: mode.defaultRevision },
-        {
-          kind: 'workspace.trust',
-          scope: `workspace:${selected.workspaceId}`,
-          revision: trust.revision,
-        },
-      ],
-      revision: createHash('sha256')
-        .update(
-          JSON.stringify({
-            scope: mode.scopeSessionId,
-            modeRevision: mode.revision,
-            defaultRevision: mode.defaultRevision,
-            trustRevision: trust.revision,
-            canonicalIdentity: trust.canonicalIdentity,
-            externalReadScopeDigest: trust.externalReadScopeDigest,
-            trust: trust.status,
-          }),
-        )
-        .digest('hex'),
-      allowed,
-    };
-  }
-
-  // Injected policy may narrow capabilities/trust, but mode belongs to the live root.
-  async function currentPolicy(
-    request: Parameters<Permissions['authorize']>[0],
-    allowed: readonly CapabilityIdentity[],
-    original?: { sessionId: string; expectedStoreId: string; subjectId: string },
-  ): Promise<PermissionPolicySnapshot> {
-    const current = await persistedPolicy(request, allowed, original);
-    if (!options.permissionPolicy || options.permissions) return current;
-    const injected = await options.permissionPolicy.readPolicy(request);
-    return {
-      ...injected,
-      mode: current.mode,
-      workspaceTrust: current.workspaceTrust && injected.workspaceTrust,
-      revision: createHash('sha256')
-        .update(JSON.stringify([current.revision, injected.revision]))
-        .digest('hex'),
-      controlReads: current.controlReads,
-    };
-  }
-
-  const withInjectedCeiling = (current: Permissions): Permissions =>
-    intersectPermissionPolicies(current, options.permissions);
-  const childCapability = (role: ChildRole): CapabilityDescription => ({
-    kind: 'job',
-    definitionId: `agent/${role.id}`,
-    definitionVersion: role.version,
-    revision: `trusted-child:${role.id}:${role.version}`,
-    effects: ['unknown'],
-    hardAllowed: true,
-    safeRead: false,
-  });
-  const modelCapability = (modelId: string): CapabilityDescription => ({
-    kind: 'model',
-    definitionId: modelId,
-    definitionVersion: '1',
-    revision: 'compatible-model-1',
-    effects: ['network'],
-    hardAllowed: true,
-    safeRead: false,
-  });
   const businessTools = new Map((planning.extension.tools ?? []).map((tool) => [tool.id, tool]));
-  const globalCapabilities = new Map<string, CapabilityDescription>();
-  for (const role of childRoles) {
-    globalCapabilities.set(
-      JSON.stringify(['job', `agent/${role.id}`, role.version]),
-      childCapability(role),
-    );
-    // A runless parent has no Run model to inherit. The child resolver must still
-    // establish this exact trusted role binding before any child Model can run.
-    if (role.modelId)
-      globalCapabilities.set(
-        JSON.stringify(['model', role.modelId, '1']),
-        modelCapability(role.modelId),
-      );
-  }
-  for (const extension of [planning.extension, files.extension])
-    for (const action of extension.actions ?? []) {
-      const definitionId = `${extension.id}/${action.id}`;
-      const capability = builtinCapability(
-        extension.id,
-        action.id,
-        'action',
-        planning.extension.id,
-        action.version,
-      );
-      globalCapabilities.set(JSON.stringify(['job', definitionId, action.version]), {
-        kind: 'job',
-        definitionId,
-        definitionVersion: action.version,
-        revision: `${extension.id}:${extension.version}:${action.version}`,
-        effects: capability.effects,
-        hardAllowed: true,
-        safeRead: capability.safeRead,
+  const permissionConfiguration = createDefaultPermissionConfiguration({
+    profile: options.profile,
+    authority: options,
+    externalPermissionAuthority,
+    afterTurn,
+    nativeShellRead: shellOptions?.platform === 'darwin' && process.platform === 'darwin',
+    childRoles,
+    defaultTaskRoles: classifyDefaultTasks,
+    defaultAutoReview: !options.authorizationCheck && !options.permissions,
+    readRuntime: () => policyRuntime,
+    bindRuntime: (runtime) => {
+      policyRuntime = runtime;
+    },
+    planning,
+    files,
+    task,
+    browser,
+    mcp,
+    mcpManagement,
+    mcpSources,
+    authorizeTitle: (request) => titles.authorize(request),
+    async readGlobalMcpAdmissionError(request) {
+      if (!policyRuntime) return 'execution_scope_unavailable';
+      const session = await policyRuntime.getSession(request.sessionId);
+      const workspace = session && (await policyRuntime.getWorkspace(session.workspaceId));
+      if (!workspace) return 'execution_scope_unavailable';
+      const root = fileURLToPath(workspace.rootUri);
+      const user = userConfiguration.read().value;
+      const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
+      const current = explicitConfiguration(explicit);
+      const effective = resolveConfiguration({
+        defaults: configurationDefaults,
+        user,
+        workspace: withoutProjectModels(project),
+        explicit: current,
       });
-    }
-  for (const capability of browser.capabilities)
-    if (capability.kind === 'job')
-      globalCapabilities.set(
-        JSON.stringify([capability.kind, capability.definitionId, capability.definitionVersion]),
-        capability,
+      const execution = await policyRuntime.getExecution(request.executionId);
+      const command = execution && (await policyRuntime.getCommand(execution.originCommandId));
+      if (!session || !command) return 'execution_scope_unavailable';
+      const selectedSources = mcpSources.select(
+        await mcpSources.capture({ command, session, workspace }),
+        {
+          present: [user, project, current].some((layer) => Object.hasOwn(layer, 'mcp')),
+          disabledUserServerIds: disabledUserMcpSources(user),
+          configurations: effective.mcp ?? [],
+        },
       );
-  const globalDefaultPolicy = createPermissionPolicy({
-    readPolicy: (request) =>
-      currentPolicy(
-        request,
-        [
-          ...globalCapabilities.values(),
-          ...mcp.listCapabilities(),
-          ...mcpManagement.listCapabilities(),
-          ...mcpSources.listCapabilities(),
-        ].map(({ kind, definitionId, definitionVersion }) => ({
-          kind,
-          definitionId,
-          definitionVersion,
-        })),
-      ),
-    describeCapability: async (request) => {
-      const description = globalCapabilities.get(
-        JSON.stringify([request.kind, request.definitionId, request.definitionVersion]),
-      );
-      return (
-        description ??
-        mcp.describe(request) ??
-        mcpSources.describe(request) ??
-        mcpManagement.describe(request)
-      );
+      const error =
+        selectedSources.admissionError(request) ??
+        mcp
+          .select(
+            effective.mcp?.filter(
+              (server) =>
+                mcpRegistry.servers.some((registered) => registered.id === server.id) ||
+                !/^mcp-[a-f0-9]{64}$/.test(server.id),
+            ),
+            [],
+            selectedSources.servers,
+          )
+          .admissionError(request);
+      return error;
     },
   });
-  const globalPermissions = withInjectedCeiling(globalDefaultPolicy);
   const titles = createSessionTitleExtension({
     runtime: () => {
       if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
@@ -804,9 +679,11 @@ export function createDefaultProcessConfiguration(options: {
         modelId: selected.model,
         ...credentials,
       });
-      return createSdkModelAdapter({
+      return createRunModelAdapters({
+        modelId: selected.id,
         models: new Map([[selected.id, binding]]),
-        presets: new Map([[selected.id, preset]]),
+        preset,
+        supportsCheckOutputLimit: false,
       });
     }
     const apiKey =
@@ -821,9 +698,11 @@ export function createDefaultProcessConfiguration(options: {
       apiKey,
       fetch: transport.fetch,
     });
-    return createSdkModelAdapter({
+    return createRunModelAdapters({
+      modelId: selected.id,
       models: new Map([[selected.id, binding]]),
-      presets: new Map([[selected.id, parseModelPreset(selected.options)]]),
+      preset: parseModelPreset(selected.options),
+      supportsCheckOutputLimit: true,
     });
   };
   type ResolveInput = Parameters<NonNullable<RuntimeOptions['resolveRunConfiguration']>>[0];
@@ -841,6 +720,8 @@ export function createDefaultProcessConfiguration(options: {
       >[0]['parentTools'];
       inheritDynamicMcp?: boolean;
       readOnlyTask?: boolean;
+      readOnlyTaskDescription?: string;
+      defaultAutoReview?: 'shell_risk' | null;
     },
     recovery?: {
       digest: string;
@@ -852,10 +733,24 @@ export function createDefaultProcessConfiguration(options: {
       browserSnapshotPresent: boolean;
       modelTransportSnapshot: Json;
       runIdentity: { runId: string; sessionId: string };
+      readOnlyTaskSource?: Json;
+      defaultAutoReview?: 'shell_risk';
     },
   ) => {
     try {
       recovery?.signal.throwIfAborted();
+      const inheritedReview = recovery
+        ? recovery.defaultAutoReview
+        : selection?.defaultAutoReview === null
+          ? undefined
+          : (selection?.defaultAutoReview ?? 'shell_risk');
+      if (
+        (options.authorizationCheck || options.permissions) &&
+        ((recovery && inheritedReview) || selection?.defaultAutoReview === 'shell_risk')
+      )
+        throw new AgentError('recovery_configuration_changed');
+      const defaultAutoReview =
+        !options.authorizationCheck && !options.permissions ? inheritedReview : undefined;
       const businessInputs = readBusinessRunInputs(command.request);
       const planningIntent = recovery
         ? readPlanningIntent(recovery.planningSnapshot)
@@ -876,6 +771,16 @@ export function createDefaultProcessConfiguration(options: {
       } catch {
         throw new ConfigurationError('workspace_configuration_unavailable');
       }
+      // A recovered binding uses its original source, never today's role text. Old runs retain absence.
+      const readOnlyTaskSource = recovery
+        ? recovery.readOnlyTaskSource === undefined
+          ? undefined
+          : frozenReadOnlyTaskSource(root, recovery.readOnlyTaskSource)
+        : selection?.readOnlyTask
+          ? readOnlyTaskGuidanceSource(root, selection.readOnlyTaskDescription)
+          : undefined;
+      if (readOnlyTaskSource && !selection?.readOnlyTask)
+        throw new AgentError('recovery_configuration_unavailable');
       const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
       if (project.webFetch !== undefined)
         throw new ConfigurationError('web_configuration_user_only');
@@ -945,32 +850,11 @@ export function createDefaultProcessConfiguration(options: {
       const modelTransport = await resolveModelTransport();
       if (selection?.modelOnly)
         return {
-          model: await resolveModel(selected, modelTransport),
+          model: (await resolveModel(selected, modelTransport)).model,
           modelId: selected.id,
           toolIds: [],
           extensions: [],
-          permissions: withInjectedCeiling(
-            createPermissionPolicy({
-              readPolicy: (request) =>
-                currentPolicy(request, [
-                  { kind: 'model', definitionId: selected.id, definitionVersion: '1' },
-                ]),
-              describeCapability: (request) =>
-                request.kind === 'model' &&
-                request.definitionId === selected.id &&
-                request.definitionVersion === '1'
-                  ? {
-                      kind: 'model',
-                      definitionId: selected.id,
-                      definitionVersion: '1',
-                      revision: 'selected-model-only-1',
-                      effects: ['read'],
-                      hardAllowed: true,
-                      safeRead: true,
-                    }
-                  : null,
-            }),
-          ),
+          permissions: permissionConfiguration.forModelOnly(selected.id),
           snapshot: {
             ...createConfigurationSnapshot({ ...effective, tools: [], skills: [] }),
             modelTransport: modelTransport.snapshot,
@@ -1010,7 +894,13 @@ export function createDefaultProcessConfiguration(options: {
                 ? mcp.extension?.id === 'builtin.mcp' && mcp.extension.version === '1'
                   ? mcp.extension
                   : undefined
-                : undefined;
+                : selection.toolIds?.includes('browser.execute') &&
+                    browser.executionAvailable &&
+                    browser.toolIds.includes(id) &&
+                    browser.extension.id === 'builtin.browser' &&
+                    browser.extension.version === '1'
+                  ? browser.extension
+                  : undefined;
           const definition =
             businessTools.get(id) ??
             sourceExtension?.tools?.find((tool) => tool.id === id && tool.version === '1');
@@ -1116,7 +1006,7 @@ export function createDefaultProcessConfiguration(options: {
         ),
       );
       assertSelectedToolVersions(toolIds, effective.tools, [
-        askUserTools.values(),
+        builtinReadTools.values(),
         businessTools.values(),
         fileTools.values(),
         task.tools.values(),
@@ -1129,7 +1019,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser, browser.extension],
+        externallyRegisteredExtensions: [askUser, executionEvidence, browser.extension],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
@@ -1264,243 +1154,55 @@ export function createDefaultProcessConfiguration(options: {
               planningSnapshotDigest(recovery.mcpSourceSnapshot))
         )
           throw new AgentError('recovery_configuration_changed');
-        const model = await resolveModel(selected, modelTransport);
-        const authorizationCheck = options.authorizationCheck ?? {
-          id: 'builtin.auto',
-          version: createHash('sha256')
-            .update(
-              JSON.stringify({
-                provider: selected.provider,
-                id: selected.id,
-                model: selected.model,
-                baseURL: selected.baseURL,
-                credentialRef: selected.credentialRef ?? null,
-                options: actualOptions,
-              }),
-            )
-            .digest('hex'),
-          modelId: selected.id,
-          model,
-        };
-        const actual = new Map<string, CapabilityDescription>();
-        const key = (kind: string, id: string, version: string) =>
-          JSON.stringify([kind, id, version]);
-        const modelDescription = modelCapability(selected.id);
-        actual.set(key('model', selected.id, '1'), modelDescription);
-        // Only the exact trusted carrier and its valid Model binding join this Run's policy.
-        for (const role of childRoles) {
-          actual.set(key('job', `agent/${role.id}`, role.version), childCapability(role));
-          const candidate = effective.models?.find((entry) => entry.id === role.modelId);
-          if (
-            candidate &&
-            candidate.enabled !== false &&
-            isSupportedModelProvider(candidate.provider) &&
-            candidate.baseURL &&
-            candidate.model
-          )
-            actual.set(key('model', candidate.id, '1'), {
-              ...modelDescription,
-              definitionId: candidate.id,
-            });
-        }
-        for (const extension of runExtensions) {
-          for (const tool of extension.tools ?? []) {
-            if (!assembly.toolIds.includes(tool.id)) continue;
-            const hostCapability =
-              extension.id === web.extension.id
-                ? web.capabilities.find(
-                    (capability) =>
-                      capability.kind === 'tool' &&
-                      capability.definitionId === tool.id &&
-                      capability.definitionVersion === tool.version,
-                  )
-                : extension.id === browser.extension.id
-                  ? browser.capabilities.find(
-                      (capability) =>
-                        capability.kind === 'tool' &&
-                        capability.definitionId === tool.id &&
-                        capability.definitionVersion === tool.version,
-                    )
-                  : undefined;
-            actual.set(
-              key('tool', tool.id, tool.version),
-              hostCapability ?? {
-                kind: 'tool',
-                definitionId: tool.id,
-                definitionVersion: tool.version,
-                revision: `${extension.id}:${extension.version}:${tool.version}`,
-                hardAllowed: true,
-                ...builtinCapability(
-                  extension.id,
-                  tool.id,
-                  'tool',
-                  planning.extension.id,
-                  tool.version,
-                ),
-              },
-            );
-          }
-          for (const job of extension.jobs ?? []) {
-            const capability = builtinCapability(
-              extension.id,
-              job.id,
-              'job',
-              planning.extension.id,
-              job.version,
-            );
-            const hostCapability =
-              extension.id === browser.extension.id
-                ? browser.capabilities.find(
-                    (description) =>
-                      description.kind === 'job' &&
-                      description.definitionId === job.id &&
-                      description.definitionVersion === job.version,
-                  )
-                : undefined;
-            actual.set(
-              key('job', job.id, job.version),
-              hostCapability ?? {
-                kind: 'job',
-                definitionId: job.id,
-                definitionVersion: job.version,
-                revision: `${extension.id}:${extension.version}:${job.version}`,
-                effects: capability.effects,
-                hardAllowed: true,
-                safeRead: capability.safeRead,
-              },
-            );
-          }
-        }
-        // The exact file adapter may invoke the selected Planning owner's existing Action.
-        // A Run without write_plan retains no new action capability.
-        if (actual.has(key('tool', 'planning.write', '1'))) {
-          const action = globalCapabilities.get(key('job', 'builtin.planning/planning.write', '1'));
-          if (action) actual.set(key('job', action.definitionId, action.definitionVersion), action);
-        }
-        const classifiedPermissions = withInjectedCeiling(
-          createPermissionPolicy({
-            readCheckContext: createPermissionCheckContextReader({
-              readRuntime: () => policyRuntime ?? null,
-              subjectId: command.subjectId,
-              originStoreId: command.originStoreId,
-            }),
-            readPolicy: (request) =>
-              currentPolicy(
-                request,
-                [
-                  ...actual.values(),
-                  ...selectedMcp.listCapabilities(),
-                  ...mcpSources.listCapabilities(),
-                ].map(({ kind, definitionId, definitionVersion }) => ({
-                  kind,
-                  definitionId,
-                  definitionVersion,
-                })),
-                {
-                  sessionId: command.sessionId,
-                  expectedStoreId: command.originStoreId,
-                  subjectId: command.subjectId,
-                },
-              ),
-            describeCapability: async (request) => {
-              const description = actual.get(
-                key(request.kind, request.definitionId, request.definitionVersion),
-              );
-              const commandDigest = shell.commandDigest(request);
-              return description
-                ? {
-                    ...description,
-                    ...(await shell.describeRequest(request)),
-                    ...(await files.describeRequest(request)),
-                    ...describeDefaultTask(request),
-                    ...(commandDigest ? { commandDigest } : {}),
-                  }
-                : (mcpSources.describe(request) ?? selectedMcp.describe(request));
-            },
-          }),
-        );
-        let planningRun: { runId: string; sessionId: string } | undefined = recovery?.runIdentity;
-        const hasBusinessInitializer = Boolean(requirePlan);
-        const initializeBusinessRequirements: NonNullable<
-          RunConfiguration['initializeRequirements']
-        > = (input) =>
-          hasBusinessInitializer
-            ? planning.initializeRequirements(input, { requirePlan, readOnlyDefinitions })
-            : Promise.resolve([]);
-        const planningOriginStoreId = command.originStoreId;
-        const planningPermissions = createPlanningPermissionPolicy({
-          isPlanFileEdit: files.isPlanFileEdit,
-          required: requirePlan,
-          run: () => planningRun,
-          current: classifiedPermissions,
-          async readState(request, identity) {
-            const runtime = policyRuntime;
-            if (!runtime || !identity) throw new AgentError('planning_run_scope_unavailable');
-            return readPlanningPermissionState(
-              runtime,
-              planning,
-              request,
-              planningOriginStoreId,
-              identity,
-            );
-          },
-          describe: async (request) => {
-            const description = actual.get(
-              key(request.kind, request.definitionId, request.definitionVersion),
-            );
-            const commandDigest = shell.commandDigest(request);
-            return description
-              ? {
-                  ...description,
-                  ...(await shell.describeRequest(request)),
-                  ...(await files.describeRequest(request)),
-                  ...(commandDigest ? { commandDigest } : {}),
-                }
-              : (mcpSources.describe(request) ?? selectedMcp.describe(request));
-          },
-        });
-        const permissions: RuntimeOptions['permissions'] = {
-          toolDispatchOrder: planningPermissions.toolDispatchOrder,
-          async authorize(request) {
-            if (
-              selection?.readOnlyTask &&
-              ['shell.execute', 'shell.launch', 'shell.command'].includes(request.definitionId)
-            ) {
-              const description = await shell.describeRequest(request);
-              if (
-                !description?.hardAllowed ||
-                !description.safeRead ||
-                !description.effects?.every((effect) => effect === 'read')
+        const { model, checkModel, checkOptions } = await resolveModel(selected, modelTransport);
+        const authorizationCheck = {
+          ...(options.authorizationCheck ?? {
+            id: 'builtin.auto',
+            version: createHash('sha256')
+              .update(
+                JSON.stringify({
+                  provider: selected.provider,
+                  id: selected.id,
+                  model: selected.model,
+                  baseURL: selected.baseURL,
+                  credentialRef: selected.credentialRef ?? null,
+                  options: checkOptions,
+                  ...(defaultAutoReview
+                    ? { defaultAutoReview, defaultAutoReviewDigest: shellRiskReviewContractDigest }
+                    : {}),
+                }),
               )
-                return {
-                  allowed: false,
-                  revision: 'task-read-only-shell-1',
-                  reason: 'read_only_task_requires_literal_search',
-                };
-            }
-            if (
-              'assertExecutionScope' in selectedSources &&
-              typeof selectedSources.assertExecutionScope === 'function'
-            ) {
-              try {
-                await selectedSources.assertExecutionScope(request);
-              } catch {
-                return {
-                  allowed: false,
-                  revision: 'mcp-child-source-scope-1',
-                  reason: 'mcp_source_scope_invalid',
-                };
-              }
-            }
-            const error =
-              selectedSources.admissionError(request) ?? selectedMcp.admissionError(request);
-            if (error) return { allowed: false, revision: 'mcp-selected-server-1', reason: error };
-            return await planningPermissions.authorize(request);
-          },
+              .digest('hex'),
+            modelId: selected.id,
+            model: checkModel,
+            ...(defaultAutoReview ? { prepareRiskReview: shell.prepareRiskReview } : {}),
+          }),
+          timeoutMs:
+            options.authorizationCheck?.timeoutMs ??
+            snapshot.configuration.autoApproval?.timeoutMs ??
+            3000,
         };
+        const runPermissions = permissionConfiguration.forRun({
+          command,
+          modelId: selected.id,
+          models: effective.models,
+          extensions: runExtensions,
+          toolIds: assembly.toolIds,
+          shell,
+          web,
+          selectedMcp,
+          selectedSources,
+          requirePlan,
+          readOnlyDefinitions,
+          recoveryRunIdentity: recovery?.runIdentity,
+          ...(defaultAutoReview ? { defaultAutoReview } : {}),
+          trustedExtensions: runExtensions,
+        });
         return {
-          permissions,
-          ...(afterTurn ? { afterTurn } : {}),
+          ...runPermissions,
+          ...(permissionConfiguration.afterTurn
+            ? { afterTurn: permissionConfiguration.afterTurn }
+            : {}),
           compressor:
             compressor ??
             createSummaryCompressor({
@@ -1522,39 +1224,6 @@ export function createDefaultProcessConfiguration(options: {
             }),
           authorizationCheck,
           conditions: planning.conditions,
-          initializeRequirements: !hasBusinessInitializer
-            ? initializeBusinessRequirements
-            : async (
-                input: Parameters<NonNullable<RunConfiguration['initializeRequirements']>>[0],
-              ) => {
-                if (
-                  ['job.report', 'job.report.continue'].includes(input.command.kind) ||
-                  (planningRun &&
-                    planningRun.runId !== input.run.id &&
-                    typeof (input.command.receipt as { continuationRunId?: unknown })
-                      .continuationRunId === 'string')
-                ) {
-                  if (!policyRuntime || !planningRun)
-                    throw new AgentError('planning_run_scope_unavailable');
-                  await readBoundPlanningSuccessor(
-                    policyRuntime,
-                    command.originStoreId,
-                    planningRun,
-                    input.run,
-                    input.command,
-                  );
-                  // Store inherited the exact refs at report or same-work human activation.
-                  return [];
-                }
-                if (
-                  planningRun &&
-                  (planningRun.runId !== input.run.id ||
-                    planningRun.sessionId !== input.run.sessionId)
-                )
-                  throw new AgentError('planning_run_scope_unavailable');
-                planningRun = { runId: input.run.id, sessionId: input.run.sessionId };
-                return initializeBusinessRequirements(input);
-              },
           model,
           modelId: selected.id,
           toolIds: assembly.toolIds,
@@ -1603,6 +1272,7 @@ export function createDefaultProcessConfiguration(options: {
                 ...(await assembly.sources.capture(request)),
                 ...(await selectedSources.sources.capture(request)),
                 ...(mcpResourceSource ? [mcpResourceSource] : []),
+                ...(readOnlyTaskSource ? [structuredClone(readOnlyTaskSource)] : []),
               ];
             },
             async captureBatch(
@@ -1626,12 +1296,17 @@ export function createDefaultProcessConfiguration(options: {
               for (const request of requests)
                 append(await selectedSources.sources.capture(request));
               if (mcpResourceSource) append([mcpResourceSource]);
+              if (readOnlyTaskSource) append([structuredClone(readOnlyTaskSource)]);
               return [...sources.values()];
             },
           },
           dispose,
           snapshot: {
             ...snapshot,
+            ...(defaultAutoReview
+              ? { defaultAutoReview, defaultAutoReviewDigest: shellRiskReviewContractDigest }
+              : {}),
+            ...(readOnlyTaskSource ? { readOnlyTaskSource } : {}),
             modelTransport: modelTransport.snapshot,
             skillSelection: {
               requested: selection
@@ -1747,6 +1422,10 @@ export function createDefaultProcessConfiguration(options: {
       createConfigurationSnapshot(snapshot.configuration).digest !== snapshot.digest
     )
       throw new AgentError('recovery_configuration_unavailable');
+    const defaultAutoReview = defaultAutoReviewContract(
+      snapshot.defaultAutoReview,
+      snapshot.defaultAutoReviewDigest,
+    );
     return resolveConfigurationBinding(
       input,
       {
@@ -1769,11 +1448,15 @@ export function createDefaultProcessConfiguration(options: {
         browserSnapshot: snapshot.browser ?? null,
         browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
         modelTransportSnapshot: snapshot.modelTransport ?? null,
+        ...(defaultAutoReview ? { defaultAutoReview } : {}),
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
         mcpSourceSnapshot:
           snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)
             ? (snapshot.mcp.sources ?? null)
             : null,
+        ...(Object.hasOwn(snapshot, 'readOnlyTaskSource')
+          ? { readOnlyTaskSource: snapshot.readOnlyTaskSource }
+          : {}),
       },
     );
   };
@@ -1787,6 +1470,10 @@ export function createDefaultProcessConfiguration(options: {
             modelId: selection.modelId,
             toolIds: selection.role.toolIds,
             readOnlyTask: selection.role.toolPolicy === 'read_only',
+            readOnlyTaskDescription: selection.role.description,
+            defaultAutoReview: input.parentRun
+              ? parentAutoReviewContract(input.parentRun.configuration)
+              : undefined,
             parentTools: input.parentTools,
             inheritedModelHiddenToolIds: (() => {
               if (!selection.role.toolPolicy) return undefined;
@@ -1885,91 +1572,7 @@ export function createDefaultProcessConfiguration(options: {
         persistence: options.credentialBackend?.kind ?? 'os',
         explicit: () => explicitConfiguration(explicit),
       }),
-    permissionManagement,
-    permissions: {
-      toolDispatchOrder: globalPermissions.toolDispatchOrder,
-      async authorize(request) {
-        const titleDecision = await titles.authorize(request);
-        if (titleDecision) {
-          const current = await persistedPolicy(request, []);
-          return withInjectedCeiling({
-            async authorize() {
-              return {
-                ...titleDecision,
-                controlReads: current.controlReads,
-                revision: createHash('sha256')
-                  .update(JSON.stringify([titleDecision.revision, current.revision]))
-                  .digest('hex'),
-              };
-            },
-          }).authorize(request);
-        }
-        if (
-          request.kind === 'job' &&
-          (request.definitionId.startsWith('builtin.mcp/mcp.resources.') ||
-            request.definitionId.startsWith('builtin.mcp/mcp.prompts.') ||
-            request.definitionId === 'builtin.mcp/mcp.catalogue.refresh' ||
-            request.definitionId === 'builtin.mcp/mcp.connect' ||
-            request.definitionId === 'mcp.source.connection')
-        ) {
-          if (!policyRuntime)
-            return {
-              allowed: false,
-              revision: 'mcp-selected-server-1',
-              reason: 'execution_scope_unavailable',
-            };
-          const session = await policyRuntime.getSession(request.sessionId);
-          const workspace = session && (await policyRuntime.getWorkspace(session.workspaceId));
-          if (!workspace)
-            return {
-              allowed: false,
-              revision: 'mcp-selected-server-1',
-              reason: 'execution_scope_unavailable',
-            };
-          const root = fileURLToPath(workspace.rootUri);
-          const user = userConfiguration.read().value;
-          const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
-          const current = explicitConfiguration(explicit);
-          const effective = resolveConfiguration({
-            defaults: configurationDefaults,
-            user,
-            workspace: withoutProjectModels(project),
-            explicit: current,
-          });
-          const execution = await policyRuntime.getExecution(request.executionId);
-          const command = execution && (await policyRuntime.getCommand(execution.originCommandId));
-          if (!session || !command)
-            return {
-              allowed: false,
-              revision: 'mcp-selected-server-1',
-              reason: 'execution_scope_unavailable',
-            };
-          const selectedSources = mcpSources.select(
-            await mcpSources.capture({ command, session, workspace }),
-            {
-              present: [user, project, current].some((layer) => Object.hasOwn(layer, 'mcp')),
-              disabledUserServerIds: disabledUserMcpSources(user),
-              configurations: effective.mcp ?? [],
-            },
-          );
-          const error =
-            selectedSources.admissionError(request) ??
-            mcp
-              .select(
-                effective.mcp?.filter(
-                  (server) =>
-                    mcpRegistry.servers.some((registered) => registered.id === server.id) ||
-                    !/^mcp-[a-f0-9]{64}$/.test(server.id),
-                ),
-                [],
-                selectedSources.servers,
-              )
-              .admissionError(request);
-          if (error) return { allowed: false, revision: 'mcp-selected-server-1', reason: error };
-        }
-        const decision = await globalPermissions.authorize(request);
-        return options.permissions ? decision : requireFileRestoreApproval(request, decision);
-      },
-    },
+    permissionManagement: permissionConfiguration.permissionManagement,
+    permissions: permissionConfiguration.permissions,
   };
 }

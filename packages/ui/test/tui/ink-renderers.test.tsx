@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import ConcurrentSubAgentBlock from '../../src/tui/ink/ConcurrentSubAgentBlock';
 import MarkdownBlock, { updateMarkdownParseCache } from '../../src/tui/ink/MarkdownBlock';
+import { getToolPreview } from '../../src/tui/ink/render-utils';
 import SubAgentBlock from '../../src/tui/ink/SubAgentBlock';
 import TaskProgressBlock from '../../src/tui/ink/TaskProgressBlock';
 import ToolCardBlock from '../../src/tui/ink/ToolCardBlock';
@@ -102,9 +103,12 @@ test('generic result previews mark character and line clipping without splitting
   }
 });
 test('original Shell card follows five-line tail and retains settled status when collapsed', () => {
+  const args = { command: 'echo original', description: '观察原任务输出' };
   const view = render(
     <ToolCardBlock
       block={tool({
+        args,
+        preview: getToolPreview('shell_execute', args),
         liveOutput: Array.from({ length: 9 }, (_, i) => `line-${i}`).join('\n'),
         liveTotalLines: 9,
       })}
@@ -114,6 +118,7 @@ test('original Shell card follows five-line tail and retains settled status when
   try {
     const frame = view.lastFrame()!;
     expect(frame).toContain('Bash');
+    expect(frame).toContain('观察原任务输出');
     expect(frame).toContain('… +4 lines');
     expect(frame).not.toContain('line-0');
     expect(frame).toContain('line-4');

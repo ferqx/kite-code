@@ -29,4 +29,4 @@ Service 在根和 child 快照顶层保存 `skillSelection.requested/resolvedIds
 
 验证范围与实际执行结果归[实施证据](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，本决定不代表完整 V1.3、正式入口迁移或三平台发行已完成。
 
-目录与局部可用性现由[同源目录决定](2026-10-02-scoped-skill-catalogue.md)补充：坏项不阻未选任务，但显式选择和继承必须准确失败，不能换成同名项。该补充不改变原Command选择身份与父范围约束。
+目录与局部可用性现由[同源目录决定](2026-10-02-scoped-skill-catalogue.md)补充：坏项不阻未选任务，不能换成同名项。[子配置修正](../bug-fix/2026-11-05-child-preparation-acceptance.md)仅替代“全部默认继承强制”的范围：父默认项遇子能力收窄且被明确标记缺能力时可省略；显式选择与其他失效仍拒绝。原 Command 选择身份、父 ID 上限和冻结恢复约束保持。

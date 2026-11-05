@@ -615,13 +615,24 @@ test('active reuse of an automatic result retires the exact old approval before 
       executionId: job,
       resultRevision: '1',
     });
-    expect(
-      model.requests[1]!.messages.find((message) => message.toolCallId === 'old-call')!.content,
-    ).toContain('superseded_by_user_input');
+    const cancelledMessage = model.requests[1]!.messages.find(
+      (message) => message.toolCallId === 'old-call',
+    )!;
+    expect(cancelledMessage.sourceIds).toEqual([card.executionId]);
+    expect(cancelledMessage.content).toContain(
+      'New user input made the earlier decision out of date.',
+    );
+    expect(cancelledMessage.content).toContain(
+      'This request was not executed and produced no effects.',
+    );
+    expect(cancelledMessage.content).not.toContain('superseded_by_user_input');
     expect(await f.store.getExecution(card.executionId)).toMatchObject({
       status: 'cancelled',
       authorization: { dispatched: false },
-      result: { details: { adapterAttempted: false } },
+      result: {
+        content: 'superseded_by_user_input',
+        details: { code: 'superseded_by_user_input', adapterAttempted: false },
+      },
     });
     expect(
       await f.store.getInteraction({

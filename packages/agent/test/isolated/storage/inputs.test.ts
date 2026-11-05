@@ -7,7 +7,7 @@ import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
-import type { CommandRequest } from '../../../src/storage/types';
+import type { CommandRequest, Json } from '../../../src/storage/types';
 
 async function rejected(work: Promise<unknown>, code: string) {
   let error: unknown;
@@ -18,7 +18,7 @@ async function rejected(work: Promise<unknown>, code: string) {
   }
   expect((error as { code?: string })?.code).toBe(code);
 }
-async function fixture() {
+async function fixture(completionNamespace = false) {
   const dataRoot = temporaryDirectory('kite-inputs-');
   chmodSync(dataRoot, 0o700);
   const profile = { dataRoot, profile: 'test' };
@@ -45,7 +45,19 @@ async function fixture() {
   const run = await store.startRun({
     ...write,
     commandId: 'work',
-    configuration: { modelId: 'fixed' },
+    configuration: {
+      modelId: 'fixed',
+      ...(completionNamespace
+        ? {
+            extensions: [{ id: 'fixture', version: '1' }],
+            tools: ['fixed', 'completion.check'].map((id) => ({
+              id,
+              version: '1',
+              extensionId: 'fixture',
+            })),
+          }
+        : {}),
+    },
   });
   const db = new Database(join(dataRoot, 'test', 'core.db'));
   const source = { kind: 'model_decision', modelExecutionId: 'decision' };
@@ -69,7 +81,11 @@ async function fixture() {
     });
   const apply = (id: string) =>
     store.applyInput({ ...write, commandId: id, kind: 'steer', runId: run.id });
-  const plan = (id: string, kind: 'model' | 'tool' = 'tool') =>
+  const plan = (
+    id: string,
+    kind: 'model' | 'tool' = 'tool',
+    options: { input?: Json; decisionSource?: Json; definitionId?: string } = {},
+  ) =>
     store.planExecution({
       ...write,
       executionId: id,
@@ -79,10 +95,10 @@ async function fixture() {
       stepId: id,
       callId: id,
       kind,
-      definitionId: 'fixed',
+      definitionId: options.definitionId ?? 'fixed',
       definitionVersion: '1',
-      input: { content: 'original request' },
-      decisionSource: source,
+      input: options.input ?? { content: 'original request' },
+      decisionSource: options.decisionSource === undefined ? source : options.decisionSource,
     });
   return {
     store,
@@ -107,7 +123,11 @@ async function fixture() {
     },
   };
 }
-async function dispatch(f: Awaited<ReturnType<typeof fixture>>, id: string) {
+async function dispatch(
+  f: Awaited<ReturnType<typeof fixture>>,
+  id: string,
+  source: Json = f.source,
+) {
   return f.store.markDispatching({
     ...f.write,
     executionId: id,
@@ -118,7 +138,7 @@ async function dispatch(f: Awaited<ReturnType<typeof fixture>>, id: string) {
       inputDigest: await semanticDigest({ content: 'original request' }),
     },
     requirements: [],
-    freshness: { checked: true, source: f.source },
+    freshness: { checked: true, source },
   });
 }
 
@@ -417,6 +437,302 @@ test('guidance waits for planned tools and approvals, preserves dispatched reque
     await f.cleanup();
   }
 });
+const nonCompletionSources: Json[] = [
+  null,
+  {},
+  { kind: 'future_completion' },
+  { kind: 'model_decision' },
+];
+for (const decisionSource of nonCompletionSources)
+  test(`guidance cannot retire an ordinary Tool with ${JSON.stringify(decisionSource)} source or forged completion input`, async () => {
+    const f = await fixture();
+    try {
+      const original = await f.plan('ordinary', 'tool', {
+        decisionSource,
+        input: {
+          kind: 'completion_decision',
+          decisionSource: { kind: 'completion_decision' },
+          completion: true,
+        },
+      });
+      await f.steer('blocked');
+      const before = (await f.store.getMetadata()).lastChangeCursor;
+      await rejected(f.apply('blocked'), 'input_tools_pending');
+      expect(await f.store.getExecution('ordinary')).toEqual(original);
+      expect((await f.store.getCommand('blocked'))?.status).toBe('accepted');
+      expect(await f.store.listMessages('s')).toHaveLength(1);
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+test('an eligible completion Tool cannot hide another ordinary planned Tool from the guidance guard', async () => {
+  const f = await fixture();
+  try {
+    const completion = await f.plan('a-completion', 'tool', {
+      decisionSource: { kind: 'completion_decision' },
+    });
+    const ordinary = await f.plan('z-ordinary');
+    await f.steer('blocked');
+    const before = (await f.store.getMetadata()).lastChangeCursor;
+    await rejected(f.apply('blocked'), 'input_tools_pending');
+    expect(await f.store.getExecution(completion.id)).toEqual(completion);
+    expect(await f.store.getExecution(ordinary.id)).toEqual(ordinary);
+    expect((await f.store.getCommand('blocked'))?.status).toBe('accepted');
+    expect(await f.store.listMessages('s')).toHaveLength(1);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+for (const semanticCommand of [false, true])
+  test(`completion retirement revokes only its accepted same_command grant atomically (${semanticCommand ? 'command digest' : 'full input'})`, async () => {
+    const f = await fixture();
+    try {
+      const source = { kind: 'completion_decision' };
+      const input = { content: 'original request' };
+      const inputDigest = await semanticDigest(input);
+      const commandDigest = semanticCommand
+        ? await semanticDigest({ command: 'check' })
+        : undefined;
+      const approve = async (executionId: string, decisionSource: Json, semantic = false) => {
+        const execution = (await f.store.getExecution(executionId))!;
+        const card = await f.store.requestInteraction({
+          ...f.write,
+          interactionId: `approval-${executionId}`,
+          executionId,
+          attempt: execution.attempt,
+          kind: 'approval',
+          definitionId: execution.definitionId!,
+          definitionVersion: execution.definitionVersion!,
+          inputDigest: await semanticDigest(execution.input),
+          policyRevision: 'owned',
+          requiredRefs: [],
+          source: decisionSource,
+          request: {
+            grants: ['approve_once', 'same_command'],
+            ...(semantic && commandDigest ? { commandDigest } : {}),
+          },
+        });
+        await f.store.answerInteraction({
+          ...f.base,
+          commandId: `answer-${executionId}`,
+          presentationSessionId: 's',
+          interactionId: card.id,
+          expectedRevision: card.revision,
+          answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+        });
+        const answered = (await f.store.getInteraction({
+          ...f.base,
+          interactionId: card.id,
+        }))!;
+        return f.store.acceptInteractionDecision({
+          ...f.write,
+          interactionId: card.id,
+          executionId,
+          attempt: execution.attempt,
+          decisionRevision: answered.revision,
+          definitionId: execution.definitionId!,
+          definitionVersion: execution.definitionVersion!,
+          inputDigest: answered.inputDigest,
+          policyRevision: 'owned',
+          requirements: [],
+          freshness: { checked: true, source: decisionSource },
+        });
+      };
+      await f.plan('unrelated', 'tool', { definitionId: 'unrelated' });
+      const unrelated = await approve('unrelated', f.source);
+      await f.store.markDispatching({
+        ...f.write,
+        executionId: 'unrelated',
+        authorization: {
+          allowed: true,
+          revision: 'owned',
+          definitionVersion: '1',
+          inputDigest,
+          interactionId: unrelated.id,
+          decisionRevision: unrelated.acceptedDecisionRevision!,
+        },
+        requirements: [],
+        freshness: { checked: true, source: f.source },
+      });
+      await f.store.finishExecution({
+        ...f.write,
+        executionId: 'unrelated',
+        status: 'succeeded',
+        result: { outcome: 'succeeded', content: 'unrelated completed' },
+      });
+      await f.plan('old-completion', 'tool', { input, decisionSource: source });
+      const approval = await approve('old-completion', source, semanticCommand);
+      const grantInput = {
+        expectedStoreId: f.expectedStoreId,
+        ...(commandDigest ? { commandDigest } : {}),
+      };
+      expect(
+        await f.store.getPermissionGrant({ ...grantInput, executionId: 'old-completion' }),
+      ).toMatchObject({ grantId: approval.id });
+      const listGrants = () => f.store.listPermissionGrants(f.base);
+      await f.steer('retire-grant');
+      const before = await listGrants();
+      const original = await f.store.getExecution('old-completion');
+      f.db.exec(
+        "CREATE TRIGGER grant_retirement_fault BEFORE INSERT ON message_part BEGIN SELECT RAISE(ABORT,'grant_retirement_fault'); END",
+      );
+      let failure: unknown;
+      try {
+        await f.apply('retire-grant');
+      } catch (error) {
+        failure = error;
+      }
+      expect(String(failure)).toContain('grant_retirement_fault');
+      expect(await listGrants()).toEqual(before);
+      expect(await f.store.getExecution('old-completion')).toEqual(original);
+      expect(await f.store.getInteraction({ ...f.base, interactionId: approval.id })).toEqual(
+        approval,
+      );
+      expect((await f.store.getCommand('retire-grant'))?.status).toBe('accepted');
+      expect(await f.store.listMessages('s')).toHaveLength(1);
+      f.db.exec('DROP TRIGGER grant_retirement_fault');
+      const applied = await f.apply('retire-grant');
+      const after = await listGrants();
+      expect(BigInt(after.revision)).toBe(BigInt(before.revision) + 1n);
+      expect(after.items.map((item) => item.grant.id)).toEqual([unrelated.id]);
+      expect(await f.store.getInteraction({ ...f.base, interactionId: approval.id })).toMatchObject(
+        {
+          state: 'cancelled',
+          acceptedDecisionRevision: approval.acceptedDecisionRevision,
+          answer: approval.answer,
+        },
+      );
+      expect(
+        await f.store.getPermissionGrant({
+          expectedStoreId: f.expectedStoreId,
+          executionId: 'unrelated',
+        }),
+      ).toEqual({ grantId: unrelated.id, revision: after.revision });
+      expect(
+        f.db.query('SELECT revoked_seq FROM permission_grant WHERE id=?').get(approval.id),
+      ).toEqual({ revoked_seq: Number(after.revision) });
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      expect(await f.apply('retire-grant')).toEqual(applied);
+      expect(await listGrants()).toEqual(after);
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      await f.plan('fresh-completion', 'tool', {
+        input: semanticCommand ? { ...input, logicalKey: 'new-attempt' } : input,
+        decisionSource: source,
+      });
+      expect(
+        await f.store.getPermissionGrant({ ...grantInput, executionId: 'fresh-completion' }),
+      ).toBeNull();
+      const fresh = await approve('fresh-completion', source, semanticCommand);
+      expect(fresh.id).not.toBe(approval.id);
+      expect(fresh).toMatchObject({ state: 'answered', answer: { decision: 'approve' } });
+      expect(
+        await f.store.getPermissionGrant({ ...grantInput, executionId: 'fresh-completion' }),
+      ).toMatchObject({ grantId: fresh.id });
+      expect((await listGrants()).items.map((item) => item.grant.id)).toEqual([
+        unrelated.id,
+        fresh.id,
+      ]);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+test('guidance still waits for a genuinely dispatched completion Tool', async () => {
+  const f = await fixture(true);
+  try {
+    await f.store.beginRunRequirementsInitialization({ ...f.write, runId: f.run.id });
+    const recordKey = `run/${f.run.id}/completion-policy`;
+    const policy = await f.store.initializeRunRecord({
+      ...f.write,
+      runId: f.run.id,
+      extensionId: 'fixture',
+      write: {
+        key: recordKey,
+        contentType: 'agent.mutation-policy',
+        contentVersion: 1,
+        value: {
+          kind: 'mutation_policy',
+          runId: f.run.id,
+          definitions: [{ id: 'fixed', version: '1', effects: ['record_write'] }],
+          checkDefinitionId: 'completion.check',
+          checkDefinitionVersion: '1',
+        },
+      },
+    });
+    const initialized = await f.store.registerRunRequirements({
+      ...f.write,
+      runId: f.run.id,
+      initialize: true,
+      requirements: [
+        {
+          extensionId: 'fixture',
+          definitionVersion: '1',
+          requirementId: 'completion',
+          recordKey,
+          revision: policy.revision,
+          phase: 'completion',
+          sessionId: 's',
+          runId: f.run.id,
+        },
+      ],
+    });
+    const requirement = initialized.requirements[0]!;
+    await f.plan('mutation');
+    await f.store.registerMutationIntent({
+      ...f.write,
+      executionId: 'mutation',
+      requirement,
+      descriptor: { kind: 'record_write' },
+    });
+    await dispatch(f, 'mutation');
+    await f.store.finishExecution({
+      ...f.write,
+      executionId: 'mutation',
+      status: 'succeeded',
+      result: { outcome: 'succeeded', content: 'original mutation settled' },
+    });
+    const head = await f.store.getExtensionRecord({
+      sessionId: 's',
+      extensionId: 'fixture',
+      key: `run/${f.run.id}/mutation.current`,
+    });
+    const source = { kind: 'completion_decision', requirement: requirement as unknown as Json };
+    const input = { headRevision: head!.revision, mutationExecutionId: 'mutation' };
+    await f.plan('completion', 'tool', {
+      decisionSource: source,
+      input,
+      definitionId: 'completion.check',
+    });
+    await f.store.markDispatching({
+      ...f.write,
+      executionId: 'completion',
+      authorization: {
+        allowed: true,
+        revision: '1',
+        definitionVersion: '1',
+        inputDigest: await semanticDigest(input),
+      },
+      requirements: [],
+      freshness: { checked: true, source },
+    });
+    const original = await f.store.getExecution('completion');
+    expect(original).toMatchObject({ status: 'dispatching', authorization: { dispatched: true } });
+    await f.steer('blocked');
+    const before = (await f.store.getMetadata()).lastChangeCursor;
+    await rejected(f.apply('blocked'), 'input_tools_pending');
+    expect(await f.store.getExecution('completion')).toEqual(original);
+    expect((await f.store.getCommand('blocked'))?.status).toBe('accepted');
+    expect(await f.store.listMessages('s')).toHaveLength(1);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('failed atomic queue-to-guidance admission rolls back the original queue and an exact retry withdraws only once', async () => {
   const f = await fixture();
   try {
@@ -680,39 +996,86 @@ test('real message transaction fault and INT64 exhaustion roll back input/Run/su
   const f = await fixture();
   let readonly: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
-    await f.plan('old-tool');
+    const source = { kind: 'completion_decision' };
+    await f.plan('old-tool', 'tool', { decisionSource: source });
+    const approval = await f.store.requestInteraction({
+      ...f.write,
+      interactionId: 'completion-approval',
+      executionId: 'old-tool',
+      attempt: 1,
+      kind: 'approval',
+      definitionId: 'fixed',
+      definitionVersion: '1',
+      inputDigest: await semanticDigest({ content: 'original request' }),
+      policyRevision: '1',
+      requiredRefs: [],
+      source,
+      request: { title: 'original completion params' },
+    });
+    const original = await f.store.getExecution('old-tool');
     await f.steer('atomic');
+    const before = (await f.store.getMetadata()).lastChangeCursor;
     f.db.exec(
       "CREATE TRIGGER input_fault BEFORE INSERT ON message_part BEGIN SELECT RAISE(ABORT,'fault'); END",
     );
-    let failed = false;
+    let failure: unknown;
     try {
       await f.apply('atomic');
-    } catch {
-      failed = true;
+    } catch (error) {
+      failure = error;
     }
-    expect(failed).toBe(true);
+    expect(String(failure)).toContain('fault');
     expect((await f.store.getCommand('atomic'))?.status).toBe('accepted');
-    expect((await f.store.getExecution('old-tool'))?.status).toBe('planned');
+    expect(await f.store.getExecution('old-tool')).toEqual(original);
+    const readApproval = () =>
+      f.store.getInteraction({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+        interactionId: approval.id,
+      });
+    expect(await readApproval()).toEqual(approval);
+    expect(await readApproval()).toMatchObject({
+      state: 'pending',
+      acceptedDecisionRevision: null,
+    });
     expect(await f.store.listMessages('s')).toHaveLength(1);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
     f.db.exec('DROP TRIGGER input_fault');
-    await f.store.cancelCommand({
-      ...f.base,
-      commandId: 'cancel-atomic',
-      targetCommandId: 'atomic',
-    });
-    await f.store.finishExecution({
-      ...f.write,
-      executionId: 'old-tool',
+    const applied = await f.apply('atomic');
+    expect(applied.supersededExecutionIds).toEqual(['old-tool']);
+    expect((await f.store.getCommand('atomic'))?.status).toBe('applied');
+    expect(await f.store.getExecution('old-tool')).toMatchObject({
       status: 'cancelled',
-      result: { outcome: 'cancelled', content: 'fixture' },
+      authorization: { dispatched: false },
+      result: {
+        outcome: 'cancelled',
+        content: 'superseded_by_user_input',
+        details: { adapterAttempted: false, inputCommandId: 'atomic' },
+      },
     });
+    expect(await readApproval()).toMatchObject({
+      state: 'cancelled',
+      acceptedDecisionRevision: null,
+    });
+    const messages = await f.store.listMessages('s');
+    const retirement = messages.filter((message) => message.sourceIds?.includes('old-tool'));
+    expect(retirement).toHaveLength(1);
+    expect(retirement[0]).toMatchObject({
+      role: 'user',
+      sourceIds: ['old-tool'],
+      content:
+        '<execution_result trust="untrusted" executionId="old-tool">superseded_by_user_input</execution_result>',
+    });
+    expect(retirement[0]?.toolCallId).toBeUndefined();
+    expect(messages.filter((message) => message.role === 'tool')).toEqual([]);
+    expect(await f.apply('atomic')).toEqual(applied);
+    expect(await f.store.listMessages('s')).toEqual(messages);
     await f.follow('next');
     await f.finish();
     f.db.exec(
       "CREATE TRIGGER follow_fault BEFORE INSERT ON message_part BEGIN SELECT RAISE(ABORT,'fault'); END",
     );
-    failed = false;
+    let failed = false;
     try {
       await f.store.applyInput({
         ...f.write,

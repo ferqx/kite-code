@@ -1,7 +1,7 @@
-import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
+import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
 import {
   type AuthorizationCheckOutput,
-  authorizationCheckAnswer,
+  authorizationCheckAnswerForContract,
 } from '../authorization-check-output';
 import { semanticDigest } from '../json';
 import { bodyReference } from '../model-body';
@@ -15,12 +15,14 @@ import {
   type Json,
   type OwnerRef,
 } from '../storage/types';
+import { type AuthorizationTimingState, authorizationTimingSnapshot } from './authorization-timing';
 import type { ModelResponse } from './index';
 import type { ExecutionResources } from './resources';
 
 /** One internal Model call. Its owning operation supplies the sealed purpose and persistence. */
 export async function runInternalModelCall(options: {
   purpose: 'authorization_check' | 'session_title';
+  reviewPurpose?: 'shell_risk';
   store: Store;
   resources: ExecutionResources;
   owner: OwnerRef;
@@ -30,6 +32,7 @@ export async function runInternalModelCall(options: {
   request: ModelRequest;
   input: Json;
   modelMetadata: Json;
+  timing?: AuthorizationTimingState;
   controlReads?: readonly PermissionControlRead[];
   signal: AbortSignal;
   checkpoint(): Promise<void>;
@@ -53,6 +56,8 @@ export async function runInternalModelCall(options: {
   let release: (() => void) | undefined;
   let output: ModelOutputWriter | undefined;
   let dispatched = false;
+  const timing = () =>
+    options.timing ? { ...authorizationTimingSnapshot(options.timing) } : undefined;
   const preview = () => content.slice(0, 4096);
   const partial = async (modelOutput?: ModelOutputReference) => {
     await persist({
@@ -60,6 +65,7 @@ export async function runInternalModelCall(options: {
       content: modelOutput ? preview() : content,
       reasoning: modelOutput ? '' : reasoning,
       ...(firstOutput ? { firstOutput } : {}),
+      usage,
       ...(modelOutput ? { modelOutput } : {}),
     });
   };
@@ -76,11 +82,13 @@ export async function runInternalModelCall(options: {
       if (!options.authorize) throw new AgentError('internal_model_permission_unavailable');
       await options.authorize();
     }
+    if (options.timing) options.timing.queueStartedAt = Date.now();
     release = await options.resources.acquire(
       { slot: 'model' },
       { sessionId: execution.sessionId, workspaceId: options.workspaceId },
       signal,
     );
+    if (options.timing) options.timing.queueFinishedAt = Date.now();
     signal.throwIfAborted();
     await options.checkpoint();
     if (permissionCheck)
@@ -120,11 +128,15 @@ export async function runInternalModelCall(options: {
     let savedAt = Date.now();
     const providerRequest = structuredClone(options.request);
     signal.throwIfAborted();
+    if (options.timing) options.timing.providerStartedAt = Date.now();
     for await (const event of options.model.stream(providerRequest, { signal })) {
       if (finished) throw new AgentError('model_event_after_finish');
       if (event.type === 'usage') usage = structuredClone({ ...event.usage });
       signal.throwIfAborted();
-      if (event.type === 'usage') continue;
+      if (event.type === 'usage') {
+        await partial(output?.descriptor() ?? undefined);
+        continue;
+      }
       if (event.type === 'text_delta') {
         if (event.text.length) firstOutput ??= 'content';
         content += event.text;
@@ -142,7 +154,9 @@ export async function runInternalModelCall(options: {
         if (event.reason !== 'stop')
           throw new AgentError(
             permissionCheck
-              ? 'authorization_check_output_invalid'
+              ? event.reason === 'length'
+                ? 'authorization_check_output_limit'
+                : 'authorization_check_output_invalid'
               : 'internal_model_output_invalid',
           );
         finished = true;
@@ -166,14 +180,17 @@ export async function runInternalModelCall(options: {
     }
     if (!finished) throw new AgentError('model_response_incomplete');
     signal.throwIfAborted();
-    let answer: ReturnType<typeof authorizationCheckAnswer> = null;
+    let assessment: ReturnType<typeof authorizationCheckAnswerForContract> = null;
     if (permissionCheck) {
       try {
-        answer = authorizationCheckAnswer(JSON.parse(content));
+        assessment = authorizationCheckAnswerForContract(
+          JSON.parse(content),
+          options.reviewPurpose,
+        );
       } catch {
         /* Invalid text cannot authorize or become a request for human approval. */
       }
-      if (!answer)
+      if (!assessment)
         throw new AgentError(
           content.trim()
             ? 'authorization_check_output_invalid'
@@ -189,7 +206,8 @@ export async function runInternalModelCall(options: {
         modelExecutionId: execution.id,
         modelOutputDigest: await semanticDigest(descriptor as unknown as Json),
         contentHash: await semanticDigestBytes(Buffer.from(content), signal),
-        answer: answer!,
+        answer: assessment!.answer,
+        ...(assessment?.risk ? { reviewPurpose: 'shell_risk', risk: assessment.risk } : {}),
       };
       await options.publishReceipt!(receipt, signal);
     }
@@ -205,6 +223,14 @@ export async function runInternalModelCall(options: {
         toolCalls: [],
         usage,
         finishReason: 'stop',
+        ...(assessment?.risk
+          ? {
+              reviewPurpose: 'shell_risk',
+              risk: assessment.risk,
+              decision: assessment.answer.decision,
+            }
+          : {}),
+        ...(timing() ? { timing: timing()! } : {}),
         ...(body ? { modelInputBodyHash: body.reference.hash } : {}),
         ...(descriptor ? { modelOutput: descriptor as unknown as Json } : {}),
         ...(receipt ? { authorizationCheckOutput: receipt as unknown as Json } : {}),
@@ -219,12 +245,24 @@ export async function runInternalModelCall(options: {
       finishReason: 'stop',
     };
   } catch (error) {
+    const timedOut =
+      signal.reason instanceof AgentError && signal.reason.code === 'authorization_check_timeout';
     const settled = await finish({
       ...base,
-      status: signal.aborted ? 'cancelled' : 'failed',
+      status: timedOut ? 'failed' : signal.aborted ? 'cancelled' : 'failed',
       result: {
-        code: error instanceof AgentError ? error.code : 'model_failed',
+        code: timedOut
+          ? 'authorization_check_timeout'
+          : error instanceof AgentError
+            ? error.code
+            : ModelAttemptError.isInstance(error)
+              ? error.message
+              : 'model_failed',
         incomplete: true,
+        ...(timedOut && options.timing
+          ? { deadlineAt: options.timing.startedAt + options.timing.budgetMs }
+          : {}),
+        ...(timing() ? { timing: timing()! } : {}),
         content: output ? preview() : content.slice(0, 64 * 1024),
         reasoning: output ? '' : reasoning.slice(0, 64 * 1024),
         usage,

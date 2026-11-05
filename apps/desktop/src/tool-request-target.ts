@@ -95,7 +95,7 @@ export function nativeToolRequestTarget(
       return text('url');
     case 'shell.execute':
     case 'shell.launch':
-      return text('command');
+      return text('description')?.replace(/\s+/gu, ' ').trim() || text('command');
     case 'shell.read':
     case 'shell.wait':
     case 'shell.stop':

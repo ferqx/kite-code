@@ -86,6 +86,8 @@ export function readBackgroundExecutions(
       e.parent_execution_id,e.predecessor_execution_id,e.child_session_id,e.root_session_id,e.cancel_with_parent,e.step_id,e.call_id,e.attempt,e.adapter_id,e.definition_version,e.state,
       e.owner_generation,e.cancel_requested,e.cancel_requested_at,e.result_revision,e.delivery,e.delivery_reason,e.delivery_target_session_id,e.context_selection_id,json_extract(e.reference_json,'$.runId') AS reference_run_id,
       origin_tool.id AS source_tool_id,origin_tool.adapter_id AS source_tool_definition_id,origin_tool.definition_version AS source_tool_definition_version,
+      CASE WHEN origin_tool.adapter_id='shell.execute' AND origin_tool.definition_version='1'
+        AND json_type(origin_tool.intent_json,'$.background')='true' THEN 1 END AS source_tool_background,
       CAST(e.rowid AS TEXT) AS directory_seq FROM execution e
       JOIN eligible s ON s.id=e.session_id JOIN command source ON source.id=e.origin_command_id AND source.session_id=e.session_id
       LEFT JOIN execution origin_tool ON origin_tool.id=e.parent_execution_id AND origin_tool.kind='tool'
@@ -289,6 +291,7 @@ export function readBackgroundExecutions(
                 id: String(row.source_tool_id),
                 definitionId: String(row.source_tool_definition_id),
                 definitionVersion: String(row.source_tool_definition_version),
+                ...(String(row.source_tool_background) === '1' ? { background: true } : {}),
               },
             }
           : {}),

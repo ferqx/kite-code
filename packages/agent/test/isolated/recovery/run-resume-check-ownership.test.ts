@@ -37,6 +37,32 @@ async function seed(root: string, failed: boolean) {
     reason: 'stop' as const,
     usage: { inputTokens: 1, outputTokens: 1 },
   };
+  const ready = () => {
+    writeFileSync(join(root, 'ready.tmp'), expectedStoreId);
+    renameSync(join(root, 'ready.tmp'), join(root, 'ready'));
+  };
+  if (failed) {
+    const readCheck = store.getAuthorizationCheck.bind(store);
+    store.getAuthorizationCheck = async (input) => {
+      const result = await readCheck(input);
+      if (result.decision === 'unavailable') {
+        const check = await store.getExecution(result.checkExecutionId);
+        const target = await store.getExecution(input.targetExecutionId);
+        if (
+          check?.status !== 'failed' ||
+          check.parentExecutionId !== target?.id ||
+          target?.status !== 'planned' ||
+          target.authorization?.dispatched !== false
+        )
+          throw Error('failed_check_boundary_not_settled');
+        // Observe the genuine persisted failure before the business gate consumes it.
+        // No artificial human card or effect is created for this technical failure.
+        ready();
+        await new Promise<void>(() => {});
+      }
+      return result;
+    };
+  }
   const runtime = createRuntime({
     store,
     artifacts: createArtifactStore({ profile, store }),
@@ -120,6 +146,7 @@ async function seed(root: string, failed: boolean) {
     commandId: 'work',
     request: { kind: 'run.start', content: 'One exact effect' },
   });
+  if (failed) await new Promise<void>(() => {});
   const end = Date.now() + 5000;
   while (
     !(await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' }))
@@ -128,8 +155,7 @@ async function seed(root: string, failed: boolean) {
     if (Date.now() > end) throw Error('check_fixture_timeout');
     await Bun.sleep(5);
   }
-  writeFileSync(join(root, 'ready.tmp'), expectedStoreId);
-  renameSync(join(root, 'ready.tmp'), join(root, 'ready'));
+  ready();
   await new Promise<void>(() => {});
 }
 
@@ -315,18 +341,26 @@ for (const failed of [false, true])
       );
       expect(f.lease.generation).not.toBe(String(f.target.owner_generation));
       expect((await f.proof()).decision).toBe(failed ? 'unavailable' : 'ask_user');
-      const card = (
+      const cards = (
         await f.store.listInteractions({
           expectedStoreId: f.expectedStoreId,
           sessionId: 's',
           state: 'pending',
         })
-      ).interactions[0]!;
-      expect(card.state).toBe('pending');
-      expect((await f.store.getExecution(f.target.id))!.authorization).toMatchObject({
+      ).interactions;
+      const authorization = (await f.store.getExecution(f.target.id))!.authorization;
+      expect(authorization).toMatchObject({
         dispatched: false,
-        human: { accepted: false },
+        check: { decision: failed ? 'unavailable' : 'ask_user' },
       });
+      if (failed) {
+        expect(cards).toEqual([]);
+        expect(authorization?.human).toBeUndefined();
+      } else {
+        expect(cards).toHaveLength(1);
+        expect(cards[0]!.state).toBe('pending');
+        expect(authorization?.human).toMatchObject({ accepted: false });
+      }
     } finally {
       await f.close();
     }

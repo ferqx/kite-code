@@ -47,6 +47,7 @@ export function createProjectSources(
         const plans: { request: SourceRequest; root: string; directories: string[] }[] = [];
         const roots = new Map<string, string>();
         const targetDirectories = new Map<string, string>();
+        const plannedDirectories = new Set<string>();
         for (const request of requests) {
           let root = roots.get(request.workspaceId);
           if (!root) {
@@ -96,7 +97,15 @@ export function createProjectSources(
               relative(root, a).split(sep).filter(Boolean).length -
                 relative(root, b).split(sep).filter(Boolean).length || (a < b ? -1 : a > b ? 1 : 0),
           );
-          plans.push({ request, root, directories: ordered });
+          // Preserve every request's trusted target validation above, but emit a
+          // workspace/directory's sources only once in their original first-use order.
+          const unique = ordered.filter((directory) => {
+            const key = `${request.workspaceId}\0${root}\0${directory}`;
+            if (plannedDirectories.has(key)) return false;
+            plannedDirectories.add(key);
+            return true;
+          });
+          if (unique.length) plans.push({ request, root, directories: unique });
         }
         // This byte snapshot belongs only to this checkpoint. Each original request
         // still validates its complete trusted target chain and original file identity.

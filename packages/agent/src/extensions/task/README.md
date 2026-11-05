@@ -19,7 +19,9 @@
 
 角色来自可信宿主注册；默认通用 child，preset 只列实际开放项。默认 worker/code 可执行工作，explore/plan/review 只读分析。[roles.ts](roles.ts)核准确 extension owner、ID 与版本；未知定义、同名自定义工具、未来版本和写入不能借角色名称取得资格。描述帮助选择，不替代冻结定义、父子权限和当前工具交集。
 
-三个文件检索工具已移除，只读角色可使用准确的 `shell.execute@1`／`shell.launch@1`。Service 逐次核真实参数，只允许固定 rg、ls、pwd 的单条字面检索；脚本、管道、重定向和扩大范围仍受角色权限拒绝。父 Full 不绕过子角色限制。[默认角色回归](../../../../../apps/service/test/isolated/default-task-roles.test.ts)核工具交集，[Service 检索回归](../../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核实际 Shell 查询与拒写零效果。
+委派正文须保留完成子任务所需的准确目标、字段或标识符、内容转换、一次性效果与 fallback 条件；不能用“按用户要求”代替子模型未收到的正文。父级按原任务比对实际关键交付，已有原文和回执直接比较，只有影响结论的缺口才补读取。成功读到文件、child 正常结束或自报完成不等于内容满足要求；审批事实只在决定允许分支时核对，不为收尾机械追加历史读取或报告。
+
+三个文件检索工具已移除，分析角色通过准确的 `shell.execute@1`／`shell.launch@1` 查询。只读要求作为可信任务指导进入 explore／plan／review 的模型输入，并随原配置快照冻结；工具集合继续收窄，Shell 则继承父会话当前权限策略和沙箱。`cat`、复合命令和管道不因角色身份被固定命令表拒绝，仍按实际内容走普通权限链。只读角色不提供独立的 Shell 禁写／禁网保证，Full 下只读属于模型须遵循的任务约束。[默认角色回归](../../../../../apps/service/test/isolated/default-task-roles.test.ts)核工具交集，[指导输入回归](../../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核实际子模型输入，[Service 检索回归](../../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核继承的三模式执行。
 
 根 ask_user 不下放；合法 Planning 工具由 Service 核原父冻结身份和当前注册后装配，显式禁用仍拒绝。child 有自己的会话文件上下文，不从父路径字符串继承可写目录或计划授权。实际效果仍核原 requirements、parent AND current permission 与准确取消边界。
 
@@ -28,6 +30,8 @@
 `applyAgentCommand` 在一个 Store 写事务内先查原 invocation 回执，再选择当前唯一 carrier，核 Store、主体、直接父子、来源和控制关系。运行中或 queued 的 follow-up 返回 `mode:steer`；queued 引导绑定原 carrier，在真正激活后进入模型。idle follow-up 通过原 ensureAgent 建唯一 successor，复用 Session 与配置。后续普通父轮次也可管理现有直接 child，技术工作出处不额外拒绝。
 
 Host 准备 queued 引导后若最终事务发现目标已结束，返回 target_changed；重新观察后的新调用才能开始新轮。首次激活前取消且可证明未派发的 child 可复用 Session；原取消事实不改写，证明由[首次激活 owner](../../storage/sqlite/child-first-activation.ts)核验。旧 queued 引导不会转给新 carrier。
+
+父级发现原范围内可纠正的具体剩余工作时，可对同一 child 明确 follow-up，传准确差异与待修部分，保留已成功效果和一次性限制，不重启整项任务。idle 普通消息仍只排队；需继续工作才明确 follow-up。本次当前工作和完整结果核验后即可正常结束；真实拒绝、未知效果和缺授权时保留实际未完成事实。此指导不新增自动续作循环、完成闸门或业务格式校验器。
 
 普通消息持久排队。活动 Run 在安全 checkpoint 接收准确邮件；idle 邮件保存 targetRunId:null，零新 Run／Model。明确 follow-up 按原 predecessor 和双水位接纳当时已确认邮件；同请求重试不扩大集合，晚确认或晚发送的邮件留队。完整正文以原 source IDs 进入模型，发送、接收和 prepared 是不同事实。
 
@@ -43,7 +47,13 @@ list_agents 按首次创建 Command 的不可变 seq 每个 Session 只列一次
 
 错误只公开有限 code/message/next_action。写命令 accepted:true/false/null 区分有证明、明确未受理和不可核实；未知不自动换身份重放。只读取消不误报回执未知。需要父／人类答复的 child 只进行一次明确有限观察，没有答复时如实交付待决结果。
 
+公开错误的 message 按准确类别说明参数、游标、目标、权限、恢复或回执问题，并把 accepted:false 的明确未受理与 accepted:null 的可能已受理分别说清；next_action 的原机器值保持，观察取消不声称整个子任务已停止。[协作表面回归](../../../test/isolated/business/task/collaboration-surface.test.ts)核真实受理边界的原因进入下一模型、一次受理尝试及私有异常不外泄。
+
+创建或明确续作前的配置准备失败不等于受理回执丢失。Host 仅在准备失败、排除取消与清理未确认，并再次核对准确身份没有已受理回执后，提供内部可信的准备失败标记；模型得到 `accepted:false`／`preparation_failed` 和有限英文原因，说明本次没有启动新工作或投递新引导，既有协作者仍可能独立运行或完成。并发同身份已受理时返回原引用／回执；回执读取失败、身份不符、清理未确认或受理后异常仍保留原未知／恢复语义，不按异常 code 猜测未受理，也不换身份重放。[准备失败回归](../../../test/isolated/business/task/preparation-failure.test.ts)核创建和续作的实际下一模型输入、并发唯一受理、持久受理后丢响应、既有子结果保真和私有异常隔离。保留的通用 `sendAgentInput` 扩展接口继续沿自己的原回执合同，不由当前六工具的错误说明推导新恢复资格。
+
 成功结果及历史可安全读取的失败结果可包含宿主从准确 Tool 回执封存的 details.evidence。失败不撤销此前成功的工具；原失败原因和状态保留，失败结果不采用半成品助手回答作为完成报告。失败历史不可读时只缺失预览，不推断零动作；取消和未知路径不增加历史读取。工具统计、来源版本和有界原文供父级核验，child 总结不能替换事实；接纳成功也不证明结论正确。完整正文和独立核查仍由原 Source、Artifact 与权限合同保障。
+
+实际冻结的内置 Shell 注册及原 Tool→Job 归属匹配时，预览另附命令、请求权限、真实 Job 状态／退出码和有限 stdout／stderr。实际执行范围仅在已有派发记录提供时呈现；请求范围不冒充实际范围，缺输出不表示零输出，截断和省略明确标记。原 Tool／Job 若保存了审核决定、人类答案接纳或策略依据，只附其有限状态／决定／依据类型，不复制风险理由、私有证明或任务授权结论；没有这些事实时省略，不能从已派发、Full 或超时继续伪造模型批准。它与文件观察共用有界预览预算，不公开进程私有信息，也不推断任务合规、服务是否监听或业务已完成。父当前 Run 可通过 [执行证据工具](../../business/execution-evidence/README.md)重新读取自己准确 carrier 的公开结果；`list_agents` 继续提供完整报告正文，不代替这些宿主证据。
 
 ## 实现与验证边界
 

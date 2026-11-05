@@ -1,4 +1,4 @@
-import type { ArtifactRef, ToolContext, ToolDefinition } from '../extensions';
+import type { ArtifactRef, ToolContext, ToolDefinition, ToolResult } from '../extensions';
 import type { Json, JsonSchema } from '../storage/types';
 import { AgentError } from '../storage/types';
 import type { FileBaseline, FileSnapshot, WorkspaceFiles } from './files';
@@ -103,10 +103,65 @@ function baseline(value: Json | undefined): FileBaseline | null {
     inode: string(input.inode),
   };
 }
+
+/** Public cause and recovery guidance only; the caller retains the original outcome and scope. */
+export function fileFailureAdvice(code: string): string | undefined {
+  const advice: Readonly<Record<string, string>> = {
+    file_input_invalid:
+      'The file request has invalid arguments. Check the declared field names, types, required fields and mutually exclusive text or Artifact inputs before a separately authorized corrected request.',
+    file_read_range_invalid:
+      'The requested line range is invalid. start_line and max_lines must be positive safe integers; omit them to use their declared defaults. Correct the range without changing the intended file.',
+    file_edit_invalid:
+      'The edit arguments are invalid. Supply a nonempty old_text, a string new_text, a positive integer expected_matches and the exact complete-file baseline, using the declared text or Artifact fields.',
+    file_edit_match_conflict:
+      'The exact old_text occurrence count does not equal expected_matches. This edit did not publish a change. Check the exact text and intended match count against an authorized current read and its complete-file baseline before a separately authorized corrected edit; do not broaden the requested replacement.',
+    file_baseline_invalid:
+      'The supplied baseline is invalid. Use the complete baseline from the exact original file read; do not invent or partially reconstruct it.',
+    ENOENT:
+      "The target file or a required parent directory does not exist. A new file with base=null can create missing parents within this tool's accepted scope; replacement and edit require an existing file. An empty directory listing does not mean the file scope is unavailable. Verify the exact target and baseline before another authorized attempt.",
+    ENOTDIR:
+      'A parent path component is a file or a link instead of a usable directory. Inspect the exact parent chain; do not repeat the same target unchanged or select a different target without task authorization.',
+    EACCES:
+      'The operating system denied access to the target or a parent directory. Tool approval does not override filesystem permissions. Resolve access within the original task and policy before another attempt.',
+    EPERM:
+      'The operating system does not permit this filesystem operation. Tool approval does not override system restrictions. Resolve the restriction before another authorized attempt.',
+    file_path_invalid:
+      'The path is invalid for this file tool. Check the exact requested path against its declared scope and path syntax, including traversal, device names and invalid components. Correct the path before another attempt within the current task and policy; this error does not grant a different target or broader scope.',
+    file_path_protected:
+      'The target or a parent directory is protected. Approval does not bypass this boundary. Do not retry through an alias or another tool; report the restriction if the authorized target cannot be used.',
+    file_symlink:
+      'The target or a parent directory is a symbolic link. This file operation does not follow links. Verify the exact real target within the current task and accepted scope; do not use an alias to bypass the boundary.',
+    file_not_regular:
+      'The target is not a regular file; it may be a directory or another unsupported object. Check the exact requested target and report the mismatch; do not silently substitute a different file.',
+    file_owner_invalid:
+      'The target or a parent failed the owner or link-count checks. Inspect its ownership and identity before another authorized attempt; approval does not bypass these checks.',
+    file_root_changed:
+      'The original bound directory identity has changed. Verify the original scope before further operations; do not retry against a replacement directory.',
+    file_dispatch_scope_changed:
+      'The accepted file authorization or target identity changed before this invocation could publish. Inspect the original receipt and current scope; an earlier approval does not authorize a changed target.',
+    file_binary:
+      'The requested data is not supported as ordinary text by this file operation. Do not invent decoded contents or silently alter the intended data.',
+    file_encoding_invalid:
+      'The requested text is not valid in the supported encoding. Check the original source or text input; do not substitute a partial or guessed decoding.',
+    file_too_large:
+      "The requested content exceeds this file tool's supported size. Preserve the intended content and report the limit; do not silently truncate it.",
+    artifact_read_unavailable:
+      'The Artifact reader required by this file request is unavailable. No replacement text was obtained; do not invent its contents or replace the original Artifact reference.',
+    file_io_failed:
+      'A filesystem operation failed. Inspect the exact target, parent directories and original receipt before another authorized attempt; repeating the same input without resolving the cause will not repair it.',
+    file_publish_outcome_unknown:
+      'A file or parent-directory operation could not be confirmed. Do not repeat the write. Inspect the original execution and filesystem outcome before any further mutation.',
+  };
+  return advice[code];
+}
 /** Ordinary Tools: permission, source freshness and execution receipts remain core responsibilities. */
 export function createFileTools(
   files: WorkspaceFiles,
-  options: { capture?: FileMutationCapture; snapshot?: boolean } = {},
+  options: {
+    capture?: FileMutationCapture;
+    snapshot?: boolean;
+    missingRead?: 'observation' | 'error';
+  } = {},
 ): readonly ToolDefinition[] {
   const capture = options.capture;
   async function mutation(
@@ -243,7 +298,7 @@ export function createFileTools(
   const descriptions: Record<string, string> = {
     read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue by passing returned next_line as start_line (raw JSON fallback: selection.nextOffset). The returned baseline describes the complete file and is required for later modifications.',
     write:
-      'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; missing workspace parent directories are created through the same protected no-follow boundary. Replacing a file requires its exact complete-file baseline and existing parents. Supply exactly one of content or content_artifact. If a call fails, correct the reported cause before another attempt; repeating the same path and input does not fix it. A failure may leave newly created empty parent directories. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
+      'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; missing parent directories within the accepted file scope are created through the same protected no-follow boundary. Replacing a file requires its exact complete-file baseline and existing parents. Supply exactly one of content or content_artifact. If a call fails, correct the reported cause before another authorized attempt; repeating the same path and input does not fix it. Only a call that attempts parent-directory creation may leave new empty directories. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
     edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
   };
   return definitions.map((d) => ({
@@ -289,12 +344,25 @@ export function createFileTools(
         return { outcome: 'cancelled', content: 'cancelled_before_file_io' };
       try {
         const parameters = object(input);
-        const value = await d.call(
+        const selected =
           parameters.path === undefined
             ? parameters
-            : { ...parameters, path: files.relativePath(string(parameters.path)) },
-          context,
-        );
+            : { ...parameters, path: files.relativePath(string(parameters.path)) };
+        let value: unknown;
+        try {
+          value = await d.call(selected, context);
+        } catch (error) {
+          if (
+            d.name === 'read' &&
+            options.missingRead !== 'error' &&
+            error instanceof AgentError &&
+            error.code === 'ENOENT'
+          ) {
+            context.signal.throwIfAborted();
+            return createMissingFileReadResult(string(parameters.path));
+          }
+          throw error;
+        }
         if (d.name === 'read') context.signal.throwIfAborted();
         if (d.name === 'read') return await createFileReadResult(value as FileSnapshot, context);
         const mutationResult =
@@ -390,33 +458,7 @@ export function createFileTools(
           (d.name === 'write' || d.name === 'edit') && error instanceof AgentError
             ? error.code
             : undefined;
-        const mutationAdvice: Record<string, string> = {
-          ENOENT:
-            'The target file or a required parent directory does not exist. New workspace files with base=null create missing parents; replacement and edit require an existing file. An empty directory listing does not mean the workspace is unavailable. Verify the exact target and baseline before another attempt.',
-          ENOTDIR:
-            'A parent path component is a file or a link instead of a usable directory. Inspect the parent chain and choose an existing real directory; do not repeat the same target unchanged.',
-          EACCES:
-            'The operating system denied access to the target or a parent directory. Tool approval does not override filesystem permissions. Resolve access or choose an authorized writable location before another attempt.',
-          EPERM:
-            'The operating system does not permit this filesystem operation. Tool approval does not override system restrictions. Resolve the restriction before another attempt.',
-          file_path_invalid:
-            'The path is invalid or outside the fixed workspace. Use a workspace-relative path or an absolute path inside it without traversal, device names or invalid components. Correct the path before another attempt.',
-          file_path_protected:
-            'The target or a parent directory is protected. Approval does not bypass this boundary. Choose an allowed target within the user request; do not retry through an alias or another tool.',
-          file_symlink:
-            'The target or a parent directory is a symbolic link. File writes do not follow links. Select a real path inside the authorized workspace; do not retry through an alias.',
-          file_not_regular:
-            'The target is not a regular file; it may be a directory or a link. Inspect the exact target and choose a regular file or an unused filename before another attempt.',
-          file_owner_invalid:
-            'The target or a parent failed the owner or link-count checks. Inspect its ownership and identity before another attempt; approval does not bypass these checks.',
-          file_root_changed:
-            'The original workspace directory identity has changed. Reopen and verify the workspace before another attempt; do not retry against the replacement directory.',
-          file_io_failed:
-            'A filesystem operation failed. Inspect the target and parent directories before another attempt; repeating the same input without resolving the cause will not repair it.',
-          file_publish_outcome_unknown:
-            'A file or parent-directory operation could not be confirmed. Do not repeat the write. Inspect the original execution and filesystem outcome before any further mutation.',
-        };
-        const mutationNext = mutationCode ? mutationAdvice[mutationCode] : undefined;
+        const mutationNext = mutationCode ? fileFailureAdvice(mutationCode) : undefined;
         const failedPath =
           input &&
           typeof input === 'object' &&
@@ -424,10 +466,6 @@ export function createFileTools(
           typeof input.path === 'string'
             ? input.path
             : undefined;
-        const parentNotice =
-          d.name === 'write'
-            ? ' Newly created empty parent directories may remain after a failed write; they are not automatically removed.'
-            : '';
         return {
           outcome:
             error instanceof AgentError && error.code === 'file_publish_outcome_unknown'
@@ -437,9 +475,9 @@ export function createFileTools(
                 : 'failed',
           content: baselineConflict
             ? 'file_baseline_conflict: This invocation did not publish its requested change because its supplied baseline or create-only precondition was rejected. The baseline describes the complete file identity and version; this conflict does not prove that another edit targeted the same text. Compare each invocation using its own requested change and receipt. Earlier read content is historical; this failure does not report the current file content. Other successful operations are not rolled back. Do not infer that the file still has its earlier values. Before any separately authorized new edit, read the current file and use its fresh complete-file baseline.' +
-              parentNotice
+              (error instanceof Error && error.message !== mutationCode ? ` ${error.message}` : '')
             : mutationNext
-              ? `${mutationCode}${failedPath === undefined ? '' : ` (${JSON.stringify(failedPath)})`}: ${error instanceof Error && error.message !== mutationCode ? `${error.message} ` : ''}${mutationNext}${parentNotice}`
+              ? `${mutationCode}${failedPath === undefined ? '' : ` (${JSON.stringify(failedPath)})`}: ${error instanceof Error && error.message !== mutationCode ? `${error.message} ` : ''}${mutationNext}`
               : error instanceof Error
                 ? error.message
                 : String(error),
@@ -452,6 +490,15 @@ export function createFileTools(
       }
     },
   }));
+}
+
+/** A known missing ordinary target is an observation, never an empty file or an edit baseline. */
+export function createMissingFileReadResult(path: string): ToolResult {
+  return {
+    outcome: 'succeeded',
+    content: `File does not exist: ${JSON.stringify(path)}.`,
+    details: { path, exists: false },
+  };
 }
 
 /** Shared delivery for workspace snapshots and external read-only text (which has no baseline). */

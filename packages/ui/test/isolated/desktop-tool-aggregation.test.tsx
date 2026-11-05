@@ -492,6 +492,7 @@ test('Shell cards retain the original command and output while the header stays 
   const original: Message = {
     ...tool('shell-card', 'running'),
     toolName: 'shell_execute',
+    target: '运行旅程校验',
     shell: {
       operation: 'execute',
       command,
@@ -504,6 +505,7 @@ test('Shell cards retain the original command and output while the header stays 
     await render([original]);
     await click(summary(host));
     const button = host.querySelector('.shell-activity .tool-activity-summary')!;
+    expect(button.textContent).toContain('运行旅程校验');
     expect(button.querySelector('.tool-activity-title')?.textContent).toBe('运行中');
     expect(button.querySelector('.tool-command')?.textContent).not.toContain('\n');
     expect(button.querySelector('.tool-command')?.textContent?.length).toBeLessThanOrEqual(513);

@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink';
 import stringWidth from 'string-width';
-import { useInkTheme } from '../presentation';
+import { useInkI18n, useInkTheme } from '../presentation';
 import { activityDot } from './activity-dot';
 import { actionName, formatElapsed, formatReadFileRange, toolColor } from './render-utils';
 import type { OutputBlock, SubAgentRole, SubAgentStepRecord } from './types';
@@ -97,7 +97,12 @@ function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?:
 }
 
 /** One-line representation of a child tool invocation shared by compact and expanded cards. */
-export function subagentStepLabel(step: SubAgentStepRecord): string {
+export function subagentStepLabel(
+  step: SubAgentStepRecord,
+  missingLabel = 'File does not exist',
+): string {
+  if (step.fileMissing && step.status === 'success')
+    return `${missingLabel} ${typeof step.toolArgs.path === 'string' ? step.toolArgs.path : ''}`.trim();
   const argsLabel =
     step.toolArgs && Object.keys(step.toolArgs).length > 0
       ? toolArgsLabel(step.toolName, step.toolArgs, step.totalLines)
@@ -138,6 +143,7 @@ export default function SubAgentBlock({
   maxVisibleSteps = MAX_RUNNING_STEPS,
 }: SubAgentBlockProps) {
   const dt = useInkTheme();
+  const { t: translate } = useInkI18n();
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);
   const col = columns ?? process.stdout.columns ?? 80;
@@ -248,7 +254,7 @@ export default function SubAgentBlock({
         // 颜色由 step.status 唯一决定，不依赖布尔值排列组合推断
         const lineColor =
           step.status === 'error' ? dt.error : step.status === 'rejected' ? dt.warning : dt.dim;
-        const line = `├─ ${subagentStepLabel(step)}`;
+        const line = `├─ ${subagentStepLabel(step, translate('tool.fileMissing'))}`;
         return (
           <Box key={step.stepId} paddingLeft={3}>
             <Text color={lineColor}>{truncateToFit(line, Math.max(0, col - 3))}</Text>

@@ -1,9 +1,9 @@
-import { open, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { lstat, open, realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { AuthorizationRequest, ToolDefinition, ToolResult } from '../extensions';
 import type { CapabilityDescription } from '../permissions';
 import { AgentError, type Json } from '../storage/types';
-import { createFileReadResult } from './files-tools';
+import { createFileReadResult, createMissingFileReadResult } from './files-tools';
 
 const normalized = (path: string) => (process.platform === 'win32' ? path.toLowerCase() : path);
 function within(path: string, root: string) {
@@ -14,6 +14,25 @@ function codeOf(error: unknown) {
   return error instanceof Error && 'code' in error && typeof error.code === 'string'
     ? error.code
     : 'file_read_failed';
+}
+
+/** Resolve missing suffixes through existing ancestors before checking protected scopes.
+ * A dangling link is not proof that the requested ordinary target is absent.
+ */
+async function resolvedTarget(path: string): Promise<{ actual: string; exists: boolean }> {
+  try {
+    return { actual: await realpath(path), exists: true };
+  } catch (error) {
+    if (codeOf(error) !== 'ENOENT' || dirname(path) === path) throw error;
+    try {
+      await lstat(path);
+    } catch (inspectionError) {
+      if (codeOf(inspectionError) !== 'ENOENT') throw inspectionError;
+      const parent = await resolvedTarget(dirname(path));
+      return { actual: resolve(parent.actual, basename(path)), exists: false };
+    }
+    throw new AgentError('file_changed');
+  }
 }
 
 /** Ordinary external reads share the existing permission policy and result delivery.
@@ -42,18 +61,15 @@ export function withExternalFileReads(options: {
     if (path.includes('\0')) throw new AgentError('file_path_invalid');
     const workspace = await options.workspaceRoot(request);
     if (within(path, workspace)) return null;
-    const actual = await realpath(path);
+    const selected = await resolvedTarget(path);
     for (const root of options.protectedRoots()) {
       const protectedRoot = resolve(root);
-      const actualRoot = await realpath(protectedRoot).catch((error) => {
-        if (codeOf(error) === 'ENOENT') return protectedRoot;
-        throw error;
-      });
-      if (within(path, protectedRoot) || within(actual, actualRoot))
+      const actualRoot = (await resolvedTarget(protectedRoot)).actual;
+      if (within(path, protectedRoot) || within(selected.actual, actualRoot))
         throw new AgentError('file_path_protected');
     }
     request.signal.throwIfAborted();
-    return { path, actual };
+    return { path, ...selected };
   }
   return {
     tools: options.tools.map(
@@ -91,6 +107,10 @@ export function withExternalFileReads(options: {
                     Number(limit) < 1
                   )
                     throw new AgentError('file_input_invalid');
+                  if (!selected.exists) {
+                    context.signal.throwIfAborted();
+                    return createMissingFileReadResult(selected.path);
+                  }
                   const file = await open(selected.actual, 'r');
                   let bytes: Buffer;
                   try {

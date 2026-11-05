@@ -25,6 +25,13 @@ export {
 } from './network';
 export const webFetchExtensionId = 'builtin.web';
 const defaultTimeoutMs = 60_000;
+class WebHttpError extends WebFetchError {
+  readonly status: number;
+  constructor(status: number) {
+    super('web_http_failed');
+    this.status = status;
+  }
+}
 async function sha256(value: string) {
   return Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))),
@@ -210,8 +217,20 @@ function createWebFetchDefinition(
           let initial: URL;
           try {
             initial = webUrl(input.url);
-          } catch {
-            return { outcome: 'failed', content: 'web_url_denied' };
+          } catch (error) {
+            if (
+              !(error instanceof WebFetchError) ||
+              !['web_url_invalid', 'web_url_denied'].includes(error.code)
+            )
+              throw error;
+            return {
+              outcome: 'failed',
+              content:
+                error.code === 'web_url_invalid'
+                  ? 'The requested URL has invalid syntax. Correct the URL within the authorized task. No network request was made by this attempt.'
+                  : 'The requested address is not permitted for this web tool. No network request was made by this attempt. Respect the address restriction; do not bypass it using another tool or path.',
+              details: { code: error.code },
+            };
           }
           const execution = await context.getExecution(context.executionId);
           if (!execution?.originStoreId)
@@ -280,7 +299,7 @@ function createWebFetchDefinition(
                   continue;
                 }
                 if (response.status < 200 || response.status >= 300)
-                  throw new WebFetchError('web_http_failed');
+                  throw new WebHttpError(response.status);
                 return {
                   url,
                   contentType: response.contentType,
@@ -379,6 +398,12 @@ function createWebFetchDefinition(
             if (context.signal.aborted) return { outcome: 'cancelled', content: 'web_cancelled' };
             const known =
               deadline.signal.reason instanceof WebFetchError ? deadline.signal.reason : error;
+            if (known instanceof WebHttpError)
+              return {
+                outcome: 'failed',
+                content: `The web request received HTTP ${known.status}. No successful page content was returned. This response does not grant permission to retry or change the target.`,
+                details: { code: known.code, httpStatus: known.status },
+              };
             if (known instanceof WebFetchError) return { outcome: 'failed', content: known.code };
             throw error;
           } finally {

@@ -153,7 +153,7 @@ for (const mode of ['paired', 'shared'] as const)
         const driverSource = join(f.root, 'artifact/recovery-driver.ts');
         writeFileSync(
           driverSource,
-          `import {appendFileSync} from 'node:fs';import {runCLIProcess} from ${JSON.stringify(fileURLToPath(new URL('../../host/main.ts', import.meta.url)))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});process.exitCode=await runCLIProcess({profile:'owned',argv:process.argv.slice(2),resolveArtifact:()=>(${JSON.stringify(f.artifact)})});`,
+          `import {appendFileSync} from 'node:fs';import {runCLIProcess} from ${JSON.stringify(fileURLToPath(new URL('../../host/main.ts', import.meta.url)))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const response=await actual(...args);appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null,status:response.status})+'\\n');return response;},{preconnect:actual.preconnect});process.exitCode=await runCLIProcess({profile:'owned',argv:process.argv.slice(2),resolveArtifact:()=>(${JSON.stringify(f.artifact)})});`,
         );
         const daemonSource = join(f.root, 'artifact/daemon-control.ts');
         writeFileSync(
@@ -184,7 +184,7 @@ for (const mode of ['paired', 'shared'] as const)
           }),
         );
         writeFileSync(join(web, 'manifest.json'), raw);
-        const daemonEntry = join(f.root, 'artifact/node_modules/@kite-ai/service/daemon-main.js');
+        const daemonEntry = f.daemonEntrypoint;
         const originalRow = f.rows("SELECT config_json FROM run WHERE origin_command_id='work'")[0];
         if (
           !originalRow ||
@@ -194,9 +194,18 @@ for (const mode of ['paired', 'shared'] as const)
         )
           throw Error('recovery_run_configuration_unavailable');
         const original = JSON.parse(originalRow.config_json);
-        const protectedEntries = original.snapshot.pathFiles.boundary.protectedRoots as string[];
-        expect(protectedEntries).toContain(f.artifact.entrypoint);
-        expect(protectedEntries).toContain(daemonEntry);
+        // Recovery binds the sealed reviewer and selected capabilities; current
+        // Files protection is checked by its owner rather than a pathFiles snapshot.
+        expect(original.snapshot.authorizationCheck).toEqual({
+          id: 'fixture.recovery.task-review',
+          version: '1',
+          modelId: 'fixed',
+        });
+        expect(original.tools).toContainEqual({
+          extensionId: 'builtin.files',
+          id: 'files.write',
+          version: '3',
+        });
 
         let daemonManager: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
         let daemonErrors: Promise<string> | undefined;
@@ -391,6 +400,13 @@ for (const mode of ['paired', 'shared'] as const)
                 row.body?.kind === (operation === 'run' ? 'run.resume' : 'session.recover'),
             ),
           ).toHaveLength(1);
+          expect(
+            requests
+              .filter(
+                (row) => row.method === 'POST' && row.body?.commandId === intent.request.commandId,
+              )
+              .map((row) => row.status),
+          ).toEqual([202]);
           expect(
             requests.filter(
               (row) =>

@@ -5562,6 +5562,95 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "targetExecutionId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,128}$"
+              },
+              "policyEvidenceId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,128}$"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["reused_approval", "parent_review", "timeout_continue"]
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["check", "policy"]
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                  },
+                  "targetExecutionId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                  }
+                },
+                "required": ["kind", "id"],
+                "additionalProperties": false
+              },
+              "requestedScope": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "filesystem": {
+                        "type": "string",
+                        "enum": ["workspace_write", "full_access"]
+                      },
+                      "network": {
+                        "type": "string",
+                        "enum": ["none", "internet"]
+                      }
+                    },
+                    "required": ["filesystem", "network"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "effectiveScope": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "filesystem": {
+                        "type": "string",
+                        "enum": ["workspace_write", "full_access"]
+                      },
+                      "network": {
+                        "type": "string",
+                        "enum": ["none", "internet"]
+                      }
+                    },
+                    "required": ["filesystem", "network"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "targetExecutionId",
+              "policyEvidenceId",
+              "reason",
+              "source",
+              "requestedScope",
+              "effectiveScope"
+            ],
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -5697,6 +5786,95 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 9007199254740991
+              },
+              "policy": {
+                "type": "object",
+                "properties": {
+                  "targetExecutionId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                  },
+                  "policyEvidenceId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": ["reused_approval", "parent_review", "timeout_continue"]
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["check", "policy"]
+                      },
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                      },
+                      "targetExecutionId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                      }
+                    },
+                    "required": ["kind", "id"],
+                    "additionalProperties": false
+                  },
+                  "requestedScope": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "filesystem": {
+                            "type": "string",
+                            "enum": ["workspace_write", "full_access"]
+                          },
+                          "network": {
+                            "type": "string",
+                            "enum": ["none", "internet"]
+                          }
+                        },
+                        "required": ["filesystem", "network"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "effectiveScope": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "filesystem": {
+                            "type": "string",
+                            "enum": ["workspace_write", "full_access"]
+                          },
+                          "network": {
+                            "type": "string",
+                            "enum": ["none", "internet"]
+                          }
+                        },
+                        "required": ["filesystem", "network"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "targetExecutionId",
+                  "policyEvidenceId",
+                  "reason",
+                  "source",
+                  "requestedScope",
+                  "effectiveScope"
+                ],
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -5900,6 +6078,95 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 9007199254740991
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "targetExecutionId": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                        },
+                        "policyEvidenceId": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": ["reused_approval", "parent_review", "timeout_continue"]
+                        },
+                        "source": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["check", "policy"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                            },
+                            "targetExecutionId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+                            }
+                          },
+                          "required": ["kind", "id"],
+                          "additionalProperties": false
+                        },
+                        "requestedScope": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "filesystem": {
+                                  "type": "string",
+                                  "enum": ["workspace_write", "full_access"]
+                                },
+                                "network": {
+                                  "type": "string",
+                                  "enum": ["none", "internet"]
+                                }
+                              },
+                              "required": ["filesystem", "network"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "effectiveScope": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "filesystem": {
+                                  "type": "string",
+                                  "enum": ["workspace_write", "full_access"]
+                                },
+                                "network": {
+                                  "type": "string",
+                                  "enum": ["none", "internet"]
+                                }
+                              },
+                              "required": ["filesystem", "network"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "targetExecutionId",
+                        "policyEvidenceId",
+                        "reason",
+                        "source",
+                        "requestedScope",
+                        "effectiveScope"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -15363,6 +15630,65 @@
               "dispatched": {
                 "type": "boolean"
               },
+              "policy": {
+                "type": "object",
+                "properties": {
+                  "evidenceId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": ["reused_approval", "parent_review", "timeout_continue"]
+                  },
+                  "sourceExecutionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "checkExecutionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "requestedScope": {
+                    "type": "object",
+                    "properties": {
+                      "filesystem": {
+                        "type": "string",
+                        "enum": ["workspace_write", "full_access"]
+                      },
+                      "network": {
+                        "type": "string",
+                        "enum": ["none", "internet"]
+                      }
+                    },
+                    "required": ["filesystem", "network"],
+                    "additionalProperties": false
+                  },
+                  "effectiveScope": {
+                    "type": "object",
+                    "properties": {
+                      "filesystem": {
+                        "type": "string",
+                        "enum": ["workspace_write", "full_access"]
+                      },
+                      "network": {
+                        "type": "string",
+                        "enum": ["none", "internet"]
+                      }
+                    },
+                    "required": ["filesystem", "network"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["evidenceId", "reason"],
+                "additionalProperties": false
+              },
               "check": {
                 "type": "object",
                 "properties": {
@@ -17363,6 +17689,9 @@
               },
               "definitionVersion": {
                 "type": "string"
+              },
+              "background": {
+                "type": "boolean"
               }
             },
             "required": ["id", "definitionId", "definitionVersion"],
@@ -18204,6 +18533,9 @@
                     },
                     "definitionVersion": {
                       "type": "string"
+                    },
+                    "background": {
+                      "type": "boolean"
                     }
                   },
                   "required": ["id", "definitionId", "definitionVersion"],
@@ -19970,6 +20302,65 @@
                   "properties": {
                     "dispatched": {
                       "type": "boolean"
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "evidenceId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": ["reused_approval", "parent_review", "timeout_continue"]
+                        },
+                        "sourceExecutionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "checkExecutionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "requestedScope": {
+                          "type": "object",
+                          "properties": {
+                            "filesystem": {
+                              "type": "string",
+                              "enum": ["workspace_write", "full_access"]
+                            },
+                            "network": {
+                              "type": "string",
+                              "enum": ["none", "internet"]
+                            }
+                          },
+                          "required": ["filesystem", "network"],
+                          "additionalProperties": false
+                        },
+                        "effectiveScope": {
+                          "type": "object",
+                          "properties": {
+                            "filesystem": {
+                              "type": "string",
+                              "enum": ["workspace_write", "full_access"]
+                            },
+                            "network": {
+                              "type": "string",
+                              "enum": ["none", "internet"]
+                            }
+                          },
+                          "required": ["filesystem", "network"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["evidenceId", "reason"],
+                      "additionalProperties": false
                     },
                     "check": {
                       "type": "object",
@@ -24332,6 +24723,65 @@
                   "properties": {
                     "dispatched": {
                       "type": "boolean"
+                    },
+                    "policy": {
+                      "type": "object",
+                      "properties": {
+                        "evidenceId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": ["reused_approval", "parent_review", "timeout_continue"]
+                        },
+                        "sourceExecutionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "checkExecutionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "requestedScope": {
+                          "type": "object",
+                          "properties": {
+                            "filesystem": {
+                              "type": "string",
+                              "enum": ["workspace_write", "full_access"]
+                            },
+                            "network": {
+                              "type": "string",
+                              "enum": ["none", "internet"]
+                            }
+                          },
+                          "required": ["filesystem", "network"],
+                          "additionalProperties": false
+                        },
+                        "effectiveScope": {
+                          "type": "object",
+                          "properties": {
+                            "filesystem": {
+                              "type": "string",
+                              "enum": ["workspace_write", "full_access"]
+                            },
+                            "network": {
+                              "type": "string",
+                              "enum": ["none", "internet"]
+                            }
+                          },
+                          "required": ["filesystem", "network"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["evidenceId", "reason"],
+                      "additionalProperties": false
                     },
                     "check": {
                       "type": "object",

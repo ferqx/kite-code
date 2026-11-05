@@ -525,17 +525,23 @@ test('environment excludes internal title generation while retaining delegated c
   expect(display.children.size).toBe(0);
 });
 
-test('environment Shell rows require the exact background launch Tool, independent of cancellation attachment', () => {
+test('environment Shell rows require exact background request facts, independent of cancellation attachment', () => {
   for (const definitionId of ['shell.launch', 'shell.execute', 'fixture/tool']) {
     for (const cancelWithParent of [true, false]) {
-      const shell = backgroundShellItem(1);
-      shell.sourceTool!.definitionId = definitionId;
-      shell.execution.cancelWithParent = cancelWithParent;
-      const original = JSON.stringify(shell);
-      expect(environmentDisplay([shell], 'store').rows.map((row) => row.executionId)).toEqual(
-        definitionId === 'shell.launch' ? [shell.execution.id] : [],
-      );
-      expect(JSON.stringify(shell)).toBe(original);
+      for (const background of [undefined, false, true]) {
+        const shell = backgroundShellItem(1);
+        shell.sourceTool!.definitionId = definitionId;
+        if (background !== undefined) shell.sourceTool!.background = background;
+        shell.execution.cancelWithParent = cancelWithParent;
+        const original = JSON.stringify(shell);
+        expect(environmentDisplay([shell], 'store').rows.map((row) => row.executionId)).toEqual(
+          definitionId === 'shell.launch' ||
+            (definitionId === 'shell.execute' && background === true)
+            ? [shell.execution.id]
+            : [],
+        );
+        expect(JSON.stringify(shell)).toBe(original);
+      }
     }
   }
   for (const variant of ['missing', 'wrong-parent', 'unknown-version']) {

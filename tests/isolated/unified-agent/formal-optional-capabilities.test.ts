@@ -70,11 +70,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         const call = shell
           ? shellCalls === 1
             ? {
-                name: 'shell_launch',
+                name: 'shell_execute',
                 input: {
-                  key: 'default-shell',
                   command: 'printf default-shell; printf default-stderr >&2',
-                  cancellation: 'detached',
                 },
               }
             : null
@@ -131,7 +129,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           tools,
         });
       const configPath = userConfiguration.path;
-      writeFileSync(configPath, config([{ id: 'shell.launch', definitionVersion: '1' }]), {
+      writeFileSync(configPath, config([{ id: 'shell.execute', definitionVersion: '1' }]), {
         mode: 0o600,
       });
       const b = built.bundle;

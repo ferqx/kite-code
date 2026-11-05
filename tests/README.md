@@ -34,6 +34,8 @@ Caller、Recovery、MCP Selection／Connection／Reconnection／Source Approval 
 
 共享恢复夹具的真实管理进程从启动时绑定自有 HOME，并持续存活到原 daemon 正常停止；正式 `--no-orphans` 规则仍保留。只收到真实 start 成功信号后运行原恢复／查询旅程，完成后通过管理进程调用原 stop 并核退出，不能将短命管理进程被清理后的连接失败归为恢复结果。
 
+[原审批恢复夹具](../apps/cli/test/fixtures/recovery-profile.ts)显式使用已有的自定义任务审核入口和实际 compatible SDK，审核输出上限为256；这份恢复测试继续核准确 Files 原卡、批准前零效果、SIGKILL、恢复原卡及唯一写入，不表示默认 Auto 会审核 Files。自有 paired／daemon 入口复用同一配置、审核身份及本地 Provider 环境，真实审核材料与原 Store 调用、完整参数和未派发事实交叉核对，不要求审核输入携带已移除的内部字段。[完整恢复回归](../apps/cli/test/isolated/recovery-host.test.ts)还核一次原恢复 POST 的真实202响应、原封存审核 manifest 和后续只读查询；不把技术失败后查到 accepted 当成恢复完成。
+
 Caller Port 的大正文 Plan／steer／follow-up／取消和日志容量旅程为准确自有 Session 启用真实 Provider 流等待点，确认模型请求已经到达后再观察活动 Run；普通恢复工作的原 Files Tool call 身份检查保持。该等待点不修改规划权限、不增加生产延迟，也不以固定恢复回答充当新 Plan 的完成结果。
 
 后台停止丢回执的 PTY 旅程关闭阅读面板后等待自动查询，先核实首次原 GET 丢回执，再等下一次原 ID GET；重开时等待当前会话的完整面板帧。最终仍须原 applied 回执、准确一次 POST／两次原 ID GET、完整输出与子日志、兄弟 Job 独立状态及正常清理。Ctrl+L 不触发刷新或查询。
@@ -460,6 +462,8 @@ Windows managed Native 源码现另接四个稳定前门、两跳实际创建证
 macOS 另可显式执行 `bun run scripts/runtime/unified-soak.ts --profile=qualification --collect-blocked --output="${TMPDIR%/}/kite-full-soak/report.json"`，按原完整8outer／九点／60—168分钟预算采集，而不缩短到preflight。报告必须位于当前用户拥有且其他用户不可写的父目录；共享 `/private/tmp` 不能直接作父目录。支持的检查通过后仍blocked／inconclusive及退出1；实际失败则failed／退出1，formal拒绝保持。完成的各阶段复用原最终保留资源增长判定，增长失败保留私有原root与JSON，不以提前退出充作八轮通过。完整默认continuous消费父runner的同一已核验候选，源码外编译测试仍保两cycle／40Command、全部原断言与180秒预算，并核候选摘要和零重建。当前真实九点RSS增长失败、缺失Bun资源指标及全体后代资格仍单独记未具备，证据归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。
 
 [默认连续 Shell 夹具](fixtures/unified-agent/soak/continuous-default-shell.ts)按当前轮的准确 Tool call ID、名称、参数与唯一结果推进 Files、child 和 Shell。`input_pending` 等刷新回执只有在公共 SessionView 核实原 Store／Session／Run／rootWork、准确调用、未派发及未尝试适配器后才允许重新准备原请求；成功启动后仅按返回的 Shell 身份读取，不凭结果个数跳步，也不重发未知效果。当前 macOS arm64／Bun 1.4.2 的[原整文件](isolated/unified-agent/unified-default-shell-continuous.test.ts)为 1 pass／25 expects、82.83 秒，保留两 cycle／40 Command、20 Session、4 slots、每个 Shell 的 65536 单元、准确 child 完成、cold read、no replay 与原退出证据；180 秒期限和 formal／平台未取得的资格不变。
+
+2026-11-05 的完整复验为2例／38断言、96.42秒，仍保留上述两轮真实工作和180秒期限。所属两个 Service 使用[受控回环 Provider 环境](fixtures/loopback-model-environment.ts)，只接受无凭据的 HTTP 127.0.0.1 地址，精确设置本地 bypass 并覆盖代理变量，避免隔离测试意外读取机器的系统 SOCKS 配置；不修改测试主进程环境或生产代理策略。新增反例保留生产对不支持系统代理的准确拒绝，以及 helper 对外部地址、HTTPS 和凭据地址的拒绝。本机受控 Provider 的短时连续负载通过，不授真实付费模型、其他平台或完整长时资格。
 
 私有[VM 协议完整测试](isolated/unified-agent/unified-soak-vm-observer.test.ts)无平台 skip，三端可用同一纯[严格读取器](../scripts/runtime/unified-soak-vm-observer.ts)核真实 Darwin 校准原记录、V1／V2 请求地址区别、64 位身份／时基／地址、完整 frame／footer、部分释放／并发顺序未知及输入／计算上限。原九项保持，现另核稀疏索引、密集真实输出拒绝、remap 存在性短路与全部 unmap 原序；本机完整 13 pass／16474 expects。默认 200 万／最高 1 亿计算预算保持，索引、排序、访问与区间处理计费。它不调用 FFI 或模拟 Windows／Linux 原生资格。[C 观察器](../scripts/runtime/native/unified-soak-vm-observer.darwin.c)仅为 macOS 私有导入诊断，本机校准核 syscall 原返回／errno、真实输入 hint 和两次部分 munmap；生产容量溢出整条拒绝，临时小容量校准保原 syscall 并由读取器拒绝 writeErrors。原 lifecycle RSS 是 probe 自身 PID，与默认 continuous 两 Service 的指标分开保留。本轮只离线复用原 450 秒／九点记录，完整交集仍超限，RSS／live allocation owner 及全资源／出生后代继续未闭合，准确范围见[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13rss-离线读取缺口与完整观测来源)。
 

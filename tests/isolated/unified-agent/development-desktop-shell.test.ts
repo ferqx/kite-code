@@ -9,7 +9,7 @@ import { buildDevelopmentService } from '../../../scripts/development/desktop-re
 
 const repository = realpathSync(join(import.meta.dir, '../../..'));
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
-const shellNames = ['shell_execute', 'shell_launch', 'shell_read', 'shell_wait', 'shell_stop'];
+const shellNames = ['shell_execute', 'shell_read', 'shell_wait', 'shell_stop'];
 
 nativeTest(
   'actual Desktop development Service supplies and executes Shell for the root and existing default/code child roles',
@@ -64,7 +64,7 @@ nativeTest(
             );
           calls.push({
             name: 'shell_execute',
-            input: { key: marker, command: `printf '${marker}_EXECUTED\\n'` },
+            input: { command: `printf '${marker}_EXECUTED\\n'` },
           });
         }
         const frame = (delta: unknown, finish_reason: string | null) =>

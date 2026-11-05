@@ -27,25 +27,25 @@ export const defaultTaskRoles: readonly TrustedTaskRole[] = Object.freeze([
     version: '1',
     toolPolicy: 'read_only' as const,
     description:
-      'Read-only repository exploration: trace the current entry point and configuration through reachable calls to data, state and output; report evidence and unresolved steps. Use literal rg, ls and pwd Shell queries. No modifications or arbitrary process/network dispatch.',
+      'Read-only repository exploration: trace the current entry point and configuration through reachable calls to data, state and output; report evidence and unresolved steps. Keep business source, configuration and data unchanged and do not send project data outside the task. Necessary temporary scripts and temporary artifacts may be used for exploration within the inherited permissions. Shell uses the inherited permissions and sandbox; choose commands whose actual effects stay within this assignment.',
   }),
   Object.freeze({
     id: 'plan',
     version: '1',
     toolPolicy: 'read_only' as const,
     description:
-      'Read-only planning: establish the current entry point, configuration and reachable implementation before proposing scoped changes and verification; report unresolved assumptions. Use literal rg, ls and pwd Shell queries. Do not modify files, dispatch other effects or approve a plan.',
+      'Read-only planning: establish the current entry point, configuration and reachable implementation before proposing scoped changes and verification; report unresolved assumptions. Keep business source, configuration and data unchanged; do not send project data outside the task or approve a plan. Necessary temporary scripts and temporary artifacts may be used for exploration within the inherited permissions. Shell uses the inherited permissions and sandbox; keep its actual effects within this assignment.',
   }),
   Object.freeze({
     id: 'review',
     version: '1',
     toolPolicy: 'read_only' as const,
     description:
-      'Read-only code review: inspect actual changes and reachable surrounding code, identify defects with causal evidence, and state unverified scope. Use literal rg, ls and pwd Shell queries. Do not implement changes or dispatch other effects.',
+      'Read-only code review: inspect actual changes and reachable surrounding code, identify defects with causal evidence, and state unverified scope. Keep business source, configuration and data unchanged; do not implement changes or send project data outside the task. Necessary temporary scripts and temporary artifacts may be used for exploration within the inherited permissions. Shell uses the inherited permissions and sandbox; choose commands whose actual effects stay within this assignment.',
   }),
 ]);
 
-/** Exact builtin bindings. Shell dispatch additionally requires the host's literal-query ceiling. */
+/** Reduced tool surface for read-only assignments; Shell keeps the inherited execution policy. */
 const readOnlyBindings = [
   ['builtin.files', 'files.read', '4'],
   ['builtin.files', 'files.read', '5'],
@@ -71,7 +71,7 @@ export function isRootOnlyTaskTool(binding: FrozenTaskTool): boolean {
     binding.version === '1'
   );
 }
-/** Read-only ceilings use the actual frozen definition, never a matching custom name. */
+/** Tool filtering uses the actual frozen definition, never a matching custom name. */
 export function isReadOnlyTaskTool(binding: FrozenTaskTool): boolean {
   return readOnlyBindings.some(
     ([extensionId, id, version]) =>
