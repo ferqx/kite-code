@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { constants, copyFile, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'node:path';
+import { acquireFileLock, type FileLock, LockBusyError } from '../platform/locks';
 import { privateDirectory } from '../platform/windows-path-security';
 import { launchIdentity, verifyLaunchIdentities } from './launch-identity';
 
@@ -254,19 +255,37 @@ export async function stageWindowsGitBash(
         throw Error('windows_git_bash_asset_changed');
     });
   };
-  await installRuntime(runtime, true);
-  // Full and Workspace need separate MSYS shared-memory namespaces. Keep
-  // Full's image unchanged instead of widening its object ACLs.
-  await installRuntime(join(runtime, 'full'), false);
-  const manifest = join(runtime, 'manifest.json');
-  const bytes = JSON.stringify({ identity, files });
-  if (existsSync(manifest)) {
-    if (readFileSync(manifest, 'utf8') !== bytes) throw Error('windows_git_bash_asset_changed');
-  } else writeFileSync(manifest, bytes, { flag: 'wx' });
-  return {
-    shell: join(bin, 'bash.exe'),
-    fullShell: join(runtime, 'full/usr/bin/bash.exe'),
-    coreutils: join(bin, 'coreutils.exe'),
-    stateRoot,
-  };
+  // Both runtime copies and the manifest share one cross-process publication owner.
+  // A waiter must never hash a file while another preparation is still writing it.
+  const deadline = performance.now() + 30000;
+  let preparation: FileLock;
+  for (;;) {
+    try {
+      preparation = acquireFileLock(join(runtime, 'preparation.lock'), 'exclusive');
+      break;
+    } catch (error) {
+      if (!(error instanceof LockBusyError) || performance.now() >= deadline) throw error;
+      await Bun.sleep(10);
+    }
+  }
+  try {
+    await installRuntime(runtime, true);
+    // Full and Workspace need separate MSYS shared-memory namespaces. Keep
+    // Full's image unchanged instead of widening its object ACLs.
+    await installRuntime(join(runtime, 'full'), false);
+    const manifest = join(runtime, 'manifest.json');
+    const bytes = JSON.stringify({ identity, files });
+    if (existsSync(manifest)) {
+      if (readFileSync(manifest, 'utf8') !== bytes) throw Error('windows_git_bash_asset_changed');
+    } else writeFileSync(manifest, bytes, { flag: 'wx' });
+    return {
+      shell: join(bin, 'bash.exe'),
+      fullShell: join(runtime, 'full/usr/bin/bash.exe'),
+      coreutils: join(bin, 'coreutils.exe'),
+      stateRoot,
+    };
+  } finally {
+    // prepareFiles settles every started operation before this owner is released.
+    preparation.release();
+  }
 }

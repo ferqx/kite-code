@@ -82,7 +82,7 @@
 - [Model 用量结算](src/execution/index.ts)消费独立 `usage` 快照，在成功、失败和取消结果中保存已收统计及原始明细；用量不授予成功终态或 Tool 派发资格。未收到的字段仍未知，无 SQL baseline／公开 HTTP schema 变更。真实 SDK→Core→SQLite→冷只读的[回归](test/isolated/execution/model-usage.test.ts)核四种结算；算法与取舍归 [AI owner](../ai/README.md)及[用量决定](../../.agents/notes/implemented/bug-fix/2026-10-16-provider-token-accounting.md)。
 - [完整 Model 输出](src/model-output/README.md)：原 Execution linked segments 的完整 EOF、历史展开与 child 正文；私有 reviewer 另封存有限答案凭据，最终 Store 只核原 descriptor 和不可变登记，不以 preview 代替全文。
 - [Task 入口](src/extensions/task/README.md)与[Shell Tools](src/tools/shell.README.md)：可信角色和原 Job 的普通控制工具，使用同一受控 operations；容量、输入与实际执行资格由 owner 记录。
-- [Shell Jobs](src/jobs/README.md)：显式 POSIX、macOS host／confined 和 Linux host／confined 的可信资产、执行范围与原进程结束证明；正式 verifier 已接准确只读 Profile Skill 来源，Linux 原生资格仍缺。
+- [Shell Jobs](src/jobs/README.md)：Windows Git Bash 同摘要冷准备通过跨进程锁串行发布两份闭包和清单，竞争者取得锁后完整重核，不覆盖损坏文件；显式 POSIX、macOS host／confined 和 Linux host／confined 的可信资产、执行范围与原进程结束证明；正式 verifier 已接准确只读 Profile Skill 来源，Linux 原生资格仍缺。
 - [Web Fetch 入口](src/tools/web-fetch/README.md)：普通 `web_fetch` Tool、逐跳资源准入与真实 DNS/socket 绑定，惰性使用已构建的无执行能力解析 Worker；大正文保留完整 Artifact。
 - [配置入口](src/config/README.md)：JSONC 评论保留与短锁 CAS、分层解析、脱敏封存、opaque credential refs 和惰性 OS backend。默认 Service 的每 Run 解析由 Service owner 负责。
 - [Skills](src/skills/README.md)与[MCP](src/mcp/README.md)：摘要发现、按需正文/资源与具有版本的普通 Tool 快照；leaf import 不连接远端或启动进程。
