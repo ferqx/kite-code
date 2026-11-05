@@ -36,6 +36,11 @@ function fixture() {
     },
   };
 }
+function expectDefaultRate(host: HTMLElement) {
+  const rate = host.querySelector('.composer-cache-rate');
+  expect(rate?.textContent).toBe('缓存 0%');
+  expect(rate?.getAttribute('title')).toBe('暂无缓存用量数据');
+}
 const selection = (id = 's', viewSelection = 2) =>
   ({
     storeId: 'store',
@@ -197,7 +202,7 @@ test('the original Composer displays cumulative observed usage once per Model, r
     expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 50%');
     expect(requests.filter((request) => request.method === 'toolMessages.usage').length).toBe(2);
     await render([message('no-sample', 'empty')], selection('empty', 3));
-    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    expectDefaultRate(f.host);
     await render([message('zero', 'zero')], selection('zero', 4));
     expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 0%');
     expect(f.host.querySelector('.composer-cache-rate')?.getAttribute('title')).toBe(
@@ -322,7 +327,7 @@ test('retained samples still require the original body and source, and never cro
       [{ ...original, status: 'incomplete' as const }],
     ]) {
       await render({ messages, complete: false });
-      expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+      expectDefaultRate(f.host);
     }
     await render({ complete: false });
     expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 40%');
@@ -341,7 +346,7 @@ test('retained samples still require the original body and source, and never cro
       { suspended: true },
     ]) {
       await render({ ...scope, complete: false });
-      expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+      expectDefaultRate(f.host);
     }
     expect(reads).toBe(1);
   } finally {
@@ -405,9 +410,9 @@ test('returning to cached Sessions displays their own verified rate while fresh 
     await act(async () => release!());
     expect(rate?.textContent).toBe('缓存 90%');
     await render('b', 3, false, 1);
-    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    expectDefaultRate(f.host);
     await render('b', 3, false, 0);
-    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    expectDefaultRate(f.host);
   } finally {
     await f.close();
   }
@@ -470,7 +475,7 @@ test('late cache reads cannot enter another Session; changed Message samples do 
     );
   try {
     await render(selection(), [message('old')]);
-    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    expectDefaultRate(f.host);
     await render();
     expect(f.host.querySelector('.composer-cache-rate')?.getAttribute('title')).toBe(
       '缓存命中 5 / 10 tokens',
@@ -494,7 +499,7 @@ test('late cache reads cannot enter another Session; changed Message samples do 
     const changed = { ...original, content: 'changed original body' };
     fail = true;
     await render(selection('b', 3), [changed]);
-    expect(f.host.querySelector('.composer-cache-rate')).toBeNull();
+    expectDefaultRate(f.host);
     expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('缓存指标未更新');
     await render(selection('b', 3), [{ ...changed }]);
     expect(requests.filter((request) => request.method === 'toolMessages.usage').length).toBe(3);

@@ -633,7 +633,8 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
     await f.until(() => f.pending('history') > 0);
     expect(f.query('.composer-cache-rate')).toBe(rate);
     expect(f.query('.composer-context-usage')).toBe(ring);
-    expect(rate.textContent).toBe('缓存…');
+    expect(rate.textContent).toBe('缓存 0%');
+    expect(rate.getAttribute('title')).toBe('正在读取缓存用量');
     expect(ring.getAttribute('aria-label')).toBe('正在读取上下文占用');
     expect(promptValue(editor)).toBe('Draft B');
     expect(editor.getAttribute('contenteditable')).toBe('true');
@@ -645,7 +646,7 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
     await f.ready('b');
     expect(editor.getAttribute('contenteditable')).toBe('true');
     await f.release('usage');
-    expect(rate.textContent).toBe('缓存…');
+    expect(rate.textContent).toBe('缓存 0%');
     expect(ring.getAttribute('aria-label')).toBe('正在读取上下文占用');
     await f.release('context');
     await f.resume();
@@ -658,7 +659,7 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
     expect(new Set(changes)).toEqual(
       new Set([
         JSON.stringify(['缓存 70%', '上下文占用约 2%']),
-        JSON.stringify(['缓存…', '正在读取上下文占用']),
+        JSON.stringify(['缓存 0%', '正在读取上下文占用']),
         JSON.stringify(['缓存 30%', '上下文占用约 4%']),
       ]),
     );
@@ -680,10 +681,16 @@ test('failed cold usage reads end the loading state without borrowing another Se
   try {
     await f.render();
     await f.until(() => !!f.query('.composer-context-usage'));
+    const ring = f.query('.composer-context-usage');
     failed = true;
     await f.click('b');
     await f.ready('b');
-    await f.until(() => !f.query('.composer-metrics'));
+    await f.until(() => !f.query('.composer-metrics[aria-busy="true"]'));
+    expect(f.query('.composer-metrics').children).toHaveLength(2);
+    expect(f.query('.composer-cache-rate').textContent).toBe('缓存 0%');
+    expect(f.query('.composer-cache-rate').getAttribute('title')).toBe('暂无缓存用量数据');
+    expect(f.query('.composer-context-usage')).toBe(ring);
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用未知');
     expect(f.query('.composer [role="textbox"]').getAttribute('contenteditable')).toBe('true');
     failed = false;
     await f.click('a');

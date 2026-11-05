@@ -913,7 +913,7 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 
 ## 输入区上下文占用
 
-[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知，尚无可用原请求或读取失败时隐藏圆环。输入框旁仍独立显示原累计缓存文字。圆环由共享 Composer 直接渲染为无点击操作的状态图标，保留悬停与键盘聚焦的详情提示。首次打开目标会话时，两路 hook 分别返回读取待定状态，Native 在历史及所需指标读取结束前通过`metricsLoading`保留同一组节点，显示静态“缓存…”与空圆环，随后一次接管目标数据；已有对应已核实样本时继续直接恢复。真实失败、无样本或无可用估算会结束占位，原错误及隐藏规则保持，输入、权限与停止资格不等待指标。上下文无可用结果也沿原有界缓存记住对应消息／模型的只读展示状态，避免返回时重新插入占位；新选择仍重新读取，模型、正文、来源或观察边界变化继续失效。
+[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知，尚无可用原请求、数据失效或读取失败时清除旧数值，原圆环保留空轨道并标明未知；新对话与已有会话均默认显示圆环。输入框旁仍独立显示原累计缓存文字。圆环由共享 Composer 直接渲染为无点击操作的状态图标，保留悬停与键盘聚焦的详情提示。首次打开目标会话时，两路 hook 分别返回读取待定状态，Native 在历史及所需指标读取结束前通过`metricsLoading`保留同一组节点，显示默认“缓存 0%”与空圆环，随后一次接管目标数据；已有对应已核实样本时继续直接恢复。真实失败、无样本或无可用估算会结束占位，缓存文字保留默认0%，圆环仍保留，原错误事实保持，输入、权限与停止资格不等待指标。上下文无可用结果也沿原有界缓存记住对应消息／模型的只读展示状态，避免返回时重新插入占位；新选择仍重新读取，模型、正文、来源或观察边界变化继续失效。
 
 2026-11-05，Windows x64／Bun1.4.4：首次打开的隔离 Native 页面修前记录为70%／2%→两项消失→30%／4%；修后深浅主题在选择、模型准备、历史读取、两路指标分别返回及缓存往返的400帧中始终只有一组原指标节点，依次为原会话数值、静态读取状态、目标会话数值。18张阶段截图已目视核对；历史就绪而指标仍待定时，输入可编辑、原停止按钮可用。原会话页、缓存、上下文和输入编辑四个完整文件31项／425断言通过，包含失败结束占位及后续重新打开恢复；Desktop／UI类型和定向Biome通过。原始修前记录、修后逐帧数据与截图在本机`.cache/metrics-switch/`。该结果覆盖生产编译样式与实际Native组件的隔离浏览器过程，不扩大完整Electron窗口、安装或其他平台资格。
 
@@ -925,11 +925,13 @@ Renderer按generation、Store和history epoch清空有界显示缓存，按会�
 
 ## 原输入区累计缓存命中率
 
-[NativeDesktop](src/native.tsx)通过 [cache metrics adapter](src/native-cache-metrics.ts)给原 [Composer](../../packages/ui/src/desktop/Composer.tsx)传累计缓存用量，以独立文字显示原累计百分比，原生悬停提示保留完整命中／总输入 token；它与上方上下文占用的分子和分母独立，展示实现见 [UI owner](../../packages/ui/README.md)。无样本隐藏行为保持。完整历史读到固定高水位后，按所选会话全部已观察的完整助手消息读取，不限于 View 近200项；真实 cached input为0且input大于0才显示0%，缺缓存字段或总量为0不补造样本。分叉／包含的封存消息保原来源，同一个原 Store／Model Execution只计一次。后台历史／View 校准和新一轮用量读取期间，保留同一阅读范围内、正文与来源仍匹配的已核实样本；新样本整批核实后才更新累计值。原消息改变或移除即剔除对应样本；切换会话只恢复目标会话自己的样本，在新 viewSelection 下仍重新读取。generation、Store 或 history epoch 变化清空旧指标快照。失败保留仍匹配的原样本，可显式重新读取，不启动或重放任务。
+[NativeDesktop](src/native.tsx)通过 [cache metrics adapter](src/native-cache-metrics.ts)给原 [Composer](../../packages/ui/src/desktop/Composer.tsx)传累计缓存用量，以独立文字显示原累计百分比，原生悬停提示保留完整命中／总输入 token；它与上方上下文占用的分子和分母独立，展示实现见 [UI owner](../../packages/ui/README.md)。缓存文字默认常驻0%，最小宽度可容纳100%并居中；读取中或没有样本时只保留默认显示，悬停分别说明正在读取或暂无数据。完整历史读到固定高水位后，按所选会话全部已观察的完整助手消息读取，不限于 View 近200项；真实 cached input为0且input大于0才计作已核实的0%样本，缺缓存字段或总量为0不补造样本。分叉／包含的封存消息保原来源，同一个原 Store／Model Execution只计一次。后台历史／View 校准和新一轮用量读取期间，保留同一阅读范围内、正文与来源仍匹配的已核实样本；新样本整批核实后才更新累计值。原消息改变或移除即剔除对应样本；切换会话只恢复目标会话自己的样本，在新 viewSelection 下仍重新读取。generation、Store 或 history epoch 变化清空旧指标快照。失败保留仍匹配的原样本，可显式重新读取，不启动或重放任务。
 
 [Main reader](electron/tool-messages.ts)沿已有有限IPC增加 `toolMessages.usage`，复用close与所属read lease，每批至多32个已观察 Message ID，从当前生成 Client GET核原 Model Execution／Session／Run、成功结果和准确content，以及前后连接与原消息未变。它只返回已核实的缓存命中／未命中token；整数、非负及cached不大于input分别校验，不将缺失视为0。封存来源读取不可变Model用量，不借来源Run后来状态取得热事实；当前Store保存的旧Store结果另核终态出处，foreign active拒绝。读取失败不发布部分新样本；原历史正文、权限与准确停止继续独立，未新增Core／HTTP／SQL／私有持久格式。
 
 [Main与有限IPC测试](test/native-tool-messages.test.ts)、[原Composer DOM](test/isolated/native-cache-metrics-dom.test.tsx)和原[源码外默认窗口](test/isolated/native-bundle.test.ts)分别负责来源资格、累计／去重／迟到／无样本和默认SDK用量的首次及冷读。实际输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原输入区累计缓存命中率)；累计口径与来源核验保持，完整PC、全部恢复组合、资源退出和全阶段独立审查仍按原计划核对。
+
+2026-11-05，Windows x64／Bun1.4.4，按本轮确认调整默认展示：缓存文字常驻默认0%、最小宽度70px并居中，圆环在新对话、读取、无样本及失败时保持原节点。修前原冷页几何回归实际复现指标组在读取结束后缩短并右移18px。修后单独执行原[浏览器几何回归](test/session-shell-geometry.fixture.ts)的指标与会话两段：深浅主题、500–1920px共36组／5806帧通过，覆盖两路读取分别返回、0–100%文字、无样本、键盘详情／Escape、新对话往返、草稿及上翻阅读位置；已观察相关阶段截图，未见指标显隐造成的跳动或重复输入区。四个相关整文件42项／591断言、UI／Desktop类型、定向Biome与文档检查通过。本机逐帧数据和阶段截图分别在`.cache/session-shell-browser-HcSLvX/`及`.cache/session-shell-browser-YvCS6n/`；本轮使用实际Native组件与生产编译样式的隔离Main夹具，未复验完整安装版Electron或真实模型。
 
 ## 会话工具栏显示快照
 

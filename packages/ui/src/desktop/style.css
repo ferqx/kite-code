@@ -1341,10 +1341,11 @@ body {
   .composer-cache-rate {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     height: 32px;
     flex: none;
     font-size: 13px;
-    min-width: calc(2em + 5ch);
+    min-width: 70px;
     font-variant-numeric: tabular-nums;
     color: var(--muted-foreground);
     white-space: nowrap;

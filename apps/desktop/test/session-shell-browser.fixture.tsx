@@ -21,6 +21,12 @@ export const control = sessionSwitchBridge({
   replyParagraphs: new URL(location.href).searchParams.has('long') ? 40 : 0,
   initialSelection: !new URL(location.href).searchParams.has('long'),
   turnNotifications: new URL(location.href).searchParams.has('turn-notifications'),
+  cacheMetrics: !['none', 'context'].includes(
+    new URL(location.href).searchParams.get('metrics') ?? '',
+  ),
+  contextUsage: ['both', 'context'].includes(
+    new URL(location.href).searchParams.get('metrics') ?? '',
+  ),
 });
 declare global {
   interface Window {

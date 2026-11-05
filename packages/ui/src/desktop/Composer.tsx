@@ -461,7 +461,7 @@ export function Composer(props: ComposerProps) {
   const cacheTokenTotal =
     (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
   const cacheHitPercentage =
-    cacheTokenTotal > 0
+    !props.metricsLoading && cacheTokenTotal > 0
       ? Math.round(((props.cacheMetrics?.cacheHitTokens ?? 0) / cacheTokenTotal) * 100)
       : undefined;
   const contextTokens = props.contextUsage?.totalInputTokens;
@@ -828,84 +828,82 @@ export function Composer(props: ComposerProps) {
             )}
           </div>
           <div className="composer-trailing">
-            {(cacheHitPercentage !== undefined || props.contextUsage || props.metricsLoading) && (
-              <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
-                {(cacheHitPercentage !== undefined || props.metricsLoading) && (
-                  <span
-                    className="composer-cache-rate"
-                    title={
-                      props.metricsLoading
-                        ? undefined
-                        : `缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`
-                    }
-                  >
-                    {props.metricsLoading ? '缓存…' : `缓存 ${cacheHitPercentage}%`}
-                  </span>
-                )}
-                {(props.contextUsage || props.metricsLoading) && (
-                  <TooltipProvider delayDuration={200}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <svg
-                          className="composer-context-usage"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          role="img"
-                          tabIndex={props.metricsLoading ? undefined : 0}
-                          aria-label={
-                            props.metricsLoading
-                              ? '正在读取上下文占用'
-                              : contextPercentage === undefined
-                                ? '上下文占用未知'
-                                : `上下文占用约 ${contextPercentage}%`
-                          }
-                          aria-description={
-                            props.metricsLoading
-                              ? undefined
-                              : `上下文估算 ${contextTokens} / ${contextWindowTokens ?? '未知'} tokens`
-                          }
-                        >
-                          <circle className="composer-context-track" cx="8" cy="8" r="6" />
-                          {!props.metricsLoading &&
-                            contextPercentage !== undefined &&
-                            contextPercentage > 0 && (
-                              <circle
-                                cx="8"
-                                cy="8"
-                                r="6"
-                                pathLength="100"
-                                strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
-                                transform="rotate(-90 8 8)"
-                              />
-                            )}
-                        </svg>
-                      </TooltipTrigger>
-                      {!props.metricsLoading && (
-                        <TooltipContent
-                          className="kite-client composer-context-tooltip"
-                          side="top"
-                          sideOffset={8}
-                          collisionPadding={12}
-                        >
-                          <span>上下文窗口</span>
-                          <span>
-                            {contextPercentage === undefined
-                              ? '占用比例未知'
-                              : `约 ${contextPercentage}% 已用`}
-                          </span>
-                          <span>
-                            已用 {contextTokenFormat.format(contextTokens!).toLowerCase()} 标记，
-                            {contextWindowTokens === undefined
-                              ? '总量未知'
-                              : `共 ${contextTokenFormat.format(contextWindowTokens).toLowerCase()}`}
-                          </span>
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
-              </div>
-            )}
+            <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
+              <span
+                className="composer-cache-rate"
+                title={
+                  cacheHitPercentage === undefined
+                    ? props.metricsLoading
+                      ? '正在读取缓存用量'
+                      : '暂无缓存用量数据'
+                    : `缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`
+                }
+              >
+                {`缓存 ${cacheHitPercentage ?? 0}%`}
+              </span>
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <svg
+                      className="composer-context-usage"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      role="img"
+                      tabIndex={props.metricsLoading ? undefined : 0}
+                      aria-label={
+                        props.metricsLoading
+                          ? '正在读取上下文占用'
+                          : contextPercentage === undefined
+                            ? '上下文占用未知'
+                            : `上下文占用约 ${contextPercentage}%`
+                      }
+                      aria-description={
+                        props.metricsLoading
+                          ? undefined
+                          : `上下文估算 ${contextTokens ?? '未知'} / ${contextWindowTokens ?? '未知'} tokens`
+                      }
+                    >
+                      <circle className="composer-context-track" cx="8" cy="8" r="6" />
+                      {!props.metricsLoading &&
+                        contextPercentage !== undefined &&
+                        contextPercentage > 0 && (
+                          <circle
+                            cx="8"
+                            cy="8"
+                            r="6"
+                            pathLength="100"
+                            strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
+                            transform="rotate(-90 8 8)"
+                          />
+                        )}
+                    </svg>
+                  </TooltipTrigger>
+                  {!props.metricsLoading && (
+                    <TooltipContent
+                      className="kite-client composer-context-tooltip"
+                      side="top"
+                      sideOffset={8}
+                      collisionPadding={12}
+                    >
+                      <span>上下文窗口</span>
+                      <span>
+                        {contextPercentage === undefined
+                          ? '占用比例未知'
+                          : `约 ${contextPercentage}% 已用`}
+                      </span>
+                      <span>
+                        {contextTokens === undefined
+                          ? '已用未知，'
+                          : `已用 ${contextTokenFormat.format(contextTokens).toLowerCase()} 标记，`}
+                        {contextWindowTokens === undefined
+                          ? '总量未知'
+                          : `共 ${contextTokenFormat.format(contextWindowTokens).toLowerCase()}`}
+                      </span>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <div className="composer-actions">
               {showStop ? (
                 <Button

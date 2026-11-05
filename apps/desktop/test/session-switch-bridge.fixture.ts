@@ -20,6 +20,7 @@ export function sessionSwitchBridge(
     protocol?: 'chat-completions' | 'responses';
     turnNotifications?: boolean;
     readTurns?: Map<string, string>;
+    cacheMetrics?: boolean;
     contextUsage?: boolean;
     initialSelection?: boolean;
     holdDraft?: boolean;
@@ -330,13 +331,15 @@ export function sessionSwitchBridge(
             kind: 'toolMessages.usage',
             readId: request.readId,
             scope: scope(request),
-            entries: request.messageIds.map((messageId) => ({
-              messageId,
-              executionId: `model-${id}`,
-              originStoreId: 'store',
-              cacheHitTokens: id === 'a' ? 70 : 30,
-              cacheMissTokens: id === 'a' ? 30 : 70,
-            })),
+            entries: (options.cacheMetrics === false ? [] : request.messageIds).map(
+              (messageId) => ({
+                messageId,
+                executionId: `model-${id}`,
+                originStoreId: 'store',
+                cacheHitTokens: id === 'a' ? 70 : 30,
+                cacheMissTokens: id === 'a' ? 30 : 70,
+              }),
+            ),
           } as const;
           return options.contextUsage ? wait('usage', () => result) : result;
         }
