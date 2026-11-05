@@ -40,6 +40,7 @@ import {
 } from './development';
 import { registerNativeExternalLinks } from './external-links';
 import { configureMacosElectronResize, type MacosElectronResize } from './macos-electron-resize';
+import { nativeModelPreferences } from './model-preference';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { registerNativeBrowserIpc } from './native-browser';
 import { createNativeCallerGenerationOwner, NativeCaller } from './native-caller';
@@ -47,6 +48,7 @@ import { registerNativeFullPermissionDialogIpc } from './native-full-permission-
 import { createNativeGlobalDialogHost } from './native-global-dialog-host';
 import {
   registerNativeIpc,
+  registerNativeModelPreferenceIpc,
   registerNativeStartupIpc,
   registerNativeThemeIpc,
   registerNativeWindowIpc,
@@ -726,6 +728,12 @@ void app
       selectedScope() {
         return caller?.browserScope('input');
       },
+    });
+    registerNativeModelPreferenceIpc({
+      ipcMain,
+      window: () => window,
+      rendererUrl,
+      preferences: () => nativeModelPreferences(join(app.getPath('userData'), 'model-preferences')),
     });
     registerNativeThemeIpc({
       ipcMain,

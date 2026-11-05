@@ -544,7 +544,7 @@ async function mainFixture(
     './protected-path': exports(['canonicalProtectedPath']),
     './native-ipc':
       exports(['registerNativeIpc']) +
-      '\nexport const registerNativeStartupIpc = f.register, registerNativeThemeIpc = f.register, registerNativeWindowIpc = f.register;',
+      '\nexport const registerNativeStartupIpc = f.register, registerNativeThemeIpc = f.register, registerNativeModelPreferenceIpc = f.register, registerNativeWindowIpc = f.register;',
     './native-window-menu':
       prefix +
       'export const nativeWindowMenuShortcut = f.register, nativeWindowMenuTemplate = f.register, registerNativeWindowMenuIpc = f.register;',

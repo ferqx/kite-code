@@ -182,7 +182,7 @@ export async function prepareNativeModels(
     return {
       key: scope.readKey,
       facts: preparing
-        ? { ...response, recommendedModel: readNativeRecommendedModel(response.storeId) }
+        ? { ...response, recommendedModel: await readNativeRecommendedModel(response.storeId) }
         : response,
       error: '',
     };
@@ -308,18 +308,26 @@ export function NativeModelPicker({
       sequence.current++;
     };
   }, [readKey, bridge, prepared]);
-  function remember(choice: NativeModelChoice, effectiveEffort?: NativeReasoningEffort | null) {
+  const preferenceSequence = useRef(0);
+  async function remember(
+    choice: NativeModelChoice,
+    effectiveEffort?: NativeReasoningEffort | null,
+  ) {
     onChange(choice);
     if (!facts || !choice.modelId) return;
     const recommendation = {
       modelId: choice.modelId,
       ...(effectiveEffort == null ? {} : { reasoningEffort: effectiveEffort }),
     };
+    const request = ++preferenceSequence.current;
+    const original = readKey;
     try {
-      rememberNativeRecommendedModel(facts.storeId, recommendation);
+      await rememberNativeRecommendedModel(facts.storeId, recommendation);
+      if (current.current !== original || preferenceSequence.current !== request) return;
       snapshots.recommend(scope, recommendation);
       setSaveError(undefined);
     } catch {
+      if (current.current !== original || preferenceSequence.current !== request) return;
       setSaveError(readKey);
     }
   }

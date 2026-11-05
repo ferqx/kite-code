@@ -24,8 +24,14 @@ import {
   nativeWindowAppearanceChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
+import {
+  isNativeRecommendedModel,
+  type NativeModelPreferenceReply,
+  nativeModelPreferenceChannel,
+} from '../src/native-model-preference-bridge';
 import { promptTextForSend } from '../src/prompt-text';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
+import type { nativeModelPreferences } from './model-preference';
 import type { NativeCaller } from './native-caller';
 import type { NativeRootWindow as BrowserWindow } from './native-root-window';
 import { parseScheduledTaskSaveInput } from './scheduled-tasks';
@@ -1106,6 +1112,41 @@ export function assertNativeSender(
   }
   if (!same) throw Error('native_sender_denied');
 }
+/** Small non-secret client preferences, independent of renderer origin and Service state. */
+export function registerNativeModelPreferenceIpc(options: {
+  ipcMain: IpcMain;
+  window: () => BrowserWindow | undefined;
+  rendererUrl: string;
+  preferences: () => ReturnType<typeof nativeModelPreferences>;
+}) {
+  options.ipcMain.handle(
+    nativeModelPreferenceChannel,
+    (event, payload: unknown): NativeModelPreferenceReply => {
+      try {
+        assertNativeSender(event, options.window(), options.rendererUrl);
+        const input = record(payload);
+        if (input.action === 'read') {
+          exact(input, ['action', 'storeId']);
+          if (typeof input.storeId !== 'string') throw Error('model_preference_invalid');
+          return { ok: true, value: options.preferences().read(input.storeId) };
+        }
+        exact(input, ['action', 'storeId', 'choice']);
+        if (
+          input.action !== 'remember' ||
+          typeof input.storeId !== 'string' ||
+          !isNativeRecommendedModel(input.choice)
+        )
+          throw Error('model_preference_invalid');
+        options.preferences().remember(input.storeId, input.choice);
+        return { ok: true, value: null };
+      } catch {
+        return { ok: false, code: 'model_preference_unavailable' };
+      }
+    },
+  );
+  return () => options.ipcMain.removeHandler(nativeModelPreferenceChannel);
+}
+
 /** Original window-only theme operation; it never opens the business caller. */
 export function registerNativeThemeIpc(options: {
   ipcMain: IpcMain;

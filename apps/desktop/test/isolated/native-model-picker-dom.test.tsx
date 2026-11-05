@@ -302,14 +302,20 @@ test('saved Session routes remain isolated while old Runs without a saved route 
 test('browser preference storage keeps model and effort together, isolates Stores, and leaves invalid bytes untouched', async () => {
   const f = fixture();
   try {
-    expect(readNativeRecommendedModel('store')).toBeUndefined();
-    rememberNativeRecommendedModel('store', { modelId: 'a', reasoningEffort: 'high' });
+    expect(await readNativeRecommendedModel('store')).toBeUndefined();
+    await rememberNativeRecommendedModel('store', { modelId: 'a', reasoningEffort: 'high' });
     const storage = f.dom.window.localStorage,
       key = storage.key(0)!;
-    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a', reasoningEffort: 'high' });
-    expect(readNativeRecommendedModel('other')).toBeUndefined();
-    rememberNativeRecommendedModel('other', { modelId: 'b', reasoningEffort: 'low' });
-    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a', reasoningEffort: 'high' });
+    expect(await readNativeRecommendedModel('store')).toEqual({
+      modelId: 'a',
+      reasoningEffort: 'high',
+    });
+    expect(await readNativeRecommendedModel('other')).toBeUndefined();
+    await rememberNativeRecommendedModel('other', { modelId: 'b', reasoningEffort: 'low' });
+    expect(await readNativeRecommendedModel('store')).toEqual({
+      modelId: 'a',
+      reasoningEffort: 'high',
+    });
     for (const raw of [
       'broken',
       '{"modelId":"a","reasoningEffort":"invalid"}',
@@ -317,17 +323,55 @@ test('browser preference storage keeps model and effort together, isolates Store
       'x'.repeat(1025),
     ]) {
       storage.setItem(key, raw);
-      expect(readNativeRecommendedModel('store')).toBeUndefined();
+      expect(await readNativeRecommendedModel('store')).toBeUndefined();
       expect(storage.getItem(key)).toBe(raw);
     }
-    rememberNativeRecommendedModel('store', { modelId: 'a' });
-    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a' });
+    await rememberNativeRecommendedModel('store', { modelId: 'a' });
+    expect(await readNativeRecommendedModel('store')).toEqual({ modelId: 'a' });
   } finally {
     await f.close();
   }
 });
 
-test('unavailable browser storage still permits a current choice and reports that remembering failed', async () => {
+test('host preferences import an available old origin once and then survive empty browser storage', async () => {
+  const f = fixture();
+  try {
+    await rememberNativeRecommendedModel('store', { modelId: 'b', reasoningEffort: 'high' });
+    const saved = new Map<string, import('../../src/native-bridge').NativeRecommendedModel>();
+    let writes = 0;
+    Object.defineProperty(f.dom.window, 'kiteNative', {
+      value: {
+        readRecommendedModel: async (storeId: string) => saved.get(storeId) ?? null,
+        rememberRecommendedModel: async (
+          storeId: string,
+          choice: import('../../src/native-bridge').NativeRecommendedModel,
+        ) => {
+          writes++;
+          saved.set(storeId, choice);
+        },
+      },
+    });
+    expect(await readNativeRecommendedModel('store')).toEqual({
+      modelId: 'b',
+      reasoningEffort: 'high',
+    });
+    expect(writes).toBe(1);
+    f.dom.window.localStorage.clear();
+    expect(await readNativeRecommendedModel('store')).toEqual({
+      modelId: 'b',
+      reasoningEffort: 'high',
+    });
+    expect(writes).toBe(1);
+    expect(await readNativeRecommendedModel('other')).toBeUndefined();
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  'browser',
+  'host',
+])('unavailable %s storage still permits a current choice and reports that remembering failed', async (storage) => {
   const f = fixture();
   let resolved: NativeModelChoice | undefined;
   Object.defineProperty(f.dom.window, 'localStorage', {
@@ -335,6 +379,17 @@ test('unavailable browser storage still permits a current choice and reports tha
       throw Error('storage_denied');
     },
   });
+  if (storage === 'host')
+    Object.defineProperty(f.dom.window, 'kiteNative', {
+      value: {
+        readRecommendedModel: async () => {
+          throw Error('storage_denied');
+        },
+        rememberRecommendedModel: async () => {
+          throw Error('storage_denied');
+        },
+      },
+    });
   const bridge: NativeBridge = { watch: () => () => {}, request: async () => facts };
   function Host() {
     const [value, setValue] = useState<NativeModelChoice>({});
@@ -411,7 +466,7 @@ test.each([
     },
   };
   try {
-    if (recommendedModel) rememberNativeRecommendedModel('store', recommendedModel);
+    if (recommendedModel) await rememberNativeRecommendedModel('store', recommendedModel);
     await act(async () =>
       f.root.render(
         <NativeModelPicker
@@ -479,7 +534,7 @@ test('a global recommendation is saved before sending, restored on a new convers
         new f.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }),
       );
     });
-    const recommendation = readNativeRecommendedModel('store');
+    const recommendation = await readNativeRecommendedModel('store');
     expect(recommendation).toEqual({ modelId: 'b', reasoningEffort: 'ultar' });
     await act(async () => f.root.render(<Host key="new" fresh={true} identity="project-b" />));
     expect(resolved).toEqual(recommendation);
@@ -553,7 +608,10 @@ test('picker filters disabled routes, preserves transient effort through observe
     await act(async () => f.root.render(<Host />));
     expect(observed.reasoningEffort).toBe('high');
     expect(calls).toHaveLength(1);
-    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a', reasoningEffort: 'high' });
+    expect(await readNativeRecommendedModel('store')).toEqual({
+      modelId: 'a',
+      reasoningEffort: 'high',
+    });
     await f.click('选择模型，当前 openai / remote-a');
     expect(f.element.querySelector('[aria-label="选择模型 disabled"]')).toBeNull();
     expect(f.element.querySelector('[aria-label="选择模型 broken"]')).toBeNull();
@@ -562,7 +620,7 @@ test('picker filters disabled routes, preserves transient effort through observe
     await f.click('deepseek');
     await f.click('选择模型 b');
     expect(observed).toEqual({ modelId: 'b' });
-    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'b' });
+    expect(await readNativeRecommendedModel('store')).toEqual({ modelId: 'b' });
     expect(resolved.at(-1)).toEqual({ modelId: 'b' });
     const deepseekEffort = f.element.querySelector<HTMLElement>('[role="slider"]')!;
     expect(deepseekEffort).not.toBeNull();

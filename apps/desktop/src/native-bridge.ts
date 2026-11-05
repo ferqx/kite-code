@@ -61,6 +61,7 @@ import type {
 } from './mcp-bridge';
 import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
+import type { NativeModelPreferenceBridge } from './native-model-preference-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
 import type { NativeSkillDocument, NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
@@ -924,6 +925,7 @@ declare global {
       NativeBridge &
         Partial<
           NativeThemeBridge &
+            NativeModelPreferenceBridge &
             NativeWindowBridge &
             NativeWindowMenuBridge &
             NativeStartupBridge &

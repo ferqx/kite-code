@@ -39,13 +39,18 @@ import {
   nativeBrowserPresentationChannel,
 } from '../src/native-browser-bridge';
 import { nativeGlobalDialogActiveChannel } from '../src/native-global-dialog-bridge';
-
 import {
   isNativeWindowMenuAction,
   type NativeWindowMenuBridge,
   nativeWindowMenuActionChannel,
   nativeWindowMenuChannel,
 } from '../src/native-menu-bridge';
+import {
+  isNativeRecommendedModel,
+  type NativeModelPreferenceBridge,
+  type NativeModelPreferenceReply,
+  nativeModelPreferenceChannel,
+} from '../src/native-model-preference-bridge';
 
 type BrowserLayoutReply = NativeBrowserReply;
 let modalRoot: HTMLElement | undefined;
@@ -75,6 +80,7 @@ function readBrowserLayoutReply(reply: BrowserLayoutReply) {
 const bridge: NativeBridge &
   NativeBrowserBridge &
   NativeThemeBridge &
+  NativeModelPreferenceBridge &
   NativeWindowBridge &
   NativeWindowMenuBridge &
   NativeStartupBridge = {
@@ -204,6 +210,25 @@ const bridge: NativeBridge &
   },
   async setTheme(theme) {
     const reply = (await ipcRenderer.invoke(nativeThemeChannel, { theme })) as NativeReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+  },
+  async readRecommendedModel(storeId) {
+    const reply = (await ipcRenderer.invoke(nativeModelPreferenceChannel, {
+      action: 'read',
+      storeId,
+    })) as NativeModelPreferenceReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (reply.value !== null && !isNativeRecommendedModel(reply.value))
+      throw Error('model_preference_invalid');
+    return reply.value;
+  },
+  async rememberRecommendedModel(storeId, choice) {
+    if (!isNativeRecommendedModel(choice)) throw Error('model_preference_invalid');
+    const reply = (await ipcRenderer.invoke(nativeModelPreferenceChannel, {
+      action: 'remember',
+      storeId,
+      choice,
+    })) as NativeModelPreferenceReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
   },
   async request(input: NativeRequest) {
