@@ -20,6 +20,7 @@ import {
 } from 'react';
 import Markdown, { type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { useConversationReadActive } from '../conversation-activity';
@@ -280,6 +281,7 @@ const MarkdownDocument = memo(
       <Markdown
         remarkPlugins={[
           remarkGfm,
+          remarkCjkFriendly,
           remarkMath,
           [reuseDesktopMarkdownParse, prepared],
           retainListParagraphs,

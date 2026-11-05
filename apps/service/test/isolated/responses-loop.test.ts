@@ -877,11 +877,13 @@ for (const failure of [
   'incomplete',
   'partial_incomplete',
   'http400',
+  'http401',
+  'http403',
   'http500',
 ] as const)
   test(`Responses ${failure} respects retry eligibility without tool execution`, async () => {
     const counter = { effects: 0 };
-    const retryable = ['http500', 'incomplete', 'partial_incomplete'].includes(failure);
+    const retryable = !['http401', 'http403'].includes(failure);
     const failures = 5;
     const provider = endpoint(
       (body, n) => {
@@ -889,7 +891,7 @@ for (const failure of [
         if (retryable && n === failures)
           return { id: 'recovered', text: ['Recovered after the old attempt limit.'] };
         return failure.startsWith('http')
-          ? { status: failure === 'http400' ? 400 : 500 }
+          ? { status: Number(failure.slice(4)) }
           : {
               id: 'failed',
               encrypted: 'discarded-failed-continuation',
@@ -922,7 +924,11 @@ for (const failure of [
             previousExecutionId: models[index - 1]!.id,
             attempt: index + 1,
             maxAttempts: 6,
-            reason: failure === 'http500' ? 'provider_unavailable' : 'stream_incomplete',
+            reason: failure.startsWith('http')
+              ? 'provider_unavailable'
+              : ['incomplete', 'partial_incomplete'].includes(failure)
+                ? 'stream_incomplete'
+                : 'connection_failed',
           });
       expect(view.executions.filter((e) => e.kind === 'tool')).toHaveLength(0);
       saveEvidence(`failure-${failure}`, {

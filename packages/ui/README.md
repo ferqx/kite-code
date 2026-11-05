@@ -76,9 +76,15 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 用户消息由 [Conversation](src/desktop/Conversation.tsx) 分为宿主 `renderMessageAttachments` 附件插槽和 `.user-message-body` 正文气泡，时间／复制继续属于同一原消息；空正文不保留气泡。`SessionPage` 透传附件插槽，Agent 内容和工具不消费它。[MessageAttachments](src/desktop/MessageAttachments.tsx) 使用 [shadcn AttachmentGroup](src/desktop/components/ui/attachment.tsx) 的横向滚动、吸附与边缘渐隐，按实际宽度决定附件总数和前后按钮，读取或缓存资格不由滚动控件授予。尺寸／数量变化重新测量，滚动只更新端点按钮；隐藏缓存暂停观察，恢复重新测量。导航文字不进入聊天全选。[AttachmentFileCard](src/desktop/AttachmentFileCard.tsx) 与 Native 图片共用 Attachment／Media／Title，保留当前148px卡宽、80px预览、8px间隔与消息卡片12px圆角；shadcn 源码仅调整本地导入，使用已有 Radix Slot、Button 和样式工具，不增加依赖。输入区沿原移除与选择流程。
 
-[Conversation](src/desktop/Conversation.tsx)将宿主确认的 `model_connection` 系统消息与工具放在所属 Turn 的处理过程中，共用 Trace 行组件及原折叠、阅读位置；连接等待期间由过程行表达活动，不重复显示“正在回复”。连接事实、次数及因果位置归 [Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)，UI 不推断网络状态。[ModelConnection](src/desktop/ModelConnection.tsx)仅在宿主确认重连耗尽并提供可读原因时显示详情折叠按钮；正常重连、成功及取消保持普通过程行，详情随原阅读状态保留。[TurnFailure](src/desktop/TurnFailure.tsx)在普通客户端仅显示一条带提示图标的紧凑状态，技术详情继续受原构建诊断门禁控制；[诊断回归](test/desktop-diagnostics.test.tsx)核开发与生产均无折叠按钮或内部错误码。
+[Conversation](src/desktop/Conversation.tsx)将宿主确认的 `model_connection` 系统消息与工具放在所属 Turn 的处理过程中，共用 Trace 行组件及原折叠、阅读位置；连接等待期间由过程行表达活动，不重复显示“正在回复”。连接事实、次数及因果位置归 [Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)，UI 不推断网络状态。[ModelConnection](src/desktop/ModelConnection.tsx)仅在宿主确认重连耗尽并提供可读原因时显示详情折叠按钮；正常重连、成功及取消保持普通过程行，详情随原阅读状态保留。非重连的会话执行异常（包括启动、上下文及底层逻辑异常）由[TurnFailure](src/desktop/TurnFailure.tsx)在普通客户端统一使用公共[Alert](src/desktop/components/ui/alert.tsx)，只显示详细原因／建议，不显示可见标题；采用中性圆形信息图标、16px圆角、细边框及灰色说明，图标20px，内边距16px。无障碍名称仍保留准确异常摘要，不渲染聊天message或伪造Tool行；未知原因明确说明现有记录无法核实，技术详情继续受原构建诊断门禁控制；[诊断回归](test/desktop-diagnostics.test.tsx)核开发与生产均无折叠按钮或内部错误码。
 
-有准确 `turnId` 的 `turn_failure` 与其他过程记录一起进入原 Turn 的折叠内容，不再独立渲染在结果区域；默认终态收起、用户展开选择、冷读与原时间身份沿原合同。没有 Turn 的原输入拒绝仍是独立未启动事实，不由 UI 猜补 Run。首条输入、明确最终回复及独立 Agent 结果仍按原业务边界显示；[过程回归](test/desktop-reasoning-turns.test.tsx)和[Native 投影回归](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)核失败正文的过程归属与冷重开。
+轮次摘要在所有终态统一只显示原已核实用时，缺少可靠时间时显示“用时未知”；进行中沿原阶段文字，摘要不按失败、停止、中断或恢复状态着色。真实`data-turn-status`、取消／恢复资格及过程内错误保持，失败细节仍可展开阅读。有准确 `turnId` 的 `turn_failure` 与其他过程记录一起进入原 Turn 的折叠内容，不再独立渲染在结果区域；正常完成／主动停止仍默认收起；失败或异常中断且同Turn没有已核实最终回复时默认展开，外层过程不设高度上限，显式阅读选择优先。默认由整Turn的finalReply集合决定，不只检查当前片段；异常Alert不能覆盖准确的中断／取消／完成终态。冷读与原时间身份沿原合同。没有 Turn 的原输入拒绝仍是独立未启动事实，不由 UI 猜补 Run。首条输入、明确最终回复及独立 Agent 结果仍按原业务边界显示；[过程回归](test/desktop-reasoning-turns.test.tsx)和[Native 投影回归](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)核失败正文的过程归属与冷重开。
+
+2026-11-05，Windows x64／Bun1.4.4，轮次摘要调整通过过程、响应、投影、阅读滚动及Native轮次五文件69项／2174断言，UI／Desktop类型和定向Biome通过。隔离生产组件与编译CSS逐步观察执行中→失败收起→展开真实原因→停止／中断／成功→冷重挂及深浅主题；各终态只显示“用时38秒”，实际终态仍分别保留，失败正文仍在原过程内。摘要深色computed color为`rgb(181,181,181)`，浅色为`rgb(102,102,102)`，无状态红色、重复摘要或过程外失败正文。材料归本机`.cache/turn-summary-audit-20261105`，临时入口沿原过程审查夹具；不代表完整Electron安装制品或其他平台验收。
+
+2026-11-05，后续异常展示调整：Alert／轮次／新会话／Native投影六个完整文件152项／3240断言，另阅读滚动与Agent活动两文件4项／2038断言通过，UI／Desktop类型、定向Biome、边界及测试归属通过。隔离生产组件页面沿同一原轮逐步核活动→未知异常Alert、明确项目说明读取失败、中断保aborted、手动收起、冷重挂默认展开、正常最终回复默认收起和深浅主题。60项过程实际高度2343.875px，外层max-height为none，使用原会话滚动；手动上翻后主题切换scrollTop前后均为1159.333374px。普通异常只有一份Alert且不带message类，不含旧消息保留提示、原因码或日志；完整截图与DOM事实归本机`.cache/turn-exception-audit-20261105`，临时入口沿原轮次审查夹具。不证明完整Electron安装制品、真实模型故障或其他平台；本次不改变模型重连、执行或恢复协议。
+
+2026-11-05，按用户参考图进一步调整Alert外观并移除可见标题：普通异常只保留20px圆形信息图标和详细文本，16px内边距／圆角，沿主题background、border和中性文字，诊断制品的原技术详情门禁保持。诊断／轮次／Native三个完整文件35项／699断言、UI／Desktop类型及定向Biome通过。隔离生产组件页面逐步核活动→未知异常、明确原因、深浅主题及冷重挂；标题节点为0、Alert始终单份、异常过程仍默认展开。深色背景`rgb(25,25,25)`、图标`rgb(237,237,237)`、说明`rgb(181,181,181)`，实际padding／border-radius均16px；截图和样式事实归本机`.cache/alert-style-audit-20261105`。本轮仅外观及可见标题变化，原失败分类、重连、阅读选择及完整安装资格保持其各自范围。
 
 重连行在[共享样式](src/desktop/style.css)内单独使用 `--destructive`，覆盖图标、标题、次数、详情原因及建议；进行中与成功／失败／停止后的颜色一致，悬停、键盘聚焦和展开保持红色，原活动 shimmer 保留。标题与次数直接相连，次数继承同一字号和行高；图标与文字仍保留原间距。2026-11-03 在 Windows 的隔离生产组件页面中逐步切换上述四种状态及失败详情，深浅主题实际绘制和 computed style 均核对：浅色 `rgb(161,62,62)`、深色 `rgb(224,161,152)`，普通工具对照仍为原灰色；标题／次数间距均为0、字号均为14px、行高均为24px，图标与文字间距保持6px。证据位于本机`.cache/reconnect-color-preview/colors.json`、`layout.json`及`failed-expanded-final.png`，临时入口为`.cache/reconnect-color-preview.ts`；只补样式验证，重连次数、请求、取消和冷恢复继续复用 Desktop owner 的真实窗口证据。
 
@@ -109,6 +115,10 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 ## Markdown 消息内容
 
 桌面 [MessageContent](src/desktop/MessageContent.tsx) 在 GFM 上支持以下展示；Web 的 `SafeMessageMarkdown` 和独立 TUI renderer 保持各自范围。
+
+正文renderer与[纯语法入口](src/desktop/markdown-parser.ts)共同接入固定`remark-cjk-friendly@2.3.4/parseOnly`，使`**说明：**后续正文`等中文标点紧邻写法正确解析强调；直接、缓存、prepared和Native Worker保持一致。不替换原字符串或插入不可见字符，原模型输出、复制来源、AST源码offset和HTML／图片／URL安全策略保持。插件在[UI manifest](package.json)与[Desktop内联清单](scripts/bundled-dependencies.ts)登记，构建保存其许可。取舍见[中文强调决定](../../.agents/notes/implemented/bug-fix/2026-11-05-cjk-markdown-emphasis.md)。
+
+2026-11-05，Windows x64／Bun1.4.4，截图准确原文和相邻标点反例在旧实现两项均失败；修复后正文扩展、缓存、流式、Worker构建／owner和输入编辑六文件37项／1551断言通过，UI／Desktop类型通过。`bun packages/ui/scripts/build-desktop.ts --outdir=.cache/markdown-cjk-build`通过，新插件无残余bare import且包含许可；实际Worker在无DOM／Node的VM中保留CJK强调。隔离生产组件页面逐步观察未闭合→补齐→追加→完成→prepared历史重开、深浅主题与340px窄列，截图原段三处粗体一致且无多余星号／横向溢出，材料归本机`.cache/cjk-markdown-audit-20261105`。锁定依赖包含插件要求的共享serializer更新，原编辑器回归已覆盖；未重建完整Native安装制品，不代表其他客户端或平台资格。
 
 [增量展示](src/desktop/incremental-markdown.tsx)保留整条消息的固定GFM／公式解析与语义处理，再为生成元素设置无DOM包装的memo边界；比较实际内容、属性及图表围栏闭合状态，忽略源码位置与一次性渐显提示。未变化的段落、列表项、表格、链接和代码组件跳过渲染；追加中的元素仅更新变化分支，后补引用、脚注与标题目标仍按完整上下文校正。代码围栏闭合状态从当前源码派生到该块，不再通过整条源码Context使所有代码组件重新渲染；操作能力Context仍按当前准入更新。
 

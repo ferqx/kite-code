@@ -1142,14 +1142,15 @@ export function Conversation({
       // unavailable activity still retains its last known unfinished lifecycle.
       const ongoing =
         !terminalStatus && failureGroups.length === 0 && (isOngoingTurn(activity) || active);
-      const failed =
-        activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
-      const cancelled =
-        activity?.status === 'cancelled' ||
-        terminalStatus === 'cancelled' ||
-        processGroups.some((group) =>
-          group.some((message) => message.role === 'assistant' && message.status === 'cancelled'),
-        );
+      const failed = terminalStatus
+        ? terminalStatus === 'failed'
+        : activity?.status === 'failed' || failureGroups.length > 0;
+      const cancelled = terminalStatus
+        ? terminalStatus === 'cancelled'
+        : activity?.status === 'cancelled' ||
+          processGroups.some((group) =>
+            group.some((message) => message.role === 'assistant' && message.status === 'cancelled'),
+          );
       const aborted = terminalStatus === 'aborted';
       const runningTool = runningToolTurns.has(entry.turnId);
       const thinking = thinkingTurns.has(entry.turnId);
@@ -1173,8 +1174,9 @@ export function Conversation({
         (activity
           ? isLiveTurn(activity)
           : active && !completed && !failed && !cancelled && !aborted);
+      const ended = completed || failed || cancelled || aborted;
       const finishedDuration =
-        lastTurnEntry && completed
+        lastTurnEntry && ended
           ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
           : undefined;
       const responseLabel =
@@ -1190,28 +1192,22 @@ export function Conversation({
           ? '执行状态待核实'
           : diagnostics && !terminalStatus && activity?.unavailable
             ? '上次确认状态'
-            : failed
-              ? '本轮失败'
-              : cancelled
-                ? '已停止'
-                : aborted
-                  ? '已中断'
-                  : completed
-                    ? finishedDuration === undefined
-                      ? '已完成'
-                      : '用时'
-                    : activity?.status === 'recovery_required'
-                      ? '需要恢复'
-                      : activity?.status === 'cancelling'
-                        ? '正在停止'
-                        : activity?.status === 'waiting'
-                          ? '正在等待'
-                          : activity?.status === 'queued'
-                            ? '等待处理'
-                            : '处理过程';
+            : ended
+              ? finishedDuration === undefined
+                ? '用时未知'
+                : '用时'
+              : activity?.status === 'recovery_required'
+                ? '需要恢复'
+                : activity?.status === 'cancelling'
+                  ? '正在停止'
+                  : activity?.status === 'waiting'
+                    ? '正在等待'
+                    : activity?.status === 'queued'
+                      ? '等待处理'
+                      : '处理过程';
       const showProcess = processGroups.length > 0;
-      // A settled Turn starts a new reading state even when no final reply was
-      // confirmed. Its process closes once, then the reader's choice persists.
+      // Failed/interrupted work without a final reply stays readable by default.
+      // Explicit reading choices still win; a final reply preserves normal collapse.
       const settled =
         !!terminalStatus ||
         failureGroups.length > 0 ||
@@ -1220,7 +1216,8 @@ export function Conversation({
       // Settlement regroups the final reply outside the process. Start a new
       // container so the old process cannot repaint during its exit animation.
       const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
-      const open = !settled || (expanded[turnKey] ?? false);
+      const incompleteFailure = (failed || aborted) && !finalReplyByTurn.has(entry.turnId);
+      const open = !settled || (expanded[turnKey] ?? incompleteFailure);
       if (showProcess && open) openTurns.push(turnKey);
       // Cold history and restored readings start at their full height. Replaying
       // the default-open process moves the transcript for the entire animation.
@@ -1239,7 +1236,7 @@ export function Conversation({
           role={active && label !== '处理过程' ? 'status' : undefined}
         >
           {label}
-          {lastTurnEntry && (
+          {lastTurnEntry && (!ended || finishedDuration !== undefined) && (
             <TurnElapsed
               startedAtMs={timing?.turnStartedAtMs}
               finishedAtMs={timing?.turnFinishedAtMs}

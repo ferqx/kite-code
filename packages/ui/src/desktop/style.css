@@ -3425,12 +3425,6 @@ body {
 .kite-client .agent-turn-summary:focus-visible > .agent-turn-status-label {
   color: var(--foreground);
 }
-.kite-client .agent-turn[data-turn-status="failed"] .agent-turn-status-label,
-.kite-client .agent-turn[data-turn-status="cancelled"] .agent-turn-status-label,
-.kite-client .agent-turn[data-turn-status="aborted"] .agent-turn-status-label,
-.kite-client .agent-turn[data-turn-status="recovery_required"] .agent-turn-status-label {
-  color: var(--destructive);
-}
 .kite-client .agent-turn-chevron {
   width: var(--ui-icon-size);
   height: var(--ui-icon-size);
@@ -3918,20 +3912,40 @@ body {
 .kite-client .turn-failure .tool-activity-marker-icon {
   color: var(--destructive);
 }
-.kite-client .turn-failure-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  line-height: 20px;
+.kite-client .alert {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: var(--conversation-text-size);
+  line-height: 24px;
   overflow-wrap: anywhere;
 }
-.kite-client .turn-failure-notice > svg {
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
-  margin-top: 3px;
+.kite-client .alert:has(> svg) {
+  grid-template-columns: 20px minmax(0, 1fr);
+}
+.kite-client .alert > svg {
+  grid-column: 1;
+  grid-row: 1;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+}
+.kite-client .alert:has(> svg) > :not(svg) {
+  grid-column: 2;
+}
+.kite-client .alert-title {
+  font-weight: var(--font-weight-semibold);
+}
+.kite-client .alert-description {
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+}
+.kite-client .alert-destructive {
   color: var(--destructive);
 }
 .kite-client .turn-failure-details {

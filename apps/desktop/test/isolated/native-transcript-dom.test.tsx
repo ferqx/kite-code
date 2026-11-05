@@ -253,7 +253,7 @@ test('model reconnection stays in its original Turn process across retries, reco
       1,
     );
     expect(f.host.querySelector('.agent-turn-failure') === null).toBe(true);
-    // A retained exit-animation body does not change the reader's collapsed state.
+    // The reader explicitly collapsed this same Turn earlier; keep that choice.
     expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
@@ -262,7 +262,10 @@ test('model reconnection stays in its original Turn process across retries, reco
     );
     const notice = f.host.querySelector('.turn-failure')!;
     expect(notice.closest('.agent-turn-process-messages') !== null).toBe(true);
-    expect(notice.textContent).toBe('回复未完成，已保留本轮消息。');
+    expect(notice.getAttribute('role')).toBe('alert');
+    expect(notice.textContent).toContain('当前记录未提供可核实的错误原因');
+    expect(notice.textContent).toContain('先核对本轮工具执行结果');
+    expect(notice.classList.contains('message')).toBe(false);
     expect(notice.querySelector('button')).toBeNull();
     expect(notice.querySelector('p')).toBeNull();
     // A cold reconstruction uses the same confirmed facts and never revives a spinner.
@@ -272,10 +275,7 @@ test('model reconnection stays in its original Turn process across retries, reco
         <Conversation {...terminal} loading={false} selected connected saveReading={() => {}} />,
       ),
     );
-    expect(f.host.querySelector('.turn-failure') === null).toBe(true);
-    await act(async () =>
-      (f.host.querySelector('.agent-turn-summary') as HTMLButtonElement).click(),
-    );
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
     expect(f.host.querySelectorAll('.agent-turn-process-messages .turn-failure')).toHaveLength(1);
     expect(f.host.querySelector('[data-status="running"]')).toBeNull();
     for (const execution of [
@@ -369,9 +369,7 @@ test('five failed reconnections expose one expandable human-readable error in th
       later.messages.findIndex((model) => model.systemKind === 'model_connection'),
     ).toBeLessThan(later.messages.findIndex((model) => model.id === 'next-input'));
     await act(async () => draw());
-    const expandProcess = async () =>
-      act(async () => (f.host.querySelector('.agent-turn-summary') as HTMLButtonElement).click());
-    await expandProcess();
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
     expect(f.host.querySelectorAll('.model-connection')).toHaveLength(1);
     const button = () =>
       f.host.querySelector<HTMLButtonElement>('[aria-label="展开重连失败详情"]')!;
@@ -388,7 +386,7 @@ test('five failed reconnections expose one expandable human-readable error in th
     expect(f.host.querySelector('.is-running')).toBeNull();
     await act(async () => f.root.render(null));
     await act(async () => draw());
-    await expandProcess();
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
     await act(async () => button().click());
     expect(f.host.querySelectorAll('[aria-label="重连失败详情"]')).toHaveLength(1);
     for (const [code, detail, expected] of [
@@ -689,7 +687,7 @@ test('the original Conversation owns collapsed Run history, adjacent exploration
     expect(failed.messages.find((model) => model.id === 'before')!.finalReply).toBeUndefined();
     const failure = failed.messages.find((model) => model.systemKind === 'turn_failure')!;
     expect(failure.failure?.reasonCode).toBe('execution_failed');
-    expect(failure.failure?.summary).toBe('本轮回复未完成');
+    expect(failure.failure?.summary).toBe('本轮异常结束');
     expect(failure.text).not.toContain('execution_failed');
     const sealed = desktopTranscript({
       messages: [

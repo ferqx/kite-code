@@ -47,12 +47,8 @@ function render(messages: Message[], host = false, running = false) {
   return { calls, html, document: new JSDOM(html).window.document };
 }
 
-test('reasoning-only terminal turns retain their status between the original user messages', () => {
-  for (const [status, label] of [
-    ['completed', '已完成'],
-    ['cancelled', '已停止'],
-    ['aborted', '已中断'],
-  ] as const) {
+test('reasoning-only terminal turns retain their facts and elapsed summary between the original user messages', () => {
+  for (const status of ['completed', 'cancelled', 'aborted'] as const) {
     const { document, html } = render([
       user('first'),
       thinking('run'),
@@ -61,7 +57,7 @@ test('reasoning-only terminal turns retain their status between the original use
     ]);
     const turn = document.querySelector('.agent-turn');
     expect(turn?.getAttribute('data-turn-status')).toBe(status);
-    expect(turn?.textContent).toContain(label);
+    expect(turn?.textContent).toBe('用时未知');
     expect(turn?.querySelector('button')).toBeNull();
     expect(turn?.querySelector('.agent-turn-process-messages')).toBeNull();
     expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe(
@@ -245,9 +241,14 @@ test('hidden reasoning does not split adjacent exploration calls and failure rec
   expect(failed.document.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe(
     'failed',
   );
-  expect(failed.document.querySelector('.agent-turn-summary')?.textContent).toBe('本轮失败');
+  expect(failed.document.querySelector('.agent-turn-summary')?.textContent).toBe('用时未知');
   expect(failed.document.querySelector('.agent-turn-failure')).toBeNull();
-  expect(failed.html).not.toContain('Actual failure');
+  expect(failed.document.querySelector('.agent-turn-process')?.getAttribute('data-state')).toBe(
+    'open',
+  );
+  expect(failed.document.querySelector('.turn-failure')?.textContent).toContain('Actual failure');
+  expect(failed.document.querySelector('.turn-failure')?.getAttribute('role')).toBe('alert');
+  expect(failed.document.querySelector('.turn-failure')?.classList.contains('message')).toBe(false);
   const expanded = new JSDOM(
     renderToStaticMarkup(
       <Conversation
@@ -264,7 +265,7 @@ test('hidden reasoning does not split adjacent exploration calls and failure rec
     expect(
       expanded.window.document.querySelector('.agent-turn-process-messages .turn-failure')
         ?.textContent,
-    ).toBe('Actual failure');
+    ).toContain('Actual failure');
   } finally {
     expanded.window.close();
   }

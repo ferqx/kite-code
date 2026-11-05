@@ -340,7 +340,8 @@ test('changed message bytes, host renderers and current Turn facts replace the p
     expect(f.host.textContent).toContain('New renderer: Changed saved reply');
     await f.render({ turnActivity: { turnId: 'run-0', status: 'failed' } });
     expect(replacementCalls).toHaveLength(80);
-    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toContain('本轮失败');
+    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('用时未知');
+    expect(f.host.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe('failed');
   } finally {
     await f.close();
   }

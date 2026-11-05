@@ -48,6 +48,12 @@ export function modelConnectionDetail(error: unknown): ModelAttemptDetail | unde
     ECONNRESET: 'connection_interrupted',
     EPIPE: 'connection_interrupted',
     UND_ERR_SOCKET: 'connection_interrupted',
+    ENETDOWN: 'connection_interrupted',
+    ENETUNREACH: 'connection_interrupted',
+    EHOSTDOWN: 'connection_interrupted',
+    EHOSTUNREACH: 'connection_interrupted',
+    ConnectionClosed: 'connection_interrupted',
+    ConnectionRefused: 'connection_refused',
   };
   for (let depth = 0; depth < 5 && error instanceof Error; depth++) {
     const code = (error as Error & { code?: unknown }).code;

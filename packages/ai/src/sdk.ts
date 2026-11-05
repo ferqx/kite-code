@@ -310,6 +310,8 @@ export function createSdkModelAdapter(options: {
       const emittedCalls = new Set<string>();
       const startedCalls = new Set<string>();
       const completedCalls: import('./index').ModelToolCall[] = [];
+      // Validate local history before entering the Provider failure/reconnect boundary.
+      const history = messages(request, names.encode, binding);
       try {
         const { reasoningEffort, ...settings } = presets.get(request.modelId) ?? {};
         let continuation: Json | undefined;
@@ -331,7 +333,7 @@ export function createSdkModelAdapter(options: {
             : reasoningEffort === undefined
               ? {}
               : { providerOptions: { openaiCompatible: { reasoningEffort } } }),
-          messages: messages(request, names.encode, binding),
+          messages: history,
           onStepFinish(step) {
             if (!binding) return;
             const assistant = step.response.messages.find(
@@ -415,10 +417,7 @@ export function createSdkModelAdapter(options: {
                     : part.finishReason === 'length'
                       ? 'length'
                       : null;
-              if (!reason) {
-                if (part.rawFinishReason !== undefined) throw new Error('model_finish_unavailable');
-                throw new ModelAttemptError('stream_incomplete');
-              }
+              if (!reason) throw new ModelAttemptError('stream_incomplete');
               if ([...startedCalls].some((id) => !emittedCalls.has(id)))
                 throw new ModelAttemptError('stream_incomplete');
               if (finished) throw new Error('model_finish_unavailable');
@@ -461,20 +460,19 @@ export function createSdkModelAdapter(options: {
       } catch (error) {
         signal.throwIfAborted();
         if (ModelAttemptError.isInstance(error)) throw error;
-        if (APICallError.isInstance(error) && error.isRetryable)
+        if (APICallError.isInstance(error)) {
+          if (error.statusCode === 401 || error.statusCode === 403)
+            throw new Error('model_transport_failed');
           throw new ModelAttemptError(
             error.statusCode === undefined ? 'connection_failed' : 'provider_unavailable',
             error.statusCode === 429
               ? 'rate_limited'
               : error.statusCode === 408
                 ? 'request_timeout'
-                : error.statusCode !== undefined
+                : error.statusCode !== undefined && error.statusCode >= 500
                   ? 'service_unavailable'
                   : modelConnectionDetail(error),
           );
-        if (error instanceof TypeError) {
-          const detail = modelConnectionDetail(error);
-          if (detail) throw new ModelAttemptError('connection_failed', detail);
         }
         // Provider errors may contain request bodies/URLs. Do not expose them at
         // this neutral boundary, include them as causes, or print them.
@@ -489,7 +487,9 @@ export function createSdkModelAdapter(options: {
           ].includes(error.message)
         )
           throw error;
-        throw new Error('model_transport_failed');
+        // Provider failures reconnect by default, including unrecognized native
+        // transport errors. The Runtime owns the bounded retry and close proof.
+        throw new ModelAttemptError('connection_failed', modelConnectionDetail(error));
       }
     },
   };

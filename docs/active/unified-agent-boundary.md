@@ -10,6 +10,10 @@ Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desk
 
 模型绑定在首次请求时创建独立 `Bun.FetchSession`，普通 Run、标题 model-only 绑定和模型目录查询沿原 owner 收尾关闭空闲池；关闭封住该绑定的新请求并复用原清理结果。原 AbortSignal 继续负责活跃请求取消，连接池关闭不冒充业务取消、成功或完整进程退出。代理选择、摘要字节和恢复拒绝仍用原规则；不共享其他绑定的连接，不因连接失败改出口或重放。具体接线与真实本地网络回归归[Service owner](../../apps/service/README.md#模型连接池与原取消恢复边界)。
 
+默认SDK模型请求与传输失败由[AI边界](../../packages/ai/README.md)提供重连分类，明确HTTP401／403认证或权限拒绝除外；未知网络错误不因缺少系统code而退出重连路径。Runtime仍必须核原Model Execution失败、关闭及来源资格，并限制同串故障最多5次重连；此分类不赋予客户端重发权，不把取消、本地历史校验、未知效果或未确认关闭转换为可重试证明，协议与持久格式保持。
+
+Native异常提示沿已观察的原Run生成展示Alert，不写入聊天历史或补造Tool事实；具体原因不足时明确保留未知并给出检查建议。失败／异常中断且同Turn没有已核实最终回复时，过程默认展开且外层不设高度上限，用户阅读选择仍优先。Alert与折叠只是展示，不能覆盖原准确终态、签发重试或恢复权；执行／协议／持久格式保持，当前展示和验证归[UI owner](../../packages/ui/README.md)。
+
 模型启停的串行后继证明沿 [Service](../../apps/service/README.md#native-provider-与下一次模型绑定) → 原 [HostMutation journal](../../packages/agent/src/storage/sqlite/host-mutations-README.md) → [Client](../../packages/client/README.md) → [Native Main](../../apps/desktop/README.md#native-提供商与模型设置) 交接。仅已应用的模型更新可附完整 `postReadSet`，它绑定原发布候选与实际 ETag；Main 只有在同一热提交、完整 scope 和后续 GET 四字段一致时才生成后继观察。该证明不授权重放、跨身份续写或跳过 CAS；失败、未知、外部变化和冷 journal 不恢复旧队列。renderer 的正常连续交互、同模型合并和关闭设置后后台保存只管理未派发意图，不取消或修改活动 Run 的封存配置。管理页的异常自动恢复只执行GET或原HostMutation ID的结果查询，包含当前Store冷未决项；普通GET不能解除unknown或恢复已丢弃尾部。明确暂态网络错误可重试原afterCommandId校验，只有原scope与proof仍一致才能继续已接受队列。恢复不重发POST、密钥、原secret或远端发现，也不修改活动Run。默认模型与普通模型均可启停，用户配置可保留指向已禁用模型的默认ID；新运行仍须使用已启用且configured的路由，不能自动替代已禁用默认。活动Run及其后续模型请求继续按原封存配置运行，不因该偏好更新取消或重绑定。
 
 Native MCP／Skills 全局设置沿[独立用户 API](../../apps/service/README.md#http-oauth-与原认证结果)读取用户配置，不获取当前 Session／Workspace、扫描项目或创建隐藏实体。Skills 只读 metadata；MCP 使用现有 HostMutation 的闭合 user marker 与明确 user transport owner 管理认证和设置连接，协议白名单不执行工具。原 Session Action、来源批准与实际 Tool／Job 权限保持，DB7 以显式记录版本保原 ID 的只读恢复，冷启动不重 POST。当前产品范围归[桌面手册](../handbook/clients/desktop/README.md)，长期理由归[用户级设置决定](../../.agents/notes/implemented/architecture/2026-10-24-user-global-extension-settings.md)。
@@ -456,7 +460,7 @@ Desktop Main在应用存续期内触发本地定时任务，调度元数据属de
 
 配套 Service 的普通 launcher close 等待原 child 的真实 drain／退出；取消、原 Run／Execution／Job 终态与 owned 资源关闭先于成功退出，不再默认5秒强杀。SIGINT／SIGTERM 与父 EOF 汇入相同收尾；启动读取可取消，已开始的装配仍保到其真实关闭。明确 hard timeout／强退及准入失败回收只触及本次 child，不能提供终态或清理证明。Native Main 的信号／父通道事件与菜单异步决定按同一停止意图串行，不允许迟到“保留服务”撤销已开始的 drain。实际边界与回归归[Service owner](../../apps/service/README.md)、[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)和[正常退出决定](../../.agents/notes/implemented/bug-fix/2026-10-21-paired-graceful-exit.md)。
 
-桌面Markdown扩展属于[UI派生展示](../../packages/ui/README.md#markdown-消息内容)：Native Worker只复用纯GFM／公式语法，renderer负责KaTeX排版、代码高亮及受限Mermaid绘图，不取得网络、文件或业务IPC权限。图表使用本地库、strict模式及SVG image，不挂载生成事件或放宽CSP；错误／超限保留原文。消息内标题／脚注跳转仅命中当前消息，图表暂停、缓存记账和窗口隐藏沿原Activity资源边界；完整正文身份、复制资格与业务恢复仍由原owner核验。
+桌面Markdown扩展属于[UI派生展示](../../packages/ui/README.md#markdown-消息内容)：Native Worker只复用纯GFM／CJK强调兼容／公式语法，renderer负责KaTeX排版、代码高亮及受限Mermaid绘图，不取得网络、文件或业务IPC权限。图表使用本地库、strict模式及SVG image，不挂载生成事件或放宽CSP；错误／超限保留原文。消息内标题／脚注跳转仅命中当前消息，图表暂停、缓存记账和窗口隐藏沿原Activity资源边界；完整正文身份、复制资格与业务恢复仍由原owner核验。
 ## 普通页面控制租约待审分支（2026-10-27）
 
 固定Renderer的绘制前同步量测也用于准确祖先分隔线处于active的实际拖动；稳定布局仍沿原异步单在途合并。同步准入退休旧异步反馈，原scope／frame／token／revision及几何检查保持，不由拖动授予页面控制或恢复旧观察。瞬时跨surface边缘差与具体平台资格归Desktop owner，不把同步IPC完成视为系统物理同帧。

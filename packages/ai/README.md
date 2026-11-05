@@ -40,9 +40,11 @@ SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses �
 
 2026-10-16 在 Windows x64／Bun 1.4.2 的本次修复工作树，经用户明确授权向 DeepSeek 官方 deepseek-v4-flash 发送两次对照，均仅“你好”及原失败请求中的八个工具定义，不含原系统／项目上下文或 reasoning_effort。两份实际请求只有函数名不同：六个旧名称不合语法时返回400／invalid_request_error，转换后返回200且完整流结束；不执行工具，不改用户配置。该有限实测确认工具名缺陷和修复效果，不证明真实文件工具执行、其他模型或全部 Provider 兼容性；详细计数和证据限制见上述决定。
 
-[ModelAttemptError](src/model-attempt.ts)仅归一化已知传输中断、SDK 明确标记可重试的 HTTP 故障（含 408／429／5xx）和流不完整的有限公开原因；不按远端正文猜失败或重试资格。可选`detail`只接受固定枚举，从真实HTTP状态或有界cause链的已知系统code提取超时、拒绝连接、域名解析、传输中断、频率受限及服务不可用；不保存远端message、body、URL、headers或原错误对象。SDK 每次仍是零内部重试；[Agent](../agent/README.md)在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，同串故障最多重连5次，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。
+[ModelAttemptError](src/model-attempt.ts)对模型请求及传输失败默认提供重连资格，不再依赖已知系统错误码或 SDK 的 `isRetryable` 白名单；只有明确 HTTP 401／403 认证或权限拒绝立即失败。不从远端正文、错误文字或缺失状态猜权限拒绝。请求前的本地历史校验、取消和响应完整性校验保持各自边界。可选`detail`仍只接受固定枚举，从真实HTTP状态或有界cause链的已知系统code提取超时、拒绝连接、域名解析、传输中断、频率受限及服务不可用；新增覆盖网络断开／不可达及Bun连接别名，未知错误只给通用原因，400等非服务端状态不猜具体detail，也不保存远端message、body、URL、headers或原错误对象。SDK 每次仍是零内部重试；[Agent](../agent/README.md)在真实原 Execution 已失败、关闭及来源资格保持时决定下一尝试，同串故障最多重连5次，记录新的执行与实际前驱。部分工具调用不派发，取消、未知结果及无法证明关闭的尝试不成为自动重试边界。Provider 的 `length` 原样交付 Core，由 Core 区分纯文本续接、截断工具批次和不可发布的截断摘要；AI 包不自行续轮。用户确认的默认策略与取舍见[重连决定](../../.agents/notes/implemented/bug-fix/2026-11-05-default-model-reconnection.md)。
 
 验证：`bun test packages/ai/test/` 和 `bun run --cwd packages/ai typecheck`。
+
+2026-11-05，Windows x64／Bun1.4.4，`0211e6590` 加默认重连修复：新增回归对照原源码28项中16项失败，覆盖未分类传输异常、网络断开及非权限HTTP错误；修复后AI全目录、Agent重连、Service Responses完整链路及Native轮次共152项／2291断言通过，AI／Agent／Desktop类型检查通过。两协议核未知Error与非Error拒绝、流读取失败、400／404／409／422默认重连及401／403只请求一次；Service核结构化错误和400连续5次失败后第5次重连恢复、物理断流耗尽和准确取消，未完成工具零派发。末次补核SDK整文件64项／382断言，过滤及未知结束原因同样标记为未完整响应并可重连；相邻Runtime与Native证据沿上述范围复用。本机隔离Provider不证明真实公网断网或安装制品资格。
 
 `createSdkModelAdapter` 可选接受按模型划分的 `presets` 映射，字段包括 `temperature`、`topP`、`maxOutputTokens` 和有限的 `reasoningEffort`。绑定时校验、复制并冻结条目；支持的数值传递给那一次实际 SDK Provider 请求。不支持的字段和非法数值在任何尝试前拒绝。这个仅供宿主使用的绑定使中立 ModelRequest 不包含凭据或可变配置，同时保留 Tool 描述。默认 Service 装配为每个新 Run 选择新绑定，并在生效快照中记录同样的受支持非秘密选项。
 

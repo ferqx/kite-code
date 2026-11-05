@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { JSDOM } from 'jsdom';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DesktopDiagnosticsProvider } from '../src/desktop/diagnostics';
 import { TurnFailure } from '../src/desktop/TurnFailure';
@@ -37,6 +38,10 @@ test('dev and prod never imply diagnostics; only an explicit test provider expos
         expect(rendered).not.toContain('原因代码');
         expect(rendered).not.toContain('<button');
         expect(rendered).not.toContain('展开回复失败');
+        const document = new JSDOM(rendered).window.document;
+        expect(document.querySelector('[data-slot="alert"]')?.getAttribute('role')).toBe('alert');
+        expect(document.querySelector('[data-slot="alert-title"]')).toBeNull();
+        expect(document.querySelector('.message')).toBeNull();
       }
       expect(draw(true)).toContain('original_reason');
     }
@@ -44,4 +49,23 @@ test('dev and prod never imply diagnostics; only an explicit test provider expos
     if (original === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = original;
   }
+});
+
+test('an unclassified exception gives an honest cause boundary and actionable advice in an Alert', () => {
+  const html = renderToStaticMarkup(
+    <TurnFailure
+      message={{ id: 'unknown', role: 'system', text: '', settled: true }}
+      onToggle={() => {}}
+    />,
+  );
+  const document = new JSDOM(html).window.document;
+  expect(document.querySelector('[data-slot="alert-title"]')).toBeNull();
+  expect(document.querySelector('[data-slot="alert"]')?.getAttribute('aria-label')).toBe(
+    '本轮异常结束',
+  );
+  expect(document.querySelector('[data-slot="alert-description"]')?.textContent).toContain(
+    '未提供可核实的错误原因',
+  );
+  expect(document.body.textContent).toContain('核对本轮工具执行结果');
+  expect(document.body.textContent).not.toContain('回复未完成，已保留本轮消息');
 });

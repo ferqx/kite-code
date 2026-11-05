@@ -4184,11 +4184,11 @@ test('first accepted input observes a later rejection before Run creation, keeps
       [],
     );
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
-    expect(f.host.querySelector('[aria-label="回复失败"]')).toBeNull();
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
     rejectReady = true;
     await f.refreshFacts();
-    await f.until(() => !!f.host.querySelector('[aria-label="回复失败"]'));
-    expect(f.host.querySelector('[aria-label="回复失败"]')?.textContent).toContain(
+    await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
+    expect(f.host.querySelector('.turn-failure[role="alert"]')?.textContent).toContain(
       '本地执行环境尚未就绪',
     );
     expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
@@ -4204,7 +4204,7 @@ test('first accepted input observes a later rejection before Run creation, keeps
       ),
     ).toBe(true);
     await f.click('Other B');
-    expect(f.host.querySelector('[aria-label="回复失败"]')).toBeNull();
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await act(async () => {
       [...f.host.querySelectorAll<HTMLButtonElement>('.session-row')]
@@ -4212,7 +4212,7 @@ test('first accepted input observes a later rejection before Run creation, keeps
         .click();
       await nextDesktopPresentation(f.dom);
     });
-    expect(f.host.querySelector('[aria-label="回复失败"]')).not.toBeNull();
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).not.toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('你好');
     rejectReady = false;
     await f.click('发送明确的新轮次');
@@ -4226,9 +4226,9 @@ test('first accepted input observes a later rejection before Run creation, keeps
     expect(retry.intent.commandId).not.toBe(first.intent.commandId);
     expect(f.calls.filter((input) => input.method === 'conversation.send')).toHaveLength(2);
     await f.resolve('accepted');
-    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
-    const oldFailure = f.host.querySelector('[aria-label="回复失败"]')!;
+    const oldFailure = f.host.querySelector('.turn-failure[role="alert"]')!;
     const latestInput = [...f.host.querySelectorAll('.message.user')].at(-1)!;
     expect(
       oldFailure.compareDocumentPosition(latestInput) &
@@ -4287,10 +4287,10 @@ test.each([
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
-    await f.until(() => !!f.host.querySelector('[aria-label="回复失败"]'));
+    await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(persistedInput ? 1 : 0);
     expect(f.host.body.textContent).not.toContain('从一个想法开始');
-    expect(f.host.querySelector('[aria-label="回复失败"]')?.textContent).toContain('本轮未能启动');
+    expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('本轮未能启动');
     expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
     expect(
@@ -4299,10 +4299,10 @@ test.each([
       ),
     ).toBe(false);
     await f.click('Other B');
-    expect(f.host.querySelector('[aria-label="回复失败"]')).toBeNull();
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await f.click('Original A');
-    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
   } finally {
     await f.close();
@@ -4384,7 +4384,7 @@ test('cold pre-Run rejection stays after prior successful history and before a l
         }
       : value;
   };
-  const failure = () => f.host.querySelector('[aria-label="回复失败"]');
+  const failure = () => f.host.querySelector('.turn-failure[role="alert"]');
   const expectBefore = (before: Element, after: Element) =>
     expect(
       before.compareDocumentPosition(after) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
@@ -4395,7 +4395,7 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     await f.click('Original A');
     await f.releaseHistory();
     await f.until(() => !!failure());
-    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
     expect(f.host.querySelector('.message.user')?.textContent).toContain(
       'prior successful request',
@@ -4415,7 +4415,7 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     expect(failure()).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await f.click('Original A');
-    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     const originalFailure = failure();
     await f.edit('later explicitly submitted request', '当前会话私有草稿');
     await f.click('发送明确的新轮次');
@@ -4451,13 +4451,13 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     const laterInput = [...f.host.querySelectorAll('.message.user')].at(-1)!;
     expect(laterInput.textContent).toContain('later explicitly submitted request');
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
-    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     expect(failure()).toBe(originalFailure);
     expectBefore(failure()!, laterInput);
     await f.click('Other B');
     expect(failure()).toBeNull();
     await f.click('Original A');
-    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     expectBefore(failure()!, [...f.host.querySelectorAll('.message.user')].at(-1)!);
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'submit')).toHaveLength(1);
