@@ -331,7 +331,9 @@ try {
       );
       assert.deepEqual(frame.turns, initial.turns, `${label}: turn grouping changed`);
       assert.ok(
-        !frame.animations.includes('collapsible-motion-expand'),
+        !frame.animations.some((name) =>
+          ['collapsible-motion-expand', 'grid-template-rows'].includes(name),
+        ),
         `${label}: cold process replayed expansion`,
       );
     }

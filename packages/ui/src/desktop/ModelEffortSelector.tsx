@@ -41,7 +41,7 @@ function focusProviderTab(element: HTMLElement | null) {
   const tab = element?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
   if (!tab) return false;
   tab.focus({ preventScroll: true });
-  const viewport = tab.closest<HTMLElement>('[data-radix-scroll-area-viewport]');
+  const viewport = tab.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
   if (viewport) {
     const item = tab.getBoundingClientRect();
     const area = viewport.getBoundingClientRect();

@@ -88,6 +88,10 @@ for (const [key, value] of Object.entries(globals)) {
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 }
 const { SessionPage } = await import('../../src/desktop/SessionPage');
+const { ScrollArea } = await import('../../src/desktop/components/ui/scroll-area');
+const { FileDiff } = await import('../../src/desktop/FileChanges');
+const { ToolActivity } = await import('../../src/desktop/ToolActivity');
+const { createPortal } = await import('react-dom');
 const { createRoot } = await import('react-dom/client');
 let root: ReturnType<typeof createRoot> | undefined;
 afterEach(async () => {
@@ -129,6 +133,59 @@ async function resize(narrow: boolean) {
     viewport.dispatchEvent(new dom.window.Event('change'));
   });
 }
+
+test('session scroll readers and portalled host content use native scrollbars without replacing readers on refresh', async () => {
+  const message = {
+    id: 'shell-native',
+    role: 'tool' as const,
+    toolName: 'shell_execute',
+    target: 'bun test',
+    status: 'running' as const,
+    settled: false,
+    text: '',
+    toolProgress: { stdout: 'original output' },
+  };
+  const present = (stdout: string) =>
+    render({
+      messages: [{ ...message, toolProgress: { stdout } }],
+      renderToolActivity: (messages, state) => (
+        <ToolActivity messages={messages} {...state} renderChildren={() => null} />
+      ),
+      detailPanel: {
+        label: 'Diff',
+        content: <FileDiff message={{ ...message, toolResult: { ok: true, stdout: '+diff' } }} />,
+        onClose: () => {},
+      },
+      overlays: createPortal(
+        <ScrollArea viewportProps={{ 'aria-label': 'Portalled reader' }}>Options</ScrollArea>,
+        document.body,
+      ),
+    });
+  await present('original output');
+  const shell = document.querySelector<HTMLButtonElement>('.shell-activity button')!;
+  expect(shell !== null).toBe(true);
+  await act(() => shell.click());
+  const readers = [...document.querySelectorAll<HTMLElement>('[data-slot="scroll-area-viewport"]')];
+  expect(readers.length).toBeGreaterThanOrEqual(4);
+  for (const reader of readers) expect(reader.dataset.nativeScrollbars).toBe('true');
+  expect(document.querySelector('[data-slot="scroll-area-scrollbar"]') === null).toBe(true);
+  expect(document.querySelector('[data-radix-scroll-area-viewport]') === null).toBe(true);
+  const output = document.querySelector<HTMLElement>('[aria-label="Shell 执行输出"]')!;
+  expect(output !== null).toBe(true);
+  Object.defineProperties(output, {
+    scrollHeight: { configurable: true, value: 1000 },
+    clientHeight: { configurable: true, value: 100 },
+  });
+  output.scrollTop = 420;
+  await act(() => output.dispatchEvent(new dom.window.Event('scroll', { bubbles: true })));
+  await present('original output\nappended output');
+  expect(document.querySelector('[aria-label="Shell 执行输出"]') === output).toBe(true);
+  expect(output.scrollTop).toBe(420);
+  expect(output.textContent).toContain('appended output');
+  expect(document.querySelector('.tool-diff-viewport')?.classList.contains('overflow-auto')).toBe(
+    true,
+  );
+});
 
 test('retained navigation calls the latest committed host callbacks and removes withdrawn operations', async () => {
   const calls: string[] = [];

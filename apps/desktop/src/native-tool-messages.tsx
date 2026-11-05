@@ -675,13 +675,29 @@ export function nativeLiveToolPresentationReady(
   );
 }
 
+type CompleteToolPresentation = {
+  message: DesktopMessage;
+  fact?: NativeToolMessageFact;
+};
+
 /** Retain only previously complete, exact-identity rows while replacement metadata loads. */
 export class NativeToolPresentation {
   private scope: string | undefined;
-  private complete = new Map<string, DesktopMessage>();
-  private readonly cached = new NativeDisplayCache<readonly [string, DesktopMessage][]>();
+  private complete = new Map<string, CompleteToolPresentation>();
+  private order = new Map<string, number>();
+  private nextOrder = 0;
+  private readonly cached = new NativeDisplayCache<{
+    complete: readonly [string, CompleteToolPresentation][];
+    order: readonly string[];
+  }>();
   private boundary: string | undefined;
   private bridge: unknown;
+
+  /** Previously admitted display facts only, never a fresh read or control capability. */
+  retainedFact(message: DesktopMessage): NativeToolMessageFact | undefined {
+    const prior = this.complete.get(message.presentationKey ?? message.id);
+    return prior?.message.id === message.id ? prior.fact : undefined;
+  }
 
   project(
     scope: string,
@@ -702,7 +718,10 @@ export class NativeToolPresentation {
     }
     if (this.scope !== scope) {
       this.scope = scope;
-      this.complete = new Map(this.cached.get(scope));
+      const saved = this.cached.get(scope);
+      this.complete = new Map(saved?.complete);
+      this.order = new Map(saved?.order.map((key, index) => [key, index]));
+      this.nextOrder = this.order.size;
     }
     const completeIds = new Set(
       completeNativeToolMessages(messages, facts).map((message) => message.id),
@@ -713,12 +732,16 @@ export class NativeToolPresentation {
       if (message.role !== 'tool') return [message];
       const key = message.presentationKey ?? message.id;
       keep.add(key);
+      if (!this.order.has(key)) this.order.set(key, this.nextOrder++);
       const entry = liveById.get(message.id);
       const ready = entry
         ? nativeLiveToolPresentationReady(entry, facts)
         : completeIds.has(message.id);
       if (ready) {
-        this.complete.set(key, message);
+        this.complete.set(key, {
+          message,
+          fact: facts.find((fact) => fact.messageId === message.id && !fact.inputPending),
+        });
         return [message];
       }
       const pending = facts.some(
@@ -734,7 +757,7 @@ export class NativeToolPresentation {
         this.complete.delete(key);
         return [];
       }
-      const prior = this.complete.get(key);
+      const prior = this.complete.get(key)?.message;
       if (!prior) return [];
       return [
         {
@@ -749,7 +772,30 @@ export class NativeToolPresentation {
       ];
     });
     for (const key of this.complete.keys()) if (!keep.has(key)) this.complete.delete(key);
-    this.cached.set(scope, [...this.complete]);
+    for (const key of this.order.keys()) if (!keep.has(key)) this.order.delete(key);
+    // History receipts can arrive ahead of still-running View entries. Replace
+    // tools in their first observed order inside each original readable block,
+    // without moving tools across narration, guidance, or Run boundaries.
+    const positions: { key: string; indices: number[] }[] = [];
+    groupNativeToolMessages(result).forEach((message, index) => {
+      if (message.role !== 'tool' || !message.presentationGroupId) return;
+      if (positions.at(-1)?.key !== message.presentationGroupId)
+        positions.push({ key: message.presentationGroupId, indices: [] });
+      positions.at(-1)!.indices.push(index);
+    });
+    for (const { indices } of positions) {
+      const tools = indices
+        .map((index) => result[index]!)
+        .sort(
+          (left, right) =>
+            this.order.get(left.presentationKey ?? left.id)! -
+            this.order.get(right.presentationKey ?? right.id)!,
+        );
+      indices.forEach((index, offset) => {
+        result[index] = tools[offset]!;
+      });
+    }
+    this.cached.set(scope, { complete: [...this.complete], order: [...this.order.keys()] });
     return result;
   }
 }

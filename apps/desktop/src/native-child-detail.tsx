@@ -209,11 +209,17 @@ export function NativeChildDetail({
     controls,
   ) => {
     const aggregate = !!group[0]?.presentationGroupId || group.length > 1;
+    const displayTools = group.flatMap((model) => {
+      const fact =
+        facts?.presentation?.tools.find((entry) => entry.messageId === model.id) ??
+        toolPresentation.current.retainedFact(model);
+      return fact ? [fact] : [];
+    });
     const unverified = new Set(
       group
         .filter(
           (model) =>
-            !facts?.presentation?.tools.some((entry) => entry.messageId === model.id) &&
+            !displayTools.some((entry) => entry.messageId === model.id) &&
             !liveTools.some((entry) => entry.message.id === model.id),
         )
         .map((model) => model.id),

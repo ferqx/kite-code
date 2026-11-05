@@ -550,6 +550,26 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 ## 原工具过程与结果阅读
 
+[工具分段渲染](src/native.tsx)从首个普通工具就建立稳定的分段容器，后续“创建／继续子 Agent”只插入所属行；首段沿原工具组身份，后续段沿前一个子 Agent 操作身份保存展开状态。[NativeToolPresentation](src/native-tool-messages.tsx)按同scope、同执行展示身份记录首次观察的位置，回执在同一可读工具块内原位接管，避免完成顺序将仍在运行的工具移到另一段并重建DOM。说明正文、引导和其他Run继续分隔工具块；冷读从实际历史顺序开始，窗口内切换沿原有界展示缓存保留位置。位置身份与完整展示共同计入原缓存预算，不参与元数据、结果、读取或操作资格。共享扫光CSS与循环参数保持。
+
+[实际Native聚合回归](test/isolated/native-live-tool-aggregation-dom.test.tsx)补充收起／展开两例，先复现子Agent加入时的节点替换，再覆盖其回执先到时两侧活动工具的节点、展开选择和运行标记；[位置与来源回归](test/isolated/native-tool-targets-dom.test.tsx)核乱序接管、正文／引导／Run边界、会话缓存和冷读。2026-11-05，`e96af0dd4`加本次diff、Windows x64／Bun1.4.4／Chrome156，六个完整定向文件91项／2014断言、Desktop类型、定向Biome、Core边界与测试归属检查通过。隔离生产Native页面检查深浅主题下普通混合工具、Shell、子Agent加入及收起状态共8组；6025个活动逐帧采样中原工具组零缺帧，CSS动画对象与起始时间各保持一个，展开工具行的动画身份在加入与回执接管后同样保持。过程图及原始采样在本机`.cache/tool-animation-native-trace/before/`与`after/`，临时入口为`.cache/tool-animation-native-trace.ts`；原始重建与首轮仅保首段、未保另一侧工具的失败证据保留于测试输出。该夹具使用受控业务事实，普通工具的合成metadata目标不作为真实路径验收；此范围不代完整Electron窗口、真实模型或安装资格。
+
+同一隔离Native流程另在深浅主题继续到全部回执、轮次完成和重新展开过程：工具扫光、运行标记和底部回复状态均归零，原输入只显示一次，最终回复和草稿位置保持。完整阶段图与终态数据在本机`.cache/tool-animation-native-trace/completion/`；不以单张完成截图替代前述活动阶段的节点和动画时序核对。
+
+[NativeToolPresentation](src/native-tool-messages.tsx)同时保留完整行及该行此前准入的准确展示 fact，父会话与[只读子详情](src/native-child-detail.tsx)在回到原scope、当前metadata仍待核验时沿用同一工具类型，避免先画通用图标再替换。fact 只在原展示键和原消息ID一致时复用，与完整行共同计入既有有界缓存；来源冲突、输入未完成、bridge／generation 重置及缺失记录均撤销。它只支持已核实展示：文件打开仍取 fresh fileTargets，子详情导航须有当前工具 fact，图片新读还须当前 fact 已完成核验，不从缓存描述授予操作资格。[回执实际DOM](test/isolated/native-tool-receipt-render-dom.test.tsx)核已知、混合和图片工具的多次快速往返、核验挂起／接管、原SVG身份及图片新读门禁；[来源回归](test/isolated/native-tool-targets-dom.test.tsx)核准确身份和撤销。
+
+共享会话的细原生滚动条、紧凑工具行、完成式工具名称和可反向折叠由 [UI owner](../../packages/ui/README.md#原桌面展示层)负责。工具名称、颜色和动画只改展示，未升级工具定义或协议，也不改变执行结果、审批或读取资格。
+
+2026-11-05，`e96af0dd4`加本轮展示改动、Windows x64／Bun1.4.4／Chrome156.0.8078.80：逐文件 `bun test ./<原路径> --timeout 20000`，UI 的聚合、延迟内容、侧栏、差异滚动、模型选择、Agent行及页面七个完整文件，加 Native 的聚合、目标、回执、工具消息、Agent行、子消息复制及环境／子详情恢复七个完整文件，共149项／4867断言通过；UI／Desktop 类型和定向 Biome 通过。共享 viewport、Portal、逐项完成式名称、失败原因与原读取门禁均沿原测试入口核对。
+
+隔离生产 Native 页面在深浅主题各做两次 A→B→A，并挂起再交付工具 metadata；510个相关逐帧／变化采样中，原SVG零替换、零错误图标、零页面错误。基线均能复现核验期间退回通用图标，前后材料在本机`.cache/tool-icon-session-preview/{before,after}/`。生产 SessionPage 与编译CSS另核深浅×1280／780px四组：Shell手动阅读时追加保持位置，边界 wheel 原生传递至聚合及消息区，24个真实 wheel 事件均未阻止默认行为，期间零JS scrollTop setter；原生thumb拖动、普通刷新位置、差异双轴与Home／End、具名焦点、草稿及模型选择均正常。工具行实际28px，失败行常规400字重且按主题取error颜色。画面观察发现的深色 Portal 浅轨道已修正，补核两主题的thin与color-scheme；阶段图及逐帧报告在`.cache/session-native-scroll-preview/`，四组报告保留为`report-four-cases.json`。
+
+连续开合在深浅主题各做三组反向点击：旧keyframe基线跳变最大约326px，新transition在12次反向提交前后高度差均为0，原reader节点保持；1895个过程帧中，反向阶段最大帧间隔14.1ms。关闭结束后reader退出、再次打开正常，减少动态效果模式直接显示。已观察快速反向、稳定展开和最终收起画面；材料在`.cache/tool-collapse-interruption-preview/{before,after}/`，没有以最终截图代替时序采样。以上均为隔离生产组件与受控事实，不读取用户Store、不发送真实任务，未重验完整安装版Electron或其他平台。
+
+最终共享折叠和滚动样式下，另重跑前述Native扫光八组：6308个过程帧、零页面错误，普通刷新、子Agent插入及回执接管前后原动画对象和起始时间保持。最新逐帧记录及阶段图覆盖本机`.cache/tool-animation-native-trace/after/`，已复核子Agent两侧与Shell展开过程；早先完成／重开材料仍按其原范围复用。
+
+扩展回归保留既有边界：`native-session-navigation-dom.test.tsx` 的四项阅读／owner回执断言在原HEAD渲染来源同样失败；`native-transcript-dom.test.tsx`完整运行为23通过／1失败，真实HTTP createWorkspace报`network_outcome_unknown`，该单例独立执行12断言通过，把全部改动来源替换回HEAD后完整文件仍同样失败。它们未计入上述149项通过，未扩大为本轮滚动与工具展示修复；首轮高并发导致延迟内容文件超时，独立重跑5项／40断言通过。原浏览器夹具的差异按钮／模型视图定位及隐藏原生轨道参数已校正，再以可见原生轨道完成拖动验证。
+
 [目标提取](src/tool-request-target.ts)在已支持定义／版本中只选择明确的文件路径、查找／搜索条件及范围、目录、MCP查询／服务／资源／提示词、计划与Skill引用，目标最多4096个完整Unicode码点。不打印工具正文或任意扩展参数；无单一可读目标的验证记录、空输入读取及任意远端工具不猜字段。Shell继续走原命令分片和结果证明，网页显示继续沿共享UI去掉凭据／查询部分。
 
 `browser.execute`、`skills.load`、`skills.resource` 当前版本1的工具行分别显示“浏览器操作”“加载技能”“读取技能资料”，浏览器取原输入的 `description` 作为本次动作说明；加载技能只显示原 id，例如“加载技能 computer-use”，不附调用目的；读取技能资料只显示 id／资源路径，不附执行描述。仅浏览器的新模型调用要求执行描述为1–10个Unicode字符且非空白；Skill 两入口不再接受 description 入参，历史原文保留。展示只压为单行，不从代码或结果生成说明，不把目的当成成功或权限。旧浏览器记录缺字段只保可读名称，旧 Skill 可回退原 id／资源路径；未知版本不借新 schema 解释字段。该文本复用原 target 元数据及完整呈现门禁，live、只读子详情、保存回执与来源冲突撤销沿原通道，不传原代码或新增 IPC 字段。

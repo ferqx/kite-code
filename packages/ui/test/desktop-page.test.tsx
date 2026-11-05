@@ -43,7 +43,8 @@ test('read-only page permits reading and web links without exposing local or mut
   expect(html).not.toContain('data-tauri-drag-region');
   expect(html).toContain('<strong>Session</strong>');
   expect(html).not.toContain('加载更早的会话');
-  expect(html).toContain('data-radix-scroll-area-viewport');
+  expect(html).toContain('data-native-scrollbars="true"');
+  expect(html).not.toContain('data-radix-scroll-area-viewport');
   expect(html.match(/<header/g)).toHaveLength(2);
   expect(html).toContain('data-slot="resizable-panel-group"');
   expect(html).not.toContain('focus-visible:ring-0');

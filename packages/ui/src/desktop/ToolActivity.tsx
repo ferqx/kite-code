@@ -75,6 +75,25 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 function toolTitle(message: Message): string {
+  const label = toolActionTitle(message);
+  if (
+    !message.toolName ||
+    !TOOL_LABELS[message.toolName] ||
+    !['completed', 'failed'].includes(message.status ?? '') ||
+    message.dispatchCommitted === false ||
+    message.approval?.state === 'rejected' ||
+    message.decisionRefresh
+  )
+    return label;
+  if (message.toolName === 'browser_execute') return '已完成浏览器操作';
+  return /^(读取|写入|修改|查找|列出|加载|运行|查看|搜索|使用|请求|更新|编写|创建|继续|调用|询问)/.test(
+    label,
+  )
+    ? `已${label}`
+    : label;
+}
+
+function toolActionTitle(message: Message): string {
   if (
     message.toolName &&
     ['read_file', 'edit_file', 'write_file', 'shell_execute', 'web_fetch'].includes(
@@ -189,7 +208,8 @@ function shellTitle(message: Message): string {
   if (message.status === 'unknown') return '结果未知';
   if (message.status === 'completed' && message.shell?.jobStatus === 'outcome_unknown')
     return '命令结果未知';
-  if (message.status === 'completed' && message.shell?.jobStatus === 'failed') return '命令失败';
+  if (message.status === 'completed' && message.shell?.jobStatus === 'failed')
+    return operation === 'execute' ? '已运行' : '命令失败';
   if (
     operation === 'execute' &&
     (message.shell?.timedOut || message.toolResult?.terminationReason === 'timed_out')
@@ -209,7 +229,7 @@ function shellTitle(message: Message): string {
   if (message.status === 'queued') return '等待执行';
   if (message.status === 'failed')
     return {
-      execute: '运行失败',
+      execute: '已运行',
       launch: '启动失败',
       read: '读取失败',
       wait: '等待失败',
@@ -1316,6 +1336,7 @@ export function ToolActivity({
                   {grouped && (
                     <ScrollArea
                       className="tool-activity-scroll"
+                      nativeScrollbars
                       fade="y"
                       chainScroll
                       viewportClassName="tool-activity-viewport"

@@ -13,6 +13,7 @@ import type { ToolActivityState } from './Conversation';
 import { Conversation } from './Conversation';
 import { ConversationCache, type ConversationCacheScope } from './ConversationCache';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
+import { NativeScrollbars } from './components/ui/scroll-area';
 import { FileChanges } from './FileChanges';
 import {
   NewConversationContext,
@@ -268,7 +269,11 @@ export function SessionPage(props: SessionPageProps) {
     props.browserRestoreKey,
     props.browserPending,
   );
-  return <SessionPageContent {...props} hasTabs={hasTabs} tabModel={tabModel} />;
+  return (
+    <NativeScrollbars enabled={!props.workbench && !props.scheduledTasks}>
+      <SessionPageContent {...props} hasTabs={hasTabs} tabModel={tabModel} />
+    </NativeScrollbars>
+  );
 }
 
 /** The single production conversation page for both hosts. No host/protocol imports. */
@@ -1137,6 +1142,7 @@ function SessionPageContent({
   return (
     <div
       className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}
+      data-native-scrollbars={!props.workbench && !props.scheduledTasks ? 'true' : undefined}
       style={
         { '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px` } as CSSProperties
       }

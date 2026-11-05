@@ -134,7 +134,8 @@ try {
               .getAnimations()
               .filter(
                 (animation) =>
-                  (animation as CSSAnimation).animationName === 'collapsible-motion-expand',
+                  (animation as CSSAnimation).animationName === 'collapsible-motion-expand' ||
+                  (animation as CSSTransition).transitionProperty === 'grid-template-rows',
               ).length,
             bottom: viewport
               ? viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
