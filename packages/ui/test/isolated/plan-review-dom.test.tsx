@@ -3,7 +3,7 @@ import type { Interaction } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { PlanReviewDraft } from '../src';
+import type { PlanReviewDraft } from '../../src';
 
 const original = {
   id: 'original-review',
@@ -45,6 +45,7 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
     MutationObserver: globalThis.MutationObserver,
     DocumentFragment: globalThis.DocumentFragment,
     Node: globalThis.Node,
+    NodeFilter: globalThis.NodeFilter,
     Element: globalThis.Element,
     HTMLSelectElement: globalThis.HTMLSelectElement,
     HTMLInputElement: globalThis.HTMLInputElement,
@@ -63,6 +64,7 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
     MutationObserver: dom.window.MutationObserver,
     DocumentFragment: dom.window.DocumentFragment,
     Node: dom.window.Node,
+    NodeFilter: dom.window.NodeFilter,
     Element: dom.window.Element,
     HTMLSelectElement: dom.window.HTMLSelectElement,
     HTMLInputElement: dom.window.HTMLInputElement,
@@ -70,7 +72,8 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
     getComputedStyle: dom.window.getComputedStyle,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
-  const { InteractionCard } = await import('../src');
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+  const { InteractionCard } = await import('../../src');
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   const answers: NonNullable<Interaction['answer']>[] = [];
@@ -112,11 +115,18 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
     expect(approve().disabled).toBe(true);
     const text = '  修改原文\n雪🙂e\u0301 / @  ';
     await act(async () => {
-      const nativeSelect = host.querySelector('select')!;
-      nativeSelect.value = [...nativeSelect.options].find(
+      mode().dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+    });
+    await act(async () => {
+      const choice = [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')].find(
         (option) => option.textContent === 'accept_edits',
-      )!.value;
-      nativeSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+      );
+      expect(choice).toBeDefined();
+      choice!.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
       feedback().value = text;
       feedback().dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     });

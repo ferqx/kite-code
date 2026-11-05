@@ -2,14 +2,14 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { PermissionFacts } from '../src';
-import type { ComposerProps } from '../src/desktop/Composer';
+import type { PermissionFacts } from '../../src';
+import type { ComposerProps } from '../../src/desktop/Composer';
 
 // Initialize the shared Radix dependency family against a DOM before exercising each fixture.
 const bootstrap = new JSDOM('<!doctype html><div></div>');
 const priorBootstrap = { window: globalThis.window, document: globalThis.document };
 Object.assign(globalThis, { window: bootstrap.window, document: bootstrap.window.document });
-const { PermissionPanel } = await import('../src');
+const { PermissionPanel } = await import('../../src');
 Object.assign(globalThis, priorBootstrap);
 bootstrap.window.close();
 
@@ -223,7 +223,7 @@ async function composerPermissionFixture(language = 'zh-CN') {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
-  const { Composer } = await import('../src/desktop/Composer');
+  const { Composer } = await import('../../src/desktop/Composer');
   const host = document.getElementById('root')!,
     root = createRoot(host),
     changes: string[] = [],

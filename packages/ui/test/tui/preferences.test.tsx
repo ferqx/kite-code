@@ -444,11 +444,16 @@ test('populated model, permission and Skill panels translate owned instructions 
       ['Models', 'original_revision', 'unavailable'],
     ],
   ] as const) {
-    const ui = render(
+    const panel = () => (
       <TuiPresentationProvider value={{ preferences, testDiagnostics: true }}>
         <Panel controller={presented} />
-      </TuiPresentationProvider>,
+      </TuiPresentationProvider>
     );
+    const ui = render(panel());
+    // These diagnostic labels belong to the expanded panel; the test stream has no rows default.
+    Object.defineProperty(ui.stdout, 'rows', { value: 40 });
+    ui.rerender(panel());
+    await tick();
     for (const label of labels) expect(ui.lastFrame()).toContain(label);
     for (const value of raw) expect(ui.lastFrame()).toContain(value);
     ui.unmount();

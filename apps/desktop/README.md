@@ -1456,7 +1456,7 @@ Electron exit0、所属 Service／后代消失、冷只读事实与两层独占�
 
 2026-10-21 macOS 26.7.1／Bun 1.4.2／Electron 44.3.0，`2a5cd0cca` 加本任务工作区改动：上述整窗口最终1项／17条 Bun 断言及独立 Node／DOM 断言通过，25.14秒，实际10次模型请求中含2次 Auto 审核。两项原 Tool 的同 Session／Run／attempt1、最终根 revision7、准确外部文件各一次与零人工答案共同核实；独立 Auto 回执确认到可见且 busy 撤销本次约64ms，只作为单次观察。原 Electron exit0、所属 Service／后代消失、冷只读事实与两层制品独占租约重新取得均通过，成功路径清理未发信号。合并面板及原审批／输入／环境信息四个 DOM 文件10项／111断言、根八 workspace typecheck、定向 Biome 与文档检查通过。首轮子详情错误等待环境卡文案的失败保留，driver 改等实际详情“等待人工审批”；没有改变产品文案、审批期限或隐藏输入行为。此证据使用受控模型端点，不代表付费远端、签名安装或其他平台资格。
 
-[test/permissions.test.ts](test/permissions.test.ts) 使用真实默认宿主、SQLite 与 loopback HTTP，验证三种正式 API 模式/default及旧 raw ask 明确拒绝、信任/撤销、竞争 CAS、未知回执及跨会话重复抑制，业务执行数量保持零。另有局部 capability/child 投影测试；共享 UI 的 [实际 DOM 测试](../../packages/ui/test/permissions-dom.test.tsx) 覆盖键盘与迟到卡片切换。这些证据属于便携调用者，不代表正式 Electron 或 TUI 制品已完成。
+[test/permissions.test.ts](test/permissions.test.ts) 使用真实默认宿主、SQLite 与 loopback HTTP，验证三种正式 API 模式/default及旧 raw ask 明确拒绝、信任/撤销、竞争 CAS、未知回执及跨会话重复抑制，业务执行数量保持零。另有局部 capability/child 投影测试；共享 UI 的 [实际 DOM 测试](../../packages/ui/test/isolated/permissions-dom.test.tsx) 覆盖键盘与迟到卡片切换。这些证据属于便携调用者，不代表正式 Electron 或 TUI 制品已完成。
 
 新的显式原生入口位于 [electron/main.ts](electron/main.ts)、[preload.ts](electron/preload.ts) 与 [native renderer](src/native.tsx)。这是现有 portable controller 的实际 Electron 宿主；根 `desktop` 已选择此新 Native 入口；旧源码仍保留，完整 UI 能力及发布资格尚未退出，无旧协议 fallback。main 独占公共 NativeClient、配对 Service、预选 profile、观察流和意图；renderer 只有封闭的 `kiteNative.request/watch`，不接收 token、profilePath、Runtime 或任意 HTTP/IPC 通道。窗口 sender 必须是原 webContents/mainFrame 与实际制品文档，子窗口与旧 frame 不能提交。单 IPC 请求最多 1MiB、响应最多 4MiB，消息页最多 200，renderer 当前消息视图最多 4096 条/8MiB；超界只拒绝该次读写，不关闭服务。
 
@@ -1610,7 +1610,7 @@ Service声明`message_changes`时，同一连续scope随后调用[Client](../../
 
 2026-10-09 的原完整默认暴露完成轮次默认折叠后旧 driver 未展开的断言错误；driver 现沿真实“展开本轮处理过程”入口继续原计数与正文断言，原页面、driver、整例期限保持。随后原重载期限仍实际失败；当前 reader 完整文件 4 项／22 条断言核快照保留、失败前缀及切换缓存，Main 完整文件 14 项／146 条断言核固定高水位读至 EOF、后页复用已验证大小和新读取重置。独立审查核并发学习值只缩小、旧读取不能回写。真实历史窗口与完整默认的准确状态归[普通制品收束进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)，局部通过不代证窗口重载或阶段退出。
 
-2026-10-02 在 macOS/Bun 1.4.2 当前工作树执行 `bun test apps/desktop/test packages/ui/test/permissions-dom.test.tsx`，最终完整组合为 34 文件、76 项、509 条 Bun 断言，全部通过（约 111 秒）。包括 >17MiB 原作用域输入/输出、Context、授权、私有冷草稿、管理、压缩、活动刷新和新增长历史窗口；各真实窗口仍独立核对所属 Service 退出。首轮组合曾失败于暂时历史加载清除 Context 事实，以及 fixture 在 disabled 按钮直接发送 Enter；前者已修复为 loading 保留只读事实，后者等待原 actionability 后继续原键盘动作，原断言和期限保持。Desktop typecheck/build、11 个归属代码文件 Biome、文档结构/影响及测试归属/统一边界检查通过。该结果不改变正式入口和跨平台资格的未完成状态。
+2026-10-02 在 macOS/Bun 1.4.2 当前工作树执行 `bun test apps/desktop/test packages/ui/test/isolated/permissions-dom.test.tsx`，最终完整组合为 34 文件、76 项、509 条 Bun 断言，全部通过（约 111 秒）。包括 >17MiB 原作用域输入/输出、Context、授权、私有冷草稿、管理、压缩、活动刷新和新增长历史窗口；各真实窗口仍独立核对所属 Service 退出。首轮组合曾失败于暂时历史加载清除 Context 事实，以及 fixture 在 disabled 按钮直接发送 Enter；前者已修复为 loading 保留只读事实，后者等待原 actionability 后继续原键盘动作，原断言和期限保持。Desktop typecheck/build、11 个归属代码文件 Biome、文档结构/影响及测试归属/统一边界检查通过。该结果不改变正式入口和跨平台资格的未完成状态。
 
 当前输入模型选择要求实际 enabled/configured 目录。[原 Context Service 夹具](test/native-context-service.fixture.ts)为其固定 adapter 提供准确 Store/Workspace 的只读 `fixed` 目录，配置修改入口明确拒绝；[窗口 driver](test/native-context-electron.fixture.ts)两次新轮次等待按钮实际可点击。原四请求、一次 ledger 效果、idle Rewind、active Include 与下一 Model checkpoint 的准确来源、无 Job 重放、页面刷新零新增请求和所属 PID 退出断言保持。该夹具适配不改变生产模型就绪门禁；有限窗口1项4条Bun断言及15条Node断言通过，当前完整默认结果另见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 

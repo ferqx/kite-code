@@ -1613,7 +1613,7 @@ test('running Composer queues its exact input, and only the queued-row button se
     await f.click('引导发送排队消息');
     expect(guideCount).toBe(1);
     await f.refreshFacts();
-    expect(f.host.body.textContent).not.toContain('本轮未能启动');
+    expect(f.host.querySelector('.turn-failure[aria-label*="本轮未能启动"]')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('下一条仍未发送的草稿');
     expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
     await f.publishMessages(
@@ -1641,7 +1641,7 @@ test('running Composer queues its exact input, and only the queued-row button se
     expect(guideCount).toBe(1);
     await act(async () => f.root.render(<NativeDesktop key="cold-guidance" />));
     await f.click('Original A');
-    expect(f.host.body.textContent).not.toContain('本轮未能启动');
+    expect(f.host.querySelector('.turn-failure[aria-label*="本轮未能启动"]')).toBeNull();
     expect(f.host.querySelectorAll('article[data-message-id="saved-guide"]')).toHaveLength(1);
   } finally {
     await f.close();
@@ -4194,9 +4194,9 @@ test('first accepted input observes a later rejection before Run creation, keeps
     rejectReady = true;
     await f.refreshFacts();
     await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
-    expect(f.host.querySelector('.turn-failure[role="alert"]')?.textContent).toContain(
-      '本地执行环境尚未就绪',
-    );
+    const failure = f.host.querySelector('.turn-failure[role="alert"]');
+    expect(failure?.getAttribute('aria-label')).toBe('本地执行环境尚未就绪，本轮未能启动');
+    expect(failure?.textContent).toBe('原消息已保留。请在本地执行环境恢复后重新发送。');
     expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
     expect(f.host.body.textContent).not.toContain('"reason"');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('你好');
@@ -4296,7 +4296,9 @@ test.each([
     await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(persistedInput ? 1 : 0);
     expect(f.host.body.textContent).not.toContain('从一个想法开始');
-    expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('本轮未能启动');
+    const failure = f.host.querySelector('.turn-failure[role="alert"]');
+    expect(failure?.getAttribute('aria-label')).toBe('本轮未能启动');
+    expect(failure?.textContent).toBe('原消息已保留，请检查模型和执行环境后重新发送。');
     expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
     expect(

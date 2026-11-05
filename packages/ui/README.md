@@ -186,13 +186,13 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 ## 原桌面展示层
 
-`Composer.confirmFullPermission`是可选宿主确认port：提供时使用宿主异步确认及AbortSignal，只有准确当前scope／权限／回调与严格true才调用原权限变更；取消、失效与卸载退休确认，失败显示有限可重试说明。没有port的Web／共享调用保留原DOM确认及风险文案。普通模式菜单的原门控保持，仅本地完全访问确认在途禁止重复选择。[权限DOM回归](test/permissions-dom.test.tsx)核宿主与Web两条路径；Native专用自绘浮层与原有权限命令分离，实际身份／窗口和像素资格归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
+`Composer.confirmFullPermission`是可选宿主确认port：提供时使用宿主异步确认及AbortSignal，只有准确当前scope／权限／回调与严格true才调用原权限变更；取消、失效与卸载退休确认，失败显示有限可重试说明。没有port的Web／共享调用保留原DOM确认及风险文案。普通模式菜单的原门控保持，仅本地完全访问确认在途禁止重复选择。[权限DOM回归](test/isolated/permissions-dom.test.tsx)核宿主与Web两条路径；Native专用自绘浮层与原有权限命令分离，实际身份／窗口和像素资格归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
 
 [ApplicationConfirmationDialog](src/desktop/FullPermissionConfirmationDialog.tsx)集中维护完全权限与移除空间两种应用确认的固定内容和相同视觉组件；Full包装继续由Composer的Web路径复用。取消保持默认焦点，Esc取消，危险操作按钮使用共享红色样式；组件只返回用户决定，不执行权限变更或空间移除；Native退出应用保留系统原生确认框。Native在独立WebContentsView渲染同一组件、CSS和主题，Main拥有原生层序及跨视图焦点；临时失败message由Native owner负责，不复用此模态组件。
 
 [共享主题](src/desktop/style.css)以偏暖红色、松柏绿和琥珀色表达异常／危险、成功和注意，保留中性灰表面。`--destructive`负责状态文字，`--destructive-fill`及其hover／pressed变量负责白字实心按钮，深浅主题各自定义；成功徽标与diff新增共用`--success`及其底色，diff删除和错误文字共用`--destructive`，错误边框从异常色与普通边框混合。代码diff的addition／deletion也消费这套语义色，字符串、数字等语法高亮保持各自颜色；Native提供商的配置圆点和成功提示不另写固定绿色。
 
-2026-11-05，Windows x64／Bun1.4.4，`76e49e317`加本轮配色diff：[权限DOM](test/permissions-dom.test.tsx)与[Native确认框DOM](../../apps/desktop/test/isolated/native-global-dialog-dom.test.tsx)两个完整文件26项／239断言通过，沿原身份、取消、失效与主题切换核实，不改变权限或操作语义。源码色值的深浅主题共26组正常文字／背景对比度检查通过，最低4.63:1；两份CSS的Biome检查通过。隔离生产组件样式已编译；电脑操作因无法可靠识别本机浏览器地址而停止，实窗视觉与交互过程尚未完成验收，不以DOM或色值计算代替这项资格。
+2026-11-05，Windows x64／Bun1.4.4，`76e49e317`加本轮配色diff：[权限DOM](test/isolated/permissions-dom.test.tsx)与[Native确认框DOM](../../apps/desktop/test/isolated/native-global-dialog-dom.test.tsx)两个完整文件26项／239断言通过，沿原身份、取消、失效与主题切换核实，不改变权限或操作语义。源码色值的深浅主题共26组正常文字／背景对比度检查通过，最低4.63:1；两份CSS的Biome检查通过。隔离生产组件样式已编译；电脑操作因无法可靠识别本机浏览器地址而停止，实窗视觉与交互过程尚未完成验收，不以DOM或色值计算代替这项资格。
 
 `SessionPage`手动动画收起准确已展示浏览器时，关闭意图立即更新，同scope原页仅保持到既有布局rAF开始，再同批撤页与折叠。立即重开、scope／active tab／host panel替换和无布局都退休pending；不为保画面恢复旧owner或延迟真正覆盖／隐藏。普通详情、导航及已有网页直接展开时序保持。[同提交与退休回归](test/isolated/desktop-session-page-render.test.tsx)只证明状态与面板目标，真实原生过程归上述Desktop owner。
 
@@ -462,7 +462,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 有限 `plan_review` 答复只在请求提供 planId/version/digest/content 与非空、无陌生值的 allowedModes 时开启。支持模式仅 `auto`、`accept_edits`（严格取请求提供的子集），批准要求用户显式选择；Full 不在选项中。缺失/陌生 metadata 或 modes 保只读说明，并仍显示完整原 request；未知身份字段明确 unknown。反馈最多 8192 个 JavaScript 字符串单位，原空格、Unicode 与换行保留，deny/revise 不携带 mode。信息回答不改变默认权限，不证明计划已满足业务 required evaluator，也不证明执行或完成。
 
-`PlanReviewDraft` 与 `initialPlanDraft/onPlanDraftChange` 让宿主以原 Interaction 身份保存显式模式与原反馈。表单事件同步通知宿主，同一 render 重复提交受原锁约束；失败不清理，Promise resolve 也不冒充准确 accepted 回执。完整 canonical `plan_document` 的 ID/version/digest 与原 request 相符时，以安全 Markdown 展示完整正文和步骤；陌生格式保留完整原文。大附件仍先沿原 reader 完整验证，未完成读取时不提供答复，原完整附件另可展开核对。[实际 DOM 测试](test/plan-review-dom.test.tsx)核原草稿恢复、显式模式、一次提交与失败保留；宿主的页面生命周期、Main 读取证明和真实窗口资格归 [Desktop owner](../../apps/desktop/README.md#native-计划入口与完整审核)，组件不取得 I/O 或批准权。
+`PlanReviewDraft` 与 `initialPlanDraft/onPlanDraftChange` 让宿主以原 Interaction 身份保存显式模式与原反馈。表单事件同步通知宿主，同一 render 重复提交受原锁约束；失败不清理，Promise resolve 也不冒充准确 accepted 回执。完整 canonical `plan_document` 的 ID/version/digest 与原 request 相符时，以安全 Markdown 展示完整正文和步骤；陌生格式保留完整原文。大附件仍先沿原 reader 完整验证，未完成读取时不提供答复，原完整附件另可展开核对。[实际 DOM 测试](test/isolated/plan-review-dom.test.tsx)核原草稿恢复、显式模式、一次提交与失败保留；宿主的页面生命周期、Main 读取证明和真实窗口资格归 [Desktop owner](../../apps/desktop/README.md#native-计划入口与完整审核)，组件不取得 I/O 或批准权。
 
 
 `InteractionCard` 的 `onReadAttachment` 是可选宿主回调，只接受原公开 reference 的准确 Store、Session、scope 和元数据。大审批附件在完整读取、SHA-256 与严格 UTF-8 校验成功后展示全文；缺 reader、加载中或失败时保留原卡并禁用回答。取消读取、替换卡片、切换身份或卸载只释放视图等待，迟到正文不能成为另一卡的已读证明。组件仅在当前视图保存正文，重复键盘/点击同步抑制，不把正文存入控制器验证集合。无附件的原审批行为保持不变。
@@ -476,7 +476,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 `PermissionPanel` 只消费公开 mode/trust 事实，新模式仅提供请求批准（`accept_edits`）、自动审核（`auto`）、完全访问（`full`），与以后会话默认值分别确认；当前与默认模式继续显示原始事实；旧 raw `ask` 已从类型、输入和显示路径退役，不作兼容映射；信任前展示 actual readScopes 和原范围摘要，用户须明确核对。子会话或无 callback 时只读，未决/未知提交禁写；一份观察只提交一次，失败保留选项，不显示已应用。`PermissionSubmissionStatus` 将原 command 的已保存、提交中、已应用、未知和失败分别显示。新身份卸载旧面板，旧异步结果不能覆盖新卡；组件不持有凭据、服务器、文件或执行控制。
 
-[test/permissions-dom.test.tsx](test/permissions-dom.test.tsx) 使用实际 ReactDOM/JSDOM，验证 Enter/空格键选择、重复键盘/点击抑制、模式/default、未确认 trust 禁用、原读取范围、子会话只读、失败草稿及迟到身份响应；正式 Electron/TUI 与真实浏览器布局仍未由本证据建立。
+[test/isolated/permissions-dom.test.tsx](test/isolated/permissions-dom.test.tsx) 使用实际 ReactDOM/JSDOM，验证 Enter/空格键选择、重复键盘/点击抑制、模式/default、未确认 trust 禁用、原读取范围、子会话只读、失败草稿及迟到身份响应；正式 Electron/TUI 与真实浏览器布局仍未由本证据建立。
 
 `ModelOutputMessage` 消费公开 `Message.outputBody`，默认明确显示有限预览，不把预览声称为完整输出。宿主可提供 `onRead({sessionId,executionId,signal})`；该 reader 必须先通过公共 Client 的完整 EOF、SHA、UTF-8 与正文验证，再返回 `ModelOutputSnapshot`。组件复核原 Store、Session、Run、Execution、完整性与正文长度；缺省只在当前视图保存已读全文。显式关闭、`suspended`、身份／预览更新或实际卸载会 abort 所属读取并清除全文，迟到结果不能显示。可选 `onClose` 只通知用户明确关闭全文，使宿主能够单独撤销复制展示资格，不把临时读取暂停的 `onContent(undefined)` 混同为关闭；原通知、读取取消和身份校验不变。宿主 KeepAlive 停用时仍 abort 原 lease，但可保留同一已核实身份的显示；可选 `readActive=false` 撤销新读取与正文通知，重新激活后用当前回调恢复，不从保留状态取得操作资格。临时 `readActive=false` 以 `aria-disabled` 和读取 handler 的 gate 暂停动作，保留按钮外观；缺 reader 时预览仍可读，全文按钮禁用；失败不展示半正文。原完整 Tool calls 需用户展开，不完整前缀不显示完整调用。原 reasoning 缺省不展示；只有明确诊断宿主设置 `showReasoning` 才提供展开入口，普通会话阅读不启用。
 
