@@ -42,7 +42,7 @@ export type NativeToolMessageFact = Pick<
   inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };
   /** Exact known Shell result content equals its saved structured details. */
   shellResultVerified?: boolean;
-  /** Original PDF page image metadata, loaded through the same bounded image reader. */
+  /** Original image/PDF metadata, loaded through the same bounded image reader. */
   images?: { name: string; reference: { mediaType: string; size: string } }[];
   /** Read-only original Execution authorization; never a grant or answer capability. */
   authorization?: Execution['authorization'];
@@ -131,7 +131,12 @@ export type NativeToolExecution = Pick<
   | 'resultRevision'
   | 'authorization'
   | 'cancelRequestedAt'
-> & { target?: string; inputReady?: boolean };
+> & {
+  target?: string;
+  inputReady?: boolean;
+  modelRetry?: Execution['modelRetry'];
+  result?: Execution['result'];
+};
 
 export function nativeRunFact(run: NativeRunFact): NativeRunFact {
   const { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason } = run;

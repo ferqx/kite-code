@@ -43,6 +43,7 @@ async function fixture() {
   let paused = false;
   let unavailable = false;
   let nextRead: 'ready' | 'hold' | 'error' = 'ready';
+  let empty = false;
   const requests: NativeRequest[] = [];
   const pending: { readId: string; resolve: (value: NativeResult) => void; page: NativeResult }[] =
     [];
@@ -52,6 +53,7 @@ async function fixture() {
     async request(request) {
       requests.push(request);
       if (request.method === 'background.open') {
+        const entries = empty ? [] : items;
         const page: NativeResult = {
           kind: 'background.page',
           viewGeneration: generation,
@@ -61,10 +63,10 @@ async function fixture() {
           viewSelection: selection.viewSelection!,
           observationId: requests.length,
           startIndex: 0,
-          nextIndex: items.length,
-          total: items.length,
+          nextIndex: entries.length,
+          total: entries.length,
           complete: true,
-          entries: items,
+          entries,
         };
         const mode = nextRead;
         nextRead = 'ready';
@@ -139,6 +141,7 @@ async function fixture() {
         view?: number;
         generation?: number;
         nextRead?: typeof nextRead;
+        empty?: boolean;
         onCommit?: (environment: Environment) => void;
       } = {},
     ) {
@@ -148,6 +151,7 @@ async function fixture() {
       if (update.generation !== undefined) generation = update.generation;
       if (update.view !== undefined) selection = { ...selection, viewSelection: update.view };
       if (update.nextRead !== undefined) nextRead = update.nextRead;
+      if (update.empty !== undefined) empty = update.empty;
       onCommit = update.onCommit;
       await act(async () => root.render(<Surface />));
       onCommit = undefined;
@@ -169,6 +173,33 @@ async function fixture() {
 const stops = (host: HTMLElement) => [
   ...host.querySelectorAll<HTMLButtonElement>('.background-execution-stop'),
 ];
+
+test('a cold environment distinguishes loading and failed reads from a confirmed empty directory', async () => {
+  const f = await fixture();
+  const group = (name: string) => f.host.querySelector(`[aria-label="${name}"]`)!.textContent;
+  try {
+    await f.render({ nextRead: 'hold' });
+    expect(group('Shell')).toContain('读取中');
+    expect(group('Shell')).not.toContain('空闲');
+    expect(group('子智能体')).toContain('读取中');
+    expect(group('子智能体')).not.toContain('暂无');
+    expect(stops(f.host)).toHaveLength(0);
+    await f.resolve();
+    expect(stops(f.host)).toHaveLength(2);
+    expect(group('Shell')).not.toContain('读取中');
+    await f.render({ generation: 2, nextRead: 'error' });
+    expect(group('Shell')).toContain('状态未知');
+    expect(group('Shell')).not.toContain('空闲');
+    expect(group('子智能体')).toContain('状态未知');
+    expect(stops(f.host)).toHaveLength(0);
+    await f.render({ generation: 3, empty: true });
+    expect(group('Shell')).toContain('空闲');
+    expect(group('子智能体')).toContain('暂无');
+    expect(group('Shell')).not.toContain('状态未知');
+  } finally {
+    await f.close();
+  }
+});
 
 test('pause retains its display with one parent commit and resume cannot use the paused facts before a fresh read takes ownership', async () => {
   const f = await fixture();

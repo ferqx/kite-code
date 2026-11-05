@@ -192,7 +192,7 @@ for (const window of [4096, undefined])
     }
   }, 20000);
 
-test('public HTTP and generated Client retain retry attempt six with an unlimited maximum', async () => {
+test('public HTTP and generated Client retain the fifth reconnection with a finite maximum', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-public-long-retry-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
@@ -257,7 +257,7 @@ test('public HTTP and generated Client retain retry attempt six with an unlimite
     expect(attempts).toBe(6);
     expect(
       view.executions.find((execution) => execution.modelRetry?.attempt === 6)?.modelRetry,
-    ).toMatchObject({ maxAttempts: null, reason: 'provider_unavailable' });
+    ).toMatchObject({ maxAttempts: 6, reason: 'provider_unavailable' });
     expect(view.runs).toHaveLength(1);
   } finally {
     client.disposeNetwork();

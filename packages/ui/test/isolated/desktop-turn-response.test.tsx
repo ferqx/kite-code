@@ -123,7 +123,7 @@ for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const)
         expect(document.querySelector('.response-status')).toBeNull();
         expect(
           document.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded'),
-        ).toBe('false');
+        ).toBe(status === 'failed' || status === 'aborted' ? 'true' : 'false');
       });
   });
 
@@ -133,7 +133,7 @@ for (const status of ['completed', 'failed', 'cancelled'] as const)
       expect(document.querySelector('.response-status')).toBeNull();
       expect(
         document.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded'),
-      ).toBe('false');
+      ).toBe(status === 'failed' ? 'true' : 'false');
     });
   });
 
@@ -283,11 +283,11 @@ test('the unfinished process stays expanded through models, tools and waits; onl
     expect(host.querySelector('.response-status')).toBeNull();
     const finished = host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
     expect(finished.disabled).toBe(false);
-    expect(finished.getAttribute('aria-expanded')).toBe('false');
-    await act(async () => finished.click());
     expect(finished.getAttribute('aria-expanded')).toBe('true');
     await act(async () => finished.click());
     expect(finished.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => finished.click());
+    expect(finished.getAttribute('aria-expanded')).toBe('true');
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
@@ -371,7 +371,7 @@ test('unconfirmed execution hides live response and busy state while a held obse
   expect(messages[1]?.settled).toBe(false);
 });
 
-test('observation and execution warnings require explicit diagnostics while committed terminal facts remain visible', () => {
+test('observation warnings require diagnostics while terminal summaries show only elapsed time', () => {
   const messages = [user, assistant('unfinished')];
   for (const [activity, label] of [
     [{ turnId: 'run', status: 'running', unavailable: true }, '上次确认状态'],
@@ -387,23 +387,53 @@ test('observation and execution warnings require explicit diagnostics while comm
       true,
     );
   }
-  for (const [status, label] of [
-    ['failed', '本轮失败'],
-    ['cancelled', '已停止'],
-    ['aborted', '已中断'],
-  ] as const)
+  for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const)
     for (const diagnostics of [false, true])
       inspect(
         [assistant('original', true), terminal(status)],
         { turnId: 'run', status: 'running', unavailable: true, executionUnconfirmed: true },
         (document) => {
-          expect(document.body.textContent).toContain(label);
+          expect(document.querySelector('.agent-turn-status-label')?.textContent).toBe('用时未知');
+          expect(document.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe(
+            status,
+          );
           expect(document.body.textContent).not.toContain('上次确认状态');
           expect(document.body.textContent).not.toContain('执行状态待核实');
           expect(document.querySelector('.response-status')).toBeNull();
         },
         diagnostics,
       );
+});
+
+test('all settled outcomes share the same known elapsed summary and keep their actual terminal facts', () => {
+  for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const)
+    inspect(
+      [
+        assistant('original', true),
+        terminal(status),
+        {
+          id: 'timing',
+          turnId: 'run',
+          role: 'system',
+          systemKind: 'turn_timing',
+          text: '',
+          turnStartedAtMs: 1_000,
+          turnFinishedAtMs: 39_000,
+          settled: true,
+        },
+      ],
+      undefined,
+      (document) => {
+        const summary = document.querySelector('.agent-turn-summary')!;
+        expect(summary.textContent).toBe('用时 38 秒');
+        expect(summary.getAttribute('aria-label')).toBe(
+          `用时 38 秒，${status === 'failed' || status === 'aborted' ? '收起' : '展开'}本轮处理过程`,
+        );
+        expect(document.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe(
+          status,
+        );
+      },
+    );
 });
 
 test('a committed terminal wins over a stale active unconfirmed Turn observation', () => {
@@ -418,6 +448,20 @@ test('a committed terminal wins over a stale active unconfirmed Turn observation
       (document) => {
         expect(document.body.textContent).not.toContain('执行状态待核实');
         expect(document.querySelectorAll('.response-status')).toHaveLength(0);
+      },
+    );
+});
+
+test('a checked final reply keeps normal collapse even when the Turn later has an exceptional terminal fact', () => {
+  for (const status of ['failed', 'aborted'] as const)
+    inspect(
+      [tool, { ...assistant('final', true), finalReply: true }, terminal(status)],
+      undefined,
+      (document) => {
+        expect(document.querySelector('.agent-turn-process')?.getAttribute('data-state')).toBe(
+          'closed',
+        );
+        expect(document.querySelector('.agent-turn-final')?.textContent).toContain('final content');
       },
     );
 });

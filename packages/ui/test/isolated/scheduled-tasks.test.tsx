@@ -363,14 +363,27 @@ test('status and text filters compose, recover from no matches, and do not chang
       card.getAttribute('aria-label'),
     );
   expect(cards()).toEqual(['Daily review', 'Weekly digest']);
-  await click('已暂停任务');
+  const pausedTab = document.querySelector<HTMLElement>(
+    '[role="tab"][aria-label="已暂停定时任务"]',
+  )!;
+  await act(async () =>
+    pausedTab.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 })),
+  );
+  expect(pausedTab.getAttribute('aria-selected')).toBe('true');
   expect(cards()).toEqual(['Weekly digest']);
   await changeField('input[type="search"]', 'BACKEND');
   expect(cards()).toEqual(['Weekly digest']);
   await changeField('input[type="search"]', 'not here');
   expect(cards()).toEqual([]);
-  expect(document.querySelector('.scheduled-filter-empty')!.textContent).toContain('无匹配任务');
+  expect(document.querySelector('.scheduled-filter-empty')!.textContent).toContain(
+    '无匹配定时任务',
+  );
   await click('清除筛选');
+  expect(
+    document
+      .querySelector('[role="tab"][aria-label="全部定时任务"]')!
+      .getAttribute('aria-selected'),
+  ).toBe('true');
   expect(cards()).toEqual(['Daily review', 'Weekly digest']);
   expect(document.querySelector('input[type="search"]')!.getAttribute('value')).toBe('');
   expect(paused.status).toBe('paused');
@@ -405,7 +418,9 @@ test('shared project and model-effort selectors save selected IDs and effort wit
   await click('高级');
   expect(document.querySelector('button[aria-label="项目空间"]')).toBeNull();
   await click('高级');
-  expect(document.querySelector('.scheduled-setting-row')!.textContent).toContain('名称');
+  expect(document.querySelector<HTMLInputElement>('[aria-label="名称"]')!.value).toBe(
+    'Nightly checks',
+  );
   expect(document.querySelector('[aria-label="运行设置"]')!.textContent).toContain('项目');
   expect(document.querySelector('[aria-label="运行设置"]')!.textContent).toContain('模型');
   expect(document.querySelector('[aria-label="运行设置"]')!.textContent).toContain('思考程度');

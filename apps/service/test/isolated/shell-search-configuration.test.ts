@@ -62,7 +62,7 @@ native(
         ],
       }),
     );
-    const assets = windowsShellFixture();
+    const assets = await windowsShellFixture();
     const host = createDefaultProcessConfiguration({
       profile,
       userConfigurationPath: user,

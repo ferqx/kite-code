@@ -40,11 +40,29 @@ Store output paging preserves the one MiB JSON/row-overhead budget independently
 
 运行时清单是两份 Git Bash 副本的唯一闭包目录。每次派发核清单原身份与所选副本全部文件摘要，包含 MSYS、兼容 DLL、Git helper 和证书；不把另一份未使用副本混入当前检查。权限快照固定同一清单摘要，损坏闭包在原生进程创建前失败。[回归](../../test/isolated/jobs/windows-git-bash.test.ts)实际变更两份闭包的 DLL／helper／证书与清单，核零 native 派发。
 
+`createWindowsShellJob`、`captureWindowsGitBashRuntime` 的初始捕获和每次派发复核均异步等待。完整文件校验共用进程内8个读取名额，每个原 FD 独占至多1MiB缓冲，读到实际 EOF 并核前后身份、大小与时间，最后复核原路径；不缓存内容证明。SHA 分块之间按8ms／64步预算主动交还事件循环，避免已完成 I/O 的连续微任务继续阻塞其他会话。排队与读取检查点接受原取消信号；失败停止领取新文件、取消兄弟读取，等待已开始 I/O 和原 FD 关闭后才返回。关闭无法确认时保原 FileHandle 及名额，不把它当已释放；进程池和 Shell 状态复用均未引入。[异步校验回归](../../test/isolated/jobs/launch-identity-async.test.ts)核短读、空文件、尾部变更、增长／截断／替换、读取失败、排队／读取中取消、失败批次收尾、关闭未知的全局上限，以及连续完成的读取确实交还事件循环。
+
+Windows 在原 Job 停止、runner 回执和原 HANDLE 关闭均确认后，等待 `removeRuntimeTempAsync` 清理。清理最多4条并行，每条顺序等待原 FS 操作；核原根身份、逐层核目录后序删除，不遍历目录联接，Windows 只读文件只在原身份复核后恢复删除所需属性。清理不因用户取消提前返回；目录未清除或失败仍保原 Job 引用、资源／binding 与 unknown，不自动重试或重建 owner。其他平台的同步清理入口保持。[真实清理回归](../../test/isolated/jobs/runtime-temp-async.test.ts)核只读文件、外部 canary／联接、原根替换拒绝、4路上限和失败收尾，并在实际 Native Job 中保持清理未完成，核取消等待及失败 unknown。
+
 [适配器](windows-shell.ts)将原协议6 runner 接入普通 Job。工作区沿原无账户 write-restricted token／ACL，读取沿宿主权限，离线范围仅使用环境提示；Full 明确绕过沙箱。业务审批只在权限层，执行入口不重复作命令拒绝。完整文件与联网范围取最终父／子授权交集，互不隐式扩大，准确获批的外部写入可实际执行。
+
+[原 Job owner](../platform/process/windows-owned-child.ts)与原生 runner 的受限／完整文件启动均使用 `CREATE_NO_WINDOW` 和隐藏窗口的 `STARTUPINFO`，标准流仍走原管道。Windows 可能保留不可见的 console host，它也必须纳入原 Job 的完整成员观察与停止证明，不能因没有可见窗口而省略回收。[真实 Windows 回归](../../test/isolated/jobs/windows-owned-child.test.ts)核隐藏启动、输出、成员身份和完整关闭。
+
+全部命令共用同一启动与权限准备链路，不按命令名称绕开工作区范围。Windows `Path`／`PATH` 在附加固定工具路径前合并为一个 `PATH`，避免大小写重复键让 Bash 丢失工具目录。原生 runner 在准备 ACL 前开始监听取消，工作区锁等待也可取消；普通调用等待现有初始化完成，不再因固定30秒锁期限失败，显式 repair 保留原有限等待。工作区授权使用 [Windows 可回调的继承传播](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-treesetnamedsecurityinfow)，保留现有继承与显式 ACL 语义，准备中取消停止遍历。持久账本先保存未完成标记；根 ACE 已存在也不能代替后代准备完成，下一次须沿同一 SID 补全传播后才执行命令。取消时未创建业务进程且本次临时 ACL 已撤销，才返回原协议的已取消／清理确认回执；撤销不确定仍保 unknown。首次完整传播仍随文件数增长，完成后复用原账本，不自动重放已取消命令。
 
 [准备层](windows-git-bash.ts)固定本机 Git 的私有运行时闭包。仓库 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)修复 MSYS 对象 ACL；Full／完整文件范围保另一份未修改映像，避免并发共享区冲突，不修改安装 Git。两份映像共用复制与校验流程，[准备层回归](../../test/isolated/jobs/windows-git-bash.test.ts)核冷创建、复用、缺失文件恢复和变更文件保留。构建携带 runner／兼容 DLL／Coreutils／rg，不创建账户或网络规则。未知关闭保 owner，冷读取不从 PID 重建或重跑。
 
+`stageWindowsGitBash`／`windowsShellAssets` 是异步准备入口，调用者须等待完成后才能装配 Shell。源文件仍每次完整读取校验；未修改映像复用同次源 SHA，目标父目录去重，副本复制与完整内容校验最多并行8个文件。同一摘要目录的两套副本和清单由一个跨进程独占文件锁保护；竞争者最多等待30秒，取得锁后才读取目标文件，避免把尚未完成的复制误判为损坏。锁文件保持原身份、不删除；不同摘要目录互不阻塞。已有文件不覆盖，缺失文件使用排他创建；失败先等待已开始的文件操作全部结算，不发布新清单或提前交出可执行资产，随后释放准备锁；既有损坏文件仍失败而不修写。两套副本与派发前完整重核保持，不用 mtime 缓存或链接替代内容验证。[并发回归](../../test/isolated/jobs/windows-git-bash-race.test.ts)用精确半写同步点核跨进程复制／补丁映像／Full／清单发布、同进程竞争、失败全结算和 owner 强杀后的锁释放；POSIX 只证明合成 Git 资产与本机 OS 锁，不代替 Windows 原生资格。
+
 [原生测试](../../test/isolated/jobs/windows-shell.test.ts)与 [Service 集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)覆盖检索、Git／fork／管道、范围与审批、并发、取消／宿主死亡、准确关闭和冷零重放；事实及安装资格范围归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
+
+每次 Windows Shell 仍创建独立 runner、Bash、原 Job、临时目录和双流，下一条命令从原 Workspace／宿主环境开始，不继承前一条的 `cd`／`export`。共享的是已准备的摘要运行时及工作区 ACL 账本；ACL mutex 只串行准备，Shell 本身仅申请 process slot，没有工作区执行串行锁。[真实 Service 跨会话回归](../../../../apps/service/test/isolated/shell-concurrency-configuration.test.ts)在实际 Windows／Runtime／SQLite、两个 process slot 下核两个会话并行、第三个排队、准确取消一个时另一原 HANDLE 仍存活、同／不同工作区与受限／Full、输出和 temp 分离及后续命令状态重置。它也确定性证明同一 Workspace 的文件可被另一会话覆盖；执行隔离不提供文件副本或 Git 索引隔离。
+
+每个 Runtime 默认4个 process 任务名额，覆盖派发准备及实际执行，超额任务可取消地等待；同一 Shell 可有多个子进程，名额不是 OS 进程总数。进程内8路完整资产读取与该名额分开，既不按会话各分8路，也不串行全部命令。Run 配置捕获、权限与扩展装配并不全部受 process 名额限制，不能由4槽或8个校验缓冲推导整个 Service 的 CPU／RSS／响应延迟上限。32会话的真实排队、实际32条并发、关闭证明及秒级心跳缺口见 [Service 压测](../../../../apps/service/README.md#默认-shell-装配)。
+
+显式[启动计时夹具](../../test/fixtures/windows-shell-timing.ts)可用 `bun packages/agent/test/fixtures/windows-shell-timing.ts` 复现；只运行隔离固定命令，不增加普通客户端入口或性能阈值。2026-11-05 Windows x64／Bun1.4.4，异步化前8次采样去掉首个完整调用后，同步 start 中位约739ms，校验期间最大心跳间隔约793ms；异步化后同入口同步 start 约0.04ms、最大心跳间隔约38ms，热调用总耗时中位约860ms。完整内容校验仍占数百毫秒，不承诺减少总 I/O。直接 Bash 启动约35ms的比较省略授权、校验、受限令牌／Job／ACL及清理，只是本机下界，不代表可省掉这些边界。数据仅为本次源码与本机隔离采样，不构成其他机器的延迟保证。
+
+2026-11-05 本机 Windows x64／Bun1.4.4 对本轮源码运行原生 Cargo、上述 Shell／Service、原 Job owner 与 Windows stdio MCP 回归通过，新增实际 Path 大小写、部分继承恢复、锁等待取消、撤销失败保守结算及目录联接外部写拒绝断言。隔离 Native 制品在50000文件工作区运行同一组合写入／管道脚本：准备中取消约147ms确认、业务文件未写；切换会话后执行新命令，约14.1秒完成权限恢复、写入与正确输出，exit0、原 Job 空树及资源关闭均确认。持续界面采样与控制台观察未见新增终端，取消后 Main 心跳最大约32ms、renderer帧间隔最大约88ms；此场景未复现此前报告的长时间整窗冻结，不外推其他冻结原因或安装／发布资格。首次完整 ACL 准备成本仍随文件数增长。
 
 ## 默认 macOS 宿主 Shell
 

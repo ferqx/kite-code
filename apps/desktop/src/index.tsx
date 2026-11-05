@@ -9,6 +9,7 @@ import {
   PermissionSubmissionStatus,
   PublicViewCard,
 } from '@kite-ai/ui';
+import { Button } from '@kite-ai/ui/desktop';
 
 export {
   type ContextSubmission,
@@ -204,14 +205,14 @@ export function DesktopPermissions({
             }}
           />
           {controller && state.phase === 'unknown' && (
-            <button
+            <Button
               type="button"
               onClick={() => {
                 void controller.lookupPermissionMutation(state.intent.commandId).catch(() => {});
               }}
             >
               查询原选择回执
-            </button>
+            </Button>
           )}
         </div>
       ))}

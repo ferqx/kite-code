@@ -7,8 +7,10 @@
 @import "./native-typeset.css";
 @import "./native-provider-settings.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist/wght-italic.css";
 @import "@fontsource-variable/geist-mono";
-@source "../../../packages/ui/src/desktop";
+@import "@fontsource-variable/geist-mono/wght-italic.css";
+@source "../../../packages/ui/src";
 
 @custom-variant focus-visible (&:focus-visible:where(:root:not([data-input-modality="pointer"]) *));
 
@@ -20,7 +22,7 @@ html[data-input-modality="pointer"] :focus {
 
 :root {
   --font-geist: var(--font-ui);
-  --font-geist-mono: "Geist Mono Variable", monospace;
+  --font-geist-mono: var(--font-mono);
   --native-content-shadow: 0 1px 6px rgb(0 0 0 / 6%);
   --native-content-border: rgb(0 0 0 / 5%);
 }
@@ -312,7 +314,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-page-heading h2 {
   margin: 0 0 8px;
   font-size: 24px;
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.5px;
 }
 .kite-client .desktop-settings .settings-page-heading p {
@@ -333,7 +335,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .extension-settings .settings-section-heading h2 {
   margin: 0 0 44px;
   font-size: 24px;
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 .kite-client .desktop-settings .extension-settings .settings-section-heading {
   align-items: flex-start;
@@ -341,7 +343,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-content h3 {
   margin: 0 0 18px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 .kite-client .desktop-settings .settings-content .settings-group-heading {
   margin: 0 0 12px;
@@ -381,7 +383,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .settings-row strong {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 .kite-client .settings-row small,
 .kite-client .settings-hint {
@@ -410,7 +412,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-content legend {
   padding: 0 6px;
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 /* Model configuration uses compact horizontal rows, independent of form labels. */
 .kite-client .desktop-settings .settings-models > h2 {
@@ -460,7 +462,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-models-title h2 {
   margin: 0;
   font-size: 24px;
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.5px;
 }
 .kite-client .desktop-settings .settings-model-current {
@@ -544,7 +546,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-model-provider-heading strong {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 .kite-client .desktop-settings .settings-model-provider-identity > span {
   color: var(--muted-foreground);
@@ -598,7 +600,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings .settings-model-option strong {
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 .kite-client .desktop-settings .settings-model-option[data-enabled="false"] strong {
   color: var(--muted-foreground);
@@ -1232,15 +1234,87 @@ html[data-native-window][data-platform="macos"] .kite-client .client-content-fra
   height: 100%;
   place-items: center;
 }
+.native-browser-error {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: auto;
+  padding: 24px clamp(20px, 5cqw, 64px);
+  background: var(--page-background);
+  color: var(--muted-foreground);
+  font: 400 14px / 1.65 var(--font-ui);
+}
+.native-browser-error-body {
+  width: 100%;
+  max-width: 600px;
+  margin: clamp(24px, 16vh, 140px) auto 24px;
+}
+.native-browser-error-icon {
+  display: block;
+  margin-bottom: 24px;
+  color: #009bff;
+}
+.native-browser-error-icon :where(svg) {
+  width: 36px;
+  height: 36px;
+}
+.native-browser-error :where(h2) {
+  margin: 0 0 12px;
+  font-size: 22px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+}
+.native-browser-error :where(p) {
+  margin: 0;
+}
+.native-browser-error-target {
+  overflow-wrap: anywhere;
+}
+.native-browser-error-advice {
+  margin-top: 24px;
+}
+.native-browser-error-advice ul {
+  margin: 4px 0 0;
+  padding-left: 24px;
+}
+.native-browser-error .native-browser-error-code {
+  margin-top: 28px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.native-browser-error-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+.native-browser-error-actions :where(p) {
+  font-size: 12px;
+}
 .native-browser-viewport {
   flex: 1;
   min-height: 0;
   min-width: 0;
   width: 100%;
   overflow: hidden;
-  border-radius: var(--radius);
+  border-radius: 0;
   background: var(--page-background);
 }
-html[data-platform="macos"] .native-browser-viewport {
-  border-radius: 0;
+
+/* Keep the visible seam and grip in the native page's geometry commit on Windows.
+ * The real DOM separator still owns pointer capture, keyboard input and semantics. */
+html[data-native-window][data-platform="windows"] .kite-client
+  .client-content-panels:has(> #details [data-native-browser-frame="true"])
+  > #details
+  .right-sidebar {
+  border-image: linear-gradient(transparent, transparent) 1;
+}
+html[data-native-window][data-platform="windows"]
+  .kite-client
+  .client-content-panels:has(> #details [data-native-browser-frame="true"])
+  > #details-resize[data-separator="active"]
+  .resizable-grip {
+  visibility: hidden;
 }

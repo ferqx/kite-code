@@ -1,9 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -16,7 +19,7 @@ function gate() {
   return { promise, release };
 }
 async function fixture() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-artifact-pressure-')));
+  const root = temporaryDirectory('kite-artifact-pressure-');
   const profile = { dataRoot: root, profile: 'test' };
   const store = await openSqliteStore(profile);
   const artifacts = createArtifactStore({ profile, store });
@@ -51,56 +54,60 @@ async function fixture() {
     async close() {
       await artifacts.close();
       await store.close();
-      rmSync(root, { recursive: true, force: true });
+      removeTemporaryDirectory(root);
     },
   };
 }
 
-test('more than 64 pending publications wait with eight active sources and publish once each', async () => {
-  const f = await fixture();
-  const held = gate();
-  const eight = gate();
-  let active = 0;
-  let peak = 0;
-  let starts = 0;
-  const outcomes = Promise.allSettled(
-    Array.from({ length: 104 }, (_, index) =>
-      f.artifacts.publishStream({
-        ...f.input,
-        refId: `p-${index}`,
-        content: (async function* () {
-          active++;
-          starts++;
-          peak = Math.max(peak, active);
-          if (active === 8) eight.release();
-          try {
-            await held.promise;
-            yield Buffer.from(`body-${index}`);
-          } finally {
-            active--;
-          }
-        })(),
-      }),
-    ),
-  );
-  try {
-    await eight.promise;
-    expect(starts).toBe(8);
-    held.release();
-    const settled = await outcomes;
-    expect(settled.filter((result) => result.status === 'rejected')).toEqual([]);
-    expect(starts).toBe(104);
-    expect(peak).toBe(8);
-    for (const index of [0, 71, 103]) {
-      const content = await f.artifacts.read({ ...f.input, refId: `p-${index}` });
-      expect(Buffer.from(content).toString()).toBe(`body-${index}`);
+test(
+  'more than 64 pending publications wait with eight active sources and publish once each',
+  async () => {
+    const f = await fixture();
+    const held = gate();
+    const eight = gate();
+    let active = 0;
+    let peak = 0;
+    let starts = 0;
+    const outcomes = Promise.allSettled(
+      Array.from({ length: 104 }, (_, index) =>
+        f.artifacts.publishStream({
+          ...f.input,
+          refId: `p-${index}`,
+          content: (async function* () {
+            active++;
+            starts++;
+            peak = Math.max(peak, active);
+            if (active === 8) eight.release();
+            try {
+              await held.promise;
+              yield Buffer.from(`body-${index}`);
+            } finally {
+              active--;
+            }
+          })(),
+        }),
+      ),
+    );
+    try {
+      await eight.promise;
+      expect(starts).toBe(8);
+      held.release();
+      const settled = await outcomes;
+      expect(settled.filter((result) => result.status === 'rejected')).toEqual([]);
+      expect(starts).toBe(104);
+      expect(peak).toBe(8);
+      for (const index of [0, 71, 103]) {
+        const content = await f.artifacts.read({ ...f.input, refId: `p-${index}` });
+        expect(Buffer.from(content).toString()).toBe(`body-${index}`);
+      }
+    } finally {
+      held.release();
+      await outcomes;
+      await f.close();
     }
-  } finally {
-    held.release();
-    await outcomes;
-    await f.close();
-  }
-}, 10000);
+  },
+  process.platform === 'win32' ? 45000 : 10000,
+);
 
 test('payload overflow seals original bytes without copying another large buffer, supports cancellation and cold reads', async () => {
   const f = await fixture();

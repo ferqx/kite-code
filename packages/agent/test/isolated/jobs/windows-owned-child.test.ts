@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { startWindowsOwnedChild } from '../../../src/platform/process/windows-owned-child';
 
 test.skipIf(process.platform === 'win32')('Windows owned child import is inert on POSIX', () => {
@@ -45,7 +50,7 @@ const kernel={
  UpdateProcThreadAttribute(list,flags,attribute,values,size){assert.equal(attribute,0x20002n);assert.equal(size,24n);const hs=bytes(values);assert.equal(hs.length,3);for(const h of hs)assert.ok(handles.get(h).inherit);handles.get(hs[0]).childStdin=true;return true;},
  DeleteProcThreadAttributeList(){calls.push('delete_attributes');},
  CreateProcessW(exe,command,pa,ta,inherit,flags,env,cwd,start,info){
-  assert.equal(flags,0x80404);assert.equal(inherit,true);assert.equal(bytes(start).readUInt32LE(0),112);assert.equal(bytes(start).readUInt32LE(60),0x100);
+  assert.equal(flags,0x08080404);assert.equal(inherit,true);assert.equal(bytes(start).readUInt32LE(0),112);assert.equal(bytes(start).readUInt32LE(60),0x101);assert.equal(bytes(start).readUInt16LE(64),0);
   assert.equal(bytes(exe).toString('utf16le'),'C:\\\\trusted\\\\child.exe\\0');
   assert.equal(bytes(command).toString('utf16le'), '"C:\\\\trusted\\\\child.exe" "a b" "q\\\\"z" "tail\\\\\\\\"\\0');
   assert.equal(bytes(env).toString('utf16le'),'EMPTY=\\0SELECTED=original\\0\\0');
@@ -133,9 +138,75 @@ console.log('windows_owned_child_contract_passed');
 }, 10000);
 
 test.skipIf(process.platform !== 'win32')(
-  'Windows native original Job members exit naturally without force',
+  'Windows background children hide console windows while their piped output remains readable',
   async () => {
-    const script = `const c=Bun.spawn([process.execPath,'-e','await Bun.stdin.text()'],{stdin:'pipe',stdout:'ignore',stderr:'ignore'});console.log(JSON.stringify({pid:c.pid}));await Bun.stdin.text();c.stdin.end();if(await c.exited!==0)process.exit(2);`;
+    const root = temporaryDirectory('kite-console-child-');
+    const executable = join(root, 'probe.exe');
+    const source = `using System; using System.Runtime.InteropServices; class ConsoleProbe {
+      [StructLayout(LayoutKind.Sequential)] struct StartupInfo {
+        public uint cb; public IntPtr reserved, desktop, title;
+        public uint x, y, width, height, charsX, charsY, fill, flags;
+        public ushort show, reservedBytes; public IntPtr reservedData, stdin, stdout, stderr;
+      }
+      [DllImport("kernel32.dll")] static extern void GetStartupInfo(out StartupInfo info);
+      [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
+      [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+      static void Main() { StartupInfo info; GetStartupInfo(out info);
+        IntPtr window = GetConsoleWindow();
+        Console.WriteLine("{0}:{1}:{2}", (info.flags & 1) != 0, info.show,
+          window != IntPtr.Zero && IsWindowVisible(window)); }
+    }`;
+    const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    const compiled = spawnSync(
+      join(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Add-Type -TypeDefinition ${quote(source)} -OutputAssembly ${quote(executable)} -OutputType ConsoleApplication`,
+      ],
+      { encoding: 'utf8', timeout: 10000, windowsHide: true },
+    );
+    expect(compiled.status, compiled.stderr).toBe(0);
+    const child = startWindowsOwnedChild({
+      executable,
+      argv: [],
+      cwd: process.cwd(),
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
+      stdin: 'ignore',
+    });
+    let output = '',
+      error = '';
+    const stdout = (async () => {
+      for await (const chunk of child.stdout) output += Buffer.from(chunk).toString();
+    })();
+    const stderr = (async () => {
+      for await (const chunk of child.stderr) error += Buffer.from(chunk).toString();
+    })();
+    const deadline = setTimeout(() => void child.stop({ graceMs: 0 }), 10000);
+    try {
+      expect(await child.exited).toBe(0);
+      await Promise.all([stdout, stderr]);
+      expect(error).toBe('');
+      expect(output.trim()).toBe('True:0:False');
+    } finally {
+      clearTimeout(deadline);
+      await child.close();
+      await Promise.all([stdout, stderr]);
+      removeTemporaryDirectory(root);
+    }
+  },
+  25000,
+);
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows native original Job observes children and headless console hosts through full cleanup',
+  async () => {
+    const script = `const c=Bun.spawn([process.execPath,'-e','await Bun.stdin.text()'],{stdin:'pipe',stdout:'ignore',stderr:'ignore',windowsHide:true});console.log(JSON.stringify({pid:c.pid}));await Bun.stdin.text();c.stdin.end();if(await c.exited!==0)process.exit(2);`;
     const child = startWindowsOwnedChild({
       executable: process.execPath,
       argv: ['-e', script],
@@ -161,21 +232,28 @@ test.skipIf(process.platform !== 'win32')(
         await new Promise((resolve) => setTimeout(resolve, 5));
       const descendant = JSON.parse(output.trim()) as { pid: number };
       const members = child.retainMembers();
-      expect(members.map((member) => member.pid).sort()).toEqual(
+      const business = members.filter((member) => [child.pid, descendant.pid].includes(member.pid));
+      expect(business.map((member) => member.pid).sort()).toEqual(
         [child.pid, descendant.pid].sort(),
       );
       for (const member of members) {
-        expect(member.parentPid).toBe(member.pid === child.pid ? process.pid : child.pid);
         expect(member.creationTime).toMatch(/^[1-9][0-9]*$/);
-        expect(member.executablePath.toLowerCase()).toBe(process.execPath.toLowerCase());
         expect(member.inspect()).toBe('alive');
+        if (business.includes(member)) {
+          expect(member.parentPid).toBe(member.pid === child.pid ? process.pid : child.pid);
+          expect(member.executablePath.toLowerCase()).toBe(process.execPath.toLowerCase());
+        } else {
+          // Windows may own a headless console host for a no-window console process.
+          expect(member.executablePath.toLowerCase().endsWith('\\conhost.exe')).toBe(true);
+        }
       }
       await child.endStdin();
       expect(await child.exited).toBe(0);
       const proof = await child.stop({ graceMs: 0 });
       expect(proof.root.waitConfirmed).toBe(true);
       expect(proof.job.activeProcesses).toBe(0);
-      expect(proof.job.terminationRequested).toBe(false);
+      expect(proof.root.exitCode).toBe(0);
+      if (members.length === business.length) expect(proof.job.terminationRequested).toBe(false);
       await Promise.all([stdout, stderr]);
       for (const member of members) expect(member.inspect()).toBe('dead');
       await child.close();

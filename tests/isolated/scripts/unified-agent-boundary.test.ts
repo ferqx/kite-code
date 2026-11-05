@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { checkUnifiedAgentBoundary } from '../../../scripts/check-unified-agent-boundary';
@@ -43,6 +43,91 @@ function fixture(sources: Record<string, string>): string {
 }
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+test('resolution caches observe missing, changed and removed files and changed manifests on the next check', () => {
+  const root = fixture({
+    'apps/desktop/src/index.ts': 'export * from "@kite-ai/ui";',
+    'packages/ui/src/index.ts': 'export {};',
+    'packages/ui/private/blocked.ts': 'import "node:fs";',
+    'packages/ui/package.json': JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { '.': './private/entry.ts' },
+    }),
+  });
+  const unresolved = () =>
+    checkUnifiedAgentBoundary(root).violations.some(
+      (item) => item.rule === 'target-unresolved-workspace-export',
+    );
+  expect(unresolved()).toBe(true);
+  const entry = resolve(root, 'packages/ui/private/entry.ts');
+  writeFileSync(entry, 'import "node:fs";');
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (item) => item.rule === 'portable-dependency' && item.file.endsWith('private/entry.ts'),
+    ),
+  ).toBe(true);
+  writeFileSync(entry, 'export {};');
+  expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
+  rmSync(entry);
+  expect(unresolved()).toBe(true);
+  writeFileSync(entry, 'export {};');
+  const manifest = resolve(root, 'packages/ui/package.json');
+  writeFileSync(
+    manifest,
+    JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { '.': { types: './private/entry.ts', default: './private/blocked.ts' } },
+    }),
+  );
+  expect(
+    checkUnifiedAgentBoundary(root).violations.some(
+      (item) => item.rule === 'portable-dependency' && item.file.endsWith('private/blocked.ts'),
+    ),
+  ).toBe(true);
+  writeFileSync(manifest, '{');
+  expect(unresolved()).toBe(true);
+  writeFileSync(
+    manifest,
+    JSON.stringify({ name: '@kite-ai/ui', exports: { '.': './private/entry.ts' } }),
+  );
+  expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
+});
+
+test('resolution caches refresh directory links without accepting outside or legacy stylesheet targets', () => {
+  const outside = fixture({ 'style.css': '.page { color: black; }' });
+  const root = fixture({
+    'apps/desktop/src/index.ts': 'import "@kite-ai/ui/asset.css";',
+    'packages/ui/src/index.ts': 'export {};',
+    'packages/ui/assets/style.css': '.page { color: black; }',
+    'packages/kite-client-ui/assets/style.css': '.page { color: black; }',
+    'packages/ui/package.json': JSON.stringify({
+      name: '@kite-ai/ui',
+      exports: { './asset.css': './linked/style.css' },
+    }),
+  });
+  const link = resolve(root, 'packages/ui/linked');
+  const kind = process.platform === 'win32' ? 'junction' : 'dir';
+  symlinkSync(outside, link, kind);
+  try {
+    expect(
+      checkUnifiedAgentBoundary(root).violations.some(
+        (item) => item.rule === 'target-unresolved-workspace-export',
+      ),
+    ).toBe(true);
+    unlinkSync(link);
+    symlinkSync(resolve(root, 'packages/ui/assets'), link, kind);
+    expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
+    unlinkSync(link);
+    symlinkSync(resolve(root, 'packages/kite-client-ui/assets'), link, kind);
+    expect(
+      checkUnifiedAgentBoundary(root).violations.some(
+        (item) => item.rule === 'target-no-legacy-engine',
+      ),
+    ).toBe(true);
+  } finally {
+    unlinkSync(link);
+  }
 });
 
 test('Agent permission closure rejects Service through barrels and every public export branch', () => {

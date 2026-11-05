@@ -1,6 +1,18 @@
 # 通用 Agent 新执行边界
 
+本地图片读取由[Files owner](../../packages/agent/src/tools/files/README.md#图片读取)的 `files.view_images@1` 承担：原权限／路径／附件选择先约束全字节读取，固定严格解码程序只收字节，不收用户路径或 Provider 状态；明确空 Bun/tsconfig 防止目录 preload／别名改变入口。Windows 原 Job owner 提供512MiB和单进程限制，取消后核原 wait／tree；退出无法确认时结算 unknown、保 owner／图片名额并拒绝后续读取，不无限等待缺失证明。监督进程隔离崩溃与资源，不把它称为文件／网络 OS 沙箱。Service 保护实际处理资产及 native 依赖根；其他平台资格独立核实。
+
+图片结果保存原 Execution 的不可变 Artifact，沿既有 `modelImages` 与两协议交接，当前运行、历史、Fork和冷读保原出处；单次批次只对该准确版本接纳最多10张／每张8MiB／整批16MiB，其他工具仍为4张；批次先约束完整有序路径及输入原件revision，串行读取并在全部解码成功后才交付视觉结果，容量继续只对该准确新工具版本累计32MiB，并在越界图片展开前失败，不修改其他图片入口。Native 的计数、缩略图和折叠从准确原成功回执派生，窗口预览缓存不承担历史保存或授权。上传原件与实际视觉结果均沿原 Blob／引用／显式无引用 GC，不新增会过期的历史图片缓存；原协议和既有工具版本保持。
+
+Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desktop/README.md#native-项目会话目录)保存，Store／Session／Run 与终态仅作本机呈现依据，不是业务 receipt 或执行 authority。renderer 的 `session.markRead` 仍须原主 frame／generation、准确选择与 Main 已观察终态，写入不修改 Runtime、会话消息时间、Run、审批或命令，不授予 Service 写权；原业务 Store／公开工具协议版本保持。
+
 默认 Service 的模型代理选择归 [Service owner](../../apps/service/README.md)，不下沉到 AI／Core 或客户端。新 Run 的 `snapshot.modelTransport.digest` 只绑定宿主代理环境与系统选择的摘要；恢复前变化拒绝，旧无字段记录不追补。代理传输不改变模型请求、权限、工具身份、未知结果或零重放边界，也不把模型自动代理推广到 MCP 网络准入。
+
+模型绑定在首次请求时创建独立 `Bun.FetchSession`，普通 Run、标题 model-only 绑定和模型目录查询沿原 owner 收尾关闭空闲池；关闭封住该绑定的新请求并复用原清理结果。原 AbortSignal 继续负责活跃请求取消，连接池关闭不冒充业务取消、成功或完整进程退出。代理选择、摘要字节和恢复拒绝仍用原规则；不共享其他绑定的连接，不因连接失败改出口或重放。具体接线与真实本地网络回归归[Service owner](../../apps/service/README.md#模型连接池与原取消恢复边界)。
+
+默认SDK模型请求与传输失败由[AI边界](../../packages/ai/README.md)提供重连分类，明确HTTP401／403认证或权限拒绝除外；未知网络错误不因缺少系统code而退出重连路径。Runtime仍必须核原Model Execution失败、关闭及来源资格，并限制同串故障最多5次重连；此分类不赋予客户端重发权，不把取消、本地历史校验、未知效果或未确认关闭转换为可重试证明，协议与持久格式保持。
+
+Native异常提示沿已观察的原Run生成展示Alert，不写入聊天历史或补造Tool事实；具体原因不足时明确保留未知并给出检查建议。失败／异常中断且同Turn没有已核实最终回复时，过程默认展开且外层不设高度上限，用户阅读选择仍优先。Alert与折叠只是展示，不能覆盖原准确终态、签发重试或恢复权；执行／协议／持久格式保持，当前展示和验证归[UI owner](../../packages/ui/README.md)。
 
 模型启停的串行后继证明沿 [Service](../../apps/service/README.md#native-provider-与下一次模型绑定) → 原 [HostMutation journal](../../packages/agent/src/storage/sqlite/host-mutations-README.md) → [Client](../../packages/client/README.md) → [Native Main](../../apps/desktop/README.md#native-提供商与模型设置) 交接。仅已应用的模型更新可附完整 `postReadSet`，它绑定原发布候选与实际 ETag；Main 只有在同一热提交、完整 scope 和后续 GET 四字段一致时才生成后继观察。该证明不授权重放、跨身份续写或跳过 CAS；失败、未知、外部变化和冷 journal 不恢复旧队列。renderer 的正常连续交互、同模型合并和关闭设置后后台保存只管理未派发意图，不取消或修改活动 Run 的封存配置。管理页的异常自动恢复只执行GET或原HostMutation ID的结果查询，包含当前Store冷未决项；普通GET不能解除unknown或恢复已丢弃尾部。明确暂态网络错误可重试原afterCommandId校验，只有原scope与proof仍一致才能继续已接受队列。恢复不重发POST、密钥、原secret或远端发现，也不修改活动Run。默认模型与普通模型均可启停，用户配置可保留指向已禁用模型的默认ID；新运行仍须使用已启用且configured的路由，不能自动替代已禁用默认。活动Run及其后续模型请求继续按原封存配置运行，不因该偏好更新取消或重绑定。
 
@@ -12,7 +24,7 @@ Native消息历史在完整基线之后，可按`message_changes`能力用持久
 
 普通 Files 的确定缺失由[原读取 owner](../../packages/agent/src/tools/files-tools.ts)及[外部读取适配器](../../packages/agent/src/tools/external-file-reads.ts)返回 `outcome:succeeded/details.exists:false`，没有正文或基线；只包住实际目标读取，Artifact 发布、私有引用、保护范围与取消失败不被通用 `ENOENT` 转成缺失。[Service 最终 Files 装配](../../apps/service/src/file-checkpoint-configuration.ts)统一模型说明和 path 文案，保留输入 schema 语义、定义版本及原 Full-only 外写策略，不让附件说明覆盖普通外部读取范围。[模型错误呈现](../../packages/agent/src/tool-failure-presentation.ts)只用已知公开原因生成英文解释，保原调用出处、审批和未知事实；[补充原因表](../../packages/agent/src/tool-failure-causes.ts)不改变分类或授权。原 stdout／stderr、MCP 业务数据与非英文业务正文不因移除解释中的内部执行术语而被翻译或裁剪，原持久回执仍完整保存。产品表现归[工具手册](../handbook/features/tools-and-approvals.md)，验收边界与取舍见[缺失观察及工具反馈记录](../../.agents/notes/implemented/bug-fix/2026-11-05-ordinary-missing-file-and-readable-tool-feedback.md)。
 
-Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。准确失败的子结果也保已取得的工具观察和 Shell 两流预览，原效果与失败状态不互相覆盖；不认识的证据限定保原完整 Source，不因错误简化丢失。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不按具体文件工具 ID 改写完成条件，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型。
+Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。准确失败的子结果也保已取得的工具观察和 Shell 两流预览，原效果与失败状态不互相覆盖；不认识的证据限定保原完整 Source，不因错误简化丢失。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不按具体文件工具 ID 改写完成条件，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型；上述准确图像版本识别仅用于请求展开的资源预算。
 
 会话文件沿 Native 字节准备 → Service 流式导入 → Store 原消息事务绑定 → Files 精确对象权限 → Artifact／模型结果交接。Blob、可变工作文件和可重建缓存职责分开；会话路径不扩大 Shell／普通外部文件工具的 Profile 权限。Plan 文件编辑经原 Planning Action 保存新版本，文件事实不能替代原 Run／版本批准。PDF 页图由准确 Tool Execution 的不可变 Artifact 进入中立 tool 消息，协议视觉载体不产生人类授权。跨介质发布保留 pending／unknown；备份 v20 保存最新实际工作文件和明确缺失，恢复生成新 Store。详细合同分别归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)、[维护](../../packages/agent/src/maintenance/README.md)和 [AI](../../packages/ai/README.md#图片消息)。
 
@@ -100,6 +112,10 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 
 正式命令/CI 中 `bun test` 明确列出的 `*.test/spec.*` 文件必须存在，包含 `--cwd` 解析后的输入；缺失由 [workspace 守卫](../../scripts/check-unified-workspaces.ts)以 `formal-test-file-missing` 拒绝。此检查不把 build 尚未生成的输出当测试输入，不改变运行预算、选择范围或原资格要求。
 
+质量作业、提交 hook 和 pre-release architecture 统一通过该 workspace 守卫执行一次默认源码及正式消费入口的边界检查；独立 `check:unified-agent-boundary`／`check:core-boundary` 仍可诊断。合并结果保留 source-boundary 拒绝、覆盖计数、pending 与未完成发布资格提示，不将源码缺失或计算夹具当作实际运行通过。`tsconfig.typecheck.json` 仅聚合原根和精确八 workspace，原九份配置独立生效；清单守卫拒绝漏项、重复、越界及额外配置，文件和失败路径验证归[测试体系](../../tests/README.md#类型检查)。
+
+依赖解析只在一次守卫调用内缓存工作区 manifest 和候选文件的存在／类型／实际路径；不缓存跨入口策略的通过结论，不忽略条件导出的任何分支，也不沿越界链接继续寻找替代源码。下一次调用重新读取，包括新增／删除文件、清单修改及目录链接换向；原来源、循环依赖与 CLI 专属例外保持。quality 显式准备 Web 资产，缺失导出仍拒绝；禁用安装脚本只适用于该静态作业，不放宽运行时或发布的原生资产要求。相关[负例与冷安装记录](../../tests/README.md#质量作业冷安装与边界缓存)不表示三平台运行或发布资格。
+
 单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限与决策来源独立核实。人工／自动拒绝、工具失败、adapter 异常及已保存的 unknown 作为准确 ToolResult 交回下一 Model；拒绝和 unknown 只停止本批后继效果，已启动调用先完成原结算，不取消整 Run。非法工具返回的快照／序列化失败仍属于adapter结果边界，保守结算原unknown；后续只使用独立纯JSON，不执行返回对象中的getter／toJSON。下一模型可以说明失败与未知，不能重投效果或换工具绕过拒绝；回复 completed 不解决原 unknown。用户明确取消仍停止；原终态保存失败或 authority 损坏不能编造消息继续。Run 收口与 lease release 等待全部已启动调用，真正持久化失败保原错误。显式接续复用非前缀的已结算结果，只有已声明的内部 continuation 可恢复监督，普通未知效果不能自动重放。当前实现与验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)及[工具结果决定](../../.agents/notes/implemented/architecture/2026-10-29-tool-results-preserve-agent-loop.md)。
 
 [`ai`](../../packages/ai/README.md)拥有中立模型协议与独立 SDK 适配 leaf；[`agent`](../../packages/agent/README.md)拥有单一 Loop、具名 Store 操作、执行意图/派发/回执、精确取消与显式本地中断。普通扩展只得到受范围限制的调用身份、自有记录和有限 operations，不能写 SQL、owner 或 Runtime 完成事实。Store 是宿主边界，不能作为便利对象传入扩展。Action 不虚构模型 Run，Query 不触发模型、工具或恢复。
@@ -120,7 +136,7 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 可信 runless Action/Tool 的 child 仍核宿主精确角色、模型与实际父工具上限。MCP 空目录只有在真实无 Run 祖先、原 Command/准备摘要和 child carrier/manifest 闭合时，才保存 `parentRunId:null` 血缘供后代验证；它不生成 source read-set、连接或凭据许可。省略真实父 Run 不能制造这种血缘，非空来源与篡改证明继续拒绝。装配与准确拒绝证据归[Service owner](../../apps/service/README.md)。
 
-长期执行不设主 Run 总期限、累计用量、来源数量、隐式 Shell 总超时或暂时性模型失败的次数额度。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。公共重试上界以 `maxAttempts:null` 表达，Client schema 与 TUI 保实际 attempt 和原失败前驱。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。
+长期执行不设主 Run 总期限、累计用量、来源数量或隐式 Shell 总超时。暂时性模型故障只在已确认关闭的原失败之后退避重连，同串故障最多5次，首次请求另计；新事实以`maxAttempts:6`和实际attempt／原失败前驱表达，第5次重连失败结束原Run，不新增请求。冷恢复保留原计数；旧历史的`maxAttempts:null`仍可读，不改写为新上限。AI只提供有限错误分类，Execution保存脱敏枚举，Desktop将其映射为原Turn内可展开的易读原因和建议，不发送原日志、地址或错误对象。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。实现与验证归[Agent](../../packages/agent/README.md)、[AI](../../packages/ai/README.md)和[Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 
 原 Run 的冷恢复将持久意图、可替换 Model 尝试、已确认结果与进程监督分开。纯 Model 无派生效果时可关闭旧 running/failed 尝试并重试；压缩 pending 重建摘要、已发布点保持。所选父子树在同一 root lease 下准备全部绑定并原子交接，只有提前封存的可信 Tool continuation 可接回原操作；普通外部未知效果仍需核实。原 ID、结果、审批、子期限与失败序列事实保持，失败序列不再作为 Run 取消条件。正常 Store 事务以闭合增量迁移维护恢复证明，首次冷读只核前沿/增量和必要来源；旧库一次升级及失效协议完整审计回退。全部迁移资产进入包内构建和 Service 文件保护，公开 HTTP 与 format major 1 保持；协议、真实强杀与成本边界归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
 
@@ -162,7 +178,7 @@ Native 全局总览的[后台 Main](../../apps/desktop/electron/background.ts)�
 
 TUI 当前 Session 的[后台 reader](../../packages/ui/src/tui/executions.ts)分别封存当前准入 Store 与快照中原 Job 的 origin/definition/version；恢复历史可读但停止资格仍要求当前出处。完整 child 正文沿实际 carrier/父链及原 Message/Model Execution/Run 证明出处，公共 snapshot 表示当前 Store，封存阅读不借来源 Run 后来的状态改写结果。发布前复核原身份、Model revision 与 child selection；关闭或切选择只释放所属 GET。正式 CLI host 接真实 getRun，公共 API/SQL/Artifact 合同未改变；当前消费者范围及实际恢复证据归[TUI owner](../../packages/ui/src/tui/README.md)和[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-tui-后台任务完整读取)，不代替完整平台/维护或阶段退出。
 
-Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/skill-catalogue-reads.ts)和公开 `SkillCataloguePage`。Main 从实际选中 Session 固定 Workspace/Store 与视图代次，open 核原选择/观察代次后立即登记所属取消域，不排在另一个刷新之后；原 read ID 的 close/next 不能重绑或关闭后复活读取。Main 保留原 revision/cursor，每页 128KiB，renderer 复用公共闭合 verifier 并在穷尽全部页后发布，没有累计条目截断。有限 source 仅为配置位置分类，禁用项不因此读取文件，不传路径、正文或授权；目录和页面关闭不创建 Run、改变 SSE 水位或提交业务取消。实际交付与平台证据归 [Desktop owner](../../apps/desktop/README.md#native-skills-目录迁移)。
+Native 全局 Skills 目录经 [Main 的有限 reader](../../apps/desktop/electron/skill-catalogue-reads.ts)和公开 `UserSkillCataloguePage`。Main 固定实际attach generation与Store，不接收Session／Workspace或执行authority，open立即登记所属取消域，不排在另一个刷新之后；原 read ID 的 close/next 不能重绑或关闭后复活读取。Main 保留原 revision/cursor，每页 128KiB，renderer 复用公共闭合 verifier 并在穷尽全部页后发布，没有累计条目截断。有限 source 仅为配置位置分类，禁用项不因此读取文件，目录不传路径、正文或授权；独立 `user_skill_document` 预览只接受Store、技能、正文版本和目录revision，沿同一可信用户来源返回最多1MiB UTF-8正文，不接受路径或资源。Main固定实际attach generation／Store并以独立read ID取消，关闭、替换及迟到不影响继任读取；Client和Renderer均核闭合身份。缺执行依赖可供人阅读说明，原模型加载与资源读取门禁保持，正文不进入模型或执行链；目录和页面关闭不创建 Run、改变 SSE 水位或提交业务取消。实际交付与平台证据归 [Desktop owner](../../apps/desktop/README.md#native-skills-目录迁移)。
 
 [本实例生命周期](../../packages/agent/src/lifecycle.README.md)以同步真实 busy 检查与封门实现 if_idle；status 采样不授权稍后的关闭。已受理准备、owner 接管、后台 operation 和未完成 cleanup 参与同一边界，重复关闭共用完成 Promise。只收束本实例真实拥有的工作，不因保存 command ID 就取消另一 Service 已接管的命令。普通 GET 不算执行 busy，但最终 Store 关闭等待原读取资源排空；Service 的窄 beforeResourceClose 回调先封最后业务资源入口再排空。未确认停止或清理失败保留原资源、profile 锁及诊断 HTTP，状态为 drain_failed，不伪造 completed。
 
@@ -210,7 +226,7 @@ Web 后台目录复用现有 `BackgroundExecutionQuery/Page`，仅增加 Cookie 
 
 原模型浮层接受宿主提供的准确 ID、名称与合法请求档位，再回调原选择；不根据 Provider 或模型能力标记隐藏思考调节。当前 Service 对所有配置可用模型提供 low/medium/high/xhigh/max/ultar 六档并透传，宿主稀疏列表只表示可编码的选择，远端效果由模型服务决定。Native catalogue、原作用域、Session route、临时 effort 与就绪判定仍归 Desktop，详见 [UI owner](../../packages/ui/README.md#原桌面展示层)及 [Native owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。展示重用不扩大公共管理或运行权限。
 
-原安排任务页只有现行手册定义的字段草稿，Native 不提供不存在的保存、调度或通知回调。页面导航与原 Session 的读取/写入意图分别管理，晚创建回执不能抢占后来页面；返回原会话不以持久草稿覆盖未保存原文。负责实现与当前验收归 [Native owner](../../apps/desktop/README.md#native-安排任务草稿)，不增加 Service 能力或执行权限。
+定时任务页复用公共表单，由Desktop Main持久化并按本地服务宿主时钟调度，具体运行边界见下文“Desktop 本地定时任务”。UI不自行调度、调用模型或提供未实现的通知入口。页面导航与原 Session 的读取/写入意图分别管理，晚创建回执不能抢占后来页面；返回原会话不以持久草稿覆盖未保存原文。负责实现与当前验收归 [Native owner](../../apps/desktop/README.md#native-定时任务)，不增加 Service 能力或执行权限。
 
 Native [新对话 Main](../../apps/desktop/electron/conversation.ts)只编排现有创建、私有草稿、permission controller、caller journal 与 input caller。全局准备模型只读观察独立于选中 Session，不授予 Settings 写权限；准备页选择 Workspace 只查询同代次／Store 已观察规范目录的 Git，有限结果不含路径或控制句柄。显式首次分支切换核实际根／HEAD／脏文件、全部活动工作和 trusted Main 的 Profile／制品保护根，不重启 Service。热首次链的原创建身份与新输入 Command 分别固定，权限 controller 不接管阅读选择；额外宿主 read scopes 仍需明确确认。私有原草稿在创建 POST 前保存，输入 journal 在输入 POST 前保存；未知创建／权限／输入仅原 GET，冷行不授予续写资格。UI 的等待消息按实际原 Command，或 sourceIds 加准确原 Run 证明接管，不从文本推导来源。公开 API、私有 SQLite 格式与运行授权保持。已保存草稿的消费与原回执同事务提交；选中草稿读取可带本进程有界、非持久的准确消费凭据，仅用于诊断保存的修订核对，不把其他写入者的空正文视作本次消费，也不授予命令执行权。负责行为和限定验证见 [Native owner](../../apps/desktop/README.md#native-新对话准备与首次发送)。
 
@@ -433,7 +449,7 @@ Native普通输入区可经已有Tool Message read lease读取该预测的有限
 
 ## Desktop 本地定时任务
 
-Desktop Main在应用存续期内触发本地定时任务，调度元数据属desktop-private DB10／closed manifest19；时钟取本地Service宿主的系统时间，renderer只提交墙钟字段，Main持有时区绑定。绑定变化只重算当前Store的未来安排，冻结运行快照和外来Store不改写；Agent业务执行仍只由普通Session创建与run.start拥有。每次新Session，运行前持久稳定原身份与完整快照，未知及冷恢复只查询原申请，不恢复POST权利；新Store不retag原任务，也不自动重放。权限、审批、Agent baseline与schema保持。精确实现和验证归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)与[maintenance DB10合同](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。
+Desktop Main在应用存续期内触发本地定时任务，调度元数据属desktop-private DB10／closed manifest19；时钟取本地Service宿主的系统时间，renderer只提交墙钟字段，Main持有时区绑定。绑定变化只重算当前Store的未来安排，冻结运行快照和外来Store不改写；Agent业务执行仍只由普通Session创建与run.start拥有。每次新Session，运行前持久稳定原身份与完整快照，未知及冷恢复只查询原申请，不恢复POST权利；新Store不retag原任务，也不自动重放。权限、审批、Agent baseline与schema保持。精确实现和验证归[Desktop owner](../../apps/desktop/README.md#native-定时任务)与[maintenance DB10合同](../../packages/agent/src/maintenance/README.md#desktop-db10-与-manifest-v19)。
 
 任务可选`reasoningEffort`与准确Model ID一起进入私有保存和每次运行快照，经原`run.start.reasoningEffort`传递并进入原请求摘要；保存前按当前模型目录核档位。旧任务无此字段时不造覆盖，原摘要不变；编辑后的值不重写已派发快照。DB10与manifest19行白名单仅增加受控可选枚举，原字节预算、坏行拒绝、新Store及冷零POST规则保持，不提升格式或API版本。
 
@@ -450,8 +466,18 @@ Desktop Main在应用存续期内触发本地定时任务，调度元数据属de
 
 配套 Service 的普通 launcher close 等待原 child 的真实 drain／退出；取消、原 Run／Execution／Job 终态与 owned 资源关闭先于成功退出，不再默认5秒强杀。SIGINT／SIGTERM 与父 EOF 汇入相同收尾；启动读取可取消，已开始的装配仍保到其真实关闭。明确 hard timeout／强退及准入失败回收只触及本次 child，不能提供终态或清理证明。Native Main 的信号／父通道事件与菜单异步决定按同一停止意图串行，不允许迟到“保留服务”撤销已开始的 drain。实际边界与回归归[Service owner](../../apps/service/README.md)、[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)和[正常退出决定](../../.agents/notes/implemented/bug-fix/2026-10-21-paired-graceful-exit.md)。
 
-桌面Markdown扩展属于[UI派生展示](../../packages/ui/README.md#markdown-消息内容)：Native Worker只复用纯GFM／公式语法，renderer负责KaTeX排版、代码高亮及受限Mermaid绘图，不取得网络、文件或业务IPC权限。图表使用本地库、strict模式及SVG image，不挂载生成事件或放宽CSP；错误／超限保留原文。消息内标题／脚注跳转仅命中当前消息，图表暂停、缓存记账和窗口隐藏沿原Activity资源边界；完整正文身份、复制资格与业务恢复仍由原owner核验。
+桌面Markdown扩展属于[UI派生展示](../../packages/ui/README.md#markdown-消息内容)：Native Worker只复用纯GFM／CJK强调兼容／公式语法，renderer负责KaTeX排版、代码高亮及受限Mermaid绘图，不取得网络、文件或业务IPC权限。图表使用本地库、strict模式及SVG image，不挂载生成事件或放宽CSP；错误／超限保留原文。消息内标题／脚注跳转仅命中当前消息，图表暂停、缓存记账和窗口隐藏沿原Activity资源边界；完整正文身份、复制资格与业务恢复仍由原owner核验。
 ## 普通页面控制租约待审分支（2026-10-27）
+
+固定Renderer的绘制前同步量测也用于准确祖先分隔线处于active的实际拖动；稳定布局仍沿原异步单在途合并。同步准入退休旧异步反馈，原scope／frame／token／revision及几何检查保持，不由拖动授予页面控制或恢复旧观察。瞬时跨surface边缘差与具体平台资格归Desktop owner，不把同步IPC完成视为系统物理同帧。
+
+普通网页加载失败的浏览器错误页只消费Main核验的当前失败状态及有界kind／单行ERR_名称，不接收日志、异常栈或远端HTML作为应用展示。Root错误页不替换原生文档、失败历史或页面身份，不授Agent文档就绪、导航成功、截图freshness或控制权。显式重新加载仍经原准确id／scope／控制门禁，普通HTTP错误正文继续由站点呈现；TLS、正常首帧与取消／未知约束保持。实现与限定验证归[Desktop owner](../../apps/desktop/README.md#浏览器加载失败页2026-11-03)。
+
+普通网页文档及首帧展示等待由引擎与准确展示生命周期结束，不设应用独立倒计时；慢页不能仅因12秒／2秒经过而变为display failed。文档／Root／scope／几何失效、撤页及销毁仍取消准确等待和订阅，不复活旧帧或授页面控制；Agent操作期限和观察／输入证明不因此改变。
+
+Windows右栏分隔线与拖拽中的把手由Main的普通原生View随准确Page几何绘制，Root只交付有界装饰位置、尺寸及主题颜色；通过同一scope／Root frame／文档token／revision和panel投影校验才采用。静止DOM把手继续接收真实输入，原生把手只在Root分隔线已捕获的active拖拽期间显示，结束、撤页、隐藏及销毁均撤下；不增WebContents、截图、Agent输入转发或授权。完整工具栏、键盘和可访问性仍归Root，原生装饰不是页面已显示、模型观察或控制凭据。实际实现与Windows限定过程证据归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
+
+当前固定Renderer路径在Windows首帧准备时，仅临时关闭准确原页的backgroundThrottling，以便被完整Root覆盖的BaseWindow子视图实际绘制；成功、失败、取消或展示身份退休时恢复原策略。显示仍须当前文档、完整原生帧、Root覆盖及原scope／frame／token／revision／几何检查，不能以临时后台绘制、DOM-ready或URL授予模型观察或控制。Renderer按实际标题栏和内容框CSS边距提供自洽量测，旧窗口／DOM混合尺寸不成为新anchor。现有layout几何与工具版本保持；实现与Windows限定证据归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
 
 2026-10-31 的 macOS 原生分栏候选只改变 Desktop 展示所有权：Main 通过公开 `BaseWindow + WebContentsView` 组合限定 Root 自身物理边界，固定 UI viewport 只作用于准确自有 Root，不进入 Agent 页面 registry、Tool 或 Service 端口。browser-live中的窗口事件与Renderer量测由同一controller入口计算最终几何并做输出差分；host不另订阅resize，Root viewport按准确文档／连接环境去重，几何相同不省权限、绑定或原回执。现有controller的真实native resize回调可在旧Root尺寸ACK未返回时向同一writer提交当前不同尺寸，普通Renderer来源仍单在途合并；准确当前请求、Root frame与metricsEpoch约束完成，旧完成／拒绝不影响继任，当前失败仍安全撤下。该尺寸ACK不能代替Page绘制或操作许可，稳定async量测不生成或复用旧Root绘制证明。未托管浏览器的Root由自身原生resize回调同步跟随全窗尺寸，避免普通双击缩放也等待浏览器布局队列；已托管Root仍由controller保物理裁剪，不被该全宽路径覆盖。prepared的hosted页直接在原生resize回调中沿唯一布局入口跟随，旧坐标先失效并取消尚未执行的bootstrap任务；启动及未托管恢复继续排队。浏览器scope从NativeCaller逐次读取窄内存投影，与完整state共享同一选中快照及失败边界，不为四元组读取无关UI提交记录，也不缓存authority；原持久记录与派发完整性校验保持。稳定hosted的正向量测经同一布局channel异步校准，Renderer仅保一个在途请求并在完成后重测当前DOM；首次绑定与兼容路径仍同步。Main在变更呈现证明前核当前几何、准确active／visible页、已有presentation、scope与Chrome binding，异步调用不能首次显示或复活已撤页；hide及scope变化不等待旧正向量测，迟到回复不接管新树。右栏的实际折叠可见性随实时layout通知撤销，完成通知另行确认用户关闭意图；已验收Renderer显式hide退休旧drawn证明，迟到Chrome ready不得复活旧呈现，内部suspend／bootstrap交接仍保各自证明。原生连续预测独立保存受约束后的尺寸历史，新验收量测重置预测，不能充作Renderer观察或输入proof。已加载页的原位切换只保同scope／Root环境下的物理宿主，新目标轮换wire身份并重新确认，旧目标输入与迟到事件不沿用；inactive Pane只保资料，不安装或撤销下一次呈现。同viewport的短期旧live页只在已ready原生输入屏障下保留，逻辑旧proof仍退休；目标自身单次完整帧仅作UI就绪门，不展示或供模型观察，超时／身份／几何变化按单次key清理，原Run与控制租约不转移。用户切页与当前页关闭可先准备准确既有目标自身单次完整帧（100ms准备、ready最多1500ms采纳），独立key及单在途读取不授模型观察／租约；真实close仍立即销毁，准备目标不依赖已关闭源继续存活。Root聚合提交中间缺失端口的发布而立即拒旧动作，继任正快照先于同commit的close派发；同id导航、旧页loading或关闭不自动等同宿主几何失效，新ACK／量测与原scope边界保持。工具栏DOM仅按Root scope复用，实际页id仍进入动作binding；页面loading／hasPage／能力事实不因fresh ACK暂缺而被清空，交互暂停仍禁按钮与提交，真实控制限制保留。不同页清旧编辑与待提交、同页几何保IME，失焦旧input及旧unknown不接管新目标。首次发送前的手动网页使用Root本地草稿owner，不借当前旧Session、不预建Session或注册/arm Agent页面；正式Session restore/能力边界保持。Main核准确Root frame/epoch、draft token、页面和展示revision，草稿只恢复本owner的已有页面清单；同document保token，Root重建时按准确token重新核绑定，旧proof退休且revision floor保留，不导航/刷新或重放。草稿与正式会话沿同一原生Chrome/Root裁剪和Page双帧交接呈现，采用后的尺寸校准复用异步入口。Chrome展示owner可为Root本地draft，但Agent页面scope仍只接受真实Session；显式Root展示context及单调revision约束当前显示意图，不补造Caller、lease或模型观察。首次从完整Root转入原生网页时，Root绘制确认仅完成量测，不授网页已呈现；Main先确认现有原生Chrome宿主的完整右栏loading帧，再准Root内部绘制证明；目标Page预备在Root之上、该宿主之下，真实文档与自身首帧及fresh Root ACK完成后裁剪Root，再恢复稳定Page在Root之下的层序并将Chrome缩回工具栏。准确同页同尺寸可复用原生资源并用输入屏障保护live画面，但新wire、Root证明和Page帧仍重新取得，资源描述不能授租约或模型观察。准备不取得Agent lease或生成模型观察，旧scope／frame／token／revision及超时、停止和关闭均撤销；失败保留原页，不刷新、新建或重放导航。合并Main调用与CDP完成均不构成系统像素同帧提交证明。独立浏览器标签／工具栏 Renderer 使用专属受限 preload，只收有界纯展示快照并发送封闭 UI 事件；Root 仍为唯一 tab model、权限观察及业务处理器。Main 核实际页对象、scope、attachment、revision、单调序号及一次性确认，未知派发不重发；已解析但展示owner失效的菜单请求只取消，来源校验、畸形输入及真实Native失败仍保留。菜单局部反馈不构成网页错误或撤销呈现的依据，也不授控制能力；真正网页、scope与权限门禁保持。独立宿主没有 NativeBridge、Service caller、任意代码、CDP 或网页认证能力。工具／协议版本及原网页与控制租约身份保持。当前源码、状态切换、原型反例与冻结制品资格归[Desktop owner](../../apps/desktop/README.md#macos-原生分栏与浏览器工具栏2026-10-31)，不能用本段设计边界补造连续画面验收。
 

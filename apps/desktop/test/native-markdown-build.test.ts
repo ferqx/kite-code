@@ -32,11 +32,12 @@ test('the actual browser Worker bundle decodes full GFM without document, window
   };
   runInNewContext(script.code, { self });
   const text =
-    '# &copy; &NotEqualTilde; &notit;🙂\n\n$x^2$\n\n$$\n\\frac{a}{b}\n$$\n\n' +
+    '**下周如何调整：**如果没有新反馈，重复本周安排。\n\n# &copy; &NotEqualTilde; &notit;🙂\n\n$x^2$\n\n$$\n\\frac{a}{b}\n$$\n\n' +
     '中文🙂 '.repeat(10000) +
     '\n\n[link][late]\n\n[late]: https://example.com/?a=1&amp;b=2\n\n|a|\n|-|\n|~~b~~|';
   self.onmessage!({ data: { id: 7, text } });
   expect(replies).toEqual([{ id: 7, text, tree: parseDesktopMarkdown(text) }]);
+  expect(JSON.stringify(replies)).toContain('"type":"strong"');
   expect(script.code).not.toContain('document.createElement');
   expect(script.code).not.toContain('react-dom');
 }, 15000);

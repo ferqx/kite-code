@@ -24,8 +24,14 @@ import {
   nativeWindowAppearanceChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
+import {
+  isNativeRecommendedModel,
+  type NativeModelPreferenceReply,
+  nativeModelPreferenceChannel,
+} from '../src/native-model-preference-bridge';
 import { promptTextForSend } from '../src/prompt-text';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
+import type { nativeModelPreferences } from './model-preference';
 import type { NativeCaller } from './native-caller';
 import type { NativeRootWindow as BrowserWindow } from './native-root-window';
 import { parseScheduledTaskSaveInput } from './scheduled-tasks';
@@ -34,6 +40,7 @@ import { saveStartupDiagnosticReport } from './startup-report';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'session.markRead': ['expectedStoreId', 'sessionId', 'runId', 'status'],
   'input.queue.read': ['readId', 'viewSelection', 'historyEpoch'],
   'input.queue.close': ['readId'],
   'input.queue.steer': ['observationId', 'targetCommandId'],
@@ -108,6 +115,8 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'background.child.read': ['readId', 'offset', 'limit'],
   'background.child.close': ['readId'],
   'settings.skills.open': ['readId'],
+  'settings.skills.document': ['readId', 'skillId', 'skillVersion', 'revision'],
+  'settings.skills.document.close': ['readId'],
   'settings.skills.next': ['readId'],
   'settings.skills.close': ['readId'],
   'jobOutput.open': ['readId', 'executionId', 'viewSelection', 'historyEpoch'],
@@ -263,6 +272,17 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   }
   const candidate = record(value);
   if (
+    candidate.method === 'settings.skills.document' &&
+    (typeof candidate.skillId !== 'string' ||
+      !candidate.skillId ||
+      candidate.skillId.length > 128 ||
+      typeof candidate.skillVersion !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(candidate.skillVersion) ||
+      typeof candidate.revision !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(candidate.revision))
+  )
+    throw Error('invalid_native_request');
+  if (
     bytes >
     (candidate.method === 'caller.prepare' ||
     candidate.method === 'submit' ||
@@ -273,6 +293,13 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('native_request_too_large');
   const input = record(value),
     method = input.method;
+  if (
+    method === 'session.markRead' &&
+    (typeof input.runId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(input.runId) ||
+      !['completed', 'failed', 'cancelled', 'interrupted'].includes(String(input.status)))
+  )
+    throw Error('invalid_native_request');
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
   if (method.startsWith('input.files.')) {
@@ -685,6 +712,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     if (
       method !== 'interaction.answer' &&
       method !== 'grants.read' &&
+      !(method === 'settings.skills.document' && key === 'revision') &&
       fields[method as NativeRequest['method']].includes(key) &&
       (!Number.isSafeInteger(input[key]) || Number(input[key]) < 0)
     )
@@ -1084,6 +1112,41 @@ export function assertNativeSender(
   }
   if (!same) throw Error('native_sender_denied');
 }
+/** Small non-secret client preferences, independent of renderer origin and Service state. */
+export function registerNativeModelPreferenceIpc(options: {
+  ipcMain: IpcMain;
+  window: () => BrowserWindow | undefined;
+  rendererUrl: string;
+  preferences: () => ReturnType<typeof nativeModelPreferences>;
+}) {
+  options.ipcMain.handle(
+    nativeModelPreferenceChannel,
+    (event, payload: unknown): NativeModelPreferenceReply => {
+      try {
+        assertNativeSender(event, options.window(), options.rendererUrl);
+        const input = record(payload);
+        if (input.action === 'read') {
+          exact(input, ['action', 'storeId']);
+          if (typeof input.storeId !== 'string') throw Error('model_preference_invalid');
+          return { ok: true, value: options.preferences().read(input.storeId) };
+        }
+        exact(input, ['action', 'storeId', 'choice']);
+        if (
+          input.action !== 'remember' ||
+          typeof input.storeId !== 'string' ||
+          !isNativeRecommendedModel(input.choice)
+        )
+          throw Error('model_preference_invalid');
+        options.preferences().remember(input.storeId, input.choice);
+        return { ok: true, value: null };
+      } catch {
+        return { ok: false, code: 'model_preference_unavailable' };
+      }
+    },
+  );
+  return () => options.ipcMain.removeHandler(nativeModelPreferenceChannel);
+}
+
 /** Original window-only theme operation; it never opens the business caller. */
 export function registerNativeThemeIpc(options: {
   ipcMain: IpcMain;

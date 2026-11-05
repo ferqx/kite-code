@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun build ./src/index.tsx --target=browser --packages=external --outdir=dist",
     "build:native": "bun run scripts/build-native.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "bun check -p tsconfig.json",
     "test": "bun test ./test"
   },
   "dependencies": {

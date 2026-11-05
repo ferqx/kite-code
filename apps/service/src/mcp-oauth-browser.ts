@@ -67,8 +67,13 @@ export function createMcpOAuthBrowser(
     void child.exited.then(
       (code) => {
         exitConfirmed = true;
-        evidence.launcher.exit = { code, signal: child.signalCode, reaped: true };
-        publish();
+        const signal = child.signalCode;
+        // The existing evidence format accepts only named signals or null.
+        // Other native forms remain unreported rather than broadening admission.
+        if (signal === null || typeof signal === 'string') {
+          evidence.launcher.exit = { code, signal, reaped: true };
+          publish();
+        }
       },
       () => {},
     );

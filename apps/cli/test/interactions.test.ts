@@ -104,6 +104,8 @@ async function fixture() {
   return {
     client,
     runtime,
+    store,
+    model,
     storeId,
     get effects() {
       return effects;
@@ -268,7 +270,7 @@ test('actual private paired Service process completes opt-in CLI approval/questi
   }
 }, 15000);
 
-test('actual denied approval ends original Run with zero tool effects; invalid question answer stays pending', async () => {
+test('actual denied approval reaches the next Model without tool effects; invalid question answer stays pending', async () => {
   const denied = await fixture();
   try {
     const result = await run(
@@ -281,8 +283,47 @@ test('actual denied approval ends original Run with zero tool effects; invalid q
         answerInteraction: async () => ({ kind: 'approval', decision: 'deny' }),
       },
     );
-    expect(result.status).toBe('cancelled');
+    expect(result.status).toBe('succeeded');
+    expect(result.commandId).toBe('run');
+    expect(result.exitCode).toBe(0);
     expect(denied.effects).toBe(0);
+    expect(denied.answers).toBeUndefined();
+    const view = await denied.store.getView('s');
+    expect(view.runs).toHaveLength(1);
+    expect(view.runs[0]).toMatchObject({ status: 'completed', originCommandId: 'run' });
+    const executions = await denied.store.listExecutions('s');
+    const tools = executions.filter((execution) => execution.kind === 'tool');
+    expect(tools).toHaveLength(1);
+    const original = tools[0]!;
+    expect(original).toMatchObject({
+      definitionId: 'fixture.question',
+      runId: view.runs[0]!.id,
+      originCommandId: 'run',
+      status: 'failed',
+      result: {
+        outcome: 'failed',
+        details: { code: 'approval_denied', adapterAttempted: false, dispatchCommitted: false },
+      },
+      authorization: { dispatched: false, human: { state: 'answered', decision: 'deny' } },
+      decisionSource: {
+        kind: 'model_decision',
+        modelExecutionId: denied.model.requests[0]!.requestId,
+      },
+    });
+    expect(denied.model.requests).toHaveLength(2);
+    const models = executions.filter((execution) => execution.kind === 'model');
+    expect(models.map((execution) => execution.id)).toEqual(
+      denied.model.requests.map((request) => request.requestId),
+    );
+    expect(models.every((execution) => execution.runId === view.runs[0]!.id)).toBe(true);
+    const feedback = denied.model.requests[1]!.messages.filter(
+      (message) => message.role === 'tool' && message.sourceIds?.includes(original.id),
+    );
+    expect(feedback).toHaveLength(1);
+    expect(feedback[0]).toMatchObject({ toolCallId: 'call', sourceIds: [original.id] });
+    expect(feedback[0]!.content).toContain('The user denied this request.');
+    expect(feedback[0]!.content).toContain('It was not executed.');
+    expect(feedback[0]!.content).toContain('Do not resubmit it or bypass the refusal.');
   } finally {
     await denied.close();
   }

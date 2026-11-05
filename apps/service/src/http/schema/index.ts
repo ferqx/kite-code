@@ -26,6 +26,8 @@ import {
   SkillCatalogueQuerySchema,
   UserSkillCataloguePageSchema,
   UserSkillCatalogueQuerySchema,
+  UserSkillDocumentQuerySchema,
+  UserSkillDocumentSchema,
 } from './skill-catalogue';
 import {
   UserMcpOperationQuerySchema,
@@ -1894,6 +1896,8 @@ export const apiSchemas = {
   SkillCataloguePage: SkillCataloguePageSchema,
   UserSkillCatalogueQuery: UserSkillCatalogueQuerySchema,
   UserSkillCataloguePage: UserSkillCataloguePageSchema,
+  UserSkillDocumentQuery: UserSkillDocumentQuerySchema,
+  UserSkillDocument: UserSkillDocumentSchema,
   UserMcpSettingsQuery: UserMcpSettingsQuerySchema,
   UserMcpSettingsRequest: UserMcpSettingsRequestSchema,
   UserMcpSettingsView: UserMcpSettingsViewSchema,
@@ -2322,6 +2326,12 @@ export const apiRoutes = [
     path: '/v1/workspaces/{id}/removals/{commandId}',
     query: 'PermissionControlQuery',
     response: 'WorkspaceRemoval',
+  },
+  {
+    method: 'get',
+    path: '/v1/config/user/skills/document',
+    query: 'UserSkillDocumentQuery',
+    response: 'UserSkillDocument',
   },
   {
     method: 'get',

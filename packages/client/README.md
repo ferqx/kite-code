@@ -206,6 +206,8 @@ Linux Shell 的准确 `linux_pid_namespace/linux_host_boundary_unqualified` 与 
 
 `listUserSkills({storeId,afterId?,revision?,limit?,byteLimit?,signal?})` 经 `user_skill_catalogue` 读取 `GET /v1/config/user/skills`，返回独立闭合 `UserSkillCataloguePage`。固定 `scope:user`，无 Session／Workspace 参数或身份，来源仅可为 user，不接受 Workflow 查询或投影。消费者在第一份 revision 下穷尽分页再发布完整目录；用户配置变化、取消或连接身份变化使本次读取失败，不创建隐藏任务或自动重开。默认 Native 全局设置使用此入口，项目 Skill 的实际执行选择仍由原 Run 合同处理。
 
+`readUserSkillDocument({storeId,skillId,skillVersion,revision,signal?})` 要求 `user_skill_document`，通过用户级只读端点取得 `UserSkillDocument`。请求与响应闭合，响应不接受路径或资源字段；共享 `verifyUserSkillDocument` 核准确Store／技能／版本／目录revision及1MiB UTF-8预算，SDK前后核连接身份。取消、旧版本或身份变化不自动重读，不推进SSE或改变执行能力；目录本身仍不附带正文。
+
 `listSkills(workspaceId,{storeId,afterId?,revision?,limit?,byteLimit?,signal?})` 保留实际 Workspace 的 `skill_catalogue` metadata；`listAllSkills(workspaceId,{storeId,signal?})` 在第一份revision下穷尽全部页，返回同一完整page形状（complete=true/nextAfterId=null）。SDK私有复制参数，核原Store/Workspace、state一致性、严格升序和末cursor、revision及原连接代次；失败/变更不重试或重新开始目录，更不创建任务。取消和迟到读取仅影响本调用，SSE和lastAppliedCursor保持。
 
 `SkillCataloguePage` 与HostStatus一样使用专门闭合响应schema，拒绝附加正文/路径/凭据字段；其他公共response的可扩展策略不变。available仅说明当前知识发现，不是Workflow activation、工具权限或未来版本预订；unavailable与有效空目录分别表达。单页字节预算不限制listAll的总条目数。

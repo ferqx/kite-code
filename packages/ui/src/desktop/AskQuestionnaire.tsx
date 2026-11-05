@@ -170,27 +170,27 @@ export function AskQuestionnaire({
             );
           })}
           <div className="ask-questionnaire-actions">
-            <button type="button" disabled={disabled} onClick={onCancel}>
+            <Button type="button" disabled={disabled} onClick={onCancel}>
               取消回答
-            </button>
+            </Button>
             {current > 0 && (
-              <button type="button" disabled={disabled} onClick={() => setCurrent(current - 1)}>
+              <Button type="button" disabled={disabled} onClick={() => setCurrent(current - 1)}>
                 上一题
-              </button>
+              </Button>
             )}
             {current < questions.length - 1 ? (
-              <button
+              <Button
                 className="primary"
                 type="button"
                 disabled={disabled}
                 onClick={() => setCurrent(current + 1)}
               >
                 下一题
-              </button>
+              </Button>
             ) : (
-              <button className="primary" type="submit" disabled={disabled || !allAnswered}>
+              <Button className="primary" type="submit" disabled={disabled || !allAnswered}>
                 提交回答
-              </button>
+              </Button>
             )}
           </div>
         </Questionnaire.Root>

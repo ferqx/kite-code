@@ -403,7 +403,240 @@ export async function verifySessionShellGeometry(browser: Browser, url: string, 
   return cases;
 }
 
-/** Settings uses the same bounded surface as scheduled-task and conversation rails. */
+type ToolbarGeometry = {
+  phase: string;
+  model: string | null;
+  composer: number[];
+  metrics: number[];
+  action: number[];
+  rate: number[] | null;
+  ring: number[] | null;
+  textLeft: number | null;
+  textRight: number | null;
+  text: string | null;
+  same: boolean;
+};
+declare global {
+  interface Window {
+    toolbarGeometry: {
+      active: boolean;
+      phase: string;
+      read: () => ToolbarGeometry;
+      frames: ToolbarGeometry[];
+    };
+  }
+}
+
+/** Metric availability and changing digits must not move or wrap the toolbar. */
+export async function verifyColdSessionToolbarWidth(
+  browser: Browser,
+  url: string,
+  artifact: string,
+) {
+  const cases = [];
+  for (const theme of ['light', 'dark'] as const) {
+    for (const mode of ['cache', 'both', 'context', 'none']) {
+      for (const width of mode === 'cache' ? [500, 810, 820, 830, 1440] : [500, 820, 1440]) {
+        const page = await browser.newPage({
+          viewport: { width, height: 900 },
+          colorScheme: theme,
+        });
+        page.setDefaultTimeout(10000);
+        const errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        try {
+          await page.goto(`${url}?metrics=${mode}`);
+          await page.getByRole('button', { name: 'Session A', exact: true }).click();
+          await page.waitForFunction(
+            () =>
+              !document.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled &&
+              !document.querySelector('.composer-metrics[aria-busy="true"]'),
+          );
+          await page.evaluate(() => document.fonts.ready);
+          await page.evaluate(() => {
+            const metrics = document.querySelector('.composer-metrics');
+            const action = document.querySelector('.composer-actions');
+            const ring = document.querySelector('.composer-context-usage');
+            const cacheRate = document.querySelector('.composer-cache-rate');
+            const state = {
+              active: true,
+              phase: 'original',
+              frames: [] as ToolbarGeometry[],
+              read: (): ToolbarGeometry => {
+                const rect = (selector: string) => {
+                  const value = document.querySelector(selector)?.getBoundingClientRect();
+                  return value ? [value.x, value.y, value.width, value.height] : null;
+                };
+                const rate = document.querySelector('.composer-cache-rate');
+                const range = document.createRange();
+                if (rate) range.selectNodeContents(rate);
+                return {
+                  phase: state.phase,
+                  model: document.querySelector('[data-model-trigger]')?.textContent ?? null,
+                  composer: rect('.composer')!,
+                  metrics: rect('.composer-metrics')!,
+                  action: rect('.composer-actions')!,
+                  rate: rect('.composer-cache-rate'),
+                  ring: rect('.composer-context-usage'),
+                  textLeft: rate ? range.getBoundingClientRect().left : null,
+                  textRight: rate ? range.getBoundingClientRect().right : null,
+                  text: rate?.textContent ?? null,
+                  same:
+                    document.querySelector('.composer-metrics') === metrics &&
+                    document.querySelector('.composer-actions') === action &&
+                    document.querySelector('.composer-context-usage') === ring &&
+                    document.querySelector('.composer-cache-rate') === cacheRate,
+                };
+              },
+            };
+            window.toolbarGeometry = state;
+            const sample = () => {
+              state.frames.push(state.read());
+              if (state.active) requestAnimationFrame(sample);
+            };
+            requestAnimationFrame(sample);
+          });
+          const read = () => page.evaluate(() => window.toolbarGeometry.read());
+          const original = await read();
+          const phase = async (name: string) => {
+            await page.evaluate((name) => {
+              window.toolbarGeometry.phase = name;
+            }, name);
+            await page.waitForTimeout(80);
+            await page.screenshot({
+              path: path.join(artifact, `toolbar-${theme}-${width}-${mode}-${name}.png`),
+            });
+          };
+          await phase('original');
+          await page.evaluate(() => window.sessionShellFixture.hold());
+          await page.getByRole('button', { name: 'Session B', exact: true }).click();
+          await page.waitForFunction(() => window.sessionShellFixture.pending('selection') > 0);
+          await phase('selection');
+          await page.evaluate(() => window.sessionShellFixture.release('selection'));
+          await page.waitForFunction(() => window.sessionShellFixture.pending('models') > 0);
+          await phase('models');
+          await page.evaluate(() => window.sessionShellFixture.release('models'));
+          await page.waitForFunction(() => window.sessionShellFixture.pending('history') > 0);
+          assert.equal(await page.locator('.composer-cache-rate').textContent(), '缓存 0%');
+          await phase('history');
+          const loading = await read();
+          if (mode === 'both' || mode === 'context') {
+            await page.evaluate(() => window.sessionShellFixture.release('history'));
+            await page.waitForFunction(
+              () =>
+                window.sessionShellFixture.pending('usage') > 0 &&
+                window.sessionShellFixture.pending('context') > 0,
+            );
+            await phase('metrics-pending');
+            await page.evaluate(() => window.sessionShellFixture.release('usage'));
+            await phase('usage-ready');
+            assert.equal(await page.locator('.composer-cache-rate').textContent(), '缓存 0%');
+          }
+          await page.evaluate(() => window.sessionShellFixture.resume());
+          await page.waitForFunction(
+            () =>
+              document.querySelector('[data-model-trigger]')?.textContent?.includes('Model B') &&
+              !document.querySelector('.composer-metrics[aria-busy="true"]'),
+          );
+          await phase('settled');
+          const settled = await read();
+          assert.equal(settled.text, mode === 'cache' || mode === 'both' ? '缓存 30%' : '缓存 0%');
+          assert.equal(!!settled.ring, true);
+          assert.equal(
+            await page.locator('.composer-context-usage').getAttribute('aria-label'),
+            mode === 'both' || mode === 'context' ? '上下文占用约 4%' : '上下文占用未知',
+          );
+          await page.getByRole('button', { name: 'Session A', exact: true }).click();
+          await page.waitForFunction(
+            () => !document.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled,
+          );
+          await phase('return-cached');
+          const frames = await page.evaluate(() => {
+            window.toolbarGeometry.active = false;
+            return window.toolbarGeometry.frames;
+          });
+          for (const frame of frames) {
+            const label = `${theme}/${width}/${mode}/${frame.phase}`;
+            assert.equal(frame.same, true, `${label}: stable toolbar nodes`);
+            const expected = frame.model?.includes('Model B') ? loading : original;
+            for (const key of ['composer', 'metrics', 'action'] as const)
+              assert.deepEqual(frame[key], expected[key], `${label}: ${key} stays put`);
+            if (frame.ring && frame.rate && frame.textLeft !== null && frame.textRight !== null) {
+              assert(
+                Math.abs(frame.ring[0]! - (frame.rate[0]! + frame.rate[2]!) - 4) < 0.25,
+                `${label}: compact cache-to-ring gap`,
+              );
+              assert(
+                Math.abs(frame.textLeft + frame.textRight - (2 * frame.rate[0]! + frame.rate[2]!)) <
+                  0.5,
+                `${label}: centered cache text`,
+              );
+            }
+          }
+          const rateWidths = await page.evaluate(() => {
+            const rail = document.querySelector('.composer-metrics')!;
+            return [0, 1, 10, 99, 100].map((value) => {
+              const sample = rail.cloneNode() as HTMLElement;
+              sample.style.cssText = 'position:fixed; visibility:hidden';
+              const rate = document.createElement('span');
+              rate.className = 'composer-cache-rate';
+              rate.textContent = `缓存 ${value}%`;
+              sample.append(rate);
+              rail.parentElement!.append(sample);
+              const range = document.createRange();
+              range.selectNodeContents(rate);
+              if (range.getBoundingClientRect().width > rate.getBoundingClientRect().width)
+                throw Error('percentage digits overflow their slot');
+              const width = rate.getBoundingClientRect().width;
+              sample.remove();
+              return width;
+            });
+          });
+          assert.equal(
+            new Set(rateWidths).size,
+            1,
+            `${theme}/${width}/${mode}: 0–100% occupies one width`,
+          );
+          assert.deepEqual(errors, []);
+          await page.locator('.composer-context-usage').focus();
+          const tooltip = page.getByRole('tooltip');
+          await tooltip.waitFor();
+          const detail = await tooltip.textContent();
+          assert(detail?.includes('上下文窗口'));
+          assert(!detail?.includes('NaN') && !detail?.includes('undefined'));
+          if (mode === 'cache' || mode === 'none') assert(detail?.includes('已用未知，总量未知'));
+          await page.screenshot({
+            path: path.join(artifact, `toolbar-${theme}-${width}-${mode}-tooltip.png`),
+          });
+          await page.keyboard.press('Escape');
+          await tooltip.waitFor({ state: 'hidden' });
+          assert.deepEqual((await read()).metrics, original.metrics);
+          const result = {
+            theme,
+            width,
+            mode,
+            original,
+            loading,
+            settled,
+            frames,
+            rateWidths,
+            detail,
+            errors,
+          };
+          await Bun.write(
+            path.join(artifact, `toolbar-${theme}-${width}-${mode}.json`),
+            JSON.stringify(result, null, 2),
+          );
+          cases.push(result);
+        } finally {
+          await page.close();
+        }
+      }
+    }
+  }
+  return cases;
+}
+
 export async function verifySettingsGeometry(browser: Browser, url: string, artifact: string) {
   const cases = [];
   for (const theme of ['light', 'dark'] as const) {
@@ -525,7 +758,7 @@ export async function verifySettingsGeometry(browser: Browser, url: string, arti
         const skillsWidth = await railWidth();
         assert(Math.abs(skillsWidth - expectedWidth) < 1, 'Skills uses the same default');
         await page.getByRole('button', { name: '返回应用', exact: true }).click();
-        await page.getByRole('button', { name: '安排任务', exact: true }).click();
+        await page.getByRole('button', { name: '定时任务', exact: true }).click();
         await page.getByRole('button', { name: '新建', exact: true }).click();
         await page.waitForTimeout(260);
         const scheduledWidth = () =>

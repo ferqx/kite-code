@@ -58,6 +58,7 @@ export interface WindowsOwnedProcessObservation {
 }
 
 const INVALID = 0xffffffffffffffffn;
+const CREATE_NO_WINDOW = 0x08000000;
 const retained = new Set<object>();
 const borrowedMemory = new Set<object>();
 const delay = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -224,6 +225,9 @@ export function startWindowsOwnedChild(input: {
   cwd: string;
   env: Readonly<Record<string, string>>;
   stdin: 'pipe' | 'ignore';
+  /** Optional limits for a trusted, fixed one-shot helper. Ordinary consumers keep their limits. */
+  maxMemoryBytes?: number;
+  maxProcesses?: number;
 }): WindowsOwnedChild {
   const absolute = (path: string) =>
     win32.isAbsolute(path) && (/^[A-Za-z]:[\\/]/.test(path) || /^\\\\[^\\]+\\[^\\]+\\/.test(path));
@@ -232,6 +236,12 @@ export function startWindowsOwnedChild(input: {
     !absolute(input.cwd) ||
     input.argv.length > 256 ||
     !['pipe', 'ignore'].includes(input.stdin) ||
+    (input.maxMemoryBytes !== undefined &&
+      (!Number.isSafeInteger(input.maxMemoryBytes) || input.maxMemoryBytes < 64 * 1024 * 1024)) ||
+    (input.maxProcesses !== undefined &&
+      (!Number.isSafeInteger(input.maxProcesses) ||
+        input.maxProcesses < 1 ||
+        input.maxProcesses > 256)) ||
     [input.executable, input.cwd, ...input.argv].some((value) => value.includes('\0')) ||
     Object.entries(input.env).length > 256 ||
     Object.entries(input.env).some(
@@ -673,6 +683,14 @@ export function startWindowsOwnedChild(input: {
     job = take('job_create', api.CreateJobObjectW(null, null));
     const limits = Buffer.alloc(144);
     limits.writeUInt32LE(0x2000, 16); // KILL_ON_JOB_CLOSE only.
+    if (input.maxMemoryBytes !== undefined) {
+      limits.writeUInt32LE(limits.readUInt32LE(16) | 0x200, 16); // JOB_MEMORY
+      limits.writeBigUInt64LE(BigInt(input.maxMemoryBytes), 120);
+    }
+    if (input.maxProcesses !== undefined) {
+      limits.writeUInt32LE(limits.readUInt32LE(16) | 8, 16); // ACTIVE_PROCESS
+      limits.writeUInt32LE(input.maxProcesses, 40);
+    }
     check('job_configure', api.SetInformationJobObject(job, 9, ptr(limits), limits.length));
     const sa = securityAttributes(0n, true);
     const makeOutput = () => {
@@ -814,7 +832,7 @@ export function startWindowsOwnedChild(input: {
     const startup = Buffer.alloc(112),
       info = Buffer.alloc(24);
     startup.writeUInt32LE(112, 0);
-    startup.writeUInt32LE(0x100, 60);
+    startup.writeUInt32LE(0x101, 60); // USESTDHANDLES | USESHOWWINDOW; zero wShowWindow = SW_HIDE.
     startup.writeBigUInt64LE(childStdin, 80);
     startup.writeBigUInt64LE(out.writer, 88);
     startup.writeBigUInt64LE(err.writer, 96);
@@ -830,7 +848,7 @@ export function startWindowsOwnedChild(input: {
         null,
         null,
         true,
-        0x80404,
+        CREATE_NO_WINDOW | 0x80404,
         ptr(environment),
         ptr(cwd),
         ptr(startup),

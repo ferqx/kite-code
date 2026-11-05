@@ -72,6 +72,75 @@ function client() {
     },
   } as unknown as AgentClient & { writes: number };
 }
+
+test('read receipts bind the selected terminal Run and Store, persist locally, and reject guessed or active facts', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  const item = backgroundItem();
+  let run: Run = {
+    ...item.run!,
+    id: 'terminal-run',
+    sessionId: 'root',
+    status: 'completed',
+    isActive: false,
+  };
+  const original = port.getView.bind(port);
+  port.serverInfo!.capabilities.push('session_directory_activity');
+  Object.assign(port, {
+    getView: async (id: string) => ({ ...(await original(id)), runs: [run] }),
+    getCommand: async () => ({ id: 'start', sessionId: 'root', originStoreId: 'store' }),
+    listAllSessionDirectory: async () => [
+      {
+        seq: '1',
+        session: { ...item.rootSession, id: 'root', workspaceId: 'w' },
+        activity: {
+          updatedAt: null,
+          queued: false,
+          pendingInteractions: 0,
+          run: { id: run.id, status: run.status, isActive: run.isActive },
+        },
+      },
+    ],
+  });
+  const caller = new NativeCaller(port, () => {}, data);
+  const mark: Extract<NativeRequest, { method: 'session.markRead' }> = {
+    method: 'session.markRead',
+    generation: 1,
+    expectedStoreId: 'store',
+    sessionId: 'root',
+    runId: run.id,
+    status: 'completed',
+  };
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'directory', generation: 1 });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+    expect(caller.state().directory?.readTurns).toEqual([]);
+    for (const change of [
+      { expectedStoreId: 'foreign' },
+      { runId: 'guessed' },
+      { status: 'failed' as const },
+    ])
+      await expect(caller.invoke({ ...mark, ...change })).rejects.toMatchObject({
+        code: 'turn_read_observation_changed',
+      });
+    await caller.invoke(mark);
+    expect(data.readTurns('store')).toEqual([['root', '["terminal-run","completed"]']]);
+    expect(caller.state().directory?.readTurns).toEqual(data.readTurns('store'));
+    run = { ...run, status: 'running', isActive: true };
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+    await caller.invoke({ method: 'directory', generation: 1 });
+    await expect(caller.invoke(mark)).rejects.toMatchObject({
+      code: 'turn_read_observation_changed',
+    });
+    expect(port.writes).toBe(0);
+    expect(decodeNativeRequest(mark)).toEqual(mark);
+    for (const change of [{ runId: '../bad' }, { status: 'running' }, { extra: true }])
+      expect(() => decodeNativeRequest({ ...mark, ...change })).toThrow('invalid_native_request');
+  } finally {
+    await caller.close();
+  }
+});
 async function waitForCallerState(
   caller: NativeCaller,
   predicate: (state: NativeState) => boolean,

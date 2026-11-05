@@ -1,5 +1,10 @@
-import { ArrowDown01Icon, TriangleAlertIcon } from '@hugeicons/core-free-icons';
+import {
+  ArrowDown01Icon,
+  InformationCircleIcon,
+  TriangleAlertIcon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import { Alert, AlertDescription } from './components/ui/alert';
 import {
   AnimatedCollapsibleContent,
   Collapsible,
@@ -26,7 +31,7 @@ const RECOVERY_LABELS = {
   operator_action: '先处理相关配置或服务问题',
 };
 
-/** A terminal notice uses tool-row primitives while retaining its system identity. */
+/** Exceptions are alerts, independent of chat messages and Tool execution records. */
 export function TurnFailure({
   message,
   expanded = false,
@@ -38,11 +43,19 @@ export function TurnFailure({
   onToggle: (open: boolean) => void;
   restoredExpanded?: boolean;
 }) {
-  const summary =
-    message.failure?.summary || message.text.trim().split('\n')[0] || '本轮回复未完成';
+  const summary = message.failure?.summary || '本轮异常结束';
   const diagnostics = useDesktopDiagnostics();
-  const detail = message.text || '当前记录未提供具体失败原因。';
+  const detail =
+    message.text ||
+    '当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。';
   const outcome = message.failure?.outcome;
+  if (!diagnostics)
+    return (
+      <Alert className="turn-failure" aria-label={summary}>
+        <HugeiconsIcon icon={InformationCircleIcon} aria-hidden="true" />
+        <AlertDescription>{detail}</AlertDescription>
+      </Alert>
+    );
   return (
     <Collapsible asChild open={expanded} onOpenChange={onToggle}>
       <article

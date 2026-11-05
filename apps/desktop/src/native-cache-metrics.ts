@@ -242,8 +242,18 @@ export function useNativeCacheMetrics({
     }
   const overflow =
     metrics && !Number.isSafeInteger(metrics.cacheHitTokens + metrics.cacheMissTokens);
+  const failed = state.scope === scope && state.version === version && !!state.error;
+  const unread = candidates.some((message) => {
+    const receipt = displayed.get(message.id);
+    return receipt?.key !== modelUsageMessageKey(message) || receipt.content !== message.content;
+  });
   return {
     metrics: overflow ? undefined : metrics,
+    pending:
+      !!bridge &&
+      !suspended &&
+      !!selection &&
+      (!historyComplete || (available && unread && !failed)),
     error:
       state.scope === scope && state.version === version
         ? state.error || (overflow ? '缓存指标超出可核实范围。' : '')

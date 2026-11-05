@@ -219,7 +219,9 @@ for (const protocol of ['responses', 'chat-completions'] as const)
       }
       if (rejected) {
         expect(failure).toBeInstanceOf(Error);
-        expect((failure as Error).message).toBe('model_transport_failed');
+        expect((failure as Error).message).toBe(
+          'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable',
+        );
         expect((failure as Error).cause).toBeUndefined();
         expect(events).toEqual([]);
         expect(JSON.stringify(failure)).not.toContain('private fixture');

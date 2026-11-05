@@ -15,6 +15,8 @@ const overview = `# Markdown 内容
 
 正文中的 \`sessionId\`、\`bun test ./packages/ui/test/markdown.test.tsx\` 与[外部文档](https://example.com/markdown)各自保持清楚的视觉识别。
 
+*English italic* 与 *中文斜体*，以及 *\`const italic = true\`* 保留强调样式。
+
 > 普通引用保留左侧竖线，长段中文在深浅主题中都应清楚可读。
 
 > [!NOTE]
@@ -66,7 +68,7 @@ const diagrams: Record<string, string> = {
   'ER 图': 'erDiagram\nUSER ||--o{ MESSAGE : writes\nUSER {\nstring name\n}',
 };
 const editorSource =
-  '输入中的 `sessionId` 与[外部文档](https://example.com/markdown)。\n\n> 编辑引用保持可读。\n\n```typescript\nconst draft = "编辑原文";\n```';
+  '输入中的 `sessionId` 与[外部文档](https://example.com/markdown)，*English italic* 与 *中文斜体*。\n\n> 编辑引用保持可读。\n\n```typescript\nconst draft = "编辑原文";\n```';
 const streamingSamples = [
   '',
   '## 流式样式预览\n\n已经显示的文字与 `sessionId` 保持稳定。',
@@ -87,6 +89,15 @@ function Fixture() {
   return (
     <div data-theme={theme} style={{ minHeight: '100vh' }}>
       <div className="kite-client" style={{ minHeight: '100vh', display: 'block', padding: 24 }}>
+        <div className="desktop-settings">
+          <div className="settings-page-heading">
+            <h2 data-typography-heading>中文标题 English</h2>
+            <p data-typography-body>普通正文 English</p>
+          </div>
+        </div>
+        <div className="shell-output">
+          <pre data-typography-shell>const italic = true</pre>
+        </div>
         <nav
           aria-label="隔离测试控制"
           style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}

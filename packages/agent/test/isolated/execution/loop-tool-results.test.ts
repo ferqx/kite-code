@@ -16,7 +16,7 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
 };
 async function fixture(execute: ToolDefinition['execute'], sibling = false) {
   const root = mkdtempSync(join(tmpdir(), 'kite-loop-results-'));
-  const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
+  const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   let siblingEffects = 0;
   const model = createFixedModel([
     [
@@ -302,7 +302,7 @@ test('legal JSON data is detached once without losing optional omissions or own 
 
 test('a Tool terminal persistence failure cannot be replaced with an invented result or next Model', async () => {
   const f = await fixture(async () => ({ outcome: 'succeeded', content: 'Original effect' }));
-  const db = new Database(join(f.root, 'test/core.db'));
+  const db = new Database(join(f.root, 'data', 'test', 'core.db'));
   db.exec('PRAGMA busy_timeout=1000');
   db.exec(
     "CREATE TRIGGER reject_terminal BEFORE UPDATE OF state ON execution WHEN NEW.call_id='original' AND NEW.state='succeeded' BEGIN SELECT RAISE(ABORT,'original Tool terminal denied'); END",

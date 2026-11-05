@@ -27,4 +27,4 @@ Provider update沿原command/read-set/CAS与两介质回执链新增有限upsert
 
 同模板同地址可以有多个具名实例，旧配置读取不变更磁盘。删除须先解决默认/定时依赖；未决原意图仍可冷查，不能自动重发或补偿。运行历史和Vault可能保留已删除连接的旧记录，由各自明确流程处理。
 
-[真实Client/HTTP测试](../../../../apps/service/test/isolated/provider-settings.test.ts)、[Main测试](../../../../apps/desktop/test/native-provider-settings.test.ts)、[Native串行调用回归](../../../../apps/desktop/test/native-caller.test.ts)、[DOM](../../../../apps/desktop/test/native-provider-settings-dom.test.tsx)及[Node备份恢复](../../../../packages/agent/test/isolated/maintenance/desktop-configurations.test.ts)验证各自闭合边界。Linux Electron隔离预览不外推真实远端账户、系统Vault、正式全量构建或其他平台资格；本机引用保护不锁定非合作外部JSONC编辑器。
+[真实Client/HTTP测试](../../../../apps/service/test/isolated/provider-settings.test.ts)、[Main测试](../../../../apps/desktop/test/native-provider-settings.test.ts)、[Native串行调用回归](../../../../apps/desktop/test/native-caller.test.ts)、[DOM](../../../../apps/desktop/test/isolated/native-provider-settings-dom.test.tsx)及[Node备份恢复](../../../../packages/agent/test/isolated/maintenance/desktop-configurations.test.ts)验证各自闭合边界。Linux Electron隔离预览不外推真实远端账户、系统Vault、正式全量构建或其他平台资格；本机引用保护不锁定非合作外部JSONC编辑器。

@@ -20,10 +20,10 @@ type Manifest = {
   dependencies?: Record<string, string>;
 };
 const repository = resolve(import.meta.dir, '../../..');
-async function run(args: string[], cwd: string) {
+async function run(args: string[], cwd: string, env: Record<string, string> = {}) {
   const child = Bun.spawn([process.execPath, ...args], {
     cwd,
-    env: { PATH: process.env.PATH ?? '' },
+    env: { PATH: process.env.PATH ?? '', ...env },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -86,6 +86,15 @@ nativeTest(
   'complete manifest build runs SQLite Worker, Shell and MCP guardians, Web parser, Skills and paired Service outside source without fallback',
   async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-built-package-'));
+    let proxyRequests = 0;
+    const proxy = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch() {
+        proxyRequests++;
+        return new Response('Only direct loopback fixture requests are allowed.', { status: 502 });
+      },
+    });
     try {
       const artifact = join(root, 'distribution');
       const modules = join(artifact, 'node_modules');
@@ -430,7 +439,17 @@ try{
 }finally{await files.close();await service?.close();await runtime?.close();if(!runtime)await store?.close();await lifecycle.close();await adapter.close();server.stop(true);web.stop(true);provider.stop(true);}
 `,
       );
-      const result = JSON.parse((await run([entry], artifact)).trim()) as {
+      // Keep real Provider traffic on the owned loopback server regardless of the host proxy.
+      // An explicit supported proxy also avoids OS discovery; NO_PROXY alone does not.
+      const result = JSON.parse(
+        (
+          await run([entry], artifact, {
+            HTTP_PROXY: proxy.url.href,
+            HTTPS_PROXY: proxy.url.href,
+            NO_PROXY: 'localhost,127.0.0.1,[::1]',
+          })
+        ).trim(),
+      ) as {
         entries: number;
         worker: boolean;
         guardian: boolean;
@@ -505,10 +524,12 @@ try{
         backupVerified: true,
         restoreVerified: true,
       });
+      expect(proxyRequests).toBe(0);
       expect(result.skillVersion).toHaveLength(64);
       expect(result.parserHash).toMatch(/^[a-f0-9]{64}$/);
       expect(result.webArtifactBytes).toBeGreaterThan(65536);
     } finally {
+      proxy.stop(true);
       rmSync(root, { recursive: true, force: true });
     }
   },

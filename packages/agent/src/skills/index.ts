@@ -19,8 +19,10 @@ export interface SkillSummary {
   location: string;
   requiredCapabilities: string[];
 }
-export interface SkillBody extends SkillSummary {
+export interface SkillDocument extends SkillSummary {
   body: string;
+}
+export interface SkillBody extends SkillDocument {
   resources: { id: string; path: string }[];
 }
 export interface SkillSourceOptions {
@@ -62,7 +64,7 @@ export function createSkillSource(options: SkillSourceOptions) {
     throw new SkillError('invalid_skill_configuration');
   const scope = options.knowledgeScope ?? createKnowledgeReadScope();
   let entries = new Map<string, SkillSummary>();
-  async function read(path: string, files: KnowledgeFileAccess) {
+  async function read(path: string, files: KnowledgeFileAccess, maximumBytes = textBytes) {
     const target = await realpath(path);
     const trusted = await Promise.all(roots.map((root) => realpath(root)));
     if (!trusted.some((root) => inside(root, target))) throw new SkillError('skill_path_denied');
@@ -71,7 +73,7 @@ export function createSkillSource(options: SkillSourceOptions) {
       const stat = await handle.stat();
       if (stat.dev !== expected.dev || stat.ino !== expected.ino)
         throw new SkillError('skill_path_changed');
-      if (!stat.isFile() || (textBytes !== undefined && stat.size > textBytes))
+      if (!stat.isFile() || (maximumBytes !== undefined && stat.size > maximumBytes))
         throw new SkillError('skill_text_limit');
       // Verify the path after opening; never follow a newly replaced target outside the root.
       if ((await realpath(path)) !== target) throw new SkillError('skill_path_changed');
@@ -84,7 +86,7 @@ export function createSkillSource(options: SkillSourceOptions) {
         if (!chunk.bytesRead) break;
         offset += chunk.bytesRead;
       }
-      if ((textBytes !== undefined && offset > textBytes) || offset > stat.size)
+      if ((maximumBytes !== undefined && offset > maximumBytes) || offset > stat.size)
         throw new SkillError('skill_text_limit');
       let body: string;
       try {
@@ -132,6 +134,23 @@ export function createSkillSource(options: SkillSourceOptions) {
       location: target,
       requiredCapabilities,
     };
+  }
+  async function readDocument(
+    input: { id: string; version: string; maxTextBytes: number },
+    files: KnowledgeFileAccess,
+  ): Promise<SkillDocument> {
+    if (!Number.isSafeInteger(input.maxTextBytes) || input.maxTextBytes < 1)
+      throw new SkillError('invalid_skill_configuration');
+    const entry = entries.get(input.id);
+    if (!entry) throw new SkillError('skill_not_discovered');
+    const value = await read(
+      entry.location,
+      files,
+      Math.min(input.maxTextBytes, textBytes ?? input.maxTextBytes),
+    );
+    const current = summary(value.target, value.body);
+    if (input.version !== current.version) throw new SkillError('skill_version_changed');
+    return { ...current, body: value.body };
   }
   async function load(
     input: {
@@ -191,6 +210,9 @@ export function createSkillSource(options: SkillSourceOptions) {
       });
     },
     load: (input: Parameters<typeof load>[0]) => scope.run((files) => load(input, files)),
+    /** Human-facing knowledge preview only; never supplies resources or execution authority. */
+    readDocument: (input: { id: string; version: string; maxTextBytes: number }) =>
+      scope.run((files) => readDocument(input, files)),
     async readResource(input: {
       skillId: string;
       version: string;

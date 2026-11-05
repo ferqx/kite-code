@@ -1,5 +1,59 @@
 # 测试体系
 
+## 类型检查
+
+`bun run typecheck` 使用 Bun 1.4.4，以 `bun check -b -p tsconfig.typecheck.json` 单进程检查原根和精确八 workspace；[聚合配置](../tsconfig.typecheck.json)不覆盖项目设置，各包独立检查与[原 runner](../scripts/run-runtime-workspace-script.ts)保留。开发要求见[本地开发](../docs/development/local-development.md)。此前 2026-11-04，Windows x64、源码基线 `4f29be4e0` 加上一轮迁移改动，逐配置对照 `tsc --listFilesOnly -p <config>` 与 `bun check --listFilesOnly -p <config>`：排除外部依赖和检查器自带标准库后，仓库文件及本地声明的导入闭包完全相同。原九份 tsconfig 与严格选项未修改；相同文件范围不表示 TypeScript 5.9.3 和 Bun 内置 7.0.2 的标准库或诊断语义完全相同。
+
+| 配置 | 两种检查器共同覆盖的仓库文件数 |
+| --- | ---: |
+| 根 | 1082 |
+| packages/ai | 12 |
+| packages/agent | 988 |
+| packages/client | 297 |
+| packages/ui | 555 |
+| apps/service | 894 |
+| apps/cli | 892 |
+| apps/desktop | 1229 |
+| apps/web | 145 |
+
+[并行 Tool 测试](../packages/agent/test/isolated/execution/parallel-tools.test.ts)的两组工具定义使用 `satisfies ToolDefinition[]` 恢复上下文参数和结果联合类型，消除原六处诊断；执行、故障注入及原断言保持。实际 `bun run typecheck` 的根与八 workspace 全部通过，该测试整文件 3 项／64 断言通过。CI 的 `quality` 使用 1.4.4；运行时与正式发布仍沿[原基线](../docs/active/release-control.md#当前发行与源身份)，不由本次本机检查取得 hosted CI 或完整产品资格。
+
+上一轮[CI 基线](integration/scripts/ci-bun-baseline.test.ts)与[工作区合同](integration/scripts/unified-workspaces.test.ts)两份整文件为 12 项／177 断言通过；原 TypeScript 5.9.3 的 Agent 配置亦通过。当时附带执行[CI 消费闭包](integration/scripts/unified-ci.test.ts)为 21 项通过、1 项失败，已用原 HEAD 检查器复现。现已查明负例模板仍包含退役的 Workflow 测试，使替换没有发生；本轮更新模板和对应负例，并逐项断言输入确实变异，生产准入条件和 TUI workflow 未改。
+
+本轮基于 `b9a25f082` 加未提交改动、Windows x64／Bun 1.4.4，实际逐项目文件清单与聚合清单均列出 6094 个仓库文件条目／2566 个唯一文件，含本地声明；各项目重叠文件的出现次数亦相同，无新增或遗漏。临时夹具继承原九份配置并分别注入 TS2322，逐项目与聚合检查均返回1并报告相同诊断；有效夹具通过，没有生成 JS／声明／build-info。实际根聚合检查通过九项目；[CI 消费闭包](integration/scripts/unified-ci.test.ts)、[工作区合同](integration/scripts/unified-workspaces.test.ts)和[版本基线](integration/scripts/ci-bun-baseline.test.ts)三份整文件共37项／678断言通过。六类原边界违规及合并 CLI 的错误退出／pending 提示均已核对；子进程探针独立执行，不进入并行 integration 测试。同机三轮交替测量旧逐项目入口与新聚合入口，wall time 中位数为5.136秒与2.050秒；仅说明本机该轮结果，不外推 hosted CI。
+
+上一轮[独立边界回归](isolated/scripts/unified-agent-boundary.test.ts)整文件实际20项通过、1项失败：本机 Windows 在创建文件符号链接时返回 `EPERM`，沙箱外重试相同，尚未进入该例的链接拒绝断言。该轮边界实现与测试文件未修改，未加平台 skip 或放宽链接判断；静态 pre-release architecture／API 检查已通过，不将此结果记为完整边界回归或三平台资格。
+
+## 质量作业冷安装与边界缓存
+
+Required quality 的依赖安装、Web 资产准备与原全部检查由[CI 回归](integration/scripts/unified-ci.test.ts)核对；其他 Required 作业仍执行原安装脚本。[边界回归](isolated/scripts/unified-agent-boundary.test.ts)增加缺失候选出现、源码改变／删除、manifest 修改／修复，以及目录链接由越界转向当前资产再转向旧模块的连续检查。缓存仅在单次调用内生效；原循环图、入口策略、条件导出与 CLI 失败断言继续执行，不删除或跳过原文件链接用例。
+
+2026-11-04，基于 `b9a25f082` 加本轮未提交改动，在 Windows x64／Bun 1.4.4 的独立物理源码副本中，从没有 `node_modules`、Web dist、Files 原生资产及 Cargo target 的状态，以空的专属 Bun 缓存实际安装838个锁定包；`cargo` 和 `rustc` 均不在验证 PATH。`bun install --frozen-lockfile --ignore-scripts` 通过，安装约60.38秒，没有生成 Files 资产。构建前守卫准确拒绝 `./assets:default: ./dist/assets.js`；以 `apps/web` 为工作目录执行 `bun run build` 后，原 quality 的九项目类型检查、Biome、工作区边界、同源 API、测试归属、文档、计划证据与文档影响 range 检查全部通过。range 使用副本已有提交历史，当前未提交覆盖另按 `--scope=all` 核对；不将本机副本记为 hosted Ubuntu CI 或运行时／发布资格。
+
+缓存前后在原负例及新增夹具上逐次对照163份完整报告，包含拒绝、行号、入口来源、pending 和覆盖计数，全部相同；正式消费者清单也相同，均为931个额外入口。同机三轮交替执行原／新守卫，完整报告保持一致，耗时中位数为11.972秒与5.009秒。独立边界整文件22项通过、1项仍在创建原文件符号链接时遇到 `EPERM`；沙箱外的新增目录链接越界／旧模块／换向断言已实际通过，未删除或跳过原失败用例，不把该文件记为全通过。
+
+最终三份 integration 回归共39项／688断言通过，含生成 Web 导出在缺失、生成、删除后的原拒绝验证。与冷副本检查并行的一轮曾在原 TUI 消费夹具清理 hook 超时；停止并行后按原命令、原时限完整复验通过，未增加 timeout 或缩小断言。根聚合类型检查九项目、Biome 和 pre-release architecture 通过；Biome 仍为原41 warnings／200 infos，没有自动修复。本轮仅改变质量准备与守卫内部解析成本，产品行为、运行时基线和原九份配置不变。
+
+## 运行时升级与模型连接池
+
+本轮 quality 下载缓存另以两个独立物理源码副本验证：均没有依赖目录、Web dist、Files 资产和 Cargo target，PATH 不含 Rust。空缓存冻结安装838个包约272.13秒；第二副本仅凭同一下载缓存以 `--offline --frozen-lockfile --ignore-scripts` 安装约33.14秒，再按原 workflow 安装命令复验通过。两者的锁文件、清单和九份原配置字节未变，八个 workspace 链接均只指向各自副本。最终在两份副本按 workflow 执行 Web 准备及原全部 quality 检查，连同当前覆盖的 docs-impact all 均通过；分别变异清单和隐藏 Web 导出后，仍准确返回 frozen-lockfile／workspace-export-invalid，恢复后边界通过。这是本机冷／热下载验证，耗时包含当时网络和磁盘条件，不代表 hosted cache action 已执行或承诺加速比例。
+
+2026-11-04，接入 FetchSession 前，基于 `b9a25f082` 加当时已有工具链改动，Windows x64：从官方分发下载独立 Bun1.4.3，与本机1.4.4使用相同源码、同样25个完整测试文件、原测试运行器的私有 runtime／HOME／TEMP和原时限串行对照。两版均21文件通过、4文件失败，失败文件与测试名相同，无新增版本失败；通过范围包含代理／Codex／模型选择与配置、提供商与网页装配、Service取消／恢复、Store／rollback／statement ACK生命周期、crash、HTTP／paired关闭、Client SSE及真实Windows sealed Bun／standalone verifier。它是有限兼容对照，不是全仓、三平台、installed或正式发布资格。
+
+原失败保留：[恢复准备清理](../apps/service/test/isolated/recovery-preparation-ownership.test.ts)在旧seed就绪／私有ACL阶段失败；[恢复锁释放](../packages/agent/test/isolated/storage/recovery-lock-release.test.ts)的生成夹具把Windows反斜杠写进TS import，尚未进入原断言；[历史配置兼容](../packages/agent/test/isolated/recovery/run-resume-configuration-compatibility.test.ts)的approved原Execution仍为failed；[配对代理](../apps/service/test/isolated/paired-proxy.test.ts)的upper用例启动为`network_outcome_unknown`。这些失败已由两版同源实际复现，未删断言、改时限或追加skip，不记为资格通过。
+
+另用真实本地Service与SQLite Worker各执行500次View读取和15秒空闲采样：旧／新P50为1.213／1.022ms，P95为1.519／1.467ms；末尾进程RSS约115.8／119.2MB，没有观察到RSS下降。`process.cpuUsage`空闲采样为218／0ms，受短窗口和系统计时粒度影响，不能解释为零CPU或承诺收益；没有强制GC，主线程heap不是所有Worker的内存总和。独立内存DB探针确认两版内嵌SQLite均为3.53.4、sourceId `2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e09459bcc`，原已审查来源白名单未修改。
+
+当前workflow与fault-soak／完整blocked collection的Bun预期固定1.4.4，原source、receipt、迭代、期限、资源拒绝、OS矩阵和实际调用命令保留；旧1.4.2历史／legacy格式夹具仍标注原环境，不因此取得新资格。配套`@types/bun`由1.3.14固定到1.4.4，lock只更新该包、`bun-types`及其新增`undici-types`依赖；原九份tsconfig未改。新增类型把launcher signal扩为数值时，OAuth观察仍只接受原字符串／null，原numeric拒绝继续核对，未升级证据格式。
+
+FetchSession 接线后的[代理](../apps/service/test/isolated/model-transport.test.ts)、[标题](../apps/service/test/isolated/session-title.test.ts)与[提供商](../apps/service/test/isolated/provider-settings.test.ts)完整文件均已通过。原认证／取消／恢复拒绝、两 SDK 协议、空闲池隔离与实际 owner 清理均保留；此处使用本地合成服务，不调用真实付费 Provider，不替代普通窗口全过程或发布资格。
+
+最终源码为 `f1cacb69d` 加本任务工作树，保留期间合入的图像处理修复。Bun1.4.4 接线后重跑上述25份完整文件，仍为原21通过／4失败，没有新增失败；另以原私有运行器串行运行连接池、标题、OAuth 三文件、清理保留、CI 三文件及两份 soak 校验文件，共141项通过／5项原平台 skip／0失败，补齐 blocked collection 旧／越界版本拒绝后共1374条断言。根 `bun run build` 的八 workspace 及聚合 typecheck 九项目通过；原九配置与前轮逐字相同，逐项目和聚合仓库文件多重集合相等，均6095条／2567个唯一文件。相比前轮增加的1条是上述合入提交的图像处理测试，原检查范围没有删减。10份 workflow／15处 setup-bun 结构对照只允许新增 quality 下载缓存与 Bun pin 变化，原命令、条件、矩阵和时限均相同。
+
+## 当前测试范围
+
+图片读取的严格格式／进程取消／退出证明、源码树外闭包、实际 Service／冷历史／Fork 和两协议回归分别位于 [Agent Files](../packages/agent/test/isolated/files/images.test.ts)、[退出未知](../packages/agent/test/isolated/files/image-process-unknown.test.ts)、[闭包](../packages/agent/test/isolated/files/images-packaged.test.ts)和[Service](../apps/service/test/isolated/image-reading.test.ts)。[显式性能程序](e2e/live/model/image-reading.benchmark.ts)仅合成图片／固定模型，测真实持久化与下一次输入；[真实视觉程序](e2e/live/model/image-vision.live.ts)另需 opt-in，边界和命令见[live说明](e2e/live/model/README.md#本地图片读取)。Native 工具摘要沿[真实页面回归](../apps/desktop/test/isolated/native-tool-receipt-render-dom.test.tsx)和[明确浏览器制品](../apps/desktop/test/tool-image-preview-browser-runner.fixture.ts)观察全过程；这些入口不启用普通客户端诊断或扩展发版权限。
+
 Windows 每个正式测试作业使用自有私有 HOME 与其下私有 TEMP/TMP，源码外制品沿实际私有父目录准入，不读取用户应用配置或改变系统临时目录 ACL。仅成功作业清理隔离根，失败／中断保留准确路径和证据。清理仅接受当前运行器创建的规范根，在同一 PowerShell 内逐项核边界，遇 reparse 目录只解除入口，不遍历外部目标；私有只读 Artifact 通过父目录已有删除权清理，不放宽其 ACL。[运行器回归](isolated/scripts/test-suite-runner.test.ts)覆盖真实制品准入、只读文件和外部 junction 目标保全。
 
 2026-10-26 已删除仅服务旧架构的测试、fixture 和工具脚本；旧架构只保留无运行依赖闭包的 `apps/kite-cli` 源码。当前默认发现以[统一计划](../scripts/unified-test-plan.ts)为准。本文固定 revision 链接与带历史日期的旧库存、旧入口拒绝、旧 library 记录仅说明当时证据，不属于当前测试入口，也不表示删除后的库存已完整执行。安全、恢复、平台与发布门禁按原适用范围保留。
@@ -107,6 +161,8 @@ argv保持原顺序准备，完整Terminal candidate归成功的开发Service fi
 [Client扩展输入](../packages/client/test/isolated/extension-inputs.test.ts)与[原选择](../packages/client/test/isolated/selected-skills.test.ts)两个完整文件保所有原capability／closed输入／快照／唯一POST断言，明确真实HTTP空JSON得到 `invalid_response`，以及发送任何response前物理socket断开得到 `network_outcome_unknown`。后者仍保存完整原请求且各只一次POST；空响应后的socket关闭仅为收尾，注册close前核已关闭状态。无fetch替身、伪造Response、sleep或重试，生产网络错误语义和原预算不变。
 
 真实child的JSON ready publication须先完整写闭同目录临时文件，再rename到原最终路径；父进程仍按原存在屏障一次读取和解析，不吞解析错误。[恢复后Model历史](../packages/agent/test/isolated/recovery/history-followup-runtime.test.ts)的真实空文件红定位了该竞态，同机制的report、Windows caller、deferred和synchronous extension fixture亦补齐原publication。所有原payload／窗口／提交顺序／断言和预算保持，便携路径用系统tmpdir与标准file URL转换。原POSIX SIGKILL保留，Windows核held child的原生dispatch与异常exited；父退出不推广为全后代、Artifact ACL或三平台资格。
+
+大审批附件回归由 [Client](../packages/client/test/fixtures/large-interaction.ts)、[CLI](../apps/cli/test/fixtures/large-interaction.ts)、[Desktop](../apps/desktop/test/fixtures/large-interaction.ts)和[共享 UI](../packages/ui/test/fixtures/large-interaction.ts)的夹具在当前 Session 保存完整17MiB原 JSON，审核请求传入既有完整 Artifact 引用。正文仍由原卡读取、完整 SHA、作用域和回答边界核验，不缩短内容，也不因换为引用放宽跨会话、损坏、迟到与一次效果断言。普通 SQLite RPC 仍保留14MiB帧边界；这组完整附件资格不表示任意内联审核元数据可以绕过该上限。
 
 [Native审批DOM原完整测试](../apps/desktop/test/isolated/native-approval-dom.test.tsx)在真实点击后等待附件实际 `verified`：onClick的void load仍须完成异步SHA-256，act不能代替该完成条件。等待绑定原整例开始的5秒，核验错误立即失败；原未验证禁批准、完整command字节／原卡／可选grant／标签断言保持，生产reader与digest不替换。
 
@@ -673,7 +729,7 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 同日按依赖初始化至构建的完整流程，在上述 macOS arm64／Bun 1.4.2 工作树实际执行 `bun install --frozen-lockfile`：安装 830 个包，根 postinstall 完成 Files Node-API 编译、资产准备和许可证收集；八个 workspace 的依赖链接均指向当前目录，根 manifest 与 lock 字节未变。随后 `bun run build` 的八 workspace 构建、`bun run typecheck` 的根及八 workspace 类型检查、`check:pre-release-architecture`、`check:test-ownership`、`check:docs`、`check:docs-impact`、`check:plan-evidence` 均通过。`format:check` 退出 0，检查 2871 个文件，仍有 2 warnings／183 infos，没有自动修复；根类型检查的脚本覆盖限制仍按上文保留。
 
-另实际启动三轮 `bun run test`，保持默认并发、期限和隔离。前两轮发现并修复了五份 Desktop 测试夹具与当前合同的偏差：[plan review](../apps/desktop/test/native-plan-review-dom.test.tsx)、[questionnaire](../apps/desktop/test/native-questionnaire-dom.test.tsx) 和 [drafts](../apps/desktop/test/isolated/native-drafts-dom.test.tsx)、[scheduled tasks](../apps/desktop/test/isolated/native-scheduled-tasks-dom.test.tsx) 在实际会话切换后等待既有 presentation 交接，后两者显式选择模型并保留选择前禁止发送；普通工具许可保持主输入草稿。[scheduled runner](../apps/desktop/test/scheduled-task-runner.test.ts) 改在真实 `receiveAgentMessages` 事务后核 report gate，以真实阻塞 Tool 验证未完成工作不结算，并单独验证保留的 deferred 事实。五个完整文件定向执行共 34 pass／0 fail／478 assertions；相关 Desktop 类型检查通过，未改生产实现或放宽安全、结果及期限断言。
+另实际启动三轮 `bun run test`，保持默认并发、期限和隔离。前两轮发现并修复了五份 Desktop 测试夹具与当前合同的偏差：[plan review](../apps/desktop/test/isolated/native-plan-review-dom.test.tsx)、[questionnaire](../apps/desktop/test/native-questionnaire-dom.test.tsx) 和 [drafts](../apps/desktop/test/isolated/native-drafts-dom.test.tsx)、[scheduled tasks](../apps/desktop/test/isolated/native-scheduled-tasks-dom.test.tsx) 在实际会话切换后等待既有 presentation 交接，后两者显式选择模型并保留选择前禁止发送；普通工具许可保持主输入草稿。[scheduled runner](../apps/desktop/test/scheduled-task-runner.test.ts) 改在真实 `receiveAgentMessages` 事务后核 report gate，以真实阻塞 Tool 验证未完成工作不结算，并单独验证保留的 deferred 事实。五个完整文件定向执行共 34 pass／0 fail／478 assertions；相关 Desktop 类型检查通过，未改生产实现或放宽安全、结果及期限断言。
 
 第三轮默认测试仍退出 1，实际失败为 [native-model-input.test.ts](../apps/desktop/test/native-model-input.test.ts) 的 205 条原始输入目录用例：Main 会话选择阶段抛出 `native_selection_changed`，尚未进入分页读取；其余三个并发 job 随 runner 中止为 143，不能算三个独立测试失败。单独执行 `bun test --parallel=1 --max-concurrency=1 ./apps/desktop/test/native-model-input.test.ts` 也得到 2 pass／1 fail／17 assertions。该测试及相关 NativeCaller／controller 生产实现与本轮清理前一致，[Desktop 当前说明](../apps/desktop/README.md) 已有同类失败记录。本次依赖初始化、构建与上述静态门禁通过，但完整默认测试未通过、剩余库存未跑完；未据此取得完整 TUI、Windows 原生、真实 Provider 或发布资格。
 

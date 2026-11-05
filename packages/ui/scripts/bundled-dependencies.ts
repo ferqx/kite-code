@@ -29,6 +29,7 @@ export const desktopBundledDependencies: readonly string[] = Object.freeze([
   'mermaid',
   'react-markdown',
   'react-resizable-panels',
+  'remark-cjk-friendly',
   'remark-gfm',
   'remark-parse',
   'tailwind-merge',

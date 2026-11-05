@@ -35,23 +35,10 @@
   align-items: center;
   min-width: 0;
   gap: 2px;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--muted);
 }
 .agent-browser-location input {
   flex: 1;
-  width: 100%;
   min-width: 0;
-  height: 28px;
-  border: 0;
-  border-radius: 6px;
-  padding: 4px 8px;
-  background: transparent;
-  color: var(--foreground);
-  font: inherit;
-  font-size: 12px;
 }
 .agent-browser-location button {
   flex: none;
@@ -145,19 +132,9 @@
   justify-content: flex-end;
   gap: 6px;
 }
-.agent-browser-note textarea,
-.agent-browser-more input,
-.agent-browser-more select {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 9px;
-  background: var(--background);
-  color: var(--foreground);
-  font: inherit;
-}
+
 .agent-browser-note textarea {
+  field-sizing: fixed;
   resize: vertical;
   max-height: 180px;
 }
@@ -258,13 +235,9 @@
   color: var(--muted-foreground);
 }
 .browser-note-card textarea {
-  width: 100%;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--background);
-  color: var(--foreground);
-  font: inherit;
+  field-sizing: fixed;
+  max-height: 180px;
+  resize: vertical;
 }
 .browser-note-card p {
   margin: 4px 0;
@@ -277,11 +250,7 @@
   gap: 6px;
   margin-top: 4px;
 }
-.browser-note-actions button {
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
+
 @container (max-width: 280px) {
   .browser-note-card {
     grid-template-columns: 1fr;

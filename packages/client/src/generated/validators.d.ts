@@ -8,6 +8,7 @@ export declare function response_FileCheckpointRecoveryBoundary(value: unknown):
 export declare function response_SessionLogPage(value: unknown): boolean;
 export declare function response_SkillCataloguePage(value: unknown): boolean;
 export declare function response_UserSkillCataloguePage(value: unknown): boolean;
+export declare function response_UserSkillDocument(value: unknown): boolean;
 export declare function response_UserMcpSettingsView(value: unknown): boolean;
 export declare function response_UserMcpOperationResult(value: unknown): boolean;
 export declare function response_UserMcpToolsPage(value: unknown): boolean;
@@ -81,6 +82,7 @@ export declare function request_SessionLogQuery(value: unknown): boolean;
 export declare function request_BrowserSessionLogQuery(value: unknown): boolean;
 export declare function request_SkillCatalogueQuery(value: unknown): boolean;
 export declare function request_UserSkillCatalogueQuery(value: unknown): boolean;
+export declare function request_UserSkillDocumentQuery(value: unknown): boolean;
 export declare function request_UserMcpSettingsQuery(value: unknown): boolean;
 export declare function request_UserMcpSettingsRequest(value: unknown): boolean;
 export declare function request_UserMcpOperationQuery(value: unknown): boolean;
@@ -168,6 +170,7 @@ export declare const responseValidators: {
   SessionLogPage: (value: unknown) => boolean;
   SkillCataloguePage: (value: unknown) => boolean;
   UserSkillCataloguePage: (value: unknown) => boolean;
+  UserSkillDocument: (value: unknown) => boolean;
   UserMcpSettingsView: (value: unknown) => boolean;
   UserMcpOperationResult: (value: unknown) => boolean;
   UserMcpToolsPage: (value: unknown) => boolean;
@@ -243,6 +246,7 @@ export declare const requestValidators: {
   BrowserSessionLogQuery: (value: unknown) => boolean;
   SkillCatalogueQuery: (value: unknown) => boolean;
   UserSkillCatalogueQuery: (value: unknown) => boolean;
+  UserSkillDocumentQuery: (value: unknown) => boolean;
   UserMcpSettingsQuery: (value: unknown) => boolean;
   UserMcpSettingsRequest: (value: unknown) => boolean;
   UserMcpOperationQuery: (value: unknown) => boolean;

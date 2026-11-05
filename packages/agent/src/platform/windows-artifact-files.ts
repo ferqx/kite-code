@@ -14,6 +14,8 @@ export interface WindowsArtifactTemporary {
   /** Private unpublished snapshot; reads the original temporary under unchanged ACL and identity. */
   sealSnapshot(): { chunks(): Generator<Uint8Array>; close(): void };
   publish(hash: string, size: string): void;
+  /** Same complete publication proof, with cooperative steps when adopting existing bytes. */
+  publishSteps(hash: string, size: string): Generator<void>;
   close(): void;
 }
 export class WindowsArtifactSnapshotCleanupUnknownError extends AggregateError {
@@ -527,6 +529,11 @@ function native() {
         };
       },
       publish(hash, size) {
+        for (const _step of this.publishSteps(hash, size)) {
+          /* Synchronous maintenance caller. */
+        }
+      },
+      *publishSteps(hash, size) {
         live();
         valid(hash, size);
         if (count !== BigInt(size)) fail();
@@ -582,7 +589,7 @@ function native() {
             if (status >>> 0 !== 0xc0000035) fail();
             // Only STATUS_OBJECT_NAME_COLLISION adopts an existing immutable object.
             for (const _part of read(profile, hash, size)) {
-              /* Complete EOF before reuse. */
+              yield; // Complete EOF before reuse; caller retains the original reader and directories.
             }
             return;
           }

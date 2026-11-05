@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -109,6 +109,7 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           requiredCapabilities: ['commands', 'sessions'],
         },
       });
+      const closedSessions = spyOn(Bun.FetchSession.prototype, 'close');
       try {
         await client.connect();
         await client.createSession({
@@ -206,9 +207,15 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
         expect(requests).toHaveLength(2);
       } finally {
         client.disposeNetwork();
-        await service.close();
-        provider.stop(true);
-        rmSync(root, { recursive: true, force: true });
+        try {
+          await service.close();
+          // The title's model-only binding and the business Run each own a pool.
+          expect(closedSessions).toHaveBeenCalledTimes(requests.length);
+        } finally {
+          closedSessions.mockRestore();
+          provider.stop(true);
+          rmSync(root, { recursive: true, force: true });
+        }
       }
     },
   );

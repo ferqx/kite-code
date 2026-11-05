@@ -281,9 +281,9 @@ test('Native reuses the scheduled page and editor with real projects, model vali
         ]);
       }
     };
-    await f.click('安排任务');
+    await f.click('定时任务');
     expect(f.host.querySelector('.primary-navigation [aria-current="page"]')?.textContent).toBe(
-      '安排任务',
+      '定时任务',
     );
     expect(f.host.querySelector('[aria-label="工作台"]')).toBeNull();
     expect(input()).toBeNull();
@@ -293,10 +293,10 @@ test('Native reuses the scheduled page and editor with real projects, model vali
     const editor = f.host.querySelector<HTMLFormElement>('.scheduled-editor')!;
     expect(editor).not.toBeNull();
     expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
-    expect(editor.closest('aside')?.getAttribute('aria-label')).toBe('新建安排任务');
+    expect(editor.closest('aside')?.getAttribute('aria-label')).toBe('新建定时任务');
     await f.edit(editor.querySelector<HTMLInputElement>('[aria-label="名称"]')!, '原页面草稿');
     await f.edit(
-      editor.querySelector<HTMLTextAreaElement>('[aria-label="任务说明"]')!,
+      editor.querySelector<HTMLTextAreaElement>('[aria-label="定时任务说明"]')!,
       '检查提交\n🙂',
     );
     await act(async () =>
@@ -332,7 +332,9 @@ test('Native reuses the scheduled page and editor with real projects, model vali
     expect(editor.querySelector('[aria-label="星期一"]')).not.toBeNull();
     expect(f.button('创建')!.disabled).toBe(false);
     expect(editor.querySelector('[aria-label="时区"]')).toBeNull();
-    expect(f.host.querySelector('.scheduled-page')!.textContent).toContain('仅在应用运行时执行');
+    expect(f.host.querySelector('.scheduled-page')!.textContent).not.toContain(
+      '仅在应用运行时执行',
+    );
     expect(f.calls.slice(baseline).map((call) => call.method)).toEqual([
       'scheduled.list',
       'conversation.models.read',
@@ -345,11 +347,11 @@ test('Native reuses the scheduled page and editor with real projects, model vali
     await f.click('Original A');
     expect(promptValue(input())).toBe('unsaved original\n雪🙂');
     expectResumedReads(1);
-    await f.click('安排任务');
+    await f.click('定时任务');
     await f.click('Original A');
     expect(promptValue(input())).toBe('unsaved original\n雪🙂');
     expectResumedReads(2);
-    await f.click('安排任务');
+    await f.click('定时任务');
     await f.click('Other B');
     expect(promptValue(input())).toBe('saved other');
     expect(f.selected()).toBe('b');
@@ -378,7 +380,7 @@ test('a late creation receipt cannot replace the scheduled page or the original 
     await f.chooseModel();
     await f.click('发送首条消息');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
-    await f.click('安排任务');
+    await f.click('定时任务');
     await act(async () => f.releaseCreation());
     expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
     expect(f.selected()).toBe('a');
@@ -401,7 +403,7 @@ test('a missing scheduled result keeps the task page and exposes the navigation 
   const f = fixture(true);
   try {
     await act(async () => f.root.render(<NativeDesktop />));
-    await f.click('安排任务');
+    await f.click('定时任务');
     await f.click('打开会话');
     expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
     expect(f.host.body.textContent).toContain('session_missing');

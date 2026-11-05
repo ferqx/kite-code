@@ -1,7 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { parseDocument } from 'yaml';
-import { checkUnifiedAgentBoundary } from './check-unified-agent-boundary';
+import {
+  checkUnifiedAgentBoundary,
+  type UnifiedBoundaryReport,
+} from './check-unified-agent-boundary';
 
 export const UNIFIED_WORKSPACES = Object.freeze([
   'packages/ai',
@@ -21,13 +24,14 @@ export interface UnifiedWorkspaceViolation {
 export interface UnifiedWorkspaceReport {
   readonly violations: readonly UnifiedWorkspaceViolation[];
   readonly checked: readonly string[];
+  readonly boundary: UnifiedBoundaryReport;
 }
 const names = new Map(UNIFIED_WORKSPACES.map((path) => [`@kite-ai/${path.split('/')[1]}`, path]));
 const formalScripts: Readonly<Record<string, string>> = {
   build: 'bun run scripts/run-runtime-workspace-script.ts build',
   test: 'bun run scripts/run-default-tests.ts',
   'test:all': 'bun run test',
-  typecheck: 'tsc --noEmit && bun run scripts/run-runtime-workspace-script.ts typecheck',
+  typecheck: 'bun check -b -p tsconfig.typecheck.json',
   agent: 'bun run scripts/release/entrypoints/cli.ts',
   tui: 'bun run scripts/release/entrypoints/tui.ts',
   'prod:tui': 'NODE_ENV=production bun run scripts/release/entrypoints/tui.ts',
@@ -850,6 +854,22 @@ export function checkUnifiedWorkspaces(repositoryRoot: string): UnifiedWorkspace
     if (!existsSync(resolve(root, 'scripts/release/source-terminal.ts')))
       add('formal-entry-missing', 'scripts/release/source-terminal.ts', 'root module');
   }
+  const typecheck = manifest('tsconfig.typecheck.json');
+  const references = ['.', ...UNIFIED_WORKSPACES].map((path) => ({
+    path: path === '.' ? './tsconfig.json' : `./${path}/tsconfig.json`,
+  }));
+  if (
+    typecheck &&
+    (Object.keys(typecheck).length !== 2 ||
+      !Array.isArray(typecheck.files) ||
+      typecheck.files.length !== 0 ||
+      JSON.stringify(typecheck.references) !== JSON.stringify(references))
+  )
+    add(
+      'typecheck-projects-invalid',
+      'tsconfig.typecheck.json',
+      'requires root and exact eight projects',
+    );
   for (const path of UNIFIED_WORKSPACES) {
     const location = `${path}/package.json`,
       value = manifest(location);
@@ -898,18 +918,22 @@ export function checkUnifiedWorkspaces(repositoryRoot: string): UnifiedWorkspace
   }
   const consumers = checkUnifiedFormalConsumers(root);
   violations.push(...consumers.violations);
-  for (const violation of checkUnifiedAgentBoundary(root, consumers.entrypoints).violations)
+  const boundary = checkUnifiedAgentBoundary(root, consumers.entrypoints);
+  for (const violation of boundary.violations)
     add(
       'source-boundary',
       violation.file,
       `${violation.rule}:${violation.line} ${violation.detail}`,
     );
-  return { violations, checked };
+  return { violations, checked, boundary };
 }
 if (import.meta.main) {
   const report = checkUnifiedWorkspaces(process.argv[2] ?? process.cwd());
   for (const violation of report.violations)
     console.error(`${violation.code}: ${violation.path}: ${violation.message}`);
+  for (const item of report.boundary.checked) console.log(`checked ${item}`);
+  for (const item of report.boundary.pending) console.log(`pending ${item}`);
+  console.log('Legacy retirement remains pending; this check does not certify final cutover.');
   console.log(
     `unified workspaces checked=${report.checked.length} violations=${report.violations.length}; static only, not install/runtime qualification`,
   );

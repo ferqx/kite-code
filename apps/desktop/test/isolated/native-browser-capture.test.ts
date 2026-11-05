@@ -60,11 +60,12 @@ class FakeContents extends EventEmitter {
   destroyed = false;
   zoom = 1;
   attached = true;
-  mainFrame = { url: 'http://localhost/' };
+  mainFrame: { url: string; processId?: number; routingId?: number } = { url: 'http://localhost/' };
   readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false };
   readMetrics: () => Promise<unknown> = async () => metrics;
   screenshot: (params: Record<string, unknown>) => Promise<unknown> = async () => image;
   paintWorld: (scripts: { code: string }[]) => Promise<void> = async () => {};
+  readDocumentState: () => Promise<unknown> = async () => 'loading';
   readonly debugger = Object.assign(new EventEmitter(), {
     isAttached: () => this.attached,
     attach: () => {
@@ -107,16 +108,25 @@ class FakeContents extends EventEmitter {
     this.frameCallbacks.push(this.frame);
   }
   endFrameSubscription() {
+    if (this.subscriptionEndError) throw this.subscriptionEndError;
     this.subscriptionEnds++;
     this.frame = undefined;
   }
   invalidations = 0;
   autoPresentationFrame = true;
   nativeSurface = false;
+  backgroundThrottling = true;
+  getBackgroundThrottling() {
+    return this.backgroundThrottling;
+  }
+  setBackgroundThrottling(value: boolean) {
+    this.backgroundThrottling = value;
+  }
   nativeVisible: () => boolean = () => true;
   invalidateError?: Error;
   frameImage?: () => Electron.NativeImage;
   subscriptionError?: Error;
+  subscriptionEndError?: Error;
   subscriptionEnds = 0;
   lastCaptureImage?: Electron.NativeImage;
   invalidate() {
@@ -143,11 +153,17 @@ class FakeContents extends EventEmitter {
     return this.loadingMain;
   }
   loads = 0;
+  loadResult: () => Promise<void> = async () => {};
   readonly document = { value: '', clicks: 0 };
   async loadURL() {
     this.loads++;
+    return this.loadResult();
   }
   stops = 0;
+  reloads = 0;
+  reload() {
+    this.reloads++;
+  }
   stop() {
     this.stops++;
   }
@@ -176,6 +192,7 @@ class FakeContents extends EventEmitter {
     return this.readMetrics();
   }
   async executeJavaScriptInIsolatedWorld(_world: number, scripts: { code: string }[]) {
+    if (scripts[0]?.code === 'document.readyState') return this.readDocumentState();
     return this.paintWorld(scripts);
   }
   async removeInsertedCSS() {}
@@ -185,13 +202,14 @@ class FakeContents extends EventEmitter {
     this.destroyed = true;
   }
 }
-class FakePlainView {
+class FakePlainView extends EventEmitter {
   visible = false;
   readonly visibility: boolean[] = [];
   bounds = { x: 0, y: 0, width: 0, height: 0 };
   readonly boundsWrites: Electron.Rectangle[] = [];
   readonly radiusWrites: number[] = [];
   readonly backgrounds: string[] = [];
+  setBackgroundBlur(_radius: number) {}
   setVisible(value: boolean) {
     this.visible = value;
     this.visibility.push(value);
@@ -612,6 +630,108 @@ test('Native waits for the owned main document DOM-ready while hide and resource
     f.close();
   }
 });
+
+test('a failed navigation publishes bounded human-readable metadata without granting document readiness or copying pixels', async () => {
+  const f = fixture();
+  f.state.phase = 'human';
+  const failed = 'http://localhost/unavailable';
+  try {
+    f.contents.emit('did-start-navigation', {}, failed, false, true);
+    f.contents.actualUrl = failed;
+    f.contents.mainFrame = { url: failed, processId: 41, routingId: 7 };
+    f.present(bounds);
+    await turn();
+    f.contents.emit('did-fail-load', {}, -102, 'ERR_CONNECTION_REFUSED', failed, true, 41, 7);
+    expect(f.view.visible).toBe(false);
+    f.contents.emit('dom-ready');
+    await turn();
+    expect(f.pageState()).toMatchObject({
+      url: failed,
+      error: 'load_failed',
+      display: 'failed',
+      loading: false,
+      failure: { kind: 'connection', code: 'ERR_CONNECTION_REFUSED' },
+    });
+    expect(f.aboveRoot()).toBe(false);
+    f.state.phase = 'agent';
+    expect(await f.page.waitForDocument!(new AbortController().signal)).toBe(false);
+    expect(f.page.captureMeta()).toMatchObject({ metadata: null });
+    f.state.phase = 'human';
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(f.contents.captureCalls).toBe(0);
+    const loads = f.contents.loads;
+    f.invoke({ action: 'reload', id: 'page' });
+    expect(f.contents.reloads).toBe(1);
+    expect(f.pageState().failure).toBeUndefined();
+    f.contents.emit('did-start-navigation', {}, failed, false, true);
+    expect(f.view.visible).toBe(false);
+    f.contents.mainFrame = { url: failed, processId: 42, routingId: 8 };
+    f.completeDocument(f.view, failed, false);
+    await f.show(bounds);
+    expect(f.pageState().error).toBeUndefined();
+    expect(f.aboveRoot()).toBe(true);
+    f.state.phase = 'agent';
+    expect(await f.page.waitForDocument!(new AbortController().signal)).toBe(true);
+    expect(f.contents.loads).toBe(loads);
+  } finally {
+    f.close();
+  }
+});
+
+for (const [code, description, kind] of [
+  [-105, 'ERR_NAME_NOT_RESOLVED', 'dns'],
+  [-106, 'ERR_INTERNET_DISCONNECTED', 'offline'],
+  [-118, 'ERR_CONNECTION_TIMED_OUT', 'timeout'],
+  [-202, 'ERR_CERT_AUTHORITY_INVALID', 'certificate'],
+  [-107, 'ERR_SSL_PROTOCOL_ERROR', 'secure_connection'],
+  [-379, 'ERR_HTTP_RESPONSE_CODE_FAILURE', 'other'],
+  [-2, 'private stack\n and logs', 'other'],
+] as const)
+  test(`native load failure ${code} publishes only its bounded reason and code`, () => {
+    const f = fixture(),
+      url = 'http://localhost/failed';
+    try {
+      f.contents.emit('did-start-navigation', {}, url, false, true);
+      f.contents.mainFrame = { url, processId: 41, routingId: 7 };
+      f.contents.emit('did-fail-load', {}, code, description, url, true, 41, 7);
+      expect(f.pageState().failure).toEqual({
+        kind,
+        ...(description.startsWith('ERR_') ? { code: description } : {}),
+      });
+      expect(f.view.visible).toBe(false);
+    } finally {
+      f.close();
+    }
+  });
+
+for (const stale of ['url', 'frame', 'subframe', 'aborted'] as const)
+  test(`a ${stale} failure cannot poison the current document`, async () => {
+    const f = fixture();
+    f.state.phase = 'human';
+    const url = 'http://localhost/unavailable';
+    try {
+      f.contents.emit('did-start-navigation', {}, url, false, true);
+      f.contents.actualUrl = url;
+      f.contents.mainFrame = { url, processId: 41, routingId: 7 };
+      f.contents.emit(
+        'did-fail-load',
+        {},
+        stale === 'aborted' ? -3 : -102,
+        'failure',
+        stale === 'url' ? 'http://localhost/old' : url,
+        stale !== 'subframe',
+        stale === 'frame' ? 40 : 41,
+        7,
+      );
+      f.contents.emit('dom-ready');
+      await f.show(bounds);
+      expect(f.aboveRoot()).toBe(false);
+      expect(f.pageState().display).not.toBe('ready');
+      expect(f.pageState().error).toBeUndefined();
+    } finally {
+      f.close();
+    }
+  });
 
 test('late failures from an old URL and same-URL abort do not poison the current document', async () => {
   const f = fixture(),
@@ -1532,6 +1652,139 @@ test('Main routes only the pending native popup Escape sequence and restores ord
   }
 });
 
+test.skipIf(process.platform !== 'win32')(
+  'Windows paints the seam and grip with the accepted page geometry without adding an input surface',
+  async () => {
+    const f = fixture();
+    f.state.phase = 'human';
+    const panel = {
+      size: 0,
+      min: 0,
+      minUnit: 'px',
+      max: 100,
+      maxUnit: '%',
+      preserve: 'relative',
+      collapsible: false,
+    } as const;
+    const layout: NativeBrowserLayout = {
+      windowWidth: 1600,
+      windowHeight: 1200,
+      insetLeft: 1,
+      insetRight: 1,
+      groups: [
+        {
+          left: 0,
+          right: 0,
+          gap: 1,
+          panels: [
+            { ...panel, size: 599 },
+            { ...panel, size: 1000 },
+          ],
+        },
+      ],
+      frame: {
+        top: 38,
+        bottom: 6,
+        width: 1,
+        color: [255, 255, 255, 0.08],
+        grip: {
+          left: -1,
+          width: 3,
+          height: 28,
+          color: [181, 181, 181, 0.55],
+          visible: true,
+        },
+      },
+    };
+    const bounds = { x: 601, y: 100, width: 998, height: 1094, radius: 0 };
+    const decorations = () =>
+      (f.window.contentView.children as unknown as FakePlainView[]).filter(
+        (v) => !(v instanceof FakeView),
+      );
+    try {
+      await f.show(bounds, layout);
+      const [seam, grip] = decorations();
+      expect(decorations()).toHaveLength(2);
+      expect(seam!.visible).toBe(true);
+      expect(seam!.bounds).toEqual({ x: 600, y: 38, width: 1, height: 1156 });
+      expect(grip!.bounds.x).toBe(599);
+      expect(grip!.visible).toBe(true);
+      expect(seam!.radiusWrites).toEqual([]); // Tiny native strips must not be clipped away.
+      const retired = f.layoutRequest('page', bounds, layout);
+      const nextLayout = {
+        ...layout,
+        groups: [
+          {
+            ...layout.groups[0]!,
+            panels: [
+              { ...panel, size: 549 },
+              { ...panel, size: 1050 },
+            ] as const,
+          },
+        ],
+      };
+      expect(
+        f.sync(f.layoutRequest('page', { ...bounds, x: 551, width: 1048 }, nextLayout)),
+      ).toMatchObject({ ok: true });
+      expect(Math.abs(f.view.bounds.x - 551)).toBeLessThanOrEqual(1);
+      expect([seam!.bounds.x, grip!.bounds.x]).toEqual([f.view.bounds.x - 1, f.view.bounds.x - 2]);
+      const accepted = [seam!.bounds.x, grip!.bounds.x, f.view.bounds.x];
+      f.sync(retired);
+      expect([seam!.bounds.x, grip!.bounds.x, f.view.bounds.x]).toEqual(accepted);
+      f.contentSize[0] = 1800;
+      f.window.emit('resize');
+      expect(f.view.bounds.x - seam!.bounds.x).toBeGreaterThanOrEqual(1);
+      expect(f.view.bounds.x - seam!.bounds.x).toBeLessThanOrEqual(2);
+      expect(grip!.bounds.x).toBe(seam!.bounds.x - 1);
+      expect(views).toHaveLength(1);
+      expect(f.contents.loads).toBe(1);
+      expect(f.contents.captureCalls).toBe(0);
+      f.windowEvent('hide');
+      expect(decorations().every((v) => !v.visible)).toBe(true);
+      f.sync(retired);
+      expect(decorations().every((v) => !v.visible)).toBe(true);
+    } finally {
+      f.close();
+    }
+    expect(decorations()).toEqual([]);
+  },
+);
+
+for (const previous of [true, false])
+  for (const outcome of ['ready', 'cancelled', 'failed'] as const)
+    test.skipIf(process.platform !== 'win32')(
+      `Windows first-frame preparation restores background throttling=${previous} after ${outcome}`,
+      async () => {
+        const f = fixture();
+        f.contents.backgroundThrottling = previous;
+        f.contents.autoPresentationFrame = false;
+        try {
+          f.present(bounds);
+          await turn();
+          expect(f.contents.backgroundThrottling).toBe(false);
+          expect(f.aboveRoot()).toBe(false);
+          const late = f.contents.frame!;
+          if (outcome === 'ready') {
+            late(nativeFrame(1600, 1200));
+            await turn();
+            expect(f.pageState().display).toBe('ready');
+          } else if (outcome === 'cancelled') {
+            f.present(null);
+          } else {
+            f.contents.emit('did-fail-load', {}, -105, 'failed', f.contents.getURL(), true);
+          }
+          expect(f.contents.backgroundThrottling).toBe(previous);
+          late(nativeFrame(1600, 1200));
+          await turn();
+          expect(f.contents.backgroundThrottling).toBe(previous);
+          if (outcome !== 'ready') expect(f.aboveRoot()).toBe(false);
+          expect(f.contents.captureCalls).toBe(0);
+        } finally {
+          f.close();
+        }
+      },
+    );
+
 test('a hidden new page really has no capture surface, but a full native frame under Root promotes the exact committed document', async () => {
   const f = fixture({ ready: false });
   f.state.phase = 'human';
@@ -1605,6 +1858,248 @@ for (const invalid of ['empty', 'small', 'wrong-aspect'] as const)
     }
   });
 
+for (const detach of ['host', 'debugger'] as const)
+  test(`${detach} detach retires Agent reads while the same pending document can still display`, async () => {
+    const f = fixture({ ready: false });
+    try {
+      const reader = f.page.waitForDocument!(new AbortController().signal);
+      f.present(bounds);
+      await turn();
+      if (detach === 'host') await f.page.detach();
+      else f.contents.debugger.emit('detach');
+      expect(await reader).toBe(false);
+      await turn();
+      expect(f.pageState().display).toBe('loading');
+      f.state.phase = 'human';
+      f.page.changed();
+      f.completeDocument(f.view, f.contents.actualUrl, false);
+      await turn();
+      expect(f.pageState().display).toBe('ready');
+      expect(f.aboveRoot()).toBe(true);
+      expect(f.contents.loads).toBe(1);
+      expect(f.contents.reloads).toBe(0);
+    } finally {
+      f.close();
+    }
+  });
+
+test('a stop-loading notification does not fail a document whose DOM-ready arrives later', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.contents.emit('did-navigate', {}, f.contents.actualUrl);
+    f.present(bounds);
+    await turn();
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState().display).toBe('loading');
+    f.contents.emit('dom-ready');
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.loads).toBe(1);
+  } finally {
+    f.close();
+  }
+});
+
+test('explicit stop before commit remains a neutral stopped page and a later new navigation can display', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.present(bounds);
+    await turn();
+    f.invoke({ action: 'stop', id: 'page' });
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState()).toMatchObject({ display: 'stopped', loading: false });
+    expect(f.pageState().error).toBeUndefined();
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(f.contents.stops).toBe(1);
+    f.completeDocument(f.view, 'https://example.test/successor');
+    f.present(bounds);
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.reloads).toBe(0);
+  } finally {
+    f.close();
+  }
+});
+
+test('explicit stop owns its generic engine cancellation while a successor generic failure remains real', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.invoke({ action: 'stop', id: 'page' });
+    for (const event of ['did-fail-provisional-load', 'did-fail-load'])
+      f.contents.emit(event, {}, -2, 'ERR_FAILED', f.contents.actualUrl, true);
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState()).toMatchObject({ display: 'stopped', loading: false });
+    expect(f.pageState().error).toBeUndefined();
+    f.contents.emit('did-start-navigation', {}, f.contents.actualUrl, false, true);
+    f.contents.emit('did-fail-load', {}, -2, 'ERR_FAILED', f.contents.actualUrl, true);
+    expect(f.pageState()).toMatchObject({ display: 'failed', error: 'load_failed' });
+  } finally {
+    f.close();
+  }
+});
+
+test('a loadURL rejection caused by explicit stop cannot replace its neutral stopped state', async () => {
+  const f = fixture();
+  f.state.phase = 'human';
+  const load = deferred<void>();
+  f.contents.loadResult = () => load.promise;
+  try {
+    const url = 'http://localhost/stopping';
+    f.invoke({ action: 'navigate', id: 'page', input: url });
+    f.contents.actualUrl = url;
+    f.contents.emit('did-start-navigation', {}, url, false, true);
+    f.invoke({ action: 'stop', id: 'page' });
+    load.reject(Object.assign(Error('ERR_FAILED'), { errno: -2, code: 'ERR_FAILED' }));
+    await turn();
+    expect(f.pageState()).toMatchObject({ display: 'stopped', loading: false });
+    expect(f.pageState().error).toBeUndefined();
+    expect(f.contents.stops).toBe(1);
+  } finally {
+    f.close();
+  }
+});
+
+test('a stopped committed document can display its actual completed DOM without another DOM-ready', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  f.contents.readDocumentState = async () => 'complete';
+  try {
+    f.contents.emit('did-navigate', {}, f.contents.actualUrl);
+    f.present(bounds);
+    await turn();
+    f.invoke({ action: 'stop', id: 'page' });
+    f.contents.emit('did-stop-loading');
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.loads).toBe(1);
+    expect(f.contents.reloads).toBe(0);
+    expect(f.contents.frameCallbacks).toHaveLength(1);
+  } finally {
+    f.close();
+  }
+});
+
+for (const retire of ['navigation', 'failure', 'close'] as const)
+  test(`a stopped-document readiness reply after ${retire} cannot authorize a successor`, async () => {
+    const f = fixture({ ready: false });
+    f.state.phase = 'human';
+    const reply = deferred<unknown>();
+    f.contents.readDocumentState = () => reply.promise;
+    try {
+      f.contents.emit('did-navigate', {}, f.contents.actualUrl);
+      f.present(bounds);
+      await turn();
+      f.contents.emit('did-stop-loading');
+      await turn();
+      if (retire === 'navigation')
+        f.contents.emit('did-start-navigation', {}, 'https://example.test/new', false, true);
+      if (retire === 'failure')
+        f.contents.emit(
+          'did-fail-provisional-load',
+          {},
+          -102,
+          'ERR_CONNECTION_REFUSED',
+          f.contents.actualUrl,
+          true,
+        );
+      if (retire === 'close') f.close();
+      reply.resolve('complete');
+      await turn();
+      expect(f.view.visible).toBe(false);
+      expect(f.contents.frameCallbacks).toHaveLength(0);
+      expect(f.contents.loads).toBe(1);
+      if (retire !== 'close') expect(f.pageState().display).not.toBe('ready');
+    } finally {
+      if (retire !== 'close') f.close();
+    }
+  });
+
+test('a real provisional failure goes directly to its bounded engine error without a generic display failure', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  try {
+    f.present(bounds);
+    await turn();
+    f.contents.emit(
+      'did-fail-provisional-load',
+      {},
+      -102,
+      'ERR_CONNECTION_REFUSED',
+      f.contents.actualUrl,
+      true,
+    );
+    await turn();
+    expect(f.pageState()).toMatchObject({
+      display: 'failed',
+      error: 'load_failed',
+      failure: { kind: 'connection' },
+    });
+    f.contents.emit('did-start-loading');
+    f.contents.emit('did-stop-loading');
+    expect(f.pageState().error).toBe('load_failed');
+    f.completeDocument(f.view, f.contents.actualUrl, false);
+    await turn();
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(
+      f.owner.sent.some(
+        ({ value }) =>
+          (value as NativeBrowserState).display === 'failed' &&
+          (value as NativeBrowserState).error !== 'load_failed',
+      ),
+    ).toBe(false);
+  } finally {
+    f.close();
+  }
+});
+
+test('a delayed Root layout keeps the document loading and resumes on its actual bounds change', async () => {
+  const f = fixture({ ready: false });
+  f.state.phase = 'human';
+  f.contents.document.value = 'retained input';
+  try {
+    f.present(bounds);
+    await turn();
+    const original = { ...f.root.bounds };
+    f.root.setBounds({ ...original, width: original.width - 1 });
+    f.completeDocument(f.view, 'https://example.test/late-layout', false);
+    await turn();
+    expect(f.pageState().display).toBe('loading');
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.frameCallbacks).toHaveLength(0);
+    f.root.setBounds(original);
+    f.root.emit('bounds-changed');
+    await turn();
+    expect(f.pageState().display).toBe('ready');
+    expect(f.aboveRoot()).toBe(true);
+    expect(f.contents.document.value).toBe('retained input');
+    expect(f.contents.loads).toBe(1);
+    expect(f.contents.reloads).toBe(0);
+    expect(f.contents.stops).toBe(0);
+    expect(f.contents.captureCalls).toBe(0);
+    expect(
+      f.owner.sent.some(({ value }) => (value as NativeBrowserState).display === 'failed'),
+    ).toBe(false);
+    f.present(null);
+    f.root.emit('bounds-changed');
+    await turn();
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.loads).toBe(1);
+  } finally {
+    f.close();
+    expect(f.root.listenerCount('bounds-changed')).toBe(0);
+  }
+});
+
 test('native frame subscription failure withdraws its underlay without replay or automatic retry', async () => {
   const f = fixture();
   f.state.phase = 'human';
@@ -1627,26 +2122,47 @@ test('native frame subscription failure withdraws its underlay without replay or
   }
 });
 
-test('the first native frame has a finite deadline and its late callback cannot resurrect its underlay', async () => {
+test('a real frame subscription cleanup failure remains a failure when its paint is retired', async () => {
   const f = fixture();
   f.state.phase = 'human';
   f.contents.autoPresentationFrame = false;
   try {
     f.present(bounds);
     await turn();
-    const old = f.contents.frame!;
-    expect(typeof old).toBe('function');
-    expect(f.aboveRoot()).toBe(false);
-    expect(f.invoke({ action: 'stop', id: 'page' })).toMatchObject({ ok: true });
-    expect(f.contents.stops).toBe(1);
-    await Bun.sleep(2050);
-    expect(f.pageState().display).toBe('failed');
-    expect(f.view.visible).toBe(false);
-    expect(f.contents.frame).toBeUndefined();
-    old(nativeFrame(1600, 1200));
+    f.contents.subscriptionEndError = Error('native frame cleanup failed');
+    f.root.setBounds({ ...f.root.bounds, width: 800 });
+    f.contents.frame!(nativeFrame(1600, 1200));
     await turn();
-    expect(f.view.visible).toBe(false);
     expect(f.pageState().display).toBe('failed');
+    expect(f.view.visible).toBe(false);
+    expect(f.contents.loads).toBe(1);
+    expect(f.contents.reloads).toBe(0);
+  } finally {
+    f.contents.subscriptionEndError = undefined;
+    f.close();
+  }
+});
+
+test('the first native frame waits for the engine past two seconds without failing or replaying the page', async () => {
+  const f = fixture();
+  f.state.phase = 'human';
+  f.contents.autoPresentationFrame = false;
+  try {
+    f.present(bounds);
+    await turn();
+    const receive = f.contents.frame!;
+    expect(typeof receive).toBe('function');
+    expect(f.aboveRoot()).toBe(false);
+    await Bun.sleep(2050);
+    expect(f.pageState().display).toBe('loading');
+    expect(f.aboveRoot()).toBe(false);
+    expect(f.contents.frame).toBe(receive);
+    receive(nativeFrame(1600, 1200));
+    await turn();
+    expect(f.view.visible).toBe(true);
+    expect(f.pageState().display).toBe('ready');
+    expect(f.contents.frame).toBeUndefined();
+    expect(f.contents.stops).toBe(0);
     expect(f.contents.captureCalls).toBe(0);
     expect(f.contents.loads).toBe(1);
   } finally {
@@ -1654,7 +2170,7 @@ test('the first native frame has a finite deadline and its late callback cannot 
   }
 });
 
-test('an uncommitted first document has a finite display deadline and late DOM-ready cannot start its native frame observer', async () => {
+test('a first document waits for engine readiness past twelve seconds and can still display the same page', async () => {
   const f = fixture({ ready: false });
   f.state.phase = 'human';
   try {
@@ -1664,14 +2180,15 @@ test('an uncommitted first document has a finite display deadline and late DOM-r
     expect(f.aboveRoot()).toBe(false);
     expect(f.pageState().display).toBe('loading');
     await Bun.sleep(12050);
-    expect(f.pageState().display).toBe('failed');
+    expect(f.pageState().display).toBe('loading');
     expect(f.view.visible).toBe(false);
     f.completeDocument(f.view, 'https://example.test/late', false);
     await turn();
-    expect(f.contents.frameCallbacks).toHaveLength(0);
+    expect(f.contents.frameCallbacks).toHaveLength(1);
     expect(f.contents.captureCalls).toBe(0);
-    expect(f.view.visible).toBe(false);
-    expect(f.pageState().display).toBe('failed');
+    expect(f.view.visible).toBe(true);
+    expect(f.pageState().display).toBe('ready');
+    expect(f.contents.loads).toBe(1);
     expect(f.invoke({ action: 'stop', id: 'page' })).toMatchObject({ ok: true });
     expect(f.contents.stops).toBe(1);
   } finally {
@@ -1817,10 +2334,19 @@ for (const missing of ['hidden', 'cropped', 'absent'] as const)
       await turn();
       expect(f.view.visible).toBe(false);
       expect(f.contents.frameCallbacks).toHaveLength(0);
-      expect(f.pageState().display).toBe('failed');
+      expect(f.pageState().display).toBe(missing === 'absent' ? 'failed' : 'loading');
       expect(f.contents.captureCalls).toBe(0);
       expect(f.armed).toEqual([]);
       expect(f.contents.loads).toBe(1);
+      if (missing !== 'absent') {
+        f.root.setVisible(true);
+        f.root.setBounds({ x: 0, y: 0, width: 1600, height: 1200 });
+        f.present(bounds);
+        await turn();
+        expect(f.pageState().display).toBe('ready');
+        expect(f.aboveRoot()).toBe(true);
+        expect(f.contents.loads).toBe(1);
+      }
     } finally {
       f.close();
     }
@@ -1856,9 +2382,25 @@ for (const boundary of [
       await turn();
       expect(f.view.visible).toBe(false);
       expect(f.contents.frame).toBeUndefined();
-      expect(f.pageState().display).toBe('failed');
+      expect(f.pageState().display).toBe('loading');
       expect(f.contents.captureCalls).toBe(0);
       expect(f.armed).toEqual([]);
+      expect(f.contents.loads).toBe(1);
+      f.root.setVisible(true);
+      f.root.setBounds({ x: 0, y: 0, width: 1600, height: 1200 });
+      f.window.contentView.addChildView(f.root as unknown as Electron.View);
+      if (boundary === 'page-frame') f.completeDocument(f.view);
+      f.present(bounds);
+      await turn();
+      const current = f.contents.frame!;
+      expect(current).not.toBe(old);
+      old(nativeFrame(1600, 1200));
+      expect(f.contents.frame).toBe(current);
+      expect(f.aboveRoot()).toBe(false);
+      current(nativeFrame(1600, 1200));
+      await turn();
+      expect(f.pageState().display).toBe('ready');
+      expect(f.aboveRoot()).toBe(true);
       expect(f.contents.loads).toBe(1);
     } finally {
       f.close();
@@ -2694,6 +3236,44 @@ test('live sidebar animation accepts measured intermediate widths while rejectin
     expect(f.contents.loads).toBe(loads);
     expect(f.contents.frameCallbacks).toHaveLength(reads);
     expect(f.contents.closes).toBe(0);
+  } finally {
+    f.close();
+  }
+});
+
+test('a Windows content-frame inset remains inside the same panel through native resize without another first-frame read', async () => {
+  const f = fixture();
+  const panel = (size: number, preserve: 'relative' | 'pixel' = 'relative') => ({
+    size,
+    min: 0,
+    minUnit: 'px' as const,
+    max: 100,
+    maxUnit: '%' as const,
+    preserve,
+    collapsible: false,
+  });
+  const layout: NativeBrowserLayout = {
+    windowWidth: 1600,
+    windowHeight: 1200,
+    insetLeft: 0,
+    insetRight: 0,
+    groups: [
+      { left: 0, right: 0, gap: 1, panels: [panel(200, 'pixel'), panel(1399)] },
+      { left: 6, right: 6, gap: 1, panels: [panel(600), panel(786)] },
+    ],
+  };
+  try {
+    await f.show({ x: 808, y: 132, width: 786, height: 1061, radius: 8 }, layout);
+    expect(f.view.visible).toBe(true);
+    const frames = f.contents.frameCallbacks.length,
+      loads = f.contents.loads;
+    f.contentSize.splice(0, 2, 1700, 1300);
+    f.window.emit('resize');
+    expect(f.view.bounds.x + f.view.bounds.width).toBe(1694);
+    expect(f.view.bounds.y + f.view.bounds.height).toBe(1293);
+    expect(f.view.visible).toBe(true);
+    expect(f.contents.frameCallbacks).toHaveLength(frames);
+    expect(f.contents.loads).toBe(loads);
   } finally {
     f.close();
   }

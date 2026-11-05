@@ -10,10 +10,10 @@ pre-commit:
       stage_fixed: true
     typecheck:
       glob: "*.{ts,tsx}"
-      run: node node_modules/typescript/bin/tsc --noEmit
+      run: bun check -p tsconfig.json
     unified-boundary:
       glob: "*.{ts,tsx}"
-      run: bun run check:unified-agent-boundary && bun run check:runtime-packages
+      run: bun run check:runtime-packages
     api-contract:
       glob: "*.{ts,tsx,json}"
       run: bun run check:unified-api

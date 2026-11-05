@@ -42,9 +42,10 @@ use windows::Win32::System::JobObjects::AssignProcessToJobObject;
 use windows::Win32::System::Threading::{
     CreateProcessAsUserW, CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess,
     InitializeProcThreadAttributeList, OpenProcessToken, ResumeThread, TerminateProcess,
-    UpdateProcThreadAttribute, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
+    UpdateProcThreadAttribute, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
     EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    STARTUPINFOW,
 };
 
 const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
@@ -1116,7 +1117,7 @@ pub fn spawn_restricted_suspended_verified(
     let startup = STARTUPINFOEXW {
         StartupInfo: STARTUPINFOW {
             cb: size_of::<STARTUPINFOEXW>() as u32,
-            dwFlags: STARTF_USESTDHANDLES,
+            dwFlags: STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW,
             hStdInput: stdin_read,
             hStdOutput: stdout_write,
             hStdError: stderr_write,
@@ -1134,7 +1135,10 @@ pub fn spawn_restricted_suspended_verified(
             None,
             None,
             true,
-            CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+            CREATE_NO_WINDOW
+                | CREATE_SUSPENDED
+                | EXTENDED_STARTUPINFO_PRESENT
+                | CREATE_UNICODE_ENVIRONMENT,
             environment,
             PCWSTR(cwd.as_ptr()),
             &startup.StartupInfo,
@@ -1292,7 +1296,7 @@ pub fn spawn_current_user_in_job(
     let startup = STARTUPINFOEXW {
         StartupInfo: STARTUPINFOW {
             cb: size_of::<STARTUPINFOEXW>() as u32,
-            dwFlags: STARTF_USESTDHANDLES,
+            dwFlags: STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW,
             hStdInput: stdin_read,
             hStdOutput: stdout_write,
             hStdError: stderr_write,
@@ -1309,7 +1313,10 @@ pub fn spawn_current_user_in_job(
             None,
             None,
             true,
-            CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+            CREATE_NO_WINDOW
+                | CREATE_SUSPENDED
+                | EXTENDED_STARTUPINFO_PRESENT
+                | CREATE_UNICODE_ENVIRONMENT,
             environment,
             PCWSTR(cwd.as_ptr()),
             &startup.StartupInfo,

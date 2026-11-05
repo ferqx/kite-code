@@ -2,13 +2,26 @@ export const nativeBrowserChannel = 'kite:native:browser';
 export const nativeBrowserEventChannel = 'kite:native:browser-state';
 export const nativeBrowserLayoutChannel = 'kite:native:browser-layout';
 export const nativeBrowserPresentationChannel = 'kite:native:browser-presentation';
+
+export interface NativeBrowserLoadFailure {
+  readonly kind:
+    | 'dns'
+    | 'connection'
+    | 'timeout'
+    | 'offline'
+    | 'certificate'
+    | 'secure_connection'
+    | 'other';
+  /** A single native error name, never a log, stack or remote response body. */
+  readonly code?: string;
+}
 export const nativeBrowserMenuChannel = 'kite:native:browser-menu';
 export const nativeBrowserMenuCancelChannel = 'kite:native:browser-menu-cancel';
 
 export interface NativeBrowserState {
   /** Opaque Main page/document and display-generation fence; never inferred from its URL. */
   readonly pageToken?: string;
-  readonly display?: 'loading' | 'ready' | 'failed';
+  readonly display?: 'loading' | 'ready' | 'stopped' | 'failed';
   readonly control?: {
     readonly phase: 'human' | 'armed' | 'acquiring' | 'agent' | 'revoking' | 'unknown';
     readonly incarnation: string;
@@ -23,6 +36,7 @@ export interface NativeBrowserState {
   readonly loading: boolean;
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
+  readonly failure?: NativeBrowserLoadFailure;
   readonly error?:
     | 'load_failed'
     | 'unsupported_navigation'
@@ -58,6 +72,21 @@ export interface NativeBrowserLayout {
   readonly groups: readonly NativeBrowserGroupLayout[];
   readonly insetLeft: number;
   readonly insetRight: number;
+  /** Windows decorations share the native page's geometry commit; never page or control authority. */
+  readonly frame?: NativeBrowserFrame;
+}
+export interface NativeBrowserFrame {
+  readonly top: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly color: readonly [number, number, number, number];
+  readonly grip: {
+    readonly left: number;
+    readonly width: number;
+    readonly height: number;
+    readonly color: readonly [number, number, number, number];
+    readonly visible: boolean;
+  };
 }
 export interface NativeBrowserRestoreScope {
   readonly storeId: string;
@@ -427,6 +456,30 @@ function isNativeBrowserLayout(value: unknown): value is NativeBrowserLayout {
     Object.keys(value).every((key) => keys.includes(key));
   const finite = (value: unknown) =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 32768;
+  const color = (value: unknown) =>
+    Array.isArray(value) &&
+    value.length === 4 &&
+    Array.from(value).every(
+      (channel, index) => finite(channel) && channel <= (index === 3 ? 1 : 255),
+    );
+  const frame = (value: unknown): value is NativeBrowserFrame => {
+    if (!closed(value, ['top', 'bottom', 'width', 'color', 'grip'])) return false;
+    const grip = value.grip;
+    return (
+      ['top', 'bottom', 'width'].every((key) => finite(value[key])) &&
+      Number(value.width) <= 4 &&
+      color(value.color) &&
+      closed(grip, ['left', 'width', 'height', 'color', 'visible']) &&
+      typeof grip.left === 'number' &&
+      Number.isFinite(grip.left) &&
+      Math.abs(grip.left) <= 16 &&
+      ['width', 'height'].every((key) => finite(grip[key])) &&
+      Number(grip.width) <= 8 &&
+      Number(grip.height) <= 64 &&
+      color(grip.color) &&
+      typeof grip.visible === 'boolean'
+    );
+  };
   const panel = (value: unknown) =>
     closed(value, ['size', 'min', 'minUnit', 'max', 'maxUnit', 'preserve', 'collapsible']) &&
     ['size', 'min', 'max'].every((key) => finite(value[key])) &&
@@ -437,7 +490,16 @@ function isNativeBrowserLayout(value: unknown): value is NativeBrowserLayout {
     ['pixel', 'relative'].includes(String(value.preserve)) &&
     typeof value.collapsible === 'boolean';
   return (
-    closed(value, ['windowWidth', 'windowHeight', 'groups', 'insetLeft', 'insetRight']) &&
+    closed(value, [
+      'windowWidth',
+      'windowHeight',
+      'groups',
+      'insetLeft',
+      'insetRight',
+      ...(value && typeof value === 'object' && Object.hasOwn(value, 'frame') ? ['frame'] : []),
+    ]) &&
+    (value.frame === undefined ||
+      (frame(value.frame) && value.frame.top + value.frame.bottom < Number(value.windowHeight))) &&
     ['windowWidth', 'windowHeight', 'insetLeft', 'insetRight'].every((key) => finite(value[key])) &&
     Number(value.windowWidth) > 0 &&
     Number(value.windowHeight) > 0 &&
@@ -568,18 +630,21 @@ export function isNativeBrowserState(value: unknown): value is NativeBrowserStat
         'canGoBack',
         'canGoForward',
         'error',
+        'failure',
         'control',
         'display',
         'pageToken',
       ].includes(key),
     ) &&
+    (state.failure === undefined ||
+      (state.error === 'load_failed' && isNativeBrowserLoadFailure(state.failure))) &&
     (state.control === undefined || isBrowserControl(state.control)) &&
     (state.pageToken === undefined ||
       (typeof state.pageToken === 'string' &&
         state.pageToken.length > 0 &&
         state.pageToken.length <= 1024)) &&
     (state.display === undefined ||
-      ['loading', 'ready', 'failed'].includes(String(state.display))) &&
+      ['loading', 'ready', 'stopped', 'failed'].includes(String(state.display))) &&
     typeof state.id === 'string' &&
     /^[A-Za-z0-9_-]{1,64}$/.test(state.id) &&
     typeof state.url === 'string' &&
@@ -591,6 +656,27 @@ export function isNativeBrowserState(value: unknown): value is NativeBrowserStat
       ['load_failed', 'unsupported_navigation', 'download_unsupported', 'process_gone'].includes(
         String(state.error),
       ))
+  );
+}
+
+function isNativeBrowserLoadFailure(value: unknown): value is NativeBrowserLoadFailure {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const failure = value as Record<string, unknown>;
+  return (
+    Object.keys(failure).every((key) => ['kind', 'code'].includes(key)) &&
+    Object.hasOwn(failure, 'kind') &&
+    typeof failure.kind === 'string' &&
+    [
+      'dns',
+      'connection',
+      'timeout',
+      'offline',
+      'certificate',
+      'secure_connection',
+      'other',
+    ].includes(String(failure.kind)) &&
+    (failure.code === undefined ||
+      (typeof failure.code === 'string' && /^ERR_[A-Z0-9_]{1,60}$/.test(failure.code)))
   );
 }
 

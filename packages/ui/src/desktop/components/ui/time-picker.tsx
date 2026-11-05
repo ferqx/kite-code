@@ -25,7 +25,7 @@ export function TimePicker({
       onChange={(event) => onValueChange(event.target.value)}
       disabled={disabled}
       required
-      className="time-picker-input appearance-none bg-background [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+      className="time-picker-input appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
     />
   );
 }

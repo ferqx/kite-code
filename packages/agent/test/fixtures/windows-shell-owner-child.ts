@@ -4,13 +4,13 @@ import { createWindowsShellJob } from '../../src/jobs/windows-shell';
 import { windowsShellFixture } from './windows-shell-runtime';
 
 const root = process.argv[2]!;
-const assets = windowsShellFixture();
+const assets = await windowsShellFixture();
 const powershell = join(
   process.env.SystemRoot!,
   'System32/WindowsPowerShell/v1.0/powershell.exe',
 ).replaceAll('\\', '/');
 const script = `$p=Start-Process -FilePath "${powershell}" -ArgumentList "-NoProfile -NonInteractive -Command Start-Sleep -Seconds 60" -PassThru -NoNewWindow;Write-Output ("PIDS "+$PID+" "+$p.Id);Start-Sleep -Seconds 60`;
-const job = createWindowsShellJob({
+const job = await createWindowsShellJob({
   cwd: join(root, 'workspace'),
   controlBase: join(root, 'control'),
   env: Object.fromEntries(

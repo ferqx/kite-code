@@ -7,6 +7,7 @@ import { chromium } from 'playwright';
 import { build } from 'vite';
 import type {} from './session-shell-browser.fixture';
 import {
+  verifyColdSessionToolbarWidth,
   verifyFormControlStyles,
   verifyMcpCustomForms,
   verifyMcpFailureFeedback,
@@ -110,6 +111,7 @@ try {
     ...(await verifyFormControlStyles(browser, server.url.toString(), artifact)),
     ...(await verifySwitchGeometry(browser, server.url.toString(), artifact)),
     ...(await verifySessionShellGeometry(browser, server.url.toString(), artifact)),
+    ...(await verifyColdSessionToolbarWidth(browser, server.url.toString(), artifact)),
     ...(await verifySettingsGeometry(browser, server.url.toString(), artifact)),
     ...(await verifyMcpSettingsProduct(browser, server.url.toString(), artifact)),
     ...(await verifyMcpFailureFeedback(browser, server.url.toString(), artifact)),

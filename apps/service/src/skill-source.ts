@@ -67,6 +67,7 @@ export function createConfiguredSkillSource(
   type KnowledgeSource = ReturnType<typeof createSkillSource> | typeof builtin;
   let sources = new Map<string, KnowledgeSource>();
   let configuredIds = new Map<string, string>();
+  let documents = new Map<string, { source: KnowledgeSource; id: string }>();
   const knowledgeScope = options.knowledgeScope ?? createKnowledgeReadScope();
   const pending = new Set<Promise<unknown>>();
   let sealed = false;
@@ -102,6 +103,7 @@ export function createConfiguredSkillSource(
         const summaries = new Map<string, SkillSummary>();
         const nextSources = new Map<string, KnowledgeSource>();
         const nextIds = new Map<string, string>();
+        const nextDocuments = new Map<string, { source: KnowledgeSource; id: string }>();
         const entry = (await builtin.list()).entries[0]!;
         const missingCapabilities = entry.requiredCapabilities.filter(
           (id) => !allowed.includes(id),
@@ -122,10 +124,12 @@ export function createConfiguredSkillSource(
         // Installation is global and independent of a workspace path or Tool selection.
         // Keeping its reader does not grant dependencies; load rechecks the host's allowed set.
         nextSources.set(entry.id, builtin);
+        nextDocuments.set(builtinComputerUseSkillId, { source: builtin, id: entry.id });
         if (!missingCapabilities.length) summaries.set(entry.id, entry);
         const publish = () => {
           sources = nextSources;
           configuredIds = nextIds;
+          documents = nextDocuments;
           return {
             entries: [...summaries.values()].sort((a, b) =>
               this.configuredId(a) < this.configuredId(b) ? -1 : 1,
@@ -254,6 +258,7 @@ export function createConfiguredSkillSource(
               states.get(duplicate)!.reason = 'duplicate_skill_location';
               summaries.delete(summary.id);
               nextSources.delete(summary.id);
+              nextDocuments.delete(duplicate);
               state.reason = 'duplicate_skill_location';
               continue;
             }
@@ -262,6 +267,7 @@ export function createConfiguredSkillSource(
               state.reason = 'skill_version_changed';
               continue;
             }
+            nextDocuments.set(state.id, { source, id: summary.id });
             if (state.missingCapabilities.length) {
               state.reason = 'skill_capability_missing';
               continue;
@@ -273,6 +279,17 @@ export function createConfiguredSkillSource(
         }
         return publish();
       });
+    },
+    readDocument(input: { id: string; version: string }) {
+      const document = documents.get(input.id);
+      if (!document) throw new SkillError('skill_not_discovered');
+      return admitted(() =>
+        document.source.readDocument({
+          id: document.id,
+          version: input.version,
+          maxTextBytes: 1048576,
+        }),
+      );
     },
     load(input: Parameters<ReturnType<typeof createSkillSource>['load']>[0]) {
       const source = sources.get(input.id);

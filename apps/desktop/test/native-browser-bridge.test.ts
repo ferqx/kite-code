@@ -11,6 +11,83 @@ import {
   projectNativeBrowserLayout,
 } from '../src/native-browser-bridge';
 
+test('native frame metadata is bounded paint-only geometry and survives native window projection', () => {
+  const panel = {
+    size: 0,
+    min: 0,
+    minUnit: 'px',
+    max: 100,
+    maxUnit: '%',
+    preserve: 'relative',
+    collapsible: false,
+  } as const;
+  const frame = {
+    top: 38,
+    bottom: 6,
+    width: 1,
+    color: [255, 255, 255, 0.08],
+    grip: {
+      left: -1,
+      width: 3,
+      height: 28,
+      color: [181, 181, 181, 0.55],
+      visible: true,
+    },
+  } as const;
+  const layout: NativeBrowserLayout = {
+    windowWidth: 1000,
+    windowHeight: 800,
+    insetLeft: 1,
+    insetRight: 1,
+    groups: [
+      {
+        left: 0,
+        right: 0,
+        gap: 1,
+        panels: [
+          { ...panel, size: 599 },
+          { ...panel, size: 400 },
+        ],
+      },
+    ],
+    frame,
+  };
+  const bounds = { x: 601, y: 100, width: 398, height: 694, radius: 0 };
+  const request = {
+    action: 'present' as const,
+    id: 'page',
+    bounds,
+    layout,
+    scope: { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 1 },
+    pageToken: 'current',
+    presentationRevision: 1,
+  };
+  expect(parseNativeBrowserRequest(request)).toEqual(request);
+  const projected = projectNativeBrowserLayout(bounds, layout, 1200, 900)!;
+  expect(projected.layout.frame).toEqual(frame);
+  expect(projected.bounds.x).toBeGreaterThan(bounds.x);
+  for (const invalid of [
+    { ...frame, top: -1 },
+    { ...frame, bottom: 800 },
+    { ...frame, width: 5 },
+    { ...frame, color: [255, 255, 255, 2] },
+    { ...frame, color: [255, 255, Number.NaN, 1] },
+    { ...frame, color: [255, 255, 255] },
+    { ...frame, color: Array(4) },
+    { ...frame, input: true },
+    ...[
+      { ...frame.grip, left: 17 },
+      { ...frame.grip, width: 9 },
+      { ...frame.grip, height: 65 },
+      { ...frame.grip, visible: 'true' },
+      { ...frame.grip, control: 'human' },
+    ].map((grip) => ({ ...frame, grip })),
+  ])
+    expect(() =>
+      parseNativeBrowserRequest({ ...request, layout: { ...layout, frame: invalid } }),
+    ).toThrow('invalid_browser_request');
+});
+
 test('sidebar animation keeps measured widths until a real window resize applies the target constraints', () => {
   for (const [size, min, max] of [
     [200, 0, 0],
@@ -232,6 +309,31 @@ test('browser requests are closed and finite before allocating any native view',
   ])
     expect(() => parseNativeBrowserRequest(value)).toThrow();
 });
+test('load failure metadata permits a finite reason and one error name, never logs or authority', () => {
+  const state = {
+    id: 'page',
+    url: 'https://example.test/',
+    title: '',
+    loading: false,
+    canGoBack: true,
+    canGoForward: false,
+    error: 'load_failed',
+    failure: { kind: 'dns', code: 'ERR_NAME_NOT_RESOLVED' },
+  };
+  expect(isNativeBrowserState(state)).toBe(true);
+  for (const failure of [
+    { kind: 'unknown' },
+    { kind: ['dns'] },
+    { kind: 'dns', code: 'ERR_BAD\nstack trace' },
+    { kind: 'dns', code: `ERR_${'A'.repeat(61)}` },
+    { kind: 'dns', code: 105 },
+    { kind: 'dns', details: 'private log' },
+    { kind: 'dns', control: 'agent' },
+  ])
+    expect(isNativeBrowserState({ ...state, failure })).toBe(false);
+  expect(isNativeBrowserState({ ...state, error: undefined })).toBe(false);
+});
+
 test('only bounded display metadata crosses the browser event channel', () => {
   const state = {
     id: 'b',
@@ -538,7 +640,7 @@ test('bounded display state does not turn ready or visible UI into observation o
     canGoBack: false,
     canGoForward: false,
   };
-  for (const display of ['loading', 'ready', 'failed'])
+  for (const display of ['loading', 'ready', 'stopped', 'failed'])
     expect(isNativeBrowserState({ ...base, display, pageToken: 'exact-Main-token' })).toBe(true);
   for (const invalid of [
     { ...base, display: 'first-paint-authorized-input' },

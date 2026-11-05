@@ -29,7 +29,7 @@ import {
   resolveConfiguration,
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
-import { filesNativeAssets, pdfAssets } from '@kite-ai/agent/files';
+import { filesNativeAssets, imageAssets, pdfAssets } from '@kite-ai/agent/files';
 import { ripgrepAsset } from '@kite-ai/agent/jobs/shell';
 import {
   createMcpResourceModelSource,
@@ -82,6 +82,7 @@ import { defaultConfiguration, ordinaryHostConfigurationDefaults } from './confi
 import { createConfigurationManagement } from './configuration-management';
 import type { DesktopBrowserEndpoint } from './desktop-browser';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
+import { readHostState } from './host-read';
 import { createDefaultHostStatusSource } from './host-status';
 import { createMcpConfiguration } from './mcp-configuration';
 import { createMcpManagement } from './mcp-management';
@@ -436,6 +437,7 @@ export function createDefaultProcessConfiguration(options: {
     const storage = sqliteStorageAssets();
     const extractor = webExtractorAssets();
     const pdf = pdfAssets();
+    const image = imageAssets();
     const compilers = [mcpSchemaWorkerAssets()];
     return [
       dirname(userConfiguration.path),
@@ -465,6 +467,9 @@ export function createDefaultProcessConfiguration(options: {
       pdf.worker,
       pdf.checksum,
       ...pdf.dependencies,
+      image.child,
+      image.checksum,
+      ...image.dependencies,
       browser.privateDirectory,
       ...browser.runtimeAssets,
       ...(options.runtimeAssets ?? []),
@@ -737,6 +742,7 @@ export function createDefaultProcessConfiguration(options: {
       defaultAutoReview?: 'shell_risk';
     },
   ) => {
+    let modelTransport: Awaited<ReturnType<typeof resolveModelTransport>> | undefined;
     try {
       recovery?.signal.throwIfAborted();
       const inheritedReview = recovery
@@ -761,7 +767,7 @@ export function createDefaultProcessConfiguration(options: {
       const skillSelection = selection
         ? (selection.skillSelection?.requested ?? undefined)
         : commandSkills(command.request);
-      const user = userConfiguration.read().value;
+      const user = (await readHostState(() => userConfiguration.read(), recovery?.signal)).value;
       let root: string;
       try {
         const uri = new URL(workspace.rootUri);
@@ -781,7 +787,12 @@ export function createDefaultProcessConfiguration(options: {
           : undefined;
       if (readOnlyTaskSource && !selection?.readOnlyTask)
         throw new AgentError('recovery_configuration_unavailable');
-      const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
+      const project = (
+        await readHostState(
+          () => readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }),
+          recovery?.signal,
+        )
+      ).value;
       if (project.webFetch !== undefined)
         throw new ConfigurationError('web_configuration_user_only');
       if (user.browser !== undefined || project.browser !== undefined)
@@ -847,11 +858,12 @@ export function createDefaultProcessConfiguration(options: {
       // adapters. Skill rows are validated locally by discovery, then the exact
       // selected subset is included in the final immutable snapshot below.
       createConfigurationSnapshot({ ...effective, skills: [] });
-      const modelTransport = await resolveModelTransport();
+      modelTransport = await resolveModelTransport();
       if (selection?.modelOnly)
         return {
           model: (await resolveModel(selected, modelTransport)).model,
           modelId: selected.id,
+          dispose: modelTransport.close,
           toolIds: [],
           extensions: [],
           permissions: permissionConfiguration.forModelOnly(selected.id),
@@ -999,6 +1011,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         toolIds,
         options: shellOptions,
+        signal: recovery?.signal,
       });
       const shellTools = new Map(
         shell.extensions.flatMap((extension) =>
@@ -1050,6 +1063,7 @@ export function createDefaultProcessConfiguration(options: {
           }),
           Promise.resolve().then(() => webBinding?.dispose()),
           Promise.resolve().then(() => browser.disposeCommand(session.id, command.id)),
+          Promise.resolve().then(() => modelTransport?.close()),
         ]).then((results) => {
           const failures = results.flatMap((result) =>
             result.status === 'rejected' ? [result.reason] : [],
@@ -1353,12 +1367,22 @@ export function createDefaultProcessConfiguration(options: {
           throw new ConfigurationPreparationCleanupError({
             originalError: error,
             cleanupError,
-            resources: { assembly, webBinding },
+            resources: { assembly, webBinding, modelTransport },
           });
         }
         throw error;
       }
     } catch (error) {
+      if (!(error instanceof ConfigurationPreparationCleanupError))
+        try {
+          await modelTransport?.close();
+        } catch (cleanupError) {
+          throw new ConfigurationPreparationCleanupError({
+            originalError: error,
+            cleanupError,
+            resources: { modelTransport },
+          });
+        }
       if (error instanceof KnowledgeReadCleanupError)
         throw new ConfigurationPreparationCleanupError({
           originalError: error,

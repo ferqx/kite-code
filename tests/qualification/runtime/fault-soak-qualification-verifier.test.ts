@@ -147,7 +147,7 @@ function validReport() {
     perCaseTimeoutMs: 180_000,
     startedAt: '2026-08-01T00:00:00.000Z',
     finishedAt: '2026-08-01T00:00:01.000Z',
-    environment: { platform: 'linux', arch: 'x64', bunVersion: '1.4.2' },
+    environment: { platform: 'linux', arch: 'x64', bunVersion: '1.4.4' },
     source,
     attempts,
   });
@@ -194,11 +194,13 @@ describe('runtime fault soak qualification verifier', () => {
   });
 
   test('rejects reports from a non-baseline Bun runtime', () => {
-    const report = structuredClone(validReport());
-    report.environment.bunVersion = '1.3.14';
-    expect(verifyRuntimeFaultSoakQualification(report, expectation)).toEqual(
-      expect.arrayContaining([expect.stringContaining('environment.bunVersion')]),
-    );
+    for (const version of ['1.3.14', '1.4.2', '1.4.3', '1.5.0']) {
+      const report = structuredClone(validReport());
+      report.environment.bunVersion = version;
+      expect(verifyRuntimeFaultSoakQualification(report, expectation)).toEqual(
+        expect.arrayContaining([expect.stringContaining('environment.bunVersion')]),
+      );
+    }
   });
 
   test('rejects re-digested receipt/resource provenance mismatches', () => {

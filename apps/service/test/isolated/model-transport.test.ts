@@ -1,5 +1,6 @@
-import { expect, mock, test } from 'bun:test';
+import { expect, mock, spyOn, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,6 +15,113 @@ import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai
 import { resolveModelTransport } from '../../src/model-transport';
 import { encodeFrames, responseFrames } from '../fixtures/responses-wire';
 import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
+
+test('real FetchSessions reuse their own connections, keep other bindings alive and close idempotently', async () => {
+  const sockets = new Map<import('node:net').Socket, number>();
+  const closed = new Set<number>();
+  const requests: number[] = [];
+  const server = createServer((request, response) => {
+    requests.push(sockets.get(request.socket)!);
+    response.end('ok');
+  });
+  server.on('connection', (socket) => {
+    const id = sockets.size + 1;
+    sockets.set(socket, id);
+    socket.once('close', () => closed.add(id));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address() as import('node:net').AddressInfo;
+  const url = `http://127.0.0.1:${address.port}`;
+  const first = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
+  const second = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
+  try {
+    for (let index = 0; index < 2; index++)
+      expect(await (await first.fetch(url)).text()).toBe('ok');
+    expect(await (await second.fetch(url)).text()).toBe('ok');
+    expect(await (await fetch(url, { proxy: false } as RequestInit)).text()).toBe('ok');
+    expect(requests).toEqual([1, 1, 2, 3]);
+    const closing = first.close();
+    expect(first.close()).toBe(closing);
+    await closing;
+    const deadline = Date.now() + 2000;
+    while (!closed.has(1) && Date.now() < deadline) await Bun.sleep(5);
+    expect(closed.has(1)).toBe(true);
+    expect(closed.has(2)).toBe(false);
+    await expect(first.fetch(url)).rejects.toMatchObject({ code: 'model_transport_closed' });
+    expect(await (await second.fetch(url)).text()).toBe('ok');
+    expect(requests).toEqual([1, 1, 2, 3, 2]);
+  } finally {
+    await Promise.all([first.close(), second.close()]);
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+}, 10000);
+
+test('a failed native close is retained without retrying cleanup or accepting new requests', async () => {
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('ok') });
+  const transport = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
+  const failure = new Error('fixture_session_close_failed');
+  let session: Bun.FetchSession | undefined;
+  const close = spyOn(Bun.FetchSession.prototype, 'close').mockImplementation(function (
+    this: Bun.FetchSession,
+  ) {
+    session = this;
+    throw failure;
+  });
+  try {
+    expect(await (await transport.fetch(server.url)).text()).toBe('ok');
+    const closing = transport.close();
+    await expect(closing).rejects.toBe(failure);
+    expect(transport.close()).toBe(closing);
+    await expect(transport.close()).rejects.toBe(failure);
+    expect(close).toHaveBeenCalledTimes(1);
+    await expect(transport.fetch(server.url)).rejects.toMatchObject({
+      code: 'model_transport_closed',
+    });
+  } finally {
+    close.mockRestore();
+    session?.close();
+    await server.stop(true);
+  }
+});
+
+test('session transport preserves caller abort identity and never retries an interrupted body', async () => {
+  let calls = 0;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch() {
+      calls++;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('pending'));
+          },
+        }),
+      );
+    },
+  });
+  const transport = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
+  try {
+    const controller = new AbortController();
+    const response = await transport.fetch(server.url, { signal: controller.signal });
+    const reading = response.text();
+    const reason = new Error('fixture_model_cancelled');
+    controller.abort(reason);
+    await expect(reading).rejects.toBe(reason);
+    await transport.close();
+    expect(calls).toBe(1);
+    await expect(transport.fetch(server.url)).rejects.toMatchObject({
+      code: 'model_transport_closed',
+    });
+    expect(calls).toBe(1);
+  } finally {
+    await transport.close();
+    await server.stop(true);
+  }
+});
 
 test('system proxy selection retains request identity, bypass patterns and binding snapshot without changing environment', async () => {
   const before = { ...process.env };
@@ -74,7 +182,7 @@ test('system proxy selection retains request identity, bypass patterns and bindi
   expect(process.env).toEqual(before);
 });
 
-test('explicit environment stays with Bun; NO_PROXY overrides system bypass and unsupported settings fail closed', async () => {
+test('explicit environment stays with Bun inside the owned transport; NO_PROXY overrides system bypass and unsupported settings fail closed', async () => {
   let discoveries = 0;
   const systemProxy = async () => {
     discoveries++;
@@ -86,7 +194,8 @@ test('explicit environment stays with Bun; NO_PROXY overrides system bypass and 
     { ALL_PROXY: 'http://explicit.test' },
   ]) {
     const transport = await resolveModelTransport({ env, systemProxy });
-    expect(transport.fetch).toBe(fetch);
+    expect(transport.fetch).not.toBe(fetch);
+    await transport.close();
     expect(JSON.stringify(transport.snapshot)).not.toContain('secret');
   }
   expect(discoveries).toBe(0);
@@ -153,8 +262,9 @@ test('real SDK Chat and Responses requests use the selected proxy; bypass, cance
     port: 0,
     fetch: () => new Response('direct ok'),
   });
+  let transport: Awaited<ReturnType<typeof resolveModelTransport>> | undefined;
   try {
-    const transport = await resolveModelTransport({
+    transport = await resolveModelTransport({
       env: {},
       systemProxy: async () => ({ http: proxy.url.origin, noProxy: '127.*' }),
     });
@@ -213,6 +323,7 @@ test('real SDK Chat and Responses requests use the selected proxy; bypass, cance
     await expect(reading).rejects.toBeDefined();
     expect(requests).toHaveLength(4);
   } finally {
+    await transport?.close();
     await proxy.stop(true);
     await direct.stop(true);
   }

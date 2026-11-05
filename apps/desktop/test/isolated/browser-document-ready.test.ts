@@ -78,3 +78,20 @@ test('failed, detached and disposed documents settle all pending readers', async
     if (end !== 'cancel') expect(await gate.wait(signal)).toBe(false);
   }
 });
+
+test('stopped reads retire without rejecting a later readiness event for the same committed epoch', async () => {
+  const gate = createBrowserDocumentReady();
+  const epoch = gate.start();
+  gate.commit(epoch);
+  const pending = gate.wait();
+  gate.stopped();
+  expect(await pending).toBe(false);
+  expect(await gate.wait()).toBe(false);
+  gate.ready(epoch);
+  expect(await gate.wait()).toBe(true);
+  const successor = gate.start();
+  gate.commit(successor);
+  gate.fail();
+  gate.ready(successor);
+  expect(await gate.wait()).toBe(false);
+});

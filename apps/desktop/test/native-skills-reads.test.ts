@@ -41,6 +41,61 @@ const client = (listUserSkills: AgentClient['listUserSkills']) =>
     serverInfo: { capabilities: ['user_skill_catalogue'] },
     listUserSkills,
   }) as unknown as AgentClient;
+
+test('document leases preserve Store, revision and skill identity, isolate closes and reject late or foreign content', async () => {
+  let scope = { ...originalScope };
+  const identity = { skillId: '技能🙂', skillVersion: 'a'.repeat(64), revision: 'b'.repeat(64) };
+  const document = { ...identity, storeId: 'store', body: '# 正文' };
+  const pending: { signal: AbortSignal; resolve: (value: typeof document) => void }[] = [];
+  const owner = new NativeSkillCatalogueReads(
+    {
+      serverInfo: { capabilities: ['user_skill_document'] },
+      readUserSkillDocument: async (input: { signal: AbortSignal }) =>
+        new Promise((resolve) => pending.push({ signal: input.signal, resolve })),
+    } as unknown as AgentClient,
+    () => scope,
+  );
+  const first = owner.document({ ...identity, readId: 'first' });
+  const second = owner.document({ ...identity, readId: 'second' });
+  expect(pending[0]!.signal.aborted).toBe(true);
+  owner.closeDocument('first');
+  expect(pending[1]!.signal.aborted).toBe(false);
+  pending[0]!.resolve(document);
+  await expect(first).rejects.toMatchObject({ code: 'skill_catalogue_view_changed' });
+  pending[1]!.resolve(document);
+  expect((await second).document.body).toBe('# 正文');
+  const foreign = owner.document({ ...identity, readId: 'foreign' });
+  pending[2]!.resolve({ ...document, skillId: 'other' });
+  await expect(foreign).rejects.toMatchObject({ code: 'skill_catalogue_identity_mismatch' });
+  const late = owner.document({ ...identity, readId: 'late' });
+  scope = { ...scope, generation: 2 };
+  pending[3]!.resolve(document);
+  await expect(late).rejects.toMatchObject({ code: 'skill_catalogue_view_changed' });
+  const retired = owner.document({ ...identity, readId: 'reused' });
+  owner.closeDocument('reused');
+  const successor = owner.document({ ...identity, readId: 'reused' });
+  pending[4]!.resolve(document);
+  await expect(retired).rejects.toMatchObject({ code: 'skill_catalogue_view_changed' });
+  expect(pending[5]!.signal.aborted).toBe(false);
+  pending[5]!.resolve(document);
+  expect((await successor).document.body).toBe('# 正文');
+  const request = {
+    method: 'settings.skills.document' as const,
+    generation: 1,
+    readId: 'read',
+    ...identity,
+  };
+  expect(decodeNativeRequest(request)).toEqual(request);
+  for (const patch of [
+    { path: '/private' },
+    { skillVersion: 'latest' },
+    { revision: '' },
+    { workspaceId: 'w' },
+    { skillId: '' },
+  ])
+    expect(() => decodeNativeRequest({ ...request, ...patch })).toThrow('invalid_native_request');
+  owner.release();
+});
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {

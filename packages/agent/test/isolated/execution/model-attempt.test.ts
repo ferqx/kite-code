@@ -59,6 +59,7 @@ async function fixture(model: ModelAdapter) {
     title: 'test',
   });
   return {
+    store,
     runtime,
     input,
     get effects() {
@@ -114,7 +115,7 @@ test('each safe transport attempt is a separate failed/successful execution with
       retry: {
         previousExecutionId: models[0]!.id,
         attempt: 2,
-        maxAttempts: null,
+        maxAttempts: 6,
         reason: 'stream_incomplete',
       },
     });
@@ -124,7 +125,7 @@ test('each safe transport attempt is a separate failed/successful execution with
   }
 });
 
-test('safe transient failures continue beyond five attempts in the same Run', async () => {
+test('the fifth reconnection can succeed in the same Run and a new task starts its own request', async () => {
   let attempts = 0;
   const f = await fixture({
     async *stream() {
@@ -149,7 +150,7 @@ test('safe transient failures continue beyond five attempts in the same Run', as
     expect(first.runs[0]!.status).toBe('completed');
     expect(first.runs).toHaveLength(1);
     expect(first.executions.at(-1)!.decisionSource).toMatchObject({
-      retry: { attempt: 6, maxAttempts: null },
+      retry: { attempt: 6, maxAttempts: 6 },
     });
     await f.runtime.submitCommand({
       ...f.input,
@@ -174,6 +175,75 @@ test('safe transient failures continue beyond five attempts in the same Run', as
     await f.close();
   }
 });
+
+test('five failed reconnections end the Run with retained failures, no partial tool effects and no seventh request', async () => {
+  let attempts = 0;
+  let recovered = false;
+  const f = await fixture({
+    async *stream() {
+      attempts++;
+      if (!recovered) {
+        yield { type: 'text_delta', text: 'Original partial' };
+        yield { type: 'tool_call', id: `discarded-${attempts}`, name: 'effect', arguments: '{}' };
+        throw new ModelAttemptError('connection_failed', 'connection_timeout');
+      }
+      yield { type: 'text_delta', text: 'New explicit task' };
+      yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  });
+  try {
+    await f.runtime.submitCommand({
+      ...f.input,
+      commandId: 'work',
+      request: { kind: 'run.start', content: 'fail' },
+    });
+    await f.runtime.waitForCommand('work');
+    const view = await f.runtime.getView('session');
+    expect(attempts).toBe(6);
+    expect(f.effects).toBe(0);
+    expect(view.runs[0]).toMatchObject({
+      status: 'failed',
+      reason: 'model_reconnect_exhausted',
+      isActive: false,
+    });
+    const models = view.executions.filter((execution) => execution.kind === 'model');
+    expect(models).toHaveLength(6);
+    expect(models.every((execution) => execution.status === 'failed')).toBe(true);
+    expect(models[5]!.decisionSource).toMatchObject({
+      retry: { attempt: 6, maxAttempts: 6, previousExecutionId: models[4]!.id },
+    });
+    expect(models[5]!.result).toMatchObject({
+      incomplete: true,
+      content: 'Original partial',
+      modelFailure: { detail: 'connection_timeout' },
+    });
+    const original = (await f.store.getRun(view.runs[0]!.id))!;
+    const session = (await f.store.getSession('session'))!;
+    const resumeError = await f.runtime
+      .resumeRun({
+        ...f.input,
+        runId: original.id,
+        commandId: 'resume-exhausted',
+        expectedOwnerGeneration: session.ownerGeneration,
+      })
+      .catch((error) => error);
+    expect(['owner_changed', 'run_not_active']).toContain(resumeError.code);
+    expect(attempts).toBe(6);
+    recovered = true;
+    await f.runtime.submitCommand({
+      ...f.input,
+      commandId: 'new-work',
+      request: { kind: 'run.start', content: 'New explicit task' },
+    });
+    await f.runtime.waitForCommand('new-work');
+    expect(attempts).toBe(7);
+    const after = await f.runtime.getView('session');
+    expect(after.runs.find((run) => run.id === view.runs[0]!.id)?.status).toBe('failed');
+    expect(after.runs.some((run) => run.status === 'completed')).toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 10000);
 
 test('unclassified model failure is retained and never retried', async () => {
   let attempts = 0;

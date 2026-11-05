@@ -90,7 +90,7 @@
   :is(.provider-settings, .catalogue-settings)
   .provider-badge.is-configured
   .provider-status-dot {
-  background: #22845b;
+  background: var(--success);
   opacity: 1;
 }
 .kite-client
@@ -216,7 +216,7 @@
   gap: 7px;
   margin: 0;
   font-size: var(--ui-text-size);
-  font-weight: 500;
+  font-weight: var(--font-weight-semibold);
 }
 .kite-client
   .desktop-settings
@@ -323,7 +323,7 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-notice-success {
-  border-left: 3px solid #22845b;
+  border-left: 3px solid var(--success);
 }
 .kite-client
   .desktop-settings
@@ -904,15 +904,7 @@
   min-width: 0;
 }
 .kite-client .desktop-settings .settings-content .settings-model-search {
-  min-height: 34px;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--button-radius);
-  color: var(--foreground);
-  background: var(--background);
-  padding: 6px 10px;
-  font: inherit;
-  font-size: 12px;
 }
 .kite-client .desktop-settings .connection-models-popover .connection-models-scroll {
   min-height: 0;

@@ -74,13 +74,33 @@ export async function largeInteractionFixture() {
     ],
     permissions: {
       async authorize(request) {
-        return request.kind === 'model'
-          ? { allowed: true, revision: 'p1' }
-          : {
-              allowed: false,
-              revision: 'p1',
-              check: { request: { task: body, plan: { full: 'actual fixed plan' } } },
-            };
+        if (request.kind === 'model') return { allowed: true, revision: 'p1' };
+        const reference = await artifacts.publish({
+          expectedStoreId: storeId,
+          sessionId: request.sessionId,
+          subjectId: 'owner',
+          scope: { kind: 'session', id: request.sessionId },
+          refId: `large-human-${request.executionId}`,
+          mediaType: 'application/json',
+          content: Buffer.from(JSON.stringify({ task: body, plan: { full: 'actual fixed plan' } })),
+          signal: request.signal,
+        });
+        return {
+          allowed: false,
+          revision: 'p1',
+          check: {
+            request: {
+              kind: 'artifact',
+              complete: true,
+              reference: {
+                id: reference.id,
+                mediaType: reference.mediaType,
+                size: reference.size,
+                scope: reference.scope,
+              },
+            },
+          },
+        };
       },
     },
   });

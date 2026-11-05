@@ -1225,7 +1225,7 @@ test('failed group reads keep the exact scheduled occurrence unknown and never r
   }
 });
 
-test('actual Runtime unknown tool outcome keeps the failed scheduled Run blocked across due time and restart', async () => {
+test('actual Runtime unknown tool outcome keeps a completed scheduled Run blocked across due time and restart', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'scheduled-unknown-'))),
     dataRoot = join(root, 'data');
   const store = await openSqliteStore({ dataRoot, profile: 'test' });
@@ -1238,7 +1238,13 @@ test('actual Runtime unknown tool outcome keeps the failed scheduled Run blocked
       usage: { inputTokens: 1, outputTokens: 1 },
     },
   ];
-  const model = createFixedModel([step, step]);
+  const model = createFixedModel([
+    step,
+    [
+      { type: 'text_delta', text: 'Reconcile the original operation before further work.' },
+      { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } },
+    ],
+  ]);
   const runtime = createRuntime({
     store,
     model,
@@ -1302,8 +1308,35 @@ test('actual Runtime unknown tool outcome keeps the failed scheduled Run blocked
     await runtime.waitForCommand(original.startCommandId, { timeoutMs: 5000 });
     await runner.tick();
     const view = await client.getView(original.sessionId);
-    expect(view.runs[0]!.status).toBe('failed');
-    expect(view.executions.some((item) => item.status === 'outcome_unknown')).toBe(true);
+    expect(view.runs[0]!.status).toBe('completed');
+    const executions = await store.listExecutions(original.sessionId);
+    const modelExecutions = executions.filter((item) => item.kind === 'model');
+    expect(modelExecutions.map((execution) => execution.id)).toEqual(
+      model.requests.map((request) => request.requestId),
+    );
+    expect(modelExecutions.every((execution) => execution.runId === view.runs[0]!.id)).toBe(true);
+    const originalTools = executions.filter((item) => item.kind === 'tool');
+    expect(originalTools).toHaveLength(1);
+    const originalTool = originalTools[0]!;
+    expect(originalTool).toMatchObject({
+      definitionId: 'fixture.effect',
+      runId: view.runs[0]!.id,
+      originCommandId: original.startCommandId,
+      status: 'outcome_unknown',
+      decisionSource: { kind: 'model_decision', modelExecutionId: model.requests[0]!.requestId },
+    });
+    const feedback = model.requests[1]!.messages.filter(
+      (message) => message.role === 'tool' && message.sourceIds?.includes(originalTool.id),
+    );
+    expect(feedback).toHaveLength(1);
+    expect(feedback[0]).toMatchObject({ toolCallId: 'call', sourceIds: [originalTool.id] });
+    expect(feedback[0]!.content).toContain('Outcome unknown.');
+    expect(feedback[0]!.content).toContain('do not repeat it');
+    expect(feedback[0]!.content).toContain('Effect needs reconciliation');
+    const receipt = (await store.getCommand(original.startCommandId))!;
+    expect(receipt).toMatchObject({ status: 'applied', receipt: { runId: view.runs[0]!.id } });
+    expect(effects).toBe(1);
+    expect(model.requests).toHaveLength(2);
     expect(runner.list().runs[0]!.status).toBe('unknown');
     expect(runner.list().runs[0]!.finishedAt).toBeUndefined();
     await runner.stop();
@@ -1317,7 +1350,11 @@ test('actual Runtime unknown tool outcome keeps the failed scheduled Run blocked
     expect(runner.list().runs[0]!.sessionId).toBe(original.sessionId);
     expect(runner.list().runs[0]!.status).toBe('unknown');
     expect(effects).toBe(1);
-    expect(model.requests).toHaveLength(1);
+    expect(model.requests).toHaveLength(2);
+    expect(
+      (await store.listExecutions(original.sessionId)).map((execution) => execution.id),
+    ).toEqual(executions.map((execution) => execution.id));
+    expect(await store.getCommand(original.startCommandId)).toEqual(receipt);
     expect(() => runner.delete('task')).toThrow('scheduled_task_active');
   } finally {
     await runner.stop();
@@ -1349,6 +1386,7 @@ test('actual detached child remains a scheduling gate after the original foregro
       { type: 'tool_call', id: 'effect', name: 'fixture.effect', arguments: '{}' },
       { ...finish, reason: 'tool_calls' },
     ],
+    [finish],
   ]);
   let release!: () => void, entered!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -1478,7 +1516,27 @@ test('actual detached child remains a scheduling gate after the original foregro
     expect(runner.list().runs).toHaveLength(1);
     expect(effects).toBe(1);
     expect(parent.requests).toHaveLength(2);
-    expect(child.requests).toHaveLength(1);
+    expect(child.requests).toHaveLength(2);
+    const childView = await store.getView(childSessionId);
+    expect(childView.runs).toHaveLength(1);
+    expect(childView.runs[0]!.status).toBe('completed');
+    const originalTools = childView.executions.filter((execution) => execution.kind === 'tool');
+    expect(originalTools).toHaveLength(1);
+    const originalTool = originalTools[0]!;
+    expect(originalTool).toMatchObject({
+      definitionId: 'fixture.effect',
+      status: 'outcome_unknown',
+      runId: childView.runs[0]!.id,
+      originCommandId: `child-start-${childExecutionId}`,
+    });
+    const feedback = child.requests[1]!.messages.filter(
+      (message) => message.role === 'tool' && message.sourceIds?.includes(originalTool.id),
+    );
+    expect(feedback).toHaveLength(1);
+    expect(feedback[0]).toMatchObject({ toolCallId: 'effect', sourceIds: [originalTool.id] });
+    expect(feedback[0]!.content).toContain('Outcome unknown.');
+    expect(feedback[0]!.content).toContain('do not repeat it');
+    expect(feedback[0]!.content).toContain('Needs reconciliation');
   } finally {
     release();
     await runner.stop();

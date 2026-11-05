@@ -163,7 +163,7 @@ for (const protocol of ['chat-completions', 'responses'] as const)
       failure = error;
     }
     expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toBe('model_transport_failed');
+    expect((failure as Error).message).toBe('MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable');
     expect((failure as Error).cause).toBeUndefined();
     expect(events).toEqual([]);
     expect(requests).toHaveLength(1);

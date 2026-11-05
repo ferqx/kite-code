@@ -522,6 +522,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       'read_execution_evidence',
       'web_fetch',
       'read_file',
+      'view_images',
       'write_file',
       'edit_file',
       'spawn_agent',
@@ -1274,11 +1275,15 @@ test('user provider Responses protocol reaches the real runtime endpoint and nev
     expect(await child.run('responses-failure')).toMatchObject({ status: 'applied' });
     const failed = await child.finished('responses-failure');
     expect(failed.commandRun.status).toBe('failed');
-    expect(requests.map((request) => request.path)).toEqual([
-      '/v1/responses',
-      '/v1/responses',
-      '/v1/responses',
-    ]);
+    expect(failed.commandRun.reason).toBe('model_reconnect_exhausted');
+    // Two successful requests, then the original attempt plus five reconnections.
+    expect(requests.map((request) => request.path)).toEqual(Array(8).fill('/v1/responses'));
+    const failedAttempts = failed.executions.filter(
+      (execution) => execution.runId === failed.commandRun.id && execution.kind === 'model',
+    );
+    expect(failedAttempts).toHaveLength(6);
+    expect(new Set(failedAttempts.map((execution) => execution.id)).size).toBe(6);
+    expect(failedAttempts.every((execution) => execution.status === 'failed')).toBe(true);
   } finally {
     await child?.handle.close();
     provider.stop(true);

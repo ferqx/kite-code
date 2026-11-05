@@ -43,6 +43,7 @@ import { cn } from './lib/utils';
 import { ModelEffortSelector, type ModelOption, type ThinkingEffort } from './ModelEffortSelector';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
 import { QueuedMessages, type QueuedMessagesProps } from './QueuedMessages';
+import { ReadGate } from './ReadGate';
 import { Button } from './ui';
 
 const contextTokenFormat = new Intl.NumberFormat('en-US', {
@@ -149,6 +150,9 @@ export interface ComposerProps {
   inputLabel?: string;
   sendLabel?: string;
   sendDisabled?: boolean;
+  /** Scope handoff and read freshness are independent of business availability. */
+  readOnly?: boolean;
+  readGate?: { send?: boolean; cancel?: boolean; permission?: boolean };
   draft: string;
   onChange: (value: string) => void;
   onSend?: () => void;
@@ -182,6 +186,7 @@ export interface ComposerProps {
     readonly cacheHitTokens: number;
     readonly cacheMissTokens: number;
   };
+  metricsLoading?: boolean;
   submitStatus?: string;
   sending?: boolean;
   promptHidden?: boolean;
@@ -192,6 +197,8 @@ function canConfirmFull(props: ComposerProps) {
     props.permission !== 'full' &&
     !!props.onPermissionChange &&
     !props.disabled &&
+    !props.readOnly &&
+    !props.readGate?.permission &&
     !props.permissionDisabled &&
     !props.permissionPending &&
     !props.promptHidden
@@ -252,7 +259,12 @@ export function Composer(props: ComposerProps) {
       setPreparingFiles(false);
       setFileError(undefined);
     }
-    if (current.current.scopeKey !== props.scopeKey || props.disabled || props.promptHidden)
+    if (
+      current.current.scopeKey !== props.scopeKey ||
+      props.disabled ||
+      props.readOnly ||
+      props.promptHidden
+    )
       setAttachmentMenuOpen(false);
     if (!canConfirmFull(props) || !samePermissionContext(current.current, props)) {
       const wasConfirming = !!fullConfirmation.current || confirmingFullScope !== null;
@@ -267,6 +279,8 @@ export function Composer(props: ComposerProps) {
       current.current.scopeKey !== props.scopeKey ||
       current.current.fullPermissionScope !== props.fullPermissionScope ||
       props.permissionDisabled ||
+      props.readOnly ||
+      props.readGate?.permission ||
       props.promptHidden
     )
       setPermissionMenuOpen(false);
@@ -323,7 +337,7 @@ export function Composer(props: ComposerProps) {
   }, [filePickingEnabled]);
   function pickFiles() {
     const original = current.current;
-    if (!filePickingEnabled || original.disabled || !fileInput.current) return;
+    if (!filePickingEnabled || original.disabled || original.readOnly || !fileInput.current) return;
     fileDialog.current = original;
     fileInput.current.value = '';
     fileInput.current.click();
@@ -337,7 +351,12 @@ export function Composer(props: ComposerProps) {
     [],
   );
   async function attachFiles(selected: readonly File[], original = current.current) {
-    if (!selected.length || original.disabled || current.current.scopeKey !== original.scopeKey)
+    if (
+      !selected.length ||
+      original.disabled ||
+      original.readOnly ||
+      current.current.scopeKey !== original.scopeKey
+    )
       return;
     filePick.current?.abort();
     const token = new AbortController();
@@ -361,6 +380,7 @@ export function Composer(props: ComposerProps) {
         filePick.current !== token ||
         latest.scopeKey !== original.scopeKey ||
         latest.disabled ||
+        latest.readOnly ||
         latest.promptHidden
       )
         return;
@@ -441,7 +461,7 @@ export function Composer(props: ComposerProps) {
   const cacheTokenTotal =
     (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
   const cacheHitPercentage =
-    cacheTokenTotal > 0
+    !props.metricsLoading && cacheTokenTotal > 0
       ? Math.round(((props.cacheMetrics?.cacheHitTokens ?? 0) / cacheTokenTotal) * 100)
       : undefined;
   const contextTokens = props.contextUsage?.totalInputTokens;
@@ -466,6 +486,7 @@ export function Composer(props: ComposerProps) {
       !!props.images?.length ||
       !!props.files?.length ||
       !!props.contextHasInput);
+  const canSubmit = canSend && !props.readOnly && !props.readGate?.send;
   const showStop =
     !props.sending &&
     props.active &&
@@ -475,43 +496,17 @@ export function Composer(props: ComposerProps) {
       !props.files?.length &&
       !props.contextHasInput) ||
       props.stopping);
-  // Preserve only previously enabled presentation during a routine read gate. Business
-  // disabled states (empty draft, sending, stopping, file preparation) remain visible.
-  const presentation = useRef(
-    new Map<
-      string,
-      { send: boolean; stop: boolean; attach: boolean; input: boolean; permission: boolean }
-    >(),
-  );
-  const presentationScope = props.scopeKey ?? 'composer';
-  const previousPresentation = props.sessionLoading
-    ? presentation.current.get(presentationScope)
-    : undefined;
-  useLayoutEffect(() => {
-    if (props.sessionLoading) return;
-    presentation.current.delete(presentationScope);
-    presentation.current.set(presentationScope, {
-      send: canSend,
-      stop: !!showStop && !props.stopping && !props.cancelDisabled,
-      attach: !props.disabled && !pickingFiles,
-      input: !props.disabled,
-      permission: !!props.permission && !props.permissionDisabled,
-    });
-    while (presentation.current.size > 12)
-      presentation.current.delete(presentation.current.keys().next().value!);
-  });
   if (props.promptHidden) {
     return null;
   }
   return (
-    <>
+    <ReadGate blocked={props.readOnly}>
       {props.context}
       <form
         ref={form}
         className="composer"
         data-permission-pending={props.permissionPending || undefined}
         data-session-loading={props.sessionLoading || undefined}
-        data-preserve-input={previousPresentation?.input || undefined}
         onPointerDownCapture={(event) => {
           if (event.target instanceof Element && event.target.closest('button:disabled')) {
             event.preventDefault();
@@ -533,7 +528,7 @@ export function Composer(props: ComposerProps) {
         }}
         onSubmit={(event) => {
           event.preventDefault();
-          if (canSend) props.onSend?.();
+          if (canSubmit) props.onSend?.();
         }}
       >
         {props.queue && (
@@ -559,6 +554,7 @@ export function Composer(props: ComposerProps) {
                 selected &&
                 selected.scopeKey === current.current.scopeKey &&
                 !current.current.disabled &&
+                !current.current.readOnly &&
                 files.length
               )
                 void attachFiles(files, selected);
@@ -622,7 +618,7 @@ export function Composer(props: ComposerProps) {
           disabled={props.disabled}
           onChange={props.onChange}
           onSend={() => {
-            if (canSend) props.onSend?.();
+            if (canSubmit) props.onSend?.();
           }}
           onFiles={
             filePickingEnabled
@@ -684,9 +680,6 @@ export function Composer(props: ComposerProps) {
                     aria-label="添加附件"
                     title="添加文件"
                     disabled={props.disabled || pickingFiles}
-                    data-preserve-enabled={
-                      (!!previousPresentation?.attach && !pickingFiles) || undefined
-                    }
                     aria-busy={pickingFiles || undefined}
                   >
                     <HugeiconsIcon icon={Add01Icon} />
@@ -738,6 +731,8 @@ export function Composer(props: ComposerProps) {
                     !open ||
                     (!fullConfirmation.current &&
                       !current.current.permissionDisabled &&
+                      !current.current.readOnly &&
+                      !current.current.readGate?.permission &&
                       current.current.permission)
                   )
                     setPermissionMenuOpen(open);
@@ -752,7 +747,7 @@ export function Composer(props: ComposerProps) {
                       props.permission === 'full' && 'permission-trigger-full',
                     )}
                     data-permission-trigger
-                    data-preserve-enabled={previousPresentation?.permission || undefined}
+                    readOnly={props.readGate?.permission}
                     aria-busy={
                       confirmingFull || props.permissionPending || props.sessionLoading || undefined
                     }
@@ -788,6 +783,8 @@ export function Composer(props: ComposerProps) {
                       if (
                         fullConfirmation.current ||
                         current.current.permissionDisabled ||
+                        current.current.readOnly ||
+                        current.current.readGate?.permission ||
                         !current.current.permission ||
                         value === current.current.permission
                       )
@@ -831,71 +828,82 @@ export function Composer(props: ComposerProps) {
             )}
           </div>
           <div className="composer-trailing">
-            {(cacheHitPercentage !== undefined || props.contextUsage) && (
-              <div className="composer-metrics">
-                {cacheHitPercentage !== undefined && (
-                  <span
-                    className="composer-cache-rate"
-                    title={`缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`}
-                  >
-                    缓存 {cacheHitPercentage}%
-                  </span>
-                )}
-                {props.contextUsage && (
-                  <TooltipProvider delayDuration={200}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <svg
-                          className="composer-context-usage"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          role="img"
-                          // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus exposes the read-only icon's tooltip without giving it button semantics.
-                          tabIndex={0}
-                          aria-label={
-                            contextPercentage === undefined
-                              ? '上下文占用未知'
-                              : `上下文占用约 ${contextPercentage}%`
-                          }
-                          aria-description={`上下文估算 ${contextTokens} / ${contextWindowTokens ?? '未知'} tokens`}
-                        >
-                          <circle className="composer-context-track" cx="8" cy="8" r="6" />
-                          {contextPercentage !== undefined && contextPercentage > 0 && (
-                            <circle
-                              cx="8"
-                              cy="8"
-                              r="6"
-                              pathLength="100"
-                              strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
-                              transform="rotate(-90 8 8)"
-                            />
-                          )}
-                        </svg>
-                      </TooltipTrigger>
-                      <TooltipContent
-                        className="kite-client composer-context-tooltip"
-                        side="top"
-                        sideOffset={8}
-                        collisionPadding={12}
-                      >
-                        <span>上下文窗口</span>
-                        <span>
-                          {contextPercentage === undefined
-                            ? '占用比例未知'
-                            : `约 ${contextPercentage}% 已用`}
-                        </span>
-                        <span>
-                          已用 {contextTokenFormat.format(contextTokens!).toLowerCase()} 标记，
-                          {contextWindowTokens === undefined
-                            ? '总量未知'
-                            : `共 ${contextTokenFormat.format(contextWindowTokens).toLowerCase()}`}
-                        </span>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
-              </div>
-            )}
+            <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
+              <span
+                className="composer-cache-rate"
+                title={
+                  cacheHitPercentage === undefined
+                    ? props.metricsLoading
+                      ? '正在读取缓存用量'
+                      : '暂无缓存用量数据'
+                    : `缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`
+                }
+              >
+                {`缓存 ${cacheHitPercentage ?? 0}%`}
+              </span>
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <svg
+                      className="composer-context-usage"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      role="img"
+                      tabIndex={props.metricsLoading ? undefined : 0}
+                      aria-label={
+                        props.metricsLoading
+                          ? '正在读取上下文占用'
+                          : contextPercentage === undefined
+                            ? '上下文占用未知'
+                            : `上下文占用约 ${contextPercentage}%`
+                      }
+                      aria-description={
+                        props.metricsLoading
+                          ? undefined
+                          : `上下文估算 ${contextTokens ?? '未知'} / ${contextWindowTokens ?? '未知'} tokens`
+                      }
+                    >
+                      <circle className="composer-context-track" cx="8" cy="8" r="6" />
+                      {!props.metricsLoading &&
+                        contextPercentage !== undefined &&
+                        contextPercentage > 0 && (
+                          <circle
+                            cx="8"
+                            cy="8"
+                            r="6"
+                            pathLength="100"
+                            strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
+                            transform="rotate(-90 8 8)"
+                          />
+                        )}
+                    </svg>
+                  </TooltipTrigger>
+                  {!props.metricsLoading && (
+                    <TooltipContent
+                      className="kite-client composer-context-tooltip"
+                      side="top"
+                      sideOffset={8}
+                      collisionPadding={12}
+                    >
+                      <span>上下文窗口</span>
+                      <span>
+                        {contextPercentage === undefined
+                          ? '占用比例未知'
+                          : `约 ${contextPercentage}% 已用`}
+                      </span>
+                      <span>
+                        {contextTokens === undefined
+                          ? '已用未知，'
+                          : `已用 ${contextTokenFormat.format(contextTokens).toLowerCase()} 标记，`}
+                        {contextWindowTokens === undefined
+                          ? '总量未知'
+                          : `共 ${contextTokenFormat.format(contextWindowTokens).toLowerCase()}`}
+                      </span>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <div className="composer-actions">
               {showStop ? (
                 <Button
@@ -905,9 +913,7 @@ export function Composer(props: ComposerProps) {
                   title={props.stopping ? '正在停止…' : '停止任务'}
                   onClick={props.onCancel}
                   disabled={props.stopping || props.cancelDisabled}
-                  data-preserve-enabled={
-                    (!!previousPresentation?.stop && !props.stopping) || undefined
-                  }
+                  readOnly={props.readGate?.cancel}
                 >
                   <HugeiconsIcon icon={StopIcon} fill="currentColor" strokeWidth={0} />
                 </Button>
@@ -934,17 +940,7 @@ export function Composer(props: ComposerProps) {
                   }
                   aria-busy={props.sending || undefined}
                   disabled={!canSend}
-                  data-preserve-enabled={
-                    (!!previousPresentation?.send &&
-                      !props.sending &&
-                      !pickingFiles &&
-                      !props.images?.some((image) => image.loading || image.error) &&
-                      (!!props.draft.trim() ||
-                        !!props.images?.length ||
-                        !!props.files?.length ||
-                        !!props.contextHasInput)) ||
-                    undefined
-                  }
+                  readOnly={props.readGate?.send}
                 >
                   <HugeiconsIcon
                     icon={props.sending ? Loading03Icon : ArrowUp02Icon}
@@ -980,6 +976,6 @@ export function Composer(props: ComposerProps) {
           {props.submitStatus}
         </span>
       )}
-    </>
+    </ReadGate>
   );
 }

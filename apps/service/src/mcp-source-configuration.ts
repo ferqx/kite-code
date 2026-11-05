@@ -60,6 +60,7 @@ import type {
   SessionRecord,
   WorkspaceRecord,
 } from '@kite-ai/agent/storage';
+import { readHostState } from './host-read';
 import { createMcpHttpTransportPort, type McpHttpPortOptions } from './mcp-http-port';
 import {
   type McpEnvironmentReader,
@@ -874,7 +875,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       input.session.workspaceId !== source.workspace.id
     )
       throw new AgentError('mcp_source_scope_invalid');
-    const observed = observe(source);
+    const observed = await readHostState(() => observe(source));
     const servers = await Promise.all(
       observed.capture.servers.map(async (server) => {
         if (!server.admitted) return server;
@@ -1123,8 +1124,13 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     own: Awaited<ReturnType<Host['getExecution']>>,
     nearestRun?: RunRecord,
   ) {
-    const current = observe(source);
-    const selected = select(current.capture, selection(source.sourceScope, source.root)).snapshot;
+    const { current, selected } = await readHostState(() => {
+      const current = observe(source);
+      return {
+        current,
+        selected: select(current.capture, selection(source.sourceScope, source.root)).snapshot,
+      };
+    });
     if (!own?.runId && !nearestRun) return { ...current, snapshot: selected };
     const run = nearestRun ?? (own?.runId ? await source.host.getRun(own.runId) : null);
     if (

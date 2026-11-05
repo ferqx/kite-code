@@ -1,5 +1,75 @@
 # Workspace 文件 leaf
 
+## 图片读取
+
+持久理由见[严格本地图片读取决定](../../../../../.agents/notes/implemented/architecture/2026-11-04-strict-local-image-reading.md)。
+
+`builtin.files/files.view_images@1` 的模型入口为 `view_images({paths:[...]})`，一次1至10张，兼容单图 `view_images({path})`；两种参数互斥，重复路径、空列表和11张在任何源文件读取前拒绝。工具模型名、内部标识和公开工厂统一为`view_images`、`files.view_images@1`和`createViewImagesTool`；按用户要求不保留旧名称别名或数据迁移，版本保持1。默认 CLI/TUI/Native 装配，复用普通只读授权和实际工作区身份；Web 仍只读。工作区相对／内部绝对路径沿原生 no-follow Files 引擎；普通外部绝对路径同时核词法和实际受保护根，允许普通硬链接，不发现外部项目指令。私有上传原件必须来自当前选择的输入或准确 Fork 来源，核 Store/Session/subject、完整 hash/size 和派发 revision；知道 Blob 路径不授予读取权。工具不返回编辑 baseline，不形成文件恢复点。
+
+[工具](../images/tool.ts)仅接受路径，拒绝 URL；[读取适配器](../images/reader.ts)在取得图片处理名额后才读取字节，排队可取消，不预读下一张源文件正文；批次里已完成的PNG仍可保留在16MiB预算内。原生 `readBytes` 支持可信 signal、64KiB 分片和事件循环让出，仍核完整 EOF、摘要和前后文件身份。普通图片读取使用 sharedRead 保留普通硬链接语义，私有原件仍核本人、单硬链与严格路径；不改变恢复／CAS 的默认严格读取。
+
+批次先校验全部路径分类和输入原件登记，派发revision绑定完整有序列表，不能用单图批准替代混合批次；逐张读取前再核该目标身份，原生读取仍独立拒绝不安全工作区路径。按序串行处理，每次只持一张原始输入，保留待发布PNG累计最多16MiB；跨过总量时明确`image_batch_too_large`，不追加降质或静默删图。全部解码成功后才逐项发布，键为`image-1`至`image-10`，单图保原`image`键及结果结构，多图metadata使用同序`images`数组。读取／解码失败或取消不交付部分视觉结果；发布故障继续交原Artifact owner，已发布引用不冒充成功批次，也不盲目删除。单张30秒处理预算保持，整批耗时随张数累加，不宣称整批30秒。
+
+[处理进程](../images/child.ts)使用固定 `sharp@0.35.5`，关闭 libvips 缓存、并发为1。只支持 PNG/JPEG/WebP/GIF；完整容器、PNG CRC 与 native `failOn:warning` 都通过后才发布。源文件最多16MiB、3200万像素、单边16384；应用 EXIF、动画仅首帧，不放大，最长边2048；输出保透明 PNG、最多8MiB，超量时按实际大小确定性缩小并只重试一次。结果说明原格式、原／实际尺寸、方向、首帧及缩放。SVG、损坏或截断图片失败；不把 native 填充的缺失像素当完整图片。
+
+[监督器](../images/processor.ts)启动固定校验摘要的程序，stdin 只传字节，不传路径、URL、Provider 配置或凭据。入口显式选择系统空设备作为 Bun config 和 tsconfig，禁用自动 env／安装；[Bun 的目录 preload](https://bun.sh/docs/runtime/bunfig)不能在已核程序前执行或改写 Sharp 解析。单宿主只允许一个处理进程，30秒取消预算；Windows 使用原 Job owner，512MiB Job 内存和单进程限制，核原 HANDLE wait 与 Job tree 停止后才释放名额。退出／关闭无法确认时保 owner、返回 unknown 并停止新的图片处理；停止证明失败独立于 stdout／exit Promise 结算，不无限等待已经缺失的证明。普通失败确认退出后允许下一次读取。POSIX 使用固定单程序、原 ChildProcess 与管道 close 收口，操作错误与 close 证明分开等待，无 PID 时不发送 kill；stdin 的结束回调拒绝写入失败，error 监听保留至管道 close，避免随后 EPIPE 成为未处理异常。输出越限先发起停止并退出迭代器关闭溢出管道，再等原退出证明，避免等待 close 与未消费管道相互阻塞。当前 Linux 的监督器、严格解码和 Service 链路验证见下文，没有硬内存资格。合作取消不对单次慢磁盘调用承诺实时上限。
+
+成功结果发布当前 Execution 的 PNG `artifactRefs/modelImages`，沿[完整模型正文链](../../model-body/README.md)进入下一次模型请求，保原 Tool 来源、调用顺序和完整 Artifact 校验；历史／冷重开／Fork 不重读源路径。所选历史中的新工具图片累计超过32MiB时，在展开越界图片前明确 `image_context_too_large`，不静默丢图；用户图片、PDF 和浏览器原预算保持。AI 两协议编码和版本保持，真实视觉能力由 Provider 决定。
+
+Core只为准确`files.view_images@1`接纳最多10张、每张8MiB、整批16MiB；其他工具的4张／16MiB合同保持。Native同样按原Execution读取1至10张，并保持每张尺寸和总量校验，不依赖renderer上报计数。
+
+### 本地保存与缓存目录
+
+`profilePath = <dataRoot>/<profile>`，沿现有 Profile 选择器取得，不从工作区或模型参数推导。
+
+| 内容 | 保存位置／生命周期 |
+| --- | --- |
+| 上传图片／文件原件 | `<profilePath>/blobs/<SHA256前两位>/<完整SHA256>`，不可变 Session 引用；输入文件 URI 指向已登记原件 |
+| 工具实际交给模型的 PNG | 同一 Blob 目录，另建准确 Execution 引用；相同字节物理去重，引用和授权仍独立 |
+| 工作区／外部原文件 | 保留原位置；每次调用重新核权限及全字节，没有另存原件或解码磁盘缓存 |
+| Native 派生缩略图 | 复用窗口内512px WebP预览缓存，最多128项／32MiB估算成本，隐藏／切换释放读取租约及显示 URL |
+| 既有 PDF 解析缓存 | `<profilePath>/cache/documents/...`，仍按原配方和权限核验；图片工具不混用 |
+
+原件和实际视觉结果属于持久历史，不能按普通缓存 TTL 删除。清理由[维护 owner 的显式无引用附件 GC](../../maintenance/README.md#显式无引用附件-gc)处理，默认无引用宽限7天，备份／恢复继续使用原 Blob 与出处合同。没有新增 `cache/images` 副本或静默淘汰仍被引用的结果。解码进程结束释放 native 缓存；进程内临时字节不承担历史保存。
+
+Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存仍将该次图片 Base64 保存到准确请求的 JSON／Artifact 中，历史图片参与后继请求时会增加正文与磁盘成本；32MiB展开预算也不承诺整个会话的存储上限。
+
+### 当前验证与性能
+
+2026-11-04，Linux x64／Bun1.4.4，[POSIX 监督器回归](../../../test/isolated/files/image-process-posix.test.ts)在修复前分别复现无 PID 的启动失败误封后续读取、stdin 结束回调之后的未处理 EPIPE，以及大量输出越限后的 close 等待互锁；修复后5项27断言通过。覆盖独立延迟 close 后的排队／后续恢复、真实 Writable 的回调与 error 顺序、真实子进程提前退出时的16MiB输入写入、stdout／stderr 各9MiB越限及随后正常协议往返，并保留 close 证明缺失时的全局拒绝。故障注入不启动或遗留实际故障进程，协议往返使用固定 PNG，不代替 Sharp 解码。首次仅运行该监督器文件时未安装仓库依赖；后续完整验证见下一段。
+
+同日，在 `4f29be4e0fbd8baf49c7fc2b50617f2e16b4b34e` 加本次监督器修复的 Linux x64／Bun1.4.4 隔离目录中，使用 `bun install --frozen-lockfile --ignore-scripts` 安装锁定依赖，根 manifest／lock 字节未变；另以官方 Rust1.97.1 运行 `bun run build:files-native`，并由原构建器生成图片与 PDF 资产。沿[原测试运行器](../../../../../scripts/test-suite.ts)逐文件执行严格图片、POSIX监督器、源码外闭包、退出未知、Service图片和历史预算六文件，保留隔离 HOME、`--no-orphans` 与 Linux 原 `--timeout=30000`，结果18 pass／1 Windows平台skip／0 fail／194断言。外部读取、完整读取响应、原生 Files、PDF、Artifact及取消六个完整文件另33 pass／0 fail／248断言。最初裸 `bun test` 使用默认5秒时，高熵图片例超时并被测试器终止；按仓库原30秒预算重跑完整文件通过，未修改生产30秒处理预算或测试断言。首次失败日志保留，不表述为所有命令一次全绿。根及八 workspace 的 `bun run typecheck`、全仓 `bun run format:check`、边界／workspace／同源 API、测试归属、文档结构／影响和计划证据检查均通过；Biome 原有41 warnings／200 infos保留。workspace检查先因尚未构建的Web资产失败，执行原Web构建后通过，未修改检查器。这里只运行上述受影响整文件，不代表完整默认、TUI或CI作业已通过。
+
+本次未在 Windows 运行新的共享输出越限逻辑；下述 Windows 记录来自修复前基准，不能代替当前修复的 Windows 复验，也不由 Linux 通过推定 Windows Job／硬内存、真实模型、完整客户端或发行资格。
+
+2026-11-04，Windows x64／Bun1.4.3，修复前基准的[严格解码回归](../../../test/isolated/files/images.test.ts)覆盖真实像素、透明、EXIF、动画首帧、截断与伪装、尺寸和字节预算、排队／在途取消、超时、原生崩溃、输出超量、Job 内存耗尽及随后正常读取。[源码树外闭包](../../../test/isolated/files/images-packaged.test.ts)物理复制 Sharp 和 native 依赖，空 PATH/NODE_PATH、禁止自动安装，核资产删除／摘要篡改及每次恢复；正式 Agent build 已产出 child、摘要与原生文件资产。
+
+[默认 Service 联验](../../../../../apps/service/test/isolated/image-reading.test.ts)通过真实 SQLite/Artifact、两个不同像素调用的结果／来源配对、外部文件／有效原件、跨会话拒绝、冷重开和 Fork，并将实际请求交给两种 SDK 编码。[累计预算回归](../../../test/isolated/artifacts/tool-image-budget.test.ts)核最后越界图片未读正文、零后继模型请求。原 PDF、外部读取、异步完整读取、Windows Job 和 Artifact 原门禁继续通过。
+
+源码树外的合成 `bunfig` preload／`tsconfig`别名先实际复现 `image_process_failed`，封闭配置后解码与资产恢复通过。[退出未知回归](../../../test/isolated/files/image-process-unknown.test.ts)先复现等待旧 exit Promise 挂起，修后在原真实合成进程已物理清理、但 adapter 证明被保留的故障下，原调用和排队调用均结算 `image_process_exit_unconfirmed`，后续不再读取字节或启动进程。该用例不把模拟证明缺失当真实OS无法停止资格。
+
+[性能 runner](../../../../../tests/e2e/live/model/image-reading.benchmark.ts)使用默认 Service、实际 Artifact 和固定模型，每次新建会话，零 Provider。最终54次全部成功；整链路包含下一次模型输入的封存与完整校验，单工具包含读取、独立解码和 PNG 发布。每种大图6次，另连续界面图30次；有限样本 P95 不代表长期服务分位数。
+
+| 合成输入 | 工具 P50 | 整链路 P50 / P95 |
+| --- | --- | --- |
+| 1920×1080 界面 PNG | 319ms | 1003 / 1906ms |
+| 12MP 噪声 JPEG | 2483ms | 4663 / 5033ms |
+| 32MP 平坦 PNG | 578ms | 1184 / 1207ms |
+| 2048² 透明噪声 WebP | 2345ms | 3917 / 4199ms |
+| 界面 PNG 连续30次 | 281ms | 879 / 937ms |
+
+主 Service/benchmark 进程 RSS 峰值528MiB，连续30次界面图阶段从408回落至268MiB；解码子进程不在该数值中，Windows Job 另限制512MiB，不承诺整机或主进程硬内存上限。最大10ms采样间隔470ms：已修复大块发布的连续同步写入与重复 Blob 采用回读，仍有同步元数据／JSON及系统调用开销。此前同 JPEG 独立批次最大间隔904ms，修复后473ms；这是响应性证据，不是严格单变量吞吐比较。完整数据保留于本机 `.cache/image-read-implementation-20261104/benchmark-final-04.json` 和原失败／中间批次；不据有限回落证明长期无泄漏。
+
+封闭配置和退出未知收口后，正式Agent再次构建通过；最终界面图独立6次复测全部成功，工具P50为234ms，整链路P50／P95为727／1068ms，主进程峰值257MiB、最大采样间隔176ms，报告为`.cache/image-read-implementation-20261104/benchmark-ui-final-05.json`。其余54次数据按未改变的解码、发布和封存路径复用；独立小批次不作为与前表的严格性能对照。
+
+同日10图增量：严格回归覆盖一次10张顺序、11张／空列表／混用／重复的零源读取拒绝、中途损坏／取消零交图、真实高熵PNG跨16MiB整批拒绝，以及单图授权不能替代混合原件批次。默认Service实际将10张放入同一Tool消息，经两种SDK编码核完整有序图像、11张拒绝、冷重开与Fork；原PDF和32MiB历史门禁复验通过。Native按原执行引用核第10张、拒绝第11张及错误scope／名称数目／单张和总字节，实际页面核10张折叠／重开／切会话，过程证据归[Desktop owner](../../../../../apps/desktop/README.md)。
+
+当前批次[性能runner](../../../../../tests/e2e/live/model/image-reading.benchmark.ts)的`--case=ui-batch10`为6次调用、共60张1920×1080合成界面图，每次10个不同路径而字节相同，实际解码／完整读取均执行，Blob内容去重。6次全部成功，整批PNG约1.04MiB，整链路P50／P95为2943／3501ms，主进程峰值303MiB、最大采样间隔144ms，报告为`.cache/image-read-implementation-20261104/benchmark-batch10-01.json`。这是有限的固定模型和可去重样本，不证明10张高熵大图、长期SLO或总内存硬限额；前表保留原单图范围。
+
+同日更名前的[真实视觉 runner](../../../../../tests/e2e/live/model/image-vision.live.ts)经默认装配和现有 `deepseek-v4-flash`／Chat Completions，两次HTTP200、一次成功的本地图片工具调用，准确识别随机六字符与红7／蓝3柱图；源路径已删除。没有 OCR、替换模型回复或协议回退。报告为本机 `.cache/image-read-implementation-20261104/vision-01.json`。这不保证任意图片识别率、其他平台、完整 Native 窗口或安装发行资格。
+
+2026-11-04更名后再次实际调用同一已配置模型：单图和`--images=10`两次独立联验均通过，各为2次HTTP200、一次成功`view_images`，共4次实际HTTP。10图样本使用不同随机六字符及柱图数值，真实模型一次以有序`paths`读取全部已保存原件，后继请求图像数为10，最终JSON的10个代码与20个数值逐图完全匹配，数组顺序保持。两次都先删除工作区源文件，没有OCR、回复替换、模型／协议回退或外围重试。报告分别为本机`.cache/image-read-implementation-20261104/vision-view-images-single-01.json`和`vision-view-images-batch10-01.json`；新的批次报告只保存逐图布尔判定及有限元数据，原请求／回答按原Runtime保存在隔离Profile中。此为单一模型的两份合成样本，不推广为任意图片、其他模型或平台的识别率保证。
+
 默认 Service 已接入准确会话文件适配器；持久取舍见[会话文件决定](../../../../../.agents/notes/implemented/architecture/2026-10-23-persistent-session-files.md)，客户端和发行资格分别见 [Desktop](../../../../../apps/desktop/README.md)与 [Terminal](../../../../../apps/cli/docs/terminal-release.md)。默认宿主的 `files.read@5` 组合以下能力，`files.write@3` 新建时补齐工作区父目录，edit 保持版本 2。
 
 ## 新建文件的父目录与失败反馈

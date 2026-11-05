@@ -34,17 +34,25 @@ jobs:
     name: quality
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      BUN_INSTALL_CACHE_DIR: ${{ runner.temp }}/kite-bun-install-cache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile
+          bun-version: 1.4.4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ env.BUN_INSTALL_CACHE_DIR }}
+          key: quality-bun-${{ runner.os }}-${{ runner.arch }}-1.4.4-${{ hashFiles('bun.lock', 'package.json', 'bunfig.toml', '.npmrc', 'packages/ai/package.json', 'packages/agent/package.json', 'packages/client/package.json', 'packages/ui/package.json', 'apps/service/package.json', 'apps/cli/package.json', 'apps/desktop/package.json', 'apps/web/package.json', 'patches/**') }}
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Prepare quality Web assets
+        working-directory: apps/web
+        run: bun run build
       - run: bun run typecheck
       - run: bun run format:check
-      - run: bun run check:unified-agent-boundary
       - run: bun run check:runtime-packages
       - run: bun run check:unified-api
       - run: bun run check:test-ownership
@@ -66,7 +74,7 @@ jobs:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - name: Prepare Linux native qualification dependencies
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap xvfb
@@ -80,7 +88,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run test:mock
 
@@ -92,7 +100,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run test:e2e
 
@@ -104,7 +112,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run test:runtime:fault
       - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
@@ -129,7 +137,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run test:tui:system
         env:

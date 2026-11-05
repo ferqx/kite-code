@@ -3,16 +3,15 @@ import type { AgentClient, HostMutation, ProviderSettingsRequest } from '@kite-a
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { NativeProviderSettings as ProviderManager } from '../electron/provider-settings';
+import { NativeProviderSettings as ProviderManager } from '../../electron/provider-settings';
 import type {
   NativeBridge,
   NativeProviderSettingsFacts,
   NativeProviderSubmission,
   NativeRequest,
   NativeSelection,
-} from '../src/native-bridge';
-import { prepareDesktopDom } from './native-page-dom.fixture';
-import { memoryPrivateData } from './private-data.fixture';
+} from '../../src/native-bridge';
+import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>');
 const bootstrapPrior = {
@@ -25,7 +24,8 @@ Object.assign(globalThis, {
   document: bootstrap.window.document,
   navigator: bootstrap.window.navigator,
 });
-const { NativeProviderSettings } = await import('../src/native-provider-settings');
+const { NativeProviderSettings } = await import('../../src/native-provider-settings');
+const { memoryPrivateData } = await import('../private-data.fixture');
 Object.assign(globalThis, bootstrapPrior);
 bootstrap.window.close();
 
@@ -60,26 +60,51 @@ function fixture() {
   >(
     name: string,
   ) => element.querySelector<T>(`[aria-label="${name}"]`)!;
+  async function openOptions(name: string) {
+    await act(async () =>
+      field(name).dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      ),
+    );
+    expect(field(name).getAttribute('aria-expanded')).toBe('true');
+    return [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')];
+  }
+  async function optionLabels(name: string) {
+    const items = await openOptions(name);
+    const labels = items.map((item) => item.textContent);
+    expect(items.length).toBeGreaterThan(0);
+    await act(async () =>
+      items[0]!.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    // Radix restores the trigger focus in its existing zero-delay unmount task.
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    return labels;
+  }
   async function edit(name: string, value: string) {
     const control = field(name);
     if (control?.getAttribute('role') === 'combobox') {
-      const option = [...control.closest('label')!.querySelectorAll('option')].find(
-        (option) => option.value === value,
-      )!;
-      const label = option.textContent;
+      const labels: Record<string, Record<string, string>> = {
+        服务商预设: {
+          openai: 'OpenAI',
+          deepseek: 'DeepSeek',
+          compatible: '自定义服务商',
+          ollama: 'Ollama',
+        },
+        'API 协议': { 'chat-completions': 'Chat Completions', responses: 'Responses' },
+        凭据处理: { keep: '保留已保存凭据', replace: '保存新 API key', none: '不使用凭据' },
+      };
+      const label = labels[name]?.[value];
+      expect(label).toBeDefined();
+      const item = (await openOptions(name)).find((item) => item.textContent === label);
+      expect(item).toBeDefined();
       await act(async () =>
-        control.dispatchEvent(
-          new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
-        ),
-      );
-      const item = [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-        (item) => item.textContent === label,
-      )!;
-      await act(async () =>
-        item.dispatchEvent(
+        item!.dispatchEvent(
           new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
         ),
       );
+      await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
       return;
     }
     await act(async () => {
@@ -99,6 +124,7 @@ function fixture() {
     button,
     field,
     edit,
+    optionLabels,
     click: async (name: string) => act(async () => button(name).click()),
     async addPreset(name: string) {
       await act(async () => button('新增提供商').click());
@@ -230,11 +256,12 @@ test('Provider settings show the automatic local Codex source without manual con
     expect(f.element.contains(row)).toBe(true);
     await f.click('新增提供商');
     expect(f.field('服务商预设').textContent).toBe('OpenAI');
-    expect(
-      [...f.field('服务商预设').closest('label')!.querySelectorAll('option')].map(
-        (option) => option.value,
-      ),
-    ).toEqual(['openai', 'deepseek', 'compatible', 'ollama']);
+    expect(await f.optionLabels('服务商预设')).toEqual([
+      'OpenAI',
+      'DeepSeek',
+      '自定义服务商',
+      'Ollama',
+    ]);
     expect(calls.some((input) => input.method === 'settings.providers.save')).toBe(false);
   } finally {
     await f.close();
@@ -1256,16 +1283,11 @@ test('Empty provider list opens the actual Add form with a shared preset select 
     expect(select.getAttribute('role')).toBe('combobox');
     expect(select.dataset.slot).toBe('select-trigger');
     expect(select.textContent).toBe('OpenAI');
-    expect(
-      [...select.closest('label')!.querySelectorAll('option')].map((option) => [
-        option.value,
-        option.textContent,
-      ]),
-    ).toEqual([
-      ['openai', 'OpenAI'],
-      ['deepseek', 'DeepSeek'],
-      ['compatible', '自定义服务商'],
-      ['ollama', 'Ollama'],
+    expect(await f.optionLabels('服务商预设')).toEqual([
+      'OpenAI',
+      'DeepSeek',
+      '自定义服务商',
+      'Ollama',
     ]);
     expect(f.panelHost.querySelectorAll('.provider-preset')).toHaveLength(0);
     expect(f.button('更换预设')).toBeUndefined();

@@ -1,5 +1,7 @@
 # 通用 Agent
 
+默认SDK模型请求与传输失败除明确HTTP401／403认证或权限拒绝外均取得重连资格，分类与未知错误净化归[AI owner](../ai/README.md)。自定义Adapter的未分类异常仍不能替代已确认关闭的重试证明。[模型重连](src/model-attempt.ts)由 Runtime 在原已确认失败、关闭和来源资格保持的 Model Execution 之后退避重试，同一连续故障最多重连5次（首次请求另计，共6次尝试）。新重试事实持久记录`maxAttempts:6`，第5次重连仍失败时以`model_reconnect_exhausted`结束原Run，不创建第7次请求；原部分正文、用量和工具事实保留，明确新任务独立计数。冷恢复沿原attempt继续计数，不扩大剩余次数；旧历史的`maxAttempts:null`仍按原值可读。Execution只保存AI边界核实的有限`modelFailure.detail`，客户端自行映射可读原因，不记录或转发远端日志。[模型回归](test/isolated/execution/model-attempt.test.ts)核最后一次成功、耗尽后新任务、原前驱与部分工具零效果；物理断流和公开投影归[Service回归](../../apps/service/test/isolated/responses-loop.test.ts)。
+
 2026-10-26，本轮失败修复已通过12份受影响 Agent 完整测试文件。普通输入的 Run、Model 和来源直接绑定原 Command；内部权限模型使用 `authorization.check`，不再把它算作子 Agent／业务 Run。原 Action 来源继承用当前 ensure／prepare／dispatch 检查链核对目标、输入、策略与模型身份，损坏后仍要求零派发事件；Files 协作从实际模型文本回执读取完整 baseline，保留真实 CAS 冲突、结果未知、取消、串行资源与恢复不重放断言。真实恢复 PTY 已核原 Session 和准确历史。此为受影响范围的定向资格，不代表全仓或跨平台验收。
 
 会话附件、输出文件和 Plan 当前文件已接入；机制与验证见 [Files](src/tools/files/README.md)、[Planning](src/business/planning/README.md)和[维护](src/maintenance/README.md)。客户端过程与发行资格分别归 [Desktop](../../apps/desktop/README.md)和 [Terminal](../../apps/cli/docs/terminal-release.md)，不从单项测试推定完整安装或其他平台资格。
@@ -25,6 +27,10 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 [Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护文件读改写、内部目录检索 API、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、失败与未知结果记录和 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
 
 设计原因、备选与代价保存在[工具反馈与任务质量决定](../../.agents/notes/implemented/architecture/2026-10-23-agent-feedback-and-task-quality.md)。模型指导已实施，真实样本中仍有冗长和超出证据的表述；机械执行断言与全文质量分别说明，不能据工具全部成功宣称模型结论全部正确。
+
+## 本地图片读取
+
+默认宿主注册 `builtin.files/files.view_images@1`，模型入口 `view_images({paths:[...]})` 一次1至10张，兼容单图`path`；两者互斥，整批PNG最多16MiB，失败不交付部分图片。它复用 Files 作用域、权限及完整字节读取，在受监督独立进程严格解码后发布原 Execution 的 PNG `modelImages`；下一次请求、冷历史和 Fork 继续使用现有 Tool/Artifact/ModelInput 链，既有工具和协议版本保持。[Files owner](src/tools/files/README.md#图片读取)维护格式、处理和资源预算、本地持久目录、实际性能及平台范围；[Model body](src/model-body/README.md#工具视觉结果)维护准确来源和请求累计预算。读取权限不因排队或缓存变成长期授权。
 
 ## 用户图片输入
 
@@ -81,7 +87,7 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 - [Model 用量结算](src/execution/index.ts)消费独立 `usage` 快照，在成功、失败和取消结果中保存已收统计及原始明细；用量不授予成功终态或 Tool 派发资格。未收到的字段仍未知，无 SQL baseline／公开 HTTP schema 变更。真实 SDK→Core→SQLite→冷只读的[回归](test/isolated/execution/model-usage.test.ts)核四种结算；算法与取舍归 [AI owner](../ai/README.md)及[用量决定](../../.agents/notes/implemented/bug-fix/2026-10-16-provider-token-accounting.md)。
 - [完整 Model 输出](src/model-output/README.md)：原 Execution linked segments 的完整 EOF、历史展开与 child 正文；私有 reviewer 另封存有限答案凭据，最终 Store 只核原 descriptor 和不可变登记，不以 preview 代替全文。
 - [Task 入口](src/extensions/task/README.md)与[Shell Tools](src/tools/shell.README.md)：可信角色和原 Job 的普通控制工具，使用同一受控 operations；容量、输入与实际执行资格由 owner 记录。
-- [Shell Jobs](src/jobs/README.md)：显式 POSIX、macOS host／confined 和 Linux host／confined 的可信资产、执行范围与原进程结束证明；正式 verifier 已接准确只读 Profile Skill 来源，Linux 原生资格仍缺。
+- [Shell Jobs](src/jobs/README.md)：Windows Git Bash 同摘要冷准备通过跨进程锁串行发布两份闭包和清单，竞争者取得锁后完整重核，不覆盖损坏文件；显式 POSIX、macOS host／confined 和 Linux host／confined 的可信资产、执行范围与原进程结束证明；正式 verifier 已接准确只读 Profile Skill 来源，Linux 原生资格仍缺。
 - [Web Fetch 入口](src/tools/web-fetch/README.md)：普通 `web_fetch` Tool、逐跳资源准入与真实 DNS/socket 绑定，惰性使用已构建的无执行能力解析 Worker；大正文保留完整 Artifact。
 - [配置入口](src/config/README.md)：JSONC 评论保留与短锁 CAS、分层解析、脱敏封存、opaque credential refs 和惰性 OS backend。默认 Service 的每 Run 解析由 Service owner 负责。
 - [Skills](src/skills/README.md)与[MCP](src/mcp/README.md)：摘要发现、按需正文/资源与具有版本的普通 Tool 快照；leaf import 不连接远端或启动进程。
@@ -197,7 +203,7 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 扩展completion条件可等待准确Job的结果接纳；Job本身终态不等于原Run已收到该结果。nested Tool登记要求时沿可信实际父链定位原Run，Runtime与Store在等待事务重核同Store／Session／root work、namespace、记录revision与selection；不能拿当前active Run补绑。自定义业务记录不恢复已退役Task的operation_result消费，等待沿原change cursor／取消／期限，不新增Loop或公共字段。当前[Browser人工receipt](src/tools/browser/README.md#异步人工交接候选未发布)按此保持原任务直到实际相关回应接纳；当前Task默认仍沿 `agent_completion` 邮箱交付，不登记旧专用结果义务。本次合并的[准确receipt等待](test/isolated/storage/condition-result-wait.test.ts)与[人工交接Runtime](test/isolated/browser/human-async-runtime.test.ts)分别核不可变等待证明和同Run实际回应、取消与未知边界，真实Native范围另核。
 
-唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败不设尝试次数上限，按原失败 Execution 血缘退避且响应取消；公开重试 `maxAttempts=null`。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
+唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败沿本页模型重连边界最多重连5次，保留原失败 Execution 血缘并响应取消。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
 
 长度续写请求遇到可重试 Provider 失败时，Runtime 仍从当前持久历史、真实人类补充、权限、工具和 Host Sources 重新准备，只恢复 Loop 的准确临时续写尾项。该尾项须绑定同 Store/Session/Run/工作/原 Command 的成功纯文本 length Execution；完整原输出与新历史中的唯一原 assistant 正文一致才允许追加。若当前已发布压缩已准确覆盖该原 assistant，则验证同 selection 的覆盖上界、原正文或完整 descriptor 及当前真实摘要后退役旧尾项，沿新摘要继续，不把旧正文灌回窗口。无效证明拒绝继续，普通重试不增加尾项，也不把失败尝试的部分文本加入上下文。[长度后重试回归](test/isolated/execution/model-length-retry.test.ts)核超过64KiB原 Artifact、真实 Tool、人类补充及 Source/权限刷新和错工作反例。
 

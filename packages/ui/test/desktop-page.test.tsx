@@ -46,7 +46,8 @@ test('read-only page permits reading and web links without exposing local or mut
   expect(html).toContain('data-radix-scroll-area-viewport');
   expect(html.match(/<header/g)).toHaveLength(2);
   expect(html).toContain('data-slot="resizable-panel-group"');
-  expect(html).toContain('focus-visible:ring-0');
+  expect(html).not.toContain('focus-visible:ring-0');
+  expect(html).toContain('focus-visible:ring-[3px]');
   expect(html.match(/role="separator"/g)).toHaveLength(2);
 });
 
@@ -266,11 +267,11 @@ test('scheduled tasks is a first-class page below workbench without inventing sa
       scheduledTasks={{ tasks: [], workspaces: base.workspaces }}
     />,
   );
-  expect(html).toContain('aria-label="安排任务"');
+  expect(html).toContain('aria-label="定时任务"');
   expect(html).toContain('<span>工作台</span>');
-  expect(html).toContain('<span>安排任务</span>');
-  expect(html.indexOf('<span>工作台</span>')).toBeLessThan(html.indexOf('<span>安排任务</span>'));
-  expect(html).toContain('暂无任务');
+  expect(html).toContain('<span>定时任务</span>');
+  expect(html.indexOf('<span>工作台</span>')).toBeLessThan(html.indexOf('<span>定时任务</span>'));
+  expect(html).toContain('暂无定时任务');
   expect(html).toContain('>新建</button>');
   expect(html).not.toContain('每日检查 CI');
   expect(html).not.toContain('conversation-footer');

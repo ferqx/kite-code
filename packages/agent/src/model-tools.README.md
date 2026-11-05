@@ -44,6 +44,8 @@
 
 `anyOf` 多个匹配分支产生不同字段映射时，该调用明确失败；`if/not` 谓词内的 `properties` 自身需要改名时，装配明确拒绝。只含 `required` 的条件和名称不变的 `kind` 判别仍支持。每份实际变换的 schema 独立校验，纯名称投影不重复编译远端 MCP schema，不合并不同工具的 `$id` 空间。
 
+[model-schema.ts](model-schema.ts)仅按完整 JSON 内容复用模型参数投影与分支匹配的 Ajv 编译结果；每个 schema 仍有独立 registry 和私有副本，同 `$id` 的不同正文及本地 `$ref` 不混用。缓存按 LRU 最多128项，键串 UTF-8 合计1MiB、单键64KiB；超出接纳预算、非纯 JSON／访问器等情况保原完整编译路径，不拒绝工具。实际调用只消费本次同步校验结果，不缓存参数、字段映射、权限或文件事实。新 Run 的 schema 改动产生新键，旧 caller 修改 schema 不能污染复用结果。[缓存回归](../test/isolated/execution/model-schema.test.ts)核内容复用、引用隔离、修改、数量／键字节淘汰与非缓存路径；[参数投影](../test/isolated/execution/model-tools.test.ts)和[分支回归](../test/isolated/execution/model-tools-branches.test.ts)继续拥有目录、碰撞和 opaque JSON 语义。
+
 显式公开名称须为最多 64 字符的 lowercase snake_case 标识。一次准确目录中的名称碰撞、同一对象的字段碰撞和不存在的显式字段路径均拒绝；`hidden:true` 只从模型声明目录移除，内部注册和可信调用资格仍由原合同核实，不通过隐藏授予额外权限。
 
 同一对象跨 `allOf` 的字段声明按来源及替代分支选择核对，碰撞检测不依赖分支遍历顺序，也不枚举组合；互斥分支可分别使用可逆映射。只有名称变化的 MCP/自定义工具直接深拷贝原 schema，不遍历或重编译远端字段，合法空字段和 opaque JSON 保持。
@@ -73,7 +75,7 @@ Files 的目录与检索 API 仍服务客户端文件候选等内部读取，不
 
 ## 工具选择与职责
 
-普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：不含可选 Browser 的基础模型目录在具备合格 Shell 时为16项，不具备时为12项，包括 Files 三项、问题、网页、当前任务证据读取及协作六项；其中 read_file 支持准确工作区外路径，有效 Full 下的 write_file/edit_file 也支持普通外部修改。宿主允许 Browser 时另选择对应浏览器能力；新 Native 默认对模型提供 `browser_execute` 与两个 Skill 读取入口，原子依赖保持内部隐藏。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留内部兼容入口。
+普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：不含可选 Browser 的基础模型目录在具备合格 Shell 时为17项，不具备时为13项，包括 Files 读写三项、图片读取、问题、网页、当前任务证据读取及协作六项；其中 read_file 支持准确工作区外路径，有效 Full 下的 write_file/edit_file 也支持普通外部修改。宿主允许 Browser 时另选择对应浏览器能力；新 Native 默认对模型提供 `browser_execute` 与两个 Skill 读取入口，原子依赖保持内部隐藏。最小嵌入配置仍只默认提供问题工具。名称表同时列可选能力，不是每次 Run 的固定清单；Planning、Skill 和 MCP 仍按配置、能力及权限选择。旧 Task 工具和专用 required-result 机制已删除，不保留内部兼容入口。
 
 工具按独立操作及可观察结果划分，不把模型填写的结论包装成事实来源。研究状态工具及其 records/context、权限例外和导出入口已撤回。计划工具管理步骤、批准和版本；专用验证工具已移除，检查通过普通 Shell 执行并如实报告。
 

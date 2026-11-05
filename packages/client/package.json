@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts ./src/sse.ts ./src/browser.ts ./src/file-recovery-intent.ts --target=browser --packages=external --outdir=dist",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "bun check -p tsconfig.json",
     "test": "bun test ./test"
   }
 }

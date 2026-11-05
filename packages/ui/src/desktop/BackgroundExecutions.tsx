@@ -67,6 +67,7 @@ export function BackgroundExecutions({
         (execution.status === 'running' || execution.status === 'stopping'),
     );
     const subagents = executions.filter((execution) => execution.kind === 'subagent');
+    const emptyStatus = stale ? '状态未知' : subagentDetails?.loading ? '读取中…' : undefined;
     return (
       <section
         className="background-executions environment-information"
@@ -82,7 +83,7 @@ export function BackgroundExecutions({
         <ExecutionGroup
           icon={TerminalIcon}
           label="Shell"
-          emptyLabel="空闲"
+          emptyLabel={emptyStatus ?? '空闲'}
           executions={shells}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
@@ -91,7 +92,7 @@ export function BackgroundExecutions({
         <ExecutionGroup
           icon={BotIcon}
           label="子智能体"
-          emptyLabel="暂无"
+          emptyLabel={emptyStatus ?? '暂无'}
           executions={subagents}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
@@ -127,13 +128,13 @@ export function BackgroundExecutions({
               <span>{execution.cleanupConfirmed ? '清理已确认' : '清理未确认'}</span>
               {execution.cursor !== undefined && <span>游标 {execution.cursor}</span>}
               {onStop && !stale && execution.status === 'running' && (
-                <button
+                <Button
                   type="button"
                   disabled={busy || stoppingExecutionId === execution.executionId}
                   onClick={() => onStop(execution)}
                 >
                   {stoppingExecutionId === execution.executionId ? '停止请求已受理' : '停止'}
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -175,9 +176,7 @@ function ExecutionGroup({
         {executions.length > 0 ? (
           <span className="background-execution-count">{executions.length}</span>
         ) : (
-          !subagentDetails?.loading && (
-            <span className="background-execution-empty">{emptyLabel}</span>
-          )
+          <span className="background-execution-empty">{emptyLabel}</span>
         )}
       </h3>
       {executions.length > 0 && (
@@ -201,7 +200,8 @@ function ExecutionGroup({
               <li key={execution.executionId} data-execution-id={execution.executionId}>
                 <span className="background-execution-identity">
                   {childSessionId ? (
-                    <button
+                    <Button
+                      variant="ghost"
                       type="button"
                       className="background-execution-detail"
                       title={name}
@@ -211,7 +211,7 @@ function ExecutionGroup({
                       {childIcon}
                       <span className="background-execution-name">{name}</span>
                       <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
-                    </button>
+                    </Button>
                   ) : execution.displayName || !diagnostics ? (
                     <span className="background-execution-label">
                       {childIcon}

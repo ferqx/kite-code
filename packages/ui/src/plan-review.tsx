@@ -1,5 +1,8 @@
 import type { Interaction, Json } from '@kite-ai/client';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
+import { Button } from './desktop/components/ui/button';
+import { SelectField } from './desktop/components/ui/select-field';
+import { Textarea } from './desktop/components/ui/textarea';
 import type { InteractionAnswer } from './interactions';
 import { SafeMessageMarkdown } from './markdown';
 import { questionDraftKey } from './questionnaire';
@@ -180,6 +183,7 @@ function PlanReviewForm({
   initialDraft?: PlanReviewDraft;
   onDraftChange?: (draft: PlanReviewDraft) => void;
 }) {
+  const formId = useId();
   const [draft, setDraft] = useState<PlanReviewDraft>(() => ({
     mode: plan.allowedModes.includes(initialDraft?.mode as PlanMode) ? initialDraft!.mode : '',
     feedback: initialDraft?.feedback ?? '',
@@ -222,25 +226,25 @@ function PlanReviewForm({
         void answer('approve');
       }}
     >
-      <label>
+      <label htmlFor={`${formId}-mode`}>
         Explicit mode
-        <select
+        <SelectField
+          id={`${formId}-mode`}
           aria-label="Plan review mode"
           value={draft.mode}
           disabled={disabled || submitting}
-          onChange={(event) => change({ ...current.current, mode: event.target.value })}
-        >
-          <option value="">Select a mode explicitly</option>
-          {plan.allowedModes.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
+          onValueChange={(value) => change({ ...current.current, mode: value })}
+          options={[
+            { value: '', label: 'Select a mode explicitly' },
+            ...plan.allowedModes.map((value) => ({ value, label: value })),
+          ]}
+        />
       </label>
-      <label>
+      <label htmlFor={`${formId}-feedback`}>
         Feedback
-        <textarea
+        <Textarea
+          id={`${formId}-feedback`}
+          className="field-sizing-fixed min-h-24 max-h-60 resize-y"
           aria-label="Plan review feedback"
           maxLength={8192}
           value={draft.feedback}
@@ -249,15 +253,27 @@ function PlanReviewForm({
         />
       </label>
       {error && <p role="alert">{error}</p>}
-      <button type="submit" disabled={disabled || submitting || !draft.mode}>
-        Approve this exact plan
-      </button>
-      <button type="button" disabled={disabled || submitting} onClick={() => void answer('deny')}>
-        Deny plan
-      </button>
-      <button type="button" disabled={disabled || submitting} onClick={() => void answer('revise')}>
-        Request revision
-      </button>
+      <div className="actions">
+        <Button type="submit" disabled={disabled || submitting || !draft.mode}>
+          Approve this exact plan
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled || submitting}
+          onClick={() => void answer('deny')}
+        >
+          Deny plan
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled || submitting}
+          onClick={() => void answer('revise')}
+        >
+          Request revision
+        </Button>
+      </div>
     </form>
   );
 }

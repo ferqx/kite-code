@@ -15,6 +15,13 @@ test('packaged computer-use knowledge is versioned, capability-gated and immutab
     const original = (await source.list()).entries[0]!;
     expect(original.name).toBe('computer-use');
     expect(original.requiredCapabilities).toEqual(['browser.execute']);
+    const preview = await source.readDocument({
+      id: original.id,
+      version: original.version,
+      maxTextBytes: 1048576,
+    });
+    expect(preview.body).toContain('controlled');
+    expect('resources' in preview).toBe(false);
     await expect(source.load({ id: original.id })).rejects.toMatchObject({
       code: 'skill_capability_missing',
     });

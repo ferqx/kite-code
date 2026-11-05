@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { initializeDesktopBuildEnvironment } from '../../../../scripts/development/windows-desktop-environment';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { buildWindowsAccess } from '../../scripts/build-windows-access';
 
 test('actual Node queue journal migrates the private database, survives cold loss, retains original text until ack and rejects forged data', async () => {
   const root = temporaryDirectory('kite-input-queue-journal-');
@@ -12,6 +14,8 @@ test('actual Node queue journal migrates the private database, survives cold los
     const initialized = acquireProfileAccess(profile);
     privateDirectory(initialized.profilePath);
     initialized.lock.release();
+    initializeDesktopBuildEnvironment();
+    const asset = process.platform === 'win32' ? await buildWindowsAccess(root) : undefined;
     const helper = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
       target: 'bun',
@@ -42,6 +46,9 @@ test('actual Node queue journal migrates the private database, survives cold los
         hash(executable),
         helperPath,
         hash(helperPath),
+        JSON.stringify(
+          asset ? { path: join(root, asset.relativePath), sha256: asset.sha256 } : null,
+        ),
       ],
       { stdout: 'pipe', stderr: 'pipe' },
     );
@@ -61,4 +68,4 @@ test('actual Node queue journal migrates the private database, survives cold los
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 45000);

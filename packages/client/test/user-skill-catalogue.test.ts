@@ -4,6 +4,7 @@ import {
   type ServerInfo,
   type UserSkillCataloguePage,
   verifyUserSkillCataloguePage,
+  verifyUserSkillDocument,
 } from '../src';
 
 const info: ServerInfo = {
@@ -37,6 +38,78 @@ const page = (rows = entries): UserSkillCataloguePage => ({
   entries: rows,
   complete: true,
   nextAfterId: null,
+});
+
+test('document preview verifies exact identity, connection and byte budget without acquiring execution capabilities', async () => {
+  const identity = {
+    storeId: 'store',
+    skillId: 'computer-use',
+    skillVersion: 'a'.repeat(64),
+    revision: 'b'.repeat(64),
+  };
+  const document = { ...identity, body: '# 说明\n\n正文🙂' };
+  expect(verifyUserSkillDocument(document, identity)).toEqual(document);
+  for (const patch of [
+    { storeId: 'foreign' },
+    { skillId: 'other' },
+    { skillVersion: 'c'.repeat(64) },
+    { revision: 'c'.repeat(64) },
+  ])
+    expect(() => verifyUserSkillDocument({ ...document, ...patch }, identity)).toThrow(
+      expect.objectContaining({ code: 'skill_catalogue_identity_mismatch' }),
+    );
+  for (const patch of [{ path: '/private' }, { resources: [] }, { body: null }])
+    expect(() => verifyUserSkillDocument({ ...document, ...patch }, identity)).toThrow(
+      expect.objectContaining({ code: 'invalid_response' }),
+    );
+  expect(() =>
+    verifyUserSkillDocument({ ...document, body: '雪'.repeat(400000) }, identity),
+  ).toThrow(expect.objectContaining({ code: 'skill_text_limit' }));
+  const originalFetch = globalThis.fetch;
+  let enabled = true,
+    reads = 0;
+  const urls: URL[] = [];
+  globalThis.fetch = (async (input, init) => {
+    expect(init?.method).toBe('GET');
+    const url = new URL(String(input));
+    if (url.pathname === '/v1/server')
+      return Response.json({
+        ...info,
+        capabilities: enabled
+          ? ['user_skill_catalogue', 'user_skill_document']
+          : ['user_skill_catalogue'],
+      });
+    urls.push(url);
+    reads++;
+    return Response.json(document);
+  }) as typeof fetch;
+  const client = createClient({
+    endpoint: 'http://owned.local',
+    token: 'owned',
+    expected: { apiMajor: 1, profile: info.profile, requiredCapabilities: [] },
+  });
+  try {
+    await client.connect();
+    expect(await client.readUserSkillDocument(identity)).toEqual(document);
+    expect(urls[0]!.pathname).toBe('/v1/config/user/skills/document');
+    expect(Object.fromEntries(urls[0]!.searchParams)).toEqual(identity);
+    expect(client.lastAppliedCursor).toBeUndefined();
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(
+      client.readUserSkillDocument({ ...identity, signal: aborted.signal }),
+    ).rejects.toBeDefined();
+    expect(reads).toBe(1);
+    enabled = false;
+    await client.connect();
+    await expect(client.readUserSkillDocument(identity)).rejects.toMatchObject({
+      code: 'capability_unavailable',
+    });
+    expect(reads).toBe(1);
+  } finally {
+    client.disposeNetwork();
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('global Skills decoder is closed at every level and rejects project, Session and Workflow metadata', () => {

@@ -532,6 +532,24 @@ test('late references and inline syntax correct existing semantics without fadin
   }
 });
 
+test('streamed Chinese punctuation emphasis closes without literal markers or changing earlier paragraphs', async () => {
+  const f = await fixture();
+  try {
+    await f.render('保留的前文。\n\n**下周如何调整：');
+    const first = f.host.querySelector('p')!;
+    expect(f.host.querySelector('strong')).toBeNull();
+    await f.render('保留的前文。\n\n**下周如何调整：**如果没有新反馈，就重复本周安排。');
+    expect(f.host.querySelector('p')).toBe(first);
+    expect(f.host.querySelector('strong')?.textContent).toBe('下周如何调整：');
+    expect(f.host.textContent).toBe('保留的前文。\n下周如何调整：如果没有新反馈，就重复本周安排。');
+    await f.render('保留的前文。\n\n**下周如何调整：**如果没有新反馈，就重复本周安排。', false);
+    expect(f.host.querySelector('p')).toBe(first);
+    expect(f.host.querySelectorAll('strong')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
 test('growing Unicode text preserves completed segments across the long-node boundary', async () => {
   const f = await fixture();
   try {

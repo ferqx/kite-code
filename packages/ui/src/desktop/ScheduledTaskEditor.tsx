@@ -13,6 +13,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+import { Input } from './components/ui/input';
 import { PillSelectTrigger } from './components/ui/pill-select-trigger';
 import { TimePicker } from './components/ui/time-picker';
 import { ModelEffortSelector, type ModelEffortSelectorProps } from './ModelEffortSelector';
@@ -25,7 +26,7 @@ import {
   scheduledTaskError,
   validScheduledTaskDraft,
 } from './scheduled-task-types';
-import { Button } from './ui';
+import { Button, Textarea } from './ui';
 
 function EditorSection({
   title,
@@ -172,28 +173,30 @@ export function ScheduledTaskEditor({
       }}
     >
       <div className="scheduled-editor-body right-sidebar-editor-body">
-        <EditorSection title="任务内容">
-          <div className="scheduled-setting-card">
-            <EditorRow label="名称" htmlFor={nameId}>
-              <input
-                id={nameId}
-                className="scheduled-title-input"
-                aria-label="名称"
-                value={name}
-                disabled={pending}
-                onChange={(event) => setName(event.target.value)}
-                required
-              />
-            </EditorRow>
+        <EditorSection title="定时任务内容">
+          <div className="scheduled-field">
+            <label className="sr-only" htmlFor={nameId}>
+              名称
+            </label>
+            <Input
+              id={nameId}
+              className="h-9"
+              aria-label="名称"
+              placeholder="名称"
+              value={name}
+              disabled={pending}
+              onChange={(event) => setName(event.target.value)}
+              required
+            />
           </div>
           <div className="scheduled-field">
             <label className="sr-only" htmlFor={promptId}>
               说明
             </label>
-            <textarea
+            <Textarea
               id={promptId}
               className="scheduled-prompt-input"
-              aria-label="任务说明"
+              aria-label="定时任务说明"
               value={prompt}
               disabled={pending}
               onChange={(event) => setPrompt(event.target.value)}
@@ -202,7 +205,7 @@ export function ScheduledTaskEditor({
             />
           </div>
         </EditorSection>
-        <EditorSection title="执行安排" framed>
+        <EditorSection title="执行时间" framed>
           <EditorRow label="重复">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -297,7 +300,7 @@ export function ScheduledTaskEditor({
         </Collapsible>
         {!save && (
           <p className="scheduled-unavailable" role="note">
-            当前无法保存任务。
+            当前无法保存定时任务。
           </p>
         )}
         {error && (

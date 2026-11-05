@@ -51,6 +51,9 @@ try {
     await electron.evaluate(() => {
       const window = globalThis.browserTabsHostFixture.window;
       window.show();
+      // Windows can consume the first show according to the launcher's hidden
+      // STARTUPINFO. Admit the actual visible test window before checking pixels.
+      if (process.platform === 'win32' && !window.isVisible()) window.show();
       return window.isVisible() && !window.isMinimized();
     }),
     true,
@@ -156,6 +159,19 @@ try {
   assert.equal(first.url, `${origin}/one`);
   assert.equal((await inspect()).length, 1);
   assert.ok(first.bounds.width > 100 && first.bounds.height > 100);
+  if (process.platform === 'win32') {
+    await page.locator('.native-browser-viewport[data-native-browser-frame="true"]').waitFor();
+    const decorations = await electron.evaluate(() =>
+      globalThis.browserTabsHostFixture.window.contentView.children
+        .filter((view) => !('webContents' in view))
+        .map((view) => ({ visible: view.getVisible(), bounds: view.getBounds() })),
+    );
+    assert.equal(decorations.length, 2);
+    assert.equal(decorations[0]!.visible, true);
+    assert.equal(decorations[1]!.visible, false);
+    assert.ok(decorations[0]!.bounds.x >= first.bounds.x - 4);
+    assert.ok(decorations[0]!.bounds.x < first.bounds.x);
+  }
   const isolation = await electron.evaluate(async ({ webContents }, id) => {
     const owner = globalThis.browserTabsHostFixture.window;
     const contents = webContents.fromId(id);
@@ -196,6 +212,156 @@ try {
   assert.equal(isolation.persistent, false);
   assert.deepEqual(isolation.globals, ['undefined', 'undefined', 'undefined']);
   assert.ok(!isolation.cookies.includes('app_only'));
+
+  // A genuinely pending engine document must outlive the former application
+  // deadline and display its exact page when the server finally completes it.
+  await rail.getByRole('button', { name: '新建标签页', exact: true }).click();
+  await address().fill(`${origin}/slow-document`);
+  await address().press('Enter');
+  await rail.getByRole('tab', { name: 'Slow document', exact: true }).waitFor();
+  await electron.evaluate(async () => {
+    while (!globalThis.browserTabsHostFixture.hits['/pending-script'])
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const slow = (await inspect()).find((v) => v.id !== first.id)!;
+  await new Promise((resolve) => setTimeout(resolve, 12100));
+  assert.equal(await rail.getByRole('status', { name: '网页加载中', exact: true }).count(), 1);
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.equal(await rail.getByText('网页显示尚未确认，请刷新或重新输入地址。').count(), 0);
+  assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, false);
+  // A delayed application layout must retire the paint, not fail the engine's
+  // healthy document. Only the real Root bounds notification resumes display.
+  const rootBounds = await electron.evaluate(() => {
+    const root = globalThis.browserTabsHostFixture.rootView;
+    const bounds = root.getBounds();
+    root.setBounds({ ...bounds, width: bounds.width - 1 });
+    return bounds;
+  });
+  await electron.evaluate(() => globalThis.browserTabsHostFixture.releaseSlowDocuments());
+  await electron.evaluate(
+    async ({ webContents }, id) =>
+      webContents
+        .fromId(id)!
+        .executeJavaScript(
+          'new Promise(resolve => document.readyState === "complete" ? resolve(true) : addEventListener("load", () => resolve(true), {once:true}))',
+        ),
+    slow.id,
+  );
+  assert.equal(await rail.getByRole('status', { name: '网页加载中', exact: true }).count(), 1);
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  await electron.evaluate((_, bounds) => {
+    globalThis.browserTabsHostFixture.rootView.setBounds(bounds);
+  }, rootBounds);
+  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, true);
+  assert.equal(
+    await electron.evaluate(
+      async ({ webContents }, id) =>
+        webContents.fromId(id)!.executeJavaScript('document.body.innerText'),
+      slow.id,
+    ),
+    'Slow document',
+  );
+  // Explicitly stopping a second blocked document must not synthesize a
+  // display failure; its committed DOM may finish without another dom-ready.
+  await address().fill(`${origin}/slow-document`);
+  await address().press('Enter');
+  await electron.evaluate(async () => {
+    while ((globalThis.browserTabsHostFixture.hits['/pending-script'] ?? 0) < 2)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  await rail.getByRole('button', { name: '停止加载', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, true);
+  assert.equal(
+    await electron.evaluate(() => globalThis.browserTabsHostFixture.hits['/slow-document']),
+    2,
+  );
+  await address().fill(`${origin}/slow-response`);
+  await address().press('Enter');
+  await electron.evaluate(async () => {
+    while (!globalThis.browserTabsHostFixture.hits['/slow-response'])
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  await rail.getByRole('button', { name: '停止加载', exact: true }).click();
+  await rail.getByRole('status').filter({ hasText: '已停止加载' }).waitFor();
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  await address().fill(`${origin}/one`);
+  await address().press('Enter');
+  await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  await rail.getByRole('button', { name: '关闭标签页：Page One', exact: true }).last().click();
+  await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+
+  // The browser error page keeps the native failed document and history;
+  // website-supplied HTTP errors remain ordinary website content.
+  await rail.getByRole('button', { name: '\u65B0\u5EFA\u6807\u7B7E\u9875', exact: true }).click();
+  await address().fill(`${origin}/one`);
+  await address().press('Enter');
+  await page.waitForFunction(
+    () => document.querySelector('[role="tab"][data-state="active"]')?.textContent === 'Page One',
+  );
+  await address().fill(`${origin}/engine-failure`);
+  await address().press('Enter');
+  await rail
+    .getByRole('heading', { name: '\u65E0\u6CD5\u8BBF\u95EE\u6B64\u7AD9\u70B9', exact: true })
+    .waitFor();
+  const failedPage = (await inspect()).find(
+    (v) => v.id !== first.id && v.url === `${origin}/engine-failure`,
+  );
+  assert.ok(failedPage, 'native_failed_document_missing');
+  assert.equal(failedPage.visible, false);
+  const engineError = await electron.evaluate(
+    async ({ webContents }, id) =>
+      webContents
+        .fromId(id)!
+        .executeJavaScript('({href:location.href,text:document.body.innerText})'),
+    failedPage.id,
+  );
+  assert.equal(engineError.href, 'chrome-error://chromewebdata/');
+  assert.equal(engineError.text, '');
+  assert.equal(await rail.getByRole('alert').count(), 1);
+  assert.equal(await rail.getByText('ERR_EMPTY_RESPONSE', { exact: true }).count(), 1);
+  assert.equal(await address().inputValue(), `${origin}/engine-failure`);
+  await rail.getByRole('button', { name: '\u540E\u9000', exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector('[role="tab"][data-state="active"]')?.textContent === 'Page One',
+  );
+  await address().fill(`${origin}/site-404`);
+  await address().press('Enter');
+  await rail.getByRole('tab', { name: 'Site supplied 404', exact: true }).waitFor();
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.equal(
+    await electron.evaluate(
+      async ({ webContents }, id) =>
+        webContents.fromId(id)!.executeJavaScript('document.body.innerText'),
+      failedPage.id,
+    ),
+    'Site supplied 404',
+  );
+  await address().fill(`${origin}/engine-failure`);
+  await address().press('Enter');
+  await rail
+    .getByRole('heading', { name: '\u65E0\u6CD5\u8BBF\u95EE\u6B64\u7AD9\u70B9', exact: true })
+    .waitFor();
+  await electron.evaluate(() => {
+    globalThis.browserTabsHostFixture.recoverEnginePage = true;
+  });
+  await rail.getByRole('button', { name: '\u91CD\u65B0\u52A0\u8F7D', exact: true }).click();
+  await rail.getByRole('tab', { name: 'Recovered engine page', exact: true }).waitFor();
+  assert.equal(
+    (await inspect()).find((v) => v.id === failedPage.id)?.url,
+    `${origin}/engine-failure`,
+  );
+  await rail
+    .getByRole('button', {
+      name: '\u5173\u95ED\u6807\u7B7E\u9875\uFF1ARecovered engine page',
+      exact: true,
+    })
+    .click();
+  await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+  assert.equal((await inspect()).find((v) => v.id === first.id)?.visible, true);
   const clickGuest = (selector: string) =>
     electron!.evaluate(
       async ({ webContents }, input) => {
@@ -337,7 +503,10 @@ try {
     if (!view) throw Error('fixture_exact_retained_view_missing');
     fixture.retained = { contents, view, frame: contents.mainFrame };
     await contents.executeJavaScript(
-      `document.querySelector('#retained').value='keep this exact form';scrollTo(0,420)`,
+      `new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        document.querySelector('#retained').value='keep this exact form';scrollTo(0,420);
+        requestAnimationFrame(resolve);
+      })))`,
     );
   }, first.id);
   const beforeScope = await readRetainedDocument();
@@ -389,9 +558,18 @@ try {
   assert.equal(restoredScope.exactContents, true);
   assert.equal(restoredScope.exactFrame, true);
   assert.equal(restoredScope.visible, true);
-  const { scrollY: originalScrollY, ...originalReading } = beforeScope.document;
-  const { scrollY: restoredScrollY, ...restoredReading } = restoredScope.document;
+  const {
+    scrollY: originalScrollY,
+    readingTop: originalTop,
+    ...originalReading
+  } = beforeScope.document;
+  const {
+    scrollY: restoredScrollY,
+    readingTop: restoredTop,
+    ...restoredReading
+  } = restoredScope.document;
   assert.deepEqual(restoredReading, originalReading);
+  assert.ok(Math.abs(restoredTop - originalTop) <= 1, 'visible reading anchor moved');
   const sameViewport =
     restoredScope.viewport.width === beforeScope.viewport.width &&
     restoredScope.viewport.height === beforeScope.viewport.height;
@@ -526,6 +704,7 @@ try {
       );
     }
   }
+  console.log(`browser_electron_artifacts:${directory}`);
   console.log(
     'browser_electron_pass: external reply links, keyboard, fragments, navigation, history, readers, resize, exact owner hide/restore, form/reading retention, isolation, foreign IPC, popup, download, explicit destruction',
   );

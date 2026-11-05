@@ -2,7 +2,7 @@ import { join, resolve } from 'node:path';
 import { stageWindowsGitBash } from '../../src/jobs/windows-git-bash';
 
 /** Isolated native-test profile. Tests never create OS accounts implicitly. */
-export function windowsShellFixture() {
+export async function windowsShellFixture() {
   const stateRoot = resolve(
     import.meta.dir,
     '../../../../.cache/windows-shell-tests/git-bash-runtime',
@@ -11,6 +11,10 @@ export function windowsShellFixture() {
   return {
     built,
     runner: join(built, 'kite-windows-runner.exe'),
-    ...stageWindowsGitBash(stateRoot, join(built, 'coreutils.exe'), join(built, 'ktipc.dll')),
+    ...(await stageWindowsGitBash(
+      stateRoot,
+      join(built, 'coreutils.exe'),
+      join(built, 'ktipc.dll'),
+    )),
   };
 }

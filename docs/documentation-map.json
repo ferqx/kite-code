@@ -248,7 +248,12 @@
     },
     {
       "id": "runtime-workspace-boundaries",
-      "sources": ["bun.lock", "tsconfig.json", "scripts/run-runtime-workspace-script.ts"],
+      "sources": [
+        "bun.lock",
+        "tsconfig.json",
+        "tsconfig.typecheck.json",
+        "scripts/run-runtime-workspace-script.ts"
+      ],
       "authorities": ["docs/active/unified-agent-boundary.md", "tests/README.md"]
     },
     {

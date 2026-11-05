@@ -18,11 +18,13 @@
 
 会话文件新增固定 PDF.js 6.4.299、Canvas 1.0.10 及平台原生依赖。Agent manifest 构建包含 `tools/documents/pdf-worker.js`／摘要；Terminal 继续通过现有依赖闭包物化 parser 的字体、CMap、WASM 与 Canvas，不在运行时下载。本轮源码解析与独立候选 PDF 资源读取已通过，具体解析与错误恢复边界见 [Files owner](../../../packages/agent/src/tools/files/README.md)。这些结果不授予完整搬迁／安装资格，仍按本页独立资格范围记录，不能复用没有这些新资产的旧候选证据。
 
+本地图片工具新增固定Sharp0.35.5及平台native依赖，Agent build产出`tools/images/image-child.js`／摘要，运行时不下载。当前源码树外离线闭包验证实际复制Sharp及已安装平台companion，在空PATH／NODE_PATH下读取并核缺失／篡改拒绝；证据归[Files owner](../../../packages/agent/src/tools/files/README.md#当前验证与性能)。这不是完整Terminal候选构建、搬迁或安装结果；包含新增图片资产的完整制品资格仍须单独取得。
+
 Windows 的完整原文件 owner 现可由同进程 verifier/归档复用；每次仍扫描准确库存、全部 SHA 和原对象/ACL，复制、错根、关闭或部分关闭的对象不提供权利。归档从原 HANDLE 读完整字节，压缩后复验保持。私有批量写入仅合并祖先持有，CREATE_NEW、每文件 Flush 和关闭未知保资源的合同保持。AI/Agent/Service/UI 的[明确普通 JS 构建声明](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)减少重复 npm 文件，React/React DOM、原生资产、WASM 和 jsdom 动态资源仍完整物化；构建扫描残余 bare import，并保安装声明图的原 manifest 摘要和许可全文。CLI renderer 与 hooks 共用 UI 的 Ink 入口。安装前门的错误出口优先保留有界业务 `code`（如 `owner_busy`），未知细节仍只返回原封闭 fallback；不把维护忙拒绝误写成注册失败。
 
 根 `npm run agent`／`npm run tui` 使用固定 `dist/unified-terminal`，先执行 `npm run release:build`。缺候选路径现沿同一结构化资产错误返回 `terminal_bundle_unavailable` 并说明构建／开发命令；纯帮助、版本和非TTY拒绝仍先于候选与Profile访问。取锁、完整闭包验证和原finally释放保持，不自动构建或转向源码。日常源码调整使用 `npm run build` 后 `npm run cli:dev`／`npm run tui:dev`，步骤见[本地开发](../../../docs/development/local-development.md)。
 
-在已经安装仓库依赖的 checkout 中，Windows 使用 Bun 1.4.3，Linux/macOS 保持 Bun 1.4.2。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
+在已经安装仓库依赖的 checkout 中，当前 CI 使用 Bun 1.4.4；本轮 Windows 定向对照范围见[运行时升级记录](../../../tests/README.md#运行时升级与模型连接池)，各平台完整发行资格仍须独立取得。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
 
 ```sh
 bun run release:terminal build --directory /absolute/output/candidate
@@ -74,6 +76,8 @@ stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OP
 升级只影响后续启动，原进程保持原 candidate。回滚完整验证 previous 后交换指针；它不恢复旧数据库或回放业务意图，本轮只验证相同新基线格式的候选组合，不宣称任意未来格式均可回滚。用户应先通过原实例的公开 `server stop` 结束要卸载的 daemon。卸载完整枚举已管理内容、拒绝未知条目/坏 active/坏候选，取得所有候选 exclusive 使用锁后重命名安装根再删除；任何 live lease 都立即拒绝，不强杀或猜测进程。独立 profile 数据保留。
 
 ## Windows managed Terminal 当前实现
+
+当前CI基线已按[运行时对照](../../../tests/README.md#运行时升级与模型连接池)选择Bun1.4.4；实际Windows sealed Bun、固定配置与standalone verifier在原1.4.3和新1.4.4均通过。两版内嵌SQLite均为原已审查3.53.4/sourceId，精确来源及原PE／System32／no-delay规则未放宽。此定向结果不替代下述完整安装／维护、Native或三平台门禁；历史候选和旧资源census保持原环境范围。
 
 2026-10-17 范围审查按[因果分组](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md#scope-review)核对连续任务，撤回 Linux/macOS CI、formal soak 和实验 census 的版本迁移，只保 Windows Bun1.4.3；工具 smoke 恢复原每命令20秒。同进程借用新增库存反例先红后绿，许可记录补保完整原 manifest，不能以摘要代替仅在 manifest 内的声明。
 

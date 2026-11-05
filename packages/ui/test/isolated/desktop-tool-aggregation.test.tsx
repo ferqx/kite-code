@@ -44,6 +44,73 @@ const tool = (id: string, status: NonNullable<Message['status']> = 'queued'): Me
   settled: ['completed', 'failed'].includes(status),
 });
 
+test('image receipts show verified counts, retain thumbnails beside their disclosure and never count unsuccessful calls', () => {
+  const image: Message = {
+    ...tool('image', 'completed'),
+    toolName: 'view_images',
+    toolImageCount: 1,
+  };
+  for (const [messages, label] of [
+    [[image], '已查看 1 张图像'],
+    [[image, { ...image, id: 'image-2' }], '已查看 2 张图像'],
+    [[{ ...image, status: 'running', settled: false }], '正在查看图像'],
+    [[{ ...image, status: 'failed' }], '查看图像'],
+    [[{ ...image, status: 'cancelled' }], '查看图像'],
+  ] as const) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <ToolActivity
+          messages={messages}
+          onToggle={() => {}}
+          renderChildren={() => null}
+          renderImages={(message) =>
+            message.status === 'completed' ? (
+              <img src="data:image/png;base64,AA==" alt="已验证图像" />
+            ) : null
+          }
+        />,
+      ),
+    );
+    try {
+      expect(dom.window.document.querySelector('.tool-activity-title')?.textContent).toBe(label);
+      expect(dom.window.document.querySelectorAll('.tool-image-thumbnails img')).toHaveLength(
+        messages.filter((item) => item.status === 'completed').length,
+      );
+      expect(dom.window.document.querySelector('.tool-activity-summary')?.tagName).toBe('BUTTON');
+    } finally {
+      dom.window.close();
+    }
+  }
+});
+
+test('image disclosure hides and restores one thumbnail per original message without showing raw success metadata', () => {
+  const messages: Message[] = [1, 2].map((id) => ({
+    ...tool(String(id), 'completed'),
+    toolName: 'view_images',
+    toolImageCount: 1,
+    text: 'PRIVATE_IMAGE_METADATA',
+  }));
+  for (const expanded of [false, true]) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <ToolActivity
+          messages={messages}
+          expanded={expanded}
+          onToggle={() => {}}
+          renderChildren={() => null}
+          renderImages={(message) => <img src="data:image/png;base64,AA==" alt={message.id} />}
+        />,
+      ),
+    );
+    try {
+      expect(dom.window.document.querySelectorAll('img')).toHaveLength(expanded ? 2 : 0);
+      expect(dom.window.document.body.textContent).not.toContain('PRIVATE_IMAGE_METADATA');
+    } finally {
+      dom.window.close();
+    }
+  }
+});
+
 async function withConversation(
   inspect: (fixture: {
     host: HTMLElement;
@@ -137,6 +204,40 @@ function summary(host: HTMLElement) {
   expect(button).not.toBeNull();
   return button!;
 }
+
+test('an image stays visible when an ordinary sibling arrives in the same activity', async () => {
+  const image: Message = {
+    ...tool('image', 'completed'),
+    toolName: 'view_images',
+    toolImageCount: 1,
+    presentationGroupId: 'batch:shared',
+  };
+  await withConversation(
+    async ({ host, render }) => {
+      await render([image]);
+      expect(summary(host).getAttribute('aria-expanded')).toBe('true');
+      expect(host.querySelectorAll('img')).toHaveLength(1);
+      await render([image, { ...tool('next', 'running'), presentationGroupId: 'batch:shared' }]);
+      expect(summary(host).getAttribute('aria-expanded')).toBe('true');
+      expect(host.querySelectorAll('img')).toHaveLength(1);
+    },
+    {
+      renderToolActivity: (messages, state) => (
+        <ToolActivity
+          {...state}
+          messages={messages}
+          aggregate
+          renderChildren={() => null}
+          renderImages={(message) =>
+            message.toolName === 'view_images' ? (
+              <img src="data:image/png;base64,AA==" alt={message.id} />
+            ) : null
+          }
+        />
+      ),
+    },
+  );
+});
 
 test('the shared task adapter retains exact child navigation inside a mixed aggregate', async () => {
   const opened: string[] = [];

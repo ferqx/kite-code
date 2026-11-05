@@ -1,6 +1,6 @@
 import {
   Add01Icon,
-  CalendarClockIcon,
+  AlarmClockIcon,
   Delete02Icon,
   Folder01Icon,
   Folder02Icon,
@@ -197,7 +197,14 @@ const SessionRow = memo(function SessionRow({
         <Button
           className={`session-row ${selected ? 'selected' : ''}`}
           aria-label={session.displayName}
-          aria-description={awaitingInteraction ? '待用户输入' : statusLabel}
+          aria-description={
+            [
+              awaitingInteraction ? '待用户输入' : statusLabel,
+              session.hasUnreadTurn && '有新结束的回复',
+            ]
+              .filter(Boolean)
+              .join('，') || undefined
+          }
           aria-current={selected ? 'page' : undefined}
           disabled={!onOpen}
           onClick={() => onOpen?.(session.sessionId)}
@@ -216,6 +223,9 @@ const SessionRow = memo(function SessionRow({
           ) : session.status === 'running' || session.status === 'waiting_execution' ? (
             <Spinner aria-label="会话运行中" />
           ) : null}
+          {session.hasUnreadTurn && (
+            <span className="session-unread-dot" role="img" aria-label="有新结束的回复" />
+          )}
         </Button>
       </TooltipTrigger>
       <TooltipContent className="kite-client directory-tooltip" side="right" sideOffset={8}>
@@ -396,8 +406,8 @@ export function Sidebar({
               aria-current={activePage === 'scheduledTasks' ? 'page' : undefined}
               onClick={actions.scheduledTasks}
             >
-              <HugeiconsIcon data-icon="inline-start" icon={CalendarClockIcon} />
-              <span>安排任务</span>
+              <HugeiconsIcon data-icon="inline-start" icon={AlarmClockIcon} />
+              <span>定时任务</span>
             </Button>
           )}
         </nav>

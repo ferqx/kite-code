@@ -7,7 +7,9 @@ import type { PublicExecution, ReadContext, ToolContext } from '@kite-ai/agent/e
 import {
   type CheckpointSource,
   createFileCheckpointing,
+  createImageFileReads,
   createScopedFileCheckpointing,
+  createWorkspaceFiles,
   type EditablePlanFile,
   type FileCheckpoint,
   type FileCheckpointCaptureProof,
@@ -702,6 +704,65 @@ export function createDefaultFileCheckpointConfiguration(options: {
       };
     },
   });
+  const images = createImageFileReads({
+    profilePath: options.profile.profilePath,
+    protectedRoots: () => [
+      options.profile.dataRoot,
+      options.profile.coordinationPath,
+      ...options.runtimeAssets(),
+    ],
+    async workspaceRoot(request) {
+      const runtime = options.runtime(),
+        session = await runtime.getSession(request.sessionId);
+      const workspace = session && (await runtime.getWorkspace(session.workspaceId));
+      if (!workspace) fail('file_read_scope_unavailable');
+      return fileURLToPath(workspace.rootUri);
+    },
+    async readWorkspace(path, context, signal) {
+      const bound = await scope(context);
+      const files = createWorkspaceFiles({
+        root: bound.root,
+        protectReads: true,
+        protectedPaths: await protectedPaths(bound.root, options.profile, options.runtimeAssets()),
+      });
+      try {
+        signal.throwIfAborted();
+        const value = await files.readBytes(files.relativePath(path), {
+          maxBytes,
+          signal,
+          sharedRead: true,
+        });
+        signal.throwIfAborted();
+        return { path, bytes: value.bytes, hash: value.baseline.hash };
+      } finally {
+        await files.close();
+      }
+    },
+    async resolveInput(request, uri) {
+      const runtime = options.runtime(),
+        actual = await runtime.getExecution(request.executionId);
+      const metadata = await runtime.getMetadata(),
+        command = actual && (await runtime.getCommand(actual.originCommandId));
+      if (
+        !actual ||
+        !command ||
+        actual.sessionId !== request.sessionId ||
+        actual.originStoreId !== metadata.storeId ||
+        command.originStoreId !== metadata.storeId ||
+        actual.kind !== 'tool' ||
+        actual.definitionId !== 'files.view_images' ||
+        actual.definitionVersion !== '1'
+      )
+        fail('input_file_scope_denied');
+      return runtime.resolveInputFile({
+        expectedStoreId: metadata.storeId,
+        sessionId: request.sessionId,
+        subjectId: command.subjectId,
+        uri,
+        signal: request.signal,
+      });
+    },
+  });
   const fileScopeDescription =
     'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. In Request Approval and Auto, ordinary external files are read-only through Files: external write_file/edit_file requests are unsupported and do not open an approval card. Only effective Full access supports direct ordinary external writes and edits. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files and host-provided session output paths follow their separate declared scope. External files are outside workspace checkpoints.';
   const descriptions: Readonly<Record<string, string>> = {
@@ -712,7 +773,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
     'files.edit':
       'Replace exact non-overlapping literal text using the complete-file baseline. expected_matches must equal the actual count. Supply old_text/new_text or their corresponding immutable Artifact references. Preserve the requested target and intended replacement. A conflict does not reveal current contents or roll back other successful operations; use original receipts and authorized current reads before a separately authorized corrected edit.',
   };
-  const tools = outputs.extension.tools!.map((tool) => {
+  const tools = [...outputs.extension.tools!, images.tool].map((tool) => {
     const description = descriptions[tool.id];
     if (!description) return tool;
     return {
@@ -740,6 +801,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
       policy?: Readonly<PermissionPolicySnapshot>,
     ) {
       return (
+        (await images.describeRequest(request)) ??
         (await outputs.describeRequest(request)) ??
         (await planFiles.describeRequest(request)) ??
         (await inputFiles.describeRequest(request)) ??

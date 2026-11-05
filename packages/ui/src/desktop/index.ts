@@ -17,6 +17,7 @@ export {
   type BackgroundExecutionsProps,
 } from './BackgroundExecutions';
 export { Conversation } from './Conversation';
+export { Alert, AlertDescription, AlertTitle } from './components/ui/alert';
 export {
   AlertDialog,
   AlertDialogAction,
@@ -67,6 +68,7 @@ export {
   SelectTrigger,
   SelectValue,
 } from './components/ui/select';
+export { SelectField, type SelectFieldOption } from './components/ui/select-field';
 export {
   Sheet,
   SheetClose,
@@ -110,6 +112,7 @@ export {
 } from './markdown-parse-cache';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { QueuedMessages, type QueuedMessagesProps, type QueuedPrompt } from './QueuedMessages';
+export { ReadGate } from './ReadGate';
 export {
   RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
   RightSidebar,

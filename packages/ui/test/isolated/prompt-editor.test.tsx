@@ -48,6 +48,8 @@ for (const [key, value] of Object.entries({
 const { createRoot } = await import('react-dom/client');
 const { PromptEditor } = await import('../../src/desktop/PromptEditor');
 const { Composer } = await import('../../src/desktop/Composer');
+const { ReadGate } = await import('../../src/desktop/ReadGate');
+const { Button } = await import('../../src/desktop/components/ui/button');
 let root: ReturnType<typeof createRoot> | undefined;
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
@@ -66,6 +68,56 @@ async function render(node: React.ReactNode) {
   root ??= createRoot(document.getElementById('root')!);
   await act(async () => root!.render(node));
 }
+
+test('nested read gates retain business state and nodes while blocking buttons, editing and file drops', async () => {
+  let clicks = 0,
+    files = 0,
+    sends = 0;
+  const view = (blocked: boolean) => (
+    <ReadGate blocked={blocked}>
+      <ReadGate blocked={false}>
+        <Button onClick={() => clicks++}>操作</Button>
+        <Button disabled>业务不可用</Button>
+        <PromptEditor
+          value="原草稿"
+          scopeKey="a"
+          label="读取门禁草稿"
+          disabled={false}
+          onChange={() => {}}
+          onSend={() => sends++}
+          onFiles={() => files++}
+        />
+      </ReadGate>
+    </ReadGate>
+  );
+  await render(view(true));
+  const [button, unavailable] = document.querySelectorAll<HTMLButtonElement>('button');
+  const editor = document.querySelector<HTMLElement>('[role="textbox"]')!;
+  expect(button!.disabled).toBe(true);
+  expect(button!.dataset.disabled).toBeUndefined();
+  expect(unavailable!.dataset.disabled).toBe('true');
+  expect(editor.getAttribute('contenteditable')).toBe('false');
+  expect(editor.dataset.disabled).toBeUndefined();
+  const drop = new dom.window.Event('drop', { bubbles: true, cancelable: true });
+  Object.defineProperty(drop, 'dataTransfer', {
+    value: { files: [new dom.window.File(['a'], 'a.txt')] },
+  });
+  await act(async () => {
+    button!.click();
+    editor.dispatchEvent(drop);
+    editor.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  expect([clicks, files, sends]).toEqual([0, 0, 0]);
+  await render(view(false));
+  expect(document.querySelector('[role="textbox"]') === editor).toBe(true);
+  expect(document.querySelector('button') === button).toBe(true);
+  expect(editor.getAttribute('contenteditable')).toBe('true');
+  expect(editor.textContent).toBe('原草稿');
+  expect(button!.disabled).toBe(false);
+  expect(unavailable!.disabled).toBe(true);
+  await act(async () => button!.click());
+  expect(clicks).toBe(1);
+});
 async function chooseAttachment(label: string) {
   await act(async () => {
     document

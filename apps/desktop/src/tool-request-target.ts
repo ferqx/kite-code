@@ -1,5 +1,6 @@
 const versions: Readonly<Record<string, readonly string[]>> = {
   'files.read': ['2', '3', '4', '5'],
+  'files.view_images': ['1'],
   'files.read_path': ['1', '2'],
   'files.write': ['2', '3'],
   'files.edit': ['2'],
@@ -77,6 +78,14 @@ export function nativeToolRequestTarget(
         ? description.replace(/\s+/gu, ' ').trim() || undefined
         : undefined;
     }
+    case 'files.view_images':
+      if (request.path !== undefined) return request.paths === undefined ? text('path') : undefined;
+      return Array.isArray(request.paths) &&
+        request.paths.length > 0 &&
+        request.paths.length <= 10 &&
+        request.paths.every((path) => typeof path === 'string' && path.trim())
+        ? bounded(request.paths.join(' · '))
+        : undefined;
     case 'files.read':
     case 'files.read_path':
     case 'files.write':

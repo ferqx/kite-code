@@ -3,6 +3,7 @@ import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import { nativeModelConnections } from './native-model-connections';
 import { desktopMessages } from './native-presentation';
 import {
   desktopToolMessage,
@@ -576,7 +577,7 @@ export function desktopTranscript({
             ? 'aborted'
             : (run.status as 'completed' | 'failed' | 'cancelled'),
       });
-    if (!run.isActive && run.status === 'failed') {
+    if (!run.isActive && (run.status === 'failed' || run.status === 'interrupted')) {
       let last = -1;
       for (let index = 0; index < modeled.length; index++) {
         const message = modeled[index]!;
@@ -595,23 +596,34 @@ export function desktopTranscript({
         text:
           run.reason === 'context_source_unavailable'
             ? '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。'
-            : '本轮执行未完成。原消息已保留，请核对任务状态后重新发送。',
+            : run.status === 'interrupted'
+              ? '本轮执行已中断，未生成最终回复。请先核对本轮工具执行结果，再决定是否重新发送。'
+              : '本轮未能生成最终回复，当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。',
         settled: true,
         status: 'failed',
         failure: {
           summary:
-            run.reason === 'context_source_unavailable' ? '工作区上下文读取失败' : '本轮回复未完成',
+            run.reason === 'context_source_unavailable'
+              ? '工作区上下文读取失败'
+              : run.status === 'interrupted'
+                ? '本轮执行已中断'
+                : '本轮异常结束',
           ...(run.reason ? { reasonCode: run.reason } : {}),
         },
       });
     }
   }
+  nativeModelConnections(modeled, messages, executions, observed, storeId, sessionId, identity);
+  const failedConnections = new Set(
+    modeled.filter((message) => message.modelConnectionFailure).map((message) => message.turnId),
+  );
   const active = [...observed.values()].find((run) => run.isActive);
   return {
     // An old SQL running record cannot establish current execution. Only the
     // matching hot observation above may make that attempt a visible live row.
     messages: modeled.filter(
       (model) =>
+        !(model.systemKind === 'turn_failure' && failedConnections.has(model.turnId)) &&
         !(
           model.systemKind === 'compaction' &&
           model.status === 'unknown' &&

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -8,11 +9,16 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import type { JobContext, ToolResult } from '../../../src/extensions';
 import { JobStartError } from '../../../src/extensions';
 import { withBundledRipgrep } from '../../../src/jobs/ripgrep';
@@ -69,7 +75,7 @@ mock.module(${JSON.stringify(ownerModule)},()=>({
 }));
 try{
  const {createWindowsShellJob}=await import(${JSON.stringify(jobModule)});
- const job=createWindowsShellJob({cwd:root,controlBase:control,env:{},stateRoot:root,
+ const job=await createWindowsShellJob({cwd:root,controlBase:control,env:{},stateRoot:root,
   supervisorPath:join(root,'runner.exe'),shellExecutable:join(root,'usr/bin/bash.exe'),
   fullShellExecutable:join(root,'full/usr/bin/bash.exe'),coreutilsPath:join(root,'usr/bin/coreutils.exe'),
   executionScope:()=>({filesystem:'workspace_write',network:'none'})});
@@ -120,7 +126,7 @@ native(
     writeFileSync(join(cwd, 'source.txt'), 'bundled-rg-needle\n');
     writeFileSync(join(privateRoot, 'secret.txt'), 'private-needle');
     writeFileSync(join(root, 'external.txt'), 'external-needle');
-    const runtime = windowsShellFixture();
+    const runtime = await windowsShellFixture();
     const built = runtime.built;
     const environment = withBundledRipgrep({
       ...Object.fromEntries(
@@ -130,12 +136,17 @@ native(
       ),
       PATH: '',
     });
-    const execute = async (command: string, full = false, onOutput?: (text: string) => void) => {
+    const execute = async (
+      command: string,
+      full = false,
+      onOutput?: (text: string) => void,
+      inheritedEnvironment: Readonly<Record<string, string>> = environment.env,
+    ) => {
       const controller = new AbortController();
-      const job = createWindowsShellJob({
+      const job = await createWindowsShellJob({
         cwd,
         controlBase: control,
-        env: environment.env,
+        env: inheritedEnvironment,
         supervisorPath: join(built, 'kite-windows-runner.exe'),
         shellExecutable: runtime.shell,
         fullShellExecutable: runtime.fullShell,
@@ -164,11 +175,25 @@ native(
       return { output, result, handle };
     };
     try {
+      for (const key of ['Path', 'pAtH']) {
+        const inherited = Object.fromEntries(
+          Object.entries(environment.env).filter(([name]) => name.toUpperCase() !== 'PATH'),
+        );
+        const pipeline = await execute(
+          'set -e -o pipefail; printf case-path | sed s/case/tool/ | tr a-z A-Z > path.txt; cat path.txt',
+          false,
+          undefined,
+          { ...inherited, [key]: '' },
+        );
+        expect(pipeline.result?.outcome, pipeline.output).toBe('succeeded');
+        expect(pipeline.output).toBe('TOOL-PATH');
+        expect(readFileSync(join(cwd, 'path.txt'), 'utf8')).toBe('TOOL-PATH');
+      }
       const denied = await execute('printf forbidden > ../outside.txt');
       expect(denied.result?.outcome).toBe('failed');
       expect(existsSync(join(root, 'outside.txt'))).toBe(false);
       expect(readdirSync(control)).toEqual([]);
-      const cancelledJob = createWindowsShellJob({
+      const cancelledJob = await createWindowsShellJob({
         cwd,
         controlBase: control,
         env: environment.env,
@@ -188,16 +213,10 @@ native(
       startupAbort.abort();
       const startFailure = await cancelledStart.catch((error: unknown) => error);
       expect(startFailure).toBeInstanceOf(JobStartError);
-      const cancelledHandle = (startFailure as JobStartError).handle;
-      if (!cancelledHandle) throw Error('cancelled_start_handle_missing');
-      const stopped = cancelledJob.cancel!(cancelledHandle);
-      let cancelledResult: ToolResult | undefined;
-      for await (const event of cancelledJob.observe(cancelledHandle))
-        if (event.type === 'terminal') cancelledResult = event.result;
-      expect(['stopped', 'already_finished']).toContain((await stopped).status);
-      expect(cancelledResult?.outcome).toBe('cancelled');
+      // Cancellation during async verification has not created a native owner.
+      expect((startFailure as JobStartError).handle).toBeUndefined();
+      expect(readdirSync(control)).toEqual([]);
       expect(existsSync(join(cwd, 'cancelled.txt'))).toBe(false);
-      await cancelledJob.dispose?.(cancelledHandle);
       const ordinary = await execute(
         'set -e -o pipefail; rg --no-config --version; rg --no-config bundled-rg-needle source.txt; for i in 1 2 3; do printf "%s\\n" "$i"; done | sed -n 2p; printf workspace-write > written.txt',
       );
@@ -334,7 +353,7 @@ native(
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
-    const runtime = windowsShellFixture();
+    const runtime = await windowsShellFixture();
     const built = runtime.built;
     const env = withBundledRipgrep(
       Object.fromEntries(
@@ -357,7 +376,7 @@ native(
         ['workspace_write', 'internet'],
         ['full_access', 'internet'],
       ] as const) {
-        const job = createWindowsShellJob({
+        const job = await createWindowsShellJob({
           cwd,
           controlBase: control,
           env,
@@ -409,15 +428,113 @@ native(
 );
 
 native(
+  'Windows cancels Workspace preparation while another owner holds its ACL lock and later executes a compound write',
+  async () => {
+    const root = temporaryDirectory('kite-windows-shell-preparation-');
+    const cwd = join(root, 'workspace'),
+      control = join(root, 'control'),
+      stateRoot = join(root, 'state'),
+      outside = join(root, 'outside');
+    for (const path of [cwd, control, stateRoot, outside]) mkdirSync(path);
+    writeFileSync(join(outside, 'keep.txt'), 'original');
+    symlinkSync(outside, join(cwd, 'outside-link'), 'junction');
+    const ready = join(root, 'mutex-ready');
+    const canonical = cwd.startsWith('\\\\?\\') ? cwd : `\\\\?\\${cwd}`;
+    const mutex = `Local\\KiteCode.RestrictedToken.${createHash('sha256').update(canonical.toLowerCase()).digest('hex')}`;
+    const powershell = join(
+      process.env.SystemRoot!,
+      'System32/WindowsPowerShell/v1.0/powershell.exe',
+    );
+    const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    const holder = Bun.spawn(
+      [
+        powershell,
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$m=[Threading.Mutex]::new($false,${quote(mutex)});$null=$m.WaitOne();[IO.File]::WriteAllText(${quote(ready)},'ready');$null=[Console]::ReadLine();$m.ReleaseMutex();$m.Dispose()`,
+      ],
+      { stdin: 'pipe', stdout: 'ignore', stderr: 'pipe', windowsHide: true },
+    );
+    const diagnostics = new Response(holder.stderr).text();
+    try {
+      const deadline = Date.now() + 5000;
+      while (!existsSync(ready) && Date.now() < deadline) await Bun.sleep(10);
+      expect(existsSync(ready)).toBe(true);
+      const runtime = await windowsShellFixture();
+      const job = await createWindowsShellJob({
+        cwd,
+        controlBase: control,
+        stateRoot,
+        env: { SystemRoot: process.env.SystemRoot!, Path: '' },
+        supervisorPath: runtime.runner,
+        shellExecutable: runtime.shell,
+        fullShellExecutable: runtime.fullShell,
+        coreutilsPath: runtime.coreutils,
+        executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
+      });
+      const context = () =>
+        ({
+          signal: new AbortController().signal,
+          executionId: crypto.randomUUID(),
+          sessionId: 's',
+        }) as JobContext;
+      const handle = await job.start(
+        { command: 'printf forbidden > should-not-run.txt' },
+        context(),
+      );
+      await Bun.sleep(750);
+      expect(existsSync(join(cwd, 'should-not-run.txt'))).toBe(false);
+      const stopping = job.cancel!(handle);
+      let result: ToolResult | undefined;
+      for await (const event of job.observe(handle))
+        if (event.type === 'terminal') result = event.result;
+      expect(await stopping).toEqual({ status: 'stopped' });
+      expect(result?.outcome).toBe('cancelled');
+      expect(result?.details).toMatchObject({ cleanupConfirmed: true, processTreeStopped: true });
+      expect(existsSync(join(cwd, 'should-not-run.txt'))).toBe(false);
+      expect(readdirSync(control)).toEqual([]);
+      await job.dispose?.(handle);
+      holder.stdin.end();
+      expect(await holder.exited, await diagnostics).toBe(0);
+      const resumed = await job.start(
+        {
+          command:
+            'set -e -o pipefail; printf resumed > written.txt; cat written.txt | sed s/resumed/verified/; if (printf forbidden > outside-link/keep.txt) 2>/dev/null; then exit 99; fi',
+        },
+        context(),
+      );
+      let output = '';
+      for await (const event of job.observe(resumed)) {
+        if (event.type === 'output') output += event.content;
+        if (event.type === 'terminal') result = event.result;
+      }
+      expect(result?.outcome, output).toBe('succeeded');
+      expect(output).toBe('verified');
+      expect(readFileSync(join(cwd, 'written.txt'), 'utf8')).toBe('resumed');
+      expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('original');
+      await job.dispose?.(resumed);
+    } finally {
+      holder.stdin.end();
+      holder.kill();
+      await holder.exited;
+      await diagnostics;
+      removeTemporaryDirectory(root);
+    }
+  },
+  20000,
+);
+
+native(
   'Windows cancel acknowledges the original owned Job after its background descendant has stopped',
   async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-windows-shell-cancel-')));
     const cwd = join(root, 'workspace'),
       control = join(root, 'control');
     for (const path of [cwd, control]) mkdirSync(path);
-    const runtime = windowsShellFixture();
+    const runtime = await windowsShellFixture();
     const built = runtime.built;
-    const job = createWindowsShellJob({
+    const job = await createWindowsShellJob({
       cwd,
       controlBase: control,
       env: Object.fromEntries(

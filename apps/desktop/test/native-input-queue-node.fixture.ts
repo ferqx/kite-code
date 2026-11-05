@@ -6,9 +6,8 @@ import { parseNativeQueueRecord } from '../electron/native-input-queue-journal';
 import { openPrivateData } from '../electron/private-data';
 import { acquireDesktopProfileAccess } from '../electron/profile-access';
 
-const [profileJson, bunExecutable, bunSha256, helperPath, helperSha256] = process.argv.slice(
-  2,
-) as string[];
+const [profileJson, bunExecutable, bunSha256, helperPath, helperSha256, windowsAssetJson] =
+  process.argv.slice(2) as string[];
 const profile = JSON.parse(profileJson!);
 const profilePath = selectProfile(profile).profilePath;
 const open = async () =>
@@ -20,6 +19,9 @@ const open = async () =>
       bunSha256: bunSha256!,
       helperPath: helperPath!,
       helperSha256: helperSha256!,
+      ...(windowsAssetJson && JSON.parse(windowsAssetJson)
+        ? { windowsAsset: JSON.parse(windowsAssetJson) }
+        : {}),
     }),
   );
 let data = await open();

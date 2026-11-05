@@ -3,7 +3,7 @@ import type { Interaction } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { InteractionCard, type PlanReviewDraft } from '../src';
+import type { PlanReviewDraft } from '../src';
 
 const original = {
   id: 'original-review',
@@ -39,6 +39,17 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
     window: globalThis.window,
     document: globalThis.document,
     navigator: globalThis.navigator,
+    HTMLElement: globalThis.HTMLElement,
+    HTMLFormElement: globalThis.HTMLFormElement,
+    Event: globalThis.Event,
+    MutationObserver: globalThis.MutationObserver,
+    DocumentFragment: globalThis.DocumentFragment,
+    Node: globalThis.Node,
+    Element: globalThis.Element,
+    HTMLSelectElement: globalThis.HTMLSelectElement,
+    HTMLInputElement: globalThis.HTMLInputElement,
+    CustomEvent: globalThis.CustomEvent,
+    getComputedStyle: globalThis.getComputedStyle,
     IS_REACT_ACT_ENVIRONMENT: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
       .IS_REACT_ACT_ENVIRONMENT,
   };
@@ -46,8 +57,20 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
     window: dom.window,
     document: dom.window.document,
     navigator: dom.window.navigator,
+    HTMLElement: dom.window.HTMLElement,
+    HTMLFormElement: dom.window.HTMLFormElement,
+    Event: dom.window.Event,
+    MutationObserver: dom.window.MutationObserver,
+    DocumentFragment: dom.window.DocumentFragment,
+    Node: dom.window.Node,
+    Element: dom.window.Element,
+    HTMLSelectElement: dom.window.HTMLSelectElement,
+    HTMLInputElement: dom.window.HTMLInputElement,
+    CustomEvent: dom.window.CustomEvent,
+    getComputedStyle: dom.window.getComputedStyle,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
+  const { InteractionCard } = await import('../src');
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   const answers: NonNullable<Interaction['answer']>[] = [];
@@ -75,7 +98,7 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
       ),
     );
   const mode = () =>
-    host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!;
+    host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Plan review mode"]')!;
   const feedback = () =>
     host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
   const approve = () =>
@@ -85,18 +108,21 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
   try {
     await render('first');
     expect(host.textContent).toContain('ORIGINAL_FULL_TAIL');
-    expect(mode().value).toBe('');
+    expect(mode().textContent).toBe('Select a mode explicitly');
     expect(approve().disabled).toBe(true);
     const text = '  修改原文\n雪🙂e\u0301 / @  ';
     await act(async () => {
-      mode().value = 'accept_edits';
-      mode().dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+      const nativeSelect = host.querySelector('select')!;
+      nativeSelect.value = [...nativeSelect.options].find(
+        (option) => option.textContent === 'accept_edits',
+      )!.value;
+      nativeSelect.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
       feedback().value = text;
       feedback().dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     });
     expect(saved).toEqual({ mode: 'accept_edits', feedback: text });
     await render('returned');
-    expect(mode().value).toBe('accept_edits');
+    expect(mode().textContent).toBe('accept_edits');
     expect(feedback().value).toBe(text);
     await act(async () => {
       host

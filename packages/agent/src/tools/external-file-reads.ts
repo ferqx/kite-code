@@ -35,6 +35,28 @@ async function resolvedTarget(path: string): Promise<{ actual: string; exists: b
   }
 }
 
+/** Shared exact-path classification; this performs no content read or new authorization. */
+export async function externalReadTarget(
+  path: string,
+  workspace: string,
+  roots: readonly string[],
+  signal: AbortSignal,
+) {
+  if (!isAbsolute(path)) return null;
+  path = resolve(path);
+  if (path.includes('\0')) throw new AgentError('file_path_invalid');
+  if (within(path, workspace)) return null;
+  const selected = await resolvedTarget(path);
+  for (const root of roots) {
+    const protectedRoot = resolve(root);
+    const actualRoot = (await resolvedTarget(protectedRoot)).actual;
+    if (within(path, protectedRoot) || within(selected.actual, actualRoot))
+      throw new AgentError('file_path_protected');
+  }
+  signal.throwIfAborted();
+  return { path, ...selected };
+}
+
 /** Ordinary external reads share the existing permission policy and result delivery.
  * Saved input/plan/output adapters wrap this layer and retain their scoped private references.
  */
@@ -57,19 +79,8 @@ export function withExternalFileReads(options: {
       !isAbsolute(input.path)
     )
       return null;
-    const path = resolve(input.path);
-    if (path.includes('\0')) throw new AgentError('file_path_invalid');
     const workspace = await options.workspaceRoot(request);
-    if (within(path, workspace)) return null;
-    const selected = await resolvedTarget(path);
-    for (const root of options.protectedRoots()) {
-      const protectedRoot = resolve(root);
-      const actualRoot = (await resolvedTarget(protectedRoot)).actual;
-      if (within(path, protectedRoot) || within(selected.actual, actualRoot))
-        throw new AgentError('file_path_protected');
-    }
-    request.signal.throwIfAborted();
-    return { path, ...selected };
+    return externalReadTarget(input.path, workspace, options.protectedRoots(), request.signal);
   }
   return {
     tools: options.tools.map(

@@ -26,6 +26,7 @@ export function ordinaryHostConfigurationDefaults(
       ...[
         'execution_evidence.read',
         'files.read',
+        'files.view_images',
         'files.write',
         'files.edit',
         ...(shellAvailable ? shellToolIds : []),

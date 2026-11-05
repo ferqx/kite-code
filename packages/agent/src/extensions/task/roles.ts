@@ -49,6 +49,7 @@ export const defaultTaskRoles: readonly TrustedTaskRole[] = Object.freeze([
 const readOnlyBindings = [
   ['builtin.files', 'files.read', '4'],
   ['builtin.files', 'files.read', '5'],
+  ['builtin.files', 'files.view_images', '1'],
   ['builtin.shell', 'shell.execute', '1'],
   ['builtin.shell', 'shell.launch', '1'],
   ['builtin.shell', 'shell.read', '1'],

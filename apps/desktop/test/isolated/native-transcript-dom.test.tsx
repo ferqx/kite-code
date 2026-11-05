@@ -20,6 +20,7 @@ import {
 } from '../../src/native-transcript';
 import type {
   NativeRunFact,
+  NativeToolExecution,
   NativeToolMessageFact,
   NativeToolRunPage,
 } from '../../src/tool-messages-bridge';
@@ -114,6 +115,309 @@ const tool = (id: string): NativeToolMessageFact => ({
   status: 'succeeded',
   resultRevision: '1',
   target: `${id}.txt`,
+});
+
+test('model reconnection stays in its original Turn process across retries, recovery, cancellation and cold reads', async () => {
+  const f = fixture();
+  const failed = (
+    id: string,
+    attempt = 1,
+    previousExecutionId = 'initial',
+  ): NativeToolExecution => ({
+    id,
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'r',
+    kind: 'model',
+    definitionId: 'model',
+    definitionVersion: '1',
+    status: 'failed',
+    resultRevision: '1',
+    cancelRequestedAt: null,
+    result: { code: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:connection_failed', incomplete: true },
+    ...(attempt > 1
+      ? {
+          modelRetry: {
+            previousExecutionId,
+            attempt,
+            maxAttempts: 6,
+            reason: 'connection_failed',
+          },
+        }
+      : {}),
+  });
+  const input = message('input', 'user', '1', '原任务');
+  const first = failed('initial');
+  const second = { ...failed('second', 2), status: 'running' as const, result: null };
+  const draw = async (
+    executions: NativeToolExecution[],
+    extra: Message[] = [],
+    fact: NativeRunFact = { ...run(), status: 'running', isActive: true, finishedAt: null },
+  ) => {
+    const transcript = desktopTranscript({
+      messages: [input, ...extra],
+      runs: [fact],
+      executions,
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+    await act(async () =>
+      f.root.render(
+        <Conversation {...transcript} loading={false} selected connected saveReading={() => {}} />,
+      ),
+    );
+    return transcript;
+  };
+  try {
+    const waiting = await draw([first]);
+    const row = () => f.host.querySelector('.model-connection')!;
+    const rowId = waiting.messages.find((model) => model.systemKind === 'model_connection')!.id;
+    expect(row().closest('.agent-turn-process')).not.toBeNull();
+    expect(row().classList.contains('is-running')).toBe(true);
+    expect(row().textContent).toBe('正在重新连接模型服务第 1/5 次重连');
+    expect(f.host.querySelector('.turn-failure')).toBeNull();
+    expect(f.host.querySelector('.response-status')).toBeNull();
+    const partial = {
+      ...message('original-partial', 'assistant', '2', '原尝试的部分正文'),
+      sourceIds: ['initial'],
+      status: 'incomplete' as const,
+    };
+    const interrupted = await draw([first], [partial]);
+    expect(interrupted.messages.findIndex((model) => model.id === partial.id)).toBeLessThan(
+      interrupted.messages.findIndex((model) => model.systemKind === 'model_connection'),
+    );
+    const stopping = await draw([first], [], { ...run(), status: 'cancelling', isActive: true });
+    expect(stopping.messages.find((model) => model.systemKind === 'model_connection')?.title).toBe(
+      '正在停止重新连接',
+    );
+    await draw([first, second]);
+    expect(f.host.querySelectorAll('.model-connection')).toHaveLength(1);
+    const third = { ...failed('third', 3, 'second'), status: 'running' as const, result: null };
+    const retrying = await draw([first, failed('second', 2), third]);
+    expect(row().textContent).toContain('第 2/5 次重连');
+    expect(retrying.messages.find((model) => model.systemKind === 'model_connection')!.id).toBe(
+      rowId,
+    );
+    const recovered = {
+      ...message('reply', 'assistant', '2', '恢复后的回复'),
+      sourceIds: ['third'],
+      status: 'incomplete' as const,
+    };
+    await draw([first, failed('second', 2), third], [recovered]);
+    expect(row().textContent).toContain('已重新连接模型服务');
+    expect(row().getAttribute('data-status')).toBe('completed');
+    expect(row().classList.contains('is-running')).toBe(false);
+    expect(f.host.querySelector('.response-status')?.textContent).toContain('正在回复');
+    const completed: NativeRunFact = { ...run(), status: 'completed', isActive: false };
+    const finished = await draw(
+      [first, failed('second', 2), { ...third, status: 'succeeded' }],
+      [{ ...recovered, status: 'complete' }],
+      completed,
+    );
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    expect(finished.messages.filter((model) => model.role === 'user')).toHaveLength(1);
+    await act(async () =>
+      (f.host.querySelector('.agent-turn-summary') as HTMLButtonElement).click(),
+    );
+    expect(row().closest('.agent-turn-process')).not.toBeNull();
+    expect(row().textContent).toContain('已重新连接模型服务');
+    expect(f.host.querySelector('.agent-turn-final')?.textContent).toContain('恢复后的回复');
+    await draw([first, { ...second, status: 'cancelled' }], [], {
+      ...run(),
+      status: 'cancelled',
+      isActive: false,
+    });
+    await act(async () =>
+      (f.host.querySelector('.agent-turn-summary') as HTMLButtonElement).click(),
+    );
+    expect(row().textContent).toContain('重新连接已停止');
+    expect(f.host.querySelector('.turn-failure')).toBeNull();
+    const receivedThenCancelled = await draw(
+      [first, { ...second, status: 'cancelled' }],
+      [{ ...recovered, sourceIds: ['second'] }],
+      { ...run(), status: 'cancelled', isActive: false },
+    );
+    expect(
+      receivedThenCancelled.messages.find((model) => model.systemKind === 'model_connection')
+        ?.title,
+    ).toBe('已重新连接模型服务');
+    const terminal = await draw([first, failed('second', 2)], [], {
+      ...run(),
+      status: 'failed',
+      isActive: false,
+    });
+    expect(terminal.messages.filter((model) => model.systemKind === 'turn_failure')).toHaveLength(
+      1,
+    );
+    expect(f.host.querySelector('.agent-turn-failure') === null).toBe(true);
+    // The reader explicitly collapsed this same Turn earlier; keep that choice.
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    await act(async () =>
+      (f.host.querySelector('.agent-turn-summary') as HTMLButtonElement).click(),
+    );
+    const notice = f.host.querySelector('.turn-failure')!;
+    expect(notice.closest('.agent-turn-process-messages') !== null).toBe(true);
+    expect(notice.getAttribute('role')).toBe('alert');
+    expect(notice.textContent).toContain('当前记录未提供可核实的错误原因');
+    expect(notice.textContent).toContain('先核对本轮工具执行结果');
+    expect(notice.classList.contains('message')).toBe(false);
+    expect(notice.querySelector('button')).toBeNull();
+    expect(notice.querySelector('p')).toBeNull();
+    // A cold reconstruction uses the same confirmed facts and never revives a spinner.
+    await act(async () => f.root.render(null));
+    await act(async () =>
+      f.root.render(
+        <Conversation {...terminal} loading={false} selected connected saveReading={() => {}} />,
+      ),
+    );
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelectorAll('.agent-turn-process-messages .turn-failure')).toHaveLength(1);
+    expect(f.host.querySelector('[data-status="running"]')).toBeNull();
+    for (const execution of [
+      { ...first, originStoreId: 'foreign' },
+      { ...first, sessionId: 'foreign' },
+      { ...first, runId: 'foreign' },
+      { ...first, result: { code: 'model_failed', incomplete: true } },
+    ]) {
+      const foreign = await draw([execution]);
+      expect(foreign.messages.some((model) => model.systemKind === 'model_connection')).toBe(false);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('five failed reconnections expose one expandable human-readable error in the original Turn and survive cold reads', async () => {
+  const f = fixture();
+  const attempts: NativeToolExecution[] = Array.from({ length: 6 }, (_, index) => ({
+    id: `model-${index}`,
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'r',
+    kind: 'model',
+    definitionId: 'model',
+    definitionVersion: '1',
+    status: 'failed',
+    resultRevision: '1',
+    cancelRequestedAt: null,
+    result: {
+      code: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:connection_failed',
+      incomplete: true,
+      modelFailure: {
+        detail: 'connection_timeout',
+        message: 'private-token raw stack ECONNREFUSED http://private',
+      },
+    },
+    ...(index
+      ? {
+          modelRetry: {
+            previousExecutionId: `model-${index - 1}`,
+            attempt: index + 1,
+            maxAttempts: 6,
+            reason: 'connection_failed',
+          },
+        }
+      : {}),
+  }));
+  const project = (fact: NativeRunFact, executions = attempts) =>
+    desktopTranscript({
+      messages: [message('input', 'user', '1', '原任务')],
+      runs: [fact],
+      executions,
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+  const terminal = project({
+    ...run(),
+    status: 'failed',
+    reason: 'model_reconnect_exhausted',
+    isActive: false,
+  });
+  const draw = () =>
+    f.root.render(
+      <Conversation {...terminal} selected connected loading={false} saveReading={() => {}} />,
+    );
+  try {
+    const finishing = project({ ...run(), status: 'running', isActive: true });
+    const row = finishing.messages.find((model) => model.systemKind === 'model_connection')!;
+    expect(row.text).toBe('第 5/5 次重连');
+    expect(row.status).toBe('waiting');
+    expect(row.modelConnectionFailure).toBeUndefined();
+    expect(terminal.messages.some((model) => model.systemKind === 'turn_failure')).toBe(false);
+    const later = desktopTranscript({
+      messages: [
+        message('input', 'user', '1', '原任务'),
+        { ...message('next-input', 'user', '2', '明确新任务'), runId: 'next-run' },
+        { ...message('next-reply', 'assistant', '3', '新任务回复'), runId: 'next-run' },
+      ],
+      runs: [
+        run('next-run'),
+        { ...run(), status: 'failed', reason: 'model_reconnect_exhausted', isActive: false },
+      ],
+      executions: attempts,
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+    expect(
+      later.messages.findIndex((model) => model.systemKind === 'model_connection'),
+    ).toBeLessThan(later.messages.findIndex((model) => model.id === 'next-input'));
+    await act(async () => draw());
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelectorAll('.model-connection')).toHaveLength(1);
+    const button = () =>
+      f.host.querySelector<HTMLButtonElement>('[aria-label="展开重连失败详情"]')!;
+    expect(button().textContent).toContain('重连失败第 5/5 次重连');
+    expect(button().getAttribute('aria-expanded')).toBe('false');
+    await act(async () => button().click());
+    const detail = f.host.querySelector('[aria-label="重连失败详情"]')!;
+    expect(detail.closest('.agent-turn-process')).not.toBeNull();
+    expect(detail.textContent).toContain('连接模型服务超时');
+    expect(detail.textContent).toContain('网络和代理');
+    expect(f.host.textContent).not.toMatch(
+      /private-token|raw stack|ECONNREFUSED|http:\/\/private|MODEL_ATTEMPT/,
+    );
+    expect(f.host.querySelector('.is-running')).toBeNull();
+    await act(async () => f.root.render(null));
+    await act(async () => draw());
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => button().click());
+    expect(f.host.querySelectorAll('[aria-label="重连失败详情"]')).toHaveLength(1);
+    for (const [code, detail, expected] of [
+      ['provider_unavailable', 'rate_limited', '限制了请求频率'],
+      ['provider_unavailable', 'service_unavailable', '暂时不可用'],
+      ['connection_failed', 'connection_refused', '拒绝了连接'],
+      ['connection_failed', 'name_resolution_failed', '无法解析'],
+      ['connection_failed', 'connection_interrupted', '传输过程中中断'],
+      ['provider_unavailable', 'request_timeout', '回复超时'],
+      ['stream_incomplete', 'unrecognized private error', '回复提前结束'],
+    ] as const) {
+      const last = {
+        ...attempts[5]!,
+        result: {
+          incomplete: true,
+          code: `MODEL_ATTEMPT_RETRYABLE_FAILURE:${code}`,
+          modelFailure: { detail },
+        },
+      };
+      const mapped = project(
+        { ...run(), status: 'failed', reason: 'model_reconnect_exhausted', isActive: false },
+        [...attempts.slice(0, 5), last],
+      );
+      expect(
+        mapped.messages.find((model) => model.systemKind === 'model_connection')
+          ?.modelConnectionFailure?.description,
+      ).toContain(expected!);
+    }
+  } finally {
+    await f.close();
+  }
 });
 
 test('only a local original user steer receives guidance classification; initial, follow-up, Fork and incomplete ownership stay ordinary', () => {
@@ -383,7 +687,7 @@ test('the original Conversation owns collapsed Run history, adjacent exploration
     expect(failed.messages.find((model) => model.id === 'before')!.finalReply).toBeUndefined();
     const failure = failed.messages.find((model) => model.systemKind === 'turn_failure')!;
     expect(failure.failure?.reasonCode).toBe('execution_failed');
-    expect(failure.failure?.summary).toBe('本轮回复未完成');
+    expect(failure.failure?.summary).toBe('本轮异常结束');
     expect(failure.text).not.toContain('execution_failed');
     const sealed = desktopTranscript({
       messages: [

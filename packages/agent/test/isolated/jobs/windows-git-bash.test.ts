@@ -39,7 +39,7 @@ try {
   write(compatibility, 'compatibility');
   Bun.which = command => { assert.equal(command, 'git'); return join(installation, 'cmd/git.exe'); };
   const state = join(root, 'state');
-  const staged = stageWindowsGitBash(state, coreutils, compatibility);
+  const staged = await stageWindowsGitBash(state, coreutils, compatibility);
   const runtime = join(dirname(staged.shell), '../..');
   const fullRuntime = join(dirname(staged.fullShell), '../..');
   const manifest = readFileSync(join(runtime, 'manifest.json'));
@@ -54,42 +54,42 @@ try {
     assert.equal(readFileSync(join(base, 'etc/ssl/certs/ca-bundle.crt'), 'utf8'), 'certificate');
     assert.equal(readFileSync(join(base, 'usr/bin/coreutils.exe'), 'utf8'), 'coreutils');
   }
-  assert.deepEqual(stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
   rmSync(staged.fullShell);
-  assert.deepEqual(stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
   assert.equal(readFileSync(staged.fullShell, 'utf8'), 'bash');
   for (const path of [staged.shell, staged.fullShell]) {
     writeFileSync(path, 'changed');
-    assert.throws(() => stageWindowsGitBash(state, coreutils, compatibility), /windows_git_bash_asset_changed/);
+    await assert.rejects(stageWindowsGitBash(state, coreutils, compatibility), /windows_git_bash_asset_changed/);
     assert.equal(readFileSync(path, 'utf8'), 'changed');
     writeFileSync(path, 'bash');
   }
-  assert.deepEqual(stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
   assert.deepEqual(readFileSync(join(runtime, 'manifest.json')), manifest);
-  const verify = captureWindowsGitBashRuntime(staged.shell, staged.fullShell);
-  verify(false); verify(true);
+  const verify = await captureWindowsGitBashRuntime(staged.shell, staged.fullShell);
+  await verify(false); await verify(true);
   let starts=0,full=false;
   mock.module(${JSON.stringify(owner)},()=>({WindowsOwnedChildStartError:class extends Error{},
     startWindowsOwnedChild:()=>{starts++;throw Error('unexpected_dispatch');}}));
   const {createWindowsShellJob}=await import(${JSON.stringify(jobModule)});
   const control=join(root,'control');mkdirSync(control);
-  const job=createWindowsShellJob({cwd:root,controlBase:control,env:{},stateRoot:state,
+  const job=await createWindowsShellJob({cwd:root,controlBase:control,env:{},stateRoot:state,
     supervisorPath:coreutils,shellExecutable:staged.shell,fullShellExecutable:staged.fullShell,
     coreutilsPath:staged.coreutils,executionScope:()=>({filesystem:full?'full_access':'workspace_write',network:'none'})});
   for (const base of [runtime, fullRuntime]) for (const name of ['usr/bin/msys-2.0.dll', 'usr/bin/ktipc.dll', 'mingw64/bin/git.exe', 'etc/ssl/certs/ca-bundle.crt']) {
     const path = join(base, name), original = readFileSync(path);
     writeFileSync(path, 'changed after capture');
-    assert.throws(() => verify(base === fullRuntime), /windows_git_bash_asset_changed/);
+    await assert.rejects(verify(base === fullRuntime), /windows_git_bash_asset_changed/);
     full=base===fullRuntime;
     await assert.rejects(job.start({command:'printf forbidden'},{signal:new AbortController().signal,sessionId:'s',executionId:'tampered'}),/windows_git_bash_asset_changed/);
     assert.equal(starts,0,'changed runtime closure must fail before native dispatch');
     writeFileSync(path, original);
-    verify(base === fullRuntime);
+    await verify(base === fullRuntime);
   }
   writeFileSync(join(runtime, 'manifest.json'), '{}');
-  assert.throws(() => verify(false), /confined_launch_changed/);
+  await assert.rejects(verify(false), /confined_launch_changed/);
   writeFileSync(join(runtime, 'manifest.json'), manifest);
-  verify(false); verify(true);
+  await verify(false); await verify(true);
 } finally {
   assert.equal(realpathSync.native(root), root);
   rmSync(root, {recursive:true,force:true});

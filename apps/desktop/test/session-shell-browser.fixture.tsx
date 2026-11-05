@@ -19,6 +19,14 @@ export const control = sessionSwitchBridge({
   protocol: 'chat-completions',
   modelNames: { b: 'Model B Extended Reasoning Route' },
   replyParagraphs: new URL(location.href).searchParams.has('long') ? 40 : 0,
+  initialSelection: !new URL(location.href).searchParams.has('long'),
+  turnNotifications: new URL(location.href).searchParams.has('turn-notifications'),
+  cacheMetrics: !['none', 'context'].includes(
+    new URL(location.href).searchParams.get('metrics') ?? '',
+  ),
+  contextUsage: ['both', 'context'].includes(
+    new URL(location.href).searchParams.get('metrics') ?? '',
+  ),
 });
 declare global {
   interface Window {
@@ -220,6 +228,63 @@ createRoot(document.getElementById('root')!).render(
       </fieldset>
     </section>
   ) : (
-    <NativeDesktop nativeWindow={settingsGeometry} />
+    <>
+      <NativeDesktop nativeWindow={settingsGeometry} />
+      {new URL(location.href).searchParams.has('turn-notifications') && (
+        <section
+          aria-label="完成提醒测试夹具"
+          style={{ position: 'fixed', right: 8, top: 8, zIndex: 9999 }}
+        >
+          <button type="button" onClick={() => control.setTurn('b', 'completed')}>
+            结束 B
+          </button>
+          <button type="button" onClick={() => control.setTurn('b', 'running', 'next-b')}>
+            运行 B
+          </button>
+          <button type="button" onClick={() => control.setTurn('b', 'failed', 'next-b')}>
+            B 新一轮失败
+          </button>
+          <button type="button" onClick={() => control.setTurn('a', 'completed')}>
+            结束 A
+          </button>
+          <button type="button" onClick={() => control.setTurn('a', 'running', 'next-a')}>
+            运行 A
+          </button>
+          <button type="button" onClick={() => control.setTurn('a', 'failed', 'next-a')}>
+            A 新一轮失败
+          </button>
+          <button type="button" onClick={() => control.hold()}>
+            暂停读取
+          </button>
+          <button type="button" onClick={() => control.release('selection')}>
+            释放选择
+          </button>
+          <button type="button" onClick={() => control.release('models')}>
+            释放模型
+          </button>
+          <button type="button" onClick={() => control.release('history')}>
+            释放历史
+          </button>
+          <button type="button" onClick={() => control.release('receipt')}>
+            释放已读保存
+          </button>
+          <button type="button" onClick={() => control.resume()}>
+            恢复读取
+          </button>
+          <button type="button" onClick={() => control.fail(true)}>
+            读取失败
+          </button>
+          <button type="button" onClick={() => control.fail(false)}>
+            读取恢复
+          </button>
+          <button type="button" onClick={() => control.failReceipt(true)}>
+            已读保存失败
+          </button>
+          <button type="button" onClick={() => control.failReceipt(false)}>
+            已读保存恢复
+          </button>
+        </section>
+      )}
+    </>
   ),
 );

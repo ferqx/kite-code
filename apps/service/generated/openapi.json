@@ -2921,6 +2921,62 @@
         }
       }
     },
+    "/v1/config/user/skills/document": {
+      "get": {
+        "parameters": [
+          {
+            "name": "storeId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "skillId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "skillVersion",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSkillDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config/user/skills": {
       "get": {
         "parameters": [
@@ -6664,6 +6720,62 @@
           "complete",
           "scope"
         ],
+        "additionalProperties": false
+      },
+      "UserSkillDocumentQuery": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "skillId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "skillVersion": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["storeId", "skillId", "skillVersion", "revision"],
+        "additionalProperties": false
+      },
+      "UserSkillDocument": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "skillId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "skillVersion": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "required": ["storeId", "skillId", "skillVersion", "revision", "body"],
         "additionalProperties": false
       },
       "UserMcpSettingsQuery": {

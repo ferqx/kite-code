@@ -6,9 +6,9 @@ import type {
   NativeUserMcpRequest,
   NativeUserMcpResult,
   NativeUserMcpSubmission,
-} from '../src/mcp-bridge';
-import type { NativeBridge } from '../src/native-bridge';
-import { prepareDesktopDom } from './native-page-dom.fixture';
+} from '../../src/mcp-bridge';
+import type { NativeBridge } from '../../src/native-bridge';
+import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>');
 const priorBootstrap = {
@@ -22,7 +22,7 @@ Object.assign(globalThis, {
   navigator: bootstrap.window.navigator,
 });
 const { createRoot } = await import('react-dom/client');
-const { NativeMcpSettings } = await import('../src/native-mcp-settings');
+const { NativeMcpSettings } = await import('../../src/native-mcp-settings');
 Object.assign(globalThis, priorBootstrap);
 bootstrap.window.close();
 const serverId = `mcp-${'1'.repeat(64)}`;

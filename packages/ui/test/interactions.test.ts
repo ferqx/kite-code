@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Interaction } from '@kite-ai/client';
 import { InteractionCard } from '../src';
+import { Button } from '../src/desktop/ui';
 
 export const card: Interaction = {
   id: 'i',
@@ -33,7 +34,7 @@ test('pure React element projection preserves true child and exact request; read
   const element = InteractionCard({ interaction: card });
   expect(JSON.stringify(element)).toContain('child');
   expect(JSON.stringify(element)).toContain('actual.txt');
-  const buttons = nodes(element).filter((node) => node.type === 'button');
+  const buttons = nodes(element).filter((node) => node.type === Button);
   expect(buttons.map((button) => button.props.children)).toEqual(['Approve once', 'Deny']);
   expect(buttons.every((button) => button.props.disabled)).toBe(true);
 });
@@ -45,10 +46,10 @@ test('submitting panel persists and disables offered approvals; saved plan is di
   });
   expect(
     nodes(element)
-      .filter((node) => node.type === 'button')
+      .filter((node) => node.type === Button)
       .every((button) => button.props.disabled),
   ).toBe(true);
   expect(JSON.stringify(element)).toContain('Acceptance does not prove execution');
   const plan = InteractionCard({ interaction: { ...card, kind: 'plan_review' }, onAnswer() {} });
-  expect(nodes(plan).filter((node) => node.type === 'button')).toHaveLength(0);
+  expect(nodes(plan).filter((node) => node.type === Button)).toHaveLength(0);
 });

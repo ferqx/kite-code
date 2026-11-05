@@ -1,0 +1,63 @@
+.kite-client .skills-settings .skill-detail-description {
+  margin: 0;
+  font-size: var(--ui-text-size);
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.kite-client .desktop-settings .skills-settings .skill-detail-heading .skill-detail-title h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.skills-settings .skill-detail-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.skills-settings .skill-detail-title > span {
+  color: var(--muted-foreground);
+}
+
+.skills-settings .skill-detail-content {
+  display: grid;
+  gap: 16px;
+}
+
+.skills-settings .skill-document {
+  height: clamp(220px, 48dvh, 480px);
+  min-height: 180px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--form-control-radius);
+  background: var(--background);
+  user-select: text;
+}
+
+.skills-settings .skill-document > p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+.kite-client .skills-settings .skill-document .typeset-chat p {
+  color: var(--foreground);
+  font-size: var(--ui-text-size);
+}
+
+.kite-client .desktop-settings .skills-settings .skill-document pre {
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.skills-settings .skill-detail-source,
+.skills-settings .skill-detail-notice {
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+}

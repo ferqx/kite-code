@@ -55,6 +55,7 @@ export function memoryPrivateData(): PrivateData {
   const mcps = new Map<string, NativeStoredMcpRecord>();
   const configurations = new Map<string, NativeConfigurationRecord>();
   const routes = new Map<string, string>();
+  const readTurns = new Map<string, Map<string, string>>();
   const answers = new Map<string, NativeAnswerRecord>();
   const drafts = new Map<string, NativeDraft>(),
     creations = new Map<string, NativeCreation>(),
@@ -144,6 +145,12 @@ export function memoryPrivateData(): PrivateData {
       if (['applied', 'failed'].includes(record.state.phase))
         configurations.delete(record.input.commandId);
       else configurations.set(record.input.commandId, record);
+    },
+    readTurns: (storeId) => [...(readTurns.get(storeId) ?? [])],
+    markTurnRead(input) {
+      const turns = readTurns.get(input.expectedStoreId) ?? new Map<string, string>();
+      turns.set(input.sessionId, JSON.stringify([input.runId, input.status]));
+      readTurns.set(input.expectedStoreId, turns);
     },
     modelRoute: (storeId, sessionId) => routes.get(JSON.stringify([storeId, sessionId])),
     rememberModelRoute: (storeId, sessionId, modelId) => {

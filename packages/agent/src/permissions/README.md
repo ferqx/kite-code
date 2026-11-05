@@ -116,10 +116,12 @@ Shell 与私有文件适配器的最终证明共用内部 [dispatch-scope](dispa
 
 [shell-command-policy.ts](shell-command-policy.ts) 使用本包固定 `tree-sitter-bash 0.25.1` 与 `web-tree-sitter 0.25.10` WASM。有限字面量 AST 与危险扫描分开，保原 cwd 分支预算与资产完整性校验；动态或不透明命令不取得安全证明，由实际系统范围约束，越界失败不自动扩权重跑。两个公开 entry 均进入本包 build；正式制品按 Agent manifest 复制完整解析依赖。
 
+[shell.ts](shell.ts) 的配置捕获与每次派发前资产重核使用 [Jobs 的有界异步完整校验](../jobs/README.md#默认-windows-git-bash)，rg 与解析器资产同样逐次重核，不因异步化跳过。派发复核接原 Job 取消信号，失败或取消等待已开始的读取关闭后才报告未派发；Windows 工厂也须等待捕获完成。解析器 WASM 加载和后续内容重核均异步，已加载实例的来源摘要守卫及危险命令规则保持。装配入口可传可信取消信号；Service 恢复装配传原恢复信号，普通 Run 装配不虚构新的取消来源。
+
 绝对分析路径保自身语义：盘符及反斜杠 UNC 按 Windows 解析，POSIX 绝对路径按 POSIX 解析，相对 cwd 才使用宿主实际目录。POSIX 的 `//etc` 保原系统目录归一化和极危险拒绝，不因测试宿主或 UNC 猜测改变结果；已确认的 Windows UNC cwd 在后续命令中保持其语义。三端共享测试同时核盘符危险目标和 POSIX 双斜杠拒绝，支持 Shell 清单、审批模式及危险路径集合保持；这些纯解析结果不补齐 Windows 实际 Shell 后端资格。
 
 [原策略测试](../../test/isolated/permissions/policy.test.ts)、[独立解析与资产篡改测试](../../test/isolated/permissions/shell-command-policy.test.ts)、[独立范围测试](../../test/isolated/permissions/shell-scoped-permissions.test.ts)从原 Service owner 迁入，原用例及断言保持；策略测试另通过真实 Core 核同名扩展不能借只读权限、Workflow Job 不降格。实际 macOS [Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[网络审批](../../../../apps/service/test/isolated/web-permissions.test.ts)继续验证正式调用链。边界检查沿公开导出和 barrel 拒绝本模块反向依赖 Service、Service 直接解析依赖或重新实现原工厂。
 
-Linux/Windows 真实执行依用户安排后置，Windows 正式 Shell 后端仍缺失；发布 RSS 稳定性、完整 Runtime 观测资格及 V1.3 阶段退出门禁保留。当前开发阶段的正常运行和内存稳定证据不等同于取得这些正式资格，源码迁移和本机通过也不解除它们。
+Windows 默认 Git Bash 的本机执行、审批与取消资格归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)，其他平台的实际执行范围归 [Jobs owner](../jobs/README.md)。发布 RSS 稳定性、完整 Runtime 观测资格及 V1.3 阶段退出门禁保留；源码迁移和本机通过不解除这些门禁。
 
 [真实 pending approval SIGKILL 回归](../../test/isolated/recovery/live-approval-crash.test.ts)在审批卡和原 planned Tool 已耐久后杀死自有进程（核 SIGKILL/137），只读重开保持原卡/Run/执行和 cursor、模型 ledger 不增长。随后持久根模式由请求批准改为 Full，冷 Runtime 观察仍不准备 Provider；错误主体显式恢复被拒，准确原 Run 显式恢复才读取当前 applied control revision、同事务失效旧卡并派发原 Tool。外置 ledger 核原效果一次、已成功原 Model 不重放、重复同一恢复不增效果；原 request/source 不变、answer 仍 null，唯一失效回执保准确原revision/当前controls。该 fixture只验证这一实际进程丢失与模式变化边界，不替代其他平台或所有自动审核崩溃场景。

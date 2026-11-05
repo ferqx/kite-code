@@ -68,6 +68,7 @@ const responseNames = [
   'SessionLogPage',
   'SkillCataloguePage',
   'UserSkillCataloguePage',
+  'UserSkillDocument',
   'UserMcpSettingsView',
   'UserMcpOperationResult',
   'UserMcpToolsPage',
@@ -143,6 +144,7 @@ const requestNames = [
   'BrowserSessionLogQuery',
   'SkillCatalogueQuery',
   'UserSkillCatalogueQuery',
+  'UserSkillDocumentQuery',
   'UserMcpSettingsQuery',
   'UserMcpSettingsRequest',
   'UserMcpOperationQuery',
@@ -250,6 +252,7 @@ for (const [prefix, names] of [
       name !== 'HostStatus' &&
       name !== 'SkillCataloguePage' &&
       name !== 'UserSkillCataloguePage' &&
+      name !== 'UserSkillDocument' &&
       name !== 'UserMcpSettingsView' &&
       name !== 'UserMcpOperationResult' &&
       name !== 'UserMcpToolsPage' &&

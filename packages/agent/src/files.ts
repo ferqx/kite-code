@@ -35,6 +35,9 @@ export {
 export type { FileMutationCapture } from './tools/files-tools';
 export { createFileTools } from './tools/files-tools';
 export { withFullAccessFiles } from './tools/full-access-files';
+export { imageAssets } from './tools/images/processor';
+export { createImageFileReads } from './tools/images/reader';
+export { createViewImagesTool } from './tools/images/tool';
 export { withInputFileReads } from './tools/input-files';
 export { type EditablePlanFile, withPlanFileTools } from './tools/plan-files';
 export { type SessionOutput, withSessionOutputs } from './tools/session-outputs';

@@ -12,11 +12,23 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 ## 当前新图与Windows资格
 
+Git Bash 准备入口异步等待两套副本完整校验，最多8个文件并发，未修改映像只复用本次读取所得的源摘要。现存资产不覆盖，排他创建缺失文件；失败等待所有已开始的读写结算后拒绝返回。清单格式、完整源／目标内容核验、所选副本的逐次派发核验和协议6保持；不以元数据缓存、硬链接或共享 MSYS 映像缩减安全边界。实现、回归与本机耗时范围归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)和 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+
 Job 只有在 READY 核验与 GO 写入确认后进入 running；失败准入仍把原 handle 交回 Core，清理未知不会丢失停止能力或释放资源。确认未派发的准备失败不虚构进程 owner，正常释放资源。运行时以原 manifest 固定完整所选副本的文件摘要，每次派发重核，包括 MSYS／兼容 DLL 和 Git helper；资产漂移先于 native 创建失败。原 runner 的 ACL 账本同步、关闭写句柄后再原子发布；Windows 临时访问／共享冲突仅在200ms内重试原替换，持续失败仍保原账本并拒绝启动。连续替换、短冲突恢复与持续冲突零损坏由 [原生回归](../../native/windows-sandbox-runner/src/direct_workspace.rs)核验。协议6与runner0.8.3不变，权限范围不扩。
+
+派发前完整资产校验已改为有界、可取消的异步读取，主动交还事件循环；取消和失败等待已开始读取关闭，确认零业务派发后才结算。多会话共享读取名额但独立持有校验状态，B 的读取未完成不会阻止 A 取消或 C 执行。每条命令仍创建独立 Bash／Job，不复用活进程；资源上限、完整身份与 SHA 守卫及本机回归归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)，正式调度证据归 [Service](../../apps/service/README.md#默认-shell-装配)。
+
+同日扩大到32会话后，真实排队／32条同时执行、单独取消及准确关闭通过，完整校验保持进程内8路上限。随后按确认范围优化新鲜配置／权限检查调度、纯模型 schema 编译复用及 Windows 临时目录异步清理；无 profiler 的相同32会话夹具中，默认4槽最大心跳约1608→598ms，显式32槽约2858→553ms，原执行／取消／全关闭断言保持。会话锁路径、Store 序列化及 Artifact 持久发布仍有峰值，完整链路的响应性缺口尚未全部消除，不能据此宣称几十会话始终不卡。完整比较、实现 owner 与复现入口归 [Service](../../apps/service/README.md#默认-shell-装配)；正式默认并发、完整校验及逐条独立执行保持，没有引入进程池。
+
+2026-11-05，Windows x64／Bun1.4.4 的隔离 Native 开发制品使用真实默认 Service／SQLite／Git Bash 与固定本地模型，连续观察提交、资产读取、取消、其他会话执行和恢复。测试夹具保持 B 的真实读取未完成，A 的原 Job 在191／238ms内确认取消，C 随后完成写入与管道；B 取消后先关闭读取，保持零 native reference、零业务写入。长消息场景中取消等待时切换约72ms，真实滚轮将原阅读位置移动500px，取消完成后仍停在同一阅读位置；Main 心跳最大约73ms、Renderer 帧间隔最大约25ms，观察全程没有新可见终端窗口。原始过程及截图保于本机 `.cache/cancel-native-inspection-ft2CEn/` 的 `SHELL-ASYNC-UI-RESULT.json`、`SHELL-ASYNC-SCROLL-UI-RESULT.json` 与对应 trace。暂停读取只在独立测试制品启用，普通客户端没有新开关。客户端现有取消等待期间的输入禁用状态保持；上述结果仅覆盖本机读取调度与所观察过程，不代表其他卡顿来源、实际拖窗或完整安装发布资格。
+
+三条同步路径优化后，同一独立 Native 场景再观察183份连续页面状态与 trace：B 保持读取时 A 在331ms确认取消、C 实际完成写入和管道；B 取消等待期间切换约73ms、滚动500px，读取关闭后恢复且阅读位置保持，零 Renderer 错误／新增终端。Main 心跳最大约57ms、帧间隔最大约31ms。证据为上述本机目录的 `SHELL-OPTIMIZED-SCROLL-UI-RESULT.json` 及 `shell-optimized-scroll-trace.zip`；原 Main／Service 均已退出。此处仍仅为三会话实际 UI 过程，32会话结果来自独立 Service 压测，两者不混称为32会话 Native 资格。
 
 2026-11-02 已按用户确认的无账户 unelevated 边界，将原协议6 runner 接入普通 Job 和默认 Git Bash。工作区范围沿原 WRITE_RESTRICTED 令牌及 capability ACL 限制写入；读取沿宿主 ACL，离线范围提供代理及常用包管理器的环境提示，不承诺系统级断网或禁止读取路径。Full 明确绕过沙箱；准确批准的完整文件范围与网络范围分别传递，不能由联网批准隐式扩大文件权限。没有新增账户、WFP 规则或设置入口。
 
 当前执行宿主为 Windows x64 的 Bun Service；正式 Terminal／Native 客户端使用该宿主。Node 嵌入不宣告这一依赖 Bun FFI 的 Shell 能力，避免先提供定义再在派发时失败。工作区加联网范围仍保持受限令牌；依赖系统 Schannel 的工具可能保留该令牌的兼容性限制，不能自动升为完整文件范围。
+
+全部命令的统一环境路径、后台隐藏窗口、可取消的工作区准备及未完成权限传播恢复归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。取消准备不能把部分继承标为完成，也不能忽略本次临时 ACL 撤销失败；已有业务进程继续核原完整 Job。没有新增工具字段或配置开关，协议6、runner0.8.3、业务审批与未知结果合同保持。
 
 业务允许／拒绝只由统一权限与计划／角色上限决定。Tool 和真实 Job 按各自原身份授权；runner 只消费最终 markDispatching 接纳的父／子范围交集，不按默认范围覆盖批准，也不再安装独立命令拒绝脚本。范围外的 OS 访问失败、坏协议／资产身份及清理未知仍按执行事实报告，不构成新的业务审批。批准外部写入后，完整文件范围可实际执行；不因它位于 Workspace 外在 Shell 层再拒一次。
 

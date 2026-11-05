@@ -28,6 +28,8 @@ import {
   SkillCatalogueQuerySchema,
   UserSkillCataloguePageSchema,
   UserSkillCatalogueQuerySchema,
+  UserSkillDocumentQuerySchema,
+  UserSkillDocumentSchema,
 } from './http/schema/skill-catalogue';
 import { createHttpLifecycle } from './lifecycle';
 import { executionResponse, messageResponses } from './message-response';
@@ -290,6 +292,7 @@ export async function startService(options: ServiceOptions) {
         'host_status',
         'skill_catalogue',
         'user_skill_catalogue',
+        'user_skill_document',
         'user_mcp_settings',
         'run_skill_selection',
         'run_extension_inputs',
@@ -328,6 +331,7 @@ export async function startService(options: ServiceOptions) {
   if (options.userMcpManagement) capabilities.push('user_mcp_settings');
   if (options.skillCatalogue) capabilities.push('skill_catalogue');
   if (options.skillCatalogue?.listUser) capabilities.push('user_skill_catalogue');
+  if (options.skillCatalogue?.readUserDocument) capabilities.push('user_skill_document');
   if (sessionLogs) capabilities.push('session_logs');
   if (supportsFileRecovery(options.runtime)) capabilities.push('file_recovery');
   schemas.ServerInfo.parse({
@@ -1383,6 +1387,35 @@ export async function startService(options: ServiceOptions) {
         ),
       ),
     );
+  });
+  app.get('/v1/config/user/skills/document', async (context) => {
+    context.header('cache-control', 'no-store');
+    const query = sessionExportQuery(context.req.queries(), UserSkillDocumentQuerySchema);
+    if ((await runtime.getMetadata()).storeId !== query.storeId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    if (!options.skillCatalogue?.readUserDocument)
+      throw new HttpFailure('capability_unavailable', 404);
+    const document = await options.skillCatalogue
+      .readUserDocument({ ...query, subjectId, runtime })
+      .catch((error: unknown) => {
+        const code = (error as { code?: string })?.code;
+        if (code === 'skill_catalogue_changed' || code === 'skill_version_changed')
+          throw new HttpFailure(code, 409);
+        if (code === 'skill_not_discovered' || code === 'skill_unavailable')
+          throw new HttpFailure('skill_unavailable', 404);
+        if (code === 'skill_text_limit') throw new HttpFailure(code, 413);
+        throw error;
+      });
+    if (
+      document.storeId !== query.storeId ||
+      document.skillId !== query.skillId ||
+      document.skillVersion !== query.skillVersion ||
+      document.revision !== query.revision
+    )
+      throw new HttpFailure('skill_catalogue_identity_mismatch', 409);
+    const verified = UserSkillDocumentSchema.parse(document);
+    if (Buffer.byteLength(verified.body) > 1048576) throw new HttpFailure('skill_text_limit', 413);
+    return context.json(verified);
   });
   app.get('/v1/config/user/skills', async (context) => {
     context.header('cache-control', 'no-store');

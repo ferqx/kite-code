@@ -256,6 +256,12 @@ test('actual SDK DCR/PKCE accepts only exact callback; cold vault resumes and pr
     expect(
       decodeMcpOAuthLauncherObservation({
         ...launcher,
+        launcher: { ...launcher.launcher, exit: { code: 0, signal: 15, reaped: true } },
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeMcpOAuthLauncherObservation({
+        ...launcher,
         launcher: { ...launcher.launcher, kernelState: 'alive' },
       }),
     ).toBeUndefined();

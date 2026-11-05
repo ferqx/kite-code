@@ -33,6 +33,7 @@ export interface Message {
     | 'agent_result'
     | 'turn_timing'
     | 'turn_terminal'
+    | 'model_connection'
     | 'turn_failure';
   /** Core-confirmed ordinary Agent mail in its receiving parent's Turn. */
   readonly agentMessage?: {
@@ -69,6 +70,8 @@ export interface Message {
       readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
     };
   };
+  /** Human-readable terminal transport facts; never raw Provider errors or logs. */
+  readonly modelConnectionFailure?: { readonly description: string; readonly suggestion: string };
   /** Exact terminal fact for a hidden Turn marker; independent of message status. */
   readonly turnTerminalStatus?: 'completed' | 'failed' | 'cancelled' | 'aborted';
   readonly approval?: {
@@ -150,6 +153,8 @@ export interface Message {
     readonly cancelRequested?: boolean;
   };
   readonly toolName?: string;
+  /** Count from a verified successful original image Tool receipt, never model-authored text. */
+  readonly toolImageCount?: number;
   /** Host-confirmed display classification; tool aggregation does not require it. */
   readonly presentation?: 'exploration' | 'standalone' | 'hidden';
   /** Exact child-task owner for internal tool presentation. */
@@ -211,6 +216,8 @@ export interface TurnActivity {
 }
 
 export interface SessionSummary {
+  /** Host-confirmed latest terminal turn has not been read in this client. */
+  readonly hasUnreadTurn?: boolean;
   readonly sessionId: string;
   readonly displayName: string;
   readonly status: string;

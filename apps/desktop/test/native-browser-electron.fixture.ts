@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { release } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import {
   app,
   ipcMain,
+  nativeTheme,
   shell,
   type WebContents,
   type WebContentsView,
@@ -38,11 +39,14 @@ declare global {
     hits: Record<string, number>;
     externalUrls: string[];
     forwardExternal: boolean;
+    recoverEnginePage: boolean;
+    releaseSlowDocuments(): void;
     retained?: { contents: WebContents; view: WebContentsView; frame: WebFrameMain };
   };
 }
 void app.whenReady().then(async () => {
   const hits: Record<string, number> = {};
+  const slowScripts = new Set<ServerResponse>();
   const server = createServer((request, response) => {
     const url = new URL(request.url!, 'http://localhost');
     hits[url.pathname] = (hits[url.pathname] ?? 0) + 1;
@@ -52,12 +56,35 @@ void app.whenReady().then(async () => {
       response.end(
         `<!doctype html><html data-theme="dark" data-native-window="true"${platform ? ` data-platform="${platform}"` : ''} data-window-material="${material}"><head><link rel="stylesheet" href="/browser-ui.css"></head><body><div id="root"></div><script type="module" src="/browser-ui.js"></script></body></html>`,
       );
+    } else if (url.pathname === '/slow-document') {
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end(
+        '<!doctype html><title>Slow document</title><h1>Slow document</h1><script src="/pending-script"></script>',
+      );
+    } else if (url.pathname === '/slow-response') {
+      slowScripts.add(response);
+      response.on('close', () => slowScripts.delete(response));
+    } else if (url.pathname === '/pending-script') {
+      response.setHeader('content-type', 'text/javascript');
+      slowScripts.add(response);
+      response.on('close', () => slowScripts.delete(response));
     } else if (url.pathname === '/one' || url.pathname === '/two') {
       const title = url.pathname === '/one' ? 'Page One' : 'Page Two';
       response.setHeader('content-type', 'text/html');
       response.end(
         `<html><head><title>${title}</title></head><body><h1>${title}</h1><input id="retained" aria-label="Retained form"><a id="next" href="/two">Next</a><a id="file" href="file:///C:/private.txt">File</a><a id="popup" href="/two" target="_blank">Popup</a><a id="download" href="/download">Download</a><div style="height:1000px">Reading content</div><h2 id="reading">Retained reading position</h2><div style="height:1000px">More content</div></body></html>`,
       );
+    } else if (
+      url.pathname === '/engine-failure' &&
+      !globalThis.browserTabsHostFixture.recoverEnginePage
+    ) {
+      request.socket.destroy();
+    } else if (url.pathname === '/engine-failure' || url.pathname === '/site-404') {
+      const title = url.pathname === '/site-404' ? 'Site supplied 404' : 'Recovered engine page';
+      response.writeHead(url.pathname === '/site-404' ? 404 : 200, {
+        'content-type': 'text/html; charset=utf-8',
+      });
+      response.end(`<!doctype html><title>${title}</title><h1>${title}</h1>`);
     } else if (url.pathname === '/download') {
       response.setHeader('content-disposition', 'attachment; filename="example.txt"');
       response.end('example');
@@ -95,12 +122,31 @@ void app.whenReady().then(async () => {
     height: 800,
     show: false,
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    // Exercise the same Windows titlebar, transparent Root and material as the
+    // ordinary client. A framed, opaque fixture has a different paint path.
+    ...(process.platform === 'win32'
+      ? {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: {
+            color: '#00000000',
+            symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
+            height: 32,
+          },
+          ...(material === 'mica' ? { backgroundMaterial: 'mica' as const } : {}),
+          backgroundColor:
+            material === 'mica'
+              ? '#00000000'
+              : nativeTheme.shouldUseDarkColors
+                ? '#191919'
+                : '#fafafa',
+        }
+      : {}),
     webPreferences: {
       preload: join(directory, 'preload.cjs'),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      backgroundThrottling: false,
+      ...(process.platform !== 'win32' ? { backgroundThrottling: false } : {}),
     },
   });
   // The renderer supplies explicit Root-local draft owners. No Core selection
@@ -123,6 +169,11 @@ void app.whenReady().then(async () => {
     hits,
     externalUrls,
     forwardExternal: false,
+    recoverEnginePage: false,
+    releaseSlowDocuments() {
+      for (const response of slowScripts) response.end('');
+      slowScripts.clear();
+    },
   };
   await window.loadURL(`${origin}/`);
   app.once('will-quit', () => {

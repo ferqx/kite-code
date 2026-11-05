@@ -4,7 +4,12 @@ import type { NativeBridge, NativeSelection } from './native-bridge';
 import { NativeDisplayCache } from './native-display-cache';
 import { modelUsageMessageKey, type NativeContextUsage } from './tool-messages-bridge';
 
-type Receipt = { messageKey: string; content: string; context: NativeContextUsage };
+type Receipt = {
+  messageKey: string;
+  content: string;
+  context?: NativeContextUsage;
+  modelId?: string;
+};
 
 /** Current-context forecast only; cache-hit and cumulative token counts never enter this ratio. */
 export function useNativeContextUsage({
@@ -140,18 +145,20 @@ export function useNativeContextUsage({
                 context.contextWindowTokens <= 0)))
         )
           throw Error('context_usage_identity_mismatch');
-        const receipt =
-          context && (!modelId || context.modelId === modelId)
-            ? { messageKey, content, context }
-            : undefined;
-        if (receipt) snapshots.current.cache.set(displayKey, receipt);
-        else snapshots.current.cache.delete(displayKey);
+        const receipt: Receipt = {
+          messageKey,
+          content,
+          modelId,
+          context: context && (!modelId || context.modelId === modelId) ? context : undefined,
+        };
+        snapshots.current.cache.set(displayKey, receipt);
         setState({ scope, receipt });
       })
       .catch(() => {
         if (active) {
-          snapshots.current.cache.delete(displayKey);
-          setState({ scope, failed: true });
+          const receipt = { messageKey, content, modelId };
+          snapshots.current.cache.set(displayKey, receipt);
+          setState({ scope, receipt, failed: true });
         }
       });
     return () => {
@@ -177,14 +184,24 @@ export function useNativeContextUsage({
   ]);
   const displayed =
     state?.scope === scope ? state.receipt : snapshots.current.cache.get(displayKey);
-  const metrics =
-    !suspended &&
+  const observed =
     candidate &&
     displayed &&
     displayed.messageKey === messageKey &&
     displayed.content === content &&
-    (!modelId || displayed.context.modelId === modelId)
-      ? displayed.context
-      : undefined;
-  return { metrics };
+    (displayed.context
+      ? !modelId || displayed.context.modelId === modelId
+      : !modelId || displayed.modelId === modelId);
+  const metrics = !suspended && observed ? displayed.context : undefined;
+  return {
+    metrics,
+    pending:
+      !!bridge &&
+      !suspended &&
+      !!selection &&
+      selection.canReadContext !== false &&
+      selection.canReadModelInput !== false &&
+      !observed &&
+      (!historyComplete || (available && !!candidate && state?.scope !== scope)),
+  };
 }

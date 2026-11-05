@@ -1,5 +1,9 @@
 import type { PublicView } from '@kite-ai/client';
 import { type FormEvent, useId, useRef, useState } from 'react';
+import { Button } from './desktop/components/ui/button';
+import { Input } from './desktop/components/ui/input';
+import { SelectField } from './desktop/components/ui/select-field';
+import { Textarea } from './desktop/components/ui/textarea';
 import { describeInput, serializeInput } from './form';
 
 export type PublicAction = PublicView['actions'][number];
@@ -42,16 +46,16 @@ export function PublicViewCard({
           ))}
         </ul>
       )}
-      <div>
+      <div className="actions">
         {projected.actions.map((action, index) => (
-          <button
+          <Button
             key={`${action.actionId}:${index}`}
             type="button"
             disabled={!onAction}
             onClick={() => onAction?.(action)}
           >
             {action.label}
-          </button>
+          </Button>
         ))}
       </div>
     </article>
@@ -135,9 +139,11 @@ export function ActionInputForm({
   return (
     <form onSubmit={submit}>
       {form.kind === 'raw-json' ? (
-        <label>
+        <label htmlFor={`${formId}-raw`}>
           {form.reason}
-          <textarea
+          <Textarea
+            id={`${formId}-raw`}
+            className="field-sizing-fixed min-h-24 max-h-60 resize-y"
             aria-label="Raw JSON input"
             value={raw}
             disabled={disabled || submitting}
@@ -162,22 +168,19 @@ export function ActionInputForm({
                 onChange={(event) => changeValues(field.name, event.target.checked)}
               />
             ) : field.kind === 'enum' ? (
-              <select
+              <SelectField
                 id={`${formId}-${field.name}`}
                 value={String(values[field.name] ?? '')}
                 required={field.required}
                 disabled={disabled || submitting}
-                onChange={(event) => changeValues(field.name, event.target.value)}
-              >
-                <option value="">Select</option>
-                {field.choices?.map((choice) => (
-                  <option key={choice} value={choice}>
-                    {choice}
-                  </option>
-                ))}
-              </select>
+                onValueChange={(value) => changeValues(field.name, value)}
+                options={[
+                  { value: '', label: 'Select' },
+                  ...(field.choices ?? []).map((choice) => ({ value: choice, label: choice })),
+                ]}
+              />
             ) : (
-              <input
+              <Input
                 id={`${formId}-${field.name}`}
                 type={field.kind === 'number' || field.kind === 'integer' ? 'number' : 'text'}
                 step={field.kind === 'integer' ? '1' : 'any'}
@@ -191,9 +194,9 @@ export function ActionInputForm({
         ))
       )}
       {error && <p role="alert">{error}</p>}
-      <button type="submit" disabled={disabled || submitting}>
+      <Button type="submit" disabled={disabled || submitting}>
         {submitLabel}
-      </button>
+      </Button>
     </form>
   );
 }

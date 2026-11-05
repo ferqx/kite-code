@@ -109,7 +109,10 @@ export interface WorkspaceFiles {
   /** Trusted host metadata only: strict parent/file identity from the actual native IO. */
   inspectIdentity(path: string): Promise<{ parent: FileIdentity; file: FileIdentity | null }>;
   /** Trusted host byte primitives; not additional Model tools or authority. */
-  readBytes(path: string, options: { maxBytes: number }): Promise<FileByteSnapshot>;
+  readBytes(
+    path: string,
+    options: { maxBytes: number; signal?: AbortSignal; sharedRead?: boolean },
+  ): Promise<FileByteSnapshot>;
   restore(input: {
     path: string;
     bytes: Uint8Array;
@@ -364,11 +367,13 @@ export function createWorkspaceFiles(options: {
   async function withReadParent<T>(
     path: string,
     work: (parent: number, name: string) => Promise<T>,
+    strict = false,
   ): Promise<T> {
     check();
     const parts = segments(path);
     if (!parts.length) fail('file_path_invalid');
-    if (protectReads && isProtected(parts.join('/'))) fail('file_path_protected');
+    if ((strict || protectReads) && isProtected(parts.join('/'))) fail('file_path_protected');
+    if (strict) io.verifyOwner(rootFd);
     const opened: number[] = [];
     let fd = rootFd;
     let failed = false;
@@ -376,8 +381,9 @@ export function createWorkspaceFiles(options: {
     let result: T | undefined;
     try {
       for (const part of parts.slice(0, -1)) {
-        fd = io.openAt(fd, part, 'directory');
+        fd = io.openAt(fd, part, 'directory', strict);
         opened.push(fd);
+        if (strict) io.verifyOwner(fd);
       }
       result = await work(fd, parts.at(-1)!);
     } catch (error) {
@@ -655,13 +661,29 @@ export function createWorkspaceFiles(options: {
     name: string,
     path: string,
     limit: number,
+    strict = true,
   ): FileByteSnapshot {
-    const fd = io.openAt(parent, name, 'read', true);
+    const steps = readByteSteps(parent, name, path, limit, strict);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  }
+  function* readByteSteps(
+    parent: number,
+    name: string,
+    path: string,
+    limit: number,
+    strict: boolean,
+  ): Generator<void, FileByteSnapshot, void> {
+    const fd = io.openAt(parent, name, 'read', strict);
     try {
       const before = io.stat(fd);
       if (!before.isFile()) fail('file_not_regular');
-      io.verifyOwner(fd);
-      if (before.nlink !== 1n) fail('file_owner_invalid');
+      if (strict) {
+        io.verifyOwner(fd);
+        if (before.nlink !== 1n) fail('file_owner_invalid');
+      }
       if (before.size > BigInt(limit)) fail('file_too_large');
       const chunks: Buffer[] = [];
       const digest = createHash('sha256');
@@ -675,6 +697,7 @@ export function createWorkspaceFiles(options: {
         const chunk = Buffer.from(block.subarray(0, size));
         digest.update(chunk);
         chunks.push(chunk);
+        yield;
       }
       const after = io.stat(fd);
       if (
@@ -684,7 +707,7 @@ export function createWorkspaceFiles(options: {
         before.mtimeNs !== after.mtimeNs ||
         before.ctimeNs !== after.ctimeNs ||
         before.owner !== after.owner ||
-        after.nlink !== 1n ||
+        (strict && after.nlink !== 1n) ||
         BigInt(count) !== after.size
       )
         fail('file_changed');
@@ -948,14 +971,46 @@ export function createWorkspaceFiles(options: {
     },
     async readBytes(path, options) {
       const limit = byteLimit(options.maxBytes);
+      if (options.sharedRead !== undefined && typeof options.sharedRead !== 'boolean')
+        fail('file_input_invalid');
+      const strict = options.sharedRead !== true;
+      if (options.signal) {
+        const signal = options.signal;
+        signal.throwIfAborted();
+        return trackRead(() =>
+          withReadParent(
+            path,
+            async (parent, name) => {
+              const steps = readByteSteps(parent, name, path, limit, strict),
+                checkpoint = queryCheckpoint(signal);
+              try {
+                for (;;) {
+                  signal.throwIfAborted();
+                  const step = steps.next();
+                  if (step.done) {
+                    signal.throwIfAborted();
+                    check();
+                    return step.value;
+                  }
+                  const pause = checkpoint();
+                  if (pause) await pause;
+                }
+              } finally {
+                steps.return(undefined as never);
+              }
+            },
+            strict,
+          ),
+        );
+      }
       return withParent(
         path,
         (parent, name) => {
-          const snapshot = readBytesAt(parent, name, path, limit);
+          const snapshot = readBytesAt(parent, name, path, limit, strict);
           check();
           return snapshot;
         },
-        true,
+        strict,
       );
     },
     async restore(input) {

@@ -1,5 +1,6 @@
 import type {
   NativeBridge,
+  NativeDirectory,
   NativeEvent,
   NativeRequest,
   NativeResult,
@@ -17,6 +18,12 @@ export function sessionSwitchBridge(
     modelNames?: Record<string, string>;
     replyParagraphs?: number;
     protocol?: 'chat-completions' | 'responses';
+    turnNotifications?: boolean;
+    readTurns?: Map<string, string>;
+    cacheMetrics?: boolean;
+    contextUsage?: boolean;
+    initialSelection?: boolean;
+    holdDraft?: boolean;
   } = {},
 ) {
   const base = backgroundShellItem();
@@ -35,9 +42,12 @@ export function sessionSwitchBridge(
     refreshing = false,
     failed = false;
   let held = false;
+  let hasSelection = options.initialSelection !== false;
   const pending = new Map<string, (() => void)[]>();
   const listeners = new Set<(event: NativeEvent) => void>();
   const requests: NativeRequest[] = [];
+  const readTurns = options.readTurns ?? new Map<string, string>();
+  let receiptFailure = false;
   const send = () => {
     for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
   };
@@ -56,12 +66,44 @@ export function sessionSwitchBridge(
           pending.set(phase, queue);
         });
   const session = () => sessions.find((value) => value.id === selected)!;
+  const turns = new Map<
+    string,
+    {
+      id: string;
+      status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+      isActive: boolean;
+    }
+  >(
+    sessions.map((session) => [
+      session.id,
+      { id: `run-${session.id}`, status: 'running', isActive: true },
+    ]),
+  );
+  const directory = (): NativeDirectory => ({
+    storeId: 'store',
+    ...(options.turnNotifications ? { readTurns: [...readTurns] } : {}),
+    sessions: sessions.map((session) =>
+      options.turnNotifications
+        ? {
+            ...session,
+            activity: {
+              updatedAt: null,
+              run: turns.get(session.id)!,
+              queued: false,
+              pendingInteractions: 0,
+            },
+          }
+        : session,
+    ),
+    workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+  });
   const protocol = options.protocol;
   const run = () => ({
     ...base.run!,
     id: `run-${selected}`,
     sessionId: selected,
     isActive: options.active ?? true,
+    ...(options.turnNotifications ? turns.get(selected) : {}),
     configuration: {
       modelId: `model-${options.sameModel ? 'a' : selected}`,
       snapshot: {
@@ -87,8 +129,9 @@ export function sessionSwitchBridge(
     inputSubmissions: [],
     permissionSubmissions: [],
     interactionSubmissions: [],
+    ...(options.turnNotifications ? { directory: directory() } : {}),
     selection:
-      selecting || withdrawn
+      selecting || withdrawn || !hasSelection
         ? undefined
         : {
             storeId: 'store',
@@ -148,16 +191,20 @@ export function sessionSwitchBridge(
     async request(request) {
       requests.push(request);
       switch (request.method) {
+        case 'session.markRead':
+          if (receiptFailure) throw Error('turn_read_storage_unavailable');
+          return wait('receipt', () => {
+            readTurns.set(request.sessionId, JSON.stringify([request.runId, request.status]));
+            send();
+            return state();
+          });
         case 'attach':
         case 'state':
           return state();
         case 'directory':
-          return {
-            storeId: 'store',
-            sessions,
-            workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
-          };
+          return directory();
         case 'select': {
+          hasSelection = true;
           selected = request.sessionId;
           view++;
           revision++;
@@ -171,8 +218,8 @@ export function sessionSwitchBridge(
           }
           return state();
         }
-        case 'draft.read':
-          return {
+        case 'draft.read': {
+          const draft = {
             id: selected,
             storeId: 'store',
             workspaceId: 'w',
@@ -180,6 +227,8 @@ export function sessionSwitchBridge(
             revision: 1,
             content: options.drafts?.[selected] ?? `Draft ${selected.toUpperCase()}`,
           };
+          return options.holdDraft ? wait('draft', () => draft) : draft;
+        }
         case 'messages': {
           if (withdrawn) throw Error('native_view_unavailable');
           const id = selected;
@@ -276,19 +325,41 @@ export function sessionSwitchBridge(
             scope: scope(request),
             runs: [{ ...run(), status: 'running', finishedAt: null }],
           };
-        case 'toolMessages.usage':
-          return {
+        case 'toolMessages.usage': {
+          const id = selected;
+          const result = {
             kind: 'toolMessages.usage',
             readId: request.readId,
             scope: scope(request),
-            entries: request.messageIds.map((id) => ({
-              messageId: id,
-              executionId: `model-${selected}`,
-              originStoreId: 'store',
-              cacheHitTokens: selected === 'a' ? 70 : 30,
-              cacheMissTokens: selected === 'a' ? 30 : 70,
-            })),
-          };
+            entries: (options.cacheMetrics === false ? [] : request.messageIds).map(
+              (messageId) => ({
+                messageId,
+                executionId: `model-${id}`,
+                originStoreId: 'store',
+                cacheHitTokens: id === 'a' ? 70 : 30,
+                cacheMissTokens: id === 'a' ? 30 : 70,
+              }),
+            ),
+          } as const;
+          return options.contextUsage ? wait('usage', () => result) : result;
+        }
+        case 'toolMessages.contextUsage': {
+          if (!options.contextUsage) return null;
+          const id = selected;
+          const reading = scope(request);
+          const contextSelectionId = session().contextSelectionId;
+          return wait('context', () => ({
+            kind: 'toolMessages.contextUsage',
+            readId: request.readId,
+            scope: reading,
+            context: {
+              modelId: `model-${id}`,
+              contextSelectionId,
+              totalInputTokens: id === 'a' ? 5700 : 12000,
+              contextWindowTokens: 272000,
+            },
+          }));
+        }
         case 'background.open':
           return {
             kind: 'background.page',
@@ -347,6 +418,15 @@ export function sessionSwitchBridge(
       revision++;
       send();
     },
+    setTurn(
+      sessionId: string,
+      status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted',
+      id = `run-${sessionId}`,
+    ) {
+      turns.set(sessionId, { id, status, isActive: status === 'running' });
+      revision++;
+      send();
+    },
     refresh(value: boolean) {
       refreshing = value;
       revision++;
@@ -355,6 +435,11 @@ export function sessionSwitchBridge(
     fail(value: boolean) {
       failed = value;
       refreshing = false;
+      revision++;
+      send();
+    },
+    failReceipt(value: boolean) {
+      receiptFailure = value;
       revision++;
       send();
     },

@@ -7,6 +7,7 @@ import {
   nativeBrowserDisplayHint,
   restoreNativeBrowserDraft,
 } from '../src/native-browser-session';
+import { NativeWindowFrame } from '../src/native-window-frame';
 import '../src/native-tailwind.css';
 import '@kite-ai/ui/desktop/style.css';
 
@@ -74,4 +75,8 @@ function Fixture() {
     />
   );
 }
-createRoot(document.getElementById('root')!).render(<Fixture />);
+createRoot(document.getElementById('root')!).render(
+  <NativeWindowFrame>
+    <Fixture />
+  </NativeWindowFrame>,
+);

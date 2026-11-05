@@ -152,6 +152,15 @@ export function createBuiltinComputerUseSkillSource() {
       return { entries: [structuredClone(summary)], errors: [] };
     },
     load,
+    async readDocument(input: { id: string; version: string; maxTextBytes: number }) {
+      open();
+      if (!discovered || input.id !== sourceId) throw new SkillError('skill_not_discovered');
+      if (input.version !== summary.version) throw new SkillError('skill_version_changed');
+      if (!Number.isSafeInteger(input.maxTextBytes) || input.maxTextBytes < 1)
+        throw new SkillError('invalid_skill_configuration');
+      if (Buffer.byteLength(body) > input.maxTextBytes) throw new SkillError('skill_text_limit');
+      return { ...structuredClone(summary), body };
+    },
     async readResource(input: {
       skillId: string;
       version: string;

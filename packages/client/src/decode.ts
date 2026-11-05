@@ -13,6 +13,7 @@ export interface Responses {
   SessionLogPage: API.SessionLogPage;
   SkillCataloguePage: API.SkillCataloguePage;
   UserSkillCataloguePage: API.UserSkillCataloguePage;
+  UserSkillDocument: API.UserSkillDocument;
   UserMcpSettingsView: API.UserMcpSettingsView;
   UserMcpOperationResult: API.UserMcpOperationResult;
   UserMcpToolsPage: API.UserMcpToolsPage;
@@ -107,6 +108,7 @@ export function validateRequest(
     | 'BrowserSessionLogQuery'
     | 'SkillCatalogueQuery'
     | 'UserSkillCatalogueQuery'
+    | 'UserSkillDocumentQuery'
     | 'UserMcpSettingsQuery'
     | 'UserMcpSettingsRequest'
     | 'UserMcpOperationQuery'

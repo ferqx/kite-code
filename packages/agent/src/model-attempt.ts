@@ -1,5 +1,8 @@
 import { ModelAttemptError } from '@kite-ai/ai';
 
+/** One initial request followed by at most five transport reconnections. */
+export const modelMaxAttempts = 6;
+
 export interface ModelRetrySource {
   readonly previousExecutionId: string;
   readonly attempt: number;

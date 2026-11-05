@@ -169,6 +169,7 @@ export async function runDevelopmentDesktop(
     if (watchError) throw watchError;
     if (requested) return requested === 'SIGINT' ? 130 : 143;
     reportTiming('Main and preloads built', nativeStartedAt);
+    const launchStartedAt = performance.now();
     const env = { ...process.env };
     for (const name of ['NODE_PATH', 'NODE_OPTIONS', 'BUN_OPTIONS', 'ELECTRON_RUN_AS_NODE'])
       delete env[name];
@@ -182,6 +183,7 @@ export async function runDevelopmentDesktop(
         stderr: 'inherit',
       });
     channel = await control.attach(child.exited);
+    reportTiming('Electron and Service handshake ready', launchStartedAt);
     if (watchError) throw watchError;
     reloadQueue = createDesktopReloadQueue({
       async reload() {

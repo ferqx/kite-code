@@ -215,11 +215,15 @@ test('context reads and retained ratios remain bound to their Session, model, ep
       '上下文占用约 20%',
     );
     await render('b', 5, false, 'different-route');
-    expect(f.host.querySelector('.composer-context-usage')).toBeNull();
+    const ring = f.host.querySelector('.composer-context-usage')!;
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用未知');
+    expect(ring.querySelector('[stroke-dasharray]')).toBeNull();
     await render('b', 5, false, undefined, 1);
-    expect(f.host.querySelector('.composer-context-usage')).toBeNull();
+    expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
+    expect(ring.getAttribute('aria-label')).toBe('上下文占用未知');
     await render('b', 5, false, undefined, 1, []);
-    expect(f.host.querySelector('.composer-context-usage')).toBeNull();
+    expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
+    expect(ring.getAttribute('aria-description')).toBe('上下文估算 未知 / 未知 tokens');
   } finally {
     await f.close();
   }

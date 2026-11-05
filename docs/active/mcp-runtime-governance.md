@@ -8,7 +8,7 @@
 
 相关：[Agent Note 0127](../../.agents/notes/implemented/simplification/2026-08-23-remove-rav1-speculative-authority.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
 
-MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.2`，不得与 Required CI
+MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.4`，不得与 Required CI
 形成第二套 Bun 基线。
 
 2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。

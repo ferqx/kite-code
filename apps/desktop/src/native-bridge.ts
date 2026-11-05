@@ -61,8 +61,9 @@ import type {
 } from './mcp-bridge';
 import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
+import type { NativeModelPreferenceBridge } from './native-model-preference-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
-import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
+import type { NativeSkillDocument, NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
   NativeContextUsagePage,
   NativeModelUsagePage,
@@ -431,6 +432,8 @@ export type NativeFileRecoveryObservation = {
 };
 export type NativeDirectory = {
   storeId: string;
+  /** Main's persisted local read receipts, independent of the renderer origin. */
+  readTurns?: readonly (readonly [string, string])[];
   workspaces: Workspace[];
   sessions: (Session & { activity?: SessionDirectoryActivity })[];
   unavailable?: boolean;
@@ -545,6 +548,14 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | {
+      method: 'session.markRead';
+      generation: number;
+      expectedStoreId: string;
+      sessionId: string;
+      runId: string;
+      status: 'completed' | 'failed' | 'cancelled' | 'interrupted';
+    }
   | NativeInputQueueRequest
   | NativeInputImageRequest
   | NativeScheduledRequest
@@ -850,6 +861,7 @@ export type NativeResult =
   | { kind: 'workspace.picked'; workspaceId: string }
   | NativeBackgroundResult
   | NativeSkillsPage
+  | NativeSkillDocument
   | NativeJobOutputPage
   | NativeUserMcpResult
   | NativeMcpResult
@@ -913,6 +925,7 @@ declare global {
       NativeBridge &
         Partial<
           NativeThemeBridge &
+            NativeModelPreferenceBridge &
             NativeWindowBridge &
             NativeWindowMenuBridge &
             NativeStartupBridge &

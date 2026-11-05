@@ -2,9 +2,13 @@
 
 Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当前 guardian 与隔离代码 worker 资产；源码 locator 的拒绝规则保持，具体接线和验证范围见 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。锁定 CLI 运行组件及系统 Chrome／Chromium 仍须先准备；开发构建不自动下载浏览器、不导入现有 Profile，只读观察也不会启动 Browser Job。
 
-仓库使用 Bun；Linux/macOS CI 与正式 qualification 保持 Bun 1.4.2，Windows CI 固定 Bun 1.4.3，以采用固定 tsconfig 的上游修复。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
+仓库使用 Bun 1.4.4；本地类型检查、Required 与运行时／qualification workflow 均固定该版本，配套 `@types/bun` 也固定1.4.4。Windows 原1.4.3与新1.4.4的定向对照和既有失败归[测试体系](../../tests/README.md#运行时升级与模型连接池)；原平台／发布资格不会因 pin 或连接池接线更新而获得。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确八个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
 
 源码安装的 postinstall 会构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，期间显示三个构建阶段及实时 Cargo 诊断，完成后显示资产路径。需要 rustup／固定 Rust1.97.1 和本机 linker；Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C 工具链。使用 `--ignore-scripts` 安装后，先显式运行 `bun run build:files-native` 再执行文件工具测试。正式 Agent build 会把同一原生模块、ABI/hash manifest 和许可证放进制品；用户机器不需要 Rust。运行期缺失资产明确失败，不能依靠源码或即时编译回退。
+
+Required 的纯静态 `quality` 作业使用 `bun install --frozen-lockfile --ignore-scripts`，不需要 Rust，也不准备 Files 原生资产。安装后以 Actions 的 `working-directory: apps/web` 执行 `bun run build`，生成公开 `./assets` 的实际默认导出 `apps/web/dist/assets.js`，再执行原全部质量门禁；缺少该导出仍由工作区守卫拒绝。该准备只构建 Web，不执行整个 workspace build。其他运行时测试、qualification、发布和普通源码安装继续执行原 postinstall，不能照搬 quality 的安装方式后直接运行文件工具。
+
+quality 仅缓存 `BUN_INSTALL_CACHE_DIR` 指定的下载目录，位于 runner 临时目录，不缓存 `node_modules`、workspace 构建或原生资产。不可变 cache action 的 key 包含 OS、架构、Bun1.4.4、lock、根及精确八 workspace manifest、registry 配置和 patches；不使用较宽 restore key。命中和未命中都执行原 frozen install、Web 准备与全部检查，不能把 cache hit 当作依赖或边界验证通过。
 
 | 目标 | 命令 | 说明 |
 | --- | --- | --- |
@@ -21,12 +25,14 @@ Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当
 | Native 安装生命周期 | `bun run test:desktop:window` | 新完整 Native 的源码外安装、升级、强杀、回滚与卸载；具体资格见 Native owner |
 | 默认测试 | `bun run test` | 与 `test:unified-agent` 共用新八 workspace 和有限 root safety 计划，最多四槽；独占场景串行 |
 | TUI 系统测试 | `bun run test:tui:system` | 当前 112 个完整文件（原 52 个旅程及 60 个当前宿主文件）；支持 `--list` 和 `KITE_TUI_SYSTEM_SHARD=0/4` 至 `3/4`，详见测试 owner |
-| 类型检查 | `bun run typecheck` | 根与精确八 workspace |
+| 类型检查 | `bun run typecheck` | Bun 1.4.4；单进程检查原根与精确八 workspace 的九份配置 |
 | 工作区与依赖边界 | `bun run check:runtime-packages`、`bun run check:core-boundary` | 工作区清单、正式消费闭包与源代码依赖边界 |
 | 文档 | `bun run check:docs`、`bun run check:docs-impact` | 结构检查与实际影响语义核对 |
 | 首发证据 | `bun run check:plan-evidence` | 独立历史证据消费者，不代替当前 §35 资格 |
 
-`check:runtime-packages` 检查八个工作区的清单、公开 exports、正式脚本和 CI 消费闭包，并调用与 `check:core-boundary` 相同的[依赖边界守卫](../../scripts/check-unified-agent-boundary.ts)。守卫在每次调用内复用已解析的模块依赖图，各入口仍按自己的策略遍历；仅在导入或违规处计算行号。下一次调用重新读取源码和清单。回归覆盖[共享与循环依赖及入口策略](../../tests/isolated/scripts/unified-agent-boundary.test.ts)、[工作区合同](../../tests/integration/scripts/unified-workspaces.test.ts)和[CI 消费闭包](../../tests/integration/scripts/unified-ci.test.ts)。
+类型检查执行 `bun check -b -p tsconfig.typecheck.json`；[聚合配置](../../tsconfig.typecheck.json)只含空 `files` 和原根／八 workspace 的有序 references，共九份配置。每个项目仍用自己的 include/exclude、严格选项和类型环境；不把源码合成一个项目，也不递归发现目录。任一项目类型错误仍返回非零，聚合检查可以一起报告多个项目错误。各包的 `bun check -p tsconfig.json` 与[原 workspace runner](../../scripts/run-runtime-workspace-script.ts)仍可独立使用；pre-commit 仍只检查根配置。Bun 1.4.4 内置检查器标识为 TypeScript 7.0.2；保留项目的 TypeScript 5.9.3，供边界检查、测试发现使用 compiler API，并供编辑器使用，不再作为默认类型门禁。类型库语义差异、文件清单与失败路径对照归[测试体系](../../tests/README.md#类型检查)。
+
+`check:runtime-packages` 检查八个工作区的清单、公开 exports、正式脚本、聚合类型检查清单和 CI 消费闭包，并调用与 `check:core-boundary` 相同的[依赖边界守卫](../../scripts/check-unified-agent-boundary.ts)，同时覆盖默认源码和额外正式入口。Required quality、pre-commit 与 `check:pre-release-architecture` 各只调用一次这一合并入口，独立边界命令保留。合并 CLI 输出原覆盖计数、pending 与未取得发布资格提示；拒绝条件保持，聚合清单缺少、重复、越界或覆盖项目设置也会失败。守卫仅在本次调用内复用已解析的模块图、workspace manifest、候选文件的存在／类型与实际路径结果，包括缺失候选；入口策略仍分别检查，每个条件导出分支仍解析，并核实际路径是否越界或指向旧模块。下一次调用重新读取源码、清单和链接，不跨运行缓存通过结论。回归覆盖[共享与循环依赖、入口策略及缓存失效](../../tests/isolated/scripts/unified-agent-boundary.test.ts)、[独立／合并拒绝对照](../../tests/integration/scripts/unified-workspaces.test.ts)和[CI 消费闭包](../../tests/integration/scripts/unified-ci.test.ts)。
 
 正式 Terminal 默认使用 `~/.kite-code/unified-agent/default`。CLI、TUI、Desktop 和 Web 开发入口的默认数据根为当前用户的 `~/.kite-code`，与 checkout 和启动工作目录无关；其 `development` profile 位于 `~/.kite-code/development`，数据库直接位于 `~/.kite-code/development/core.db`，会话、制品、草稿和偏好随 profile 保存。CLI/TUI/Web 可用 `--data-root <绝对路径>` 明确选择其他数据根，优先于默认值。原 checkout 的 `.kite-code/unified-development` 数据保持原位，不自动迁移；需要读取时显式选择该旧数据根。模型配置仍统一读取 `~/.kite-code/kite-code.jsonc`。测试必须使用所属临时 home/workspace/profile/endpoint，按 harness 清理。
 
@@ -42,6 +48,8 @@ npm run desktop:dev
 四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
 
 Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预热页面模块，不另做这两页的生产构建。终端会分项输出准备／构建耗时，并在真实 Service 就绪后输出总耗时；初次依赖优化与本机文件系统状态仍会影响耗时。具体构建边界及本机前后对照归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+
+构建完成后，终端继续输出 `Service shell_runtime/configuration/store/runtime/http` 的开始、完成或失败及耗时，最后输出 Electron／Service 握手耗时；阶段日志不包含路径、凭据或原始服务输出。`desktop:dev` 的 Service bootstrap 与连接等待各有30秒上限，外层父控制仍最多等待45秒；编译时间不计入 Service 的等待期限。Windows 首次准备 Git Bash 会复制并校验两套运行时，优化后的并发文件处理仍完整核对资产；后续启动保留副本并重新校验。
 
 Windows 数据目录若被其他程序增加授权（例如 Agent 沙箱读取组），Desktop 会在启动 Service／SQLite 前显示准确路径和处理选项，默认退出；符合有限安全条件时可主动备份并修复该对象，操作见[桌面手册](../handbook/clients/desktop/README.md)。取消后开发命令返回 `native_profile_permissions_cancelled`，不删除 Profile。验证权限错误须使用测试自有的数据根，不在真实用户目录制造故障；正式 Native 默认数据根 `~/.kite-code/unified-agent` 与开发入口保持独立。
 

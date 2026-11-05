@@ -452,7 +452,7 @@ for (const mode of [
         expect(
           after.filter((execution) => execution.kind === 'model').at(-1)!.decisionSource,
         ).toMatchObject({
-          retry: { previousExecutionId: ready.executionId, attempt: 5, maxAttempts: null },
+          retry: { previousExecutionId: ready.executionId, attempt: 5, maxAttempts: 6 },
         });
       }
       if (

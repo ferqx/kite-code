@@ -1,5 +1,7 @@
 import type { Interaction, Json } from '@kite-ai/client';
 import { type FormEvent, useId, useRef, useState } from 'react';
+import { Button } from './desktop/components/ui/button';
+import { Textarea } from './desktop/components/ui/textarea';
 import type { ActionInputDraft } from './index';
 import {
   type QuestionFieldDraft,
@@ -30,8 +32,10 @@ function ChoiceInformation({ title, description }: { title: string; description:
   const [focused, setFocused] = useState(false);
   return (
     <span className="questionnaire-information">
-      <button
+      <Button
         className="questionnaire-info-button"
+        variant="ghost"
+        size="icon-xs"
         type="button"
         aria-label={`${title}的说明`}
         aria-describedby={hovered || focused ? id : undefined}
@@ -49,7 +53,7 @@ function ChoiceInformation({ title, description }: { title: string; description:
             strokeLinecap="round"
           />
         </svg>
-      </button>
+      </Button>
       {(hovered || focused) && (
         <span id={id} role="tooltip" className="questionnaire-tooltip">
           <strong>{title}</strong>
@@ -207,9 +211,13 @@ export function Questionnaire({
                 </div>
               )}
               {(!field.choices.length || input.selected === field.choices.length) && (
-                <label className="questionnaire-text-answer">
+                <label
+                  className="questionnaire-text-answer"
+                  htmlFor={`${formId}-${draft.step}-text`}
+                >
                   {!field.choices.length && <span>自由回答</span>}
-                  <textarea
+                  <Textarea
+                    id={`${formId}-${draft.step}-text`}
                     aria-label="自由回答"
                     placeholder="输入你的回答…"
                     rows={3}
@@ -236,15 +244,16 @@ export function Questionnaire({
       <footer className="questionnaire-actions">
         {form.alternative && (
           <div className="questionnaire-alternative">
-            <button
+            <Button
               className="questionnaire-cancel"
+              variant="ghost"
               type="button"
               disabled={disabled || submitting}
               title={cancel ? '跳过这些问题，继续当前任务' : form.alternative.description}
               onClick={() => void send(form.alternative!.value as Json)}
             >
               {cancel ? '取消回答' : form.alternative.title}
-            </button>
+            </Button>
             {!cancel && form.alternative.description && (
               <ChoiceInformation
                 title={form.alternative.title}
@@ -255,17 +264,18 @@ export function Questionnaire({
         )}
         <div className="questionnaire-navigation">
           {draft.step > 0 && (
-            <button
+            <Button
               key="previous-question"
+              variant="outline"
               type="button"
               disabled={submitting}
               onClick={() => change({ ...current.current, step: current.current.step - 1 })}
             >
               上一题
-            </button>
+            </Button>
           )}
           {draft.step < form.fields.length - 1 ? (
-            <button
+            <Button
               className="questionnaire-primary"
               key="next-question"
               type="button"
@@ -273,16 +283,16 @@ export function Questionnaire({
               onClick={() => change({ ...current.current, step: current.current.step + 1 })}
             >
               下一题
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               className="questionnaire-primary"
               key="submit-questionnaire"
               type="submit"
               disabled={disabled || submitting || !answers(draft)}
             >
               {submitting ? '正在提交…' : '提交回答'}
-            </button>
+            </Button>
           )}
         </div>
       </footer>

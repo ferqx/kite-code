@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { ModelAttemptError, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
 import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
@@ -423,11 +423,135 @@ test.each([
     expect(result.error).toBeInstanceOf(Error);
     expect(result.events.filter((event) => event.type === 'finish')).toHaveLength(0);
     expect(result.events.filter((event) => event.type === 'tool_call')).toHaveLength(0);
+    expect(ModelAttemptError.isInstance(result.error)).toBe(true);
     expect(String(result.error)).not.toContain('fixture-secret');
+    expect(JSON.stringify(result.error)).not.toContain('fixture-secret');
     expect(data.calls).toBe(1);
   } finally {
     await data.close();
   }
+});
+
+test.each([
+  ['ECONNREFUSED', 'connection_refused'],
+  ['ETIMEDOUT', 'connection_timeout'],
+  ['ENOTFOUND', 'name_resolution_failed'],
+  ['ECONNRESET', 'connection_interrupted'],
+  ['UND_ERR_HEADERS_TIMEOUT', 'request_timeout'],
+  ['ENETDOWN', 'connection_interrupted'],
+  ['ENETUNREACH', 'connection_interrupted'],
+  ['EHOSTDOWN', 'connection_interrupted'],
+  ['EHOSTUNREACH', 'connection_interrupted'],
+  ['ConnectionClosed', 'connection_interrupted'],
+  ['ConnectionRefused', 'connection_refused'],
+])('known transport code %s becomes finite safe detail without retaining the error', async (code, detail) => {
+  let attempts = 0;
+  const model = createCompatibleModelBinding({
+    baseURL: 'http://127.0.0.1:1/v1',
+    modelId: 'fixture',
+    apiKey: 'fixture-secret',
+    fetch: Object.assign(
+      async () => {
+        attempts++;
+        throw new TypeError('private endpoint and fixture-secret', {
+          cause: Object.assign(new Error('private log'), { code }),
+        });
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  });
+  const adapter = createSdkModelAdapter({ models: new Map([['bound', model]]) });
+  const result = await collect(adapter);
+  expect(attempts).toBe(1);
+  expect(result.error).toMatchObject({ reason: 'connection_failed', detail });
+  expect(JSON.stringify(result.error)).not.toMatch(/fixture-secret|private|127\.0\.0\.1/);
+  expect(ModelAttemptError.isInstance(result.error)).toBe(true);
+});
+
+for (const protocol of ['chat-completions', 'responses'] as const) {
+  test.each([
+    'fetch-error',
+    'stream-error',
+    'non-error-rejection',
+  ] as const)(`${protocol} reconnects unclassified Provider failures without exposing private data: %s`, async (mode) => {
+    let attempts = 0;
+    const failure =
+      mode === 'non-error-rejection'
+        ? { private: 'fixture-secret' }
+        : new Error('permission denied in private fixture-secret log');
+    const model = createCompatibleModelBinding({
+      baseURL: 'http://127.0.0.1:1/v1',
+      modelId: 'fixture',
+      protocol,
+      fetch: Object.assign(
+        async () => {
+          attempts++;
+          if (mode !== 'stream-error') throw failure;
+          return new Response(
+            new ReadableStream({ start: (controller) => controller.error(failure) }),
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        },
+        { preconnect: fetch.preconnect },
+      ),
+    });
+    const result = await collect(createSdkModelAdapter({ models: new Map([['bound', model]]) }));
+    expect(attempts).toBe(1);
+    expect(ModelAttemptError.isInstance(result.error)).toBe(true);
+    expect(result.events.some((event) => ['tool_call', 'finish'].includes(event.type))).toBe(false);
+    expect(String(result.error)).not.toMatch(/private|fixture-secret|127\.0\.0\.1/);
+    expect(JSON.stringify(result.error)).not.toMatch(/private|fixture-secret|127\.0\.0\.1/);
+    expect((result.error as Error).cause).toBeUndefined();
+  });
+
+  test.each([
+    400, 401, 403, 404, 408, 409, 422, 429, 500, 503,
+  ])(`${protocol} only authentication and permission HTTP refusals stop reconnection: %i`, async (status) => {
+    let attempts = 0;
+    const model = createCompatibleModelBinding({
+      baseURL: 'http://127.0.0.1:1/v1',
+      modelId: 'fixture',
+      protocol,
+      fetch: Object.assign(
+        async () => {
+          attempts++;
+          return Response.json({ error: { message: 'fixture-secret' } }, { status });
+        },
+        { preconnect: fetch.preconnect },
+      ),
+    });
+    const result = await collect(createSdkModelAdapter({ models: new Map([['bound', model]]) }));
+    expect(attempts).toBe(1);
+    expect(ModelAttemptError.isInstance(result.error)).toBe(![401, 403].includes(status));
+    expect(result.events.some((event) => ['tool_call', 'finish'].includes(event.type))).toBe(false);
+    expect(String(result.error)).not.toContain('fixture-secret');
+    expect(JSON.stringify(result.error)).not.toContain('fixture-secret');
+    if (![401, 403, 408, 429].includes(status) && status < 500)
+      expect(result.error).toMatchObject({ reason: 'provider_unavailable', detail: undefined });
+  });
+}
+
+test('local history validation remains outside the reconnect boundary', async () => {
+  const data = endpoint(() => {
+    throw Error('must_not_send_invalid_history');
+  });
+  try {
+    const result = await collect(data.adapter, undefined, {
+      ...request,
+      messages: [{ role: 'tool', content: 'Unpaired result', toolCallId: 'missing' }],
+    });
+    expect(data.calls).toBe(0);
+    expect(ModelAttemptError.isInstance(result.error)).toBe(false);
+    expect((result.error as Error).message).toBe('invalid_tool_history');
+  } finally {
+    await data.close();
+  }
+});
+
+test('unrecognized error detail cannot cross the safe model attempt boundary', () => {
+  expect(() => new ModelAttemptError('connection_failed', 'raw private log' as never)).toThrow(
+    'invalid_model_failure_detail',
+  );
 });
 
 test('AbortSignal terminates the actual in-flight HTTP stream without retry or successful finish', async () => {
@@ -554,6 +678,15 @@ test.each([
     const result = await collect(data.adapter);
     expect(String(result.error)).toContain('MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable');
     expect(String(result.error)).not.toContain('fixture-secret');
+    expect(result.error).toMatchObject({
+      detail:
+        status === 429
+          ? 'rate_limited'
+          : status === 408
+            ? 'request_timeout'
+            : 'service_unavailable',
+    });
+    expect(JSON.stringify(result.error)).not.toContain('fixture-secret');
     expect(data.calls).toBe(1);
   } finally {
     await data.close();

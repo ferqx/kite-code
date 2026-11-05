@@ -6,6 +6,7 @@ import {
   type ServerInfo,
 } from '@kite-ai/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from './desktop/ui';
 
 export type { ModelInputSnapshot } from '@kite-ai/client';
 export type ModelInputIdentity = Pick<
@@ -217,15 +218,15 @@ export function ModelInputs({
   }
   return (
     <section className="model-inputs" aria-label="Model calls" aria-busy={loading || undefined}>
-      <button type="button" disabled={!enabled || suspended} onClick={() => void directory()}>
+      <Button type="button" disabled={!enabled || suspended} onClick={() => void directory()}>
         Model calls
-      </button>
+      </Button>
       {!enabled && <p>Original Model input capability unavailable</p>}
       {open && (
         <div className="model-input-panel">
           <h2>Original Model input</h2>
           <p>Sensitive local diagnostic. Current selected context is a separate projection.</p>
-          <button
+          <Button
             type="button"
             onClick={() => {
               stop();
@@ -235,10 +236,10 @@ export function ModelInputs({
             }}
           >
             Close Model inspector
-          </button>
+          </Button>
           {error && <p role="alert">Original input unavailable · {error}</p>}
           {calls?.map((call) => (
-            <button
+            <Button
               type="button"
               key={call.executionId}
               onClick={() => {
@@ -248,7 +249,7 @@ export function ModelInputs({
               }}
             >
               {call.executionId} · attempt {call.attempt} · {call.status} · {call.confirmation}
-            </button>
+            </Button>
           ))}
           {calls?.length === 0 && <p>No recorded Model calls</p>}
           {target && !snapshot && (
@@ -257,9 +258,9 @@ export function ModelInputs({
                 Read the complete sensitive input of {target}? Content can include project text. No
                 execution or permission is granted.
               </p>
-              <button type="button" disabled={loading || suspended} onClick={() => void confirm()}>
+              <Button type="button" disabled={loading || suspended} onClick={() => void confirm()}>
                 Confirm read original input
-              </button>
+              </Button>
             </div>
           )}
           {snapshot && (
