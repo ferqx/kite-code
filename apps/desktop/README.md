@@ -406,6 +406,8 @@ macOS 复用上述玻璃透明层、设置遮盖、导航对齐和调宽样式�
 
 ## 交互状态与透明材质
 
+Native消费[UI共享语义色](../../packages/ui/README.md#原桌面展示层)的深浅主题红、绿与琥珀色：应用确认框的危险按钮独立适配默认／悬停／按下，提供商配置圆点和成功提示使用`--success`，不再保留固定绿色。此轮只改共享和设置CSS；权限确认、操作准入及取消规则保持，验证与实窗视觉验收限制见上述UI owner。
+
 2026-11-01，设置分类恢复持续选中高亮：Windows x64／Electron44.3.0、独立Profile及普通生产renderer实际核常规、MCP、Skills、提供商与模型四项，鼠标移开后仍只有当前项保留底色；Tab把焦点移到Skills时仍保留MCP选中，Enter后选中转到Skills，键盘焦点环保持，返回原页面正常。过程截图和无障碍树在本机`.cache/settings-selection-20261101/`；零模型请求，窗口正常退出0，5个所属进程全部结束。本轮仅改CSS及当前文档，未改页面状态或TypeScript；原窗口动作DOM结果沿用前轮，CSS Biome与文档检查通过，不扩展安装或其他平台资格。
 
 Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。设置分类沿原aria-pressed标记当前页，选中项持续保留悬停底色，指针移开或重复点击不撤下也不加深；切换只标记新的分类，保留原生按钮及键盘焦点提示；Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。

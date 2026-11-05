@@ -176,6 +176,10 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 [ApplicationConfirmationDialog](src/desktop/FullPermissionConfirmationDialog.tsx)集中维护完全权限与移除空间两种应用确认的固定内容和相同视觉组件；Full包装继续由Composer的Web路径复用。取消保持默认焦点，Esc取消，危险操作按钮使用共享红色样式；组件只返回用户决定，不执行权限变更或空间移除；Native退出应用保留系统原生确认框。Native在独立WebContentsView渲染同一组件、CSS和主题，Main拥有原生层序及跨视图焦点；临时失败message由Native owner负责，不复用此模态组件。
 
+[共享主题](src/desktop/style.css)以偏暖红色、松柏绿和琥珀色表达异常／危险、成功和注意，保留中性灰表面。`--destructive`负责状态文字，`--destructive-fill`及其hover／pressed变量负责白字实心按钮，深浅主题各自定义；成功徽标与diff新增共用`--success`及其底色，diff删除和错误文字共用`--destructive`，错误边框从异常色与普通边框混合。代码diff的addition／deletion也消费这套语义色，字符串、数字等语法高亮保持各自颜色；Native提供商的配置圆点和成功提示不另写固定绿色。
+
+2026-11-05，Windows x64／Bun1.4.4，`76e49e317`加本轮配色diff：[权限DOM](test/permissions-dom.test.tsx)与[Native确认框DOM](../../apps/desktop/test/isolated/native-global-dialog-dom.test.tsx)两个完整文件26项／239断言通过，沿原身份、取消、失效与主题切换核实，不改变权限或操作语义。源码色值的深浅主题共26组正常文字／背景对比度检查通过，最低4.63:1；两份CSS的Biome检查通过。隔离生产组件样式已编译；电脑操作因无法可靠识别本机浏览器地址而停止，实窗视觉与交互过程尚未完成验收，不以DOM或色值计算代替这项资格。
+
 `SessionPage`手动动画收起准确已展示浏览器时，关闭意图立即更新，同scope原页仅保持到既有布局rAF开始，再同批撤页与折叠。立即重开、scope／active tab／host panel替换和无布局都退休pending；不为保画面恢复旧owner或延迟真正覆盖／隐藏。普通详情、导航及已有网页直接展开时序保持。[同提交与退休回归](test/isolated/desktop-session-page-render.test.tsx)只证明状态与面板目标，真实原生过程归上述Desktop owner。
 
 `useSessionTabs`把明确关闭浏览器标签与scope变化／组件卸载分开。关闭回执失败时只合并回准确原标签，保留后来选择、标题及其他标签改动；同 scope 往返也不能接纳旧 owner 回执。未确认关闭继续占一个容量，成功后释放，避免失败恢复突破八项上限。后两者只结束界面观察，由Native Pane撤下呈现，Main继续持有网页；私有restore可交付同scope的全部存活页及activeId，保留旧单page消费形式。恢复清单不授控制权，迟到或错误scope不发布。不同网址的Agent新页保留已有标签，后台会话不因恢复清单抢占当前选择；明确Tab X交宿主核准确当前scope并关闭原页，活动操作的结果与资源清理另核，不把控制权移给替代页。实现和真实资格归[Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。

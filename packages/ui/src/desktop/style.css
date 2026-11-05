@@ -88,14 +88,16 @@ body {
   --primary-foreground: #fff;
   --diagram-accent: #4b68b1;
   --diagram-secondary: #478079;
-  --destructive: #a13e3e;
-  --destructive-fill: #dc2626;
-  --destructive-fill-hover: #b91c1c;
-  --destructive-fill-pressed: #991b1b;
-  --permission-full-foreground: #b45309;
-  --success: #287a4f;
-  --attention-background: #f5e6c8;
-  --attention-foreground: #714700;
+  /* Vermilion, pine and amber keep clear color against the neutral surfaces.
+   * Filled actions have their own contrast-safe ramp, separate from status text. */
+  --destructive: #ae3e36;
+  --destructive-fill: #bd433b;
+  --destructive-fill-hover: #ae3933;
+  --destructive-fill-pressed: #9b322d;
+  --permission-full-foreground: #9a6728;
+  --success: #247553;
+  --attention-background: #f4e9d5;
+  --attention-foreground: #80591f;
   --conversation-text-size: var(--ui-text-size);
   --markdown-code-background: color-mix(in srgb, var(--foreground) 5%, transparent);
   --markdown-inline-code-background: color-mix(in srgb, var(--foreground) 7%, transparent);
@@ -106,14 +108,14 @@ body {
   --scrollbar-thumb: #b8b8b8;
   --scrollbar-thumb-hover: #999;
   --navigation-foreground: #484848;
-  --success-background: #e3f1e4;
-  --success-foreground: #2d6535;
-  --diff-added-background: #dff2df;
-  --diff-added-foreground: #20542c;
-  --diff-removed-background: #fbe5e0;
-  --diff-removed-foreground: #84392e;
-  --error-border: #bd8e85;
-  --error-foreground: #91493d;
+  --success-background: #e4f0e9;
+  --success-foreground: var(--success);
+  --diff-added-background: var(--success-background);
+  --diff-added-foreground: var(--success);
+  --diff-removed-background: #f8e7e3;
+  --diff-removed-foreground: var(--destructive);
+  --error-border: color-mix(in srgb, var(--destructive) 50%, var(--border));
+  --error-foreground: var(--destructive);
 }
 .kite-client {
   & {
@@ -995,7 +997,7 @@ body {
   }
   .message.failed:not(.user),
   .message.rejected {
-    border-left: 2px solid #985349;
+    border-left: 2px solid var(--error-border);
   }
   .message.subagent {
     padding: 0;
@@ -2106,23 +2108,26 @@ body {
   --diagram-accent: #9aafe6;
   --diagram-secondary: #85b9b2;
   --markdown-link-color: #6487bf;
-  --destructive: #e0a198;
-  --permission-full-foreground: #fb923c;
-  --success: #82c9a0;
-  --attention-background: #4b3518;
-  --attention-foreground: #ffe0a3;
+  --destructive: #eb8b81;
+  --destructive-fill: #bc463f;
+  --destructive-fill-hover: #c54c44;
+  --destructive-fill-pressed: #ab3e38;
+  --permission-full-foreground: #d4a562;
+  --success: #69bd92;
+  --attention-background: #423521;
+  --attention-foreground: #e0b574;
   --scrollbar-thumb: #606060;
   --scrollbar-thumb-hover: #7a7a7a;
   --sidebar-accent: #303030;
   --navigation-foreground: #d2d2d2;
-  --success-background: #254331;
-  --success-foreground: #a8ddb8;
-  --diff-added-background: #254331;
-  --diff-added-foreground: #b2e2bc;
-  --diff-removed-background: #4a2d2b;
-  --diff-removed-foreground: #f0b5ab;
-  --error-border: #a97168;
-  --error-foreground: #f0b5ab;
+  --success-background: #203e30;
+  --success-foreground: var(--success);
+  --diff-added-background: var(--success-background);
+  --diff-added-foreground: var(--success);
+  --diff-removed-background: #462d2a;
+  --diff-removed-foreground: var(--destructive);
+  --error-border: color-mix(in srgb, var(--destructive) 50%, var(--border));
+  --error-foreground: var(--destructive);
 }
 [data-theme="dark"] .kite-client {
   color-scheme: dark;
@@ -3012,9 +3017,11 @@ body {
 .kite-client .typeset-chat .hljs-type {
   color: light-dark(#713ca4, #cba2ee);
 }
-.kite-client .typeset-chat .hljs-string,
-.kite-client .typeset-chat .hljs-addition {
+.kite-client .typeset-chat .hljs-string {
   color: light-dark(#236544, #92c9a2);
+}
+.kite-client .typeset-chat .hljs-addition {
+  color: var(--diff-added-foreground);
 }
 .kite-client .typeset-chat .hljs-title,
 .kite-client .typeset-chat .hljs-built_in,
@@ -3022,9 +3029,11 @@ body {
   color: light-dark(#275e90, #9bbfe0);
 }
 .kite-client .typeset-chat .hljs-number,
-.kite-client .typeset-chat .hljs-literal,
-.kite-client .typeset-chat .hljs-deletion {
+.kite-client .typeset-chat .hljs-literal {
   color: light-dark(#a33e31, #e4a095);
+}
+.kite-client .typeset-chat .hljs-deletion {
+  color: var(--diff-removed-foreground);
 }
 
 .kite-client .history-panel {

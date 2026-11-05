@@ -90,7 +90,7 @@
   :is(.provider-settings, .catalogue-settings)
   .provider-badge.is-configured
   .provider-status-dot {
-  background: #22845b;
+  background: var(--success);
   opacity: 1;
 }
 .kite-client
@@ -323,7 +323,7 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-notice-success {
-  border-left: 3px solid #22845b;
+  border-left: 3px solid var(--success);
 }
 .kite-client
   .desktop-settings
