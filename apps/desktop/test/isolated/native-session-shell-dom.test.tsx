@@ -136,6 +136,90 @@ const businessMethods = new Set([
   'draft.write',
 ]);
 
+test('a turn finishing in the visible current session never flashes a reminder while its receipt saves', async () => {
+  const readTurns = new Map<string, string>();
+  const f = fixture({ turnNotifications: true, readTurns });
+  const row = () => f.query('[aria-label="Session A"]');
+  const unread = () => !!row()?.querySelector('.session-unread-dot');
+  const addedDots: Node[] = [];
+  const observer = new window.MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes)
+        if (
+          node instanceof window.Element &&
+          (node.matches('.session-unread-dot') || node.querySelector('.session-unread-dot'))
+        )
+          addedDots.push(node);
+  });
+  try {
+    await f.render();
+    observer.observe(f.host, { childList: true, subtree: true });
+    f.hold();
+    await act(async () => f.setTurn('a', 'completed'));
+    await f.until(() => f.pending('history') > 0 || f.pending('receipt') > 0);
+    expect(unread()).toBe(false);
+    expect(addedDots).toHaveLength(0);
+    await f.release('history');
+    await f.until(() => f.pending('receipt') > 0);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(readTurns.has('a')).toBe(false);
+    expect(unread()).toBe(false);
+    expect(addedDots).toHaveLength(0);
+    await f.resume();
+    await f.until(() => readTurns.has('a'));
+    expect(unread()).toBe(false);
+    expect(addedDots).toHaveLength(0);
+
+    // Suppression is only presentation; a failed commit must restore the reminder.
+    await act(async () => f.setTurn('a', 'running', 'next-a'));
+    await act(async () => f.failReceipt(true));
+    await act(async () => f.setTurn('a', 'failed', 'next-a'));
+    await f.until(unread);
+    expect(readTurns.get('a')).toBe(JSON.stringify(['run-a', 'completed']));
+    await act(async () => f.failReceipt(false));
+    await f.until(() => !unread());
+    expect(readTurns.get('a')).toBe(JSON.stringify(['next-a', 'failed']));
+    expect(f.requests.filter((request) => businessMethods.has(request.method))).toEqual([]);
+  } finally {
+    observer.disconnect();
+    await f.close();
+  }
+});
+
+test('leaving an on-screen completion or failing its history read restores the unsaved reminder', async () => {
+  const readTurns = new Map<string, string>();
+  const f = fixture({ turnNotifications: true, readTurns });
+  const unread = (id: string) =>
+    !!f.query(`[aria-label="Session ${id.toUpperCase()}"] .session-unread-dot`);
+  try {
+    await f.render();
+    f.hold();
+    await act(async () => f.setTurn('a', 'completed'));
+    await f.until(() => f.pending('history') > 0);
+    expect(unread('a')).toBe(false);
+    await f.click('b');
+    await f.until(() => f.pending('selection') > 0);
+    expect(unread('a')).toBe(true);
+    expect(readTurns.has('a')).toBe(false);
+    await f.resume();
+    await f.ready('b');
+    expect(unread('a')).toBe(true);
+    expect(readTurns.has('a')).toBe(false);
+
+    await f.fail(true);
+    await act(async () => f.setTurn('b', 'cancelled'));
+    await f.until(() => unread('b'));
+    expect(readTurns.has('b')).toBe(false);
+    await f.fail(false);
+    await f.until(() => !unread('b'));
+    expect(readTurns.get('b')).toBe(JSON.stringify(['run-b', 'cancelled']));
+    expect(unread('a')).toBe(true);
+    expect(f.requests.filter((request) => businessMethods.has(request.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('terminal turn reminders survive failed reads and reopening, and clear only after visible reading', async () => {
   const f = fixture({ turnNotifications: true });
   const row = (id: string) => f.query(`[aria-label="Session ${id.toUpperCase()}"]`);
@@ -161,8 +245,11 @@ test('terminal turn reminders survive failed reads and reopening, and clear only
     await f.release('models');
     await f.until(() => f.pending('history') > 0);
     expect(unread('b')).toBe(true);
-    await f.resume();
+    await f.release('history');
     await f.ready('b');
+    await f.until(() => f.pending('receipt') > 0);
+    expect(unread('b')).toBe(true);
+    await f.resume();
     await f.until(() => !unread('b'));
     await f.click('a');
     await f.ready('a');

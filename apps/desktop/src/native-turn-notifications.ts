@@ -38,15 +38,47 @@ export function useNativeTurnNotifications(
   }, []);
   const local =
     acknowledged && acknowledged.storeId === currentStore ? acknowledged.turns : undefined;
+  const source = directory?.sessions.find((session) => session.id === reading?.session.id);
+  const run = source?.activity?.run;
+  const turn = terminalTurn(run);
+  const key = source && turn && JSON.stringify([generation, currentStore, source.id, turn]);
+  const watching = useRef<string | undefined>(undefined);
+  const [failedWrite, setFailedWrite] = useState<string>();
+  const watchingKey =
+    directory &&
+    !directory.unavailable &&
+    seen &&
+    visible &&
+    reading &&
+    reading.storeId === currentStore &&
+    (!reading.permissionUnavailable || reading.viewLoading) &&
+    source &&
+    run &&
+    reading.runs.some((value) => value.id === run.id)
+      ? JSON.stringify([generation, currentStore, source.id, run.id])
+      : undefined;
+  useLayoutEffect(() => {
+    if (watching.current !== watchingKey) watching.current = undefined;
+    if (
+      watchingKey &&
+      run?.isActive &&
+      !reading?.viewLoading &&
+      !reading?.permissionUnavailable &&
+      reading?.runs.some((value) => value.id === run.id && value.isActive)
+    )
+      watching.current = watchingKey;
+  }, [watchingKey, run, reading]);
+  // An on-screen completion need not flash while its receipt commits. This is not a receipt:
+  // leaving the page, losing the read, or failing the write restores the durable unread fact.
+  const savingViewedTurn =
+    key && watchingKey && watching.current === watchingKey && key !== failedWrite;
   useLayoutEffect(() => {
     if (!directory || directory.unavailable || !seen || !visible) return;
-    const source = directory.sessions.find((session) => session.id === reading?.session.id);
-    const run = source?.activity?.run;
-    const turn = terminalTurn(run);
     if (
       !source ||
       !run ||
       !turn ||
+      !key ||
       reading?.storeId !== directory.storeId ||
       reading.viewLoading ||
       reading.permissionUnavailable ||
@@ -55,7 +87,6 @@ export function useNativeTurnNotifications(
       local?.get(source.id) === turn
     )
       return;
-    const key = JSON.stringify([generation, directory.storeId, source.id, turn]);
     if (pending.current.has(key)) return;
     pending.current.add(key);
     void bridge
@@ -79,13 +110,31 @@ export function useNativeTurnNotifications(
       })
       .catch(() => {
         // A failed write does not consume the reminder; a later observation may retry.
+        if (watching.current === watchingKey) setFailedWrite(key);
       })
       .finally(() => pending.current.delete(key));
-  }, [bridge, generation, directory, reading, visible, seen, local]);
+  }, [
+    bridge,
+    generation,
+    directory,
+    reading,
+    visible,
+    seen,
+    local,
+    source,
+    run,
+    turn,
+    key,
+    watchingKey,
+  ]);
   const unreadKey = JSON.stringify(
     directory?.sessions.flatMap((session) => {
       const turn = terminalTurn(session.activity?.run);
-      return seen && turn && seen.get(session.id) !== turn && local?.get(session.id) !== turn
+      return seen &&
+        turn &&
+        seen.get(session.id) !== turn &&
+        local?.get(session.id) !== turn &&
+        !(savingViewedTurn && session.id === source?.id)
         ? [session.id]
         : [];
     }) ?? [],

@@ -241,6 +241,12 @@ createRoot(document.getElementById('root')!).render(
           <button type="button" onClick={() => control.setTurn('a', 'completed')}>
             结束 A
           </button>
+          <button type="button" onClick={() => control.setTurn('a', 'running', 'next-a')}>
+            运行 A
+          </button>
+          <button type="button" onClick={() => control.setTurn('a', 'failed', 'next-a')}>
+            A 新一轮失败
+          </button>
           <button type="button" onClick={() => control.hold()}>
             暂停读取
           </button>
@@ -250,6 +256,12 @@ createRoot(document.getElementById('root')!).render(
           <button type="button" onClick={() => control.release('models')}>
             释放模型
           </button>
+          <button type="button" onClick={() => control.release('history')}>
+            释放历史
+          </button>
+          <button type="button" onClick={() => control.release('receipt')}>
+            释放已读保存
+          </button>
           <button type="button" onClick={() => control.resume()}>
             恢复读取
           </button>
@@ -258,6 +270,12 @@ createRoot(document.getElementById('root')!).render(
           </button>
           <button type="button" onClick={() => control.fail(false)}>
             读取恢复
+          </button>
+          <button type="button" onClick={() => control.failReceipt(true)}>
+            已读保存失败
+          </button>
+          <button type="button" onClick={() => control.failReceipt(false)}>
+            已读保存恢复
           </button>
         </section>
       )}

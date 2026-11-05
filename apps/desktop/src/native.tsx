@@ -3793,7 +3793,7 @@ function NativeDesktopContent({
       !scheduledTasksView &&
       !settingsOpen &&
       selected.current === selection?.session.id &&
-      historyState.phase === 'complete'
+      historyState.phase !== 'unavailable'
       ? selection
       : undefined,
   );
