@@ -376,6 +376,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
     host,
     until,
     requests,
+    settlePresentation: () => act(async () => nextDesktopPresentation(dom)),
     render: async () => {
       await act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />));
       await act(async () => {
@@ -427,6 +428,16 @@ function fixture(mode: Mode, testDiagnostics = false) {
           !!host.querySelector('.conversation-viewport')?.textContent?.includes('Other session'),
       );
     },
+    selectOriginal: async () => {
+      await act(async () => {
+        const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+          (candidate) => candidate.textContent === 'Original',
+        );
+        expect(!!button).toBe(true);
+        button!.click();
+      });
+      await until(() => !!host.querySelector('.conversation .tool-activity'));
+    },
     async close() {
       for (const release of [...pending.splice(0), ...pendingTargets.splice(0)]) release();
       await act(async () => root.unmount());
@@ -455,11 +466,69 @@ test('actual NativeDesktop keeps a raw tool receipt hidden while metadata reader
     expect(f.host.textContent).not.toContain(sentinel);
     expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain('结果未知');
-    expect(f.host.querySelector('.tool-activity')?.getAttribute('aria-label')).toBe('读取 · 成功');
+    expect(f.host.querySelector('.tool-activity')?.getAttribute('aria-label')).toBe(
+      '已读取 · 成功',
+    );
   } finally {
     await f.close();
   }
 });
+
+for (const mode of ['known', 'mixed', 'image'] as const)
+  test(`actual NativeDesktop keeps the ${mode} tool icon through cached return and held metadata`, async () => {
+    const f = fixture(mode);
+    try {
+      await f.render();
+      await f.flush();
+      if (mode === 'image')
+        await f.until(() => !!f.host.querySelector('.tool-image-thumbnails img'));
+      if (mode === 'mixed') await f.toggle();
+      await f.settlePresentation();
+      const iconSelector =
+        '.conversation .tool-activity :is(.tool-step-icon,.tool-activity-kind-icon)';
+      const icons = [...f.host.querySelectorAll(iconSelector)];
+      expect(icons.length).toBe(mode === 'mixed' ? 3 : 1);
+      const drawings = icons.map((icon) => icon.innerHTML);
+      const image = f.host.querySelector('.tool-image-thumbnails img');
+      for (let round = 0; round < 3; round++) {
+        await f.selectOther();
+        const pendingReads = f.requests.filter(
+          (request) => request.method === 'toolMessages.list',
+        ).length;
+        const imageReads = f.requests.filter(
+          (request) => request.method === 'input.image.open',
+        ).length;
+        await f.selectOriginal();
+        if (round === 0)
+          await f.until(
+            () =>
+              f.requests.filter((request) => request.method === 'toolMessages.list').length >
+              pendingReads,
+          );
+        else await f.settlePresentation();
+        const pendingIcons = [...f.host.querySelectorAll(iconSelector)];
+        expect(pendingIcons.map((icon) => icon.innerHTML)).toEqual(drawings);
+        expect(pendingIcons.every((icon, index) => icon === icons[index])).toBe(true);
+        if (mode === 'image') {
+          expect(f.host.textContent).toContain('已查看 1 张图像');
+          expect(f.host.querySelector('.tool-image-thumbnails img') === image).toBe(true);
+          expect(
+            f.requests.filter((request) => request.method === 'input.image.open'),
+          ).toHaveLength(imageReads);
+        }
+        if (mode === 'mixed' && round === 0)
+          expect(f.host.querySelector('.file-link') === null).toBe(true);
+        // Leave once while metadata is still held; late reads belong to that retired scope.
+        if (round > 0) await f.flush();
+        const currentIcons = [...f.host.querySelectorAll(iconSelector)];
+        expect(currentIcons.map((icon) => icon.innerHTML)).toEqual(drawings);
+        expect(currentIcons.every((icon, index) => icon === icons[index])).toBe(true);
+        await f.settlePresentation();
+      }
+    } finally {
+      await f.close();
+    }
+  });
 
 for (const count of [1, 10] as const)
   test(`actual NativeDesktop renders ${count} verified view_images thumbnails in its counted disclosure and removes them on session switch`, async () => {
@@ -561,7 +630,9 @@ test('isolated Native diagnostics also wait for complete tool metadata without p
     expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
     await f.flush();
     expect(f.host.textContent).not.toContain('状态待核对');
-    expect(f.host.querySelector('.tool-activity')?.getAttribute('aria-label')).toBe('读取 · 成功');
+    expect(f.host.querySelector('.tool-activity')?.getAttribute('aria-label')).toBe(
+      '已读取 · 成功',
+    );
     expect(f.host.textContent).not.toContain(sentinel);
   } finally {
     await f.close();

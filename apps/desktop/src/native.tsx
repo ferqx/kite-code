@@ -3974,12 +3974,18 @@ function NativeDesktopContent({
       />
     );
   };
-  const renderNativeTools: NonNullable<SessionPageProps['renderToolActivity']> = (
-    group,
-    controls,
-  ) => {
+  const renderNativeTools = (
+    group: Parameters<NonNullable<SessionPageProps['renderToolActivity']>>[0],
+    controls: Parameters<NonNullable<SessionPageProps['renderToolActivity']>>[1],
+    ordinarySegment = false,
+  ): ReactNode => {
     const aggregate = !!group[0]?.presentationGroupId || group.length > 1;
-    const displayTools = toolMessages.entries;
+    const displayTools = group.flatMap((model) => {
+      const fact =
+        toolMessages.entries.find((entry) => entry.messageId === model.id) ??
+        toolPresentation.current.retainedFact(model);
+      return fact ? [fact] : [];
+    });
     const displayTargets = fileTargets.entries;
     const agentProps = (model: (typeof group)[number]) => {
       const activity = nativeAgentActivityForTool(
@@ -3990,7 +3996,9 @@ function NativeDesktopContent({
       return {
         childAgent: activity?.childAgent,
         childDetail:
-          activity && childReadAvailable
+          activity &&
+          childReadAvailable &&
+          toolMessages.entries.some((entry) => entry.messageId === model.id)
             ? {
                 label: activity.childAgent.name,
                 onOpen: () =>
@@ -4038,22 +4046,35 @@ function NativeDesktopContent({
     // A verified child operation is a direct navigation row. Keep it outside
     // ordinary Tool disclosures, preserving the original tool order and the
     // independent expansion identities of ordinary segments on either side.
-    if (group.some(childOperation)) {
+    // Establish segment owners before a child arrives, so ongoing rows never remount.
+    if (!ordinarySegment) {
       const rows: ReactNode[] = [];
       let ordinary: (typeof group)[number][] = [];
+      let childBoundary: (typeof group)[number] | undefined;
+      let segmentIndex = 0;
       const flush = () => {
         if (!ordinary.length) return;
         const segment = ordinary;
         ordinary = [];
-        const key = JSON.stringify(['native-tools', segment[0]!.presentationKey ?? segment[0]!.id]);
+        // Receipts may change the first item. The block and child boundaries own segments.
+        const key =
+          segmentIndex++ === 0
+            ? controls.activityId
+            : `activity:${childBoundary!.presentationKey ?? childBoundary!.id}`;
         rows.push(
           <Fragment key={key}>
-            {renderNativeTools(segment, {
-              ...controls,
-              activityId: key,
-              expanded: controls.expandedItems[key],
-              onToggle: (open) => controls.onToggleItem(key, open),
-            })}
+            {renderNativeTools(
+              segment,
+              {
+                ...controls,
+                activityId: key,
+                expanded:
+                  controls.expandedItems[key] ??
+                  (key === controls.activityId ? controls.expanded : undefined),
+                onToggle: (open) => controls.onToggleItem(key, open),
+              },
+              true,
+            )}
           </Fragment>,
         );
       };
@@ -4062,6 +4083,7 @@ function NativeDesktopContent({
         if (row) {
           flush();
           rows.push(<Fragment key={model.presentationKey ?? model.id}>{row}</Fragment>);
+          childBoundary = model;
         } else ordinary.push(model);
       }
       flush();
@@ -4132,7 +4154,11 @@ function NativeDesktopContent({
           message={message}
           images={images}
           readAvailable={
-            !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable
+            !selection.viewLoading &&
+            historyState.phase === 'complete' &&
+            !directory?.unavailable &&
+            toolMessages.entries.some((entry) => entry.messageId === model.id) &&
+            !toolMessages.pendingMessageIds.has(model.id)
           }
         />
       ) : null;

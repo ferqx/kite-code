@@ -310,7 +310,7 @@ test('expanded tool groups show exact Skill identities and browser purposes in t
     );
     expect(
       [...host.querySelectorAll('.tool-activity-title')].map((node) => node.textContent),
-    ).toEqual(['使用工具', '加载技能', '读取技能资料', '浏览器操作', '浏览器操作']);
+    ).toEqual(['使用工具', '已加载技能', '已读取技能资料', '已完成浏览器操作', '已完成浏览器操作']);
     expect(host.querySelectorAll('.file-link')).toHaveLength(0);
   });
 });
@@ -384,20 +384,23 @@ test.each([
     { code: 'PRIVATE CODE', description: '读取北京天气' },
     '浏览器操作',
     '读取北京天气',
+    '已完成浏览器操作',
   ],
   [
     'skills.load',
     { id: 'computer-use', description: '加载浏览器技能' },
     '加载技能',
     'computer-use',
+    '已加载技能',
   ],
   [
     'skills.resource',
     { id: 'computer-use', path: 'references/browser-api.md', description: '读取浏览器指南' },
     '读取技能资料',
     'computer-use · references/browser-api.md',
+    '已读取技能资料',
   ],
-] as const)('%s target stays readable through live, readonly child and saved receipt handoff', async (id, input, label, purpose) => {
+] as const)('%s target stays readable through live, readonly child and saved receipt handoff', async (id, input, label, purpose, completedLabel) => {
   await fixture(async ({ host, render }) => {
     const tool = execution(id, '1', input);
     for (const projected of [false, true])
@@ -417,7 +420,7 @@ test.each([
       sessionId: 'child',
     })!;
     await render(desktopToolMessage(fact, receipt.id, receipt.content));
-    expect(host.querySelector('.tool-activity-title')?.textContent).toBe(label);
+    expect(host.querySelector('.tool-activity-title')?.textContent).toBe(completedLabel);
     expect(host.querySelector('.tool-step-target')?.textContent).toBe(purpose);
 
     const unknown = {
@@ -467,12 +470,12 @@ test.each([
 test('legacy browser and Skill rows keep readable names without inventing a purpose or exposing code', async () => {
   await fixture(async ({ host, render }) => {
     for (const [id, input, label, target] of [
-      ['browser.execute', { code: 'PRIVATE CODE' }, '浏览器操作', undefined],
-      ['skills.load', { id: 'computer-use' }, '加载技能', 'computer-use'],
+      ['browser.execute', { code: 'PRIVATE CODE' }, '已完成浏览器操作', undefined],
+      ['skills.load', { id: 'computer-use' }, '已加载技能', 'computer-use'],
       [
         'skills.resource',
         { id: 'computer-use', path: 'references/browser-api.md' },
-        '读取技能资料',
+        '已读取技能资料',
         'computer-use · references/browser-api.md',
       ],
     ] as const) {
@@ -777,6 +780,67 @@ test('batched metadata publishes only complete tool rows and revokes pending or 
   });
 });
 
+test('presentation keeps tool positions through out-of-order receipts without crossing readable or Run boundaries', () => {
+  const presentation = new NativeToolPresentation();
+  const live = liveToolMessages(
+    {
+      storeId: 'store',
+      session: { id: 'child' },
+      runs: [run],
+      executions: ['a', 'b', 'c'].map((id) => ({
+        ...execution(),
+        id,
+        toolCallId: `call-${id}`,
+        status: 'running' as const,
+      })),
+    },
+    [],
+  );
+  const saved = live.map(({ message }, index) => ({
+    ...message,
+    id: `receipt-${index}`,
+    status: 'completed' as const,
+    settled: true,
+  }));
+  const facts = saved.map((message) => ({
+    messageId: message.id,
+    definitionId: 'files.read',
+    definitionVersion: '5',
+    status: 'succeeded' as const,
+    resultRevision: '1',
+    executionId: message.id,
+  }));
+  const keys = (messages: readonly DesktopMessage[]) =>
+    messages.map((message) => message.presentationKey ?? message.id);
+  const initial = presentation.project('a', [], [], live);
+  expect(keys(presentation.project('a', [saved[2]!], [facts[2]!], live.slice(0, 2)))).toEqual(
+    keys(initial),
+  );
+  const reversed = [saved[2]!, saved[1]!, saved[0]!];
+  expect(keys(presentation.project('a', reversed, facts, []))).toEqual(keys(initial));
+  for (const separator of [
+    { id: 'narration', role: 'assistant' as const, text: 'Next stage', settled: true },
+    {
+      id: 'guidance',
+      role: 'user' as const,
+      inputKind: 'input.steer' as const,
+      text: 'Check this',
+      settled: true,
+    },
+    { ...saved[1]!, id: 'other-run', presentationKey: 'other-run', turnId: 'other-run' },
+  ]) {
+    const messages = [saved[2]!, separator, saved[1]!, saved[0]!];
+    const extra = separator.role === 'tool' ? [{ ...facts[1]!, messageId: separator.id }] : [];
+    expect(keys(presentation.project('a', messages, [...facts, ...extra], []))).toEqual(
+      keys([saved[2]!, separator, saved[0]!, saved[1]!]),
+    );
+  }
+  presentation.project('b', [], [], []);
+  expect(keys(presentation.project('a', reversed, facts, []))).toEqual(keys(initial));
+  // A fresh session/load starts from its actual history, without another scope's ordering.
+  expect(keys(presentation.project('cold', reversed, facts, []))).toEqual(keys(reversed));
+});
+
 test('presentation retains only a previously complete exact tool through receipt metadata handoff and clears it across scopes or conflicts', async () => {
   await fixture(async ({ host, render }) => {
     const presentation = new NativeToolPresentation();
@@ -839,14 +903,18 @@ test('presentation retains only a previously complete exact tool through receipt
     expect(accepted).toHaveLength(1);
     expect(accepted[0]!.target).toBe(path);
     expect(accepted[0]!.status).toBe('completed');
+    expect(presentation.retainedFact(accepted[0]!) === fact).toBe(true);
+    expect(presentation.retainedFact({ ...accepted[0]!, id: 'different-receipt' })).toBeUndefined();
     await render(accepted);
     expect(host.querySelector('.tool-step-target')?.textContent).toBe(path);
 
     expect(presentation.project('other-session', [], [], [])).toEqual([]);
+    expect(presentation.retainedFact(accepted[0]!)).toBeUndefined();
     const returned = presentation.project('scope-a', unverified, [], []);
     expect(returned).toHaveLength(1);
     expect(returned[0]!.target).toBe(path);
     expect(returned[0]!.executionUnconfirmed).toBe(true);
+    expect(presentation.retainedFact(returned[0]!) === fact).toBe(true);
     await render(returned);
     expect(host.querySelector('.file-link')).toBeNull();
 
@@ -858,6 +926,7 @@ test('presentation retains only a previously complete exact tool through receipt
     expect(
       bounded.project('scope-a', unverified, [], [], { bridge, key: 'new-generation/store' }),
     ).toEqual([]);
+    expect(bounded.retainedFact(confirmed[0]!)).toBeUndefined();
     expect(
       bounded.project('scope-a', confirmed, [fact], [], { bridge, key: 'new-generation/store' }),
     ).toHaveLength(1);
@@ -887,6 +956,8 @@ test('presentation retains only a previously complete exact tool through receipt
         })),
       ),
     ).toHaveLength(0);
+    const beforeConflict = presentation.project('scope-b', confirmed, [fact], []);
+    expect(presentation.retainedFact(beforeConflict[0]!) === fact).toBe(true);
     const conflict = presentation.project(
       'scope-b',
       unverified,
@@ -894,6 +965,7 @@ test('presentation retains only a previously complete exact tool through receipt
       [],
     );
     expect(conflict).toHaveLength(0);
+    expect(presentation.retainedFact(beforeConflict[0]!)).toBeUndefined();
     expect(presentation.project('scope-b', unverified, [], [])).toHaveLength(0);
     await render(conflict);
     expect(host.querySelectorAll('.tool-activity')).toHaveLength(0);

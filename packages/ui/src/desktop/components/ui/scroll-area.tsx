@@ -3,11 +3,25 @@ import * as React from 'react';
 
 import { cn } from '../../lib/utils';
 
+const NativeScrollbarsContext = React.createContext(false);
+
+function NativeScrollbars({
+  children,
+  enabled = true,
+}: {
+  children: React.ReactNode;
+  enabled?: boolean;
+}) {
+  return <NativeScrollbarsContext value={enabled}>{children}</NativeScrollbarsContext>;
+}
+
 type ScrollAreaProps = React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> & {
   orientation?: 'vertical' | 'horizontal' | 'both';
   fade?: 'x' | 'y' | false;
-  /** Continue edge wheel input and keep keyboard-selected reader edges visible in ancestors. */
+  /** Reveal keyboard-selected edges; custom scrollbars also forward edge wheel input. */
   chainScroll?: boolean;
+  /** Use the browser scrollbar while keeping the same viewport and edge handling. */
+  nativeScrollbars?: boolean;
   viewportRef?: React.Ref<HTMLDivElement>;
   viewportClassName?: string;
   viewportProps?: Omit<
@@ -27,6 +41,7 @@ const ScrollArea = React.forwardRef<
       orientation = 'vertical',
       fade = false,
       chainScroll = false,
+      nativeScrollbars = false,
       viewportRef,
       viewportClassName,
       viewportProps,
@@ -34,6 +49,8 @@ const ScrollArea = React.forwardRef<
     },
     ref,
   ) => {
+    const inheritedNativeScrollbars = React.useContext(NativeScrollbarsContext);
+    const native = nativeScrollbars || inheritedNativeScrollbars;
     const viewport = React.useRef<HTMLDivElement>(null);
     const bindViewport = React.useCallback(
       (node: HTMLDivElement | null) => {
@@ -62,6 +79,7 @@ const ScrollArea = React.forwardRef<
       const wheel = (event: WheelEvent) => {
         invalidate();
         if (
+          native ||
           event.defaultPrevented ||
           !event.cancelable ||
           event.ctrlKey ||
@@ -88,7 +106,8 @@ const ScrollArea = React.forwardRef<
           return;
         }
       };
-      element.addEventListener('wheel', wheel, { passive: false });
+      // Native viewports let the browser carry wheel momentum across boundaries.
+      element.addEventListener('wheel', wheel, { passive: native });
       const keydown = (event: KeyboardEvent) => {
         invalidate();
         if (
@@ -157,7 +176,31 @@ const ScrollArea = React.forwardRef<
         element.ownerDocument.removeEventListener('pointerdown', invalidate, true);
         invalidate();
       };
-    }, [chainScroll]);
+    }, [chainScroll, native]);
+    if (native)
+      return (
+        <div data-slot="scroll-area" ref={ref} className={cn('relative', className)} {...props}>
+          <div
+            data-slot="scroll-area-viewport"
+            data-native-scrollbars="true"
+            ref={bindViewport}
+            className={cn(
+              'h-full w-full rounded-[inherit]',
+              orientation === 'vertical'
+                ? 'overflow-x-hidden overflow-y-auto'
+                : orientation === 'horizontal'
+                  ? 'overflow-x-auto overflow-y-hidden'
+                  : 'overflow-auto',
+              fade === 'x' && 'scroll-fade-x',
+              fade === 'y' && 'scroll-fade-y',
+              viewportClassName,
+            )}
+            {...viewportProps}
+          >
+            {children}
+          </div>
+        </div>
+      );
     return (
       <ScrollAreaPrimitive.Root
         data-slot="scroll-area"
@@ -211,4 +254,4 @@ const ScrollBar = React.forwardRef<
 ));
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName;
 
-export { ScrollArea, ScrollBar };
+export { NativeScrollbars, ScrollArea, ScrollBar };

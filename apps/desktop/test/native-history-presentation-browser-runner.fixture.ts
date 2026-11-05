@@ -32,7 +32,15 @@ type Frame = {
   left: number | null;
   footer: number[] | null;
   messages: MessageFrame[];
-  turns: { node: number; height: number; expanded: string | null }[];
+  turns: {
+    node: number;
+    height: number;
+    expanded: string | null;
+    summaryTag: string | null;
+    summaryRole: string | null;
+    staticSummary: boolean;
+    processToggles: number;
+  }[];
   animations: string[];
 };
 type Variant = {
@@ -179,12 +187,18 @@ try {
               final: element.getAttribute('data-final-reply'),
             };
           }),
-          turns: [...(viewport?.querySelectorAll('.agent-turn') ?? [])].map((element) => ({
-            node: nodeId(element),
-            height: element.getBoundingClientRect().height,
-            expanded:
-              element.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded') ?? null,
-          })),
+          turns: [...(viewport?.querySelectorAll('.agent-turn') ?? [])].map((element) => {
+            const summary = element.querySelector('.agent-turn-summary');
+            return {
+              node: nodeId(element),
+              height: element.getBoundingClientRect().height,
+              expanded: summary?.getAttribute('aria-expanded') ?? null,
+              summaryTag: summary?.tagName ?? null,
+              summaryRole: summary?.getAttribute('role') ?? null,
+              staticSummary: summary?.classList.contains('agent-turn-summary-static') ?? false,
+              processToggles: element.querySelectorAll('button.agent-turn-summary').length,
+            };
+          }),
           animations: document
             .getAnimations()
             .map(
@@ -288,9 +302,27 @@ try {
     const presented = targetFrames.slice(first);
     const initial = presented[0]!;
     assert.equal(
-      initial.turns.filter((turn) => turn.expanded === 'true').length,
-      1,
+      initial.turns.filter(
+        (turn) =>
+          turn.summaryTag === 'BUTTON' &&
+          turn.expanded === 'false' &&
+          !turn.staticSummary &&
+          turn.processToggles === 1,
+      ).length,
+      variant.turns - 1,
       `${label}: completed processes were not initially folded`,
+    );
+    assert.equal(
+      initial.turns.filter(
+        (turn) =>
+          turn.summaryTag === 'DIV' &&
+          turn.summaryRole === 'status' &&
+          turn.staticSummary &&
+          turn.expanded === null &&
+          turn.processToggles === 0,
+      ).length,
+      1,
+      `${label}: active process did not retain its static read-only summary`,
     );
     assert.equal(
       initial.messages.filter((message) => message.text.includes(marker)).length,
@@ -298,7 +330,7 @@ try {
       `${label}: incomplete human history`,
     );
     assert.ok(
-      initial.messages.some((message) => message.text === '读取 1 次 · 搜索 1 次'),
+      initial.messages.some((message) => message.text === '搜索内容读取文件'),
       `${label}: search v3 and file reads were not aggregated`,
     );
     for (let index = 0; index < variant.turns; index++)
@@ -331,7 +363,9 @@ try {
       );
       assert.deepEqual(frame.turns, initial.turns, `${label}: turn grouping changed`);
       assert.ok(
-        !frame.animations.includes('collapsible-motion-expand'),
+        !frame.animations.some((name) =>
+          ['collapsible-motion-expand', 'grid-template-rows'].includes(name),
+        ),
         `${label}: cold process replayed expansion`,
       );
     }

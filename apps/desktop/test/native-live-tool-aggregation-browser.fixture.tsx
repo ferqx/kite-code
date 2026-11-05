@@ -20,7 +20,7 @@ import type {
   NativeRequest,
   NativeResult,
 } from '../src/native-bridge';
-import { nativeRunFact } from '../src/tool-messages-bridge';
+import { type NativeToolMessageFact, nativeRunFact } from '../src/tool-messages-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { sessionSwitchBridge } from './session-switch-bridge.fixture';
 import '../src/native-tailwind.css';
@@ -346,14 +346,44 @@ const bridge: NativeBridge = {
         });
         return { ...result, entries };
       }
-      return new Promise((resolve) =>
-        pending.push(() =>
-          resolve({
-            ...result,
-            entries: request.messageIds.flatMap((messageId) => {
+      return new Promise((resolve, reject) =>
+        pending.push(async () => {
+          try {
+            const shellExecutionIds = (request.executionIds ?? []).filter((id) =>
+              facts.get(id)?.definitionId.startsWith('shell.'),
+            );
+            const shellMessageIds = request.messageIds.filter((id) => {
+              const message = messages.find((item) => item.id === id);
+              return facts.get(message?.sourceIds?.[0] ?? '')?.definitionId.startsWith('shell.');
+            });
+            let shellEntries: NativeToolMessageFact[] = [];
+            if (shellExecutionIds.length || shellMessageIds.length) {
+              const response = await fetch('/native-shell-metadata', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  messages,
+                  executions: [...facts.values()],
+                  observedExecutions: executions.map(
+                    ({ toolInput: _savedInput, ...observed }) => observed,
+                  ),
+                  scope: result.scope,
+                  input: {
+                    ...request,
+                    executionIds: request.executionIds ? shellExecutionIds : undefined,
+                    messageIds: shellMessageIds,
+                  },
+                }),
+              });
+              if (!response.ok) throw Error(`fixture_native_shell_metadata_${response.status}`);
+              shellEntries = await response.json();
+            }
+            const entries = request.messageIds.flatMap((messageId) => {
+              const shell = shellEntries.find((entry) => entry.messageId === messageId);
+              if (shell) return [shell];
               const message = messages.find((item) => item.id === messageId);
               const execution = facts.get(message?.sourceIds?.[0] ?? '');
-              return execution
+              return execution && !execution.definitionId.startsWith('shell.')
                 ? [
                     {
                       messageId,
@@ -372,9 +402,20 @@ const bridge: NativeBridge = {
                     },
                   ]
                 : [];
-            }),
-          }),
-        ),
+            });
+            resolve({
+              ...result,
+              entries: [
+                ...entries,
+                ...shellEntries.filter((entry) =>
+                  shellExecutionIds.some((id) => entry.messageId === `native-execution:${id}`),
+                ),
+              ],
+            });
+          } catch (error) {
+            reject(error);
+          }
+        }),
       );
     }
     if (

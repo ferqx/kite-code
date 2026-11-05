@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ScrollArea } from '../../src/desktop/components/ui/scroll-area';
+import { NativeScrollbars, ScrollArea } from '../../src/desktop/components/ui/scroll-area';
 import { FileChanges, FileDiff } from '../../src/desktop/FileChanges';
 import type { Message } from '../../src/desktop/types';
 
@@ -159,6 +159,47 @@ test('nested tool wheels retain native scrolling and hand edge input to one capa
     await render(null);
     expect(await wheel()).toBe(false);
     expect(outer.scrollTop).toBe(100);
+  });
+});
+
+test('native nested readers leave boundary wheels to the browser without moving an ancestor in JavaScript', async () => {
+  await withDom(async ({ host, render }) => {
+    await render(
+      <NativeScrollbars>
+        <div data-outer style={{ overflowY: 'auto' }}>
+          <ScrollArea chainScroll viewportClassName="native-group">
+            <ScrollArea chainScroll viewportClassName="native-detail">
+              <span data-target>original output</span>
+            </ScrollArea>
+          </ScrollArea>
+        </div>
+      </NativeScrollbars>,
+    );
+    const outer = host.querySelector<HTMLElement>('[data-outer]')!;
+    const group = host.querySelector<HTMLElement>('.native-group')!;
+    const detail = host.querySelector<HTMLElement>('.native-detail')!;
+    for (const node of [outer, group, detail]) {
+      Object.defineProperties(node, {
+        clientHeight: { value: 100, configurable: true },
+        scrollHeight: { value: 400, configurable: true },
+      });
+      node.style.overflowY = 'auto';
+    }
+    const target = host.querySelector('[data-target]')!;
+    for (const [position, deltaY] of [
+      [300, 30],
+      [0, -30],
+    ] as const) {
+      detail.scrollTop = group.scrollTop = position;
+      outer.scrollTop = 150;
+      const event = new window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY });
+      await act(async () => target.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(false);
+      expect(detail.scrollTop).toBe(position);
+      expect(group.scrollTop).toBe(position);
+      expect(outer.scrollTop).toBe(150);
+    }
+    expect(host.querySelector('[data-radix-scroll-area-viewport]') === null).toBe(true);
   });
 });
 

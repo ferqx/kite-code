@@ -37,7 +37,10 @@ const count = Number(params.get('turns') ?? 4);
 if (!Number.isInteger(count) || count < 2 || count > 40) throw Error('invalid_fixture_turns');
 const target = params.get('mode') === 'initial' ? 'a' : 'b';
 const viewAll = params.get('viewAll') === 'true';
-const control = sessionSwitchBridge({ active: true });
+const control = sessionSwitchBridge({
+  active: true,
+  initialSelection: params.get('mode') !== 'initial',
+});
 const base = backgroundItem();
 const histories = new Map<string, Message[]>();
 const runLists = new Map<string, Run[]>();

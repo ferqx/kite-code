@@ -433,6 +433,60 @@ test('mixed aggregate headings contain only the action label for every approval 
   }
 });
 
+test('known completed and failed tool actions use past tense without marking pending or unexecuted actions complete', () => {
+  for (const [toolName, action, completed] of [
+    ['read_file', '读取', '已读取'],
+    ['write_file', '写入', '已写入'],
+    ['edit_file', '修改', '已修改'],
+    ['search_content', '搜索内容', '已搜索内容'],
+    ['glob', '查找文件', '已查找文件'],
+    ['load_skill', '加载技能', '已加载技能'],
+  ]) {
+    for (const status of ['queued', 'running', 'completed', 'failed', 'not_executed'] as const) {
+      for (const dispatchCommitted of [undefined, false]) {
+        const message: Message = { ...tool('past-tense', status), toolName, dispatchCommitted };
+        const dom = new JSDOM(renderToStaticMarkup(<ToolRow message={message} />));
+        try {
+          expect(dom.window.document.querySelector('.tool-step-title')?.textContent).toBe(
+            dispatchCommitted !== false && ['completed', 'failed'].includes(status)
+              ? completed
+              : action,
+          );
+        } finally {
+          dom.window.close();
+        }
+      }
+    }
+  }
+});
+
+test('failed Shell summaries retain the executed label, command, accessible failure and original error output', async () => {
+  await withConversation(async ({ host, render, click }) => {
+    const message: Message = {
+      ...tool('failed-command', 'failed'),
+      toolName: 'shell_execute',
+      target: 'pwd; ls; git status --short',
+      toolResult: { ok: false, stderr: 'Original execution error', exitCode: 1 },
+    };
+    await render([message]);
+    await click(summary(host));
+    const row = host.querySelector('.shell-activity')!;
+    const button = row.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+    expect(button.textContent).toBe(`已运行${message.target}`);
+    expect(button.getAttribute('data-status')).toBe('error');
+    expect(button.querySelector('.tool-activity-title')?.textContent).toBe('已运行');
+    expect(button.textContent).not.toContain('运行失败');
+    expect(row.getAttribute('aria-label')).toContain('失败');
+    await click(button);
+    expect(host.querySelector('.shell-output-viewport')?.textContent).toContain(
+      'Original execution error',
+    );
+    expect(host.querySelector('.shell-result')?.textContent).toContain('失败');
+    expect(row.querySelector('.tool-activity-summary') === button).toBe(true);
+    expect(button.textContent).toBe(`已运行${message.target}`);
+  });
+});
+
 test('approval rows omit redundant pre-dispatch results while preserving independent execution outcomes', () => {
   const cases: {
     message: Partial<Message>;
@@ -546,7 +600,7 @@ test('approval rows omit redundant pre-dispatch results while preserving indepen
             if (item.result) {
               const expected =
                 (
-                  { 执行中: '运行中', 失败: '运行失败', 执行超时: '运行超时' } as Record<
+                  { 执行中: '运行中', 失败: '已运行', 执行超时: '运行超时' } as Record<
                     string,
                     string
                   >
@@ -1228,6 +1282,13 @@ test('Trace aggregation preserves Shell disclosure, output following and real st
     ];
     await render(messages('first line'));
     await click(summary(host));
+    const details = host.querySelector<HTMLElement>('[aria-label="工具执行明细"]')!;
+    expect(details.getAttribute('data-native-scrollbars')).toBe('true');
+    expect(details.hasAttribute('data-radix-scroll-area-viewport')).toBe(false);
+    expect(
+      details.parentElement!.querySelector('[data-slot="scroll-area-scrollbar"]') === null,
+    ).toBe(true);
+    details.scrollTop = 77;
     expect(host.querySelector('.tool-activity-steps')?.getAttribute('data-slot')).toBe('trace');
     const shellSummary = () => host.querySelector('.shell-activity .tool-activity-summary')!;
     expect(shellSummary().getAttribute('data-slot')).toBe('trace-collapsible-trigger');
@@ -1257,6 +1318,8 @@ test('Trace aggregation preserves Shell disclosure, output following and real st
       output().dispatchEvent(scroll);
     });
     await render(messages('first line\nsecond line'));
+    expect(host.querySelector('[aria-label="工具执行明细"]') === details).toBe(true);
+    expect(details.scrollTop).toBe(77);
     expect(output().scrollTop).toBe(500);
     expect(host.querySelector('.shell-latest')).toBeNull();
     output().scrollTop = 900;

@@ -492,6 +492,68 @@ test('Native mixed tool activity keeps its first shell through receipt eviction 
   }
 });
 
+for (const expanded of [false, true])
+  test(`Native keeps ongoing tool nodes and expansion when child operations join ${expanded ? 'an expanded' : 'a collapsed'} group`, async () => {
+    const f = fixture();
+    try {
+      await f.render();
+      const first = tool(1);
+      await f.start([first]);
+      if (expanded) await f.toggle();
+      const activity = topActivities(f.host)[0]!;
+      const summary = activity.querySelector('button.tool-activity-summary')!;
+      const label = summary.querySelector('.tool-label')!;
+      const itemLabel = activity.querySelector('.tool-activity-steps .tool-label');
+      expect(activity.classList.contains('is-running')).toBe(true);
+      expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
+      if (expanded) expect(itemLabel).not.toBeNull();
+      const items = [
+        first,
+        tool(2, {
+          definitionId: 'task.spawn',
+          definitionVersion: '1',
+          status: 'running',
+          toolInput: { title: 'Child', prompt: 'Inspect the ongoing tools' },
+        }),
+        tool(3, { status: 'running' }),
+      ];
+      await f.start(items);
+      expect(topActivities(f.host)).toHaveLength(3);
+      expect(topActivities(f.host)[0] === activity).toBe(true);
+      expect(activity.querySelector('button.tool-activity-summary') === summary).toBe(true);
+      expect(summary.querySelector('.tool-label') === label).toBe(true);
+      expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
+      expect(activity.classList.contains('is-running')).toBe(true);
+      if (expanded)
+        expect(activity.querySelector('.tool-activity-steps .tool-label') === itemLabel).toBe(true);
+      const trailingActivity = topActivities(f.host)[2]!;
+      const trailingSummary = trailingActivity.querySelector<HTMLButtonElement>(
+        'button.tool-activity-summary',
+      )!;
+      if (expanded) await act(async () => trailingSummary.click());
+      const trailingLabel = trailingSummary.querySelector('.tool-label');
+      const trailingItemLabel = trailingActivity.querySelector('.tool-activity-steps .tool-label');
+      for (const refresh of [() => f.start(items), () => f.complete(2), () => f.flush()]) {
+        await refresh();
+        expect(f.host.contains(activity)).toBe(true);
+        expect(summary.querySelector('.tool-label') === label).toBe(true);
+        expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
+        expect(activity.classList.contains('is-running')).toBe(true);
+        if (expanded)
+          expect(activity.querySelector('.tool-activity-steps .tool-label') === itemLabel).toBe(
+            true,
+          );
+        expect(f.host.contains(trailingActivity)).toBe(true);
+        expect(trailingSummary.querySelector('.tool-label') === trailingLabel).toBe(true);
+        expect(trailingSummary.getAttribute('aria-expanded')).toBe(String(expanded));
+        expect(trailingActivity.classList.contains('is-running')).toBe(true);
+        if (expanded) expect(trailingActivity.contains(trailingItemLabel)).toBe(true);
+      }
+    } finally {
+      await f.close();
+    }
+  });
+
 test('a tool-call-only Model remains inside one Native activity while its history completion trails the next View tool', async () => {
   const f = fixture();
   try {

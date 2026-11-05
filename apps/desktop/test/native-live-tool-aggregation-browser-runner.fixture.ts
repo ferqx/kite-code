@@ -2618,7 +2618,7 @@ try {
         { kind: 'execute', title: '已运行', footer: /^成功$/, success: true },
         { kind: 'execute-large', title: '已运行', footer: /^成功$/, success: true },
         { kind: 'execute-model-late', title: '已运行', footer: /^成功$/, success: true },
-        { kind: 'execute-failed', title: '运行失败', footer: /失败.*退出码 7/, success: false },
+        { kind: 'execute-failed', title: '已运行', footer: /失败.*退出码 7/, success: false },
         { kind: 'execute-unknown', title: '结果未知', footer: /结果未知/, success: false },
         { kind: 'execute-rejected', title: '运行命令', footer: null, success: false },
         { kind: 'execute-live', title: '已运行', footer: /^成功$/, success: true },
@@ -3789,7 +3789,7 @@ try {
       const cases = [
         { scenario: 'execute-running', title: '运行中', footer: /执行中/, success: false },
         { scenario: 'execute-success', title: '已运行', footer: /^成功$/, success: true },
-        { scenario: 'execute-failed', title: '运行失败', footer: /失败.*退出码 7/, success: false },
+        { scenario: 'execute-failed', title: '已运行', footer: /失败.*退出码 7/, success: false },
         { scenario: 'execute-unknown', title: '结果未知', footer: /结果未知/, success: false },
         { scenario: 'execute-rejected', title: '运行命令', footer: null, success: false },
         { scenario: 'launch-accepted', title: '已请求运行', footer: /已受理/, success: false },

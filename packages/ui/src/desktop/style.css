@@ -3722,10 +3722,43 @@ body {
 .kite-client .tool-activity-aggregate > .tool-activity-content .tool-activity-steps {
   gap: 0;
 }
+.kite-client .tool-activity-steps :is(.tool-activity-summary, .tool-activity-step) {
+  min-height: 28px;
+  padding-block: 2px;
+}
 .kite-client .tool-activity-scroll {
   /* Keep the 32px disclosure header inside the aggregate's total height. */
   max-height: calc(var(--tool-aggregate-max-height) - 32px);
   min-width: 0;
+}
+.kite-client[data-native-scrollbars],
+.kite-client[data-native-scrollbars] *,
+[data-slot="scroll-area-viewport"][data-native-scrollbars] {
+  scrollbar-width: thin;
+}
+.kite-client[data-native-scrollbars] ::-webkit-scrollbar,
+[data-slot="scroll-area-viewport"][data-native-scrollbars]::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+  height: 8px;
+}
+[data-slot="scroll-area-viewport"][data-native-scrollbars] {
+  color-scheme: light;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+[data-theme="dark"] [data-slot="scroll-area-viewport"][data-native-scrollbars] {
+  color-scheme: dark;
+}
+.kite-client
+  :is(
+    .tool-activity-viewport,
+    .tool-detail-viewport,
+    .tool-diff-viewport,
+    .shell-output-viewport,
+    .subagent-process-viewport
+  )[data-native-scrollbars] {
+  border-inline-end: 0;
+  scrollbar-gutter: stable;
 }
 .kite-client
   :is(
@@ -3758,40 +3791,41 @@ body {
 }
 .kite-client .collapsible-motion-reveal {
   display: grid;
-  grid-template-rows: 1fr;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--collapsible-collapse-duration)
+    var(--collapsible-collapse-easing);
 }
 .kite-client .collapsible-motion-reveal-inner {
   min-height: 0;
   overflow: hidden;
 }
-.kite-client .collapsible-motion-content[data-state="open"] .collapsible-motion-reveal {
-  animation: collapsible-motion-expand var(--collapsible-expand-duration)
-    var(--collapsible-expand-easing) both;
+.kite-client .collapsible-motion-content[data-state="open"] > .collapsible-motion-reveal {
+  grid-template-rows: 1fr;
+  transition-duration: var(--collapsible-expand-duration);
+  transition-timing-function: var(--collapsible-expand-easing);
+}
+@starting-style {
+  .kite-client .collapsible-motion-content[data-state="open"] > .collapsible-motion-reveal {
+    grid-template-rows: 0fr;
+  }
 }
 .kite-client
   :is(.tool-activity, .agent-turn-process)[data-restored-expanded="true"]
   > .collapsible-motion-content[data-state="open"]
   > .collapsible-motion-reveal {
-  animation: none;
+  transition: none;
 }
 .kite-client .collapsible-motion-content[data-state="closed"] {
+  /* Radix Presence waits for animations, while the grid transition owns height. */
   animation: collapsible-motion-collapse var(--collapsible-collapse-duration)
     var(--collapsible-collapse-easing);
 }
-@keyframes collapsible-motion-expand {
-  from {
-    grid-template-rows: 0fr;
-  }
-  to {
-    grid-template-rows: 1fr;
-  }
-}
 @keyframes collapsible-motion-collapse {
   from {
-    height: var(--radix-collapsible-content-height);
+    visibility: visible;
   }
   to {
-    height: 0;
+    visibility: visible;
   }
 }
 .kite-client .tool-activity-step {
@@ -3980,7 +4014,7 @@ body {
   contain: inline-size;
 }
 .kite-client .shell-activity > .tool-activity-summary .tool-activity-title {
-  font-weight: var(--font-weight-semibold);
+  font-weight: 400;
 }
 .kite-client .shell-activity > .tool-activity-summary .tool-command {
   flex: 0 1 auto;
@@ -4157,8 +4191,8 @@ body {
   .kite-client .collapsible-motion-content[data-state="closed"] {
     animation: none;
   }
-  .kite-client .collapsible-motion-content[data-state="open"] .collapsible-motion-reveal {
-    animation: none;
+  .kite-client .collapsible-motion-reveal {
+    transition: none;
   }
   .kite-client .is-running > .tool-activity-summary .tool-label,
   .kite-client .is-running > .tool-activity-heading-row > .tool-activity-summary .tool-label,

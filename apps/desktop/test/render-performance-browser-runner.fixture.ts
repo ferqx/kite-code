@@ -134,7 +134,8 @@ try {
               .getAnimations()
               .filter(
                 (animation) =>
-                  (animation as CSSAnimation).animationName === 'collapsible-motion-expand',
+                  (animation as CSSAnimation).animationName === 'collapsible-motion-expand' ||
+                  (animation as CSSTransition).transitionProperty === 'grid-template-rows',
               ).length,
             bottom: viewport
               ? viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
@@ -288,14 +289,58 @@ try {
     });
     await ready('a', continuousTail);
     const continuous = await finish();
+    const settlingMessages = await page.evaluateHandle(() =>
+      [...document.querySelectorAll('.conversation-viewport .message.assistant')].map((node) => ({
+        node,
+        id: node.getAttribute('data-message-id'),
+        wasFinal: node.getAttribute('data-final-reply') === 'true',
+        text: node.querySelector('.typeset')?.textContent ?? '',
+      })),
+    );
+    const settlingMessageIDs = await settlingMessages.evaluate((entries) =>
+      entries.map((entry) => entry.id),
+    );
+    assert.ok(settlingMessageIDs.length > 0, 'no original replies mounted before settlement');
+    assert.equal(settlingMessageIDs.at(-1), `m-a-${count - 1}`);
     await start();
     await page.evaluate(() => window.renderPerformanceFixture.settle());
-    await page.waitForFunction(
-      () =>
-        document.querySelectorAll('.message.assistant[data-final-reply="true"]').length ===
-        Number(new URL(location.href).searchParams.get('turns')),
-    );
+    await page.waitForFunction((entries) => {
+      const current = [...document.querySelectorAll('.conversation-viewport .message.assistant')];
+      return (
+        current.length === entries.length &&
+        entries.every((entry, index) => {
+          const node = current[index]!;
+          return (
+            node.getAttribute('data-message-id') === entry.id &&
+            node.getAttribute('data-final-reply') === 'true' &&
+            (node.querySelector('.typeset')?.textContent ?? '') === entry.text &&
+            (!entry.wasFinal || node === entry.node)
+          );
+        })
+      );
+    }, settlingMessages);
     const settlement = await finish();
+    const settlementIdentities = await settlingMessages.evaluate((entries) => {
+      const current = [...document.querySelectorAll('.conversation-viewport .message.assistant')];
+      return entries.map((entry, index) => ({
+        id: current[index]!.getAttribute('data-message-id'),
+        wasFinal: entry.wasFinal,
+        originalRetained: current[index] === entry.node,
+        originalConnected: entry.node.isConnected,
+      }));
+    });
+    assert.deepEqual(
+      settlementIdentities.map((entry) => entry.id),
+      settlingMessageIDs,
+      'settlement changed original reply identities or order',
+    );
+    assert.ok(
+      settlementIdentities
+        .filter((entry) => entry.wasFinal)
+        .every((entry) => entry.originalRetained),
+      'settlement replaced an unchanged completed reply',
+    );
+    await settlingMessages.dispose();
     const first = (capture: typeof initial, target: string) =>
       capture.frames.find((frame) => frame.text.includes(target))?.time;
     const initialFrames = initial.frames.filter((frame) => !frame.blank);
@@ -368,6 +413,89 @@ try {
       'session handoff blanked the transcript',
     );
     if (count < 180) assert.ok(retained, 'a budget-sized conversation lost its cached DOM');
+    // Performance samples keep their original mounted window. Read the complete
+    // history afterward through the existing UI instead of requiring it all at once.
+    const originalHistory = await page.evaluate(async () => {
+      const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
+      if (!state || !('generation' in state) || !state.selection)
+        throw Error('fixture_original_history_scope_unavailable');
+      const selection = state.selection;
+      const messages: import('@kite-ai/client').Message[] = [];
+      let afterSeq: string | undefined;
+      for (;;) {
+        const page = await window.kiteNative!.request({
+          method: 'messages',
+          generation: state.generation,
+          expectedStoreId: selection.storeId,
+          sessionId: selection.session.id,
+          upperSeq: selection.session.nextSeq,
+          afterSeq,
+          limit: 32,
+        });
+        if (!page || !('messages' in page)) throw Error('fixture_original_history_unavailable');
+        messages.push(...page.messages);
+        if (!page.nextAfterSeq) return messages;
+        afterSeq = page.nextAfterSeq;
+      }
+    });
+    const expectedIDs = Array.from({ length: count }, (_, index) => [
+      `u-a-${index}`,
+      `m-a-${index}`,
+    ]).flat();
+    assert.deepEqual(
+      originalHistory.map((message) => message.id),
+      expectedIDs,
+    );
+    for (;;) {
+      const before = await page.locator('.conversation-viewport .message').count();
+      if (before === expectedIDs.length) break;
+      assert.ok(before < expectedIDs.length, 'full history duplicated messages');
+      await page.getByRole('button', { name: '加载更早消息', exact: true }).click();
+      await page.waitForFunction(
+        (before) => document.querySelectorAll('.conversation-viewport .message').length > before,
+        before,
+      );
+    }
+    const completeHistory = await page.evaluate(() =>
+      [...document.querySelectorAll('.conversation-viewport .message')].map((node) => ({
+        id: node.getAttribute('data-message-id'),
+        final: node.getAttribute('data-final-reply'),
+        text: node.querySelector('.typeset, .user-message-body')?.textContent ?? '',
+      })),
+    );
+    assert.deepEqual(
+      completeHistory.map((message) => message.id),
+      expectedIDs,
+    );
+    const plain = (text: string) => text.replace(/\s+/gu, '');
+    for (const [index, original] of originalHistory.entries()) {
+      // Only formatting from this fixture's fixed Markdown is omitted. Every
+      // original character, repeated paragraph, table cell and code line remains.
+      const expected = original.content
+        .replace(/^```(\w*)$/gm, '$1')
+        .replace(/^\|[ :|-]+\|$/gm, '')
+        .replace(/^#{1,6} /gm, '')
+        .replace(/^[-*] /gm, '')
+        .replace(/[*`|]/g, '');
+      assert.equal(
+        plain(completeHistory[index]!.text),
+        plain(expected),
+        `complete history changed original body ${original.id}`,
+      );
+      if (original.role === 'assistant') assert.equal(completeHistory[index]!.final, 'true');
+    }
+    for (let chunk = 1; chunk <= 41; chunk++)
+      assert.ok(
+        completeHistory.at(-1)!.text.includes(`新增流式片段 ${chunk}。TAIL-A-${chunk}`),
+        `full history lost original stream chunk ${chunk}`,
+      );
+    Object.assign(report.cases.at(-1) as object, {
+      settlingMessageIDs,
+      settlementIdentities,
+      completeHistory,
+    });
+    await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+    await page.screenshot({ path: path.join(artifact, `full-history-${label}.png`) });
     await page.close();
   }
   await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
