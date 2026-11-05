@@ -235,11 +235,16 @@ test('restored compression opens the exact sensitive original input through the 
       await act(async () => target!.click());
       await settle(() => target!.getAttribute('aria-current') === 'page');
       // This read-only admitted Main has no Node private UI database. Keep its real draft failure
-      // visible and dismiss the actual alert; neither the bridge nor saved input is substituted.
-      await settle(() => !!dom!.window.document.querySelector('[role="alertdialog"]'));
-      const alert = dom!.window.document.querySelector('[role="alertdialog"]')!;
-      expect(alert.textContent).toContain('draft_storage_unavailable');
-      await click('确定', alert);
+      // visible and dismiss the actual non-modal message; neither bridge nor saved input is substituted.
+      await settle(() => !!host.querySelector('.native-message-card[role="status"]'));
+      const message = host.querySelector('.native-message-card[role="status"]')!;
+      expect(message.querySelector('p')?.textContent).toBe(
+        '草稿暂时无法保存或读取，当前输入已保留。请稍后再试。',
+      );
+      const dismiss = message.querySelector<HTMLButtonElement>('button[aria-label="关闭提示"]');
+      expect(dismiss).not.toBeNull();
+      await act(async () => dismiss!.click());
+      expect(host.querySelector('.native-message-card')).toBeNull();
     };
     await act(async () => rendered!.render(<NativeDesktop testDiagnostics />));
     await select('Original compression');

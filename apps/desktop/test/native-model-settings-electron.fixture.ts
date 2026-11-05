@@ -2,9 +2,11 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { readNativeCallerRequest } from './native-caller-body.fixture';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSettings(page: import('playwright').Page) {
   if (!(await page.locator('.desktop-settings-dialog').isVisible()))
@@ -40,7 +42,12 @@ const launch = () =>
     executablePath: electronExecutable,
     args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
     cwd: outdir,
-    env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: root!,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control)),
+    },
     timeout: 30000,
   });
 let app = await launch();
@@ -159,7 +166,7 @@ async function quitOwned() {
   eq(true, true);
 }
 try {
-  let page = await app.firstWindow();
+  let page = await nativeRootPage(app, 30000);
   page.setDefaultTimeout(30000);
   await closeSettings(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
@@ -534,7 +541,7 @@ try {
   step('next-run-complete');
   await quitOwned();
   app = await launch();
-  page = await app.firstWindow();
+  page = await nativeRootPage(app, 30000);
   page.setDefaultTimeout(30000);
   await closeSettings(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();

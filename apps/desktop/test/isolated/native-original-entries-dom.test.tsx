@@ -1,21 +1,37 @@
 import { expect, test } from 'bun:test';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
-import { MessageContent } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
 import type {
   NativeBridge,
   NativeModelSettingsFacts,
   NativeRequest,
   NativeSelection,
 } from '../../src/native-bridge';
-import { NativeGeneralSettings } from '../../src/native-general-settings';
-import { NativeModelOutputMessage } from '../../src/native-model-output-message';
+import { prepareDesktopDom } from '../native-page-dom.fixture';
+
+const bootstrap = new JSDOM('<!doctype html><div></div>');
+const initialGlobals = { window: globalThis.window, document: globalThis.document };
+Object.assign(globalThis, { window: bootstrap.window, document: bootstrap.window.document });
+const { createRoot } = await import('react-dom/client');
+const { MessageContent } = await import('@kite-ai/ui/desktop');
+const { NativeGeneralSettings } = await import('../../src/native-general-settings');
+const { NativeModelOutputMessage } = await import('../../src/native-model-output-message');
+Object.assign(globalThis, initialGlobals);
+bootstrap.window.close();
 
 function fixture() {
-  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });
-  const prior = { window: globalThis.window, document: globalThis.document };
+  const dom = new JSDOM('<div id="root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const restoreDom = prepareDesktopDom(dom);
+  const prior = {
+    window: globalThis.window,
+    document: globalThis.document,
+    IS_REACT_ACT_ENVIRONMENT: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT,
+  };
   Object.assign(globalThis, {
     window: dom.window,
     document: dom.window.document,
@@ -30,6 +46,7 @@ function fixture() {
     async close() {
       await act(async () => root.unmount());
       dom.window.close();
+      restoreDom();
       Object.assign(globalThis, prior);
     },
   };
@@ -111,10 +128,20 @@ test('retained General card reads the accurate configuration default and never s
     expect(f.host.textContent).not.toContain('temporary-choice');
     expect(f.host.textContent).toContain('模型启停与连接配置请前往“提供商与模型”');
     expect(f.host.textContent).toContain('全局默认请在 ~/.kite-code/kite-code.jsonc');
-    const editor = f.host.querySelector('select')!;
+    const editor = f.host.querySelector('[role="combobox"][aria-label="默认编辑器"]')!;
     await act(async () => {
-      editor.value = 'zed';
-      editor.dispatchEvent(new f.dom.window.Event('change', { bubbles: true }));
+      editor.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+    });
+    await act(async () => {
+      const choice = [
+        ...f.dom.window.document.querySelectorAll<HTMLElement>('[role="option"]'),
+      ].find((option) => option.textContent === 'Zed');
+      expect(choice).toBeDefined();
+      choice!.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
     });
     expect(editors).toEqual(['zed']);
     phase = 'held';

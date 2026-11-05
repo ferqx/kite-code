@@ -16,6 +16,8 @@ Worker 的控制/正文队列仍为原有限容量，没有移除或提高额度
 
 Auto 由权限系统的 `authorization.check` 直接执行一次无工具 Model，共享 Model 槽，原 Session 内保存无 Run Execution，不创建 child Session、Run、carrier 或聊天消息。检查正文仍从实际原命令、根工作、目标输入/来源和同组成功 Model 的完整请求派生；`decisionContext.messages` 只保留中立语义字段。原内联或 Artifact 请求完整验证，语义投影不改写原载体、hash 或绑定证明。Core 完整展开请求，SQL 保存原 payload binding 和准确 prepared-input digest，Provider 前再次核实际输入与封存请求 hash；实际 input body hash、完成结果独立 digest、空工具和完整输出共同参与最终授权。准备失败也结算原检查，不留 planned 孤儿。policy/check request/source 变化及旧冷记录不重跑保持。
 
+通用 policy check 的大请求沿既有 `requestBody` Artifact 封存与读取，建立检查和后续原引用核验不再内联巨正文跨 Store RPC；审核器仍收到完整原请求。批准复用预查询只投影其实际需要的判别材料：Shell 风险请求保留原值，其他请求正文留给原检查，不随缓存查询重复发送。原 operationKey、snapshot、来源、checker、权限与控制证明继续完整核对，准备仍消耗原审核期限；不扩大队列、不截断正文，也不以缓存查询代替审核。
+
 大 Auto 请求回退人工时，真实卡片以 `policy.check` 保存完整原请求的公共 Artifact 引用；新引用使用 `authorization-check-request-`，与私有 `model-body-` 分开。原请求、Execution/attempt/input/source/policy 绑定与真实人工答案仍独立复核，不公开 owner、subject 或私有 Model head。旧 `policy.review`、`authorization-review-request-` 和已发布 `model-body-` 附件只在准确原 Interaction 与新旧检查 proof 核实后兼容读取；猜 hash、改卡引用或重算卡摘要不能读取私有输入。完整附件读取资格仍按对应客户端实际验证。
 
 [真实 Core 回归](../../test/isolated/model-body/model-body.test.ts)验证至少 17 MiB 的 Tool 正文、来源与 Auto 请求完整到达固定 Model、单槽/单子任务限制不死锁、持久小引用与冷重开、损坏/跨 scope/取消零后续 Provider，以及真实人工卡片回退。[Files 大正文](../../test/isolated/files/large.test.ts)验证普通 Files Artifact 进入下一实际 Model 请求。本地证据为 macOS；外部付费 Provider 窗口、客户端附件展示与其他平台资格不由这些测试证明；巨量 Model 输出持久化由[完整输出链](../model-output/README.md)及其独立实际回归负责。

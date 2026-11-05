@@ -124,6 +124,11 @@ try {
   await address().fill(`${origin}/one`);
   await address().press('Enter');
   await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+  const firstTabId = await rail
+    .getByRole('tab', { name: 'Page One', exact: true })
+    .getAttribute('id');
+  assert.ok(firstTabId, 'original_browser_tab_identity_missing');
+  const firstTab = rail.locator(`[id=${JSON.stringify(firstTabId)}]`);
   const inspect = () =>
     electron!.evaluate(({ WebContentsView }) => {
       const { window: owner, rootView } = globalThis.browserTabsHostFixture;
@@ -219,6 +224,11 @@ try {
   await address().fill(`${origin}/slow-document`);
   await address().press('Enter');
   await rail.getByRole('tab', { name: 'Slow document', exact: true }).waitFor();
+  const slowTabId = await rail
+    .getByRole('tab', { name: 'Slow document', exact: true })
+    .getAttribute('id');
+  assert.ok(slowTabId, 'slow_browser_tab_identity_missing');
+  const slowTab = rail.locator(`[id=${JSON.stringify(slowTabId)}]`);
   await electron.evaluate(async () => {
     while (!globalThis.browserTabsHostFixture.hits['/pending-script'])
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -289,10 +299,22 @@ try {
   assert.equal(await rail.getByRole('alert').count(), 0);
   await address().fill(`${origin}/one`);
   await address().press('Enter');
-  await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+  await slowTab.filter({ hasText: 'Page One' }).waitFor();
+  assert.equal(await rail.getByRole('tab', { name: 'Page One', exact: true }).count(), 2);
+  assert.equal(await slowTab.getAttribute('aria-selected'), 'true');
+  assert.equal(await firstTab.getAttribute('aria-selected'), 'false');
   await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
-  await rail.getByRole('button', { name: '关闭标签页：Page One', exact: true }).last().click();
-  await rail.getByRole('tab', { name: 'Page One', exact: true }).waitFor();
+  await slowTab
+    .locator('..')
+    .getByRole('button', { name: '关闭标签页：Page One', exact: true })
+    .click();
+  await slowTab.waitFor({ state: 'detached' });
+  await firstTab.waitFor();
+  assert.equal(
+    (await inspect()).some((view) => view.id === slow.id),
+    false,
+  );
+  assert.equal((await inspect()).find((view) => view.id === first.id)?.visible, true);
 
   // The browser error page keeps the native failed document and history;
   // website-supplied HTTP errors remain ordinary website content.
@@ -469,6 +491,21 @@ try {
   }
   // Preserve the exact native document when the UI changes its Root-local
   // owner. The returning inventory supplies its original tab ID, not a URL guess.
+  await page.waitForFunction(() => {
+    const details = document.getElementById('details');
+    return (
+      !!details &&
+      !details
+        .parentElement!.getAnimations({ subtree: true })
+        .some(
+          (animation) =>
+            animation instanceof CSSTransition &&
+            ['width', 'flex-grow', 'flex-basis'].includes(animation.transitionProperty) &&
+            animation.playState === 'running',
+        )
+    );
+  });
+  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
   const retainedInventory = await page.evaluate(async () => {
     const draft = window.browserTabsFixture.draft();
     return window.kiteNative!.restoreBrowserDraft!(draft);

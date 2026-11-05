@@ -1129,7 +1129,12 @@ test('ordinary history and View refreshes retain reply status while actual read 
       input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
     expect(status.textContent).toBe('正在回复…');
     expect(label).not.toBeNull();
-    expect(f.host.querySelector('.agent-turn-summary-static')).toBeNull();
+    const processSummary = f.host.querySelector('.agent-turn-summary-static');
+    expect(processSummary?.tagName).toBe('DIV');
+    expect(processSummary?.getAttribute('role')).toBe('status');
+    expect(processSummary?.textContent).toMatch(/^处理过程/);
+    expect(processSummary?.querySelector('button')).toBeNull();
+    expect(processSummary?.getAttribute('aria-expanded')).toBeNull();
     expect(f.host.querySelector('.agent-turn-summary')?.textContent ?? '').not.toMatch(
       /正在进行中|正在处理|正在思考|已处理/,
     );
@@ -1742,12 +1747,20 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       if (waiting)
         expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('正在等待');
       else {
-        expect(f.host.querySelector('.agent-turn-summary-static')).toBeNull();
+        const processSummary = f.host.querySelector('.agent-turn-summary-static');
+        expect(processSummary?.tagName).toBe('DIV');
+        expect(processSummary?.getAttribute('role')).toBe('status');
+        expect(processSummary?.textContent).toMatch(/^处理过程/);
+        expect(processSummary?.querySelector('button')).toBeNull();
+        expect(processSummary?.getAttribute('aria-expanded')).toBeNull();
         expect(f.host.querySelector('.agent-turn-summary')?.textContent ?? '').not.toMatch(
           /正在进行中|正在处理|正在思考|已处理/,
         );
       }
-      expect(f.host.textContent?.includes('正在等待子 Agent 结果')).toBe(waiting);
+      expect(f.observedRun()?.status).toBe(waiting ? 'waiting_execution' : 'running');
+      expect(f.host.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe(
+        waiting ? 'waiting' : 'running',
+      );
 
       await f.observeExecutionOwner('unknown');
       expect(warning()).toBeNull();
@@ -2232,10 +2245,38 @@ for (const diagnostics of [false, true])
         );
         expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('已取消');
         expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
-        await act(async () =>
-          f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
-        );
-        expect(f.host.textContent).toContain('Saved parent content after reconciliation');
+        const message = () => f.host.querySelector('[data-message-id="parent-message"]');
+        const summary = () => f.host.querySelector('.agent-turn-summary');
+        const messageReads = () =>
+          f.requests.filter((request) => request.method === 'messages').length;
+        const readsBeforeToggle = messageReads();
+        expect(message()?.textContent).toContain('Saved parent content after reconciliation');
+        if (status === 'interrupted') {
+          expect(summary()?.tagName).toBe('BUTTON');
+          expect(summary()?.getAttribute('aria-expanded')).toBe('true');
+          await act(async () =>
+            f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
+          );
+          expect(summary()?.getAttribute('aria-expanded')).toBe('false');
+          expect(message()).toBeNull();
+          await act(async () =>
+            f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
+          );
+          expect(summary()?.getAttribute('aria-expanded')).toBe('true');
+          expect(message()?.textContent).toContain('Saved parent content after reconciliation');
+        } else {
+          expect(summary()?.tagName).toBe('DIV');
+          expect(summary()?.getAttribute('aria-expanded')).toBeNull();
+          expect(summary()?.querySelector('button')).toBeNull();
+        }
+        expect(messageReads()).toBe(readsBeforeToggle);
+        expect(
+          f.requests.some((request) =>
+            ['submit', 'caller.submit', 'conversation.send', 'createSession'].includes(
+              request.method,
+            ),
+          ),
+        ).toBe(false);
       } finally {
         await f.close();
       }

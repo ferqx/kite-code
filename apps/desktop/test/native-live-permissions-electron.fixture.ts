@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron, type Page } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
 
@@ -124,6 +125,22 @@ function rememberOwnedProcesses() {
     'owned candidate descendants observed',
   );
 }
+async function confirmFullPermission() {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const dialog = app!.windows().find((page) => page.url().endsWith('/global-dialog.html'));
+    if (dialog) {
+      await dialog
+        .getByRole('alertdialog')
+        .getByRole('button', { name: /^(Enable Full|启用完全权限)$/ })
+        .click();
+      return;
+    }
+    assert.ok(Date.now() < deadline, 'original global Full permission dialog');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 async function close() {
   if (!app) return;
   const current = app;
@@ -182,11 +199,7 @@ async function chooseMode(mode: LivePermissionFacts['mode']['mode']) {
     .getByRole('menuitemradio')
     .nth(['accept_edits', 'auto', 'full'].indexOf(mode))
     .click();
-  if (mode === 'full')
-    await page!
-      .getByRole('alertdialog')
-      .getByRole('button', { name: /^(Enable Full|启用完全权限)$/ })
-      .click();
+  if (mode === 'full') await confirmFullPermission();
   await visibleMode(mode);
   return until(facts, (value) => value.mode.mode === mode, `applied ${mode}`);
 }
@@ -361,10 +374,10 @@ async function verifyQueueWindow() {
   const input = completeRequest.input;
   assert.ok(input && typeof input === 'object' && !Array.isArray(input));
   assert.equal(input.command, shellText);
-  assert.deepEqual(input.permissions, {
-    filesystem: 'full_access',
-    network: 'none',
-  });
+  assert.equal(input.filesystem, 'full_access');
+  assert.equal(input.network, 'none');
+  assert.equal(Object.hasOwn(input, 'permissions'), false);
+  assert.equal(Object.hasOwn(input, 'key'), false);
   await screenshot('09a-queue-long-shell-full-hover');
   assert.equal(await group.locator('.approval-child').count(), 0);
   assert.equal(await group.getByRole('button', { name: /详情/ }).count(), 0);
@@ -391,10 +404,7 @@ async function verifyQueueWindow() {
   // Choose Full through the production picker before dispatching that held Job.
   await page!.locator('[data-permission-trigger]').click();
   await page!.getByRole('menuitemradio').nth(2).click();
-  await page!
-    .getByRole('alertdialog')
-    .getByRole('button', { name: /^(Enable Full|启用完全权限)$/ })
-    .click();
+  await confirmFullPermission();
   await visibleMode('full');
   await until(
     async () => (await fetch(`${control}/queue-held`)).json() as Promise<{ held: boolean }>,
@@ -708,7 +718,12 @@ try {
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 20000,
   });
   // Passive Main-only fixture. Requests, responses, policy and SDK state are untouched.

@@ -176,6 +176,23 @@ test.skipIf(process.platform !== 'darwin')(
             agentId = url.searchParams.get('agent')!;
             return new Response('recorded exact Agent');
           }
+          if (url.pathname === '/follow-run') {
+            const observed = new Database(profile.databasePath, { readonly: true });
+            try {
+              // Actual accepted carrier identity; no synthetic Session or execution binding.
+              return Response.json(
+                observed
+                  .query(
+                    `SELECT id AS executionId,child_session_id AS sessionId,state AS status,
+                 json_extract(reference_json,'$.runId') AS runId FROM execution
+                 WHERE child_session_id=? ORDER BY rowid DESC LIMIT 1`,
+                  )
+                  .get(agentId),
+              );
+            } finally {
+              observed.close();
+            }
+          }
           if (url.pathname === '/active-intake') {
             // Private fixture observation of the actual ack; public Execution
             // intentionally does not expose resultAcceptance.
@@ -212,7 +229,7 @@ test.skipIf(process.platform !== 'darwin')(
             if (message.role !== 'user' || typeof message.content !== 'string') return [];
             try {
               const value = JSON.parse(message.content);
-              return value?.purpose === 'authorization_check' ? [value] : [];
+              return value?.purpose === 'shell_risk' ? [value] : [];
             } catch {
               return [];
             }
@@ -232,20 +249,20 @@ test.skipIf(process.platform !== 'darwin')(
           } else if (reviews.length) {
             assert.equal(reviews.length, 1);
             assert.deepEqual(body.tools ?? [], []);
-            assert.ok(
-              ['files.write', 'shell.execute', 'shell.command', 'task.follow_up'].includes(
-                reviews[0].target.definitionId,
-              ),
-            );
-            if (reviews[0].target.definitionId === 'shell.execute' && gatedChecks++ < 2)
+            assert.equal(reviews[0].operation.definitionId, 'shell.execute');
+            assert.equal(reviews[0].operation.definitionVersion, '1');
+            assert.equal(typeof reviews[0].operation.input.command, 'string');
+            // The independent risk frame deliberately omits execution identity/context.
+            assert.equal(Object.hasOwn(reviews[0], 'target'), false);
+            if (gatedChecks++ < 2)
               await new Promise<void>((release) =>
-                heldChecks.set(reviews[0].target.executionId, release),
+                heldChecks.set(`risk-request-${gatedChecks}`, release),
               );
             delta = {
               content: JSON.stringify({
-                decision:
-                  reviews[0].target.definitionId === 'task.follow_up' ? 'approve_once' : 'ask_user',
-                reason: 'This exact child write requires its own human decision.',
+                risk: 'high',
+                reason:
+                  'This fixture classifies the exact Shell write as requiring a human decision.',
               }),
             };
           } else {
@@ -318,9 +335,9 @@ test.skipIf(process.platform !== 'darwin')(
                   call(
                     'shell_execute',
                     {
-                      key: `${task}-${tools}`,
                       command: `printf 'A original approved\\n' > child-a.txt; printf 'approved\\n' >> session-command.txt`,
-                      permissions: { filesystem: 'full_access', network: 'none' },
+                      filesystem: 'full_access',
+                      network: 'none',
                     },
                     `shell-${task}-${tools}`,
                   ),
@@ -339,6 +356,8 @@ test.skipIf(process.platform !== 'darwin')(
               };
               reason = 'tool_calls';
             } else {
+              if (task === 'CHILD_A_FOLLOWUP')
+                await new Promise<void>((release) => held.set(task!, release));
               if (task === 'CHILD_A_ACTIVE')
                 await new Promise<void>((release) => held.set(task!, release));
               if (task === 'NATIVE_COLLAB_ACTIVE')
@@ -396,7 +415,7 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
+          tools: ordinaryHostConfigurationDefaults(true, true, true, true).tools.map(({ id }) => ({
             id,
             enabled: enabled.has(id),
             ...(id === 'files.write' ? { definitionVersion: '3' } : {}),
@@ -409,10 +428,21 @@ test.skipIf(process.platform !== 'darwin')(
         readFileSync(
           resolve(import.meta.dir, '../native-collaboration-electron.fixture.ts'),
           'utf8',
-        ).replace(
-          "'./native-model-selection.fixture'",
-          JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
-        ),
+        )
+          .replace(
+            "'./native-root-page.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+          )
+          .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+            ),
+          )
+          .replace(
+            "'./native-model-selection.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          ),
       );
       expect(
         (
@@ -472,6 +502,7 @@ test.skipIf(process.platform !== 'darwin')(
         agentId: string;
         oldRun: string;
         nextRun: string;
+        approvedShellToolId: string;
         coldZeroReplay: boolean;
         staticCreationHistory: boolean;
         staticHistoryStages: { phase: string; cold: boolean; names: string[] }[];
@@ -527,6 +558,99 @@ test.skipIf(process.platform !== 'darwin')(
           snapshotDB.close();
         }
         expect(await cold.listSessions()).toHaveLength(1);
+        const childView = await cold.getView(report.agentId);
+        const originalShells = childView.executions.filter(
+          (row) =>
+            row.kind === 'tool' &&
+            row.definitionId === 'shell.execute' &&
+            row.runId === report.oldRun,
+        );
+        expect(originalShells).toHaveLength(2);
+        expect(originalShells.some((row) => row.id === report.approvedShellToolId)).toBe(true);
+        for (const tool of originalShells) {
+          expect(tool.status).toBe('succeeded');
+          expect(tool.authorization?.dispatched).toBe(true);
+          const input = tool.input as { command: string; filesystem: string; network: string };
+          expect(input).toEqual({
+            command:
+              "printf 'A original approved\\n' > child-a.txt; printf 'approved\\n' >> session-command.txt",
+            filesystem: 'full_access',
+            network: 'none',
+          });
+          const jobs = childView.executions.filter(
+            (row) => row.kind === 'job' && row.parentExecutionId === tool.id,
+          );
+          expect(jobs).toHaveLength(1);
+          const job = jobs[0]!;
+          expect(job).toMatchObject({
+            definitionId: 'shell.command',
+            definitionVersion: '1',
+            status: 'succeeded',
+            sessionId: report.agentId,
+            // Jobs are runless and bind to the original Run through their exact parent Tool.
+            runId: null,
+            rootWorkCommandId: tool.rootWorkCommandId,
+            rootWorkSeq: tool.rootWorkSeq,
+            cancelWithParent: true,
+            originStoreId: storeId,
+            cancelRequestedAt: null,
+          });
+          expect(job.input).toEqual({
+            command: input.command,
+            permissions: { filesystem: input.filesystem, network: input.network },
+          });
+          expect(job.authorization).toMatchObject({
+            dispatched: true,
+            policy: {
+              reason: 'parent_review',
+              sourceExecutionId: tool.id,
+              requestedScope: { filesystem: 'full_access', network: 'none' },
+              effectiveScope: { filesystem: 'full_access', network: 'none' },
+            },
+          });
+          expect(job.authorization?.check).toBeUndefined();
+          expect(job.authorization?.human).toBeUndefined();
+          const result = JSON.parse((tool.result as { content: string }).content);
+          expect(result.execution.id).toBe(job.id);
+          expect(result.ref).toMatchObject({
+            executionId: job.id,
+            commandId: job.originCommandId,
+            originStoreId: storeId,
+            sessionId: report.agentId,
+            extensionId: 'builtin.shell',
+          });
+          expect(result.shell_id).toBeString();
+          expect(result.shell_id).not.toBe('');
+          expect(result.shell_id).toBe(result.ref.key);
+        }
+        expect(
+          childView.executions.find((row) => row.id === report.approvedShellToolId)?.authorization
+            ?.human,
+        ).toMatchObject({ accepted: true, decision: 'approve', grant: 'same_command' });
+        const followFiles = childView.executions.filter(
+          (row) => row.runId === report.nextRun && row.kind === 'tool',
+        );
+        expect(followFiles).toHaveLength(1);
+        expect(followFiles[0]).toMatchObject({
+          definitionId: 'files.write',
+          definitionVersion: '3',
+          status: 'succeeded',
+          sessionId: report.agentId,
+          parentExecutionId: report.next,
+          input: { path: 'child-a-follow.txt', base: null, content: 'A follow-up approved\n' },
+          authorization: { dispatched: true },
+        });
+        expect(followFiles[0]!.authorization?.policy).toBeUndefined();
+        expect(followFiles[0]!.authorization?.check).toBeUndefined();
+        expect(followFiles[0]!.authorization?.human).toBeUndefined();
+        expect(
+          childView.messages.some(
+            (message) =>
+              message.runId === report.nextRun &&
+              message.role === 'assistant' &&
+              message.content === 'CHILD_A_FOLLOWUP_DONE_1',
+          ),
+        ).toBe(true);
         const rootView = await cold.getView('collaboration');
         const resultMessages = rootView.messages.filter((message) => message.agentResult);
         expect(
@@ -547,6 +671,18 @@ test.skipIf(process.platform !== 'darwin')(
         const lastCursor = (await cold.getMetadata()).lastChangeCursor;
         expect(await cold.listMessages('collaboration')).toEqual(rootView.messages);
         expect((await cold.getMetadata()).lastChangeCursor).toBe(lastCursor);
+        const stoppedChild = await cold.getView(stopped!.childSessionId!);
+        const blockedShells = stoppedChild.executions.filter(
+          (row) => row.kind === 'tool' && row.definitionId === 'shell.execute',
+        );
+        expect(blockedShells).toHaveLength(1);
+        expect(blockedShells[0]!.status).toBe('cancelled');
+        expect(blockedShells[0]!.authorization?.dispatched).toBe(false);
+        expect(
+          stoppedChild.executions.filter(
+            (row) => row.kind === 'job' && row.parentExecutionId === blockedShells[0]!.id,
+          ),
+        ).toHaveLength(0);
         const scopes = ['collaboration', report.agentId, stopped!.childSessionId!];
         const internalCalls: unknown[] = [];
         let checks = 0,
@@ -568,7 +704,7 @@ test.skipIf(process.platform !== 'darwin')(
             else titles++;
           }
         }
-        expect(checks).toBeGreaterThanOrEqual(4);
+        expect(checks).toBe(2);
         expect(titles).toBe(1);
         const grants = await Promise.all(
           scopes.map((sessionId) =>
@@ -587,10 +723,7 @@ test.skipIf(process.platform !== 'darwin')(
             item.grant.kind,
             item.grant.definitionId,
           ]),
-        ).toEqual([
-          [report.agentId, 'tool', 'shell.execute'],
-          [report.agentId, 'job', 'shell.command'],
-        ]);
+        ).toEqual([[report.agentId, 'tool', 'shell.execute']]);
         writeFileSync(
           join(home, 'cold-permission-evidence.json'),
           JSON.stringify({

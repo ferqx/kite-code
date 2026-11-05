@@ -4,8 +4,10 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Execution } from '@kite-ai/client';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -136,10 +138,15 @@ async function launch() {
     executablePath: launcher!,
     args: [`--user-data-dir=${join(home!, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home!,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 15000,
   });
-  page = await app.firstWindow();
+  page = await nativeRootPage(app, 15000);
   await observeNormalUiErrors();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Default Host Shell', exact: true }).waitFor();
@@ -168,11 +175,13 @@ async function launch() {
   await page.context().tracing.start({ screenshots: true, snapshots: true });
   assert.deepEqual(
     await app
-      .evaluate(({ app, BrowserWindow }) => ({
+      .evaluate(({ app, BaseWindow }) => ({
         noSandbox: app.commandLine.hasSwitch('no-sandbox'),
         appPath: app.getAppPath(),
         preferences: (
-          BrowserWindow.getAllWindows()[0]!.webContents as unknown as {
+          (
+            BaseWindow.getAllWindows()[0]! as import('../electron/native-root-window').NativeRootWindow
+          ).webContents as unknown as {
             getLastWebPreferences(): {
               sandbox?: boolean;
               contextIsolation?: boolean;
@@ -519,7 +528,7 @@ try {
   await read('signal', { pid: String(servicePid) });
   await read('process-absent', { pid: String(servicePid) });
   await read('absent', { label: 'service' });
-  assert.equal(app!.windows().length, 1);
+  assert.equal(await app!.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
   assert.deepEqual(await read('leases'), { outer: true, inner: true });
   await read('uninstall-busy');
   await close();

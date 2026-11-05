@@ -3,8 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 const [launcher, home, control, storeId] = process.argv.slice(2) as [
   string,
@@ -30,16 +32,23 @@ async function launch() {
     executablePath: launcher,
     args: [`--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 10000,
     chromiumSandbox: true,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   page.setDefaultTimeout(10000);
   assert.deepEqual(
-    await app.evaluate(({ app, BrowserWindow }) => {
+    await app.evaluate(({ app, BaseWindow }) => {
       const preferences = (
-        BrowserWindow.getAllWindows()[0]!.webContents as unknown as {
+        (
+          BaseWindow.getAllWindows()[0]! as import('../electron/native-root-window').NativeRootWindow
+        ).webContents as unknown as {
           getLastWebPreferences(): {
             sandbox?: boolean;
             contextIsolation?: boolean;
@@ -278,7 +287,7 @@ try {
   console.error(error);
   if (app)
     try {
-      const page = await app.firstWindow();
+      const page = await nativeRootPage(app, 10000);
       writeFileSync(join(home, 'extension-failure.txt'), await page.locator('body').innerText());
       await page.screenshot({ path: join(home, 'extension-failure.png'), fullPage: true });
     } catch {}

@@ -119,9 +119,12 @@ test.skipIf(process.platform !== 'darwin')(
           error = new Response(child.stderr).text(),
           timer = setTimeout(() => child.kill('SIGKILL'), 15000);
         try {
-          expect(await child.exited).toBe(0);
-          expect(await error).toBe('');
-          const result = JSON.parse(await output);
+          const exit = await child.exited,
+            stderr = await error,
+            stdout = await output;
+          expect(exit, stderr).toBe(0);
+          expect(stderr).toBe('');
+          const result = JSON.parse(stdout);
           expect(result.kind).toBe('offline_maintenance');
           expect(result.coverage.profileComplete).toBe(false);
           return result;
@@ -212,6 +215,16 @@ test.skipIf(process.platform !== 'darwin')(
           resolve(import.meta.dir, '../native-restored-questionnaire-electron.fixture.ts'),
           'utf8',
         )
+          .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+            ),
+          )
+          .replace(
+            "'./native-root-page.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+          )
           .replace(
             "'./native-model-selection.fixture'",
             JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),

@@ -9,6 +9,7 @@ import { getLoadedSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { loopbackModelEnvironment } from '../loopback-model-environment';
 import { privateDirectory } from '../test-filesystem';
 
 const [workspace, candidateRoot, barrier] = process.argv.slice(2);
@@ -116,6 +117,7 @@ async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean
 }
 let result: Record<string, unknown> | undefined;
 let cleanup = 'confirmed';
+Object.assign(userConfiguration.homeEnvironment, loopbackModelEnvironment(provider.url));
 try {
   const deadline = Date.now() + 15000;
   while (!existsSync(join(barrier, 'continue'))) {
@@ -195,7 +197,8 @@ try {
   );
   if (process.platform === 'darwin') {
     const shellRunId = (shell.receipt as { runId?: string } | null)?.runId;
-    if (shell.status !== 'applied' || !shellRunId) throw Error('default_shell_run_not_applied');
+    if (shell.status !== 'applied' || !shellRunId)
+      throw Error(`default_shell_run_not_applied:${JSON.stringify(shell)}`);
     const shellRun = await until(
       () => client.getRun(shellRunId),
       (value) => !value.isActive,

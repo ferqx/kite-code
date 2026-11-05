@@ -181,13 +181,21 @@ test.skipIf(process.platform !== 'darwin')(
       driverPath = join(root, 'driver.js');
     writeFileSync(
       fixture,
-      readFileSync(
-        resolve(import.meta.dir, '../native-model-input-electron.fixture.ts'),
-        'utf8',
-      ).replace(
-        "import { _electron } from 'playwright';",
-        `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-      ),
+      readFileSync(resolve(import.meta.dir, '../native-model-input-electron.fixture.ts'), 'utf8')
+        .replace(
+          "'./native-root-page.fixture'",
+          JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+        )
+        .replace(
+          "'../../../tests/fixtures/loopback-model-environment'",
+          JSON.stringify(
+            resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+          ),
+        )
+        .replace(
+          "import { _electron } from 'playwright';",
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+        ),
     );
     const built = await Bun.build({
       entrypoints: [fixture],

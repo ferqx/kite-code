@@ -1267,7 +1267,10 @@ export class AgentRuntime {
       expectedStoreId: work.originStoreId,
       owner: scope.owner,
       targetExecutionId: request.executionId,
-      decision,
+      decision: {
+        ...decision,
+        check: { ...decision.check, request: riskOnly ? decision.check.request : null },
+      },
       checker: identity,
       operationKey,
       ...(riskOnly ? { riskReview: preparedRisk?.review ?? null } : {}),
@@ -1475,12 +1478,18 @@ export class AgentRuntime {
     // Reserve the durable check before expensive context expansion. Its deadline
     // covers preparation and queueing as well as the Provider call.
     const checkRequest = decision.check.request;
+    const riskOnly = isShellRiskRequest(checkRequest);
+    const requestBody =
+      !riskOnly && Buffer.byteLength(canonicalJson(checkRequest)) > 64 * 1024
+        ? await this.publishBody(scope, checkRequest, 'authorization-check-request')
+        : undefined;
     const fact = await this.options.store.ensureAuthorizationCheck({
       expectedStoreId: work.originStoreId,
       owner: scope.owner,
       targetExecutionId: request.executionId,
       policyRevision: decision.revision,
-      request: checkRequest,
+      request: requestBody ? null : checkRequest,
+      ...(requestBody ? { requestBody } : {}),
       requireApproval: decision.check.requireApproval === true,
       checker: identity,
       operationKey: timing.operationKey,
@@ -1494,12 +1503,12 @@ export class AgentRuntime {
       targetExecutionId: request.executionId,
       checkExecutionId: fact.execution.id,
       policyRevision: decision.revision,
-      request: structuredClone(checkRequest),
+      request: requestBody ? null : structuredClone(checkRequest),
+      ...(requestBody ? { requestBody } : {}),
       requireApproval: decision.check.requireApproval === true,
       checker: identity,
     };
     timing.prepared(reference);
-    const riskOnly = isShellRiskRequest(checkRequest);
     if (riskOnly && (!timing.riskReview || Date.now() >= timing.deadlineAt)) {
       const timedOut = !timing.preparationFailure;
       if (fact.created)

@@ -264,6 +264,16 @@ test.skipIf(process.platform !== 'darwin')(
         fixture,
         readFileSync(resolve(import.meta.dir, '../native-bundle-electron.fixture.ts'), 'utf8')
           .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+            ),
+          )
+          .replace(
+            "'./native-root-page.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+          )
+          .replace(
             "'./native-model-selection.fixture'",
             JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
           )
@@ -385,13 +395,21 @@ test.skipIf(process.platform !== 'darwin')(
       const quitFixture = join(root, 'quit-driver.ts');
       writeFileSync(
         quitFixture,
-        readFileSync(
-          resolve(import.meta.dir, '../native-quit-electron.fixture.ts'),
-          'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
+        readFileSync(resolve(import.meta.dir, '../native-quit-electron.fixture.ts'), 'utf8')
+          .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+            ),
+          )
+          .replace(
+            "'./native-root-page.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          ),
       );
       observe('quit_driver_build_begin');
       const quitBuild = await Bun.build({

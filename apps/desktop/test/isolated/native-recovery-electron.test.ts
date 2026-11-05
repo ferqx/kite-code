@@ -109,7 +109,7 @@ for (const kind of ['run', 'interrupt', 'report'])
             });
           }
           if (kind !== 'report') expect(f.calls()).toBe(kind === 'run' ? 2 : 1);
-          else expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 2 });
+          else expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 0 });
         } finally {
           clearTimeout(timer);
         }

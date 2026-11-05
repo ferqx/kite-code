@@ -29,7 +29,7 @@ const parentTask = 'NATIVE\\_PARENT\\_B hold original active Run';
 const hasOriginalTask = (body: { messages: { role: string; content?: unknown }[] }, task: string) =>
   body.messages.some((message) => message.role === 'user' && message.content === task);
 test.skipIf(process.platform !== 'darwin')(
-  'relocated source-free Native Plan reviews preserve exact feedback, independent user approval, real Files progress and cold Store proofs',
+  'relocated source-free Native Plan reviews preserve exact feedback, explicit Plan approval, real Files progress and cold Store proofs',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-plan-review-bundle-'));
     const home = join(root, 'home'),
@@ -217,27 +217,9 @@ test.skipIf(process.platform !== 'darwin')(
               return [];
             }
           });
-          if (authorizationReviews.length) {
-            expect(authorizationReviews).toHaveLength(1);
-            expect(body.tools ?? []).toEqual([]);
-            authorizationReviewCalls++;
-            const frame = (delta: unknown, reason: string | null) =>
-              `data: ${JSON.stringify({ id: `authorization-${authorizationReviewCalls}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-            return new Response(
-              frame(
-                {
-                  content: JSON.stringify({
-                    decision: 'ask_user',
-                    reason: 'Original target requires independent user decision',
-                  }),
-                },
-                null,
-              ) +
-                frame({}, 'stop') +
-                'data: [DONE]\n\n',
-              { headers: { 'content-type': 'text/event-stream' } },
-            );
-          }
+          authorizationReviewCalls += authorizationReviews.length;
+          // This scenario uses Planning and Files, not Shell risk review.
+          expect(authorizationReviews).toHaveLength(0);
           businessBodies.push(body);
           const serial = businessBodies.length;
           const frame = (delta: unknown, reason: string | null) =>
@@ -552,6 +534,16 @@ test.skipIf(process.platform !== 'darwin')(
         fixture,
         readFileSync(resolve(import.meta.dir, '../native-plan-review-electron.fixture.ts'), 'utf8')
           .replace(
+            "'./native-root-page.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+          )
+          .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+            ),
+          )
+          .replace(
             "'./native-model-selection.fixture'",
             JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
           )
@@ -611,61 +603,11 @@ test.skipIf(process.platform !== 'darwin')(
         { sessionId: 'b', decision: 'approve', feedback: undefined },
         { sessionId: 'd', decision: 'deny', feedback: '原拒绝理由 雪🙂' },
       ]);
-      const reviewRequests: {
-        purpose: string;
-        checker: { id: string; modelId: string };
-        originCommandRequest: { content: string };
-        rootWorkRequest: { content: string };
-        target: {
-          executionId: string;
-          runId: string;
-          sessionId: string;
-          originStoreId: string;
-          definitionId: string;
-          definitionVersion: string;
-          input: { path: string };
-        };
-      }[] = [];
-      for (const body of bodies) {
-        const reviews = body.messages.flatMap((message) => {
-          if (message.role !== 'user' || typeof message.content !== 'string') return [];
-          try {
-            const payload = JSON.parse(message.content);
-            return payload?.purpose === 'authorization_check' ? [payload] : [];
-          } catch {
-            return [];
-          }
-        });
-        if (reviews.length) {
-          // Auto's actual review child has one Model call and no Tool catalog.
-          // Identify it by the expanded review purpose and original target, not by an empty list.
-          expect(reviews).toHaveLength(1);
-          expect(body.tools ?? []).toEqual([]);
-          const review = reviews[0] as (typeof reviewRequests)[number];
-          expect(review.checker.id).toBe('builtin.auto');
-          expect(review.checker.modelId).toBe('fixed');
-          expect(review.originCommandRequest.content).toBe(planTask(review.target.sessionId));
-          expect(review.rootWorkRequest.content).toBe(review.originCommandRequest.content);
-          expect(review.target.originStoreId).toBe(storeId);
-          expect(['a', 'b', 'd', 'c']).toContain(review.target.sessionId);
-          expect(['planning.write', 'planning.update', 'planning.review', 'files.write']).toContain(
-            review.target.definitionId,
-          );
-          expect(review.target.definitionVersion).toBe(
-            review.target.definitionId === 'files.write' ? '3' : '1',
-          );
-          if (review.target.definitionId === 'files.write')
-            expect(review.target.input.path).toBe(`effect-${review.target.sessionId}.txt`);
-          reviewRequests.push(review);
-          console.log(
-            'provider_actual_authorization_review',
-            JSON.stringify({ purpose: review.purpose, target: review.target }),
-          );
-        } else if (!hasOriginalTask(body, parentTask) || hasOriginalTask(body, planTask('b')))
+      expect(authorizationReviewCalls).toBe(0);
+      expect(bodies).toHaveLength(businessBodies.length);
+      for (const body of businessBodies)
+        if (!hasOriginalTask(body, parentTask) || hasOriginalTask(body, planTask('b')))
           expect(body.tools?.some((tool) => tool.function.name === 'write_plan')).toBe(true);
-      }
-      expect(reviewRequests).toHaveLength(authorizationReviewCalls);
-      expect(bodies).toHaveLength(businessBodies.length + authorizationReviewCalls);
       const report = JSON.parse(
         readFileSync(join(home, 'plan-review-report.json'), 'utf8'),
       ) as PlanReviewReport & {
@@ -689,17 +631,7 @@ test.skipIf(process.platform !== 'darwin')(
         },
       });
       expect(report.management).toHaveLength(0);
-      expect(report.filesApprovals).toHaveLength(2);
-      const reviewedFile = report.filesApprovals.find((approval) => approval.sessionId === 'a')!;
-      const originalFileReviews = reviewRequests.filter(
-        (review) => review.target.executionId === reviewedFile.executionId,
-      );
-      expect(originalFileReviews).toHaveLength(1);
-      expect(originalFileReviews[0]!.target.runId).toBe(reviewedFile.runId);
-      expect(originalFileReviews[0]!.target.sessionId).toBe('a');
-      expect(originalFileReviews[0]!.target.definitionId).toBe('files.write');
-      expect(originalFileReviews[0]!.target.input.path).toBe('effect-a.txt');
-      expect(reviewRequests).toHaveLength(report.management.length + report.filesApprovals.length);
+      expect(report.filesApprovals).toHaveLength(0);
       expect(report.expectedPosts).toBe(
         report.management.length + 4 + report.filesApprovals.length,
       );
@@ -724,25 +656,6 @@ test.skipIf(process.platform !== 'darwin')(
         });
         const cursor = (await cold.getMetadata()).lastChangeCursor;
         expect((await cold.getMetadata()).storeId).toBe(storeId);
-        for (const review of reviewRequests) {
-          const target = await cold.getExecution(review.target.executionId);
-          expect(target).toMatchObject({
-            id: review.target.executionId,
-            runId: review.target.runId,
-            sessionId: review.target.sessionId,
-            originStoreId: review.target.originStoreId,
-            definitionId: review.target.definitionId,
-            definitionVersion: review.target.definitionVersion,
-            input: review.target.input,
-            authorization: {
-              check: { status: 'succeeded', decision: 'ask_user' },
-              human: { accepted: true, state: 'answered', decision: 'approve' },
-            },
-          });
-          expect(target?.authorization?.check?.executionId).toBeDefined();
-          const child = await cold.getExecution(target!.authorization!.check!.executionId);
-          expect(child).toMatchObject({ status: 'succeeded', originStoreId: storeId });
-        }
         for (const definitionId of ['planning.write', 'planning.review', 'planning.update'])
           expect(
             report.planningExecutions.some(
@@ -824,35 +737,6 @@ test.skipIf(process.platform !== 'darwin')(
             });
             expect(Number(original.request.policy!.review.reference.size)).toBeGreaterThan(32768);
           }
-        }
-        for (const original of report.filesApprovals) {
-          const card = (
-            await cold.listInteractions({ expectedStoreId: storeId, sessionId: original.sessionId })
-          ).interactions.find((card) => card.id === original.id)!;
-          expect(card).toMatchObject({
-            kind: 'approval',
-            runId: original.runId,
-            executionId: original.executionId,
-            state: 'answered',
-            acceptedDecisionRevision: '2',
-            originStoreId: storeId,
-            sessionId: original.sessionId,
-            presentationSessionId: original.sessionId,
-            definitionId: 'files.write',
-            definitionVersion: '3',
-          });
-          expect(card.request).toEqual(original.request);
-          expect(card.answer).toEqual({
-            kind: 'approval',
-            decision: 'approve',
-            grant: 'approve_once',
-          });
-          expect((await cold.getCommand(original.commandId))?.receipt).toMatchObject({
-            outcome: 'answer_saved',
-            interactionId: original.id,
-            cancelled: false,
-          });
-          expect((await cold.getExecution(original.executionId))?.status).toBe('succeeded');
         }
         for (const original of report.cards) {
           const card = (
@@ -973,6 +857,19 @@ test.skipIf(process.platform !== 'darwin')(
           );
           if (['a', 'b'].includes(run.sessionId)) {
             expect(effects).toHaveLength(1);
+            expect(effects[0]).toMatchObject({
+              originStoreId: storeId,
+              sessionId: run.sessionId,
+              runId: run.id,
+              kind: 'tool',
+              definitionVersion: '3',
+              input: {
+                path: `effect-${run.sessionId}.txt`,
+                content: `approved ${run.sessionId} exact effect\n雪🙂`,
+              },
+              authorization: { dispatched: true },
+            });
+            expect(effects[0]!.authorization?.check).toBeUndefined();
             expect(readFileSync(join(workspace, `effect-${run.sessionId}.txt`), 'utf8')).toBe(
               `approved ${run.sessionId} exact effect\n雪🙂`,
             );
@@ -981,11 +878,8 @@ test.skipIf(process.platform !== 'darwin')(
             ).interactions.filter(
               (card) => card.kind === 'approval' && card.executionId === effects[0]!.id,
             );
-            expect(approvals).toHaveLength(1);
-            expect(approvals[0]!.answer).toMatchObject({
-              decision: 'approve',
-              grant: 'approve_once',
-            });
+            expect(approvals).toHaveLength(0);
+            expect(effects[0]!.authorization?.human).toBeUndefined();
             expect(
               (
                 await cold.getExtensionRecord({

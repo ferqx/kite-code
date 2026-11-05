@@ -5,8 +5,10 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Interaction, InteractionAttachment, Json } from '@kite-ai/client';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeDraft, NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 // Read editor text without CSS paragraph margins adding visual blank lines.
 // Keep every actual line break and leading/trailing space in the original draft.
@@ -129,10 +131,15 @@ try {
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control)),
+    },
     timeout: 10000,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   stage('window_ready', { electronPid: app.process().pid });
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => console.error('plan_renderer_error', error.message));
@@ -696,48 +703,35 @@ try {
       ),
     });
   }
-  async function toolApproval(id: string, runId: string) {
-    await page.getByRole('button', { name: '批准一次', exact: true }).waitFor();
-    await openSessionTools(page);
+  async function assertWorkspaceWrite(id: string, runId: string) {
     const current = await state();
-    const approval = current.selection!.interactions.find(
-      (card) => card.kind === 'approval' && card.state === 'pending',
-    )!;
-    assert.ok(approval);
-    assert.ok(approval.runId);
-    assert.equal(approval.runId, runId);
-    assert.equal((approval.request as Record<string, unknown>).definitionId, 'files.write');
-    assert.equal(existsSync(join(home, 'workspace', `effect-${id}.txt`)), false);
-    // Ordinary Tool approval retains the main composer and permission selector;
-    // the exact Files approval is independent of the already saved Plan approval.
+    const effects = current.selection!.executions.filter(
+      (execution) =>
+        execution.runId === runId &&
+        execution.definitionId === 'files.write' &&
+        jsonObject(execution.toolInput!).path === `effect-${id}.txt`,
+    );
+    assert.equal(effects.length, 1);
+    const effect = effects[0]!;
+    assert.equal(effect.originStoreId, storeId);
+    assert.equal(effect.sessionId, id);
+    assert.equal(effect.definitionVersion, '3');
+    assert.equal(effect.status, 'succeeded');
+    assert.equal(effect.authorization?.dispatched, true);
+    assert.equal(effect.authorization?.check, undefined);
+    assert.equal(effect.authorization?.human, undefined);
+    assert.equal(jsonObject(effect.toolInput!).path, `effect-${id}.txt`);
     assert.equal(
-      await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
-      1,
+      current.selection!.interactions.filter(
+        (card) => card.kind === 'approval' && card.executionId === effect.id,
+      ).length,
+      0,
     );
-    await page.locator('[data-permission-trigger]').waitFor();
-    await page.getByRole('button', { name: '批准一次', exact: true }).click();
-    const accepted = await until(
-      state,
-      (value) =>
-        value.interactionSubmissions.some(
-          (row) => row.interaction.id === approval.id && row.phase === 'accepted',
-        ) &&
-        !value.selection!.interactions.some(
-          (row) => row.id === approval.id && row.state === 'pending',
-        ),
-      'original Files approval not accepted',
+    assert.equal(await page.getByRole('button', { name: '批准一次', exact: true }).count(), 0);
+    assert.equal(
+      readFileSync(join(home, 'workspace', `effect-${id}.txt`), 'utf8'),
+      `approved ${id} exact effect\n雪🙂`,
     );
-    const submission = accepted.interactionSubmissions.find(
-      (row) => row.interaction.id === approval.id,
-    )!;
-    filesApprovals.push({
-      id: approval.id,
-      runId: approval.runId,
-      sessionId: approval.presentationSessionId,
-      executionId: approval.executionId,
-      request: approval.request,
-      commandId: submission.intent.commandId,
-    });
   }
   const mainDraft = '  原 Main 草稿🙂\n空格必须恢复  ';
   const first = await start('a', mainDraft);
@@ -772,9 +766,8 @@ try {
     await page.getByLabel('计划步骤', { exact: true }).innerText(),
     /Write the approved file/,
   );
-  await page
-    .getByRole('combobox', { name: 'Plan review mode', exact: true })
-    .selectOption('accept_edits');
+  await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).click();
+  await page.getByRole('option', { name: 'accept_edits', exact: true }).click();
   await page
     .getByRole('textbox', { name: 'Plan review feedback', exact: true })
     .fill(metadata.feedback);
@@ -786,7 +779,9 @@ try {
     await page.getByRole('button', { name: 'Load complete attachment', exact: true }).click();
   await page.getByLabel('完整计划正文', { exact: true }).waitFor();
   assert.equal(
-    await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).inputValue(),
+    (
+      await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).textContent()
+    )?.trim(),
     'accept_edits',
   );
   assert.equal(
@@ -802,8 +797,10 @@ try {
   assert.notEqual(second.id, first.id);
   assert.equal(planRequest(second).version, '2');
   assert.equal(
-    await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).inputValue(),
-    '',
+    (
+      await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).textContent()
+    )?.trim(),
+    'Select a mode explicitly',
   );
   assert.equal(
     await page.getByRole('textbox', { name: 'Plan review feedback', exact: true }).inputValue(),
@@ -813,11 +810,12 @@ try {
   assert.equal(existsSync(join(home, 'workspace', 'blocked-a-2.txt')), false);
   assert.equal(existsSync(join(home, 'workspace', 'effect-a.txt')), false);
   assert.equal(await posts(), management.length + 1);
-  await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).selectOption('auto');
+  await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).click();
+  await page.getByRole('option', { name: 'auto', exact: true }).click();
   await approve.click();
   await capture(second, 'approve', 'auto');
-  await toolApproval('a', second.runId!);
   await done('a', second.runId!, 'completed', mainDraft);
+  await assertWorkspaceWrite('a', second.runId!);
   const postsBeforeHistory = await posts();
   const history = page.locator('[data-interaction-history]');
   await history.locator(':scope > summary').click();
@@ -854,13 +852,12 @@ try {
   const bDraft = '  B 原草稿 雪🙂  ';
   const b = await start('b', bDraft);
   assert.equal(await approve.isDisabled(), true);
-  await page
-    .getByRole('combobox', { name: 'Plan review mode', exact: true })
-    .selectOption('accept_edits');
+  await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).click();
+  await page.getByRole('option', { name: 'accept_edits', exact: true }).click();
   await approve.click();
   await capture(b, 'approve', 'accept_edits');
-  await toolApproval('b', b.runId!);
   await done('b', b.runId!, 'completed', bDraft);
+  await assertWorkspaceWrite('b', b.runId!);
   const dDraft = '拒绝原 Main 草稿';
   const d = await start('d', dDraft);
   await page
@@ -958,8 +955,8 @@ try {
     ),
   );
   assert.equal(management.length, 0, 'record-only Planning Tools need no ordinary human approval');
-  assert.equal(filesApprovals.length, 2);
-  const expectedPosts = management.length + 4 + filesApprovals.length; // Every actual management approval, four Plan answers, two independent Files Ask approvals.
+  assert.equal(filesApprovals.length, 0);
+  const expectedPosts = management.length + 4 + filesApprovals.length; // Only the four original Plan answers; both modes allow workspace Files writes.
   assert.equal(await posts(), expectedPosts);
   stage('all_ui_assertions_complete', {
     planDecisions: 4,
@@ -980,13 +977,13 @@ try {
   );
   const exitChoicePath = join(home, 'plan-review-exit-choice.json');
   // Test port for the production warning; this does not qualify the OS modal UI.
-  await owned.evaluate(({ dialog, BrowserWindow }, path) => {
+  await owned.evaluate(({ dialog, BaseWindow }, path) => {
     const assert: typeof import('node:assert').strict =
       process.getBuiltinModule('node:assert').strict;
     const write = process.getBuiltinModule('node:fs')
       .writeFileSync as typeof import('node:fs').writeFileSync;
     const original = dialog.showMessageBox;
-    const windows = BrowserWindow.getAllWindows();
+    const windows = BaseWindow.getAllWindows();
     assert.equal(windows.length, 1);
     const originalWindow = windows[0]!;
     let calls = 0;
@@ -1047,7 +1044,7 @@ try {
       sourceFree: true,
       defaultService: true,
       planReviews: 4,
-      independentToolApprovals: 2,
+      independentToolApprovals: filesApprovals.length,
       managementApprovals: management.length,
       answerPosts: expectedPosts,
       completed: 2,

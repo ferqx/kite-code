@@ -26,6 +26,7 @@ import {
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { runDevelopmentCLI, selectDevelopmentCLI } from '../../../scripts/development/unified-cli';
+import { loopbackModelEnvironment } from '../../fixtures/loopback-model-environment';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
@@ -343,6 +344,7 @@ test('actual CLI development argv stores complete history in the owned user home
             PATH: process.env.PATH ?? '',
             LANG: 'C.UTF-8',
             ...userConfiguration.homeEnvironment,
+            ...loopbackModelEnvironment(provider.url),
           },
         },
       );
@@ -727,6 +729,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
             PATH: process.env.PATH ?? '',
             LANG: 'C.UTF-8',
             ...userConfiguration.homeEnvironment,
+            ...loopbackModelEnvironment(provider.url),
           },
         },
       );
@@ -1024,6 +1027,7 @@ test('actual development JSON Work completes ordinary input and cold same-intent
             PATH: process.env.PATH ?? '',
             LANG: 'C.UTF-8',
             ...userConfiguration.homeEnvironment,
+            ...loopbackModelEnvironment(provider.url),
           },
         },
       );
@@ -1033,6 +1037,7 @@ test('actual development JSON Work completes ordinary input and cold same-intent
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ]);
+      if (code !== 0) throw Error(`development JSON work exit ${code}: ${stderr}\n${stdout}`);
       expect(code).toBe(0);
       expect(stderr).toBe(
         shared

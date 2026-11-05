@@ -4,11 +4,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EffectiveConfiguration, ModelConfiguration } from '@kite-ai/agent/config';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type {
   NativeCallerMetadata,
   NativeProviderSubmission,
   NativeState,
 } from '../src/native-bridge';
+import { nativeRootPage } from './native-root-page.fixture';
 
 type PhysicalRequest = { path: string; method: string };
 type OwnedTransport = { base: string; headers: RequestInit['headers'] };
@@ -150,10 +152,15 @@ async function launch() {
     executablePath: join(candidate!, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate!, 'app'), `--user-data-dir=${join(home!, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home!,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 10000,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Provider A', exact: true }).waitFor();
   await openSessionTools(page);
@@ -258,7 +265,10 @@ try {
   ] as const;
   for (const [alias, label, name] of aliases) {
     await page.getByRole('button', { name: '新增提供商', exact: true }).click();
-    await page.getByRole('combobox', { name: '服务商预设', exact: true }).selectOption(alias);
+    await page.getByRole('combobox', { name: '服务商预设', exact: true }).click();
+    await page
+      .getByRole('option', { name: alias === 'compatible' ? '自定义服务商' : label, exact: true })
+      .click();
     await page.getByRole('textbox', { name: '提供商名称', exact: true }).fill(label);
     await page
       .getByRole('textbox', { name: '服务地址', exact: true })
@@ -267,7 +277,10 @@ try {
       await page
         .getByRole('textbox', { name: 'API key', exact: true })
         .fill(`owned-fixture-${alias}-nonpaid`);
-    else await page.getByRole('combobox', { name: '凭据处理', exact: true }).selectOption('none');
+    else {
+      await page.getByRole('combobox', { name: '凭据处理', exact: true }).click();
+      await page.getByRole('option', { name: '不使用凭据', exact: true }).click();
+    }
     await page.getByRole('textbox', { name: '模型名称', exact: true }).fill(name);
     await page.getByRole('button', { name: '保存提供商配置', exact: true }).click();
     const saved = await until(
@@ -474,7 +487,12 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
     .fill('Follow up: NATIVE_plain_steer');
-  await page.getByRole('button', { name: '引导当前轮次', exact: true }).click();
+  await page.getByRole('button', { name: '排队后续输入', exact: true }).click();
+  await page
+    .locator('.composer-queue-row')
+    .filter({ hasText: 'Follow up: NATIVE_plain_steer' })
+    .getByRole('button', { name: '引导发送排队消息', exact: true })
+    .click();
   const steered = await until(
     state,
     (v) => v.callerSubmissions!.some((row) => row.request.kind === 'input.steer'),
@@ -571,7 +589,7 @@ try {
     },
     { home, commandId: original.commandId },
   );
-  assert.equal(persisted.version, 7);
+  assert.equal(persisted.version, 12);
   assert.equal(persisted.mcpRows, 0);
   assert.equal(typeof persisted.row, 'string');
   const safeRow = JSON.parse(persisted.row as string);

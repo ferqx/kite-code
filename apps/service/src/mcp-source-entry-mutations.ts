@@ -19,6 +19,7 @@ import type {
   QueryDefinition,
   ToolResult,
 } from '@kite-ai/agent/extensions';
+import { unopenedRejection } from '@kite-ai/agent/mcp';
 import type {
   CommandRecord,
   ExecutionRecord,
@@ -861,12 +862,16 @@ export function createMcpSourceEntryMutations(options: {
       const result = object(execution.result),
         details = object(result.details);
       const deniedCodes = [
-        'approval_denied',
-        'permission_denied',
         'cancelled_before_dispatch',
         'cancel_requested',
         'execution_cancel_requested',
       ];
+      const refusal = !mutation ? unopenedRejection(execution) : null;
+      if (refusal) {
+        payload.phase = 'failed';
+        payload.reason = refusal;
+        return output();
+      }
       if (
         !mutation &&
         ['failed', 'cancelled'].includes(execution.status) &&

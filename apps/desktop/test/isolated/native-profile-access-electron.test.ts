@@ -141,10 +141,15 @@ test.skipIf(process.platform !== 'darwin')(
     const source = readFileSync(
       resolve(import.meta.dir, '../native-profile-access-electron.fixture.ts'),
       'utf8',
-    ).replace(
-      "import { _electron } from 'playwright';",
-      `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-    );
+    )
+      .replace(
+        "import { _electron } from 'playwright';",
+        `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+      )
+      .replace(
+        "'./native-root-page.fixture'",
+        JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+      );
     writeFileSync(join(root, 'driver.ts'), source);
     directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
     const built = await Bun.build({

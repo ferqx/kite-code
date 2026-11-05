@@ -98,6 +98,8 @@ Caller Port 的大正文 Plan／steer／follow-up／取消和日志容量旅程�
 
 Native DOM 的读取归属夹具在卸载后等待真实 FIFO timer turn，再关闭 JSDOM 和恢复全局 Event 构造器；Radix FocusScope 的卸载事件必须仍属于原 realm。`Bun.sleep(0)` 让出微任务，不能作为该 timer 已完成的证明；此清理不改变生产组件或增加业务等待预算。
 
+本轮校正的 Native 夹具使用[准确 Root 页面](../apps/desktop/test/native-root-page.fixture.ts)核对应用 renderer URL，独立全局确认框不充当主页面；物理窗口数沿 BaseWindow 核验，不把多个 WebContentsView 当成多个窗口。模型请求只使用[本机 Provider 环境](fixtures/loopback-model-environment.ts)，显式保持原测试 HOME 与代理范围，不读取开发者的配置。控件操作沿当前组合框、独立确认框和非模态反馈，原操作身份、权限、完整正文及冷恢复断言仍须独立通过。[报告恢复夹具](../apps/cli/test/fixtures/recovery-report-profile.ts)使用当前 `spawn_agent` 的 `prompt` 参数和运行时执行身份，核原执行只启动一次及其准确报告，不重新暴露旧启动参数或创建兼容入口。
+
 Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认钥匙串引用](../apps/desktop/test/owned-default-keychain.ts)：按进程 UID 只读查询 Directory Services 中的 OS 用户目录，再读取该用户的默认钥匙串，在私有测试 HOME 建立引用，让真实 OS 后端可用；不依赖 Bun 启动时缓存的 HOME、不复制钥匙串、不更改系统默认项或搜索列表。测试仍只保存自有随机凭据，并沿原准确引用撤销及用新 Vault 核实不存在，不能将临时内存后端记作这项资格。普通产品启动和其他平台的后端没有变化。
 
 2026-10-14 已按用户要求在 Windows NT 10.0.26300.0／x64／Bun1.4.2 实际执行本机验证：修复Worker构建路径与四个TOKEN_USER缓冲区问题后，八workspace build通过；原默认首批Desktop作业失败并中断，后续未派发。另26份原完整专项各独立Bun进程，12文件通过／14文件失败，合33pass／34fail／4原平台skip／2error。通过范围含daemon原生叶子、stdio MCP、文件候选与TUI私有记录；Files／媒体发布错误87、普通Workspace配置、四份恢复、ConPTY内容、Desktop夹具和缺MSVC仍阻断完整验收。准确命令、原日志与局部修复归[Windows本机证据](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-14windows-本机首次实际验证)。以下旧“Win/Linux未实测”只描述各历史轮次，当前Windows已实测但未通过，Linux／hosted Actions及完整installed资格不由本轮替代。

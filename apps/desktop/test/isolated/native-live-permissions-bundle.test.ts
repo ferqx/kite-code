@@ -210,10 +210,10 @@ test.skipIf(process.platform !== 'darwin')(
                       function: {
                         name: 'shell_execute',
                         arguments: JSON.stringify({
-                          key: 'queue-held',
                           command: `printf '%s' '${'LONG SAFE QUEUE SHELL '.repeat(18)}' > queue.marker; while [ ! -f queue.release ]; do sleep 0.05; done`,
                           execution_timeout_ms: 60000,
-                          permissions: { filesystem: 'full_access', network: 'none' },
+                          filesystem: 'full_access',
+                          network: 'none',
                         }),
                       },
                     },
@@ -274,7 +274,6 @@ test.skipIf(process.platform !== 'darwin')(
               } else if (tools.length === (actor === 'main' ? 1 : 0)) {
                 const label = actor.toUpperCase();
                 delta = call('shell_execute', {
-                  key: `held-${actor}`,
                   command: `printf '${label} STARTED\\n' > ${actor}.marker; while [ ! -f ${actor}.release ]; do sleep 0.05; done; printf '${label} FINISHED\\n' >> ${actor}.marker`,
                   execution_timeout_ms: 60000,
                 });
@@ -344,7 +343,7 @@ test.skipIf(process.platform !== 'darwin')(
             },
           ],
           tools: [
-            ...ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
+            ...ordinaryHostConfigurationDefaults(true, true, true, true).tools.map(({ id }) => ({
               id,
               enabled: enabled.has(id),
             })),
@@ -359,6 +358,12 @@ test.skipIf(process.platform !== 'darwin')(
           resolve(import.meta.dir, '../native-live-permissions-electron.fixture.ts'),
           'utf8',
         )
+          .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+            ),
+          )
           .replace(
             "'./native-model-selection.fixture'",
             JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),

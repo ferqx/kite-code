@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -74,7 +75,7 @@ async function servicePid() {
   return pid;
 }
 async function ready() {
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 30000);
   page.setDefaultTimeout(30000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
@@ -91,7 +92,13 @@ try {
   const first = await servicePid();
   process.kill(first, 'SIGKILL');
   await stopped(first);
-  eq(app.windows().length, 1);
+  eq(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
+  eq(page.isClosed(), false);
+  eq(await nativeRootPage(app, 30000), page);
+  eq(
+    await page.getByRole('textbox', { name: '当前会话私有草稿' }).textContent(),
+    'Retained UI data while Service is dead',
+  );
   eq(await request('maintenance'), 'owner_busy');
   eq(await request('other-maintenance'), 'available');
   // Explicit fixture authorizes owned application exit after its Service is already dead.

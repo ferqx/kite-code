@@ -2,21 +2,28 @@ import { strict as assert } from 'node:assert';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 const [outdir, root, executablePath, control] = process.argv.slice(2) as string[];
 const app = await _electron.launch({
   executablePath,
   args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
   cwd: outdir,
-  env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+  env: {
+    HOME: root!,
+    PATH: '/usr/bin:/bin',
+    LANG: 'C.UTF-8',
+    ...loopbackModelEnvironment(new URL(control!)),
+  },
   timeout: 15000,
 });
 let phase = 'launch';
 const diagnostics: string[] = [];
 try {
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 15000);
   await page.bringToFront();
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => diagnostics.push(error.message));
@@ -43,8 +50,8 @@ try {
     );
   };
   await select('Reasoning Stream', 'parent');
-  await app.evaluate(({ app, BrowserWindow }) => {
-    const windows = BrowserWindow.getAllWindows();
+  await app.evaluate(({ app, BaseWindow }) => {
+    const windows = BaseWindow.getAllWindows();
     if (windows.length !== 1) throw Error('reasoning_window_identity_changed');
     windows[0]!.show();
     windows[0]!.focus();
@@ -570,7 +577,7 @@ try {
   );
 } catch (cause) {
   console.error('native_reasoning_render_failed', phase, cause, diagnostics);
-  const page = await app.firstWindow().catch(() => undefined);
+  const page = await nativeRootPage(app, 15000).catch(() => undefined);
   if (page) {
     console.error('conversation', await page.locator('.conversation').innerText());
     await page.screenshot({ path: join(root!, 'failure.png') });

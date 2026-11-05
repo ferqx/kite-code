@@ -2,6 +2,7 @@ import { expect, mock, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { nativeBrowserChannel } from '../../src/native-browser-bridge';
+import { FakePlainView } from '../native-plain-view.fixture';
 
 type Request = Pick<Electron.OnBeforeRequestListenerDetails, 'url' | 'resourceType'>;
 let beforeRequest:
@@ -17,6 +18,7 @@ const browsing = Object.assign(new EventEmitter(), {
   },
 });
 mock.module('electron', () => ({
+  View: FakePlainView,
   session: { fromPartition: () => browsing },
   WebContentsView: class {
     constructor() {
@@ -32,6 +34,9 @@ test('isolated browser allows credential-free WebSocket subresources but not Web
   const contents = Object.assign(new EventEmitter(), { mainFrame: frame });
   const window = Object.assign(new EventEmitter(), {
     webContents: contents,
+    contentView: {
+      children: [Object.assign(new EventEmitter(), { webContents: contents })],
+    },
     isDestroyed: () => false,
   }) as unknown as BrowserWindow;
   type Handler = (event: IpcMainInvokeEvent, value: unknown) => unknown;

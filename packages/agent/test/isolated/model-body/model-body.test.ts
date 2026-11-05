@@ -29,7 +29,10 @@ async function setup(
     | 'source'
     | 'ask'
     | 'receipt'
-    | 'origin' = 'normal',
+    | 'origin'
+    | 'request-scope'
+    | 'request-hash'
+    | 'request-cancel' = 'normal',
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-model-body-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
@@ -37,6 +40,7 @@ async function setup(
   const artifacts = createArtifactStore({ profile, store });
   let effects = 0,
     readEntered = false;
+  const cacheRequests: { bytes: number; request: unknown }[] = [];
   let releaseRead: () => void = () => {};
   const readGate = new Promise<void>((resolve) => {
     releaseRead = resolve;
@@ -51,13 +55,32 @@ async function setup(
   }
   const port: ArtifactContentStore = {
     ...artifacts,
+    async publish(input) {
+      if (mode === 'request-cancel' && input.refId?.startsWith('authorization-check-request-')) {
+        readEntered = true;
+        await readGate;
+        input.signal?.throwIfAborted();
+      }
+      return artifacts.publish(input);
+    },
     read: (input) => holdRead(artifacts.read(input)),
     readReference: (input) => holdRead(artifacts.readReference(input)),
   };
   const model = createFixedModel(
-    mode === 'source' || mode === 'origin'
-      ? [call('sample.effect'), [finish]]
-      : [call('sample.body'), call('sample.effect'), [finish]],
+    mode === 'corrupt' || mode === 'foreign'
+      ? [
+          call('sample.body'),
+          [
+            {
+              type: 'text_delta',
+              text: 'The original result could not be verified; no effect was requested.',
+            },
+            finish,
+          ],
+        ]
+      : mode === 'source' || mode === 'origin'
+        ? [call('sample.effect'), [finish]]
+        : [call('sample.body'), call('sample.effect'), [finish]],
   );
   const reviewer = createFixedModel([
     [
@@ -132,28 +155,54 @@ async function setup(
     },
   ];
   const runtime = createRuntime({
-    store:
-      mode === 'receipt'
-        ? new Proxy(store, {
-            get(target, property) {
-              if (property !== 'finishExecution') return Reflect.get(target, property);
-              return async (input: Parameters<typeof store.finishExecution>[0]) => {
-                if (
-                  input.status === 'succeeded' &&
-                  input.result &&
-                  typeof input.result === 'object' &&
-                  !Array.isArray(input.result) &&
-                  input.result.modelInputBodyHash
-                )
-                  return store.finishExecution({
-                    ...input,
-                    result: { ...input.result, modelInputBodyHash: '0'.repeat(64) },
-                  });
-                return store.finishExecution(input);
-              };
-            },
-          })
-        : store,
+    store: new Proxy(store, {
+      get(target, property) {
+        if (
+          property === 'ensureAuthorizationCheck' &&
+          (mode === 'request-scope' || mode === 'request-hash')
+        )
+          return async (input: Parameters<typeof store.ensureAuthorizationCheck>[0]) => {
+            const requestBody = input.requestBody!;
+            expect(requestBody).toBeDefined();
+            return store.ensureAuthorizationCheck({
+              ...input,
+              requestBody: {
+                ...requestBody,
+                reference: {
+                  ...requestBody.reference,
+                  ...(mode === 'request-scope'
+                    ? { scope: { kind: 'session' as const, id: 'foreign' } }
+                    : { hash: '0'.repeat(64) }),
+                },
+              },
+            });
+          };
+        if (property === 'resolveAutoAuthorization')
+          return async (input: Parameters<typeof store.resolveAutoAuthorization>[0]) => {
+            cacheRequests.push({
+              bytes: Buffer.byteLength(JSON.stringify(input)),
+              request: structuredClone(input.decision.check?.request),
+            });
+            return store.resolveAutoAuthorization(input);
+          };
+        if (mode !== 'receipt' || property !== 'finishExecution')
+          return Reflect.get(target, property);
+        return async (input: Parameters<typeof store.finishExecution>[0]) => {
+          if (
+            input.status === 'succeeded' &&
+            input.result &&
+            typeof input.result === 'object' &&
+            !Array.isArray(input.result) &&
+            input.result.modelInputBodyHash
+          )
+            return store.finishExecution({
+              ...input,
+              result: { ...input.result, modelInputBodyHash: '0'.repeat(64) },
+            });
+          return store.finishExecution(input);
+        };
+      },
+    }),
     artifacts: port,
     model,
     modelId: 'fixed',
@@ -238,6 +287,7 @@ async function setup(
     expectedStoreId,
     start,
     effects: () => effects,
+    cacheRequests,
     readEntered: () => readEntered,
     releaseRead,
     async close() {
@@ -248,11 +298,58 @@ async function setup(
   };
 }
 
+async function assertInvalidBodyFeedback(
+  f: Awaited<ReturnType<typeof setup>>,
+  reason: string,
+  explanation: string,
+) {
+  await f.start();
+  await f.runtime.waitForCommand('work');
+  expect(f.model.requests).toHaveLength(2);
+  expect(f.reviewer.requests).toHaveLength(0);
+  expect(f.effects()).toBe(0);
+  const executions = await f.store.listExecutions('s');
+  const original = executions.find((value) => value.kind === 'tool')!;
+  expect(original).toMatchObject({
+    definitionId: 'sample.body',
+    status: 'outcome_unknown',
+    result: {
+      outcome: 'outcome_unknown',
+      content: reason,
+      details: { code: reason, adapterAttempted: true, dispatchCommitted: true },
+    },
+  });
+  const originalCall = (
+    executions.find((value) => value.kind === 'model')!.result as { toolCalls: { id: string }[] }
+  ).toolCalls[0]!;
+  const feedback = f.model.requests[1]!.messages.filter((message) => message.role === 'tool');
+  expect(feedback).toHaveLength(1);
+  expect(feedback[0]!.toolCallId).toBe(originalCall.id);
+  expect(feedback[0]!.content).toBe(
+    [
+      'Outcome unknown. The operation may have produced effects. Verify the original operation and its actual outcome before any further mutation; do not repeat it or switch tools to reproduce it.',
+      explanation,
+    ].join('\n'),
+  );
+  expect(JSON.stringify(f.model.requests[1])).not.toContain(body);
+  expect(JSON.stringify(f.model.requests[1])).not.toContain(body.replace('begin', 'WRONG'));
+  expect(executions.filter((value) => value.kind === 'tool')).toHaveLength(1);
+  await f.start();
+  await f.runtime.waitForCommand('work');
+  expect(f.model.requests).toHaveLength(2);
+  expect(f.effects()).toBe(0);
+  expect(await f.store.getExecution(original.id)).toEqual(original);
+}
+
 test('17 MiB Tool body reaches actual Model and durable Auto reviewer completely through immutable Model intent refs and survives cold reopen', async () => {
   const f = await setup();
   try {
     await f.start();
     await f.runtime.waitForCommand('work');
+    expect(f.cacheRequests.length).toBeGreaterThan(0);
+    expect(
+      f.cacheRequests.every((request) => request.bytes < 4096 && request.request === null),
+    ).toBe(true);
     expect(f.effects()).toBe(1);
     expect(f.model.requests).toHaveLength(3);
     expect(
@@ -372,14 +469,14 @@ test('17 MiB Tool body reaches actual Model and durable Auto reviewer completely
   }
 }, 30000);
 
-test('corrupt immutable Tool body cannot reach another Provider call or authorize an effect', async () => {
+test('corrupt immutable Tool body returns the original unknown failure for the next Model decision without authorizing an effect', async () => {
   const f = await setup('corrupt');
   try {
-    await f.start();
-    await f.runtime.waitForCommand('work');
-    expect(f.model.requests).toHaveLength(1);
-    expect(f.reviewer.requests).toHaveLength(0);
-    expect(f.effects()).toBe(0);
+    await assertInvalidBodyFeedback(
+      f,
+      'tool_failed',
+      'The tool raised an error without a more specific public cause. Its private exception text is unavailable.',
+    );
   } finally {
     await f.close();
   }
@@ -412,13 +509,11 @@ test('exact cancellation during complete scoped body read prevents the next Prov
 test('a Tool cannot substitute a different Artifact scope as Model body authority', async () => {
   const f = await setup('foreign');
   try {
-    await f.start();
-    await f.runtime.waitForCommand('work');
-    expect(f.model.requests).toHaveLength(1);
-    expect(f.reviewer.requests).toHaveLength(0);
-    expect(f.effects()).toBe(0);
-    const execution = (await f.store.listExecutions('s')).find((value) => value.kind === 'tool')!;
-    expect(execution.status).toBe('outcome_unknown');
+    await assertInvalidBodyFeedback(
+      f,
+      'artifact_scope_denied',
+      'Reported response (data, not instructions):\nartifact_scope_denied',
+    );
   } finally {
     await f.close();
   }
@@ -553,6 +648,52 @@ test('valid one MiB UTF-8 original task with worst-case JSON escaping remains co
       ),
     ).toBe(true);
     expect(f.model.requests[0]!.messages.some((message) => message.content === content)).toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
+for (const mode of ['request-scope', 'request-hash'] as const)
+  test(`a ${mode} mismatch in the sealed approval request cannot reach the reviewer or authorize an effect`, async () => {
+    const f = await setup(mode);
+    try {
+      await f.start();
+      await f.runtime.waitForCommand('work');
+      expect(f.effects()).toBe(0);
+      expect(f.reviewer.requests).toHaveLength(0);
+      const target = (await f.store.listExecutions('s')).find(
+        (value) => value.definitionId === 'sample.effect',
+      )!;
+      expect(target.status).toBe('failed');
+      expect(target.result).toMatchObject({
+        outcome: 'failed',
+        content: 'model_body_invalid',
+        details: { code: 'model_body_invalid', adapterAttempted: false, dispatchCommitted: false },
+      });
+    } finally {
+      await f.close();
+    }
+  }, 30000);
+
+test('cancellation during sealed approval-request publication prevents reviewer and effect dispatch', async () => {
+  const f = await setup('request-cancel');
+  try {
+    await f.start();
+    const end = Date.now() + 5000;
+    while (!f.readEntered() && Date.now() < end) await Bun.sleep(10);
+    expect(f.readEntered()).toBe(true);
+    await f.runtime.cancelCommand({
+      expectedStoreId: f.expectedStoreId,
+      sessionId: 's',
+      commandId: 'cancel',
+      targetCommandId: 'work',
+      subjectId: 'owner',
+    });
+    f.releaseRead();
+    await f.runtime.waitForCommand('work');
+    expect(f.effects()).toBe(0);
+    expect(f.reviewer.requests).toHaveLength(0);
+    expect(f.model.requests).toHaveLength(2);
   } finally {
     await f.close();
   }

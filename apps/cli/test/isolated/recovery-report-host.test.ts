@@ -12,7 +12,7 @@ test('actual configured host cold report caller preserves completed parent and o
     throw error;
   });
   try {
-    expect(f.calls()).toEqual({ parentCalls: 2, childCalls: 1, reviewCalls: 2 });
+    expect(f.calls()).toEqual({ parentCalls: 2, childCalls: 1, reviewCalls: 0 });
     expect((await service.client.getRun(f.parentId)).status).toBe('completed');
     expect((await service.client.getCommand(f.reportId)).kind).toBe('job.report');
     const intent: RecoveryIntent = {
@@ -40,7 +40,7 @@ test('actual configured host cold report caller preserves completed parent and o
         `SELECT state,attempt,result_revision,delivery FROM execution WHERE id='${f.executionId}'`,
       ),
     ).toEqual([{ state: 'succeeded', attempt: 1, result_revision: 1, delivery: 'consumed' }]);
-    expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 2 });
+    expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 0 });
     expect(
       readFileSync(f.ledger, 'utf8')
         .split('\n')
@@ -50,7 +50,7 @@ test('actual configured host cold report caller preserves completed parent and o
     expect((await submitRecovery(intent, { client: service.client })).command?.id).toBe(
       intent.request.commandId,
     );
-    expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 2 });
+    expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 0 });
   } finally {
     await service.close();
     f.close();
@@ -89,7 +89,16 @@ test('compiled paired CLI report recovery and journal reference lookup preserve 
           '--input',
           JSON.stringify({ expectedStoreId: f.storeId, commandId: 'compiled-report-recovery' }),
         ],
-        { cwd: f.workspace, stdout: 'pipe', stderr: 'pipe' },
+        {
+          cwd: f.workspace,
+          env: {
+            ...f.userConfiguration.homeEnvironment,
+            PATH: process.env.PATH ?? '',
+            LANG: 'C.UTF-8',
+          },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
       );
       try {
         const [out, err, exit] = await Promise.all([
@@ -97,6 +106,7 @@ test('compiled paired CLI report recovery and journal reference lookup preserve 
           new Response(child.stderr).text(),
           child.exited,
         ]);
+        if (exit !== 0) throw Error(`compiled report recovery failed: ${err}\n${out}`);
         expect(err).toBe('');
         expect(exit).toBe(0);
         const fact = JSON.parse(out.trim().split('\n').at(-1)!);
@@ -120,7 +130,7 @@ test('compiled paired CLI report recovery and journal reference lookup preserve 
       { origin_command_id: 'work', status: 'completed' },
       { origin_command_id: f.reportId, status: 'completed' },
     ]);
-    expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 2 });
+    expect(f.calls()).toEqual({ parentCalls: 3, childCalls: 1, reviewCalls: 0 });
     const requests = readFileSync(network, 'utf8')
       .trim()
       .split('\n')

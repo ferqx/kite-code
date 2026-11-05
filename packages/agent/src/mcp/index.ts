@@ -1158,6 +1158,7 @@ export {
   type McpOAuthProviderOptions,
   type McpOAuthVault,
 } from './oauth-provider';
+export { unopenedRejection } from './reconnection-proof';
 export type {
   McpReconnectionInput,
   McpReconnectionReplacement,

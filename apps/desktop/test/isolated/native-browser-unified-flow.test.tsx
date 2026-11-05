@@ -16,6 +16,7 @@ import {
 } from '../../src/native-browser-bridge';
 import { browserFixture, browserScope, browserView } from '../agent-browser.fixture';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { FakePlainView } from '../native-plain-view.fixture';
 
 const views: FakeView[] = [];
 const windowOwners = new WeakMap<FakeContents, BrowserWindow>();
@@ -174,13 +175,14 @@ class FakeContents extends EventEmitter {
   reload() {}
   stop() {}
 }
-class FakeView {
+class FakeView extends EventEmitter {
   readonly options: { webPreferences: Record<string, unknown> };
   readonly webContents: FakeContents;
   visible = false;
   bounds = { x: 0, y: 0, width: 0, height: 0 };
   background = '';
   constructor(options: { webPreferences: Record<string, unknown> }, contents?: FakeContents) {
+    super();
     this.options = options;
     this.webContents = contents ?? new FakeContents();
     this.webContents.view = this;
@@ -210,6 +212,7 @@ const browsing = Object.assign(new EventEmitter(), {
   webRequest: { onBeforeRequest() {} },
 });
 mock.module('electron', () => ({
+  View: FakePlainView,
   BrowserWindow: {
     fromWebContents: (contents: FakeContents) => windowOwners.get(contents) ?? null,
   },

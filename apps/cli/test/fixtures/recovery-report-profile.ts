@@ -15,7 +15,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { loopbackModelEnvironment } from '../../../../tests/fixtures/loopback-model-environment';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
 import { untilRecovery } from './recovery-profile';
@@ -27,6 +29,7 @@ export async function recoveryReportProfile() {
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' }),
     ledger = join(root, 'ledger'),
     ready = join(root, 'ready');
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   mkdirSync(workspace);
   privateDirectory(profile.profilePath);
   let release!: () => void;
@@ -68,11 +71,7 @@ export async function recoveryReportProfile() {
       }
       if (!review && !child && parentCalls === 1) {
         const spawn = body.tools?.find((tool) => tool.function.name === 'spawn_agent');
-        if (
-          !['key', 'role', 'input'].every((key) =>
-            spawn?.function.parameters.required?.includes(key),
-          )
-        )
+        if (!spawn?.function.parameters.required?.includes('prompt'))
           throw Error('original_typed_task_model_surface_missing');
       }
       const content = review
@@ -96,11 +95,7 @@ export async function recoveryReportProfile() {
                   function: {
                     name: 'spawn_agent',
                     arguments: JSON.stringify({
-                      key: 'original-child',
-                      role: 'reader',
-                      result_disposition: 'after_turn',
-                      cancellation: 'detached',
-                      input: { content: 'Original child effect' },
+                      prompt: 'Original child effect',
                     }),
                   },
                 },
@@ -117,6 +112,12 @@ export async function recoveryReportProfile() {
       );
     },
   });
+  const {
+    ALL_PROXY: _allProxy,
+    all_proxy: _allProxyLowercase,
+    ...modelEnvironment
+  } = loopbackModelEnvironment(provider.url);
+  Object.assign(userConfiguration.homeEnvironment, modelEnvironment);
   const rows = (sql: string) => {
     const db = new Database(profile.databasePath, { readonly: true });
     try {
@@ -130,7 +131,7 @@ export async function recoveryReportProfile() {
       join(profile.profilePath, 'config.jsonc'),
       JSON.stringify({
         modelId: 'parent',
-        tools: [{ id: 'task', definitionVersion: '1' }],
+        tools: [{ id: 'task.spawn', definitionVersion: '1' }],
         models: ['parent', 'child'].map((id) => ({
           id,
           provider: 'compatible',
@@ -146,22 +147,16 @@ export async function recoveryReportProfile() {
     writeFileSync(
       source,
       `import {existsSync,renameSync,writeFileSync} from 'node:fs';
-import type {Extension} from '@kite-ai/agent/extensions';
 import {selectProfile} from '@kite-ai/agent/profile';
 import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';
 import {runServiceProcess} from '@kite-ai/service/main';
-// This isolated typed-protocol recovery fixture exposes only the selected historical task@1.
-// Ordinary hosts retain the production six-tool Model surface.
-const legacySurface=(extensions:readonly Extension[]|undefined)=>extensions?.map(extension=>
-  extension.id!=='builtin.task'?extension:{...extension,tools:extension.tools?.map(tool=>
-    tool.id==='task'&&tool.version==='1'?{...tool,model:{...tool.model!,hidden:false}}:tool)});
 await runServiceProcess({configure(startup){
   const host=createDefaultProcessConfiguration({
     userConfigurationPath:selectProfile(startup.profile).profilePath+'/config.jsonc',
     profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,
     child:[{id:'reader',version:'1',modelId:'child',toolIds:[]}],
     afterTurn:{async authorize(input){
-      const allowed=input.session.id==='s'&&input.command.id==='work'&&input.execution.definitionId==='task'&&input.execution.originCommandId==='work';
+      const allowed=input.session.id==='s'&&input.command.id==='work'&&input.execution.definitionId==='task.spawn'&&input.execution.originCommandId==='work';
       if(allowed&&input.phase==='apply'&&!existsSync(${JSON.stringify(ready)})){
         writeFileSync(${JSON.stringify(`${ready}.tmp`)},JSON.stringify({executionId:input.execution.id,parentId:input.run.id}));
         renameSync(${JSON.stringify(`${ready}.tmp`)},${JSON.stringify(ready)});
@@ -170,8 +165,7 @@ await runServiceProcess({configure(startup){
       return {allowed,revision:'owned-original-report-policy-v1'};
     }}
   });
-  // The global registered definition is reused by initial, recovery, and step catalogues.
-  return {...host,extensions:legacySurface(host.extensions)};
+  return host;
 }});`,
     );
     const built = await Bun.build({
@@ -195,6 +189,7 @@ await runServiceProcess({configure(startup){
       launchPairedService({
         ...artifact,
         profile,
+        spawnChild: userConfiguration.spawnChild,
         instanceId: crypto.randomUUID(),
         requiredCapabilities: ['sessions', 'commands', 'interactions', 'job_report_resume'],
       });
@@ -229,38 +224,22 @@ await runServiceProcess({configure(startup){
       commandId: 'work',
       content: 'Delegate original child',
     });
-    await untilRecovery(
-      async () =>
-        (await client.listInteractions('s', { storeId, state: 'pending' })).interactions.length > 0,
-    );
-    const card = (await client.listInteractions('s', { storeId, state: 'pending' }))
-      .interactions[0]!;
-    if (card.definitionId !== 'task') throw Error('original_task_card_unavailable');
-    await client.answerInteraction('s', card.id, {
-      expectedStoreId: storeId,
-      commandId: 'approve-task',
-      expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
-    });
     await untilRecovery(async () =>
       (await client.getView('s')).runs.some(
         (run) => run.originCommandId === 'work' && run.status === 'completed',
       ),
     );
-    await untilRecovery(async () =>
-      (await client.listInteractions('s', { storeId, state: 'pending' })).interactions.some(
-        (card) => card.definitionId === 'agent/reader',
-      ),
-    );
-    const originalJob = (
-      await client.listInteractions('s', { storeId, state: 'pending' })
-    ).interactions.find((card) => card.definitionId === 'agent/reader')!;
-    await client.answerInteraction('s', originalJob.id, {
-      expectedStoreId: storeId,
-      commandId: 'approve-original-job',
-      expectedRevision: originalJob.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
-    });
+    const originalView = await client.getView('s');
+    if (
+      originalView.executions.filter(
+        (execution) => execution.definitionId === 'task.spawn' && execution.status === 'succeeded',
+      ).length !== 1 ||
+      originalView.executions.filter(
+        (execution) => execution.definitionId === 'agent/reader' && execution.status === 'running',
+      ).length !== 1 ||
+      (await client.listInteractions('s', { storeId, state: 'pending' })).interactions.length !== 0
+    )
+      throw Error('original_child_execution_unconfirmed');
     release();
     await untilRecovery(async () => existsSync(ready));
     const original = JSON.parse(readFileSync(ready, 'utf8')) as {
@@ -298,6 +277,7 @@ await runServiceProcess({configure(startup){
       root,
       workspace,
       profile,
+      userConfiguration,
       artifact,
       storeId,
       ...original,

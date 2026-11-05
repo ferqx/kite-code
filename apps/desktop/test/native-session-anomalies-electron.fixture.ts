@@ -4,7 +4,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { ElectronApplication, Page } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 import {
   installNativeAnomalyNetwork,
   loseNativeAnomalyReceipt,
@@ -200,13 +202,18 @@ async function launch() {
     executablePath,
     args: [outdir!, `--user-data-dir=${join(home!, 'electron-data')}`],
     cwd: outdir,
-    env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home!,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...(!live ? loopbackModelEnvironment(new URL(control!)) : {}),
+    },
     timeout: 20000,
   });
   boot++;
   const mainIdentity = observeOwnedProcess('main', application.process().pid!, 'launch_observed');
   mainIdentities.set(mainIdentity.pid, mainIdentity);
-  const page = await application.firstWindow();
+  const page = await nativeRootPage(application, 20000);
   page.setDefaultTimeout(scenario?.responseTimeoutMs ?? 20000);
   page.on('pageerror', (error) => {
     rendererErrors.push(error.message);
@@ -270,8 +277,16 @@ async function launch() {
         while (walker.nextNode()) inspect(walker.currentNode);
         for (const dialog of document.querySelectorAll('[role="alertdialog"]'))
           hit({ time: performance.now(), unexpectedDialog: dialog.textContent });
-        for (const notice of document.querySelectorAll('[role="alert"],[role="status"]'))
+        for (const notice of document.querySelectorAll('[role="alert"],[role="status"]')) {
+          // A durably interrupted Turn keeps its own precise recovery warning visible.
+          const interruptedTurn =
+            notice.matches(
+              '.agent-turn[data-turn-status="aborted"] .turn-failure[aria-label="本轮执行已中断"]',
+            ) &&
+            notice.textContent?.trim() ===
+              '本轮执行已中断，未生成最终回复。请先核对本轮工具执行结果，再决定是否重新发送。';
           if (
+            !interruptedTurn &&
             !notice.closest(
               `${allowed},.tool-activity,[data-tool-call-id],.response-status,.agent-turn-summary,.agent-turn-status-label`,
             ) &&
@@ -279,6 +294,7 @@ async function launch() {
             notice.getBoundingClientRect().height > 0
           )
             hit({ time: performance.now(), unexpectedNotice: notice.textContent });
+        }
         const sequence = [
           ...document.querySelectorAll('.message.user,.agent-turn,.message.assistant'),
         ]
@@ -919,6 +935,15 @@ try {
       ),
     'old Run durably interrupted',
   );
+  const interruptedWarning = page.locator(
+    '.agent-turn[data-turn-status="aborted"] .turn-failure[aria-label="本轮执行已中断"]',
+  );
+  assert.equal(await interruptedWarning.count(), 1);
+  assert.equal(await interruptedWarning.isVisible(), true);
+  assert.equal(
+    (await interruptedWarning.innerText()).trim(),
+    '本轮执行已中断，未生成最终回复。请先核对本轮工具执行结果，再决定是否重新发送。',
+  );
   const reopened = await readFacts();
   assertCrashUnreplayed(reopened, before, originalCrash);
   assert.equal(
@@ -1022,7 +1047,7 @@ try {
   );
   console.error(stage, error);
   if (application) {
-    const page = await application.firstWindow().catch(() => undefined);
+    const page = await nativeRootPage(application, 20000).catch(() => undefined);
     if (page) await probe(page).catch(() => {});
     console.error(
       await page

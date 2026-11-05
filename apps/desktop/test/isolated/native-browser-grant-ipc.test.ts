@@ -15,6 +15,7 @@ import {
   type NativeBrowserRestoreResult,
   nativeBrowserChannel,
 } from '../../src/native-browser-bridge';
+import { FakePlainView } from '../native-plain-view.fixture';
 import { memoryPrivateData } from '../private-data.fixture';
 
 const views: View[] = [];
@@ -157,6 +158,7 @@ const browsing = Object.assign(new EventEmitter(), {
 });
 let nativeWindow: { contentView: { children: View[] } } | undefined;
 mock.module('electron', () => ({
+  View: FakePlainView,
   WebContentsView: View,
   session: { fromPartition: () => browsing },
   BrowserWindow: {

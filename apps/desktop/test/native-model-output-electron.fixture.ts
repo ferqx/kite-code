@@ -2,7 +2,9 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -55,13 +57,18 @@ const application = await _electron.launch({
   executablePath: electronExecutable,
   args: [outdir, `--user-data-dir=${join(root, 'electron-data')}`],
   cwd: outdir,
-  env: { HOME: root, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+  env: {
+    HOME: root,
+    PATH: '/usr/bin:/bin',
+    LANG: 'C.UTF-8',
+    ...loopbackModelEnvironment(new URL(control)),
+  },
 });
 let servicePid: number | undefined;
 const diagnostics: string[] = [];
 application.process().stderr?.on('data', (chunk) => diagnostics.push(String(chunk).slice(0, 1000)));
 try {
-  const page = await application.firstWindow();
+  const page = await nativeRootPage(application, 10000);
   phase('window');
   page.setDefaultTimeout(10000);
   page.on('console', (message) => {
@@ -467,7 +474,7 @@ try {
   );
   console.error(
     'native_attach',
-    await (await application.firstWindow()).evaluate(async () => {
+    await (await nativeRootPage(application, 10000)).evaluate(async () => {
       try {
         return await window.kiteNative!.request({ method: 'attach' });
       } catch (error) {
@@ -479,7 +486,7 @@ try {
     'native_page',
     (
       await (
-        await application.firstWindow()
+        await nativeRootPage(application, 10000)
       )
         .locator('body')
         .innerText()

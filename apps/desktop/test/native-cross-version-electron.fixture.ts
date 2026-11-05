@@ -8,6 +8,7 @@ import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import type { ModelOutputSnapshot, ServerInfo } from '@kite-ai/client';
 import type { WebPreferences } from 'electron';
 import type { ElectronApplication, Page } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type {
   NativeCallerMetadata,
   NativeModelInputChunk,
@@ -20,6 +21,7 @@ import type {
 import { readNativeModelInput } from '../src/native-model-input';
 import { readNativeModelOutput } from '../src/native-model-output';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -155,6 +157,7 @@ async function launch(index: number) {
       HOME: home!,
       PATH: '/usr/bin:/bin',
       LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
       ...(process.platform === 'linux'
         ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
         : {}),
@@ -162,7 +165,7 @@ async function launch(index: number) {
     timeout: 15000,
     chromiumSandbox: true,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 15000);
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Native real versions', exact: true }).waitFor();
   await openSessionTools(page);
@@ -170,9 +173,10 @@ async function launch(index: number) {
     await app.evaluate(() => process.execPath),
     join(candidate.root, candidate.electron),
   );
-  const security = await app.evaluate(({ app, BrowserWindow }) => ({
+  const security = await app.evaluate(({ app, BaseWindow }) => ({
     sandboxDisabled: app.commandLine.hasSwitch('no-sandbox'),
-    windows: BrowserWindow.getAllWindows().map((window) => {
+    windows: BaseWindow.getAllWindows().map((native) => {
+      const window = native as import('../electron/native-root-window').NativeRootWindow;
       const preferences = (
         window.webContents as typeof window.webContents & {
           getLastWebPreferences(): WebPreferences;
@@ -558,6 +562,7 @@ try {
         HOME: home!,
         PATH: '/usr/bin:/bin',
         LANG: 'C.UTF-8',
+        ...loopbackModelEnvironment(new URL(control!)),
         ...(process.platform === 'linux'
           ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
           : {}),
@@ -566,16 +571,17 @@ try {
       chromiumSandbox: true,
     });
     const current = app;
-    const page = await app.firstWindow();
+    const page = await nativeRootPage(app, 15000);
     page.setDefaultTimeout(15000);
     assert.equal(
       await app.evaluate(() => process.execPath),
       join(candidate.root, candidate.electron),
     );
     assert.deepEqual(
-      await app.evaluate(({ app, BrowserWindow }) => ({
+      await app.evaluate(({ app, BaseWindow }) => ({
         sandboxDisabled: app.commandLine.hasSwitch('no-sandbox'),
-        windows: BrowserWindow.getAllWindows().map((window) => {
+        windows: BaseWindow.getAllWindows().map((native) => {
+          const window = native as import('../electron/native-root-window').NativeRootWindow;
           const preferences = (
             window.webContents as typeof window.webContents & {
               getLastWebPreferences(): WebPreferences;
@@ -1260,7 +1266,7 @@ try {
 } catch (error) {
   if (app) {
     try {
-      const page = await app.firstWindow();
+      const page = await nativeRootPage(app, 15000);
       writeFileSync(
         join(home!, 'native-version-failure.txt'),
         await page.locator('body').innerText(),

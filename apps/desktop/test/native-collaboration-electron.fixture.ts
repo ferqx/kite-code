@@ -3,8 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { ElementHandle } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 const [candidate, home, control, storeId, desktopPackage] = process.argv.slice(2) as [
   string,
@@ -30,6 +32,22 @@ const log = (stage: string, facts = {}) => {
   console.log(JSON.stringify({ stage, ...facts }));
 };
 
+async function confirmFullPermission() {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const dialog = app!.windows().find((page) => page.url().endsWith('/global-dialog.html'));
+    if (dialog) {
+      await dialog
+        .getByRole('alertdialog')
+        .getByRole('button', { name: /^(Enable Full|启用完全权限)$/ })
+        .click();
+      return;
+    }
+    assert.ok(Date.now() < deadline, 'original global Full permission dialog');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 async function close() {
   if (!app) return;
   clearInterval(frameTimer);
@@ -50,10 +68,15 @@ try {
       executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
       args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
       cwd: home,
-      env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+      env: {
+        HOME: home,
+        PATH: '/usr/bin:/bin',
+        LANG: 'C.UTF-8',
+        ...loopbackModelEnvironment(new URL(control)),
+      },
       timeout: 10000,
     });
-    const page = await app.firstWindow();
+    const page = await nativeRootPage(app, 10000);
     page.setDefaultTimeout(10000);
     frameTimer = setInterval(() => {
       if (frameSaving || frameNumber >= 500) return;
@@ -178,11 +201,7 @@ try {
   async function mode(index: number, expected: string) {
     await page.locator('[data-permission-trigger]').click();
     await page.getByRole('menuitemradio').nth(index).click();
-    if (expected === 'full')
-      await page
-        .getByRole('alertdialog')
-        .getByRole('button', { name: /^(Enable Full|启用完全权限)$/ })
-        .click();
+    if (expected === 'full') await confirmFullPermission();
     await until(
       state,
       (value) => value.selection?.permissions?.mode.mode === expected,
@@ -313,28 +332,8 @@ try {
   await page.screenshot({ path: join(home, '02-child-session-approval-menu.png') });
   await sessionOption.click();
   log('first_A_answer_clicked');
-  const jobPending = await until(
-    state,
-    (value) =>
-      value.selection!.interactions.some(
-        (card) =>
-          card.sessionId === a.childSessionId &&
-          card.definitionId === 'shell.command' &&
-          card.state === 'pending',
-      ),
-    'original A Job requires its separate decision',
-  );
-  const jobA = jobPending.selection!.interactions.find(
-    (card) =>
-      card.sessionId === a.childSessionId &&
-      card.definitionId === 'shell.command' &&
-      card.state === 'pending',
-  )!;
-  await (await showApproval(jobA.id))
-    .getByRole('button', { name: '更多批准方式', exact: true })
-    .click();
-  await page.getByRole('menuitem', { name: '本次会话批准', exact: false }).click();
-  log('first_A_job_answer_clicked', { interactionId: jobA.id });
+  // The original Tool decision also authorizes its own uniquely bound Shell Job.
+  // There must be no second human decision for the same accepted operation.
   await until(
     async () => (await (await fetch(`${control}/state`)).json()) as { parentReportHeld: boolean },
     (value) => value.parentReportHeld,
@@ -415,7 +414,7 @@ try {
     }, firstResultId),
     true,
   );
-  for (const original of [oldA, jobA]) {
+  for (const original of [oldA]) {
     const submitted = approved.interactionSubmissions.find(
       (entry) => entry.interaction.id === original.id,
     )!;
@@ -447,27 +446,39 @@ try {
   await fetch(`${control}/follow?agent=${encodeURIComponent(a.childSessionId!)}`);
   // Continue this work with new instructions while B retains its original work ownership.
   await send('Follow up: NATIVE_COLLAB_FOLLOW');
-  const followPending = await until(
-    state,
-    (value) =>
-      value.selection!.interactions.some(
-        (card) =>
-          card.sessionId === a.childSessionId && card.state === 'pending' && card.id !== oldA.id,
-      ),
-    'same stable A Session follow-up has a new exact approval',
+  await until(
+    async () => (await (await fetch(`${control}/state`)).json()) as { held: string[] },
+    (value) => value.held.includes('CHILD_A_FOLLOWUP'),
+    'ordinary Auto Files has completed while its next original Model is held',
   );
-  const newA = followPending.selection!.interactions.find(
-    (card) =>
-      card.sessionId === a.childSessionId && card.state === 'pending' && card.id !== oldA.id,
-  )!;
-  assert.notEqual(newA.runId, oldA.runId);
-  assert.notEqual(newA.executionId, oldA.executionId);
-  const nextCarrier = followPending.selection!.executions.find(
+  const followed = await state();
+  const nextCarrier = followed.selection!.executions.find(
     (row) => row.childSessionId === a.childSessionId && row.id !== a.id,
   )!;
   assert.ok(nextCarrier);
   assert.equal(nextCarrier.childSessionId, a.childSessionId);
-  // A late old-card answer is submitted through the same real renderer bridge; it cannot authorize A2.
+  assert.equal(nextCarrier.status, 'running');
+  const followRun = (await (await fetch(`${control}/follow-run`)).json()) as {
+    executionId: string;
+    sessionId: string;
+    runId: string;
+    status: string;
+  };
+  assert.equal(followRun.executionId, nextCarrier.id);
+  assert.equal(followRun.sessionId, a.childSessionId);
+  assert.equal(followRun.status, 'running');
+  const nextRun = followRun.runId;
+  assert.ok(nextRun);
+  assert.notEqual(nextRun, oldA.runId);
+  assert.equal(
+    followed.selection!.interactions.filter((card) => card.sessionId === a.childSessionId).length,
+    0,
+  );
+  assert.equal(
+    readFileSync(join(home, 'workspace', 'child-a-follow.txt'), 'utf8'),
+    'A follow-up approved\n',
+  );
+  // Re-answering the old Shell card cannot replay or grant authority to the distinct Files operation.
   const lateA = await page.evaluate(
     async ({ id, revision }) => {
       try {
@@ -484,10 +495,14 @@ try {
     },
     { id: oldA.id, revision: oldA.revision },
   );
-  assert.equal(existsSync(join(home, 'workspace', 'child-a-follow.txt')), false);
   assert.equal(
-    (await state()).selection!.interactions.find((card) => card.id === newA.id)!.state,
-    'pending',
+    readFileSync(join(home, 'workspace', 'child-a-follow.txt'), 'utf8'),
+    'A follow-up approved\n',
+  );
+  assert.equal(
+    (await state()).selection!.interactions.filter((card) => card.sessionId === a.childSessionId)
+      .length,
+    0,
   );
   const oldStop = await page.evaluate(async (executionId) => {
     const readId = 'completed-original-A';
@@ -515,33 +530,28 @@ try {
   assert.equal((oldStop as { code?: string }).code, 'background_stop_unavailable');
   const afterOldStop = await state();
   assert.equal(
-    afterOldStop.selection!.interactions.find((card) => card.id === newA.id)!.state,
-    'pending',
+    afterOldStop.selection!.interactions.filter((card) => card.sessionId === a.childSessionId)
+      .length,
+    0,
   );
   assert.equal(
     afterOldStop.selection!.executions.find((row) => row.id === nextCarrier.id)!.cancelRequestedAt,
     null,
+  );
+  assert.equal(
+    afterOldStop.selection!.executions.find((row) => row.id === nextCarrier.id)!.status,
+    'running',
   );
   await assertCreationHistory();
   log('same_session_followup_old_answer_isolated', {
     first: a.id,
     next: nextCarrier.id,
     oldRun: oldA.runId,
-    newRun: newA.runId,
+    newRun: nextRun,
     lateA,
     oldStop,
   });
-  await (await showApproval(newA.id))
-    .getByRole('button', { name: '批准一次', exact: true })
-    .click();
-  await until(
-    async () =>
-      existsSync(join(home, 'workspace', 'child-a-follow.txt')) &&
-      readFileSync(join(home, 'workspace', 'child-a-follow.txt'), 'utf8') ===
-        'A follow-up approved\n',
-    Boolean,
-    'new precise A approval effect',
-  );
+  await fetch(`${control}/release`);
   assert.equal(
     readFileSync(join(home, 'workspace', 'child-a-follow.txt'), 'utf8'),
     'A follow-up approved\n',
@@ -634,7 +644,26 @@ try {
     (value) => value.activeParentHeld && value.held.includes('CHILD_A_ACTIVE'),
     'parent original Turn and exact child both remain active',
   );
-  const activeStarted = await state();
+  const activeStarted = await until(
+    state,
+    (value) => {
+      const run = value.selection!.runs.find((run) => run.isActive);
+      return (
+        !!run &&
+        value.selection!.executions.some(
+          (row) =>
+            row.childSessionId === a.childSessionId &&
+            row.id !== a.id &&
+            row.id !== nextCarrier.id &&
+            row.status === 'running' &&
+            value.selection!.executions.some(
+              (parent) => parent.id === row.parentExecutionId && parent.runId === run.id,
+            ),
+        )
+      );
+    },
+    'the original active parent and exact running child are projected together',
+  );
   const activeRun = activeStarted.selection!.runs.find((run) => run.isActive)!;
   const activeCarrier = activeStarted.selection!.executions.find(
     (row) =>
@@ -679,10 +708,11 @@ try {
     true,
   );
   const activeProcess = page.locator('.agent-turn[data-turn-status="running"]');
-  for (const group of await activeProcess
-    .locator('.tool-activity-aggregate > .tool-activity-summary')
-    .all())
-    if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
+  const eventGroup = activeProcess.locator(
+    'article.tool-activity-aggregate[aria-label="查看 Agent 进展"] > .tool-activity-summary',
+  );
+  await eventGroup.waitFor();
+  if ((await eventGroup.getAttribute('aria-expanded')) === 'false') await eventGroup.click();
   const events = activeProcess
     .locator('article.tool-activity:not(.tool-activity-aggregate) > .tool-activity-summary')
     .filter({ hasText: '等待 Agent 事件' })
@@ -789,7 +819,8 @@ try {
     next: nextCarrier.id,
     agentId: a.childSessionId,
     oldRun: oldA.runId,
-    nextRun: newA.runId,
+    nextRun,
+    approvedShellToolId: oldA.executionId,
     lateA,
     oldStop,
     lateB,
@@ -808,7 +839,7 @@ try {
   console.error(error);
   if (app)
     try {
-      const page = await app.firstWindow();
+      const page = await nativeRootPage(app, 10000);
       console.error(
         JSON.stringify({
           stage: 'collaboration_failure_state',

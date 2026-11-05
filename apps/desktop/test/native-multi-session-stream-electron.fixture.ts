@@ -11,12 +11,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CDPSession } from 'playwright';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { MixedShellLedger } from '../../service/test/isolated/multi-session-shell-load.shared';
 import type { NativeBackgroundPage } from '../src/background-bridge';
 import type { NativeJobOutputPage } from '../src/job-output-bridge';
 import type { NativeState } from '../src/native-bridge';
 import { collectNativeGpuMemory } from './native-gpu-memory.fixture';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 type ProviderStatus = {
   calls: string[];
@@ -47,7 +49,12 @@ const app = await _electron.launch({
   executablePath,
   args: [outdir!, `--user-data-dir=${join(root!, 'electron-data')}`],
   cwd: outdir,
-  env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+  env: {
+    HOME: root!,
+    PATH: '/usr/bin:/bin',
+    LANG: 'C.UTF-8',
+    ...loopbackModelEnvironment(new URL(control!)),
+  },
   timeout: 15000,
 });
 let phase = 'launch',
@@ -59,10 +66,10 @@ const percentile = (values: number[], p: number) =>
   [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * p)] ?? 0;
 try {
   await (async () => {
-    const page = await app.firstWindow();
+    const page = await nativeRootPage(app, 15000);
     page.setDefaultTimeout(15000);
-    await app.evaluate(({ app, BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows()[0]!;
+    await app.evaluate(({ app, BaseWindow }) => {
+      const window = BaseWindow.getAllWindows()[0]!;
       window.show();
       app.focus({ steal: true });
       window.focus();
@@ -70,8 +77,8 @@ try {
     await page.bringToFront();
     await page.waitForFunction(() => document.hasFocus());
     page.on('pageerror', (error) => diagnostics.push(error.message));
-    const desktopEnvironment = await app.evaluate(({ app, BrowserWindow, screen }) => {
-      const window = BrowserWindow.getAllWindows()[0]!;
+    const desktopEnvironment = await app.evaluate(({ app, BaseWindow, screen }) => {
+      const window = BaseWindow.getAllWindows()[0]!;
       const display = screen.getDisplayMatching(window.getBounds());
       return {
         versions: process.versions,
@@ -289,8 +296,8 @@ try {
                 ),
               };
             }),
-            window: await app.evaluate(({ BrowserWindow }) => {
-              const window = BrowserWindow.getAllWindows()[0]!;
+            window: await app.evaluate(({ BaseWindow }) => {
+              const window = BaseWindow.getAllWindows()[0]!;
               return {
                 focused: window.isFocused(),
                 visible: window.isVisible(),
@@ -691,7 +698,7 @@ try {
       // Test-host snapshot boundary only. Backend streams, Shells, HTTP reads,
       // request replies and lifecycle messages continue. Queue changed notices
       // in order so a new React commit cannot race the retained-object census.
-      await app.evaluate(({ BrowserWindow }) => {
+      await app.evaluate(({ BaseWindow }) => {
         const host = globalThis as typeof globalThis & {
           nativeSnapshotRelease?: () => {
             deferredChanges: number;
@@ -700,7 +707,9 @@ try {
           };
         };
         if (host.nativeSnapshotRelease) throw Error('overlapping_native_snapshot');
-        const contents = BrowserWindow.getAllWindows()[0]!.webContents;
+        const contents = (
+          BaseWindow.getAllWindows()[0]! as import('../electron/native-root-window').NativeRootWindow
+        ).webContents;
         const original = contents.send;
         const queue: Parameters<typeof contents.send>[] = [];
         const started = Date.now();
@@ -1535,7 +1544,7 @@ try {
   })();
 } catch (cause) {
   console.error('native_multi_stream_failed', phase, cause, diagnostics.slice(-12));
-  const page = await app.firstWindow().catch(() => undefined);
+  const page = await nativeRootPage(app, 15000).catch(() => undefined);
   if (page) {
     if (measurement === 'profile')
       console.error(
@@ -1549,8 +1558,10 @@ try {
       );
     if (measurement === 'profile') {
       try {
-        const rendererPid = await app.evaluate(({ BrowserWindow }) =>
-          BrowserWindow.getAllWindows()[0]!.webContents.getOSProcessId(),
+        const rendererPid = await app.evaluate(({ BaseWindow }) =>
+          (
+            BaseWindow.getAllWindows()[0]! as import('../electron/native-root-window').NativeRootWindow
+          ).webContents.getOSProcessId(),
         );
         try {
           execFileSync(

@@ -118,6 +118,16 @@ test.skipIf(process.platform !== 'darwin')(
         fixture,
         readFileSync(resolve(import.meta.dir, '../native-extensions-electron.fixture.ts'), 'utf8')
           .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+            ),
+          )
+          .replace(
+            "'./native-root-page.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+          )
+          .replace(
             "'./native-model-selection.fixture'",
             JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
           )

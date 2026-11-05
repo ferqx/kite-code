@@ -803,3 +803,53 @@ test('original result, finalization and HostMutation faults cannot manufacture s
     await f.close();
   }
 }, 10000);
+
+for (const mode of ['deny', 'ask'] as const)
+  test(`original ${mode} refusal needs the same undispatched Core observation, not its display text`, async () => {
+    const f = await fixture({ mode: mode === 'deny' ? 'deny' : 'auto' });
+    const readExecution = f.runtime.getExecution.bind(f.runtime);
+    try {
+      await f.add();
+      if (mode === 'ask') await f.answer('deny');
+      const original = await f.terminal();
+      expect(original.status).toBe('failed');
+      expect(original.authorization?.dispatched).toBe(false);
+      expect(await f.history('original')).toMatchObject({ phase: 'failed' });
+      const alterations = [
+        { ...original, authorization: { ...original.authorization, dispatched: true } },
+        { ...original, authorization: undefined },
+        { ...original, status: 'outcome_unknown' },
+        ...(mode === 'ask'
+          ? [
+              { ...original, authorization: { ...original.authorization, human: undefined } },
+              {
+                ...original,
+                authorization: {
+                  ...original.authorization,
+                  human: { ...original.authorization!.human!, state: 'pending' },
+                },
+              },
+              {
+                ...original,
+                authorization: {
+                  ...original.authorization,
+                  human: { ...original.authorization!.human!, decision: 'approve' },
+                },
+              },
+            ]
+          : []),
+      ];
+      for (const altered of alterations) {
+        // Keep the same original command/result/finalization digest; only the
+        // trusted dispatch observation changes. An external same-code result is insufficient.
+        f.runtime.getExecution = async (id) =>
+          id === original.id ? (altered as typeof original) : readExecution(id);
+        expect(await f.history('original')).toMatchObject({ phase: 'outcome_unknown' });
+      }
+      f.runtime.getExecution = readExecution;
+      expect(await f.history('original')).toMatchObject({ phase: 'failed' });
+    } finally {
+      f.runtime.getExecution = readExecution;
+      await f.close();
+    }
+  }, 10000);

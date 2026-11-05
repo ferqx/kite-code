@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import { mcpCanonical } from '@kite-ai/agent/config';
 import type { Json, QueryDefinition } from '@kite-ai/agent/extensions';
+import { unopenedRejection } from '@kite-ai/agent/mcp';
 
 const hash = (value: unknown) => createHash('sha256').update(mcpCanonical(value)).digest('hex');
 const object = (value: unknown): Record<string, Json> =>
@@ -239,6 +240,12 @@ export function createMcpSourceResultQuery(options: {
       const result = object(execution.result),
         details = object(result.details);
       const code = details.code;
+      const refusal = !mutation ? unopenedRejection(execution) : null;
+      if (refusal) {
+        payload.phase = 'failed';
+        payload.reason = refusal;
+        return display();
+      }
       if (
         !mutation &&
         ['failed', 'cancelled'].includes(execution.status) &&
@@ -248,13 +255,9 @@ export function createMcpSourceResultQuery(options: {
         details.adapterAttempted === false &&
         typeof code === 'string' &&
         result.content === code &&
-        [
-          'approval_denied',
-          'permission_denied',
-          'cancelled_before_dispatch',
-          'cancel_requested',
-          'execution_cancel_requested',
-        ].includes(code) &&
+        ['cancelled_before_dispatch', 'cancel_requested', 'execution_cancel_requested'].includes(
+          code,
+        ) &&
         (execution.status !== 'cancelled' ||
           command.cancelRequestedAt !== null ||
           execution.cancelRequestedAt !== null)

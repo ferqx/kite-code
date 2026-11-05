@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 import { promptText } from './prompt-editor-text.fixture';
 
 async function observedState(
@@ -164,10 +166,11 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   await page.getByRole('combobox', { name: '默认编辑器', exact: true }).waitFor();
   await page.getByText('compatible · fixed', { exact: true }).waitFor();
   assert.equal(
-    await page.getByRole('combobox', { name: '默认编辑器', exact: true }).inputValue(),
-    'vscode',
+    (await page.getByRole('combobox', { name: '默认编辑器', exact: true }).textContent())?.trim(),
+    'VS Code',
   );
-  await page.getByRole('combobox', { name: '默认编辑器', exact: true }).selectOption('textedit');
+  await page.getByRole('combobox', { name: '默认编辑器', exact: true }).click();
+  await page.getByRole('option', { name: 'TextEdit', exact: true }).click();
   await page.getByRole('button', { name: '返回应用', exact: true }).click();
   const tabsToggle = page.getByRole('button', { name: '标签页', exact: true });
   const wasTabsOpen = await tabsToggle.getAttribute('aria-expanded');
@@ -242,8 +245,8 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   assert.equal(await pane.count(), 0);
   await page.getByRole('button', { name: '设置', exact: true }).click();
   assert.equal(
-    await page.getByRole('combobox', { name: '默认编辑器', exact: true }).inputValue(),
-    'textedit',
+    (await page.getByRole('combobox', { name: '默认编辑器', exact: true }).textContent())?.trim(),
+    'TextEdit',
   );
   await page.getByRole('button', { name: '返回应用', exact: true }).click();
   assert.equal(await (await fetch(`${control}/count`)).text(), '3');
@@ -317,12 +320,12 @@ async function readOriginalWindowActions(page: import('playwright').Page) {
     'function',
   );
   const before = await (await fetch(`${control}/count`)).text();
-  const initial = await app!.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()[0]!.isMaximized(),
+  const initial = await app!.evaluate(({ BaseWindow }) =>
+    BaseWindow.getAllWindows()[0]!.isMaximized(),
   );
   await page.locator('.session-header').dispatchEvent('mousedown', { button: 0, detail: 1 });
   assert.equal(
-    await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isMaximized()),
+    await app!.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isMaximized()),
     initial,
   );
   for (const target of [!initial, initial]) {
@@ -330,9 +333,8 @@ async function readOriginalWindowActions(page: import('playwright').Page) {
     const deadline = Date.now() + 10000;
     for (;;) {
       if (
-        (await app!.evaluate(({ BrowserWindow }) =>
-          BrowserWindow.getAllWindows()[0]!.isMaximized(),
-        )) === target
+        (await app!.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isMaximized())) ===
+        target
       )
         break;
       assert.ok(Date.now() < deadline, 'original header zoom did not settle');
@@ -377,10 +379,10 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
       background: string;
     };
     for (;;) {
-      appearance = await app!.evaluate(({ BrowserWindow, nativeTheme }) => ({
+      appearance = await app!.evaluate(({ BaseWindow, nativeTheme }) => ({
         preference: nativeTheme.themeSource,
         dark: nativeTheme.shouldUseDarkColors,
-        background: BrowserWindow.getAllWindows()[0]!.getBackgroundColor(),
+        background: BaseWindow.getAllWindows()[0]!.getBackgroundColor(),
       }));
       if (
         appearance.preference === preference &&
@@ -449,10 +451,15 @@ async function launch() {
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 10000,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   page.on('pageerror', (error) => console.error('native_bundle_renderer_error', error.message));
   console.log('native_driver_stage: window');
   page.setDefaultTimeout(10000);
@@ -539,41 +546,44 @@ try {
     0,
   );
   assert.equal(await page.getByRole('button', { name: '工作台', exact: true }).count(), 0);
-  await page.getByRole('button', { name: '创建第一个任务', exact: true }).click();
+  await page
+    .getByRole('main', { name: '定时任务', exact: true })
+    .getByRole('button', { name: '新建', exact: true })
+    .click();
   const scheduledEditor = page.getByRole('complementary', { name: '新建定时任务', exact: true });
   await scheduledEditor.getByRole('textbox', { name: '名称', exact: true }).fill('原页面任务草稿');
   await scheduledEditor
     .getByRole('textbox', { name: '定时任务说明', exact: true })
     .fill('核对原项目\n🙂');
-  const projectChoice = scheduledEditor.getByRole('combobox', { name: /^项目/ });
-  await projectChoice.waitFor();
-  assert.deepEqual(
-    await projectChoice
-      .locator('option')
-      .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)),
-    ['w'],
-  );
+  const projectChoice = scheduledEditor.getByRole('button', { name: '项目空间', exact: true });
+  await projectChoice.click();
+  const projects = scheduledEditor.getByRole('menuitemradio');
+  assert.deepEqual(await projects.allTextContents(), ['Native bundled']);
+  await projects.getByText('Native bundled', { exact: true }).click();
+  assert.equal((await projectChoice.textContent())?.trim(), 'Native bundled');
+  // The current editor fixes execution to the local environment and has no environment selector.
+  assert.equal(await scheduledEditor.getByRole('combobox', { name: /^运行环境/ }).count(), 0);
+  await scheduledEditor.getByRole('button', { name: '重复频率', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '每周', exact: true }).click();
+  await scheduledEditor.getByRole('radio', { name: '星期一', exact: true }).check();
   assert.equal(
-    await scheduledEditor.getByRole('combobox', { name: /^运行环境/ }).isDisabled(),
+    await scheduledEditor.getByRole('radio', { name: '星期一', exact: true }).isChecked(),
     true,
   );
-  assert.equal(
-    await scheduledEditor.getByRole('combobox', { name: /^运行环境/ }).inputValue(),
-    'local',
-  );
-  await scheduledEditor.getByRole('combobox', { name: /^重复/ }).selectOption('weekly');
-  await scheduledEditor.getByRole('combobox', { name: /^星期/ }).selectOption('1');
   // Invalid draft must not create work; complete CRUD has its own isolated suite.
   await scheduledEditor.getByRole('textbox', { name: '名称', exact: true }).fill('');
   assert.equal(
-    await scheduledEditor.getByRole('button', { name: '保存任务', exact: true }).isDisabled(),
+    await scheduledEditor.getByRole('button', { name: '创建', exact: true }).isDisabled(),
     true,
   );
   await scheduledEditor
     .locator('form')
     .evaluate((form) => (form as HTMLFormElement).requestSubmit());
   assert.equal(await page.locator('.scheduled-card').count(), 0);
-  await page.getByRole('button', { name: '返回会话', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Native bundled', exact: true })
+    .and(page.locator('button.session-row'))
+    .click();
   assert.equal(
     await promptText(page.getByRole('textbox', { name: '当前会话私有草稿', exact: true })),
     retainedDraft,

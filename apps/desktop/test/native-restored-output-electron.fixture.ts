@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 const [launcher, home, control, originalStoreId] = process.argv.slice(2) as [
     string,
@@ -34,15 +36,22 @@ async function launch() {
     executablePath: launcher,
     args: [`--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 10000,
     chromiumSandbox: true,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   page.setDefaultTimeout(10000);
   assert.deepEqual(
-    await app.evaluate(({ app, BrowserWindow }) => {
-      const contents = BrowserWindow.getAllWindows()[0]!.webContents as unknown as {
+    await app.evaluate(({ app, BaseWindow }) => {
+      const contents = (
+          BaseWindow.getAllWindows()[0]! as import('../electron/native-root-window').NativeRootWindow
+        ).webContents as unknown as {
           getLastWebPreferences(): {
             sandbox?: boolean;
             contextIsolation?: boolean;

@@ -2,6 +2,8 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
+import { nativeRootPage } from './native-root-page.fixture';
 import { promptText } from './prompt-editor-text.fixture';
 
 const [candidate, home, control] = process.argv.slice(2) as [string, string, string];
@@ -19,10 +21,15 @@ try {
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 10000,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   page.setDefaultTimeout(10000);
   await page.locator('.session-header').waitFor();
   const children = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
@@ -40,9 +47,9 @@ try {
   assert.deepEqual(await locks(), { outer: true, inner: true });
   const draft = page.getByRole('textbox', { name: '新对话草稿', exact: true });
   await draft.fill('关闭和退出仍保留原草稿\n雪🙂');
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.close());
+  await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.close());
   assert.equal(
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
     false,
   );
   process.kill(childPid, 0);
@@ -50,7 +57,7 @@ try {
     app.emit('activate');
   });
   assert.equal(
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
     true,
   );
   assert.equal(await promptText(draft), '关闭和退出仍保留原草稿\n雪🙂');
@@ -113,7 +120,7 @@ try {
   app.process().stdout!.on('data', (chunk: Buffer) => {
     quitEvents += chunk.toString();
   });
-  await app.evaluate(({ dialog, BrowserWindow }, pid) => {
+  await app.evaluate(({ dialog, BaseWindow }, pid) => {
     const record = (event: string, options?: unknown) => {
       process.stdout.write(
         `owned_quit_event:${JSON.stringify({ event, at: Date.now(), options })}\n`,
@@ -124,8 +131,8 @@ try {
     const owned = children.find((child) => child.pid === pid);
     if (!owned) throw Error('owned_paired_child_unavailable');
     owned.once('close', () => record('service-closed'));
-    BrowserWindow.getAllWindows()[0]!.once('hide', () => record('window-hidden'));
-    BrowserWindow.getAllWindows()[0]!.once('closed', () => record('window-closed'));
+    BaseWindow.getAllWindows()[0]!.once('hide', () => record('window-hidden'));
+    BaseWindow.getAllWindows()[0]!.once('closed', () => record('window-closed'));
     Reflect.set(globalThis, 'ownedRecordQuitEvent', record);
     Reflect.set(globalThis, 'ownedQuitPromptCount', 0);
     dialog.showMessageBox = (async (...args: unknown[]) => {
@@ -166,8 +173,8 @@ try {
   const committedAt = Date.now();
   await until(
     () =>
-      app!.evaluate(({ BrowserWindow }) => {
-        const windows = BrowserWindow.getAllWindows();
+      app!.evaluate(({ BaseWindow }) => {
+        const windows = BaseWindow.getAllWindows();
         return windows.length === 1 && windows.every((window) => !window.isVisible());
       }),
     1000,
@@ -184,9 +191,9 @@ try {
     app.emit('activate');
     app.quit();
   });
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  assert.equal(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
   assert.equal(
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
     false,
   );
   assert.equal(await app.evaluate(() => Reflect.get(globalThis, 'ownedQuitPromptCount')), 1);
@@ -204,9 +211,9 @@ try {
     app.emit('activate');
     app.quit();
   });
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  assert.equal(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
   assert.equal(
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
     false,
   );
   assert.equal(await app.evaluate(() => Reflect.get(globalThis, 'ownedQuitPromptCount')), 1);
@@ -262,10 +269,15 @@ try {
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 10000,
   });
-  const failedPage = await app.firstWindow();
+  const failedPage = await nativeRootPage(app, 10000);
   failedPage.setDefaultTimeout(10000);
   await failedPage.locator('.session-header').waitFor();
   const failedChildren = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
@@ -283,8 +295,8 @@ try {
   app.process().stdout!.on('data', (chunk: Buffer) => {
     failedEvents += chunk.toString();
   });
-  await app.evaluate(({ dialog, BrowserWindow }, pid) => {
-    BrowserWindow.getAllWindows()[0]!.once('closed', () => {
+  await app.evaluate(({ dialog, BaseWindow }, pid) => {
+    BaseWindow.getAllWindows()[0]!.once('closed', () => {
       process.stdout.write('owned_failed_window_closed\n');
     });
     type Child = { pid?: number; once(event: string, callback: () => void): void };
