@@ -2012,8 +2012,11 @@ body {
 }
 .kite-client .space-heading :is(.space-new-session, .space-more) > svg,
 .kite-client .session-row > svg[role="status"] {
-  width: 14px;
-  height: 14px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
+}
+.kite-client .session-row > svg[role="status"] {
+  animation-duration: 2.4s;
 }
 .kite-client .nav-label .space-add,
 .kite-client .space-heading :where(.space-new-session, .space-more) {
