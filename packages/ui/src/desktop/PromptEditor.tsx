@@ -29,6 +29,7 @@ import {
   SKIP_DOM_SELECTION_TAG,
 } from 'lexical';
 import { type Ref, useImperativeHandle, useLayoutEffect, useRef } from 'react';
+import { useReadGate } from './ReadGate';
 
 export interface PromptEditorHandle {
   focus(): void;
@@ -136,11 +137,13 @@ function InputPlugin(props: PromptEditorProps) {
 }
 
 export function PromptEditor(props: PromptEditorProps) {
+  const readGate = useReadGate();
+  const input = { ...props, disabled: props.disabled || readGate };
   return (
     <LexicalComposer
       initialConfig={{
         namespace: 'kite-prompt',
-        editable: !props.disabled,
+        editable: !input.disabled,
         nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, CodeNode, LinkNode],
         editorState: () => $convertFromMarkdownString(props.value, TRANSFORMERS, undefined, true),
         onError: (error) => {
@@ -167,6 +170,7 @@ export function PromptEditor(props: PromptEditorProps) {
           contentEditable={
             <ContentEditable
               className="prompt-editor"
+              data-disabled={props.disabled || undefined}
               onClick={(event) => {
                 if ((event.target as Element).closest('a')) event.preventDefault();
               }}
@@ -180,7 +184,7 @@ export function PromptEditor(props: PromptEditorProps) {
                 if (!event.dataTransfer.files.length) return;
                 event.preventDefault();
                 event.stopPropagation();
-                if (props.disabled) return;
+                if (input.disabled) return;
                 props.onFiles?.([...event.dataTransfer.files]);
               }}
             />
@@ -192,7 +196,7 @@ export function PromptEditor(props: PromptEditorProps) {
       <ListPlugin />
       <LinkPlugin />
       <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
-      <InputPlugin {...props} />
+      <InputPlugin {...input} />
     </LexicalComposer>
   );
 }

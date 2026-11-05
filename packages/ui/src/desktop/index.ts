@@ -112,6 +112,7 @@ export {
 } from './markdown-parse-cache';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { QueuedMessages, type QueuedMessagesProps, type QueuedPrompt } from './QueuedMessages';
+export { ReadGate } from './ReadGate';
 export {
   RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
   RightSidebar,

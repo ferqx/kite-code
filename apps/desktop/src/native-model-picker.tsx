@@ -1,5 +1,5 @@
-import { ModelEffortSelector } from '@kite-ai/ui/desktop';
-import { useEffect, useRef, useState } from 'react';
+import { ModelEffortSelector, ReadGate } from '@kite-ai/ui/desktop';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   NativeBridge,
   NativeModelSettingsFacts,
@@ -268,10 +268,10 @@ export function NativeModelPicker({
     supported.includes(requestEffort) ||
     (value.reasoningEffort === undefined &&
       (requestEffort === 'none' || requestEffort === 'minimal'));
-  const ready =
-    !!selected && allowedEffort && !protocol.unavailable && !reading && !error && !disabled;
-  const readyId = ready ? selected?.id : undefined;
-  useEffect(() => {
+  const observed = !!selected && allowedEffort && !protocol.unavailable && !error;
+  const ready = observed && !reading && !disabled;
+  const readyId = observed ? selected?.id : undefined;
+  useLayoutEffect(() => {
     if (current.current !== readKey) return;
     readyCallback.current(
       ready,
@@ -293,7 +293,6 @@ export function NativeModelPicker({
     }
     const retained = snapshots.get(scope);
     setState({ key: readKey, facts: retained, error: '', reading: true });
-    readyCallback.current(false);
     void prepareNativeModels(bridge, generation, selection, preparing, revision).then((result) => {
       if (current.current !== original || sequence.current !== request) return;
       if (result.facts) snapshots.set(scope, result.facts);
@@ -370,31 +369,33 @@ export function NativeModelPicker({
       aria-label="下一轮模型选择"
       aria-busy={reading || disabled || undefined}
     >
-      <ModelEffortSelector
-        model={
-          selected
-            ? {
-                id: selected.id,
-                provider: selected.provider ?? '其他',
-                name: selected.model ?? selected.id,
-              }
-            : undefined
-        }
-        models={models.map((model) => ({
-          id: model.id,
-          provider: model.provider ?? '其他',
-          name: model.model ?? model.id,
-          reasoningEffort: model.reasoningEffort ?? undefined,
-          reasoningEffortChoices: model.reasoningEffortChoices ?? [],
-        }))}
-        disabled={reading || disabled || protocol.unavailable}
-        reasoningEffort={effort ?? undefined}
-        onModelChange={(_provider, _name, id) => {
-          if (id !== undefined) choose(id);
-        }}
-        onReasoningEffortChange={(effort) => setEffort(effort)}
-        modelSelectionHint={protocol.protocol ? '仅显示当前对话可用的模型' : undefined}
-      />
+      <ReadGate blocked={reading || disabled}>
+        <ModelEffortSelector
+          model={
+            selected
+              ? {
+                  id: selected.id,
+                  provider: selected.provider ?? '其他',
+                  name: selected.model ?? selected.id,
+                }
+              : undefined
+          }
+          models={models.map((model) => ({
+            id: model.id,
+            provider: model.provider ?? '其他',
+            name: model.model ?? model.id,
+            reasoningEffort: model.reasoningEffort ?? undefined,
+            reasoningEffortChoices: model.reasoningEffortChoices ?? [],
+          }))}
+          disabled={protocol.unavailable}
+          reasoningEffort={effort ?? undefined}
+          onModelChange={(_provider, _name, id) => {
+            if (id !== undefined) choose(id);
+          }}
+          onReasoningEffortChange={(effort) => setEffort(effort)}
+          modelSelectionHint={protocol.protocol ? '仅显示当前对话可用的模型' : undefined}
+        />
+      </ReadGate>
       {protocol.unavailable && <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}
       {saveError === readKey && <p role="alert">未能记住推荐模型与思考程度，请重新选择。</p>}

@@ -90,7 +90,6 @@ import {
   NativeDiagnosticsProvider,
   useNativeDiagnostics,
 } from './native-diagnostics';
-import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
 import { NativeExtensions } from './native-extensions';
 import { NativeFileChanges, NativeOutputFile } from './native-file-changes';
@@ -272,7 +271,29 @@ function NativeDesktopContent({
   const browserDrafts = useRef(new Map<string, string>());
   const agentBrowserPresentation = useRef(new AgentBrowserPresentation());
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
-  const [preparing, setPreparing] = useState(false);
+  const [preparing, setPreparingIntent] = useState(false);
+  // Intent revokes actions immediately. A render frame changes ownership only
+  // when the target's selection, model facts and initial draft are prepared.
+  const [frame, setFrame] = useState<{
+    state?: NativeState;
+    draft: string;
+    models?: NativePreparedModels;
+    preparation: boolean;
+  }>({ draft: '', preparation: false });
+  const { state, draft, models: preparedModels } = frame;
+  function setPreparing(value: boolean) {
+    setPreparingIntent(value);
+    if (value) setFrame((previous) => ({ ...previous, preparation: true }));
+  }
+  const setDraft = useCallback((value: string | ((previous: string) => string)) => {
+    setFrame((previous) => ({
+      ...previous,
+      draft: typeof value === 'function' ? value(previous.draft) : value,
+    }));
+  }, []);
+  function setPreparedModels(models: NativePreparedModels | undefined) {
+    setFrame((previous) => ({ ...previous, models }));
+  }
   const [newDraft, setNewDraft] = useState('');
   const newDraftRevision = useRef(0);
   const [newWorkspace, setNewWorkspace] = useState('');
@@ -325,7 +346,6 @@ function NativeDesktopContent({
       }
     | undefined
   >(undefined);
-  const [state, setState] = useState<NativeState>();
   const [directory, setDirectory] = useState<NativeDirectory>();
   const [directoryProjection] = useState(() => new NativeDirectoryProjection());
   const imageDrafts = useNativeInputImages(bridge, state?.generation, directory?.storeId);
@@ -379,7 +399,6 @@ function NativeDesktopContent({
   }>();
   const [originalDraft, setOriginalDraft] = useState<NativeDraft>();
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
-  const [draft, setDraft] = useState('');
   const [queueFocusKey, setQueueFocusKey] = useState(0);
   const [planMode, setPlanMode] = useState(false);
   const [settingsPage, setSettingsPage] = useState<'general' | 'providers' | 'mcp' | 'skills'>(
@@ -390,7 +409,6 @@ function NativeDesktopContent({
   const [, choiceChanged] = useState(0);
   const modelChoices = useRef(new Map<string, NativeModelChoice>());
   const modelSnapshots = useRef(new NativeModelSnapshots());
-  const [preparedModels, setPreparedModels] = useState<NativePreparedModels>();
   const [resolvedChoice, setResolvedChoice] = useState<{
     identity: string;
     choice?: NativeModelChoice;
@@ -529,7 +547,10 @@ function NativeDesktopContent({
       setStartup('ready');
     }
   }
-  function apply(result: NativeResult) {
+  function apply(
+    result: NativeResult,
+    preparedView?: { draft: string; models?: NativePreparedModels },
+  ) {
     if (result && 'generation' in result && result.generation === generation.current) {
       const reading = selectionRead.current;
       const hold = reading?.holdPresentation && result.selection?.session.id === reading.sessionId;
@@ -602,7 +623,8 @@ function NativeDesktopContent({
           ) ?? false,
         );
       const selecting = !!selectionRead.current;
-      setState((previous) => {
+      setFrame((previousFrame) => {
+        const previous = previousFrame.state;
         if (
           !value.selection &&
           selecting &&
@@ -611,15 +633,31 @@ function NativeDesktopContent({
           (!value.directory || value.directory.storeId === previous.selection.storeId)
         )
           return {
-            ...value,
-            selection: {
-              ...previous.selection,
-              permissions: undefined,
-              permissionUnavailable: true,
-              viewLoading: true,
+            ...previousFrame,
+            state: {
+              ...value,
+              selection: { ...previous.selection, viewLoading: true },
             },
           };
-        return value;
+        const sameReading =
+          previous?.generation === value.generation &&
+          previous?.selection?.storeId === value.selection?.storeId &&
+          previous?.selection?.session.id === value.selection?.session.id;
+        const observedSelection =
+          sameReading &&
+          value.selection?.viewLoading &&
+          !value.backgroundUnavailable &&
+          !value.callerUnavailable
+            ? {
+                ...value.selection,
+                permissions: value.selection.permissions ?? previous?.selection?.permissions,
+              }
+            : value.selection;
+        return {
+          ...previousFrame,
+          state: { ...value, selection: observedSelection },
+          ...(preparedView && { ...preparedView, preparation: false }),
+        };
       });
     }
   }
@@ -807,6 +845,8 @@ function NativeDesktopContent({
       holdPresentation: true,
     };
     selectionRead.current = original;
+    let preparedDraft: { value: NativeResult } | { error: unknown } | undefined;
+    let preparedView: { draft: string; models?: NativePreparedModels } | undefined;
     try {
       if (
         !preparing &&
@@ -828,6 +868,7 @@ function NativeDesktopContent({
       if (!isCurrentRead(current, epoch, nonce)) return;
       if (value && 'generation' in value && value.selection?.session.id === sessionId) {
         const targetSelection = value.selection;
+        let targetModels: NativePreparedModels | undefined;
         const scope = nativeModelScope(
           current,
           targetSelection,
@@ -847,8 +888,23 @@ function NativeDesktopContent({
           const latestStore = selectionRead.current?.latest?.directory?.storeId;
           if (latestStore && latestStore !== targetSelection.storeId) return;
           if (prepared.facts) modelSnapshots.current.set(scope, prepared.facts);
-          setPreparedModels(prepared);
-        } else setPreparedModels(undefined);
+          targetModels = prepared;
+        }
+        if (
+          !targetSelection.session.parentSessionId &&
+          !draftCache.current.has(imageScope(targetSelection.storeId, sessionId))
+        ) {
+          try {
+            preparedDraft = {
+              value: await bridge.request({ method: 'draft.read', generation: current, sessionId }),
+            };
+          } catch (error) {
+            preparedDraft = { error };
+          }
+          if (!isCurrentRead(current, epoch, nonce)) return;
+          const latestStore = selectionRead.current?.latest?.directory?.storeId;
+          if (latestStore && latestStore !== targetSelection.storeId) return;
+        }
         const latest = selectionRead.current?.latest;
         if (latest) {
           const matching =
@@ -872,17 +928,27 @@ function NativeDesktopContent({
         original.holdPresentation = false;
         history.current?.preview(sessionId);
         draftOwner.current = imageScope(targetSelection.storeId, sessionId);
-        setDraft(draftCache.current.get(draftOwner.current)?.content ?? '');
+        const saved = preparedDraft && 'value' in preparedDraft ? preparedDraft.value : undefined;
+        preparedView = {
+          draft:
+            draftCache.current.get(draftOwner.current)?.content ??
+            (saved &&
+            'content' in saved &&
+            'storeId' in saved &&
+            saved.storeId === targetSelection.storeId
+              ? saved.content
+              : ''),
+          models: targetModels,
+        };
       }
-      apply(value);
+      apply(value, preparedView);
       if (value && 'generation' in value && value.selection && parentHistoryVisible.current)
         history.current?.select(current, value.selection, value.historyEpoch);
       if (value && 'generation' in value && !value.selection?.session.parentSessionId) {
-        const saved = await bridge.request({
-          method: 'draft.read',
-          generation: current,
-          sessionId,
-        });
+        if (preparedDraft && 'error' in preparedDraft) throw preparedDraft.error;
+        const saved = preparedDraft
+          ? preparedDraft.value
+          : await bridge.request({ method: 'draft.read', generation: current, sessionId });
         if (!isCurrentRead(current, epoch, nonce)) return;
         if (saved && 'content' in saved && 'revision' in saved) {
           setDraft(
@@ -1228,31 +1294,13 @@ function NativeDesktopContent({
       !state?.backgroundUnavailable &&
       !(state?.selection?.permissionUnavailable && !state.selection.viewLoading) &&
       (!!state?.selection?.viewLoading || historyState.phase === 'loading'));
-  const permissionLabels = useRef(
-    new NativeDisplayCache<NonNullable<NonNullable<SessionPageProps['composer']>['permission']>>(),
-  );
-  const permissionBoundary = JSON.stringify([state?.generation, state?.selection?.storeId]);
-  const previousPermissionBoundary = useRef(permissionBoundary);
-  if (previousPermissionBoundary.current !== permissionBoundary) {
-    permissionLabels.current.clear();
-    previousPermissionBoundary.current = permissionBoundary;
-  }
-  const permissionLabelKey = JSON.stringify([
-    state?.selection?.session.workspaceId,
-    state?.selection?.session.id,
-  ]);
   const permissionFailed =
     (state?.selection?.permissionUnavailable && !state.selection.viewLoading) ||
-    state?.backgroundUnavailable;
-  const observedPermission = !permissionFailed
+    state?.backgroundUnavailable ||
+    state?.callerUnavailable;
+  const composerPermission = !permissionFailed
     ? state?.selection?.permissions?.mode.mode
     : undefined;
-  if (permissionFailed) permissionLabels.current.delete(permissionLabelKey);
-  else if (observedPermission && !state?.selection?.permissionUnavailable)
-    permissionLabels.current.set(permissionLabelKey, observedPermission);
-  const composerPermission =
-    observedPermission ??
-    (sessionLoading ? permissionLabels.current.get(permissionLabelKey) : undefined);
   const choiceKey = JSON.stringify([
     selection?.storeId,
     selection?.session.workspaceId,
@@ -1296,6 +1344,8 @@ function NativeDesktopContent({
     resolvedChoice?.identity === choiceIdentity &&
     resolvedChoice.ready &&
     !!resolvedChoice.choice?.modelId;
+  const nextModelObserved =
+    resolvedChoice?.identity === choiceIdentity && !!resolvedChoice.choice?.modelId;
   const preparedPermission = newPermission ?? selection?.permissions?.mode.mode ?? 'auto';
   const attachmentGeneration = state?.generation,
     attachmentSessionId = selection?.session.id,
@@ -1357,7 +1407,7 @@ function NativeDesktopContent({
     bridge,
     generation: state?.generation ?? generation.current,
     historyEpoch: state?.historyEpoch ?? 0,
-    selection: !preparing && !scheduledTasksView ? state?.selection : undefined,
+    selection: !frame.preparation && !scheduledTasksView ? state?.selection : undefined,
     revision: state?.selectedEnvironmentRevision ?? state?.environmentRevision ?? 0,
     unavailable:
       state?.environmentReadUnavailable ??
@@ -2540,14 +2590,12 @@ function NativeDesktopContent({
   const hasPendingRootInteraction = nativeRootInteractionBlocksComposer(selection);
   const canCompose =
     !!selection && !selection.session.parentSessionId && !hasPendingRootInteraction;
-  const cancelCurrentRunDisabled =
+  const cancelCurrentRunBusinessDisabled =
     pending ||
     executionUnconfirmed ||
-    !!selection?.permissionUnavailable ||
+    !!(selection?.permissionUnavailable && !selection.viewLoading) ||
     !!state?.callerUnavailable ||
-    historyState.phase !== 'complete' ||
     !selection ||
-    selected.current !== selection.session.id ||
     !!state?.callerSubmissions?.some(
       (value) =>
         value.request.kind === 'command.cancel' &&
@@ -2555,6 +2603,11 @@ function NativeDesktopContent({
         value.scope.sessionId === selection?.session.id &&
         ['saved', 'submitting', 'unknown'].includes(value.phase),
     );
+  const cancelCurrentRunDisabled =
+    cancelCurrentRunBusinessDisabled ||
+    historyState.phase !== 'complete' ||
+    !!selection?.permissionUnavailable ||
+    selected.current !== selection?.session.id;
   const savedFirstInput = useRef<string | undefined>(undefined);
   const firstInputIdentity =
     firstSubmission &&
@@ -2621,7 +2674,7 @@ function NativeDesktopContent({
       setDraft((current) => current || original.draft.content);
       firstAcceptedDraft.current = undefined;
     }
-  }, [firstSubmission, state?.inputSubmissions, selection]);
+  }, [firstSubmission, state?.inputSubmissions, selection, setDraft]);
   useLayoutEffect(() => {
     // A later cold read must not revive a first-input placeholder already
     // replaced by verified history. Keep its receipt/retry owner intact.
@@ -4234,6 +4287,14 @@ function NativeDesktopContent({
         }
       />,
     );
+  const sendContentBlocked =
+    !selection ||
+    browserNotes.blocked(imageScope(selection.storeId, selection.session.id)) ||
+    browserNotes
+      .get(imageScope(selection.storeId, selection.session.id))
+      .some((note) => note.status !== 'ready') ||
+    (firstSubmission?.creation.sessionId === selection.session.id &&
+      firstSubmission.result?.phase === 'unknown');
   return windowFrame(
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
@@ -4608,7 +4669,7 @@ function NativeDesktopContent({
         pageIntent.current++;
         setScheduledTasksView(false);
         setPreparing(false);
-        if (!sameTarget) void report(() => select(sessionId));
+        if (!sameTarget || frame.preparation) void report(() => select(sessionId));
       }}
       newConversation={
         preparing && !scheduledTasksView
@@ -4750,7 +4811,7 @@ function NativeDesktopContent({
       }
       interactionHidesPrompt={!!hasPendingRootInteraction}
       composer={
-        preparing && state && directory
+        frame.preparation && state && directory
           ? {
               draft: newDraft,
               scopeKey: newImageScope,
@@ -4769,13 +4830,15 @@ function NativeDesktopContent({
               active: false,
               stopping: false,
               disabled: pending,
+              readOnly: !preparing,
+              readGate: { send: !newModelReady.ready },
+              sessionLoading: !preparing,
               sending,
               sendDisabled:
                 !newWorkspace ||
                 newBranch?.workspaceId !== newWorkspace ||
                 newBranch.storeId !== directory.storeId ||
                 contextBusy ||
-                !newModelReady.ready ||
                 !newModelReady.choice?.modelId ||
                 firstSubmission?.result?.phase === 'unknown',
               inputLabel: '新对话草稿',
@@ -4789,6 +4852,7 @@ function NativeDesktopContent({
                 <>
                   <NativeModelPicker
                     key={JSON.stringify([directory.storeId, newModelRevision])}
+                    disabled={!preparing}
                     snapshots={modelSnapshots.current}
                     bridge={bridge}
                     generation={state.generation}
@@ -4811,7 +4875,7 @@ function NativeDesktopContent({
                         aria-label="先审核计划"
                         checked={newPlanMode}
                         onChange={(event) => setNewPlanMode(event.target.checked)}
-                        disabled={pending}
+                        disabled={pending || !preparing}
                       />
                       先审核计划
                     </label>
@@ -4858,9 +4922,23 @@ function NativeDesktopContent({
                 active: !!activeInputRun && !executionUnconfirmed,
                 cacheMetrics: cacheMetrics.metrics,
                 contextUsage: contextUsage.metrics,
+                metricsLoading:
+                  !state.callerUnavailable &&
+                  !state.backgroundUnavailable &&
+                  !(state.selection?.permissionUnavailable && !state.selection.viewLoading) &&
+                  historyState.phase !== 'unavailable' &&
+                  ((cacheMetrics.pending && !cacheMetrics.metrics) ||
+                    (contextUsage.pending && !contextUsage.metrics)),
                 stopping: activeInputRun?.status === 'cancelling',
-                cancelDisabled: cancelCurrentRunDisabled,
-                disabled: pending || inputQueue.busy || selected.current !== selection.session.id,
+                cancelDisabled: cancelCurrentRunBusinessDisabled,
+                disabled: pending || inputQueue.busy,
+                readOnly: selected.current !== selection.session.id,
+                readGate: {
+                  send:
+                    !nextModelReady || historyState.phase !== 'complete' || !!selection.viewLoading,
+                  permission: historyState.phase !== 'complete' || !!selection.viewLoading,
+                  cancel: historyState.phase !== 'complete' || !!selection.viewLoading,
+                },
                 sessionLoading,
                 sending,
                 // A routine history scan gates actions without removing the observed label.
@@ -4875,9 +4953,8 @@ function NativeDesktopContent({
                 confirmFullPermission,
                 permissionDisabled:
                   pending ||
-                  historyState.phase !== 'complete' ||
-                  !!selection.permissionUnavailable ||
-                  !selection.permissions ||
+                  !!permissionFailed ||
+                  !composerPermission ||
                   state.permissionSubmissions.some((value) =>
                     ['saved', 'submitting', 'unknown'].includes(value.phase),
                   ),
@@ -4888,15 +4965,10 @@ function NativeDesktopContent({
                 ),
                 onPermissionChange: changeCurrentPermission,
                 sendDisabled:
-                  browserNotes.blocked(imageScope(selection.storeId, selection.session.id)) ||
-                  browserNotes
-                    .get(imageScope(selection.storeId, selection.session.id))
-                    .some((note) => note.status !== 'ready') ||
-                  historyState.phase !== 'complete' ||
-                  selection.permissionUnavailable ||
-                  (firstSubmission?.creation.sessionId === selection.session.id &&
-                    firstSubmission.result?.phase === 'unknown') ||
-                  !nextModelReady,
+                  sendContentBlocked ||
+                  !nextModelObserved ||
+                  permissionFailed ||
+                  historyState.phase === 'unavailable',
                 inputLabel: '当前会话私有草稿',
                 sendLabel: activeInputRun
                   ? planMode

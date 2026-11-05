@@ -404,6 +404,81 @@ export async function verifySessionShellGeometry(browser: Browser, url: string, 
 }
 
 /** Settings uses the same bounded surface as scheduled-task and conversation rails. */
+export async function verifyColdSessionToolbarWidth(
+  browser: Browser,
+  url: string,
+  artifact: string,
+) {
+  const cases = [];
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [810, 820, 830]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme: theme });
+      try {
+        await page.goto(`${url}?mode=long`);
+        await page.getByRole('button', { name: 'Session A', exact: true }).click();
+        await page.waitForFunction(
+          () => document.querySelector('.composer-cache-rate')?.textContent === '缓存 70%',
+        );
+        await page.evaluate(() => document.fonts.ready);
+        await page.evaluate(() => window.sessionShellFixture.hold());
+        await page.getByRole('button', { name: 'Session B', exact: true }).click();
+        await page.waitForFunction(() => window.sessionShellFixture.pending('selection') > 0);
+        await page.evaluate(() => window.sessionShellFixture.release('selection'));
+        await page.waitForFunction(() => window.sessionShellFixture.pending('models') > 0);
+        await page.evaluate(() => window.sessionShellFixture.release('models'));
+        await page.waitForFunction(() => window.sessionShellFixture.pending('history') > 0);
+        const read = () =>
+          page.evaluate(() => {
+            const rect = (selector: string) => {
+              const value = document.querySelector(selector)!.getBoundingClientRect();
+              return [value.x, value.y, value.width, value.height];
+            };
+            return { composer: rect('.composer'), metrics: rect('.composer-metrics') };
+          });
+        const loading = await read();
+        assert.equal(await page.locator('.composer-cache-rate').textContent(), '缓存…');
+        await page.screenshot({
+          path: path.join(artifact, `toolbar-${theme}-${width}-loading.png`),
+        });
+        await page.evaluate(() => window.sessionShellFixture.resume());
+        await page.waitForFunction(
+          () =>
+            document.querySelector('.composer-cache-rate')?.textContent === '缓存 30%' &&
+            !document.querySelector('.composer-metrics[aria-busy="true"]'),
+        );
+        const settled = await read();
+        await page.screenshot({
+          path: path.join(artifact, `toolbar-${theme}-${width}-settled.png`),
+        });
+        assert.deepEqual(settled.composer, loading.composer, `${theme}/${width}: footer stays put`);
+        assert.deepEqual(
+          settled.metrics,
+          loading.metrics,
+          `${theme}/${width}: metrics reserve width`,
+        );
+        const rateWidths = await page.evaluate(() => {
+          const rate = document.querySelector('.composer-cache-rate')!;
+          return [0, 1, 10, 99, 100].map((value) => {
+            const sample = rate.cloneNode() as HTMLElement;
+            sample.style.position = 'absolute';
+            sample.style.visibility = 'hidden';
+            sample.textContent = `缓存 ${value}%`;
+            rate.parentElement!.append(sample);
+            const width = sample.getBoundingClientRect().width;
+            sample.remove();
+            return width;
+          });
+        });
+        assert.equal(new Set(rateWidths).size, 1, `${theme}/${width}: 0–100% occupies one width`);
+        cases.push({ theme, width, loading, settled, rateWidths });
+      } finally {
+        await page.close();
+      }
+    }
+  }
+  return cases;
+}
+
 export async function verifySettingsGeometry(browser: Browser, url: string, artifact: string) {
   const cases = [];
   for (const theme of ['light', 'dark'] as const) {

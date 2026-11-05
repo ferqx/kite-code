@@ -1129,15 +1129,16 @@ test('a late draft write rejection remains a mutation error after reconciliation
   }
 });
 
-test('late saved prompt reads preserve newer input, including an explicitly empty draft', async () => {
+test('late saved prompt reads on a cached Session preserve newer input, including an explicitly empty draft', async () => {
   for (const text of ['new prompt 雪🙂', '']) {
     const f = fixture(true);
     const bridge = f.dom.window.kiteNative! as NativeBridge;
     const request = bridge.request;
     let release: (() => void) | undefined;
+    let holdRead = false;
     bridge.request = async (input) => {
       const result = await request(input);
-      if (input.method === 'draft.read' && input.sessionId === 'b')
+      if (holdRead && input.method === 'draft.read' && input.sessionId === 'b')
         await new Promise<void>((resolve) => {
           release = resolve;
         });
@@ -1146,6 +1147,10 @@ test('late saved prompt reads preserve newer input, including an explicitly empt
     try {
       await act(async () => f.root.render(<NativeDesktop />));
       await f.click('Original A');
+      await f.click('Other B');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+      await f.click('Original A');
+      holdRead = true;
       await f.click('Other B');
       expect(release).toBeDefined();
       expect(f.input('当前会话私有草稿')?.getAttribute('contenteditable')).toBe('true');
@@ -1950,6 +1955,7 @@ test('switching from a Session to global or project preparation retains the inpu
       expect(picker.hasAttribute('aria-busy')).toBe(false);
       expect(picker.querySelector<HTMLButtonElement>('[data-model-trigger]')!.disabled).toBe(false);
       await f.click('Original A');
+      await f.until(() => f.input('当前会话私有草稿') === input);
       expect(f.input('当前会话私有草稿')).toBe(input);
       expect(promptValue(input)).toBe('会话中尚未发送的草稿');
     }

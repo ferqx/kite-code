@@ -20,6 +20,9 @@ export function sessionSwitchBridge(
     protocol?: 'chat-completions' | 'responses';
     turnNotifications?: boolean;
     readTurns?: Map<string, string>;
+    contextUsage?: boolean;
+    initialSelection?: boolean;
+    holdDraft?: boolean;
   } = {},
 ) {
   const base = backgroundShellItem();
@@ -38,6 +41,7 @@ export function sessionSwitchBridge(
     refreshing = false,
     failed = false;
   let held = false;
+  let hasSelection = options.initialSelection !== false;
   const pending = new Map<string, (() => void)[]>();
   const listeners = new Set<(event: NativeEvent) => void>();
   const requests: NativeRequest[] = [];
@@ -126,7 +130,7 @@ export function sessionSwitchBridge(
     interactionSubmissions: [],
     ...(options.turnNotifications ? { directory: directory() } : {}),
     selection:
-      selecting || withdrawn
+      selecting || withdrawn || !hasSelection
         ? undefined
         : {
             storeId: 'store',
@@ -199,6 +203,7 @@ export function sessionSwitchBridge(
         case 'directory':
           return directory();
         case 'select': {
+          hasSelection = true;
           selected = request.sessionId;
           view++;
           revision++;
@@ -212,8 +217,8 @@ export function sessionSwitchBridge(
           }
           return state();
         }
-        case 'draft.read':
-          return {
+        case 'draft.read': {
+          const draft = {
             id: selected,
             storeId: 'store',
             workspaceId: 'w',
@@ -221,6 +226,8 @@ export function sessionSwitchBridge(
             revision: 1,
             content: options.drafts?.[selected] ?? `Draft ${selected.toUpperCase()}`,
           };
+          return options.holdDraft ? wait('draft', () => draft) : draft;
+        }
         case 'messages': {
           if (withdrawn) throw Error('native_view_unavailable');
           const id = selected;
@@ -317,19 +324,39 @@ export function sessionSwitchBridge(
             scope: scope(request),
             runs: [{ ...run(), status: 'running', finishedAt: null }],
           };
-        case 'toolMessages.usage':
-          return {
+        case 'toolMessages.usage': {
+          const id = selected;
+          const result = {
             kind: 'toolMessages.usage',
             readId: request.readId,
             scope: scope(request),
-            entries: request.messageIds.map((id) => ({
-              messageId: id,
-              executionId: `model-${selected}`,
+            entries: request.messageIds.map((messageId) => ({
+              messageId,
+              executionId: `model-${id}`,
               originStoreId: 'store',
-              cacheHitTokens: selected === 'a' ? 70 : 30,
-              cacheMissTokens: selected === 'a' ? 30 : 70,
+              cacheHitTokens: id === 'a' ? 70 : 30,
+              cacheMissTokens: id === 'a' ? 30 : 70,
             })),
-          };
+          } as const;
+          return options.contextUsage ? wait('usage', () => result) : result;
+        }
+        case 'toolMessages.contextUsage': {
+          if (!options.contextUsage) return null;
+          const id = selected;
+          const reading = scope(request);
+          const contextSelectionId = session().contextSelectionId;
+          return wait('context', () => ({
+            kind: 'toolMessages.contextUsage',
+            readId: request.readId,
+            scope: reading,
+            context: {
+              modelId: `model-${id}`,
+              contextSelectionId,
+              totalInputTokens: id === 'a' ? 5700 : 12000,
+              contextWindowTokens: 272000,
+            },
+          }));
+        }
         case 'background.open':
           return {
             kind: 'background.page',

@@ -67,6 +67,7 @@ export function BackgroundExecutions({
         (execution.status === 'running' || execution.status === 'stopping'),
     );
     const subagents = executions.filter((execution) => execution.kind === 'subagent');
+    const emptyStatus = stale ? '状态未知' : subagentDetails?.loading ? '读取中…' : undefined;
     return (
       <section
         className="background-executions environment-information"
@@ -82,7 +83,7 @@ export function BackgroundExecutions({
         <ExecutionGroup
           icon={TerminalIcon}
           label="Shell"
-          emptyLabel="空闲"
+          emptyLabel={emptyStatus ?? '空闲'}
           executions={shells}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
@@ -91,7 +92,7 @@ export function BackgroundExecutions({
         <ExecutionGroup
           icon={BotIcon}
           label="子智能体"
-          emptyLabel="暂无"
+          emptyLabel={emptyStatus ?? '暂无'}
           executions={subagents}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
@@ -175,9 +176,7 @@ function ExecutionGroup({
         {executions.length > 0 ? (
           <span className="background-execution-count">{executions.length}</span>
         ) : (
-          !subagentDetails?.loading && (
-            <span className="background-execution-empty">{emptyLabel}</span>
-          )
+          <span className="background-execution-empty">{emptyLabel}</span>
         )}
       </h3>
       {executions.length > 0 && (

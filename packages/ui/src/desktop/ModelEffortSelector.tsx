@@ -10,6 +10,7 @@ import { Separator } from './components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { effortNames, GemSlider } from './GemSlider';
 import { cn } from './lib/utils';
+import { useReadGate } from './ReadGate';
 
 const effortValues = ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'] as const;
 const defaultEffortIndex = effortValues.indexOf('medium');
@@ -51,6 +52,7 @@ function focusProviderTab(element: HTMLElement | null) {
 }
 
 export function ModelEffortSelector(props: ModelEffortSelectorProps) {
+  const readGate = useReadGate();
   const mode = props.mode ?? 'combined';
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'effort' | 'models'>(mode === 'model' ? 'models' : 'effort');
@@ -130,8 +132,8 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
     focusProviderTab(modelView.current);
   }, [view]);
   useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
+    if (disabled || readGate) setOpen(false);
+  }, [disabled, readGate]);
 
   function focusModelSwitch() {
     requestAnimationFrame(() => modelSwitch.current?.focus({ preventScroll: true }));
@@ -140,7 +142,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
     <Popover
       open={open}
       onOpenChange={(next) => {
-        if (next && disabled) return;
+        if (next && (disabled || readGate)) return;
         setOpen(next);
         if (next) {
           setView(mode === 'model' ? 'models' : 'effort');

@@ -8,8 +8,8 @@
   textarea {
     font: inherit;
   }
-  button:not(:disabled),
-  [role="button"]:not(:disabled):not([aria-disabled="true"]) {
+  button:is(:not(:disabled), [data-read-gated="true"]),
+  [role="button"]:is(:not(:disabled), [data-read-gated="true"]):not([aria-disabled="true"]) {
     cursor: pointer;
   }
 }
@@ -200,13 +200,16 @@ body {
     padding: 5px 10px;
     border-radius: var(--button-radius);
   }
-  .button:hover:not(:disabled),
-  :where(.interaction-area) button:where(:not([data-slot])):hover:not(:disabled),
-  :where(.settings) button:where(:not([data-slot])):hover:not(:disabled),
-  :where(.results) button:where(:not([data-slot])):hover:not(:disabled) {
+  .button:hover:is(:not(:disabled), [data-read-gated="true"]),
+  :where(.interaction-area)
+    button:where(:not([data-slot])):hover:is(:not(:disabled), [data-read-gated="true"]),
+  :where(.settings)
+    button:where(:not([data-slot])):hover:is(:not(:disabled), [data-read-gated="true"]),
+  :where(.results)
+    button:where(:not([data-slot])):hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-hover);
   }
-  .button:active:not(:disabled) {
+  .button:active:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-pressed);
   }
   .button[data-variant="destructive"] {
@@ -214,16 +217,16 @@ body {
     background: var(--destructive-fill);
     color: #fff;
   }
-  .button[data-variant="destructive"]:hover:not(:disabled) {
+  .button[data-variant="destructive"]:hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--destructive-fill-hover);
   }
-  .button[data-variant="destructive"]:active:not(:disabled) {
+  .button[data-variant="destructive"]:active:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--destructive-fill-pressed);
   }
-  .button:disabled,
-  :where(.interaction-area) button:where(:not([data-slot])):disabled,
-  :where(.settings) button:where(:not([data-slot])):disabled,
-  :where(.results) button:where(:not([data-slot])):disabled {
+  .button:disabled:not([data-read-gated="true"]),
+  :where(.interaction-area) button:where(:not([data-slot])):disabled:not([data-read-gated="true"]),
+  :where(.settings) button:where(:not([data-slot])):disabled:not([data-read-gated="true"]),
+  :where(.results) button:where(:not([data-slot])):disabled:not([data-read-gated="true"]) {
     opacity: 0.45;
     cursor: default;
   }
@@ -257,7 +260,7 @@ body {
     color: var(--primary-foreground);
     border-color: var(--primary);
   }
-  .primary:hover:not(:disabled) {
+  .primary:hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--primary-hover);
   }
   .ghost,
@@ -494,10 +497,10 @@ body {
     color: var(--navigation-foreground);
   }
   .primary-navigation .button.selected,
-  .primary-navigation .button:hover:not(:disabled) {
+  .primary-navigation .button:hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-hover);
   }
-  .primary-navigation .new-session:disabled {
+  .primary-navigation .new-session:disabled:not([data-read-gated="true"]) {
     opacity: 1;
   }
   .primary-navigation .button span {
@@ -571,7 +574,7 @@ body {
     border-radius: var(--button-radius);
   }
   .session-row.selected,
-  .session-row:hover:not(:disabled) {
+  .session-row:hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-hover);
   }
   .session-unread-dot {
@@ -583,8 +586,11 @@ body {
     background: #3b82f6;
     box-shadow: 0 0 6px rgb(59 130 246 / 65%);
   }
-  :is(.primary-navigation .button, .session-row, .profile-card):active:not(:disabled),
-  .primary-navigation .button.selected:active:not(:disabled) {
+  :is(.primary-navigation .button, .session-row, .profile-card):active:is(
+      :not(:disabled),
+      [data-read-gated="true"]
+    ),
+  .primary-navigation .button.selected:active:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-pressed);
   }
   .session-load-more {
@@ -627,7 +633,7 @@ body {
     border: 0;
     background: transparent;
   }
-  .profile-card:hover:not(:disabled) {
+  .profile-card:hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-hover);
   }
   .profile-card > span {
@@ -1047,10 +1053,10 @@ body {
     pointer-events: auto;
     box-shadow: 0 2px 8px rgb(0 0 0 / 14%);
   }
-  .jump-latest:hover:not(:disabled) {
+  .jump-latest:hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: color-mix(in srgb, var(--card), var(--foreground) 5%);
   }
-  .jump-latest:active:not(:disabled) {
+  .jump-latest:active:is(:not(:disabled), [data-read-gated="true"]) {
     background: color-mix(in srgb, var(--card), var(--foreground) 8%);
   }
   .jump-latest-dots {
@@ -1170,10 +1176,10 @@ body {
     margin: 0;
     color: var(--muted-foreground);
   }
-  .composer-queue-drag:not(:disabled) {
+  .composer-queue-drag:is(:not(:disabled), [data-read-gated="true"]) {
     cursor: grab;
   }
-  .composer-queue-drag:active:not(:disabled) {
+  .composer-queue-drag:active:is(:not(:disabled), [data-read-gated="true"]) {
     cursor: grabbing;
   }
   .composer-queue-preview {
@@ -1301,21 +1307,15 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .model-trigger:hover:not(:disabled),
+  .model-trigger:hover:is(:not(:disabled), [data-read-gated="true"]),
   .model-trigger:focus-visible,
-  .permission-trigger:hover:not(:disabled),
+  .permission-trigger:hover:is(:not(:disabled), [data-read-gated="true"]),
   .permission-trigger:focus-visible {
     background-color: var(--control-hover);
     color: var(--foreground);
   }
-  .model-trigger:disabled {
+  .model-trigger:disabled:not([data-read-gated="true"]) {
     opacity: 0.55;
-  }
-  .composer[data-permission-pending="true"] .model-trigger:disabled {
-    opacity: 1;
-  }
-  .composer [data-model-picker][aria-busy="true"] .model-trigger:disabled {
-    opacity: 1;
   }
   .permission-menu {
     border-color: var(--border);
@@ -1331,39 +1331,12 @@ body {
     color: var(--muted-foreground);
   }
   .permission-trigger-full,
-  .permission-trigger-full:hover:not(:disabled),
+  .permission-trigger-full:hover:is(:not(:disabled), [data-read-gated="true"]),
   .permission-trigger-full:focus-visible {
     color: var(--permission-full-foreground);
   }
-  .permission-trigger:disabled {
+  .permission-trigger:disabled:not([data-read-gated="true"]) {
     opacity: 0.55;
-  }
-  .composer[data-permission-pending="true"] .permission-trigger:disabled {
-    opacity: 1;
-  }
-  .composer[data-session-loading="true"] button[data-preserve-enabled="true"]:disabled {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .composer[data-session-loading="true"]
-    .permission-trigger[data-preserve-enabled="true"]:disabled:hover,
-  .composer [data-model-picker][aria-busy="true"] .model-trigger:disabled:hover {
-    background-color: var(--control-hover);
-    color: var(--foreground);
-  }
-  .composer[data-session-loading="true"] .permission-trigger-full:disabled:hover {
-    color: var(--permission-full-foreground);
-  }
-  .composer [data-model-picker][aria-busy="true"] .model-trigger:disabled {
-    pointer-events: auto;
-  }
-  .composer[data-session-loading="true"]
-    .composer-attach[data-preserve-enabled="true"]:disabled:hover {
-    background-color: var(--control-hover);
-  }
-  .composer[data-session-loading="true"]
-    .composer-action[data-preserve-enabled="true"]:disabled:hover {
-    background: var(--primary-hover);
   }
   .composer-cache-rate {
     display: inline-flex;
@@ -1371,6 +1344,8 @@ body {
     height: 32px;
     flex: none;
     font-size: 13px;
+    min-width: calc(2em + 5ch);
+    font-variant-numeric: tabular-nums;
     color: var(--muted-foreground);
     white-space: nowrap;
   }
@@ -1468,7 +1443,7 @@ body {
     gap: 0.5rem;
   }
   .stop-action,
-  .stop-action:disabled {
+  .stop-action:disabled:not([data-read-gated="true"]) {
     opacity: 1;
     transition: none;
   }
@@ -1804,10 +1779,10 @@ body {
     margin: 0;
   }
 
-  .questionnaire fieldset:disabled {
+  .questionnaire fieldset:disabled:not([data-read-gated="true"]) {
     cursor: default;
   }
-  .questionnaire fieldset:disabled .questionnaire-choice {
+  .questionnaire fieldset:disabled:not([data-read-gated="true"]) .questionnaire-choice {
     opacity: 0.5;
   }
   .questionnaire-error,
@@ -1858,7 +1833,7 @@ body {
     margin: 4px;
   }
   .model-list button[aria-pressed="true"],
-  .model-list button[aria-pressed="true"]:hover:not(:disabled) {
+  .model-list button[aria-pressed="true"]:hover:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--control-selected);
   }
   .file-change {
@@ -1947,7 +1922,7 @@ body {
   border-radius: var(--radius);
   background: var(--card);
   color: var(--foreground);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
   line-height: 20px;
   text-align: center;
@@ -1995,12 +1970,16 @@ body {
 .kite-client .space-heading:hover {
   background: var(--control-hover);
 }
-.kite-client .space-heading:has(> .button:active:not(:disabled)) {
+.kite-client .space-heading:has(> .button:active:is(:not(:disabled), [data-read-gated="true"])) {
   background: var(--control-pressed);
 }
 .kite-client .nav-label .space-add,
-.kite-client .nav-label .space-add:is(:hover, :active):not(:disabled),
-.kite-client .space-heading > .button:is(:hover, :active):not(:disabled) {
+.kite-client
+  .nav-label
+  .space-add:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]),
+.kite-client
+  .space-heading
+  > .button:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]) {
   background: transparent;
 }
 .kite-client .space-heading .space-row {
@@ -2022,10 +2001,15 @@ body {
 .kite-client .space-heading :where(.space-new-session, .space-more) {
   color: var(--muted-foreground);
 }
-.kite-client .nav-label .space-add:is(:hover, :focus-visible):not(:disabled),
+.kite-client
+  .nav-label
+  .space-add:is(:hover, :focus-visible):is(:not(:disabled), [data-read-gated="true"]),
 .kite-client
   .space-heading
-  :where(.space-new-session, .space-more):is(:hover, :focus-visible):not(:disabled) {
+  :where(.space-new-session, .space-more):is(:hover, :focus-visible):is(
+    :not(:disabled),
+    [data-read-gated="true"]
+  ) {
   color: var(--foreground);
 }
 .kite-client .nav-label .space-add,
@@ -2048,7 +2032,8 @@ body {
     pointer-events: auto;
   }
 }
-.kite-client :where(.space-add, .space-new-session, .space-more):disabled {
+.kite-client
+  :where(.space-add, .space-new-session, .space-more):disabled:not([data-read-gated="true"]) {
   pointer-events: none;
 }
 .kite-client .space-name-muted {
@@ -2621,7 +2606,7 @@ body {
   outline: 2px solid var(--input);
   outline-offset: 2px;
 }
-.kite-client .scheduled-weekdays:disabled {
+.kite-client .scheduled-weekdays:disabled:not([data-read-gated="true"]) {
   opacity: 0.5;
 }
 .kite-client .scheduled-weekdays + .scheduled-setting-row {
@@ -3405,9 +3390,9 @@ body {
   font-size: var(--conversation-text-size);
   line-height: 24px;
 }
-.kite-client .agent-turn-summary:hover:not(:disabled),
+.kite-client .agent-turn-summary:hover:is(:not(:disabled), [data-read-gated="true"]),
 .kite-client .agent-turn-summary:focus-visible,
-.kite-client .agent-turn-summary:active:not(:disabled),
+.kite-client .agent-turn-summary:active:is(:not(:disabled), [data-read-gated="true"]),
 .kite-client .agent-turn-summary[aria-expanded="true"] {
   background-color: transparent;
 }
@@ -3421,7 +3406,9 @@ body {
 .kite-client .agent-turn-status-label {
   font-weight: 400;
 }
-.kite-client .agent-turn-summary:where(:not(:disabled)) > .agent-turn-status-label:hover,
+.kite-client
+  .agent-turn-summary:where(:is(:not(:disabled), [data-read-gated="true"]))
+  > .agent-turn-status-label:hover,
 .kite-client .agent-turn-summary:focus-visible > .agent-turn-status-label {
   color: var(--foreground);
 }
@@ -3573,7 +3560,7 @@ body {
   padding-inline: 8px;
   color: var(--muted-foreground);
 }
-.kite-client .tool-activity-summary:hover:not(:disabled),
+.kite-client .tool-activity-summary:hover:is(:not(:disabled), [data-read-gated="true"]),
 .kite-client .tool-activity-step:hover,
 .kite-client .tool-activity-summary:focus-visible,
 .kite-client .tool-activity-summary[aria-expanded="true"],
@@ -4281,7 +4268,7 @@ body {
   border: 0;
   background: transparent;
 }
-.kite-client .tool-diff-toggle:hover:not(:disabled) {
+.kite-client .tool-diff-toggle:hover:is(:not(:disabled), [data-read-gated="true"]) {
   background: transparent;
   color: var(--foreground);
 }
@@ -4482,7 +4469,10 @@ body {
   border: 0;
 }
 .kite-client .settings-layout > nav button[aria-pressed="true"],
-.kite-client .settings-layout > nav button[aria-pressed="true"]:hover:not(:disabled) {
+.kite-client
+  .settings-layout
+  > nav
+  button[aria-pressed="true"]:hover:is(:not(:disabled), [data-read-gated="true"]) {
   background: var(--control-selected);
 }
 .kite-client .settings-content {
@@ -4545,7 +4535,7 @@ body {
   background: transparent;
   border-radius: var(--radius);
 }
-.kite-client .workbench-item:hover:not(:disabled) {
+.kite-client .workbench-item:hover:is(:not(:disabled), [data-read-gated="true"]) {
   background: var(--control-hover);
 }
 .kite-client .workbench-item > span:first-child {
@@ -4643,7 +4633,7 @@ body {
   min-width: 0;
   max-width: 240px;
 }
-.kite-client .context-trigger:disabled {
+.kite-client .context-trigger:disabled:not([data-read-gated="true"]) {
   opacity: 1;
 }
 .kite-client .context-menu {
@@ -4882,7 +4872,11 @@ body {
   }
 }
 .kite-client .environment-information-toggle[aria-expanded="true"],
-.kite-client .environment-information-toggle[aria-expanded="true"]:hover:not(:disabled) {
+.kite-client
+  .environment-information-toggle[aria-expanded="true"]:hover:is(
+    :not(:disabled),
+    [data-read-gated="true"]
+  ) {
   background: var(--control-selected);
 }
 .kite-client
@@ -4925,11 +4919,15 @@ body {
 .kite-client .environment-information button {
   font-weight: 400;
 }
-.kite-client .environment-information[aria-busy="true"] .button:disabled {
+.kite-client
+  .environment-information[aria-busy="true"]
+  .button:disabled:not([data-read-gated="true"]) {
   opacity: 1;
   pointer-events: auto;
 }
-.kite-client .environment-information[aria-busy="true"] .button:disabled:hover {
+.kite-client
+  .environment-information[aria-busy="true"]
+  .button:disabled:not([data-read-gated="true"]):hover {
   background: var(--control-hover);
 }
 .kite-client .environment-information .background-execution-group + .background-execution-group {
@@ -5404,17 +5402,10 @@ body {
   user-select: text;
   white-space: pre-wrap;
 }
-.kite-client .prompt-editor[contenteditable="false"] {
+.kite-client .prompt-editor[data-disabled="true"] {
   opacity: 0.55;
 }
-.kite-client
-  .composer[data-session-loading="true"][data-preserve-input="true"]
-  .prompt-editor[contenteditable="false"],
-.kite-client
-  .composer[data-session-loading="true"][data-preserve-input="true"]
-  .composer-attachment-remove:disabled {
-  opacity: 1;
-}
+
 .kite-client .prompt-editor-placeholder {
   position: absolute;
   top: 3px;
@@ -5611,11 +5602,15 @@ body {
   color: #fff;
   box-shadow: 0 1px 4px rgb(0 0 0 / 40%);
 }
-.kite-client .composer-attachment > .composer-attachment-remove:hover:not(:disabled) {
+.kite-client
+  .composer-attachment
+  > .composer-attachment-remove:hover:is(:not(:disabled), [data-read-gated="true"]) {
   background: #414141;
   color: #fff;
 }
-.kite-client .composer-attachment > .composer-attachment-remove:active:not(:disabled) {
+.kite-client
+  .composer-attachment
+  > .composer-attachment-remove:active:is(:not(:disabled), [data-read-gated="true"]) {
   background: #171717;
 }
 .kite-client .composer-attachment > .composer-attachment-remove:focus-visible {
@@ -5968,9 +5963,9 @@ body {
 .pill-select-trigger[aria-expanded="true"] > .pill-select-chevron[data-direction="down"] {
   transform: rotate(180deg);
 }
-.pill-select-trigger:hover:not(:disabled),
+.pill-select-trigger:hover:is(:not(:disabled), [data-read-gated="true"]),
 .pill-select-trigger:focus-visible,
-.kite-client .pill-select-trigger:hover:not(:disabled),
+.kite-client .pill-select-trigger:hover:is(:not(:disabled), [data-read-gated="true"]),
 .kite-client .pill-select-trigger:focus-visible {
   background: var(--control-hover);
 }
