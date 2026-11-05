@@ -1,6 +1,5 @@
 import type { ReadContext } from '../extensions';
 import {
-  closed,
   confirmedStop,
   decodeOperationRef,
   decodeResultDetails,
@@ -12,6 +11,7 @@ import {
   proveConnectionParent,
   savedReconnection,
   stoppedOrUnopened,
+  unopenedRejection,
 } from './reconnection-proof';
 
 export async function readReconnection(
@@ -53,24 +53,10 @@ export async function readReconnection(
       phase = 'pending';
       reason = null;
     } else {
-      const result = object(e.result),
-        details = object(result.details);
-      try {
-        closed(result, ['outcome', 'content', 'details']);
-        closed(details, ['code', 'adapterAttempted']);
-        if (
-          e.status === 'failed' &&
-          result.outcome === 'failed' &&
-          details.adapterAttempted === false &&
-          typeof details.code === 'string' &&
-          ['approval_denied', 'permission_denied'].includes(details.code) &&
-          result.content === details.code
-        ) {
-          phase = 'failed';
-          reason = String(details.code);
-        }
-      } catch {
-        /* No closed zero-adapter proof means unknown. */
+      const refusal = unopenedRejection(e);
+      if (refusal) {
+        phase = 'failed';
+        reason = refusal;
       }
     }
   } else {

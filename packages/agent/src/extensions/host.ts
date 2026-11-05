@@ -72,6 +72,21 @@ async function publicExecution(
       ? decision.sources
       : undefined;
   return {
+    ...(execution.authorization
+      ? {
+          authorization: {
+            dispatched: execution.authorization.dispatched,
+            ...(execution.authorization.human
+              ? {
+                  human: {
+                    state: execution.authorization.human.state,
+                    decision: execution.authorization.human.decision,
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
     id: execution.id,
     sessionId: execution.sessionId,
     runId: execution.runId,

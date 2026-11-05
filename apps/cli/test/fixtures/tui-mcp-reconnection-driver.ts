@@ -38,7 +38,7 @@ const current = async () => {
   if (invalidUTF8) throw invalidUTF8;
   const frame = await active!.projection();
   if (frame.fresh) retainedFrame = undefined;
-  latestFrame = normalized(retainedFrame ?? frame.text);
+  latestFrame = normalized(retainedFrame ?? active!.viewport());
   return { fresh: frame.fresh || retainedFrame !== undefined, text: latestFrame };
 };
 const control = async (path: string) => {
@@ -242,14 +242,40 @@ const reconnections = async () => {
   await wait('Selecting an original ID does not query, reconnect or authorize tools.');
 };
 const leave = async (pending = false, parentTitle = 'MCP · w') => {
-  await key('\x03');
-  await wait(parentTitle);
+  // Escape navigates locally; Ctrl+C targets the task and a repeated gesture can quit the host.
+  await key('\x1b');
+  await waitFor(
+    'parent MCP menu',
+    (frame) =>
+      frame.fresh &&
+      !frame.text.includes(
+        'Selecting an original ID does not query, reconnect or authorize tools.',
+      ) &&
+      frame.text.includes('Esc Back'),
+  );
   note('parent-mcp-after-child-close', {
     expectedTitle: parentTitle,
     frame: latestFrame.slice(-32768),
   });
-  await key('\x03');
-  await wait(pending ? 'Ctrl+B pending cards' : 'New Run >');
+  const end = Date.now() + 10000;
+  for (let level = 0; level < 3; level++) {
+    const before = await current();
+    if (!before.text.includes('Esc Back')) break;
+    await key('\x1b');
+    await waitFor('MCP back navigation', (frame) => frame.fresh && frame.text !== before.text, end);
+  }
+  if (pending)
+    await waitFor(
+      'original approval choices',
+      (frame) =>
+        frame.fresh &&
+        !frame.text.includes('Esc Back') &&
+        frame.text.includes('Allow once') &&
+        frame.text.includes('Deny'),
+      end,
+    );
+  else
+    await waitFor('main composer', (frame) => frame.fresh && frame.text.includes('New Run >'), end);
   note('main-after-parent-close', { pending, frame: latestFrame.slice(-32768) });
 };
 const close = async (phase: string) => {

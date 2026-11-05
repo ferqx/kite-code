@@ -225,6 +225,11 @@ export interface PublicRun {
   finishedAt: number | null;
 }
 export interface PublicExecution {
+  /** Core projects saved dispatch and human-decision facts; adapter results cannot supply them. */
+  authorization?: {
+    dispatched: boolean;
+    human?: { state: 'pending' | 'answered' | 'cancelled'; decision: 'approve' | 'deny' | null };
+  };
   resultAcceptance?: import('../storage/types').ExecutionRecord['resultAcceptance'];
   id: string;
   sessionId: string;

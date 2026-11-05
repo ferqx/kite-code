@@ -425,6 +425,38 @@ export async function proveCarrier(
   await proveConnectionParent(context, connection, ref, serverId, String(catalogue.configDigest));
   return { e, record, catalogue, ref, connection };
 }
+/** Only original Core dispatch facts can prove that a refusal never reached an adapter. */
+export function unopenedRejection(
+  e: PublicExecution,
+): 'approval_denied' | 'permission_denied' | null {
+  const result = object(e.result),
+    details = object(result.details);
+  if (
+    e.kind !== 'job' ||
+    e.status !== 'failed' ||
+    result.outcome !== 'failed' ||
+    Object.keys(result).length !== 3 ||
+    typeof result.content !== 'string' ||
+    !decimal64(e.resultRevision) ||
+    e.authorization?.dispatched !== false ||
+    details.adapterAttempted !== false ||
+    (details.stopConfirmation !== undefined && details.stopConfirmation !== null)
+  )
+    return null;
+  if (
+    details.code === 'permission_denied' &&
+    typeof details.reason === 'string' &&
+    details.reason.length > 0
+  )
+    return 'permission_denied';
+  if (
+    (details.code === undefined || details.code === 'approval_denied') &&
+    e.authorization.human?.state === 'answered' &&
+    e.authorization.human.decision === 'deny'
+  )
+    return 'approval_denied';
+  return null;
+}
 /** Durable zero-adapter rejection or the exact owned transport's confirmed terminal. */
 export function stoppedOrUnopened(
   e: PublicExecution,
@@ -432,20 +464,9 @@ export function stoppedOrUnopened(
 ) {
   if (!['failed', 'cancelled', 'succeeded'].includes(e.status) || !decimal64(e.resultRevision))
     return false;
-  const result = object(e.result),
-    d = object(result.details);
+  const result = object(e.result);
   if (!['failed', 'cancelled', 'succeeded'].includes(String(result.outcome))) return false;
-  if (confirmedTransportStop(e, binding)) return true;
-  if (
-    Object.keys(result).length === 3 &&
-    Object.keys(d).length === 2 &&
-    d.adapterAttempted === false &&
-    d.stopConfirmation === null &&
-    typeof result.content === 'string' &&
-    ['approval_denied', 'permission_denied'].includes(result.content)
-  )
-    return true;
-  return false;
+  return confirmedTransportStop(e, binding) || unopenedRejection(e) !== null;
 }
 export function projectExecution(e: PublicExecution, input = false) {
   return {

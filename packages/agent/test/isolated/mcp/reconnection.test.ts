@@ -44,8 +44,9 @@ async function fixture(
     postDrift = false,
     unknown = false,
     holdStop = false,
-    denyJob = false,
     holdOpening = false;
+  let denyJob: boolean | 'approval' = false,
+    denyReconnection: boolean | 'approval' = false;
   let releaseOpen!: () => void, openEntered!: () => void;
   const openGate = new Promise<void>((r) => {
     releaseOpen = r;
@@ -210,9 +211,18 @@ async function fixture(
       extensions: [lifecycle.extension],
       permissions: {
         async authorize(request: AuthorizationRequest) {
+          const refusal =
+            request.definitionId === 'mcp.source.connection'
+              ? denyJob
+              : request.definitionId === 'builtin.mcp/mcp.reconnect'
+                ? denyReconnection
+                : false;
           return {
-            allowed: !(denyJob && request.definitionId === 'mcp.source.connection'),
+            allowed: !refusal,
             revision: 'owned',
+            ...(refusal === 'approval'
+              ? { approval: { request: { title: 'Owned exact MCP request' } } }
+              : {}),
           };
         },
       },
@@ -436,8 +446,33 @@ async function fixture(
     release() {
       releaseStop();
     },
-    deny(value: boolean) {
+    deny(value: boolean | 'approval') {
       denyJob = value;
+    },
+    denyReconnection(value: boolean | 'approval') {
+      denyReconnection = value;
+    },
+    async refusePending() {
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const card = (
+          await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
+        ).interactions[0];
+        if (card) {
+          await runtime.answerInteraction({
+            expectedStoreId,
+            subjectId: 'owner',
+            commandId: `refuse-${card.id}`,
+            presentationSessionId: 's',
+            interactionId: card.id,
+            expectedRevision: card.revision,
+            answer: { kind: 'approval', decision: 'deny' },
+          });
+          return card;
+        }
+        if (Date.now() > deadline) throw Error('owned_refusal_card_missing');
+        await Bun.sleep(5);
+      }
     },
     setUnknown() {
       unknown = true;
@@ -631,9 +666,16 @@ test('ordinary connect denied connection Job settles unopened bootstrap; indepen
     expect(children).toHaveLength(1);
     expect(children[0]!.status).toBe('failed');
     expect(children[0]!.result).toMatchObject({
-      content: 'permission_denied',
-      details: { adapterAttempted: false, stopConfirmation: null },
+      outcome: 'failed',
+      details: {
+        code: 'permission_denied',
+        reason: 'permission_denied',
+        adapterAttempted: false,
+        stopConfirmation: null,
+      },
     });
+    expect(object(children[0]!.result).content).toContain('Permission denied;');
+    expect(children[0]!.authorization?.dispatched).toBe(false);
     f.deny(false);
     const next = await f.invoke('next', 'mcp.connect', { serverId: 'local', key: 'next' });
     expect(next.status).toBe('succeeded');
@@ -665,6 +707,93 @@ test('replacement Job denied after old stop retains exact terminal child/ref and
     await f.close();
   }
 }, 20000);
+
+for (const refusal of [true, 'approval'] as const)
+  test(`recordless reconnection ${refusal === true ? 'policy' : 'human'} refusal is known without stopping the original transport`, async () => {
+    const f = await fixture();
+    try {
+      await f.invoke('a', 'mcp.connect', { serverId: 'local', key: 'a' });
+      const b = await f.invoke('b', 'mcp.connect', { serverId: 'local', key: 'b' });
+      const warm = await f.connection(b.id, 'b');
+      f.denyReconnection(refusal);
+      const pending = f.invoke('r1', 'mcp.reconnect', f.input(warm, 'r1') as unknown as Json);
+      const card = refusal === 'approval' ? await f.refusePending() : null;
+      const execution = await pending;
+      expect(execution.status).toBe('failed');
+      expect(execution.authorization?.dispatched).toBe(false);
+      expect(await f.query(execution.id)).toMatchObject({
+        phase: 'failed',
+        reason: refusal === true ? 'permission_denied' : 'approval_denied',
+      });
+      expect(f.stops).toHaveLength(0);
+      expect(f.opens).toHaveLength(1);
+      expect((await f.connection(b.id, 'b')).live).toBe(true);
+      if (card) {
+        const stored = await f.store.getInteraction({
+          expectedStoreId: execution.originStoreId,
+          sessionId: 's',
+          interactionId: card.id,
+        });
+        expect(stored).toMatchObject({
+          state: 'answered',
+          acceptedDecisionRevision: null,
+          answer: { kind: 'approval', decision: 'deny' },
+        });
+        expect(execution.authorization?.human).toMatchObject({
+          state: 'answered',
+          decision: 'deny',
+          accepted: false,
+        });
+      }
+    } finally {
+      await f.close();
+    }
+  }, 15000);
+
+test('human refusal of the replacement preserves known old stop without accepting approval or opening the new transport', async () => {
+  const f = await fixture();
+  try {
+    await f.invoke('a', 'mcp.connect', { serverId: 'local', key: 'a' });
+    const b = await f.invoke('b', 'mcp.connect', { serverId: 'local', key: 'b' });
+    const warm = await f.connection(b.id, 'b');
+    f.deny('approval');
+    const pending = f.invoke('r1', 'mcp.reconnect', f.input(warm, 'r1') as unknown as Json);
+    const card = await f.refusePending();
+    const execution = await pending;
+    expect(execution.status).toBe('failed');
+    const fact = await f.query(execution.id);
+    expect(fact).toMatchObject({
+      phase: 'failed',
+      oldStop: { confirmed: true },
+      newConnection: { status: 'failed' },
+    });
+    const replacement = await f.store.getExecution(
+      (fact.newConnection as Record<string, Json>).id as string,
+    );
+    expect(replacement).toMatchObject({
+      authorization: {
+        dispatched: false,
+        human: { state: 'answered', decision: 'deny', accepted: false },
+      },
+      result: { outcome: 'failed', details: { adapterAttempted: false, stopConfirmation: null } },
+    });
+    expect(
+      await f.store.getInteraction({
+        expectedStoreId: execution.originStoreId,
+        sessionId: 's',
+        interactionId: card.id,
+      }),
+    ).toMatchObject({ acceptedDecisionRevision: null });
+    expect(f.opens).toHaveLength(1);
+    f.deny(false);
+    expect((await f.invoke('next', 'mcp.connect', { serverId: 'local', key: 'next' })).status).toBe(
+      'succeeded',
+    );
+    expect(f.opens).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+}, 15000);
 
 test('failed replacement binds its stopped observation to the new config and remains queryable without reopening it', async () => {
   const f = await fixture(1, false, undefined, true);
