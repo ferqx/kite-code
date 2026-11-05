@@ -12,7 +12,7 @@ import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import type { McpSelectedSourceSnapshot } from '../../src/mcp-source-configuration';
 
-type Scenario = 'allowed' | 'deny' | 'drift' | 'cold' | 'nested' | 'followup' | 'unconnected';
+type Scenario = 'allowed' | 'deny' | 'drift' | 'cold' | 'completion' | 'followup' | 'unconnected';
 
 test(
   'a failed child retains successful MCP metadata receipts without claiming a remote business effect',
@@ -162,7 +162,7 @@ async function fixture(scenario: Scenario) {
   const sourceBytes = readFileSync(sourcePath, 'utf8');
   const bodies: Record<string, unknown>[] = [];
   const providerTimeline: { at: number; role: string; index: number }[] = [];
-  const counts = { parent: 0, child: 0, grandchild: 0 };
+  const counts = { parent: 0, child: 0 };
   let elapsedMs = 0;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -176,17 +176,8 @@ async function fixture(scenario: Scenario) {
           message.role === 'user' &&
           JSON.stringify(message.content).includes('CHILD_OWNED_REQUEST'),
       );
-      const grandchild = messages.some(
-        (message) =>
-          message.role === 'user' &&
-          JSON.stringify(message.content).includes('GRANDCHILD_OWNED_REQUEST'),
-      );
-      const index = counts[grandchild ? 'grandchild' : child ? 'child' : 'parent']++;
-      providerTimeline.push({
-        at: Date.now(),
-        role: grandchild ? 'grandchild' : child ? 'child' : 'parent',
-        index,
-      });
+      const index = counts[child ? 'child' : 'parent']++;
+      providerTimeline.push({ at: Date.now(), role: child ? 'child' : 'parent', index });
       const safeId = JSON.stringify(messages).match(/mcp-[a-f0-9]{64}/)?.[0];
       let call: { name: string; input: unknown } | null = null;
       const followupTarget = /FOLLOW_UP_CHILD:([A-Za-z0-9-]+)/.exec(JSON.stringify(messages))?.[1];
@@ -210,14 +201,7 @@ async function fixture(scenario: Scenario) {
           name: 'connect_mcp_server',
           input: {
             server_id: safeId,
-            key: grandchild ? 'grandchild' : index === 3 ? 'child-followup' : 'child',
-          },
-        };
-      else if (child && !grandchild && index === 1 && scenario === 'nested')
-        call = {
-          name: 'spawn_agent',
-          input: {
-            prompt: 'GRANDCHILD_OWNED_REQUEST',
+            key: index === 3 ? 'child-followup' : 'child',
           },
         };
       else if (
@@ -232,12 +216,12 @@ async function fixture(scenario: Scenario) {
         expect(tool).toBeDefined();
         call = { name: tool!.function.name, input: { value: 'exact' } };
       }
-      // Current spawn is asynchronous; the ordinary event wait keeps each parent at its safe
+      // Current spawn is asynchronous; the ordinary event wait keeps the parent at its safe
       // result-adoption boundary without an extra Provider turn or a legacy required obligation.
       const calls = call
         ? [
             call,
-            ...(scenario === 'nested' && call.name === 'spawn_agent'
+            ...(scenario === 'completion' && call.name === 'spawn_agent'
               ? [
                   {
                     name: 'wait_agent_events',
@@ -279,7 +263,7 @@ async function fixture(scenario: Scenario) {
       tools: [
         { id: 'task.spawn', definitionVersion: '1' },
         ...(scenario === 'followup' ? [{ id: 'task.follow_up', definitionVersion: '1' }] : []),
-        ...(scenario === 'nested' ? [{ id: 'task.events', definitionVersion: '1' }] : []),
+        ...(scenario === 'completion' ? [{ id: 'task.events', definitionVersion: '1' }] : []),
       ],
     }),
   );
@@ -434,7 +418,7 @@ async function fixture(scenario: Scenario) {
       return elapsedMs;
     },
     async run(
-      observerMs: 15000 | 30000 = scenario === 'nested' ? 30000 : 15000,
+      observerMs: 15000 | 30000 = scenario === 'completion' ? 30000 : 15000,
       work = { commandId: 'work', content: 'PARENT_OWNED_REQUEST' },
     ) {
       const observedAt = Date.now();
@@ -687,25 +671,22 @@ test(
 );
 
 test(
-  'default nested worker waits for exact completion results with original source scopes and independent approvals within its three-level fixture budget',
+  'default worker waits for exact completion results with original source scopes and independent MCP Tool and connection approvals',
   async () => {
-    const f = await fixture('nested');
+    const f = await fixture('completion');
     try {
-      // This observer budget is specific to three layers of durable independent Ask.
-      // Two complete independent diagnostics took 16.15s/16.513s; the original
-      // 15s fixture failures remain evidence, not a product deadline or performance SLA.
       const cards = await f.run();
       expect(f.elapsedMs).toBeLessThan(process.platform === 'win32' ? 180000 : 30000);
-      expect(cards).toHaveLength(7);
+      expect(cards).toHaveLength(5);
       expect(cards.some((card) => ['task.spawn', 'agent/worker'].includes(card.definitionId))).toBe(
         false,
       );
-      expect(f.opens).toBe(3);
+      expect(f.opens).toBe(2);
       expect(f.effects).toBe(1);
-      expect(f.counts).toEqual({ parent: 3, child: 3, grandchild: 3 });
-      expect(f.bodies).toHaveLength(9);
-      expect(cards.filter((card) => card.definitionId === 'mcp.connect')).toHaveLength(3);
-      expect(cards.filter((card) => card.definitionId === 'mcp.source.connection')).toHaveLength(3);
+      expect(f.counts).toEqual({ parent: 3, child: 3 });
+      expect(f.bodies).toHaveLength(6);
+      expect(cards.filter((card) => card.definitionId === 'mcp.connect')).toHaveLength(2);
+      expect(cards.filter((card) => card.definitionId === 'mcp.source.connection')).toHaveLength(2);
       for (const definitionId of ['mcp.connect', 'mcp.source.connection'])
         expect(
           new Set(
@@ -713,22 +694,16 @@ test(
               .filter((card) => card.definitionId === definitionId)
               .map((card) => card.sessionId),
           ).size,
-        ).toBe(3);
+        ).toBe(2);
       const parentExecutions = await f.store.listExecutions('parent');
       const carrier = parentExecutions.find(
         (execution) => execution.definitionId === 'agent/worker',
       )!;
       const childExecutions = await f.store.listExecutions(carrier.childSessionId!);
-      const nested = childExecutions.find(
-        (execution) => execution.definitionId === 'agent/worker',
-      )!;
-      const grandExecutions = await f.store.listExecutions(nested.childSessionId!);
       await f.assertRecordOnlyCreation('parent');
-      await f.assertRecordOnlyCreation(carrier.childSessionId!);
+      expect(childExecutions.some((execution) => execution.childSessionId)).toBe(false);
       const runs = await Promise.all(
-        ['parent', carrier.childSessionId!, nested.childSessionId!].map(
-          async (id) => (await f.store.getView(id)).runs[0]!,
-        ),
+        ['parent', carrier.childSessionId!].map(async (id) => (await f.store.getView(id)).runs[0]!),
       );
       const commands = await Promise.all(
         runs.map((run) => f.runtime.getCommand(run.originCommandId)),
@@ -743,10 +718,10 @@ test(
           }
         ).mcp.sources;
       });
-      const receipts = [parentExecutions, childExecutions].map(
+      const receipts = [parentExecutions].map(
         (executions) => executions.find((execution) => execution.definitionId === 'task.spawn')!,
       );
-      for (const [index, executions] of [parentExecutions, childExecutions].entries()) {
+      for (const [index, executions] of [parentExecutions].entries()) {
         const wait = executions.find((execution) => execution.definitionId === 'task.events')!;
         expect(wait).toMatchObject({
           status: 'succeeded',
@@ -759,8 +734,7 @@ test(
         expect(JSON.stringify(f.bodies[final]!.messages)).toContain('CHILD_DONE_FULL_RESULT');
       }
       expect(carrier.status).toBe('succeeded');
-      expect(nested.status).toBe('succeeded');
-      for (const [index, originalCarrier] of [carrier, nested].entries()) {
+      for (const [index, originalCarrier] of [carrier].entries()) {
         expect(originalCarrier.delivery).toBe('consumed');
         const accepted = await f.store.getRun(originalCarrier.resultAcceptance!.runId!);
         expect(accepted!.sessionId).toBe(originalCarrier.sessionId);
@@ -823,43 +797,41 @@ test(
       for (const [index, receipt] of receipts.entries()) {
         expect(receipt.status).toBe('succeeded');
         const input = receipt.input as { [key: string]: unknown };
-        expect(input.prompt).toBe(index === 0 ? 'CHILD_OWNED_REQUEST' : 'GRANDCHILD_OWNED_REQUEST');
+        expect(input.prompt).toBe('CHILD_OWNED_REQUEST');
         expect(input).not.toHaveProperty('resultDisposition');
         expect(input).not.toHaveProperty('cancellation');
         const result = receipt.result as unknown as {
           details: { accepted: boolean; agent_id: string; state: string };
         };
         expect(result.details.accepted).toBe(true);
-        expect(result.details.agent_id).toBe([carrier, nested][index]!.childSessionId!);
+        expect(result.details.agent_id).toBe([carrier][index]!.childSessionId!);
         expect(result.details.state).toBe('queued');
         expect(result.details).not.toHaveProperty('ref');
       }
       expect(sources[1]!.inheritance!.parentSnapshot).toEqual(sources[0]!);
-      expect(sources[2]!.inheritance!.parentSnapshot).toEqual(sources[1]!);
       expect(sources[1]!.readSet).toEqual(sources[0]!.readSet);
-      expect(sources[2]!.readSet).toEqual(sources[1]!.readSet);
-      for (const execution of [carrier, nested, ...grandExecutions])
+      for (const execution of [carrier, ...childExecutions])
         expect(execution.cancelRequestedAt).toBeNull();
-      const jobs = [parentExecutions, childExecutions, grandExecutions]
+      const jobs = [parentExecutions, childExecutions]
         .flat()
         .filter((execution) => execution.definitionId === 'mcp.source.connection');
-      expect(jobs).toHaveLength(3);
+      expect(jobs).toHaveLength(2);
       for (const job of jobs) {
         expect(job.status).toBe('running');
         expect(job.cancelRequestedAt).toBeNull();
       }
-      expect(grandExecutions.filter((execution) => execution.kind === 'model').at(-1)!.status).toBe(
+      expect(childExecutions.filter((execution) => execution.kind === 'model').at(-1)!.status).toBe(
         'succeeded',
       );
       expect(JSON.stringify(f.bodies)).not.toContain('PRIVATE_SOURCE_MARKER');
       console.error(
-        'default_nested_qualification',
+        'default_child_result_qualification',
         JSON.stringify({
           elapsedMs: f.elapsedMs,
           observerBudgetMs: process.platform === 'win32' ? 180000 : 30000,
           effects: f.effects,
           opens: f.opens,
-          carriers: [carrier, nested].map(
+          carriers: [carrier].map(
             ({ id, status, delivery, resultAcceptance, cancelRequestedAt }) => ({
               id,
               status,

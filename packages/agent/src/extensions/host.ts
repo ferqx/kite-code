@@ -1639,6 +1639,12 @@ export class ExtensionHost {
           };
           const prior = await readAgentOperation();
           if (prior) return prior;
+          if (options.request.kind === 'agent') {
+            const session = await this.options.store.getSession(scope.command.sessionId);
+            if (!session) throw new AgentError('child_parent_binding_unavailable');
+            if (session.parentSessionId !== null)
+              throw childPreparationFailure(new AgentError('child_agent_creation_denied'));
+          }
           let agent:
             | Awaited<ReturnType<NonNullable<ExtensionHostOptions['resolveAgent']>>>
             | undefined;

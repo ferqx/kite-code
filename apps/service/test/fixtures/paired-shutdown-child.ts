@@ -33,12 +33,18 @@ const running = runServiceProcess({
               ? stage === 0
                 ? call('fixture.hold', {})
                 : [finish]
-              : stage === 0
-                ? call('spawn_agent', {
-                    prompt: `${actor} delegates original work`,
-                    ...(actor === 'worker' ? { preset: 'leaf' } : {}),
-                  })
-                : stage === 1
+              : actor === 'parent' && stage === 0
+                ? [
+                    ...call('spawn_agent', { prompt: 'Original worker waits for mail' }).slice(
+                      0,
+                      -1,
+                    ),
+                    ...call('spawn_agent', {
+                      prompt: 'Original leaf owns cleanup',
+                      preset: 'leaf',
+                    }),
+                  ]
+                : (actor === 'parent' && stage === 1) || (actor === 'worker' && stage === 0)
                   ? call('wait_agent_events', { after_seq: '0', wait_ms: 180000 })
                   : [finish];
           for (const event of events) yield event;
@@ -74,7 +80,7 @@ const running = runServiceProcess({
       model: model('parent'),
       modelId: 'parent',
       modelConcurrency: 1,
-      maxConcurrentSubagents: 1,
+      maxConcurrentSubagents: 2,
       extensions: [{ ...tasks, tools: [...tasks.tools!, hold] }],
       childConfigurations: [
         {
@@ -82,7 +88,7 @@ const running = runServiceProcess({
           version: '1',
           model: model('worker'),
           modelId: 'worker',
-          toolIds: ['task.spawn', 'task.events', hold.id],
+          toolIds: ['task.events', hold.id],
           snapshot: {},
         },
         {

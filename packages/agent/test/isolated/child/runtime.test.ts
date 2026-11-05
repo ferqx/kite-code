@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { type ChildAgentConfiguration, createRuntime } from '../../../src';
 import type { OperationRef, ToolDefinition } from '../../../src/extensions';
+import { isChildPreparationFailure } from '../../../src/extensions/task/preparation-failure';
 import { openSqliteStore } from '../../../src/sqlite';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
@@ -367,7 +368,7 @@ test('precise cancellation of one child leaves a detached sibling running', asyn
   }
 }, 10000);
 
-test('nested child uses the same Loop with independent direct-child slots and more than twelve tool turns', async () => {
+test('direct child continues more than twelve tool turns after next-level creation is denied', async () => {
   const ledger: number[] = [];
   const refs: OperationRef[] = [];
   const parent = createFixedModel([
@@ -380,17 +381,26 @@ test('nested child uses the same Loop with independent direct-child slots and mo
     [finish],
   ]);
   const grandchild = createFixedModel([[finish]]);
+  let denials = 0;
   const tool = delegate(async (input, context) => {
     const configurationId = (input as { configurationId: string }).configurationId;
-    const ref = await context.operations.ensure({
-      key: configurationId,
-      request: { kind: 'agent', configurationId, input: { content: 'nested' } },
-    });
+    let ref: OperationRef;
+    try {
+      ref = await context.operations.ensure({
+        key: configurationId,
+        request: { kind: 'agent', configurationId, input: { content: 'delegated work' } },
+      });
+    } catch (error) {
+      if (!isChildPreparationFailure(error) || error.code !== 'child_agent_creation_denied')
+        throw error;
+      denials++;
+      return { outcome: 'failed', content: 'Only the main Agent can create child Agents.' };
+    }
     refs.push(ref);
     const result = await context.operations.wait(ref, { signal: context.signal, timeoutMs: 4000 });
     return {
       outcome: result.status === 'succeeded' ? 'succeeded' : 'failed',
-      content: 'nested finished',
+      content: 'Direct child finished',
     };
   });
   const effect: ToolDefinition = {
@@ -416,14 +426,22 @@ test('nested child uses the same Loop with independent direct-child slots and mo
     await f.done();
     expect(ledger).toEqual(Array.from({ length: 14 }, (_, i) => i));
     expect(child.requests).toHaveLength(16);
-    expect(grandchild.requests).toHaveLength(1);
+    expect(grandchild.requests).toHaveLength(0);
     expect(parent.requests).toHaveLength(2);
-    expect(refs).toHaveLength(2);
-    expect((await f.store.getSession(refs[1]!.childSessionId!))?.parentSessionId).toBe(
-      refs[0]!.childSessionId!,
-    );
-    for (const ref of refs)
-      expect((await f.store.getExecution(ref.executionId!))?.status).toBe('succeeded');
+    expect(denials).toBe(1);
+    expect(refs).toHaveLength(1);
+    const ref = refs[0]!;
+    expect(await f.store.getSession(ref.childSessionId!)).toMatchObject({
+      parentSessionId: 's',
+      rootSessionId: 's',
+    });
+    const childExecutions = await f.store.listExecutions(ref.childSessionId!);
+    expect(childExecutions.filter((execution) => execution.childSessionId !== null)).toEqual([]);
+    expect(
+      childExecutions.find((execution) => execution.definitionId === 'fixture.delegate'),
+    ).toMatchObject({ status: 'failed' });
+    expect((await f.store.getExecution(ref.executionId!))?.status).toBe('succeeded');
+    expect((await f.store.getView(ref.childSessionId!)).runs[0]?.status).toBe('completed');
     expect((await f.store.getView('s')).runs[0]?.status).toBe('completed');
   } finally {
     await f.close();

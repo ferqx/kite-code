@@ -161,7 +161,7 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
             ),
           ).toBe(true);
           expect(f.browserRequests).toEqual([]);
-          expect(f.bindings.every((binding) => binding.checkerTimeout === 3000)).toBe(true);
+          expect(f.bindings.every((binding) => binding.checkerTimeout === 10000)).toBe(true);
         } finally {
           await f?.close();
           rmSync(root, { recursive: true, force: true });

@@ -25,12 +25,12 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   for (;;) {
     const result = await read();
     if (result !== undefined) return result;
-    if (Date.now() > deadline) throw new Error('nested_sdk_deadline');
+    if (Date.now() > deadline) throw new Error('after_turn_sdk_deadline');
     await Bun.sleep(5);
   }
 }
-async function fixture(mode: 'nested' | 'followup') {
-  const root = mkdtempSync(join(tmpdir(), 'kite-nested-sdk-'));
+async function fixture(mode: 'spawn' | 'followup') {
+  const root = mkdtempSync(join(tmpdir(), 'kite-after-turn-sdk-'));
   const workspace = join(root, 'workspace');
   privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
@@ -60,9 +60,6 @@ async function fixture(mode: 'nested' | 'followup') {
       if (body.model === 'parent' && count === 1) {
         name = 'spawn_agent';
         input = { prompt: 'initial' };
-      } else if (mode === 'nested' && body.model === 'child' && count === 1) {
-        name = 'spawn_agent';
-        input = { prompt: 'nested', preset: 'grandworker' };
       } else if (
         mode === 'followup' &&
         body.model === 'parent' &&
@@ -79,7 +76,7 @@ async function fixture(mode: 'nested' | 'followup') {
         input = { agent_id: childId, content: 'new explicitly requested work' };
       }
       if (
-        body.model === 'grandchild' ||
+        (mode === 'spawn' && body.model === 'child' && count === 1) ||
         (mode === 'followup' && body.model === 'child' && count === 2)
       )
         await waiting.promise;
@@ -108,7 +105,7 @@ async function fixture(mode: 'nested' | 'followup') {
     modelId: 'parent',
     tools: ['task.spawn', 'task.follow_up'].map((id) => ({ id, definitionVersion: '1' })),
     skills: ['alpha', 'beta'].map((id) => ({ id, path: id })),
-    models: ['parent', 'child', 'grandchild'].map((id) => ({
+    models: ['parent', 'child'].map((id) => ({
       id,
       provider: 'compatible',
       model: id,
@@ -127,7 +124,11 @@ async function fixture(mode: 'nested' | 'followup') {
     async authorize(input) {
       input.signal.throwIfAborted();
       expect(Object.isFrozen(input.command)).toBe(true);
-      if (input.execution.definitionId === 'task.spawn' && input.execution.sessionId === 'root')
+      if (
+        mode === 'followup' &&
+        input.execution.definitionId === 'task.spawn' &&
+        input.execution.sessionId === 'root'
+      )
         return { allowed: false, revision: 'initial-no-idle-report' };
       approvals.push({
         phase: input.phase,
@@ -152,32 +153,10 @@ async function fixture(mode: 'nested' | 'followup') {
         id: 'worker',
         version: '7',
         modelId: 'child',
-        toolIds: mode === 'nested' ? ['task.spawn'] : [],
+        toolIds: [],
       },
-      { id: 'grandworker', version: '8', modelId: 'grandchild', toolIds: [] },
     ],
   });
-  if (mode === 'nested') {
-    const spawn = host.extensions
-      ?.find((extension) => extension.id === 'builtin.task')
-      ?.tools?.find((tool) => tool.id === 'task.spawn');
-    if (!spawn) throw Error('missing trusted nested spawn');
-    const execute = spawn.execute;
-    const trustedExecute: typeof execute = (input, context) =>
-      execute(input, {
-        ...context,
-        operations: {
-          ...context.operations,
-          ensure(options) {
-            return context.operations.ensure({
-              ...options,
-              cancellation: context.sessionId === 'root' ? 'attached' : 'detached',
-            });
-          },
-        },
-      });
-    Object.assign(spawn, { execute: trustedExecute, resume: trustedExecute });
-  }
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const runtime = createRuntime({
     ...host,
@@ -201,7 +180,7 @@ async function fixture(mode: 'nested' | 'followup') {
     ...identity,
     commandId: 'create',
     workspaceId: 'w',
-    title: 'nested SDK',
+    title: 'after-turn SDK',
   });
   host.permissionManagement?.(runtime);
   await initializeLivePermissionFixture({
@@ -249,7 +228,7 @@ async function fixture(mode: 'nested' | 'followup') {
   };
 }
 
-for (const mode of ['nested', 'followup'] as const) {
+for (const mode of ['spawn', 'followup'] as const) {
   test(`default compatible SDK ${mode} after_turn retains original carrier, route, authorization and funding deadline`, async () => {
     const f = await fixture(mode);
     try {
@@ -262,9 +241,11 @@ for (const mode of ['nested', 'followup'] as const) {
       const first = await until(async () =>
         (await f.store.getView('root')).executions.find((e) => e.childSessionId),
       );
-      await f.runtime.waitForCommand(first.originCommandId, { timeoutMs: 7000 });
+      if (mode === 'followup')
+        await f.runtime.waitForCommand(first.originCommandId, { timeoutMs: 7000 });
+      else await until(async () => f.calls.find((call) => call.model === 'child'));
       const before = await f.store.getView(first.childSessionId!);
-      expect(before.runs[0]!.status).toBe('completed');
+      expect(before.runs[0]!.status).toBe(mode === 'spawn' ? 'running' : 'completed');
       const emptyMcp = (
         before.runs[0]!.configuration as {
           snapshot: {
@@ -283,7 +264,8 @@ for (const mode of ['nested', 'followup'] as const) {
       expect(emptyMcp.servers).toHaveLength(0);
       expect(emptyMcp.readSet).toBeNull();
       expect(emptyMcp.inheritance.parentSessionId).toBe('root');
-      let carrier = before.executions.find((e) => e.childSessionId);
+      expect(before.executions.some((execution) => execution.childSessionId)).toBe(false);
+      let carrier = mode === 'spawn' ? first : undefined;
       let followupRunId: string | undefined;
       if (mode === 'followup') {
         f.followup(first.childSessionId!);
@@ -332,56 +314,47 @@ for (const mode of ['nested', 'followup'] as const) {
         expect(carrier!.afterTurn).toMatchObject({ sourceExecutionId: followupTool.id });
       }
       expect(carrier).toBeDefined();
-      if (mode === 'nested') {
-        const grandchild = await f.store.getView(carrier!.childSessionId!);
-        const inheritedEmpty = (
-          grandchild.runs[0]!.configuration as {
-            snapshot: {
-              configuration: {
-                mcp: {
-                  sources: {
-                    servers: unknown[];
-                    readSet: unknown;
-                    inheritance: { parentSessionId: string };
-                  };
-                };
-              };
-            };
-          }
-        ).snapshot.configuration.mcp.sources;
-        expect(inheritedEmpty.servers).toHaveLength(0);
-        expect(inheritedEmpty.readSet).toBeNull();
-        expect(inheritedEmpty.inheritance.parentSessionId).toBe(first.childSessionId!);
+      if (mode === 'spawn') {
+        const spawnTool = (await f.store.listExecutions('root')).find(
+          (execution) => execution.kind === 'tool' && execution.definitionId === 'task.spawn',
+        )!;
+        expect(carrier!.parentExecutionId).toBe(spawnTool.id);
+        expect(carrier!.afterTurn).toMatchObject({
+          definitionId: 'task.spawn',
+          parentRunId: spawnTool.runId,
+          sourceExecutionId: spawnTool.id,
+        });
       }
       await until(async () =>
         f.calls.find(
           (call) =>
-            call.model === (mode === 'nested' ? 'grandchild' : 'child') &&
-            (mode === 'nested' || f.calls.filter((c) => c.model === 'child').length === 2),
+            call.model === 'child' &&
+            (mode === 'spawn' || f.calls.filter((c) => c.model === 'child').length === 2),
         ),
       );
       expect(f.approvals.map((a) => a.phase)).toEqual(['request']);
       f.replace();
       f.waiting.release();
       await f.runtime.waitForCommand(carrier!.originCommandId, { timeoutMs: 7000 });
-      const target = mode === 'nested' ? first.childSessionId! : 'root';
+      const target = 'root';
       const report = await until(async () =>
         (await f.store.getView(target)).runs.find((run) =>
           run.originCommandId.startsWith('report-'),
         ),
       );
       await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 7000 });
-      if (mode === 'nested')
-        expect((await f.store.getRun(report.id))!.carrierExecutionId).toBe(first.id);
       expect(f.approvals.map((a) => a.phase)).toEqual(['request', 'apply']);
       expect(f.approvals[0]).toMatchObject({
-        definitionId: mode === 'nested' ? 'task.spawn' : 'task.follow_up',
+        definitionId: mode === 'spawn' ? 'task.spawn' : 'task.follow_up',
       });
       expect(f.approvals[1]).toEqual({ ...f.approvals[0]!, phase: 'apply' });
       expect(f.unexpected()).toBe(0);
       expect((await f.store.getExecution(first.id))!.status).toBe('succeeded');
       expect((await f.store.getRun(before.runs[0]!.id))!.status).toBe('completed');
-      const funding = mode === 'nested' ? before.runs[0]! : (await f.store.getRun(followupRunId!))!;
+      const funding =
+        mode === 'spawn'
+          ? (await f.store.getView('root')).runs[0]!
+          : (await f.store.getRun(followupRunId!))!;
       expect(report.deadlineAt).toBe(funding.deadlineAt);
       const view = await f.store.getView(target);
       const model = view.executions.find((e) => e.kind === 'model' && e.runId === report.id)!;
@@ -395,8 +368,8 @@ for (const mode of ['nested', 'followup'] as const) {
           (m) =>
             m.sourceIds?.some((id) => id.startsWith('result-')) &&
             m.content.includes(
-              mode === 'nested'
-                ? 'grandchild complete result 1 full tail'
+              mode === 'spawn'
+                ? 'child complete result 1 full tail'
                 : 'child complete result 2 full tail',
             ),
         ),
@@ -410,13 +383,12 @@ for (const mode of ['nested', 'followup'] as const) {
       expect(originalDirectory.items).toHaveLength(1);
       expect(originalDirectory.items[0]!.agentId).toBe(first.childSessionId!);
       expect(originalDirectory.items[0]!.assignmentSource.content).toBe('initial');
-      expect(f.calls.filter((c) => c.model === 'parent')).toHaveLength(mode === 'nested' ? 2 : 5);
-      expect(f.calls.filter((c) => c.model === 'child')).toHaveLength(mode === 'nested' ? 3 : 2);
+      expect(f.calls.filter((c) => c.model === 'parent')).toHaveLength(mode === 'spawn' ? 3 : 5);
+      expect(f.calls.filter((c) => c.model === 'child')).toHaveLength(mode === 'spawn' ? 1 : 2);
       expect((await f.store.getExecution(carrier!.id))!.delivery).toBe('consumed');
       for (const run of [
         ...(await f.store.getView('root')).runs,
         ...(await f.store.getView(first.childSessionId!)).runs,
-        ...(mode === 'nested' ? (await f.store.getView(carrier!.childSessionId!)).runs : []),
       ]) {
         const snapshot = (
           run.configuration as {
@@ -525,7 +497,6 @@ for (const mode of ['nested', 'followup'] as const) {
       const rootView = await f.store.getView('root');
       const outer = rootView.executions.find((e) => e.childSessionId);
       const childView = outer ? await f.store.getView(outer.childSessionId!) : null;
-      const nested = childView?.executions.find((e) => e.childSessionId);
       console.error(
         JSON.stringify({
           approvals: f.approvals,
@@ -620,18 +591,6 @@ for (const mode of ['nested', 'followup'] as const) {
           ),
           outer: outer && { id: outer.id, status: outer.status },
           childRuns: childView?.runs.map((r) => ({ id: r.id, status: r.status })),
-          nested: nested && { id: nested.id, status: nested.status },
-          descendant: nested
-            ? (await f.store.getView(nested.childSessionId!)).executions.map((e) => ({
-                id: e.id,
-                kind: e.kind,
-                status: e.status,
-                code:
-                  e.result && typeof e.result === 'object' && !Array.isArray(e.result)
-                    ? e.result.code
-                    : null,
-              }))
-            : null,
         }),
       );
       throw error;

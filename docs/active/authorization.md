@@ -25,7 +25,7 @@ Shell 只读证明按固定 rg 的实际参数取值消费，执行 hooks、外�
 
 新默认合同仅用于实际可信注册的内置 Shell；其他可信内置工具沿原硬准入和独立人工规则，自定义审核器、完整自定义 Permissions、未知注册及旧 Run 保持原合同。新 Run 冻结 defaultAutoReview 与完整 prompt／固定映射 digest；恢复时两字段同缺才为 legacy，残缺、未知或不匹配不能静默降级。新输入只投影完整 operation 与取证 material，不构造任务上下文，也不回退完整窗口。旧 sealed 请求和结果不重写、不冷重发。支持接口的独立输出上限继续适用，真实截断仍是未派发技术失败。
 
-当前 Auto 审核采用默认3000毫秒总期限，覆盖准备、队列与 Provider；`autoApproval.timeoutMs` 可显式配置。超时默认放行语义审核，由工具原有执行策略兜底。Shell 文件和网络范围采用本次请求与父子／宿主硬上限交集，不增加超时专属收窄；显式 `full_access/internet` 请求可按原策略执行，省略请求仍为 `workspace_write/none`。记录 `timeout_continue` 而非审核模型批准，受保护资源和原独立人工要求保持；无可兑现边界时返回明确超时和未执行事实。仅由模型和语义审核表达的任务要求不因此获得沙箱保证。传输、空输出及无效答案仍为独立技术失败；超时、技术失败和真实拒绝不能互相冒充。独立人工批准义务继续等待准确原卡与 accepted 回答。
+当前 Auto 审核采用默认10000毫秒总期限，覆盖准备、队列与 Provider；`autoApproval.timeoutMs` 可显式配置。超时默认放行语义审核，由工具原有执行策略兜底。Shell 文件和网络范围采用本次请求与父子／宿主硬上限交集，不增加超时专属收窄；显式 `full_access/internet` 请求可按原策略执行，省略请求仍为 `workspace_write/none`。记录 `timeout_continue` 而非审核模型批准，受保护资源和原独立人工要求保持；无可兑现边界时返回明确超时和未执行事实。仅由模型和语义审核表达的任务要求不因此获得沙箱保证。传输、空输出及无效答案仍为独立技术失败；超时、技术失败和真实拒绝不能互相冒充。独立人工批准义务继续等待准确原卡与 accepted 回答。
 
 上述拒绝保留指准确原调用与原审核终态不被改写。新调用单独求当前权限；本合同没有新增跨工具业务效果等价的硬拒绝索引，不能把超时分支描述为任务级语义拒绝不可绕过的技术保证。模型继续受原任务和拒绝指导，执行链继续检查真正的硬拒绝、原人工义务及当前派发证明。
 
@@ -55,7 +55,7 @@ Native 普通工具审批采用输入组件上方的单卡分页，根和子待�
 
 子 Agent 的会话授权选项必须保留父子策略的共同范围、原命令摘要和策略 revision；独立必需权限检查不得因会话授权被跳过。可复用的人类批准按真实来源 Session 保存，父展示根、兄弟和后代均不能借用；Auto 有效审阅的复用与持久会话授权的绑定分别核实，规则和反例由[权限 owner](../../packages/agent/src/permissions/README.md)维护。
 
-最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及权限检查 proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或检查结果不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant／检查 proof 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
+最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及权限检查 proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或检查结果不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、直接子 Agent 的可信策略注入、旧 grant／检查 proof 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
 
 下面保留旧 Kernel/SAQ 实现及仍适用理由；其中人工拒绝后结束 turn 且不再调用模型的历史规则已被上述当前合同部分替代，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。
 

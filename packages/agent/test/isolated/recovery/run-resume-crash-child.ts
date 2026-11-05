@@ -78,7 +78,7 @@ const wrapped = new Proxy(store, {
       return async (input: Parameters<Store['persistModelPartial']>[0]) => {
         const result = await store.persistModelPartial(input);
         const ex = await store.getExecution(input.executionId);
-        if (mode === 'group_new_descendant' && ex?.sessionId !== 's') {
+        if (mode === 'group_background_job' && ex?.sessionId !== 's') {
           for (;;) {
             const root = await store.getView('s');
             if (root.runs.some((run) => run.isActive))
@@ -93,10 +93,8 @@ const wrapped = new Proxy(store, {
           mode.startsWith('group_') &&
           ex?.sessionId !== 's' &&
           ![
-            'group_nested',
             'group_terminal',
-            'group_terminal_descendant',
-            'group_new_descendant',
+            'group_background_job',
             'group_approval',
             'group_activation',
           ].includes(mode)
@@ -112,16 +110,6 @@ const wrapped = new Proxy(store, {
                 await stop(root.executions.filter((item) => item.kind === 'model').at(-1)!.id);
               await Bun.sleep(5);
             }
-          }
-        }
-        if (mode === 'group_nested' && ex?.sessionId !== 's') {
-          const run = ex?.runId ? await store.getRun(ex.runId) : null;
-          const command = run ? await store.getCommand(run.originCommandId) : null;
-          if ((command?.request as { input?: { content?: string } })?.input?.content === 'grand') {
-            const root = await store.getView('s');
-            await stop(
-              root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
-            );
           }
         }
         if (
@@ -181,16 +169,12 @@ const wrapped = new Proxy(store, {
     if (key === 'finishExecution')
       return async (input: Parameters<Store['finishExecution']>[0]) => {
         if (
-          ['group_terminal', 'group_terminal_descendant'].includes(mode) &&
+          mode === 'group_terminal' &&
           (await store.getExecution(input.executionId))?.kind === 'job'
         ) {
           for (;;) {
             const root = await store.getView('s');
-            if (
-              root.runs.some((run) => run.isActive) &&
-              (mode !== 'group_terminal_descendant' ||
-                readFileSync(join(directory, 'ledger'), 'utf8').includes('child-model:grand'))
-            )
+            if (root.runs.some((run) => run.isActive))
               await stop(
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );

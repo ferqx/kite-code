@@ -63,6 +63,12 @@ interface FrozenTaskTool {
   readonly id?: unknown;
   readonly version?: unknown;
 }
+/** Exact builtin creation identity; matching model names do not establish ownership. */
+export function isAgentCreationTaskTool(binding: FrozenTaskTool): boolean {
+  return (
+    binding.extensionId === 'builtin.task' && binding.id === 'task.spawn' && binding.version === '1'
+  );
+}
 /** Human clarification belongs to the root Agent, even when a child inherits its tools. */
 export function isRootOnlyTaskTool(binding: FrozenTaskTool): boolean {
   return (

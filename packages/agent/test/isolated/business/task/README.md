@@ -6,6 +6,7 @@
 | --- | --- |
 | 六工具与身份 | [collaboration-surface](collaboration-surface.test.ts)：实际目录、丢响应重试、queued 引导、idle 复用、直接父子和错误三态 |
 | 创建／续作准备失败 | [preparation-failure](preparation-failure.test.ts)：可信未受理说明进入下一模型、原身份二次核对、并发唯一受理、原子结果保真；取消、清理未确认、读取失败和受理后异常不冒充未受理 |
+| 单层创建拒绝说明 | [creation-denied-feedback](creation-denied-feedback.test.ts)：可信拒绝明确让子 Agent 交回父 Agent，同码后置异常不冒充未受理，原 call/source 和英文原因进入下一模型 |
 | 首次激活 | [collaboration-first-activation](collaboration-first-activation.test.ts)：取消前零派发证明、稳定 Session 复用、历史和实际输入 |
 | 邮件 | [mailbox](mailbox.test.ts)：父子双向全文、唯一低信任来源、事务回滚、未知／取消目标和冷只读 |
 | 统一邮箱 | [unified-inbox](unified-inbox.test.ts)：引导与 typed 邮件同轮汇合、active 结果唯一 Source、idle 通知权限及损坏 marker 拒绝 |

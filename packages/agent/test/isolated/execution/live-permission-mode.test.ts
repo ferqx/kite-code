@@ -44,7 +44,7 @@ async function fixture(
   options: {
     holdDispatch?: boolean;
     holdResource?: boolean;
-    childDepth?: number;
+    childDepth?: 0 | 1;
     reviewer?: ModelAdapter;
     readOnly?: boolean;
     holdEffect?: boolean;
@@ -214,11 +214,11 @@ async function fixture(
       version: '1',
       modelId: `child${index + 1}`,
       model: createFixedModel([
-        index + 1 < (options.childDepth ?? 0) ? delegate(index + 2) : effect,
+        effect,
         ...(options.sameRunNextTool && index + 1 === options.childDepth ? [effect] : []),
         [finish],
       ]),
-      toolIds: ['fixture.delegate', 'fixture.effect'],
+      toolIds: ['fixture.effect'],
       snapshot: {},
       permissions: {
         async authorize() {
@@ -602,16 +602,17 @@ test('resource waiting wakes and releases its old policy before the held resourc
   }
 });
 
-test('three levels of trusted injected children follow one root mode in their original active Runs', async () => {
-  const f = await fixture({ childDepth: 3 });
+test('a trusted direct child follows the root mode in their original active Runs', async () => {
+  const f = await fixture({ childDepth: 1 });
   try {
     await f.setMode('accept_edits');
     await f.submit();
     const card = await f.pending();
-    expect(card.ancestry).toHaveLength(4);
+    expect(card.ancestry).toHaveLength(2);
     expect(card.sessionId).not.toBe('s');
     const child = await f.store.getSession(card.sessionId);
     expect(child?.rootSessionId).toBe('s');
+    expect(child?.parentSessionId).toBe('s');
     expect(f.effects()).toBe(0);
     await f.setMode('full');
     await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
@@ -630,7 +631,7 @@ test('three levels of trusted injected children follow one root mode in their or
   }
 });
 
-for (const childDepth of [0, 3]) {
+for (const childDepth of [0, 1] as const) {
   test(`tightening preserves the dispatched action and gates the next tool in the same active Run at child depth ${childDepth}`, async () => {
     const f = await fixture({ childDepth, holdEffect: true, sameRunNextTool: true });
     try {
@@ -685,15 +686,15 @@ for (const childDepth of [0, 3]) {
   });
 }
 
-test('third-level child releases its stale resource wait and invalidates the fresh card when root mode relaxes', async () => {
-  const f = await fixture({ childDepth: 3, holdResource: true });
+test('direct child releases its stale resource wait and invalidates the fresh card when root mode relaxes', async () => {
+  const f = await fixture({ childDepth: 1, holdResource: true });
   try {
     await f.setMode('full');
     await f.submit();
     await f.resource.entered;
     await f.setMode('accept_edits');
     const card = await f.pending();
-    expect(card.ancestry).toHaveLength(4);
+    expect(card.ancestry).toHaveLength(2);
     expect((await f.store.getSession(card.sessionId))?.rootSessionId).toBe('s');
     expect((await f.store.getExecution(card.executionId))?.status).toBe('planned');
     expect(f.effects()).toBe(0);
@@ -723,12 +724,12 @@ test('third-level child releases its stale resource wait and invalidates the fre
   }
 });
 
-test('third-level child discards a late Auto approval after tightening to a fresh manual request', async () => {
+test('direct child discards a late Auto approval after tightening to a fresh manual request', async () => {
   const held = barrier();
   const reviewReturned = barrier();
   let reviewCalls = 0;
   const f = await fixture({
-    childDepth: 3,
+    childDepth: 1,
     reviewer: {
       async *stream() {
         reviewCalls++;
@@ -754,7 +755,7 @@ test('third-level child discards a late Auto approval after tightening to a fres
     expect(f.effects()).toBe(0);
     await f.setMode('accept_edits');
     const fresh = await f.pending();
-    expect(fresh.ancestry).toHaveLength(4);
+    expect(fresh.ancestry).toHaveLength(2);
     expect((await f.store.getSession(fresh.sessionId))?.rootSessionId).toBe('s');
     const review = (await f.store.listExecutions(fresh.sessionId)).find(
       (execution) =>

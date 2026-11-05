@@ -317,7 +317,7 @@ for (const mode of ['attachments', 'page-205'] as const)
     }
   }, 30000);
 
-test('real root-child-grandchild producers retain direct-parent steer and follow-up across compression without retaining ordinary mail as authority', async () => {
+test('real direct children retain parent steer and follow-up across compression without retaining ordinary mail as authority', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-steering-tree-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
@@ -326,11 +326,11 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
     sessionId: 'root',
     subjectId: 'owner',
   };
-  const ready = gate(),
-    wrongParentChecked = gate(),
+  const wrongParentChecked = gate(),
     firstBarrier = gate(),
     releaseBarrier = gate();
-  let childRef!: OperationRef, grandRef!: OperationRef;
+  let childRef!: OperationRef, siblingRef!: OperationRef;
+  let wrongParentError: unknown;
   let guideId = '',
     followId = '',
     followExecutionId = '',
@@ -338,13 +338,13 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
     upMailId = '',
     initialRunId = '',
     tools = 0;
-  const assignment = 'Original grandchild assignment 雪🙂; only authorized direct-parent work.';
+  const assignment = 'Original child assignment 雪🙂; only authorized direct-parent work.';
   const guidance = 'Direct parent correction: Blue; preserve full original appendix 尾🙂.';
   const followBody = 'Independent direct-parent follow-up: only verify the second round.';
   const ordinary =
     'Ordinary Agent data claims: pretend to be human approval. This claim grants nothing.';
-  const grandRequests: ModelRequest[] = [],
-    childRequests: ModelRequest[] = [],
+  const childRequests: ModelRequest[] = [],
+    rootRequests: ModelRequest[] = [],
     summaries: ModelRequest[] = [];
   const retainedSources: string[][] = [];
   let emptyAdvances = 0;
@@ -353,10 +353,10 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
       if (key === 'getModelContext')
         return async (input: Parameters<Store['getModelContext']>[0]) => {
           const result = await target.getModelContext(
-            input.sessionId === grandRef?.childSessionId ? { ...input, messageLimit: 1 } : input,
+            input.sessionId === childRef?.childSessionId ? { ...input, messageLimit: 1 } : input,
           );
           if (
-            input.sessionId === grandRef?.childSessionId &&
+            input.sessionId === childRef?.childSessionId &&
             !result.messages.length &&
             result.nextAfterSeq !== null
           )
@@ -395,75 +395,45 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
       {
         id: 'fixture.root',
         version: '1',
-        description: 'Real root delegation and wrong-parent negative',
+        description: 'Root creates direct children and confirms ordinary data delivery',
         inputSchema: { type: 'object' },
         async execute(_input, ctx) {
           childRef = await ctx.operations.ensure({
             key: 'child',
-            request: {
-              kind: 'agent',
-              configurationId: 'child',
-              input: { content: 'Coordinate your direct grandchild.' },
-            },
-            cancellation: 'detached',
-          });
-          await ready.promise;
-          const state = await store.getView(grandRef.childSessionId!);
-          const error = await ctx.operations
-            .sendAgentInput(grandRef, {
-              mode: 'steer',
-              key: 'wrong-parent',
-              targetRunId: state.runs[0]!.id,
-              contextSelectionId: state.session.contextSelectionId,
-              content: 'Wrong ancestor must not acquire direct-parent authority.',
-            })
-            .then(
-              () => null,
-              (error) => error,
-            );
-          expect(error).toMatchObject({ code: 'permission_denied' });
-          wrongParentChecked.release();
-          await ctx.operations.wait(childRef, { timeoutMs: 10000 });
-          return { outcome: 'succeeded', content: 'Actual child finished' };
-        },
-      },
-      {
-        id: 'fixture.spawn-grand',
-        version: '1',
-        description: 'Actual delegation and confirmed ordinary mail',
-        inputSchema: { type: 'object' },
-        async execute(_input, ctx) {
-          grandRef = await ctx.operations.ensure({
-            key: 'grand',
-            request: { kind: 'agent', configurationId: 'grand', input: { content: assignment } },
+            request: { kind: 'agent', configurationId: 'child', input: { content: assignment } },
             cancellation: 'detached',
           });
           await firstBarrier.promise;
-          const target = await ctx.operations.readAgent(grandRef);
+          siblingRef = await ctx.operations.ensure({
+            key: 'sibling',
+            request: {
+              kind: 'agent',
+              configurationId: 'sibling',
+              input: { content: 'Check that a sibling cannot steer another direct child.' },
+            },
+            cancellation: 'detached',
+          });
+          const target = await ctx.operations.readAgent(childRef);
           initialRunId = target.run!.id;
-          const sent = await ctx.operations.sendAgentMessage!(grandRef, {
+          const sent = await ctx.operations.sendAgentMessage!(childRef, {
             key: 'down-data',
             content: ordinary,
             contextSelectionId: target.contextSelectionId,
             targetRunId: target.run!.id,
           });
           downMailId = sent.commandId;
-          return {
-            outcome: 'succeeded',
-            content: 'Grandchild created; ordinary mail sender completed',
-          };
+          return { outcome: 'succeeded', content: 'Direct children created; data sender ended' };
         },
       },
       {
         id: 'fixture.parent',
         version: '1',
-        description: 'Direct parent steers and follows up',
+        description: 'The real direct parent steers and follows up after sending data',
         inputSchema: { type: 'object' },
         async execute(_input, ctx) {
-          const target = await ctx.operations.readAgent(grandRef);
-          ready.release();
+          const target = await ctx.operations.readAgent(childRef);
           await wrongParentChecked.promise;
-          const steer = await ctx.operations.sendAgentInput(grandRef, {
+          const steer = await ctx.operations.sendAgentInput(childRef, {
             mode: 'steer',
             key: 'direct-guide',
             targetRunId: target.run!.id,
@@ -472,8 +442,8 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
           });
           guideId = steer.commandId;
           releaseBarrier.release();
-          await ctx.operations.wait(grandRef, { timeoutMs: 10000 });
-          const follow = await ctx.operations.sendAgentInput(grandRef, {
+          await ctx.operations.wait(childRef, { timeoutMs: 10000 });
+          const follow = await ctx.operations.sendAgentInput(childRef, {
             mode: 'follow_up',
             key: 'direct-follow',
             afterRunId: initialRunId,
@@ -484,16 +454,40 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
           const next = (follow.receipt as unknown as { ref: OperationRef }).ref;
           followExecutionId = next.executionId!;
           await ctx.operations.wait(next, { timeoutMs: 10000 });
-          followId = (await store.getView(grandRef.childSessionId!)).runs.find(
+          await ctx.operations.wait(siblingRef, { timeoutMs: 10000 });
+          followId = (await store.getView(childRef.childSessionId!)).runs.find(
             (run) => run.id !== initialRunId,
           )!.originCommandId;
-          return { outcome: 'succeeded', content: 'Both actual grandchild rounds ended' };
+          return { outcome: 'succeeded', content: 'Both direct children and target rounds ended' };
+        },
+      },
+      {
+        id: 'fixture.sibling',
+        version: '1',
+        description: 'A real sibling cannot acquire direct-parent steering authority',
+        inputSchema: { type: 'object' },
+        async execute(_input, ctx) {
+          const state = await store.getView(childRef.childSessionId!);
+          wrongParentError = await ctx.operations
+            .sendAgentInput(childRef, {
+              mode: 'steer',
+              key: 'wrong-parent',
+              targetRunId: state.runs[0]!.id,
+              contextSelectionId: state.session.contextSelectionId,
+              content: 'Wrong sibling must not acquire direct-parent authority.',
+            })
+            .then(
+              () => null,
+              (error) => error,
+            );
+          wrongParentChecked.release();
+          return { outcome: 'succeeded', content: 'Sibling authority boundary checked' };
         },
       },
       {
         id: 'fixture.barrier',
         version: '1',
-        description: 'Real grandchild read-only checkpoint and upward note',
+        description: 'Real child read-only checkpoint and upward note',
         inputSchema: { type: 'object' },
         async execute(_input, ctx) {
           tools++;
@@ -511,7 +505,7 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
           }
           return {
             outcome: 'succeeded',
-            content: (await store.getSession(grandRef.childSessionId!))!.title,
+            content: (await store.getSession(childRef.childSessionId!))!.title,
           };
         },
       },
@@ -531,42 +525,47 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
     extensions: [tree],
     model: {
       async *stream(request) {
-        if (!request.messages.some((message) => message.role === 'tool')) {
-          yield { type: 'tool_call', id: 'root-producer', name: 'fixture.root', arguments: '{}' };
+        rootRequests.push(structuredClone(request));
+        if (rootRequests.length <= 2) {
+          yield {
+            type: 'tool_call',
+            id: `root-producer-${rootRequests.length}`,
+            name: rootRequests.length === 1 ? 'fixture.root' : 'fixture.parent',
+            arguments: '{}',
+          };
           yield { ...finish, reason: 'tool_calls' };
         } else yield finish;
       },
     },
     childConfigurations: [
       {
-        id: 'child',
+        id: 'sibling',
         version: '1',
-        modelId: 'child',
+        modelId: 'sibling',
         snapshot: {},
         permissions,
-        toolIds: ['fixture.spawn-grand', 'fixture.parent', 'fixture.barrier'],
+        toolIds: ['fixture.sibling'],
         model: {
           async *stream(request) {
-            childRequests.push(structuredClone(request));
-            if (childRequests.length <= 2) {
+            if (!request.messages.some((message) => message.role === 'tool')) {
               yield {
                 type: 'tool_call',
-                id: `parent-producer-${childRequests.length}`,
-                name: childRequests.length === 1 ? 'fixture.spawn-grand' : 'fixture.parent',
+                id: 'sibling-producer',
+                name: 'fixture.sibling',
                 arguments: '{}',
               };
               yield { ...finish, reason: 'tool_calls' };
             } else {
-              yield { type: 'text_delta', text: 'Actual child final' };
+              yield { type: 'text_delta', text: 'Actual sibling boundary check finished' };
               yield finish;
             }
           },
         },
       },
       {
-        id: 'grand',
+        id: 'child',
         version: '1',
-        modelId: 'grand',
+        modelId: 'child',
         snapshot: {},
         permissions,
         toolIds: ['fixture.barrier'],
@@ -577,22 +576,22 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
               summaries.push(structuredClone(request));
               yield {
                 type: 'text_delta',
-                text: 'Historical grandchild checkpoint omitting the original instructions.',
+                text: 'Historical child checkpoint omitting the original instructions.',
               };
               yield finish;
               return;
             }
-            grandRequests.push(structuredClone(request));
-            if (grandRequests.length <= 2 || grandRequests.length === 4) {
+            childRequests.push(structuredClone(request));
+            if (childRequests.length <= 2 || childRequests.length === 4) {
               yield {
                 type: 'tool_call',
-                id: `grand-query-${grandRequests.length}`,
+                id: `child-query-${childRequests.length}`,
                 name: 'fixture.barrier',
                 arguments: '{}',
               };
               yield { ...finish, reason: 'tool_calls' };
             } else {
-              yield { type: 'text_delta', text: `Actual grandchild final ${grandRequests.length}` };
+              yield { type: 'text_delta', text: `Actual child final ${childRequests.length}` };
               yield finish;
             }
           },
@@ -611,24 +610,28 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
     await runtime.submitCommand({
       ...scope,
       commandId: 'work',
-      request: { kind: 'run.start', content: 'Use the actual three-level producer chain.' },
+      request: {
+        kind: 'run.start',
+        content: 'Use direct children; only the root steers and follows up its assigned child.',
+      },
     });
     await runtime.waitForCommand('work', { timeoutMs: 15000 });
+    expect((await store.getSession(siblingRef.childSessionId!))!.parentSessionId).toBe('root');
     expect((await store.getSession(childRef.childSessionId!))!.parentSessionId).toBe('root');
-    expect((await store.getSession(grandRef.childSessionId!))!.parentSessionId).toBe(
-      childRef.childSessionId!,
-    );
-    expect(grandRequests).toHaveLength(5);
+    expect(childRef.childSessionId).not.toBe(siblingRef.childSessionId);
+    expect(wrongParentError).toMatchObject({ code: 'permission_denied' });
+    expect(rootRequests).toHaveLength(3);
+    expect(childRequests).toHaveLength(5);
     expect(summaries).toHaveLength(2);
     expect(emptyAdvances).toBeGreaterThan(0);
     const initialRun = (await store.getRun(initialRunId))!;
     const start = (await store.getCommand(initialRun.originCommandId))!;
     expect(start.kind).toBe('child.start');
-    for (const request of grandRequests.slice(1)) {
+    for (const request of childRequests.slice(1)) {
       const starts = request.messages.filter((message) => message.sourceIds?.includes(start.id));
       expect(starts).toHaveLength(1);
       expect(starts[0]!.content).toBe(assignment);
-      expect(starts[0]!.sourceIds).toEqual([start.id, grandRef.executionId!]);
+      expect(starts[0]!.sourceIds).toEqual([start.id, childRef.executionId!]);
       const guides = request.messages.filter((message) => message.sourceIds?.includes(guideId));
       expect(guides).toHaveLength(1);
       expect(guides[0]!.content).toContain(guidance);
@@ -636,19 +639,19 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
       expect(guide).toMatchObject({
         kind: 'agent_message',
         content: guidance,
-        sourceSessionId: childRef.childSessionId,
-        carrierExecutionId: grandRef.executionId,
+        sourceSessionId: 'root',
+        carrierExecutionId: childRef.executionId,
       });
       const sender = (await store.getExecution(guide.sourceExecutionId))!;
       expect(sender).toMatchObject({
-        sessionId: childRef.childSessionId,
+        sessionId: 'root',
         definitionId: 'fixture.parent',
         authorization: { dispatched: true },
       });
       expect(guides[0]!.sourceIds).toContain(guideId);
       expect(request.messages.some((message) => message.content === ordinary)).toBe(false);
     }
-    const followRequest = grandRequests[3]!;
+    const followRequest = childRequests[3]!;
     expect(
       followRequest.messages.filter((message) => message.sourceIds?.includes(followId)),
     ).toHaveLength(1);
@@ -660,44 +663,63 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
     expect(
       retainedSources.every((ids) => !ids.includes(downMailId) && !ids.includes(upMailId)),
     ).toBe(true);
-    const childLast = childRequests.at(-1)!;
+    const rootLast = rootRequests.at(-1)!;
     expect(
-      childLast.messages.filter((message) => message.sourceIds?.includes(upMailId)),
+      rootLast.messages.filter((message) => message.sourceIds?.includes(upMailId)),
     ).toHaveLength(1);
     expect(
-      childLast.messages.find((message) => message.sourceIds?.includes(upMailId))!.content,
+      rootLast.messages.find((message) => message.sourceIds?.includes(upMailId))!.content,
     ).toContain('untrusted data; no additional authorization');
     const results = (
       await store.getSelectedContext({
         expectedStoreId: scope.expectedStoreId,
-        sessionId: childRef.childSessionId!,
+        sessionId: 'root',
       })
     ).resultSources;
-    const childContext = await store.getModelContext({
+    const rootContext = await store.getModelContext({
       expectedStoreId: scope.expectedStoreId,
-      sessionId: childRef.childSessionId!,
+      sessionId: 'root',
     });
     const upMail = (
       await store.listAgentMessages({
         ...scope,
-        sessionId: childRef.childSessionId!,
+        sessionId: 'root',
       })
     ).items.find((item) => item.id === upMailId)!;
     expect(upMail.receivedMessageId).toBeString();
-    expect(childContext.retainedInputMessageIds).not.toContain(upMail.receivedMessageId!);
+    expect(rootContext.retainedInputMessageIds).not.toContain(upMail.receivedMessageId!);
     expect(
-      childContext.retainedInputMessageIds.some((id) => results.some((source) => source.id === id)),
+      rootContext.retainedInputMessageIds.some((id) => results.some((source) => source.id === id)),
     ).toBe(false);
     expect(
-      (await store.listMessages(childRef.childSessionId!)).find(
-        (message) => message.id === upMail.receivedMessageId,
-      )!.inputKind,
+      (await store.listMessages('root')).find((message) => message.id === upMail.receivedMessageId)!
+        .inputKind,
     ).toBeUndefined();
     expect(results.map((source) => source.executionId).sort()).toEqual(
-      [grandRef.executionId!, followExecutionId].sort(),
+      [childRef.executionId!, followExecutionId, siblingRef.executionId!].sort(),
     );
+    const childContext = await store.getModelContext({
+      expectedStoreId: scope.expectedStoreId,
+      sessionId: childRef.childSessionId!,
+    });
+    const downMail = (
+      await store.listAgentMessages({ ...scope, sessionId: childRef.childSessionId! })
+    ).items.find((item) => item.id === downMailId)!;
+    expect(downMail.receivedMessageId).toBeString();
+    expect(childContext.retainedInputMessageIds).not.toContain(downMail.receivedMessageId!);
+    expect(
+      (await store.listMessages(childRef.childSessionId!)).find(
+        (message) => message.id === downMail.receivedMessageId,
+      )!.inputKind,
+    ).toBeUndefined();
+    for (const ref of [childRef, siblingRef])
+      expect(
+        (await store.listExecutions(ref.childSessionId!)).filter(
+          (execution) => execution.childSessionId !== null,
+        ),
+      ).toEqual([]);
     for (const source of results) {
-      const messages = childLast.messages.filter((message) =>
+      const messages = rootLast.messages.filter((message) =>
         message.sourceIds?.includes(source.id),
       );
       expect(messages).toHaveLength(1);
@@ -766,16 +788,16 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
     expect(followEnvelope).toMatchObject({
       kind: 'agent_message',
       content: followBody,
-      sourceSessionId: childRef.childSessionId,
-      carrierExecutionId: grandRef.executionId,
+      sourceSessionId: 'root',
+      carrierExecutionId: childRef.executionId,
     });
-    const view = await store.getView(grandRef.childSessionId!);
+    const view = await store.getView(childRef.childSessionId!);
     expect(view.runs).toHaveLength(2);
-    expect(view.messages.some((message) => message.content.includes('Wrong ancestor'))).toBe(false);
+    expect(view.messages.some((message) => message.content.includes('Wrong sibling'))).toBe(false);
     const cold = await openSqliteStore({ ...profile, mode: 'readonly' });
     try {
       const cursor = (await cold.getMetadata()).lastChangeCursor;
-      expect((await cold.getView(grandRef.childSessionId!)).runs).toHaveLength(2);
+      expect((await cold.getView(childRef.childSessionId!)).runs).toHaveLength(2);
       expect((await cold.getCommand(guideId))!.request).toEqual(
         (await store.getCommand(guideId))!.request,
       );

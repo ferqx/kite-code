@@ -10,7 +10,7 @@
 
 当前[执行驱动](approval-execution.live.ts)不设置累计模型请求数、整场案例时限或测试额外 HTTP 时限；真实模型按现有 Loop 运行至结算，不能用提高有限预算替代完整观察。Shell 自身的执行期限、审批超时策略、父子取消和资源清理保持原产品语义。操作人可用 SIGINT／SIGTERM 显式中止，驱动保留失败与采证并执行原清理；中止不算业务通过。原 wire 请求和模型事件持续追加到各案例的私有 NDJSON，最终仍封存 canonical、SQLite、完整回执及业务结果。执行目录按固定日志水位分页取得全部原执行，避免公开列表的200条上限截断长案例和子任务证据。
 
-该驱动可显式选择 `--model=gpt-6-luna|gpt-6.1-terra` 和 `--reasoning-effort=low|high`，默认仍为 `gpt-6-luna/low`；选择须命中现有本机模型，未知值在请求前拒绝。`--review=default-risk` 使用默认风险合同；`--review-timeout-ms=30000` 只扩大本次隔离审核观察窗口，不能据此宣称产品默认3秒的时延或超时行为已验收。模型与思考程度的配置对照并非单变量能力比较，不能直接把样本差异归因于模型或思考等级。
+该驱动可显式选择 `--model=gpt-6-luna|gpt-6.1-terra` 和 `--reasoning-effort=low|high`，默认仍为 `gpt-6-luna/low`；选择须命中现有本机模型，未知值在请求前拒绝。`--review=default-risk` 使用默认风险合同；`--review-timeout-ms=30000` 只扩大本次隔离审核观察窗口，不能据此宣称产品默认10秒的时延或超时行为已验收。模型与思考程度的配置对照并非单变量能力比较，不能直接把样本差异归因于模型或思考等级。
 
 ```bash
 KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --review=default-risk --review-timeout-ms=30000 --model=gpt-6-luna --reasoning-effort=high --case=natural --output=/absolute/new-luna-high.json
@@ -79,7 +79,7 @@ KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --
 
 本次 Full 确定性回归实际通过 native13项／Service9项／策略24项／权限组合与子任务45项，以及读取呈现4项和live夹具28项；八个 workspace typecheck、边界、test ownership、API与文档检查通过。扩展试跑的 Files 相邻整文件仍有旧检索工具退役造成的失败：model-result中6项 search 与 tool-paths/recovery-primitives中共3项；对应 createFileTools 与这两份相邻测试的字节摘要和本次修改前一致，未为通过恢复退役工具。新读取呈现4项另以读取范围过滤实际通过。这些失败原日志保留，不宣称全量测试通过。
 
-新默认风险合同使用执行驱动的测试专用 `--review=default-risk`，无该参数继续旧自定义审核回放。新模式保留默认 Service 的真实注册、权限策略和生产 preparer，只在已解析的根／子 Run binding 中注入既有真实模型 adapter，并将隔离审查预算设为30秒以检查分类语义；生产默认3000毫秒不变。`--case=natural` 选择主／可写子／只读子三角色与三模式的9格，其他已有拒绝或异常以准确 case ID 选择。`risk-review.json` 保原 risk 文本、持久派生决定、原 input 和夹具注入说明；不把默认策略加测试 adapter 说成默认 SDK transport 或安装客户端验收。新合同不带任务／计划／历史窗口，未知脚本正文单独不足以升为 high。
+新默认风险合同使用执行驱动的测试专用 `--review=default-risk`，无该参数继续旧自定义审核回放。新模式保留默认 Service 的真实注册、权限策略和生产 preparer，只在已解析的根／子 Run binding 中注入既有真实模型 adapter，并将隔离审查预算设为30秒以检查分类语义；生产默认10000毫秒。`--case=natural` 选择主／可写子／只读子三角色与三模式的9格，其他已有拒绝或异常以准确 case ID 选择。`risk-review.json` 保原 risk 文本、持久派生决定、原 input 和夹具注入说明；不把默认策略加测试 adapter 说成默认 SDK transport 或安装客户端验收。新合同不带任务／计划／历史窗口，未知脚本正文单独不足以升为 high。
 
 该模式的自然任务同时选择正式默认已有的 `follow_up_agent`／`send_agent_message`，父仍只能协调和核对报告，不代执行；按唯一 child Session 与原 spawn／follow-up 链核“恰好一名协作者”，逐个核后继终态、准确结果 revision／source 实际进入所属父模型及全部真实父续轮结束。原用户任务文字、外部交付／fallback 和一次实际 GET 条件保持。只读案例的明确禁写／禁网比一般角色临时探索指导更窄，Files 变更调用直接失败，不能确定为字面只读的 Shell 由 `operator-readonly-review` 沿完整命令、原脚本及实际输出独立复核；失败的网络尝试也不能算遵守禁止联网。该复核是隔离测试判定，不是新增产品审批。
 
@@ -206,9 +206,11 @@ Auto驱动按准确原目标、真实`authorization_check_timeout`结果和原ch
 
 ## 默认子角色与创建回执
 
-[子角色 runner](child-spawn.live.ts)通过实际 Service／HTTP／SQLite、默认角色与知识目录运行 `worker/explore/review × accept_edits/auto/full` 九格。显式入口为 `KITE_RUN_LIVE_CHILD_SPAWN=1 bun tests/e2e/live/model/child-spawn.live.ts <dist/acceptance 下新的自有绝对目录>`，固定使用 `gpt-6.1-terra`、低思考，不设置测试总请求数、总期限或单 HTTP 期限。保留原产品取消、子执行期限、权限及 3000ms 自动审核规则；逐张人工卡保存准确请求，由操作者核范围后提供原答案，不批量伪造批准。输入、输出、wire 和 Tool→执行引用均保留原身份并完整分页；业务结论必须另外阅读原始证据核验。
+[子角色 runner](child-spawn.live.ts)通过实际 Service／HTTP／SQLite、默认角色与知识目录运行 `worker/explore/review × accept_edits/auto/full` 九格。显式入口为 `KITE_RUN_LIVE_CHILD_SPAWN=1 bun tests/e2e/live/model/child-spawn.live.ts <dist/acceptance 下新的自有绝对目录>`，固定使用 `gpt-6.1-terra`、低思考，不设置测试总请求数、总期限或单 HTTP 期限。保留原产品取消、子执行期限、权限及 10000ms 自动审核规则；逐张人工卡保存准确请求，由操作者核范围后提供原答案，不批量伪造批准。输入、输出、wire 和 Tool→执行引用均保留原身份并完整分页；业务结论必须另外阅读原始证据核验。
 
 该测试保留父默认的真实 `computer-use` 知识和浏览器能力，验证分析子角色收窄能力后能省略不适用的默认知识，普通子角色保留能力。源码装配的资产定位仅桥接到真实发布 guardian，其他实现使用当前源码；不模拟能力可用，也不进行浏览器操作。[离线回归](../../../isolated/unified-agent/child-spawn-live-preparation.test.ts)验证同一准备路径和真实报告判定，零外部模型请求。当前 runner 保留 SDK 的中性错误分类，让暂时性模型错误继续走原 Runtime 重试；不会用测试包装异常取消该资格，也不自建重试。
+
+[canonical 导出](live-canonical-evidence.ts)读取每次原模型的可核输入和持久输出，包括失败／取消的原前缀。归档 `complete` 表示原证据已完整读取并核验；每份 `output.complete` 仍表达模型响应自身是否完整。失败前缀可完整归档而保持 `output.complete:false`，不因此否定后继合法重试；活动响应、inspector 读取失败和请求身份不符仍不能声明归档完整，不合成空输出。[真实 Runtime 离线回归](../../../isolated/unified-agent/live-canonical-evidence.test.ts)核 140,000 字节失败前缀、正常重试、零事件失败、取消及缺失 inspector，零外部模型请求。子 Agent 禁止创建下一层的独立执行边界由[Agent owner](../../../../packages/agent/src/extensions/task/README.md)维护，单层真实场景通过不能代替这个拒绝回归。
 
 2026-11-05，macOS arm64／Bun1.4.2，`cf5b5c587` 加本任务差量：首批一次九格共 69 次真实请求，八格完成业务，一格 Full worker 已受理但首个子模型请求在收到 HTTP 响应前失败，零子工具效果；父收到准确失败来源，独立检查缺失交付并如实汇报，没有代写或重新创建。首批测试装配未保留 SDK 错误分类，故不用于判定生产重试失效，也无法从已有记录恢复更细的传输原因。原报告保留五格机械通过、四格待复核；另外三格为测试断言超出任务要求，分别强制复制摘要复述随机值、审查摘要复述函数名。逐份完整正文与实际操作复核确认这三格业务达成，后续仅修正角色对应的判定，不覆盖旧报告或筛选重跑。
 

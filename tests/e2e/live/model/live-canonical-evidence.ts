@@ -72,10 +72,16 @@ export async function saveLiveCanonicalModelEvidence(options: {
         });
         if (!matches) complete = false;
       }
-      const output =
-        execution.status === 'succeeded' ? await options.runtime.readModelOutput(scope) : undefined;
-      records.push({ scope, execution, input, ...(output ? { output } : {}) });
-      if (output && !output.output.complete) complete = false;
+      const output = await options.runtime.readModelOutput(scope);
+      records.push({ scope, execution, input, output });
+      // A terminal failed/cancelled response has a verified original prefix, not a
+      // complete Provider response. Archiving that prefix still covers the attempt.
+      if (
+        !output.output.complete &&
+        execution.status !== 'failed' &&
+        execution.status !== 'cancelled'
+      )
+        complete = false;
     } catch {
       // The original Store remains retained if an active/failed request has no inspector body.
       records.push({ scope, execution, inspectorUnavailable: true });

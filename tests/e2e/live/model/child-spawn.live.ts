@@ -227,7 +227,7 @@ export async function createChildSpawnFixture(input: {
         checkerTimeout: binding.authorizationCheck?.timeoutMs ?? null,
       });
       assert(
-        binding.authorizationCheck?.timeoutMs === 3000,
+        binding.authorizationCheck?.timeoutMs === 10000,
         'child-spawn-original-review-deadline',
       );
       return {

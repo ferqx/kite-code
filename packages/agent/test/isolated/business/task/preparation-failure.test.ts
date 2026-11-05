@@ -7,7 +7,7 @@ import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/a
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { ConfigurationPreparationCleanupError, createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
-import { AgentError } from '../../../../src/storage/types';
+import { AgentError, type Json } from '../../../../src/storage/types';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -252,7 +252,7 @@ for (const entry of cases)
       receiptReads = 0,
       disposals = 0;
     let originalId = '';
-    let originalResult: unknown;
+    let originalResult: Json = null;
     let releaseCommitted!: () => void;
     const committed = new Promise<void>((resolve) => {
       releaseCommitted = resolve;

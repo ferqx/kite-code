@@ -30,11 +30,9 @@ for (const mode of [
   'group_reconciled_approval',
   'group_owned',
   'group_queued',
-  'group_nested',
   'group_activation',
   'group_terminal',
-  'group_terminal_descendant',
-  'group_new_descendant',
+  'group_background_job',
   'group_cleanup',
   'group_approval',
   'group_expired',
@@ -55,7 +53,7 @@ for (const mode of [
           : mode === 'group_reconciled'
             ? 'group_owned'
             : mode === 'group_cleanup'
-              ? 'group_new_descendant'
+              ? 'group_background_job'
               : mode === 'group_dynamic_drift'
                 ? 'group_dynamic'
                 : [
@@ -93,29 +91,22 @@ for (const mode of [
       store = await openSqliteStore(profile);
       const rootBefore = await store.getView('s');
       const carriers = rootBefore.executions.filter((execution) => execution.childSessionId);
-      const children: (typeof rootBefore)[] = [];
-      for (let index = 0; index < carriers.length; index++) {
-        const view = await store.getView(carriers[index]!.childSessionId!);
-        children.push(view);
-        carriers.push(...view.executions.filter((execution) => execution.childSessionId));
+      const children = await Promise.all(
+        carriers.map((carrier) => store!.getView(carrier.childSessionId!)),
+      );
+      for (const view of children) {
+        expect(view.session.parentSessionId).toBe('s');
+        expect(view.executions.filter((execution) => execution.childSessionId)).toHaveLength(0);
       }
       expect(carriers).toHaveLength(
-        seedMode === 'group_new_descendant'
-          ? 1
-          : seedMode === 'group_queued'
-            ? 4
-            : ['group_nested', 'group_terminal_descendant'].includes(mode)
-              ? 2
-              : 3,
+        seedMode === 'group_background_job' ? 1 : seedMode === 'group_queued' ? 4 : 3,
       );
       expect(children.filter((view) => view.runs[0]?.isActive)).toHaveLength(
         mode === 'group_activation'
           ? 0
-          : mode === 'group_terminal_descendant'
-            ? 1
-            : ['group_queued', 'group_terminal'].includes(seedMode)
-              ? 2
-              : carriers.length,
+          : ['group_queued', 'group_terminal'].includes(seedMode)
+            ? 2
+            : carriers.length,
       );
       const options = groupOptions(directory, seedMode);
       if (mode === 'group_cleanup') {
@@ -191,13 +182,13 @@ for (const mode of [
                   return typeof value === 'function' ? value.bind(target) : value;
                 },
               })
-            : mode === 'group_new_descendant'
+            : mode === 'group_background_job'
               ? new Proxy(store, {
                   get(target, key) {
                     if (key === 'registerHumanCommand')
                       return async (input: Parameters<Store['registerHumanCommand']>[0]) => {
                         const command = await target.registerHumanCommand(input);
-                        if (input.commandId === 'human-with-live-descendant') {
+                        if (input.commandId === 'human-with-live-background') {
                           const receipt = command.receipt as { humanInputCommandId: string };
                           const raw = (await target.getCommand(receipt.humanInputCommandId))!;
                           // Fix the real SQL ordering: idle preparation wins before
@@ -345,28 +336,52 @@ for (const mode of [
             ),
           );
         }
-        if (['group_terminal_descendant', 'group_new_descendant'].includes(seedMode)) {
+        if (seedMode === 'group_background_job') {
           await until(async () =>
-            readFileSync(join(directory, 'ledger'), 'utf8').includes('grand-restored'),
+            readFileSync(join(directory, 'ledger'), 'utf8').includes('background-running'),
           );
           expect(
             readFileSync(join(directory, 'ledger'), 'utf8').includes('dispose-config:one'),
           ).toBe(false);
           expect((await store.getSession('s'))!.ownerInstanceId).not.toBeNull();
-          const grand =
-            seedMode === 'group_new_descendant'
-              ? (await store.getView(children[0]!.session.id)).executions.find(
-                  (execution) => execution.childSessionId,
-                )!
-              : carriers.at(-1)!;
-          if (mode === 'group_new_descendant') {
+          const childView = await store.getView(children[0]!.session.id);
+          const backgroundOperations = childView.executions.filter(
+            (execution) =>
+              execution.kind === 'job' && execution.definitionId === 'fixture/background',
+          );
+          expect(backgroundOperations).toHaveLength(1);
+          const background = backgroundOperations[0]!;
+          expect(background).toMatchObject({
+            sessionId: childView.session.id,
+            childSessionId: null,
+            cancelWithParent: false,
+            rootWorkCommandId: 'work',
+            status: 'running',
+          });
+          const launch = await store.getExecution(background.parentExecutionId!);
+          expect(launch).toMatchObject({
+            kind: 'tool',
+            definitionId: 'fixture_delegate',
+            sessionId: childView.session.id,
+            runId: children[0]!.runs[0]!.id,
+            input: { content: 'background' },
+            status: 'succeeded',
+          });
+          expect(childView.executions.filter((execution) => execution.childSessionId)).toHaveLength(
+            0,
+          );
+          expect(sql.query('SELECT count(*) AS n FROM session').get()).toEqual({ n: 2 });
+          expect(
+            (await store.getView('s')).executions.filter((execution) => execution.childSessionId),
+          ).toHaveLength(1);
+          if (mode === 'group_background_job') {
             const supervisionOwner = await store.getSession('s');
             const command = await runtime.submitCommand({
               expectedStoreId: ready.expectedStoreId,
               sessionId: 's',
               subjectId: 'owner',
-              commandId: 'human-with-live-descendant',
-              request: { kind: 'run.start', content: 'New task: human during descendant' },
+              commandId: 'human-with-live-background',
+              request: { kind: 'run.start', content: 'New task: human during background work' },
             });
             expect(command.status).toBe('accepted');
             await until(async () => (await store!.getCommand(command.id))?.status === 'applied');
@@ -375,7 +390,7 @@ for (const mode of [
             const business = applied;
             expect(business).toMatchObject({
               status: 'applied',
-              request: { content: 'New task: human during descendant' },
+              request: { content: 'New task: human during background work' },
               rootWorkCommandId: command.id,
               receipt: { runId: application.runId },
             });
@@ -399,10 +414,10 @@ for (const mode of [
             });
             expect(source.request.messages).toContainEqual({
               role: 'user',
-              content: 'New task: human during descendant',
+              content: 'New task: human during background work',
               sourceIds: [business.id],
             });
-            expect((await store.getExecution(grand.id))!.status).toBe('running');
+            expect((await store.getExecution(background.id))!.status).toBe('running');
             expect((await store.getSession('s'))!.ownerGeneration).toBe(
               supervisionOwner!.ownerGeneration,
             );
@@ -410,11 +425,21 @@ for (const mode of [
               readFileSync(join(directory, 'ledger'), 'utf8').includes('dispose-config:one'),
             ).toBe(false);
           }
-          writeFileSync(join(directory, 'release-grand'), 'true');
-          await until(async () => (await store!.getExecution(grand.id))?.status === 'succeeded');
+          writeFileSync(join(directory, 'release-background'), 'true');
+          await until(
+            async () => (await store!.getExecution(background.id))?.status === 'succeeded',
+          );
           await until(async () =>
             readFileSync(join(directory, 'ledger'), 'utf8').includes('dispose-config:one'),
           );
+          const backgroundLedger = readFileSync(join(directory, 'ledger'), 'utf8').split('\n');
+          expect(
+            backgroundLedger.filter((line) => line === `background-start:${background.id}`),
+          ).toHaveLength(1);
+          expect(backgroundLedger.filter((line) => line === 'background-running')).toHaveLength(1);
+          expect(backgroundLedger.filter((line) => line === 'background-disposed')).toHaveLength(1);
+          expect(backgroundLedger.filter((line) => line === 'use-config:one')).toHaveLength(1);
+          expect(backgroundLedger.filter((line) => line === 'dispose-config:one')).toHaveLength(1);
           if (mode === 'group_cleanup') {
             const owner = await store.getSession('s');
             expect(await runtime.close().catch((error) => error)).toMatchObject({
@@ -439,15 +464,15 @@ for (const mode of [
         }
         expect(await runtime.resumeRun(input)).toEqual(receipt);
         const rootAfter = await store.getView('s');
-        if (mode === 'group_new_descendant') {
-          const publicInput = (await store.getCommand('human-with-live-descendant'))!;
+        if (mode === 'group_background_job') {
+          const publicInput = (await store.getCommand('human-with-live-background'))!;
           const application = publicInput.receipt as { runId: string };
           expect(publicInput).toMatchObject({
             status: 'applied',
             originStoreId: ready.expectedStoreId,
             sessionId: 's',
             subjectId: 'owner',
-            request: { content: 'New task: human during descendant' },
+            request: { content: 'New task: human during background work' },
           });
           expect(publicInput.receipt).not.toHaveProperty('humanInputCommandId');
           expect(rootAfter.runs.map((run) => run.id).sort()).toEqual(
@@ -471,7 +496,7 @@ for (const mode of [
               sessionId: 's',
               subjectId: 'owner',
               commandId: publicInput.id,
-              request: { kind: 'run.start', content: 'New task: human during descendant' },
+              request: { kind: 'run.start', content: 'New task: human during background work' },
             }),
           ).toEqual(publicInput);
           expect(await runtime.resumeRun(input)).toEqual(receipt);
@@ -502,42 +527,34 @@ for (const mode of [
               : 'completed',
           });
           expect(after.executions.filter((execution) => execution.kind === 'model')).toHaveLength(
-            mode === 'group_new_descendant'
+            mode === 'group_background_job'
               ? 3
-              : mode === 'group_terminal_descendant' && !before.runs[0]!.isActive
-                ? before.executions.filter((execution) => execution.kind === 'model').length
-                : mode === 'group_dynamic'
-                  ? 3
-                  : ['group_expired', 'group_handoff_cancel'].includes(mode) ||
-                      (mode === 'group_terminal' && !before.runs[0]!.isActive)
-                    ? 1
-                    : before.runs.length
-                      ? 2
-                      : 1,
+              : mode === 'group_dynamic'
+                ? 3
+                : ['group_expired', 'group_handoff_cancel'].includes(mode) ||
+                    (mode === 'group_terminal' && !before.runs[0]!.isActive)
+                  ? 1
+                  : before.runs.length
+                    ? 2
+                    : 1,
           );
         }
         const ledger = readFileSync(join(directory, 'ledger'), 'utf8').trim().split('\n');
-        if (mode === 'group_new_descendant')
+        if (mode === 'group_background_job')
           expect(ledger.filter((line) => line === 'dispose-config:one')).toHaveLength(1);
         if (seedMode === 'group_approval')
           expect(ledger.filter((line) => line.startsWith('effect:'))).toHaveLength(3);
         expect(ledger.filter((line) => line === 'parent-model')).toHaveLength(
-          mode === 'group_new_descendant' ? 3 : mode === 'group_handoff_cancel' ? 1 : 2,
+          mode === 'group_background_job' ? 3 : mode === 'group_handoff_cancel' ? 1 : 2,
         );
-        for (const key of [
-          'group_nested',
-          'group_terminal_descendant',
-          'group_new_descendant',
-        ].includes(mode)
-          ? ['one', 'grand']
+        for (const key of seedMode === 'group_background_job'
+          ? ['one']
           : seedMode === 'group_queued'
             ? ['one', 'two', 'three', 'four']
             : ['one', 'two', 'three'])
           expect(ledger.filter((line) => line === `child-model:${key}`)).toHaveLength(
-            mode === 'group_new_descendant'
-              ? key === 'one'
-                ? 3
-                : 1
+            mode === 'group_background_job'
+              ? 3
               : mode === 'group_dynamic'
                 ? 3
                 : ['group_expired', 'group_activation', 'group_handoff_cancel'].includes(mode) ||
@@ -550,7 +567,7 @@ for (const mode of [
         sql.close();
       }
     } finally {
-      writeFileSync(join(directory, 'release-grand'), 'true');
+      writeFileSync(join(directory, 'release-background'), 'true');
       child.kill('SIGKILL');
       await child.exited;
       if (mode === 'group_cleanup') await runtime?.close().catch(() => {});

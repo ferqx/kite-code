@@ -121,12 +121,15 @@ export function createTaskExtension(options: TaskOptions): Extension {
       } catch (error) {
         const code = error instanceof AgentError ? error.code : '';
         const preparationFailed = command && isChildPreparationFailure(error);
+        const creationDenied = preparationFailed && code === 'child_agent_creation_denied';
         const cancelledObservation = code === 'cancel_requested' && !command;
-        const projected = preparationFailed
-          ? ['preparation_failed', 'resolve_configuration', false]
-          : cancelledObservation
-            ? ['operation_cancelled', 'none', false]
-            : (errors[code] ?? ['receipt_unverifiable', 'inspect_original', null]);
+        const projected = creationDenied
+          ? ['permission_denied', 'ask_parent_to_delegate', false]
+          : preparationFailed
+            ? ['preparation_failed', 'resolve_configuration', false]
+            : cancelledObservation
+              ? ['operation_cancelled', 'none', false]
+              : (errors[code] ?? ['receipt_unverifiable', 'inspect_original', null]);
         const preparationMessages: Readonly<Record<string, string>> = {
           skill_capability_missing:
             'A selected skill requires a capability unavailable to this collaborator.',
@@ -136,13 +139,15 @@ export function createTaskExtension(options: TaskOptions): Extension {
           child_tool_scope_exceeds_parent:
             'The selected collaborator tools exceed the available parent tools.',
         };
-        const explanation = preparationFailed
-          ? `This request did not start new collaborator work or deliver new guidance. Existing collaborator work may still run or finish independently. ${Object.hasOwn(preparationMessages, code) ? preparationMessages[code] : 'The collaborator configuration could not be prepared.'} Check the selected skills, tools and model before deciding whether a separately authorized new request is appropriate.`
-          : cancelledObservation
-            ? 'Agent observation was cancelled.'
-            : !command && projected[0] === 'receipt_unverifiable'
-              ? 'The Agent observation could not be verified. Observe the current state again; this failure does not prove any child work stopped, failed or disappeared.'
-              : errorMessages[projected[0] as string]!;
+        const explanation = creationDenied
+          ? 'Only the main Agent can create collaborators. Send the remaining work to your parent instead. Do not retry this creation through another tool, role or approval mode.'
+          : preparationFailed
+            ? `This request did not start new collaborator work or deliver new guidance. Existing collaborator work may still run or finish independently. ${Object.hasOwn(preparationMessages, code) ? preparationMessages[code] : 'The collaborator configuration could not be prepared.'} Check the selected skills, tools and model before deciding whether a separately authorized new request is appropriate.`
+            : cancelledObservation
+              ? 'Agent observation was cancelled.'
+              : !command && projected[0] === 'receipt_unverifiable'
+                ? 'The Agent observation could not be verified. Observe the current state again; this failure does not prove any child work stopped, failed or disappeared.'
+                : errorMessages[projected[0] as string]!;
         const message =
           command && projected[2] === false
             ? `This Agent request was not accepted. ${explanation}`

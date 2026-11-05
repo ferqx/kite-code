@@ -1180,7 +1180,7 @@ export function createDefaultProcessConfiguration(options: {
           timeoutMs:
             options.authorizationCheck?.timeoutMs ??
             snapshot.configuration.autoApproval?.timeoutMs ??
-            3000,
+            10000,
         };
         const runPermissions = permissionConfiguration.forRun({
           command,

@@ -69,6 +69,7 @@ import {
   runSettledEvent,
   runStartedEvent,
 } from './extensions/lifecycle';
+import { isAgentCreationTaskTool } from './extensions/task/roles';
 import { inputFileContent, inputFileReferences } from './input-files';
 import { decodeInputImage, inputImages, matchesImageType } from './input-images';
 import { canonicalJson, semanticDigest } from './json';
@@ -7675,6 +7676,17 @@ export class AgentRuntime {
       };
       const modelTools = () =>
         [...scope.bindings.tools.values()]
+          .filter(
+            (tool) =>
+              session.parentSessionId === null ||
+              !isAgentCreationTaskTool({
+                id: tool.id,
+                version: tool.version,
+                extensionId: scope.bindings.extensions.find((extension) =>
+                  extension.tools?.some((candidate) => candidate.id === tool.id),
+                )?.id,
+              }),
+          )
           .sort((a, b) => a.id.localeCompare(b.id))
           .map((tool) => ({
             id: tool.id,

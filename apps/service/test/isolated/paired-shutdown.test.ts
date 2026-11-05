@@ -76,11 +76,10 @@ for (const mode of ['eof', 'SIGINT', 'SIGTERM'] as const)
         await until(async () => {
           if (!existsSync(host.entered)) return false;
           const parent = await observer!.getView('parent');
-          const child = parent.executions.find((e) => e.childSessionId !== null);
-          if (!child?.childSessionId) return false;
+          const child = parent.executions.find((e) => e.definitionId === 'agent/worker');
+          const leaf = parent.executions.find((e) => e.definitionId === 'agent/leaf');
+          if (!child?.childSessionId || !leaf?.childSessionId) return false;
           const worker = await observer!.getView(child.childSessionId);
-          const leaf = worker.executions.find((e) => e.childSessionId !== null);
-          if (!leaf?.childSessionId) return false;
           if (
             !parent.executions.some(
               (e) => e.definitionId === 'task.events' && e.status === 'dispatching',
@@ -94,7 +93,15 @@ for (const mode of ['eof', 'SIGINT', 'SIGTERM'] as const)
           return true;
         });
         expect(sessions).toHaveLength(3);
+        for (const sessionId of sessions.slice(1)) {
+          const view = await observer.getView(sessionId);
+          expect(view.session.parentSessionId).toBe('parent');
+          expect(view.executions.some((execution) => execution.childSessionId)).toBe(false);
+        }
         const originalCalls = readFileSync(host.models, 'utf8');
+        expect(originalCalls.trim().split('\n').sort()).toEqual(
+          ['parent:0', 'parent:1', 'worker:0', 'leaf:0'].sort(),
+        );
         let exited = false;
         let closeSettled = false;
         void service.exited.then(() => {

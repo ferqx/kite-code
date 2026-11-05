@@ -23,7 +23,7 @@
 
 三个文件检索工具已移除，分析角色通过准确的 `shell.execute@1`／`shell.launch@1` 查询。只读要求作为可信任务指导进入 explore／plan／review 的模型输入，并随原配置快照冻结；工具集合继续收窄，Shell 则继承父会话当前权限策略和沙箱。`cat`、复合命令和管道不因角色身份被固定命令表拒绝，仍按实际内容走普通权限链。只读角色不提供独立的 Shell 禁写／禁网保证，Full 下只读属于模型须遵循的任务约束。[默认角色回归](../../../../../apps/service/test/isolated/default-task-roles.test.ts)核工具交集，[指导输入回归](../../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核实际子模型输入，[Service 检索回归](../../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核继承的三模式执行。
 
-根 ask_user 不下放；合法 Planning 工具由 Service 核原父冻结身份和当前注册后装配，显式禁用仍拒绝。child 有自己的会话文件上下文，不从父路径字符串继承可写目录或计划授权。实际效果仍核原 requirements、parent AND current permission 与准确取消边界。
+根 ask_user 不下放，只有主 Agent 可以新建直接子 Agent。Core 的子模型目录按真实 Session 去除准确内置 `task.spawn@1`；模型目录和新建准入分别核验，内部工具注册不授予创建权限。Host 在原回执查询之后、准备新配置之前核持久会话关系，子会话通过普通 `operations.ensure` 申请新 Agent 时明确拒绝。该限制独立于三种审批模式，静态配置或自定义工具不能扩大创建层级；普通 Tool→自身 Job 不受影响。精确原回执和直接协作者的消息、观察、停止与续作沿原路径处理，不把新建限制加到共用配置 resolver。原因与取舍见[单层委派决定](../../../../../.agents/notes/implemented/bug-fix/2026-11-05-single-level-agent-delegation.md)，回归归[Core](../../../test/isolated/child/single-level.test.ts)及[Service](../../../../../apps/service/test/isolated/child-single-level.test.ts)。合法 Planning 工具仍由 Service 核原父冻结身份和当前注册后装配，显式禁用仍拒绝。child 有自己的会话文件上下文，不从父路径字符串继承可写目录或计划授权。实际效果仍核原 requirements、parent AND current permission 与准确取消边界。
 
 ## 后台工作、消息和引导
 
@@ -50,6 +50,8 @@ list_agents 按首次创建 Command 的不可变 seq 每个 Session 只列一次
 公开错误的 message 按准确类别说明参数、游标、目标、权限、恢复或回执问题，并把 accepted:false 的明确未受理与 accepted:null 的可能已受理分别说清；next_action 的原机器值保持，观察取消不声称整个子任务已停止。[协作表面回归](../../../test/isolated/business/task/collaboration-surface.test.ts)核真实受理边界的原因进入下一模型、一次受理尝试及私有异常不外泄。
 
 创建或明确续作前的配置准备失败不等于受理回执丢失。Host 仅在准备失败、排除取消与清理未确认，并再次核对准确身份没有已受理回执后，提供内部可信的准备失败标记；模型得到 `accepted:false`／`preparation_failed` 和有限英文原因，说明本次没有启动新工作或投递新引导，既有协作者仍可能独立运行或完成。并发同身份已受理时返回原引用／回执；回执读取失败、身份不符、清理未确认或受理后异常仍保留原未知／恢复语义，不按异常 code 猜测未受理，也不换身份重放。[准备失败回归](../../../test/isolated/business/task/preparation-failure.test.ts)核创建和续作的实际下一模型输入、并发唯一受理、持久受理后丢响应、既有子结果保真和私有异常隔离。保留的通用 `sendAgentInput` 扩展接口继续沿自己的原回执合同，不由当前六工具的错误说明推导新恢复资格。
+
+禁止子会话新建的可信拒绝公开为 `permission_denied`／`ask_parent_to_delegate`，英文说明只有主 Agent 可以创建协作者，不引导切换角色或审批模式重试。只有内部未受理资格与准确原因同时命中才使用该说明；任意同码 Store 异常不提供此证明。[创建拒绝反馈](../../../test/isolated/business/task/creation-denied-feedback.test.ts)核原 call/source 进入下一模型及同码后置异常继续未知。
 
 成功结果及历史可安全读取的失败结果可包含宿主从准确 Tool 回执封存的 details.evidence。失败不撤销此前成功的工具；原失败原因和状态保留，失败结果不采用半成品助手回答作为完成报告。失败历史不可读时只缺失预览，不推断零动作；取消和未知路径不增加历史读取。工具统计、来源版本和有界原文供父级核验，child 总结不能替换事实；接纳成功也不证明结论正确。完整正文和独立核查仍由原 Source、Artifact 与权限合同保障。
 

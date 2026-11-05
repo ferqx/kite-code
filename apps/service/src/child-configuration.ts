@@ -1,4 +1,9 @@
-import { AgentError, type RunConfiguration, type RuntimeOptions } from '@kite-ai/agent';
+import {
+  AgentError,
+  ConfigurationPreparationCleanupError,
+  type RunConfiguration,
+  type RuntimeOptions,
+} from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
 import { isReadOnlyTaskTool, isRootOnlyTaskTool } from '@kite-ai/agent/task';
 
@@ -190,7 +195,15 @@ export function createChildConfiguration(options: {
           },
         };
       } catch (error) {
-        await configuration.dispose?.();
+        try {
+          await configuration.dispose?.();
+        } catch (cleanupError) {
+          throw new ConfigurationPreparationCleanupError({
+            originalError: error,
+            cleanupError,
+            resources: configuration,
+          });
+        }
         throw error;
       }
     },

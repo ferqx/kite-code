@@ -116,6 +116,8 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 根与 child 使用同一个 Loop 与执行器，根执行组拥有一个 OS owner/generation；child 配置只能选择固定宿主绑定及父允许的工具。每 Run 的定义与来源封存，后台 operation 保留该绑定 lease 直到真实监督终止。Skills/MCP 内容不授予权限；默认 MCP 连接须在普通持久派发之后，不能在配置解析时提前启动。
 
+普通 Agent 新建只允许主会话到直接子会话。Core 子模型目录不公布准确内置创建工具，Host 原 Operation 新建入口再核持久来源 Session；静态配置、自定义工具及 Full 不越过此边界。同一次执行先查原受理回执，直接协作者的消息、观察、停止和续作不借新建限制失效；Tool→Job 的普通内部嵌套不是再创建子 Agent。完整行为与回归归[协作 owner](../../packages/agent/src/extensions/task/README.md)。
+
 可信 runless Action/Tool 的 child 仍核宿主精确角色、模型与实际父工具上限。MCP 空目录只有在真实无 Run 祖先、原 Command/准备摘要和 child carrier/manifest 闭合时，才保存 `parentRunId:null` 血缘供后代验证；它不生成 source read-set、连接或凭据许可。省略真实父 Run 不能制造这种血缘，非空来源与篡改证明继续拒绝。装配与准确拒绝证据归[Service owner](../../apps/service/README.md)。
 
 长期执行不设主 Run 总期限、累计用量、来源数量、隐式 Shell 总超时或暂时性模型失败的次数额度。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。公共重试上界以 `maxAttempts:null` 表达，Client schema 与 TUI 保实际 attempt 和原失败前驱。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。
@@ -144,7 +146,7 @@ QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完
 
 首输入的本地标题兜底独立于业务准入。可信宿主在 public/raw 耐久保存后、解释修订捕获前，通过受限 metadata 接点复用标题模块的 rename CAS；它不成为新的业务生命周期、事件总线或执行许可，解释轮仍零业务 Action。原输入、初始控制、空历史、保留的注册锚点和手动改名均须可核。后续标题 AI 只沿准确 public/raw/decision/business 链，在实际业务正常完成前执行；元数据失败不改变原输入的业务结果。当前负责入口归[Agent](../../packages/agent/README.md)与[Service](../../apps/service/README.md)。
 
-所属根当前 applied 权限模式通过持久 `permission.mode` revision 交给子孙策略、待审批/审核与资源等待、最终 SQL 派发；收紧和放宽均在原准确动作上重新判断，不共享兄弟/新轮批准，不因 Full 解除工具硬上限和主会话 Planning 约束；只读子角色的 Shell 继承普通权限，角色任务指导不另成禁写保证。旧卡片追加失效事实而停用，原请求/答案保留；on* 通知不是可靠唤醒依据。当前权限读取失败阻挡新效果。协议与实际强杀/模式竞争证据归[授权契约](authorization.md#当前-v13-正式授权)及[权限 owner](../../packages/agent/src/permissions/README.md)。
+所属根当前 applied 权限模式通过持久 `permission.mode` revision 交给直接子 Agent 策略、待审批/审核与资源等待、最终 SQL 派发；收紧和放宽均在原准确动作上重新判断，不共享兄弟/新轮批准，不因 Full 解除工具硬上限和主会话 Planning 约束；只读子角色的 Shell 继承普通权限，角色任务指导不另成禁写保证。旧卡片追加失效事实而停用，原请求/答案保留；on* 通知不是可靠唤醒依据。当前权限读取失败阻挡新效果。协议与实际强杀/模式竞争证据归[授权契约](authorization.md#当前-v13-正式授权)及[权限 owner](../../packages/agent/src/permissions/README.md)。
 
 可信 `readStepCapabilities` 在安全 Step 只选择缓存定义，Model 的实际工具版本与非秘密目录事实独立保存。旧未派发调用在目录变化后失效，下一模型请求同时更新 schema；已派发任务保留原 scope 和 lease。新版本 Tool 的自有 namespace 从准确成功 Model 的实际请求/绑定与原工作身份核实，不能靠调用者声明或替换旧 Run manifest 获得；真正执行仍走独立权限和最终派发事务。
 

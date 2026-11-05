@@ -49,7 +49,7 @@
 
 已应用 steer 可在旧 planned Model 取消后、新请求尚未保存前遇到进程退出。恢复仅接受准确 `superseded_by_user_input`、从未派发且无派生效果的 Model，并核原 Run／selection、steer digest、完整 Message 和应用回执确实包含该 Execution。父到子 steer 另复核真实 sender／carrier 与父子来源；两项 Agent marker 同时损坏也不能降级成人类输入。已派发、unknown、其他取消原因、旧停止或来源不符继续拒绝。恢复从当前历史读取已应用原文，创建新 Model；不复用已经失效的旧请求。
 
-Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，共同启动 barrier 之后才进入观察，防止 ensure 再启动 queued carrier。恢复和普通执行共用 Run binding lease、Job 观察、ChildSlots、取消域与 disposer。父 Run 先结束时，后代监督仍持有配置；恢复后的根任务交回同一个持 owner 的普通任务泵，独立后代继续运行期间，同会话新人类任务可以执行。后代及其配置清理由 Host 原目录持有，包含恢复后新建的独立后代；全部落定才允许释放 root owner，终态子只读结果也释放其配置。普通及恢复路径统一在 owner 释放前核 Host 监督寿命和清理失败；晚到 disposer 失败保留原 root 锁并停止调度，不以 terminal ledger 代替清理确认。子 Run 离线时间不暂停 30 分钟期限，已经超期先取消结算，零新模型调用。
+Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，共同启动 barrier 之后才进入观察，防止 ensure 再启动 queued carrier。恢复和普通执行共用 Run binding lease、Job 观察、ChildSlots、取消域与 disposer。父 Run 先结束时，已受理的直接子 Agent 与普通后台 Job 监督仍持有配置；恢复后的根任务交回同一个持 owner 的普通任务泵，后台 Job 继续运行期间，同会话新人类任务可以执行。原执行及其配置清理由 Host 原目录持有，包含恢复后按当前权限新建的普通后台 Job；全部落定才允许释放 root owner，终态子只读结果也释放其配置。普通及恢复路径统一在 owner 释放前核 Host 监督寿命和清理失败；晚到 disposer 失败保留原 root 锁并停止调度，不以 terminal ledger 代替清理确认。子 Run 离线时间不暂停 30 分钟期限，已经超期先取消结算，零新模型调用。
 
 ## 持久 continuation 与历史成本
 
@@ -71,7 +71,7 @@ steer 替代的 cancelled Model 还依赖后来保存的原 Command receipt／Me
 
 ## 证据与限制
 
-[单 Run](../../../test/isolated/recovery/run-resume-runtime.test.ts)、[任务组](../../../test/isolated/recovery/run-resume-group-runtime.test.ts)及[连续强杀](../../../test/isolated/recovery/run-resume-repeated-runtime.test.ts)使用所属子进程真实 SIGKILL、实际 SQLite 和独立效果 ledger。任务组覆盖后台必需等待、前台 continuation、多子、排队、嵌套、激活前、已完成子、原审批、超期与配置冲突；未知效果和组漂移另明确使用 SQL 故障注入。原 Run/Execution、结果与 deadline 断言分别判断，不把 accepted 当完成。
+[单 Run](../../../test/isolated/recovery/run-resume-runtime.test.ts)、[任务组](../../../test/isolated/recovery/run-resume-group-runtime.test.ts)及[连续强杀](../../../test/isolated/recovery/run-resume-repeated-runtime.test.ts)使用所属子进程真实 SIGKILL、实际 SQLite 和独立效果 ledger。任务组覆盖后台必需等待、前台 continuation、多个直接子 Agent、排队、激活前、已完成子、原审批、超期与配置冲突，以及直接子 Agent 的普通后台 Job 对配置 lease、新输入和清理所有权的保持；未知效果和组漂移另明确使用 SQL 故障注入。原 Run/Execution、结果与 deadline 断言分别判断，不把 accepted 当完成。
 
 [增量审计](../../../test/isolated/recovery/run-resume-audit.test.ts)在真实冷重开后比较 100 和 10000 条已认证 SQL 历史，另配同等数量的已结束子任务，两种规模在 planned 前沿均读取18行 SQL结果、running 前沿均22行，并核末次 Model/效果依赖/live 状态索引；这是受控 SQL 容量夹具，耗时只作本机测量，不冒充真实 Provider 工作或固定性能 SLA。它另用所属子进程实际 SIGKILL 卡在证明已写、COMMIT 前/后，核业务与证明共同回滚/提交；真实 SQL 证明失败回滚原 Run 激活与回执。历史坏正文、坏来源、删除/跨 Run、unknown、旧 failed Model 新效果、无通知变化和 CAS 均有反例。
 

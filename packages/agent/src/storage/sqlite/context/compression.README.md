@@ -36,7 +36,7 @@ Runtime 组装顺序为摘要、被覆盖的用户及父 Agent 任务原输入�
 
 [公开引导交错回归](../../../../test/isolated/context/compression-steering-boundaries.test.ts)从 `submitCommand(input.steer)` 贯通摘要成功、Provider 失败、校验拒绝、真实摘要取消与整 Run 取消，核旧摘要不因 pending 更正发布、后继原文一次及发布后的新相反纠正。引用式引导的原文保留不意味着资料全文永久保留；同例使用真实 Files 工具在原允许次数内找回摘要遗漏的随机事实，不以固定最终文本证明模型遵循。[真实压缩强杀与引导恢复](../../../../test/isolated/recovery/run-resume-compression-steering.test.ts)核摘要成功未发布、已发布未派发业务两个切点，冷读零调用，显式接续保原 Run／引导来源和已成功工具，unknown 对照仍拒绝。
 
-[附件、跨页与三层 Agent 回归](../../../../test/isolated/context/steering-payload-tree.test.ts)从真实图片 Artifact、公开 active steer、205 条原引导及 root→child→grandchild producer 进入两次压缩与实际后继模型组装。核图片原字节／引用、文件低权限引用、空正文附件、原序／来源各一次，跨会话借图与超限拒绝，冷读预算不足不截断；直接父任务保留且不获得人类权限，上行普通邮件及最终结果仍为低信任资料。隔离页大小1对照覆盖被排除页继续推进；Runtime 多消息例仍使用生产200条分页。
+[附件、跨页与直接子 Agent 回归](../../../../test/isolated/context/steering-payload-tree.test.ts)从真实图片 Artifact、公开 active steer、205 条原引导及 主 Agent 与两个直接子 Agent 的真实 producer 进入两次压缩与实际后继模型组装。核图片原字节／引用、文件低权限引用、空正文附件、原序／来源各一次，跨会话借图与超限拒绝，冷读预算不足不截断；直接父任务保留且不获得人类权限，兄弟引导被拒绝；双向普通邮件及最终结果仍为低信任资料。隔离页大小1对照覆盖被排除页继续推进；Runtime 多消息例仍使用生产200条分页。
 ## 会话消息中的压缩身份
 
 Runtime 在发布 preparing 热进度前分配本次 Model Execution ID，后续 `beginCompression` 沿用该身份。`getView` 在第一个 await 前克隆当时热进度，使较早 Store 快照跨越摘要发布与 public 投影时仍携带原观察，避免旧消息快照和已清除的热进度同时缺席。新快照中的真实 SQL 终态继续优先；热观察不持久化、不证明发布，也不扩大执行权。[真实交接回归](../../../../test/isolated/context/compression.test.ts)阻挡 preparing 与 Store View 返回，待压缩完成后再放行，核稳定 Execution 身份、旧观察完整与新发布事实分别成立。

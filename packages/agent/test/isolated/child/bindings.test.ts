@@ -507,34 +507,46 @@ for (const change of ['grants', 'commandDigest'] as const) {
   }, 10000);
 }
 
-test('a nested child needs its own Session grant and then reuses only that grant', async () => {
+test('a child grant cannot authorize another Agent level and still applies to its own work', async () => {
   const effects: string[] = [];
-  let grandchildSession = '';
+  const nestedRejections: string[] = [];
   const extra = module([
     tool('extra.effect', async (_input, context) => {
       effects.push(context.sessionId);
       return { outcome: 'succeeded', content: 'one harmless effect' };
     }),
     tool('extra.delegate', async (_input, context) => {
-      const ref = await context.operations.ensure({
-        key: 'grandchild',
-        request: { kind: 'agent', configurationId: 'grandchild', input: { content: 'nested' } },
-      });
-      grandchildSession = ref.childSessionId!;
-      await context.operations.wait(ref, { signal: context.signal, timeoutMs: 5000 });
-      return { outcome: 'succeeded', content: 'nested finished' };
+      try {
+        await context.operations.ensure({
+          key: 'grandchild',
+          request: { kind: 'agent', configurationId: 'grandchild', input: { content: 'nested' } },
+        });
+        return { outcome: 'succeeded', content: 'Another Agent level was accepted.' };
+      } catch (error) {
+        if (!(error instanceof AgentError)) throw error;
+        nestedRejections.push(error.code);
+        return {
+          outcome: 'failed',
+          content: 'Only the main Agent can create collaborators. Continue the assigned work.',
+        };
+      }
     }),
   ]);
   const child = configuration(
-    createFixedModel([call('extra.effect'), call('extra.delegate'), [finish]]),
+    createFixedModel([
+      call('extra.effect'),
+      call('extra.delegate'),
+      call('extra.effect'),
+      [finish],
+    ]),
     extra,
     { permissions: commandPolicy(commandApproval()) },
   );
-  const grandchild = configuration(
-    createFixedModel([call('extra.effect'), call('extra.effect'), [finish]]),
-    extra,
-    { id: 'grandchild', permissions: commandPolicy(commandApproval()) },
-  );
+  const grandchildModel = createFixedModel([call('extra.effect'), call('extra.effect'), [finish]]);
+  const grandchild = configuration(grandchildModel, extra, {
+    id: 'grandchild',
+    permissions: commandPolicy(commandApproval()),
+  });
   const f = await fixture(child, extra, {
     permissions: commandPolicy(commandApproval()),
     childConfigurations: [child, grandchild],
@@ -564,17 +576,23 @@ test('a nested child needs its own Session grant and then reuses only that grant
     await f.submit();
     const first = await pending();
     await answer(first);
-    const nested = await pending();
-    expect(effects).toEqual([first.sessionId]);
-    expect(nested.sessionId).not.toBe(first.sessionId);
-    expect(nested.sessionId).not.toBe('s');
-    expect((nested.request as { grants: string[] }).grants).toContain('same_command');
-    await answer(nested);
     await f.done();
-    expect(nested.sessionId).toBe(grandchildSession);
-    expect((await f.store.getSession(grandchildSession))!.parentSessionId).toBe(first.sessionId);
-    expect(effects).toEqual([first.sessionId, grandchildSession, grandchildSession]);
-    for (const sessionId of [first.sessionId, grandchildSession, 's']) {
+    expect(nestedRejections).toEqual(['child_agent_creation_denied']);
+    expect(grandchildModel.requests).toHaveLength(0);
+    expect(
+      (await f.store.listExecutions(first.sessionId)).filter((row) => row.childSessionId),
+    ).toEqual([]);
+    expect(effects).toEqual([first.sessionId, first.sessionId]);
+    expect(
+      (
+        await f.runtime.listInteractions({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          state: 'pending',
+        })
+      ).interactions,
+    ).toEqual([]);
+    for (const sessionId of [first.sessionId, 's']) {
       const grants = await f.runtime.listPermissionGrants({
         expectedStoreId: f.expectedStoreId,
         subjectId: 'owner',

@@ -29,7 +29,7 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
     await Bun.sleep(5);
   }
 }
-async function fixture(runlessTools = false, nested = true) {
+async function fixture(runlessTools = false) {
   const root = temporaryDirectory('kite-run-skills-');
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -83,7 +83,7 @@ async function fixture(runlessTools = false, nested = true) {
   });
   const config = {
     modelId: 'parent',
-    models: ['parent', 'child', 'grand'].map((id) => ({
+    models: ['parent', 'child'].map((id) => ({
       id,
       provider: 'compatible',
       model: id,
@@ -122,7 +122,6 @@ async function fixture(runlessTools = false, nested = true) {
         modelId: 'child',
         toolIds: runlessTools ? ['fixture.delegate'] : ['fixture.delegate', 'skills.load'],
       },
-      { id: 'grand', version: '1', modelId: 'grand', toolIds: runlessTools ? [] : ['skills.load'] },
     ],
   });
   const children: string[] = [];
@@ -161,13 +160,13 @@ async function fixture(runlessTools = false, nested = true) {
         description: 'owned test delegation',
         inputSchema: { type: 'object', additionalProperties: false },
         async execute(_input, context) {
-          if (!nested && context.sessionId !== 's')
+          if (context.sessionId !== 's')
             return { outcome: 'succeeded', content: 'leaf worker complete' };
           const child = await context.operations.ensure({
             key: 'child',
             request: {
               kind: 'agent',
-              configurationId: context.sessionId === 's' ? 'worker' : 'grand',
+              configurationId: 'worker',
               input: { content: 'delegate child' },
             },
             cancellation: 'detached',
@@ -265,7 +264,7 @@ async function fixture(runlessTools = false, nested = true) {
   };
 }
 
-test('per-Run root, child and grandchild seal exact inherited IDs despite name collisions; public followup chooses independently', async () => {
+test('per-Run root and child seal exact inherited IDs despite name collisions; public followup chooses independently', async () => {
   const f = await fixture();
   try {
     await f.runtime.submitCommand({
@@ -282,7 +281,7 @@ test('per-Run root, child and grandchild seal exact inherited IDs despite name c
     await until(
       async () => Promise.all(f.children.map((id) => f.store.getView(id))),
       (views) =>
-        views.length === 2 &&
+        views.length === 1 &&
         views.every((view) => view.runs.some((run) => run.status === 'completed')),
     );
     const root = (await f.store.getView('s')).runs[0]!;
@@ -498,7 +497,7 @@ test('parent marker is closed and exact inherited IDs never reinterpret a matchi
   }
 });
 
-test('a trusted truly runless Action Tool bridge keeps explicit role model and normal catalogue for descendants', async () => {
+test('a trusted truly runless Action Tool bridge keeps explicit role model and normal catalogue for a direct child', async () => {
   const f = await fixture(true);
   try {
     await f.runtime.submitCommand({
@@ -516,7 +515,7 @@ test('a trusted truly runless Action Tool bridge keeps explicit role model and n
     await until(
       async () => Promise.all(f.children.map((id) => f.store.getView(id))),
       (views) =>
-        views.length === 2 &&
+        views.length === 1 &&
         views.every((view) => view.runs.some((run) => run.status === 'completed')),
     ).catch(async () => {
       const snapshots = await Promise.all(['s', ...f.children].map((id) => f.store.getView(id)));
@@ -548,7 +547,6 @@ test('a trusted truly runless Action Tool bridge keeps explicit role model and n
     expect(existsSync(join(f.root, 'script-effect'))).toBe(false);
     const workerSession = (await f.store.getSession(f.children[0]!))!;
     const workerRun = (await f.store.getView(workerSession.id)).runs[0]!;
-    const grandRun = (await f.store.getView(f.children[1]!)).runs[0]!;
     const marker = (configuration: Json) =>
       (
         configuration as unknown as {
@@ -561,10 +559,6 @@ test('a trusted truly runless Action Tool bridge keeps explicit role model and n
       readSet: null,
       selection: { present: false, serverIds: [] },
       inheritance: { parentRunId: null, parentSessionId: 's', rootWorkCommandId: 'runless' },
-    });
-    expect(marker(grandRun.configuration).inheritance).toMatchObject({
-      parentRunId: workerRun.id,
-      parentSnapshot: workerSources,
     });
     const rootExecutions = await f.store.listExecutions('s');
     const rootTool = rootExecutions.find((execution) => execution.kind === 'tool')!;
@@ -841,8 +835,8 @@ test('a runless Action cannot give a child per-Run tools absent from its actual 
   }
 }, 10000);
 
-test('real default Run and descendants keep 301 resolved Skills while unselected bad rows never gate binding; explicit bad refuses before credentials', async () => {
-  const f = await fixture(false, false);
+test('real default Run and direct child keep 301 resolved Skills while unselected bad rows never gate binding; explicit bad refuses before credentials', async () => {
+  const f = await fixture(false);
   try {
     const skills: Array<{ id: string; path: string; enabled?: boolean; options?: { x: boolean } }> =
       [];

@@ -1,8 +1,9 @@
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import type {
   AuthorizationRequest,
   Extension,
+  JobEvent,
   Json,
   ToolContext,
   ToolResult,
@@ -25,19 +26,19 @@ export function groupOptions(
   | 'permissions'
   | 'resolveChildRunConfiguration'
 > {
+  const disposed = new Set<string>();
   // Fixed controlled-operation fixture, independent of the builtin Agent tool protocol.
   const delegate = async (input: Json, context: ToolContext): Promise<ToolResult> => {
     const content = (input as { content: string }).content;
+    const background = mode === 'group_background_job' && content === 'background';
     const ref = await context.operations.ensure({
       key: `owned-${context.executionId}`,
-      request: { kind: 'agent', configurationId: 'worker', input: { content } },
-      cancellation:
-        ['group_terminal_descendant', 'group_new_descendant'].includes(mode) && content === 'grand'
-          ? 'detached'
-          : 'attached',
+      request: background
+        ? { kind: 'job', definitionId: 'fixture/background', definitionVersion: '1', input: {} }
+        : { kind: 'agent', configurationId: 'worker', input: { content } },
+      cancellation: background ? 'detached' : 'attached',
     });
-    if (['group_terminal_descendant', 'group_new_descendant'].includes(mode) && content === 'grand')
-      return { outcome: 'succeeded', content: 'Descendant accepted' };
+    if (background) return { outcome: 'succeeded', content: 'Background operation accepted' };
     const result = await context.operations.wait(ref, { signal: context.signal });
     return { outcome: result.status as ToolResult['outcome'], content: 'Controlled child settled' };
   };
@@ -61,6 +62,41 @@ export function groupOptions(
         resume: delegate,
       },
     ],
+    ...(mode === 'group_background_job'
+      ? {
+          jobs: [
+            {
+              id: 'fixture/background',
+              version: '1',
+              description: 'Owned background operation retaining its child configuration',
+              inputSchema: { type: 'object', additionalProperties: false },
+              resources: { slot: 'process' as const },
+              async start(_input: Json, context: { executionId: string }) {
+                appendFileSync(`${directory}/ledger`, `background-start:${context.executionId}\n`);
+                return { reference: { executionId: context.executionId } };
+              },
+              async *observe(): AsyncIterable<JobEvent> {
+                appendFileSync(`${directory}/ledger`, 'background-running\n');
+                while (!existsSync(`${directory}/release-background`)) await Bun.sleep(5);
+                if (disposed.has('one')) throw Error('parent_configuration_disposed');
+                appendFileSync(`${directory}/ledger`, 'use-config:one\n');
+                yield {
+                  type: 'terminal',
+                  result: { outcome: 'succeeded', content: 'Owned background operation finished' },
+                  supervision: 'ended',
+                };
+              },
+              async cancel() {
+                writeFileSync(`${directory}/release-background`, 'true');
+                return { status: 'stopped' as const };
+              },
+              async dispose() {
+                appendFileSync(`${directory}/ledger`, 'background-disposed\n');
+              },
+            },
+          ],
+        }
+      : {}),
   };
   const permissions = {
     async authorize(request: AuthorizationRequest) {
@@ -94,7 +130,6 @@ export function groupOptions(
       },
     ],
   };
-  const disposed = new Set<string>();
   const parent: ModelAdapter = {
     async *stream(request) {
       appendFileSync(`${directory}/ledger`, 'parent-model\n');
@@ -103,11 +138,7 @@ export function groupOptions(
         yield finish;
         return;
       }
-      for (const key of [
-        'group_nested',
-        'group_terminal_descendant',
-        'group_new_descendant',
-      ].includes(mode)
+      for (const key of mode === 'group_background_job'
         ? ['one']
         : mode === 'group_queued'
           ? ['one', 'two', 'three', 'four']
@@ -156,16 +187,16 @@ export function groupOptions(
         return;
       }
       if (
-        (['group_nested', 'group_terminal_descendant'].includes(mode) ||
-          (mode === 'group_new_descendant' && existsSync(`${directory}/resuming`))) &&
+        mode === 'group_background_job' &&
+        existsSync(`${directory}/resuming`) &&
         key === 'one' &&
         !request.messages.some((message) => message.role === 'tool')
       ) {
         yield {
           type: 'tool_call',
-          id: 'grand',
+          id: 'background',
           name: 'fixture_delegate',
-          arguments: JSON.stringify({ content: 'grand' }),
+          arguments: JSON.stringify({ content: 'background' }),
         };
         yield { ...finish, reason: 'tool_calls' };
         return;
@@ -173,16 +204,6 @@ export function groupOptions(
       const attempts = readFileSync(`${directory}/ledger`, 'utf8')
         .split('\n')
         .filter((line) => line === `child-model:${key}`).length;
-      if (
-        ['group_terminal_descendant', 'group_new_descendant'].includes(mode) &&
-        key === 'grand' &&
-        existsSync(`${directory}/resuming`)
-      ) {
-        appendFileSync(`${directory}/ledger`, 'grand-restored\n');
-        while (!existsSync(`${directory}/release-grand`)) await Bun.sleep(5);
-        if (disposed.has('one')) throw Error('parent_configuration_disposed');
-        appendFileSync(`${directory}/ledger`, 'use-config:one\n');
-      }
       if (
         attempts === 1 &&
         mode !== 'group_approval' &&
@@ -217,7 +238,7 @@ export function groupOptions(
     permissions,
     resolveRunConfiguration: async () => configuration,
     resolveRecoveryRunConfiguration: async () => configuration,
-    ...(['group_terminal_descendant', 'group_new_descendant'].includes(mode)
+    ...(mode === 'group_background_job'
       ? {
           resolveChildRunConfiguration: async (
             input: Parameters<NonNullable<RuntimeOptions['resolveChildRunConfiguration']>>[0],
@@ -261,12 +282,7 @@ export function groupOptions(
         model: child,
         modelId: 'worker',
         extensions: mode === 'group_approval' ? [task, effect] : [task],
-        toolIds:
-          mode === 'group_nested'
-            ? ['fixture_delegate']
-            : mode === 'group_approval'
-              ? ['fixture/child-effect']
-              : [],
+        toolIds: mode === 'group_approval' ? ['fixture/child-effect'] : [],
         snapshot: { worker: true },
       },
     ],
