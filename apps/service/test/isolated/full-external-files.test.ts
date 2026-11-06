@@ -559,7 +559,7 @@ for (const change of ['demote', 'untrust'] as const) {
   }, 20000);
 }
 
-for (const preset of ['code', 'explore'] as const) {
+for (const preset of ['general', 'explore'] as const) {
   test(`Full child ${preset} preserves the selected file tool boundary`, async () => {
     const f = await fixture({
       program: (_body, step, actor, paths): Call | null =>
@@ -601,9 +601,9 @@ for (const preset of ['code', 'explore'] as const) {
       );
       expect(childRequests.length).toBeGreaterThan(0);
       expect(childRequests[0]!.tools.some((tool) => tool.function.name === 'write_file')).toBe(
-        preset === 'code',
+        preset === 'general',
       );
-      if (preset === 'code') {
+      if (preset === 'general') {
         expect(readFileSync(f.target, 'utf8')).toBe('child');
         expect(child.find((e) => e.definitionId === 'files.write')?.status).toBe('succeeded');
       } else {

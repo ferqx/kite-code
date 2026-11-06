@@ -8,6 +8,7 @@ import {
   authorizationApproval,
   desktopToolMessage,
   desktopToolPresentation,
+  NativeToolPresentation,
 } from '../src/native-tool-messages';
 import {
   type NativeToolMessageScope,
@@ -187,6 +188,171 @@ test('a missing-file read keeps its original successful receipt and exact builti
     ).toBeUndefined();
   }
   expect(execution).toEqual(before);
+});
+
+test('only an exact builtin Task message acknowledgment is hidden through the original Main reader', async () => {
+  const f = fixture();
+  const content = '{"accepted":true,"delivery":"queued"}';
+  const successResult = {
+    outcome: 'succeeded',
+    content,
+    details: { accepted: true, delivery: 'queued' },
+  };
+  const tools = [{ id: 'task.message', version: '1', extensionId: 'builtin.task' }];
+  for (const id of ['mail-one', 'mail-two']) {
+    f.add(id, 'succeeded', 'mail-run', 'task.message');
+    f.messages.get(id)!.content = content;
+    Object.assign(f.executions.get(`execution-${id}`)!, {
+      toolCallId: 'repeated',
+      result: successResult,
+    });
+  }
+  const run = {
+    id: 'mail-run',
+    sessionId: 's',
+    originStoreId: 'store',
+    configuration: { tools },
+  } as unknown as Run;
+  let runReads = 0;
+  f.client.getRun = async () => {
+    runReads++;
+    return run;
+  };
+  const before = structuredClone([...f.executions.values()]);
+  const page = await f.list(['mail-one', 'mail-two']);
+  expect(runReads).toBe(1);
+  expect(page.entries).toHaveLength(2);
+  for (const fact of page.entries) {
+    expect(fact.agentMessageAccepted).toBe(true);
+    expect(desktopToolMessage(fact, fact.messageId, content)).toMatchObject({
+      status: 'completed',
+      presentation: 'hidden',
+      text: content,
+    });
+  }
+  const execution = f.executions.get('execution-mail-one')!;
+  const message = f.messages.get('mail-one')!;
+  const changedResult = (patch: Record<string, unknown>) => ({
+    ...execution,
+    result: { ...successResult, ...patch },
+  });
+  for (const invalid of [
+    { run: undefined },
+    { run: { ...run, id: 'other-run' } },
+    { run: { ...run, sessionId: 'other-session' } },
+    { run: { ...run, originStoreId: 'other-store' } },
+    { run: { ...run, configuration: { tools: [] } } },
+    {
+      run: {
+        ...run,
+        configuration: { tools: [{ id: 'task.message', version: '1', extensionId: 'custom' }] },
+      },
+    },
+    {
+      run: {
+        ...run,
+        configuration: { tools: [...tools, ...tools] },
+      },
+    },
+    { execution: { ...execution, definitionVersion: '2' } },
+    { execution: { ...execution, definitionId: 'other.message' } },
+    { execution: changedResult({ details: { accepted: false, delivery: 'queued' } }) },
+    { execution: changedResult({ details: { accepted: true, delivery: 'received' } }) },
+    {
+      execution: changedResult({
+        details: { accepted: true, delivery: 'queued', error: 'unknown' },
+      }),
+    },
+    { execution: changedResult({ extra: 'unrecognized detail' }) },
+    {
+      execution: changedResult({ content: 'Message sent' }),
+      message: { ...message, content: 'Message sent' },
+    },
+    {
+      execution: changedResult({ content: '{ "accepted":true,"delivery":"queued"}' }),
+      message: { ...message, content: '{ "accepted":true,"delivery":"queued"}' },
+    },
+    ...(['failed', 'cancelled', 'outcome_unknown'] as const).map((status) => ({
+      execution: { ...execution, status, result: { ...successResult, outcome: status } },
+    })),
+  ]) {
+    const fact = nativeToolMessageFact({
+      execution,
+      run,
+      message,
+      messages: f.messages.values(),
+      sessionId: 's',
+      ...invalid,
+    } as Parameters<typeof nativeToolMessageFact>[0]);
+    expect(fact?.agentMessageAccepted).toBeUndefined();
+    if (fact)
+      expect(desktopToolMessage(fact, message.id, message.content).presentation).not.toBe('hidden');
+  }
+  expect([...f.executions.values()]).toEqual(before);
+  expect(f.messages.get('mail-one')!.content).toBe(content);
+  f.client.getRun = async () => {
+    runReads++;
+    throw Error('optional_original_run_unavailable');
+  };
+  const unavailable = await f.list(['mail-one', 'mail-two']);
+  expect(runReads).toBe(2);
+  expect(unavailable.entries).toHaveLength(2);
+  for (const fact of unavailable.entries) {
+    expect(fact.agentMessageAccepted).toBeUndefined();
+    expect(desktopToolMessage(fact, fact.messageId, content)).toMatchObject({
+      status: 'completed',
+      text: content,
+    });
+    expect(desktopToolMessage(fact, fact.messageId, content).presentation).not.toBe('hidden');
+  }
+  f.add('absent-after-mail', 'succeeded', 'mail-run', 'files.read');
+  const absent = f.executions.get('execution-absent-after-mail')!;
+  absent.definitionVersion = '5';
+  absent.result = { outcome: 'succeeded', content: 'File is absent', details: { exists: false } };
+  f.messages.get('absent-after-mail')!.content = 'File is absent';
+  await expect(f.list(['mail-one', 'absent-after-mail'])).rejects.toThrow(
+    'optional_original_run_unavailable',
+  );
+  // A Task-only optional failure cannot satisfy the existing required Files Run read.
+  expect(runReads).toBe(4);
+});
+
+test('a completed live Task message waits only for its own pending receipt and restores fallback after an unavailable read', () => {
+  const presentation = new NativeToolPresentation();
+  for (const status of ['succeeded', 'failed', 'outcome_unknown'] as const) {
+    const execution = {
+      id: `mail-${status}`,
+      originStoreId: 'store',
+      sessionId: 's',
+      runId: 'run',
+      kind: 'tool' as const,
+      definitionId: 'task.message',
+      definitionVersion: '1',
+      status,
+      resultRevision: '1',
+      cancelRequestedAt: null,
+      inputReady: true,
+    };
+    const live = {
+      ...desktopToolMessage(execution, `native-execution:${execution.id}`, ''),
+      presentationKey: execution.id,
+    };
+    const receipt = { ...live, id: `receipt-${execution.id}`, text: 'original receipt' };
+    expect(presentation.project(status, [], [], [{ message: live, execution }])).toEqual([live]);
+    const pending = presentation.project(
+      status,
+      [receipt],
+      [],
+      [],
+      undefined,
+      new Set([receipt.id]),
+    );
+    expect(pending).toHaveLength(status === 'succeeded' ? 0 : 1);
+    const unavailable = presentation.project(status, [receipt], [], [], undefined, new Set());
+    expect(unavailable).toMatchObject([
+      { id: receipt.id, status: live.status, executionUnconfirmed: true },
+    ]);
+  }
 });
 
 test('saved browser purposes survive large code and sealed Model calls through the Main reader', async () => {

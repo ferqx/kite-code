@@ -106,6 +106,12 @@ import {
 import { assertSessionModelProtocol } from './session-model-protocol';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
 import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
+import {
+  previousReadOnlyTaskToolIds,
+  previousTaskRoles,
+  readTaskCatalogue,
+  taskSnapshotFromRun,
+} from './task-history';
 import { createUserConfiguration, withoutProjectModels } from './user-configuration';
 import { createUserMcpManagement } from './user-mcp-management';
 import { disabledUserMcpSources } from './user-mcp-selection';
@@ -136,6 +142,46 @@ export type {
 export { createUserConfiguration } from './user-configuration';
 export { userConfigurationPath } from './user-configuration-path';
 export type { WebFetchConfigurationOptions } from './web-fetch-configuration';
+
+/** Decode the same saved Service binding after each caller verifies its own outer identity. */
+function readServiceRecoverySnapshot(snapshot: Json | undefined) {
+  if (
+    !snapshot ||
+    typeof snapshot !== 'object' ||
+    Array.isArray(snapshot) ||
+    snapshot.version !== 1 ||
+    typeof snapshot.digest !== 'string' ||
+    !snapshot.configuration ||
+    typeof snapshot.configuration !== 'object' ||
+    Array.isArray(snapshot.configuration) ||
+    createConfigurationSnapshot(snapshot.configuration).digest !== snapshot.digest
+  )
+    throw new AgentError('recovery_configuration_unavailable');
+  const defaultAutoReview = defaultAutoReviewContract(
+    snapshot.defaultAutoReview,
+    snapshot.defaultAutoReviewDigest,
+  );
+  return {
+    snapshot,
+    recovery: {
+      digest: snapshot.digest,
+      planningSnapshot: snapshot.planning ?? null,
+      mcpSourceSnapshot:
+        snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)
+          ? (snapshot.mcp.sources ?? null)
+          : null,
+      webSnapshot: snapshot.web ?? null,
+      browserSnapshot: snapshot.browser ?? null,
+      browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
+      modelTransportSnapshot: snapshot.modelTransport ?? null,
+      taskSnapshot: snapshot.task,
+      ...(Object.hasOwn(snapshot, 'readOnlyTaskSource')
+        ? { readOnlyTaskSource: snapshot.readOnlyTaskSource }
+        : {}),
+      ...(defaultAutoReview ? { defaultAutoReview } : {}),
+    },
+  };
+}
 
 const assemblyKeys = ['modelId', 'models', 'tools', 'skills', 'mcp'];
 function readOnlyTaskGuidanceSource(root: string, description?: string): ContextSource {
@@ -283,6 +329,14 @@ export function createDefaultProcessConfiguration(options: {
   const planningOptions = structuredClone({ completionGuidance: true, ...options.planning });
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
   const classifyDefaultTasks = !options.child;
+  const registeredChildRoles = classifyDefaultTasks
+    ? [
+        ...childRoles,
+        ...previousTaskRoles.filter(
+          (role) => !childRoles.some((current) => current.id === role.id),
+        ),
+      ]
+    : childRoles;
   const browser = createBrowserConfiguration({
     runtime: () => {
       if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
@@ -601,6 +655,7 @@ export function createDefaultProcessConfiguration(options: {
     afterTurn,
     nativeShellRead: shellOptions?.platform === 'darwin' && process.platform === 'darwin',
     childRoles,
+    previousChildRoles: classifyDefaultTasks ? previousTaskRoles : undefined,
     defaultTaskRoles: classifyDefaultTasks,
     defaultAutoReview: !options.authorizationCheck && !options.permissions,
     readRuntime: () => policyRuntime,
@@ -727,24 +782,27 @@ export function createDefaultProcessConfiguration(options: {
       readOnlyTask?: boolean;
       readOnlyTaskDescription?: string;
       defaultAutoReview?: 'shell_risk' | null;
+      taskSnapshot?: Json;
+      parentTaskSnapshot?: Json;
     },
-    recovery?: {
-      digest: string;
+    recovery?: ReturnType<typeof readServiceRecoverySnapshot>['recovery'] & {
       signal: AbortSignal;
-      planningSnapshot: Json;
-      mcpSourceSnapshot: Json;
-      webSnapshot: Json;
-      browserSnapshot: Json;
-      browserSnapshotPresent: boolean;
-      modelTransportSnapshot: Json;
-      runIdentity: { runId: string; sessionId: string };
-      readOnlyTaskSource?: Json;
-      defaultAutoReview?: 'shell_risk';
+      runIdentity?: { runId: string; sessionId: string };
+      newChildTurn?: boolean;
     },
   ) => {
     let modelTransport: Awaited<ReturnType<typeof resolveModelTransport>> | undefined;
     try {
       recovery?.signal.throwIfAborted();
+      const taskCatalogue = readTaskCatalogue(
+        recovery?.taskSnapshot ?? selection?.taskSnapshot,
+        childRoles,
+        classifyDefaultTasks,
+      );
+      const task = createTaskConfiguration(taskCatalogue.roles);
+      const runBuiltinExtensions = builtinExtensions.map((extension) =>
+        extension.id === 'builtin.task' ? task.extension! : extension,
+      );
       const inheritedReview = recovery
         ? recovery.defaultAutoReview
         : selection?.defaultAutoReview === null
@@ -848,9 +906,9 @@ export function createDefaultProcessConfiguration(options: {
           modelProtocol(selected.provider, selected.protocol),
         );
       // A root command owns its temporary effort. Apply it before snapshot sealing;
-      // a child selection uses its configured preset, while recovery reproduces
-      // the original root request rather than inheriting the current default.
-      if ((!selection || recovery) && request.reasoningEffort !== undefined) {
+      // a child selection (including follow-up and restore) uses its configured
+      // preset. Only root recovery reproduces the original root request.
+      if ((!selection || recovery?.runIdentity) && request.reasoningEffort !== undefined) {
         selected.options = { ...selected.options, reasoningEffort: request.reasoningEffort };
       }
       const actualOptions = parseModelPreset(selected.options);
@@ -1104,7 +1162,25 @@ export function createDefaultProcessConfiguration(options: {
           skills: assembly.skillConfigurations,
         });
         let mcpResourceSource: ContextSource | null = null;
-        const runExtensions = [...builtinExtensions, ...assembly.extensions];
+        const runExtensions = [...runBuiltinExtensions, ...assembly.extensions];
+        if (selection?.parentTaskSnapshot !== undefined && task.extension) {
+          // Creation is hidden and independently denied in child Sessions. Its internal
+          // binding must still be the exact current parent's definition, including schema.
+          const parentTask = createTaskConfiguration(
+            readTaskCatalogue(selection.parentTaskSnapshot, childRoles, classifyDefaultTasks).roles,
+          );
+          const creation = parentTask.tools.get('task.spawn');
+          if (creation) {
+            const index = runExtensions.findIndex((extension) => extension.id === 'builtin.task');
+            if (index >= 0)
+              runExtensions[index] = {
+                ...task.extension,
+                tools: task.extension.tools?.map((tool) =>
+                  tool.id === 'task.spawn' ? creation : tool,
+                ),
+              };
+          }
+        }
         const readOnlyDefinitions = [...runExtensions, mcpSources.extension].flatMap((extension) =>
           (extension.tools ?? [])
             .filter(
@@ -1145,29 +1221,60 @@ export function createDefaultProcessConfiguration(options: {
         // configuration before credentials are read. Core also verifies its complete
         // tool/extension/reviewer manifest before publishing any continuation.
         recovery?.signal.throwIfAborted();
-        if (
-          recovery &&
-          (snapshot.digest !== recovery.digest ||
-            (recovery.modelTransportSnapshot !== null &&
-              planningSnapshotDigest(modelTransport.snapshot) !==
-                planningSnapshotDigest(recovery.modelTransportSnapshot)) ||
-            planningSnapshotDigest(
-              (assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null) as unknown as Json,
-            ) !== planningSnapshotDigest(recovery.webSnapshot) ||
-            planningSnapshotDigest(
-              (assembly.toolIds.some((id) => browserTools.has(id))
-                ? browserRunSnapshot
-                : null) as Json,
-            ) !== planningSnapshotDigest(recovery.browserSnapshot) ||
-            !recovery.planningSnapshot ||
-            typeof recovery.planningSnapshot !== 'object' ||
-            Array.isArray(recovery.planningSnapshot) ||
-            planningSnapshotDigest(planningBinding as unknown as Json) !==
-              planningSnapshotDigest(recovery.planningSnapshot.binding ?? null) ||
-            planningSnapshotDigest(selectedSources.snapshot as unknown as Json) !==
-              planningSnapshotDigest(recovery.mcpSourceSnapshot))
-        )
-          throw new AgentError('recovery_configuration_changed');
+        if (recovery) {
+          const matches = {
+            configuration: snapshot.digest === recovery.digest,
+            transport:
+              recovery.modelTransportSnapshot === null ||
+              planningSnapshotDigest(modelTransport.snapshot) ===
+                planningSnapshotDigest(recovery.modelTransportSnapshot),
+            web:
+              planningSnapshotDigest(
+                (assembly.toolIds.includes('web_fetch')
+                  ? runWeb.snapshot
+                  : null) as unknown as Json,
+              ) === planningSnapshotDigest(recovery.webSnapshot),
+            browser:
+              planningSnapshotDigest(
+                (assembly.toolIds.some((id) => browserTools.has(id))
+                  ? browserRunSnapshot
+                  : null) as Json,
+              ) === planningSnapshotDigest(recovery.browserSnapshot),
+            planning:
+              !!recovery.planningSnapshot &&
+              typeof recovery.planningSnapshot === 'object' &&
+              !Array.isArray(recovery.planningSnapshot) &&
+              planningSnapshotDigest(planningBinding as unknown as Json) ===
+                planningSnapshotDigest(recovery.planningSnapshot.binding ?? null),
+            mcp: (() => {
+              const authority = (value: Json) => {
+                if (
+                  !recovery.newChildTurn ||
+                  !value ||
+                  typeof value !== 'object' ||
+                  Array.isArray(value)
+                )
+                  return value;
+                // A follow-up has a new, independently verified causal derivation.
+                // The selected servers, scopes and read sets must still be identical.
+                const { inheritance: _lineage, ...rest } = value;
+                return rest;
+              };
+              return (
+                planningSnapshotDigest(authority(selectedSources.snapshot as unknown as Json)) ===
+                planningSnapshotDigest(authority(recovery.mcpSourceSnapshot))
+              );
+            })(),
+          };
+          const changed = Object.entries(matches)
+            .filter(([, same]) => !same)
+            .map(([part]) => part);
+          if (changed.length)
+            throw new AgentError(
+              'recovery_configuration_changed',
+              `Original binding changed: ${changed.join(', ')}.`,
+            );
+        }
         const { model, checkModel, checkOptions } = await resolveModel(selected, modelTransport);
         const authorizationCheck = {
           ...(options.authorizationCheck ?? {
@@ -1211,6 +1318,10 @@ export function createDefaultProcessConfiguration(options: {
           recoveryRunIdentity: recovery?.runIdentity,
           ...(defaultAutoReview ? { defaultAutoReview } : {}),
           trustedExtensions: runExtensions,
+          taskRoles: taskCatalogue.roles,
+          taskDefaultRole: task.defaultRole,
+          taskTrustedRoles: taskCatalogue.previous ? previousTaskRoles : childRoles,
+          taskExtension: runExtensions.find((extension) => extension.id === 'builtin.task'),
         });
         return {
           ...runPermissions,
@@ -1243,6 +1354,7 @@ export function createDefaultProcessConfiguration(options: {
           toolIds: assembly.toolIds,
           modelHiddenToolIds,
           extensions: assembly.extensions,
+          extensionOverrides: runExtensions.filter((extension) => extension.id === 'builtin.task'),
           readStepCapabilities: async (
             input: Parameters<NonNullable<RunConfiguration['readStepCapabilities']>>[0],
           ) => {
@@ -1407,7 +1519,7 @@ export function createDefaultProcessConfiguration(options: {
       manifest && typeof manifest === 'object' && !Array.isArray(manifest)
         ? manifest.snapshot
         : undefined;
-    let snapshot = outerSnapshot;
+    let sourceSnapshot = outerSnapshot;
     if (
       outerSnapshot &&
       typeof outerSnapshot === 'object' &&
@@ -1428,28 +1540,16 @@ export function createDefaultProcessConfiguration(options: {
         (raw.receipt as { processingCommandId?: string }).processingCommandId !== input.command.id
       )
         throw new AgentError('recovery_configuration_unavailable');
-      snapshot = outerSnapshot.originalConfiguration;
+      sourceSnapshot = outerSnapshot.originalConfiguration;
     }
     if (
       !manifest ||
       typeof manifest !== 'object' ||
       Array.isArray(manifest) ||
-      typeof manifest.modelId !== 'string' ||
-      !snapshot ||
-      typeof snapshot !== 'object' ||
-      Array.isArray(snapshot) ||
-      snapshot.version !== 1 ||
-      typeof snapshot.digest !== 'string' ||
-      !snapshot.configuration ||
-      typeof snapshot.configuration !== 'object' ||
-      Array.isArray(snapshot.configuration) ||
-      createConfigurationSnapshot(snapshot.configuration).digest !== snapshot.digest
+      typeof manifest.modelId !== 'string'
     )
       throw new AgentError('recovery_configuration_unavailable');
-    const defaultAutoReview = defaultAutoReviewContract(
-      snapshot.defaultAutoReview,
-      snapshot.defaultAutoReviewDigest,
-    );
+    const { snapshot, recovery } = readServiceRecoverySnapshot(sourceSnapshot);
     return resolveConfigurationBinding(
       input,
       {
@@ -1465,27 +1565,29 @@ export function createDefaultProcessConfiguration(options: {
           snapshot.planning.binding.readOnlyTask === true,
       },
       {
-        digest: snapshot.digest,
+        ...recovery,
         signal: input.signal,
-        planningSnapshot: snapshot.planning ?? null,
-        webSnapshot: snapshot.web ?? null,
-        browserSnapshot: snapshot.browser ?? null,
-        browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
-        modelTransportSnapshot: snapshot.modelTransport ?? null,
-        ...(defaultAutoReview ? { defaultAutoReview } : {}),
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
-        mcpSourceSnapshot:
-          snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)
-            ? (snapshot.mcp.sources ?? null)
-            : null,
-        ...(Object.hasOwn(snapshot, 'readOnlyTaskSource')
-          ? { readOnlyTaskSource: snapshot.readOnlyTaskSource }
-          : {}),
       },
     );
   };
   const child = createChildConfiguration({
-    roles: childRoles,
+    roles: registeredChildRoles,
+    resolveRole(input, declared) {
+      const original = input.originalConfiguration;
+      const catalogue = readTaskCatalogue(
+        taskSnapshotFromRun(original?.snapshot ?? input.parentRun?.configuration),
+        childRoles,
+        classifyDefaultTasks,
+      );
+      const role = catalogue.roles.find(
+        (entry) => entry.id === declared.id && entry.version === declared.version,
+      );
+      if (!role) throw new AgentError('child_configuration_unavailable');
+      return catalogue.previous && role.toolPolicy === 'read_only'
+        ? { ...role, toolIds: previousReadOnlyTaskToolIds }
+        : role;
+    },
     resolve: async (input, selection) => {
       try {
         return await resolveConfigurationBinding(
@@ -1527,10 +1629,35 @@ export function createDefaultProcessConfiguration(options: {
               workspace: input.workspace,
               command: input.command,
             },
-            skillSelection: input.parentRun
-              ? readSkillSelection(input.parentRun.configuration)
-              : undefined,
+            skillSelection:
+              input.originalConfiguration || input.parentRun
+                ? readSkillSelection(
+                    input.originalConfiguration?.snapshot ?? input.parentRun!.configuration,
+                  )
+                : undefined,
+            taskSnapshot: taskSnapshotFromRun(
+              input.originalConfiguration?.snapshot ?? input.parentRun?.configuration,
+            ),
+            parentTaskSnapshot: taskSnapshotFromRun(input.parentRun?.configuration),
           },
+          input.originalConfiguration
+            ? (() => {
+                const manifest = input.originalConfiguration.snapshot;
+                const marker =
+                  manifest && typeof manifest === 'object' && !Array.isArray(manifest)
+                    ? manifest.snapshot
+                    : undefined;
+                const saved =
+                  marker && typeof marker === 'object' && !Array.isArray(marker)
+                    ? marker.configuration
+                    : undefined;
+                return {
+                  ...readServiceRecoverySnapshot(saved).recovery,
+                  signal: input.signal,
+                  newChildTurn: input.originalConfigurationPurpose === 'follow_up',
+                };
+              })()
+            : undefined,
         );
       } catch (error) {
         if (error instanceof KnowledgeReadCleanupError)

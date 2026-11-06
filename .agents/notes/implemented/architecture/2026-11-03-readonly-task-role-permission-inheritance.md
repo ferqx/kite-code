@@ -26,3 +26,5 @@ Shell 继承父会话当前审批模式、父子权限交集和普通平台沙�
 [角色 owner](../../../../packages/agent/src/extensions/task/README.md)、[权限 owner](../../../../packages/agent/src/permissions/README.md)、[Service owner](../../../../apps/service/README.md#默认-shell-装配)和[授权契约](../../../../docs/active/authorization.md#当前-v13-正式授权)记录当前职责。三模式原生执行、Auto 的准确 Tool／Job 审核和拒绝零效果由[Shell 回归](../../../../apps/service/test/isolated/shell-configuration.test.ts)验证；[指导输入回归](../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核真实五类子模型输入、原 Source 冻结与独立 host Source 恢复分支。该恢复分支不等同于完整 child Run 冷恢复；既有外层角色封套不被恢复入口识别的问题未在本轮修复。
 
 真实模型的正常委派、复合查询和正文注入样本归[原审批验收入口](../../../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)。受控适配器故意写入的反例证明普通权限边界，不代表真实模型会违反任务；真实模型遵循任务的样本也不能反推后端禁止写入。既有拒绝反馈改动继续把真正 Gate 产生的可公开原因交给下一模型，私有适配器错误不因此公开。
+
+2026-11-06 的[通用与探索子角色及冻结历史配置恢复](2026-11-06-subagent-general-explore.md)收束新默认角色目录，并处理本文记录的外层 child 封套恢复缺口。本文关于可信只读指导、工具收缩、Shell 继承及不建立独立禁写层的理由仍适用；旧五角色及当时未完成的恢复资格按原证据理解。

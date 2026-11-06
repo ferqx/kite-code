@@ -802,6 +802,11 @@ test('ordinary Agent mail renders its verified sender and full Markdown inside o
     ).toHaveLength(1);
     expect(card().querySelector('.message-label')!.textContent).toBe('研究助手 雪🙂 Agent 发送');
     expect(card().getAttribute('aria-label')).toBe('研究助手 雪🙂 Agent 发送的消息');
+    const bubble = card().querySelector('.user-message-body')!;
+    expect(bubble).not.toBeNull();
+    expect(card().querySelectorAll('.user-message-body')).toHaveLength(1);
+    expect(bubble.querySelector('.message-label')!.textContent).toBe('研究助手 雪🙂 Agent 发送');
+    expect(bubble.querySelectorAll('.typeset-chat')).toHaveLength(1);
     expect(card().querySelector('.typeset-chat strong')!.textContent).toBe('完整正文 雪🙂');
     expect(card().querySelector('.typeset-chat h1')!.textContent).toBe('实际子消息');
     expect(card().querySelector('.typeset-chat')!.textContent).toContain('原材料的最后一行');

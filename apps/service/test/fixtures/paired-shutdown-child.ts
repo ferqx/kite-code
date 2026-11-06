@@ -44,9 +44,11 @@ const running = runServiceProcess({
                       preset: 'leaf',
                     }),
                   ]
-                : (actor === 'parent' && stage === 1) || (actor === 'worker' && stage === 0)
+                : actor === 'parent' && stage === 1
                   ? call('wait_agent_events', { after_seq: '0', wait_ms: 180000 })
-                  : [finish];
+                  : actor === 'worker' && stage === 0
+                    ? call('fixture.wait_agent_events', {})
+                    : [finish];
           for (const event of events) yield event;
         },
       };
@@ -68,6 +70,19 @@ const running = runServiceProcess({
         return { outcome: 'cancelled', content: 'Original owned cleanup confirmed' };
       },
     };
+    const observe: ToolDefinition = {
+      id: 'fixture.wait_agent_events',
+      version: '1',
+      description: 'Owned generic mailbox observation for shutdown cancellation',
+      inputSchema: { type: 'object', additionalProperties: false },
+      async execute(_input, context) {
+        const waited = await context.operations.waitAgentEvents!({
+          afterSeq: '0',
+          waitMs: 180000,
+        });
+        return { outcome: 'succeeded', content: JSON.stringify(waited) };
+      },
+    };
     const tasks = createTaskExtension({
       defaultRole: 'worker',
       presets: ['leaf'],
@@ -81,14 +96,17 @@ const running = runServiceProcess({
       modelId: 'parent',
       modelConcurrency: 1,
       maxConcurrentSubagents: 2,
-      extensions: [{ ...tasks, tools: [...tasks.tools!, hold] }],
+      extensions: [
+        { ...tasks, tools: [...tasks.tools!, hold] },
+        { id: 'fixture.shutdown', version: '1', apiMajor: 1, tools: [observe] },
+      ],
       childConfigurations: [
         {
           id: 'worker',
           version: '1',
           model: model('worker'),
           modelId: 'worker',
-          toolIds: ['task.events', hold.id],
+          toolIds: [observe.id, hold.id],
           snapshot: {},
         },
         {

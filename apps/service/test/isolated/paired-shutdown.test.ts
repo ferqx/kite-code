@@ -85,7 +85,7 @@ for (const mode of ['eof', 'SIGINT', 'SIGTERM'] as const)
               (e) => e.definitionId === 'task.events' && e.status === 'dispatching',
             ) ||
             !worker.executions.some(
-              (e) => e.definitionId === 'task.events' && e.status === 'dispatching',
+              (e) => e.definitionId === 'fixture.wait_agent_events' && e.status === 'dispatching',
             )
           )
             return false;

@@ -251,6 +251,90 @@ test('accepted spawn stays in live history until the exact carrier settles witho
     false,
   );
 });
+test('child labels use original carrier roles for new, historical and follow-up work before preset or default', () => {
+  for (const tool of ['task.spawn', 'task.follow_up']) {
+    const parent = execution('task', {
+      definitionId: `builtin.task/${tool}`,
+      toolInput:
+        tool === 'task.spawn'
+          ? { prompt: 'Original delegated work', preset: 'explore' }
+          : { agentId: 'child', content: 'Continue the original colleague' },
+    });
+    for (const role of [
+      'general',
+      'worker',
+      'explore',
+      'plan',
+      'review',
+      'code',
+      'custom-reader',
+    ]) {
+      const carrier = execution('carrier', {
+        kind: 'job',
+        runId: null,
+        definitionId: `agent/${role}`,
+        parentExecutionId: parent.id,
+        childSessionId: 'child',
+      });
+      const facts = snapshot([parent, carrier]);
+      const original = structuredClone(facts);
+      expect(projectInkChild(carrier, facts)?.role).toBe(role);
+      expect(projectInkChild(carrier, structuredClone(facts))?.role).toBe(role);
+      expect(facts).toEqual(original);
+    }
+  }
+});
+
+test('a child without a carrier role uses only its exact Run marker, then the preset, then general', () => {
+  const parent = execution('task', {
+    definitionId: 'builtin.task/task.spawn',
+    toolInput: { prompt: 'Original delegated work' },
+  });
+  const carrier = execution('carrier', {
+    kind: 'job',
+    runId: null,
+    definitionId: 'fixture/child-carrier',
+    parentExecutionId: parent.id,
+    childSessionId: 'child',
+  });
+  const facts = snapshot([parent, carrier]);
+  expect(projectInkChild(carrier, facts)?.role).toBe('general');
+  const legacy = view('child', {
+    runs: [
+      {
+        ...view().runs[0]!,
+        sessionId: 'child',
+        originCommandId: 'child-start-carrier',
+        configuration: { snapshot: { roleId: 'worker', roleVersion: '1' } },
+      },
+    ],
+  });
+  const withMarker = {
+    ...facts,
+    childViews: [{ executionId: carrier.id, view: legacy }],
+  };
+  expect(projectInkChild(carrier, withMarker)?.role).toBe('worker');
+  expect(
+    projectInkChild(carrier, {
+      ...withMarker,
+      childViews: [{ executionId: 'other-carrier', view: legacy }],
+    })?.role,
+  ).toBe('general');
+  expect(
+    projectInkChild(carrier, {
+      ...withMarker,
+      childViews: [
+        {
+          executionId: carrier.id,
+          view: { ...legacy, runs: [{ ...legacy.runs[0]!, originCommandId: 'other-start' }] },
+        },
+      ],
+    })?.role,
+  ).toBe('general');
+  const explicit = { ...parent, toolInput: { prompt: 'Inspect only', preset: 'explore' } };
+  expect(projectInkChild(carrier, snapshot([explicit, carrier]))?.role).toBe('explore');
+});
+
 test('only actual same-scope failed pre-dispatch approval denial receives the user rejection message', () => {
   const denied = execution('denied', {
     definitionId: 'builtin.files/files.write',
@@ -428,6 +512,7 @@ test('spawn and follow-up cards pin their own Run and work when one stable child
     runId: null,
     parentExecutionId: spawn.id,
     childSessionId: 'child',
+    definitionId: 'agent/worker',
     status: 'succeeded',
   });
   const second = execution('carrier-two', {
@@ -435,6 +520,7 @@ test('spawn and follow-up cards pin their own Run and work when one stable child
     runId: null,
     parentExecutionId: follow.id,
     childSessionId: 'child',
+    definitionId: 'agent/worker',
     rootWorkCommandId: 'other-work',
     rootWorkSeq: '2',
     status: 'running',
@@ -1124,7 +1210,7 @@ for (const field of ['check', 'review'] as const)
       const carrier = execution('carrier', {
         kind: 'job',
         runId: null,
-        definitionId: 'agent/worker',
+        definitionId: 'agent/review',
         parentExecutionId: parent.id,
         childSessionId: 'child',
         status: 'running',

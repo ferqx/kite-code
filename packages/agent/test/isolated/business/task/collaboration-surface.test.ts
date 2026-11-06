@@ -828,6 +828,15 @@ test('public schema is exactly six closed prompt tools, with optional registered
   expect(followUp.description).toContain('The same agent_id spans turns');
   expect(followUp.description).toContain('at admission, not its completion');
   expect(followUp.description).toContain('No preset change');
+  const message = general.tools.find((tool) => tool.id === 'send_agent_message')!;
+  expect(message.description).toContain('acknowledges queue acceptance only');
+  expect(message.description).toContain(
+    'does not confirm that the recipient received, read or acted',
+  );
+  expect(message.description).toContain('Do not wait for an additional message acknowledgment');
+  expect(message.description).toContain('Continue independent authorized work');
+  expect(message.description).toContain('pending-decision result containing the complete question');
+  expect(message.description).not.toContain('30000');
   const preset = surface(['read_only']);
   expect(
     preset.tools.find((tool) => tool.id === 'spawn_agent')!.inputSchema.properties,

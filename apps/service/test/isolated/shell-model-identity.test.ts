@@ -54,7 +54,7 @@ async function scenario(input: {
   modelId: string;
   mode: (typeof modes)[number];
   shell: boolean;
-  role: 'worker' | 'explore' | 'plan' | 'review';
+  role: 'general' | 'explore';
 }) {
   const root = temporaryDirectory('kite-shell-model-identity-');
   let runtime: ReturnType<typeof createRuntime> | undefined;
@@ -105,7 +105,7 @@ async function scenario(input: {
     const parent = createFixedModel([
       call('spawn_agent', {
         prompt: 'Inspect the workspace read-only.',
-        ...(input.role === 'worker' ? {} : { preset: input.role }),
+        ...(input.role === 'general' ? {} : { preset: input.role }),
       }),
       [finish],
     ]);
@@ -230,8 +230,8 @@ async function scenario(input: {
 for (const mode of modes) {
   for (const [modelId, role] of [
     ['shell.execute', 'explore'],
-    ['shell.launch', 'plan'],
-    ['shell.command', 'review'],
+    ['shell.launch', 'explore'],
+    ['shell.command', 'explore'],
   ] as const) {
     for (const shell of [false, true])
       (shell ? selectedShellTest : test)(
@@ -242,8 +242,8 @@ for (const mode of modes) {
   }
   for (const shell of [false, true])
     (shell ? selectedShellTest : test)(
-      `${mode}: a same-name Model also works in the ordinary worker control, Shell ${shell ? 'selected' : 'absent'}`,
-      () => scenario({ modelId: 'shell.execute', role: 'worker', mode, shell }),
+      `${mode}: a same-name Model also works in the ordinary general control, Shell ${shell ? 'selected' : 'absent'}`,
+      () => scenario({ modelId: 'shell.execute', role: 'general', mode, shell }),
       15000,
     );
 }

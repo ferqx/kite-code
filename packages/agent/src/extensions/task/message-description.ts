@@ -1,0 +1,6 @@
+/** Exact builtin Task wording transition; original Model requests remain immutable. */
+export const previousTaskMessageDescription =
+  'Queue a complete message to a direct child or parent. Idle recipients stay idle; use follow_up_agent when an idle child must resume concrete remaining work. Accepted/received/prepared are distinct. If a child needs a reply to proceed, wait at most one explicit finite 30000ms observation window; without a valid reply, finish with an honest pending-decision result containing the complete question and completed/unfinished facts. Do not wait indefinitely for an idle parent.';
+
+export const currentTaskMessageDescription =
+  'Queue a complete message to a direct child or parent. A successful result acknowledges queue acceptance only; it does not confirm that the recipient received, read or acted on the message. Do not wait for an additional message acknowledgment after success. Continue independent authorized work. If a child cannot proceed without an answer, finish with an honest pending-decision result containing the complete question and completed/unfinished facts, so the parent can resolve it and explicitly continue the same child. Idle recipients stay idle; use follow_up_agent when an idle child must resume concrete remaining work.';

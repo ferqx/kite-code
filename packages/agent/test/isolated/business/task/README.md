@@ -11,7 +11,7 @@
 | 邮件 | [mailbox](mailbox.test.ts)：父子双向全文、唯一低信任来源、事务回滚、未知／取消目标和冷只读 |
 | 统一邮箱 | [unified-inbox](unified-inbox.test.ts)：引导与 typed 邮件同轮汇合、active 结果唯一 Source、idle 通知权限及损坏 marker 拒绝 |
 | idle 接纳 | [mail-adoption](mail-adoption.test.ts)：51封邮件跨页、明确新轮与双水位、重试不扩集合、晚确认留队及根停止 |
-| 问题及追发 | [question-loop](question-loop.test.ts)：父普通完成后 child 有限观察、如实待决、答复与 follow-up 进入原 Session、压缩和取消 |
+| 问题及追发 | [question-loop](question-loop.test.ts)：父普通完成后 child 只发送问题、零事件等待并如实待决，答复与 follow-up 进入原 Session，原邮件、压缩和取消保持 |
 | 观察 | [collaboration-observation](collaboration-observation.test.ts)：多 Agent 分页、压缩、完整来源、固定上界、游标缺口及冷读零重放 |
 | 后台结算 | [attached-job-settlement](attached-job-settlement.test.ts)：attached 排队／运行 Job 等待、detached 独立、取消和 close drain |
 | 文件协作 | [collaboration-files](collaboration-files.test.ts)：兄弟冲突、fresh read、部分成功及未知发布不重放 |

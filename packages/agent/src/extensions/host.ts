@@ -43,6 +43,7 @@ import type {
 } from './index';
 import type { OutputOperations } from './output';
 import { childPreparationFailure } from './task/preparation-failure';
+import { isRootAgentObservationTaskTool } from './task/roles';
 
 const semanticDigestBytes = async (bytes: Uint8Array) =>
   createHash('sha256').update(bytes).digest('hex');
@@ -146,6 +147,7 @@ export interface ExtensionHostOptions {
     parentExecutionId: string,
     source: Json,
     continuation?: { executionId: string; afterRunId: string },
+    originalExecutionId?: string,
   ): Promise<{
     configuration: ChildConfiguration;
     definition: JobDefinition;
@@ -2360,6 +2362,7 @@ export class ExtensionHost {
                 observed.runId
                   ? { executionId: observed.ref.executionId!, afterRunId: observed.runId }
                   : undefined,
+                sourceOperation.id,
               );
             } catch (error) {
               if (
@@ -2479,6 +2482,17 @@ export class ExtensionHost {
           }
         },
         waitAgentEvents: async (options = {}) => {
+          if (
+            isRootAgentObservationTaskTool({
+              extensionId: extension.id,
+              id: definition.id,
+              version: definition.version,
+            })
+          ) {
+            const session = await this.options.store.getSession(scope.command.sessionId);
+            if (!session || session.parentSessionId !== null)
+              throw new AgentError('permission_denied');
+          }
           if (!this.options.waitForChange) throw new AgentError('wait_unavailable');
           const duration = options.waitMs;
           if (

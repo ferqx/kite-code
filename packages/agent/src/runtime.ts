@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { ModelAdapter, ModelMessage, ModelRequest } from '@kite-ai/ai';
+import type { ModelAdapter, ModelMessage, ModelRequest, ModelTool } from '@kite-ai/ai';
 import type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
 import { authorizationCheckInput, authorizationReadBodies } from './authorization-check-input';
 import {
@@ -69,7 +69,11 @@ import {
   runSettledEvent,
   runStartedEvent,
 } from './extensions/lifecycle';
-import { isAgentCreationTaskTool } from './extensions/task/roles';
+import {
+  currentTaskMessageDescription,
+  previousTaskMessageDescription,
+} from './extensions/task/message-description';
+import { isAgentCreationTaskTool, isRootAgentObservationTaskTool } from './extensions/task/roles';
 import { inputFileContent, inputFileReferences } from './input-files';
 import { decodeInputImage, inputImages, matchesImageType } from './input-images';
 import { canonicalJson, semanticDigest } from './json';
@@ -339,6 +343,8 @@ export interface RunConfiguration {
   readonly maxConcurrentSubagents?: number;
   /** Trusted host registrations selected for this Run; never accepted from a public command. */
   readonly extensions?: readonly Extension[];
+  /** Trusted host replacements of already registered, same-version extensions for this Run. */
+  readonly extensionOverrides?: readonly Extension[];
   readonly sources?: ContextSources;
   readonly permissions?: Permissions;
   readonly conditions?: NecessaryConditions;
@@ -412,6 +418,7 @@ type RunBinding = {
   modelHiddenToolIds?: readonly string[];
   jobs?: ReadonlyMap<string, JobDefinition>;
   extensions?: readonly Extension[];
+  extensionOverrides?: readonly Extension[];
   sources?: ContextSources;
   permissions?: Permissions;
   conditions?: NecessaryConditions;
@@ -459,6 +466,9 @@ export interface RuntimeOptions {
   maxConcurrentSubagents?: number;
   resolveChildRunConfiguration?: (input: {
     readonly configurationId: string;
+    /** Original carrier, read and relationship-checked by Runtime for recovery or follow-up only. */
+    readonly originalConfiguration?: Readonly<ChildConfiguration>;
+    readonly originalConfigurationPurpose?: 'restore' | 'follow_up';
     readonly parentExecution: Readonly<ExecutionRecord>;
     readonly parentRun: Readonly<RunRecord> | null;
     readonly parentTools: readonly Readonly<{
@@ -684,6 +694,7 @@ export class AgentRuntime {
         configuration.extensions,
         configuration.toolIds,
         configuration.modelHiddenToolIds,
+        configuration.extensionOverrides,
       );
       const definitions = captured.definitions;
       let users = 1;
@@ -708,6 +719,7 @@ export class AgentRuntime {
         binding: {
           model: configuration.model,
           modelId: configuration.modelId,
+          extensionOverrides: captured.extensionOverrides,
           definitions,
           modelHiddenToolIds:
             configuration.modelHiddenToolIds &&
@@ -867,8 +879,22 @@ export class AgentRuntime {
         this.authorizeAfterTurn(scope, id, configuration),
       onJobSettled: (scope, id) => this.onJobSettled(scope, id),
       requirementRun: async (execution) => (await this.nearestParentRun(execution)).run,
-      resolveAgent: (configurationId, parent, executionId, source, continuation) =>
-        this.resolveChildDefinition(configurationId, parent, executionId, source, continuation),
+      resolveAgent: (
+        configurationId,
+        parent,
+        executionId,
+        source,
+        continuation,
+        originalExecutionId,
+      ) =>
+        this.resolveChildDefinition(
+          configurationId,
+          parent,
+          executionId,
+          source,
+          continuation,
+          originalExecutionId,
+        ),
       live: (command, owner, controller) => this.trackLive(command, owner, controller),
       waitForChange: (cursor, signal, timeoutMs) => {
         this.watchControls();
@@ -1116,6 +1142,7 @@ export class AgentRuntime {
     additional: readonly Extension[] = [],
     ids?: readonly string[],
     modelHiddenToolIds: readonly string[] = [],
+    overrides: readonly Extension[] = [],
   ) {
     if (
       modelHiddenToolIds.length > 256 ||
@@ -1123,7 +1150,23 @@ export class AgentRuntime {
     )
       throw new AgentError('invalid_tool_configuration');
     if (additional.length > 64) throw new AgentError('invalid_extension_configuration');
-    const extensions = Object.freeze([...this.extensions, ...additional.map(sealExtension)]);
+    if (overrides.length > 64) throw new AgentError('invalid_extension_configuration');
+    const replacements = new Map<string, Extension>();
+    for (const candidate of overrides) {
+      const original = this.extensions.find((extension) => extension.id === candidate.id);
+      if (
+        !original ||
+        replacements.has(candidate.id) ||
+        candidate.apiMajor !== original.apiMajor ||
+        candidate.version !== original.version
+      )
+        throw new AgentError('extension_definition_conflict');
+      replacements.set(candidate.id, sealExtension(candidate));
+    }
+    const extensions = Object.freeze([
+      ...this.extensions.map((extension) => replacements.get(extension.id) ?? extension),
+      ...additional.map(sealExtension),
+    ]);
     const names = new Set<string>();
     const tools = new Map<string, ToolDefinition>();
     const jobs = new Map<string, JobDefinition>();
@@ -1155,7 +1198,13 @@ export class AgentRuntime {
           }),
         );
     }
-    return { extensions, definitions, jobs, extensionIds };
+    return {
+      extensions,
+      definitions,
+      jobs,
+      extensionIds,
+      extensionOverrides: Object.freeze([...replacements.values()]),
+    };
   }
   private configurationSnapshot(
     modelId: string,
@@ -1863,6 +1912,7 @@ export class AgentRuntime {
     parentExecutionId: string,
     source: Json,
     continuation?: { executionId: string; afterRunId: string },
+    originalExecutionId?: string,
   ) {
     const declared = this.childConfigurations.get(configurationId);
     if (!declared) throw new AgentError('child_configuration_unavailable');
@@ -1889,6 +1939,30 @@ export class AgentRuntime {
     const workspace = await this.options.store.getWorkspace(session.workspaceId);
     if (!workspace) throw new AgentError('workspace_not_found');
     const nearest = await this.nearestParentRun(execution);
+    let originalConfiguration: ChildConfiguration | undefined;
+    let originalConfigurationPurpose: 'restore' | 'follow_up' | undefined;
+    const originalId = originalExecutionId ?? continuation?.executionId;
+    if (originalId) {
+      const carrier = await this.options.store.getExecution(originalId);
+      const child = carrier?.childSessionId
+        ? await this.options.store.getSession(carrier.childSessionId)
+        : null;
+      if (
+        !carrier ||
+        carrier.kind !== 'job' ||
+        carrier.originStoreId !== execution.originStoreId ||
+        carrier.sessionId !== session.id ||
+        carrier.definitionId !== `agent/${configurationId}` ||
+        carrier.childConfiguration?.id !== configurationId ||
+        !child ||
+        child.parentSessionId !== session.id ||
+        child.rootSessionId !== session.rootSessionId
+      )
+        throw new AgentError('child_parent_binding_unavailable');
+      originalConfiguration = carrier.childConfiguration;
+      originalConfigurationPurpose =
+        carrier.parentExecutionId === execution.id ? 'restore' : 'follow_up';
+    }
     const parentBindings = parent.bindings;
     if (!parentBindings) throw new AgentError('child_parent_binding_unavailable');
     const allowedExtensions = new Set(
@@ -1935,6 +2009,12 @@ export class AgentRuntime {
             },
           },
           configurationId,
+          ...(originalConfiguration
+            ? {
+                originalConfiguration: freeze(structuredClone(originalConfiguration)),
+                originalConfigurationPurpose,
+              }
+            : {}),
           parentExecution: freeze(structuredClone(execution)),
           parentRun: freeze(structuredClone(nearest.run)),
           parentTools: freeze(
@@ -1976,6 +2056,7 @@ export class AgentRuntime {
         configuration.extensions,
         configuration.toolIds,
         configuration.modelHiddenToolIds,
+        configuration.extensionOverrides,
       );
       return this.childDefinition(
         configurationId,
@@ -1999,6 +2080,7 @@ export class AgentRuntime {
           },
           binding: {
             ...configuration,
+            extensionOverrides: captured.extensionOverrides,
             modelHiddenToolIds:
               configuration.modelHiddenToolIds &&
               Object.freeze([...configuration.modelHiddenToolIds]),
@@ -2141,6 +2223,7 @@ export class AgentRuntime {
           selected.extensions,
           selected.toolIds,
           template.binding.modelHiddenToolIds,
+          template.binding.extensionOverrides,
         );
         assertParentTools(bound.definitions, bound.extensions);
         assertParentJobs(bound.jobs, bound.extensions);
@@ -3998,6 +4081,62 @@ export class AgentRuntime {
       throw new AgentError('resume_checkpoint_unavailable');
     return source;
   }
+  /** Reconstruct only the two known Task declarations for a verified original Model comparison. */
+  private originalTaskModelTools(
+    tools: readonly ModelTool[],
+    original: readonly ModelTool[],
+    bindings: ScopedBindings,
+    child: boolean,
+  ): readonly ModelTool[] {
+    const task = bindings.extensions.find(
+      (extension) =>
+        extension.id === 'builtin.task' && extension.version === '1' && extension.apiMajor === 1,
+    );
+    const builtin = (id: string) => {
+      const tool = bindings.tools.get(id);
+      return tool?.version === '1' &&
+        task?.tools?.some((candidate) => candidate.id === id && candidate.version === tool.version)
+        ? tool
+        : undefined;
+    };
+    let restored = tools;
+    const message = builtin('task.message');
+    if (
+      message?.description === currentTaskMessageDescription &&
+      original.some(
+        (tool) =>
+          tool.id === message.id &&
+          tool.definitionVersion === message.version &&
+          tool.description === previousTaskMessageDescription,
+      )
+    ) {
+      restored = restored.map((tool) =>
+        tool.id === message.id &&
+        tool.definitionVersion === message.version &&
+        tool.description === currentTaskMessageDescription
+          ? { ...tool, description: previousTaskMessageDescription }
+          : tool,
+      );
+    }
+    const events = child ? builtin('task.events') : undefined;
+    if (events && !restored.some((tool) => tool.id === events.id)) {
+      const declaration: ModelTool = {
+        id: events.id,
+        definitionVersion: events.version,
+        description: events.description,
+        inputSchema: events.inputSchema,
+      };
+      if (
+        original.some(
+          (tool) =>
+            canonicalJson(tool as unknown as Json) ===
+            canonicalJson(declaration as unknown as Json),
+        )
+      )
+        restored = [...restored, declaration].sort((a, b) => a.id.localeCompare(b.id));
+    }
+    return restored;
+  }
   private async recoveryParentBindings(
     runId: string,
     execution: ExecutionRecord,
@@ -4042,8 +4181,18 @@ export class AgentRuntime {
       }));
     if (
       canonicalJson(current.snapshot) !== canonicalJson(source.capabilitySnapshot ?? null) ||
-      canonicalJson(tools as unknown as Json) !==
-        canonicalJson(original.request.tools as unknown as Json)
+      canonicalJson(
+        this.originalTaskModelTools(
+          tools,
+          original.request.tools,
+          {
+            ...bindings,
+            extensions: current.selected.extensions,
+            tools: current.selected.definitions,
+          },
+          session.parentSessionId !== null,
+        ) as unknown as Json,
+      ) !== canonicalJson(original.request.tools as unknown as Json)
     )
       throw new AgentError('capability_refresh_required');
     return {
@@ -4487,6 +4636,7 @@ export class AgentRuntime {
           resolved?.extensions,
           resolved?.toolIds,
           resolved?.modelHiddenToolIds,
+          resolved?.extensionOverrides,
         );
         const checker = sealAuthorizationCheck(resolved?.authorizationCheck ?? this.defaultChecker);
         const snapshot = resolved?.snapshot ?? null;
@@ -4518,6 +4668,7 @@ export class AgentRuntime {
         const binding: RunBinding = {
           model,
           modelId,
+          extensionOverrides: catalogue.extensionOverrides,
           definitions: catalogue.definitions,
           modelHiddenToolIds:
             resolved?.modelHiddenToolIds && Object.freeze([...resolved.modelHiddenToolIds]),
@@ -4581,6 +4732,7 @@ export class AgentRuntime {
             parentExecution.id,
             child.carrier.decisionSource,
             continuation,
+            child.carrier.id,
           );
           recoveredChildren.push({ child, agent, parent });
           if (
@@ -5136,10 +5288,12 @@ export class AgentRuntime {
             resolved.extensions,
             resolved.toolIds,
             resolved.modelHiddenToolIds,
+            resolved.extensionOverrides,
           );
           snapshot = structuredClone(resolved.snapshot);
           binding = {
             ...binding,
+            extensionOverrides: catalogue.extensionOverrides,
             modelHiddenToolIds:
               resolved.modelHiddenToolIds && Object.freeze([...resolved.modelHiddenToolIds]),
             sources: sealSources(resolved.sources),
@@ -6800,7 +6954,12 @@ export class AgentRuntime {
         snapshot = structuredClone(resolved.snapshot);
         modelHiddenToolIds =
           resolved.modelHiddenToolIds && Object.freeze([...resolved.modelHiddenToolIds]);
-        bindings = this.runDefinitions(resolved.extensions, resolved.toolIds, modelHiddenToolIds);
+        bindings = this.runDefinitions(
+          resolved.extensions,
+          resolved.toolIds,
+          modelHiddenToolIds,
+          resolved.extensionOverrides,
+        );
         definitions = bindings.definitions;
       }
       if (!model) throw new AgentError('model_unavailable');
@@ -6864,6 +7023,7 @@ export class AgentRuntime {
       modelId,
       definitions,
       modelHiddenToolIds,
+      extensionOverrides: bindings.extensionOverrides,
       jobs: bindings.jobs,
       extensions: bindings.extensions,
       sources,
@@ -6907,6 +7067,7 @@ export class AgentRuntime {
       value.extensions,
       value.toolIds,
       binding.modelHiddenToolIds,
+      binding.extensionOverrides,
     );
     const facts: Json = {
       snapshot,
@@ -7695,13 +7856,15 @@ export class AgentRuntime {
           .filter(
             (tool) =>
               session.parentSessionId === null ||
-              !isAgentCreationTaskTool({
-                id: tool.id,
-                version: tool.version,
-                extensionId: scope.bindings.extensions.find((extension) =>
-                  extension.tools?.some((candidate) => candidate.id === tool.id),
-                )?.id,
-              }),
+              ![isAgentCreationTaskTool, isRootAgentObservationTaskTool].some((rootOnly) =>
+                rootOnly({
+                  id: tool.id,
+                  version: tool.version,
+                  extensionId: scope.bindings.extensions.find((extension) =>
+                    extension.tools?.some((candidate) => candidate.id === tool.id),
+                  )?.id,
+                }),
+              ),
           )
           .sort((a, b) => a.id.localeCompare(b.id))
           .map((tool) => ({
@@ -8075,8 +8238,14 @@ export class AgentRuntime {
       if (resumed?.modelRequest && resumed.modelSource) {
         await selectCapabilities();
         if (
-          canonicalJson(modelTools() as unknown as Json) !==
-            canonicalJson(resumed.modelRequest.tools as unknown as Json) ||
+          canonicalJson(
+            this.originalTaskModelTools(
+              modelTools(),
+              resumed.modelRequest.tools,
+              scope.bindings,
+              session.parentSessionId !== null,
+            ) as unknown as Json,
+          ) !== canonicalJson(resumed.modelRequest.tools as unknown as Json) ||
           canonicalJson((scope.bindings.capabilitySnapshot ?? null) as Json) !==
             canonicalJson(resumed.modelSource.capabilitySnapshot ?? null)
         )

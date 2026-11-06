@@ -1268,6 +1268,87 @@ for (const scenario of [
   });
 }
 
+for (const inView of [true, false]) {
+  test(`child Task acknowledgments use the exact ${inView ? 'View' : 'historical'} Run without changing the original receipt`, async () => {
+    const item = backgroundItem(1, true);
+    const f = fixture([item]);
+    const content = '{"accepted":true,"delivery":"queued"}';
+    const run = {
+      ...item.childRun!,
+      configuration: { tools: [{ id: 'task.message', version: '1', extensionId: 'builtin.task' }] },
+    };
+    const rows: Message[] = [
+      { id: 'mail-model', role: 'assistant', content },
+      {
+        id: 'mail-receipt',
+        role: 'tool',
+        content,
+        sourceIds: ['mail-tool'],
+        toolCallId: 'mail-call',
+      },
+    ].map((row, index) => ({
+      ...row,
+      sessionId: 'child',
+      runId: run.id,
+      seq: String(index + 1),
+      status: 'complete',
+    })) as Message[];
+    const execution = {
+      ...item.execution,
+      id: 'mail-tool',
+      kind: 'tool',
+      sessionId: 'child',
+      runId: run.id,
+      definitionId: 'task.message',
+      toolCallId: 'mail-call',
+      status: 'succeeded',
+      resultRevision: '1',
+      result: { outcome: 'succeeded', content, details: { accepted: true, delivery: 'queued' } },
+    } as Execution;
+    f.port.getView = async () =>
+      ({
+        storeId: 'store',
+        session: { ...item.childSession!, nextSeq: '2' },
+        runs: inView ? [run] : [],
+        executions: [],
+      }) as never;
+    f.port.listMessages = async () => structuredClone(rows);
+    let runReads = 0;
+    const getRun = f.port.getRun;
+    f.port.getRun = async (id, options) => {
+      if (id !== run.id) return getRun(id, options);
+      runReads++;
+      return structuredClone(run) as never;
+    };
+    const getExecution = f.port.getExecution;
+    f.port.getExecution = async (id, options) =>
+      id === execution.id ? structuredClone(execution) : getExecution(id, options);
+    try {
+      const page = await f.environment.open(crypto.randomUUID());
+      f.environment.close(page.readId);
+      const body = await readNativeBackgroundChild({
+        bridge: f.bridge,
+        generation: 1,
+        storeId: 'store',
+        observationId: page.observationId,
+        item,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        environment: { rootSessionId: 'root', viewSelection: 1 },
+      });
+      expect(body.messages).toEqual(rows);
+      expect(body.presentation!.tools).toMatchObject([
+        { messageId: 'mail-receipt', executionId: 'mail-tool', agentMessageAccepted: true },
+      ]);
+      expect(runReads).toBe(inView ? 0 : 1);
+      expect(f.calls.every((call) => call.startsWith('GET'))).toBe(true);
+    } finally {
+      f.main.release();
+      f.environment.release();
+    }
+  });
+}
+
 test('exact child snapshots collect live Shell command fragments within the added budget without directory or control payloads', async () => {
   const item = backgroundItem(1, true);
   const f = fixture([item]);

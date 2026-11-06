@@ -43,6 +43,7 @@ async function fixture(
   readUserConfiguration = false,
   rejectReasoningEffort = false,
   childResponses = false,
+  childSettings: { role?: string; configuredEffort?: 'absent' | 'low' | 'high' } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-run-model-selection-'));
   const workspace = readUserConfiguration ? root : join(root, 'workspace');
@@ -51,6 +52,7 @@ async function fixture(
   privateDirectory(profile.profilePath);
   const requests: { path: string; body: Record<string, unknown>; authorization: string | null }[] =
     [];
+  let queuedFollowUp: string | undefined;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -80,6 +82,8 @@ async function fixture(
       const chunk = (delta: unknown, finish_reason: string | null = null) =>
         `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
       const delegate = delegateChild && requests.length === 1;
+      const followUpAgentId = queuedFollowUp;
+      queuedFollowUp = undefined;
       const selectedTool = (
         body.tools as
           | {
@@ -93,7 +97,7 @@ async function fixture(
       )?.find((tool) =>
         readUserConfiguration
           ? tool.function.name === 'read_file'
-          : tool.function.name === 'spawn_agent',
+          : tool.function.name === (followUpAgentId ? 'follow_up_agent' : 'spawn_agent'),
       );
       const delta =
         readUserConfiguration && requests.length === 1
@@ -113,22 +117,40 @@ async function fixture(
                 },
               ],
             }
-          : delegate
+          : followUpAgentId
             ? {
                 role: 'assistant',
                 tool_calls: [
                   {
                     index: 0,
-                    id: 'delegate',
+                    id: 'continue-collaborator',
                     type: 'function',
                     function: {
                       name: selectedTool!.function.name,
-                      arguments: JSON.stringify({ prompt: 'child' }),
+                      arguments: JSON.stringify({
+                        agent_id: followUpAgentId,
+                        content: 'Continue the same bounded assignment once.',
+                      }),
                     },
                   },
                 ],
               }
-            : { role: 'assistant', content: 'done' };
+            : delegate
+              ? {
+                  role: 'assistant',
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'delegate',
+                      type: 'function',
+                      function: {
+                        name: selectedTool!.function.name,
+                        arguments: JSON.stringify({ prompt: 'child' }),
+                      },
+                    },
+                  ],
+                }
+              : { role: 'assistant', content: 'done' };
       return new Response(
         `${chunk(delta)}${chunk({}, 'tool_calls' in delta ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
         { headers: { 'content-type': 'text/event-stream' } },
@@ -141,13 +163,18 @@ async function fixture(
     model: `actual-${family}`,
     baseURL: `http://127.0.0.1:${provider.port}/${family}/v1`,
     ...(family === 'openai' && childResponses ? { protocol: 'responses' } : {}),
-    ...(family === 'openai' ? { options: { reasoningEffort: 'low' } } : {}),
+    ...(family === 'openai' && childSettings.configuredEffort !== 'absent'
+      ? { options: { reasoningEffort: childSettings.configuredEffort ?? 'low' } }
+      : {}),
   }));
   const config = {
     modelId: 'a',
     models,
     tools: delegateChild
-      ? [{ id: 'task.spawn', definitionVersion: '1' }]
+      ? [
+          { id: 'task.spawn', definitionVersion: '1' },
+          { id: 'task.follow_up', definitionVersion: '1' },
+        ]
       : readUserConfiguration
         ? [{ id: 'files.read', definitionVersion: '5' }]
         : [],
@@ -172,7 +199,7 @@ async function fixture(
       },
     },
     permissions: { authorize: async () => ({ allowed: true, revision: 'trusted-fixture' }) },
-    child: [{ id: 'worker', version: '1', modelId: 'openai', toolIds: [] }],
+    child: [{ id: childSettings.role ?? 'worker', version: '1', modelId: 'openai', toolIds: [] }],
     ...(delegateChild
       ? {
           // This model-selection fixture authorizes only its exact child and public spawn tool.
@@ -188,7 +215,12 @@ async function fixture(
                   definitionVersion: '1',
                 })),
                 { kind: 'tool' as const, definitionId: 'task.spawn', definitionVersion: '1' },
-                { kind: 'job' as const, definitionId: 'agent/worker', definitionVersion: '1' },
+                { kind: 'tool' as const, definitionId: 'task.follow_up', definitionVersion: '1' },
+                {
+                  kind: 'job' as const,
+                  definitionId: `agent/${childSettings.role ?? 'worker'}`,
+                  definitionVersion: '1',
+                },
               ],
             }),
           },
@@ -263,6 +295,9 @@ async function fixture(
     runtime,
     requests,
     base,
+    queueChildFollowUp(agentId: string) {
+      queuedFollowUp = agentId;
+    },
     get credentialReads() {
       return credentialReads;
     },
@@ -708,6 +743,111 @@ test('public spawn selects the trusted default child model without inheriting th
     await f.close();
   }
 }, 20000);
+
+for (const configuredEffort of ['absent', 'high'] as const) {
+  test(`a cross-Run public follow-up preserves the child's ${configuredEffort} effort preset while root temporary effort still recovers`, async () => {
+    const f = await fixture(true, false, false, false, { role: 'general', configuredEffort });
+    let recovered:
+      | Awaited<ReturnType<NonNullable<typeof f.host.resolveRecoveryRunConfiguration>>>
+      | undefined;
+    try {
+      const originalParent = await f.submit('root-effort', {
+        kind: 'run.start',
+        content: 'New task: delegate the bounded assignment.',
+        modelId: 'a',
+        reasoningEffort: 'low',
+      });
+      const carrier = await until(
+        async () =>
+          (await f.store.listExecutions('s')).find((execution) => execution.childSessionId),
+        (execution) => execution !== undefined,
+      );
+      const childSessionId = carrier!.childSessionId!;
+      const first = await until(
+        () => f.store.getView(childSessionId),
+        (view) => view.runs.length === 1 && !view.runs[0]!.isActive,
+      );
+      expect(first.runs[0]!.status).toBe('completed');
+      const originalConfiguration = first.runs[0]!.configuration;
+      f.queueChildFollowUp(childSessionId);
+      const nextParent = await f.submit('follow-child-effort', {
+        kind: 'run.start',
+        content: 'New task: continue the same collaborator once.',
+        modelId: 'a',
+        reasoningEffort: 'low',
+      });
+      expect(nextParent.commandRun.status).toBe('completed');
+      expect(
+        (await f.store.listExecutions('s')).filter(
+          (execution) =>
+            execution.runId === nextParent.commandRun.id &&
+            execution.definitionId === 'task.follow_up' &&
+            execution.status === 'succeeded',
+        ),
+      ).toHaveLength(1);
+      const child = await until(
+        () => f.store.getView(childSessionId),
+        (view) => view.runs.length === 2 && view.runs.every((run) => !run.isActive),
+      );
+      expect(child.runs.map((run) => run.status)).toEqual(['completed', 'completed']);
+      expect(child.runs[0]!.configuration).toEqual(originalConfiguration);
+      const roleSnapshot = (configuration: unknown) =>
+        configuration as {
+          modelId: string;
+          tools: unknown[];
+          snapshot: {
+            roleId: string;
+            roleToolIds: unknown;
+            configuration: {
+              digest: string;
+              configuration: { models: { id: string; options?: unknown }[] };
+            };
+          };
+        };
+      const firstBinding = roleSnapshot(originalConfiguration);
+      const nextBinding = roleSnapshot(child.runs[1]!.configuration);
+      expect(nextBinding.modelId).toBe(firstBinding.modelId);
+      expect(nextBinding.tools).toEqual(firstBinding.tools);
+      expect(nextBinding.snapshot.roleId).toBe('general');
+      expect(nextBinding.snapshot.roleToolIds).toEqual(firstBinding.snapshot.roleToolIds);
+      expect(nextBinding.snapshot.configuration.digest).toBe(
+        firstBinding.snapshot.configuration.digest,
+      );
+      expect(
+        nextBinding.snapshot.configuration.configuration.models.find(
+          (model) => model.id === 'openai',
+        )!.options,
+      ).toEqual(configuredEffort === 'absent' ? undefined : { reasoningEffort: 'high' });
+      const childWire = f.requests.filter((request) => request.body.model === 'actual-openai');
+      expect(childWire).toHaveLength(2);
+      expect(childWire.map((request) => request.body.reasoning_effort)).toEqual(
+        configuredEffort === 'absent' ? [undefined, undefined] : ['high', 'high'],
+      );
+      expect(
+        f.requests
+          .filter((request) => request.body.model === 'actual-compatible')
+          .every((request) => request.body.reasoning_effort === 'low'),
+      ).toBe(true);
+      expect(child.executions.filter((execution) => execution.kind === 'model')).toHaveLength(2);
+      const beforeRecovery = f.requests.length;
+      recovered = await f.host.resolveRecoveryRunConfiguration!({
+        command: (await f.store.getCommand('root-effort'))!,
+        run: originalParent.commandRun,
+        session: (await f.store.getSession('s'))!,
+        workspace: (await f.store.getWorkspace('w'))!,
+        signal: new AbortController().signal,
+      });
+      expect(recovered.snapshot).toMatchObject({
+        digest: (originalParent.commandRun.configuration as { snapshot: { digest: string } })
+          .snapshot.digest,
+      });
+      expect(f.requests).toHaveLength(beforeRecovery);
+    } finally {
+      await recovered?.dispose?.();
+      await f.close();
+    }
+  }, 20000);
+}
 
 test('a Chat parent keeps its protocol while its independent child uses a trusted Responses model', async () => {
   const f = await fixture(true, false, false, true);

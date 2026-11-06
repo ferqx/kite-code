@@ -29,8 +29,8 @@ Windows Shell 在后台执行，不弹出额外终端窗口。首次工作区权
 | 文件修改 | `write_file`、`edit_file` | 保留 `base` 原完整文件基线；新建使用 `base:null`；精确编辑用 `old_text`、`new_text`、`expected_matches` |
 | Shell | `shell_execute`、`shell_read`、`shell_wait`、`shell_stop` | 统一执行以 `background:true` 选择后台；运行时管理执行身份，读取、等待和停止使用返回的原 `shell_id` |
 | 问题与网页 | `ask_user`、`web_fetch` | 普通问题只收集信息；网页时限用 `timeout_ms` |
-| 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 默认通用协作者；稳定 `agent_id`，每次受理仍绑定准确 carrier/轮次；消息只排队，显式追问才续轮 |
-| 子 Agent 等待与目录 | `wait_agent_events`、`list_agents` | 事件等待只读自身邮箱，使用 `after_seq/wait_ms`；列表按稳定身份分页，并提供原委派/最近工作/结果的可读来源 |
+| 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 新默认 `preset:general/explore`，省略与显式 `general` 等价；稳定 `agent_id`，消息只排队，显式追问才续轮 |
+| 子 Agent 等待与目录 | `wait_agent_events`、`list_agents` | 事件等待仅向主 Agent 开放，只读其自身邮箱，使用 `after_seq/wait_ms`；列表按稳定身份分页，并提供原委派/最近工作/结果的可读来源 |
 | 计划 | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 计划保存、批准和基于真实回执的进度分别核实 |
 | 当前任务证据 | `read_execution_evidence` | 按真实任务分页列出 Tool／Job；`execution_id` 查询原公开结果，不重跑操作 |
 
@@ -92,7 +92,7 @@ Shell 输出读取故障会保存失败与可核实的错误原因，并收束�
 | 自动审核 / Auto（`auto`） | 新默认由模型分类内置 Shell 的操作风险，其他可信内置工具按自身权限规则执行；批准按准确范围执行，明确拒绝保留原因；超时默认放行语义审核，由工具原有执行策略兜底；其他审核失败交回模型，必需人工决定仍显示原卡 |
 | 完全访问 / Full（`full`） | 使用宿主权限允许的普通文件和网络范围，不走常规逐项审批；仍保极危险拒绝、Runtime 权限对象保护及系统限制 |
 
-自动审核属于权限系统的内部模型调用，记录名为 `authorization.check`。它不创建子 Agent 或子会话，不占子 Agent 并发槽，也不进入子 Agent 列表。`review` 只作为通用子 Agent 的代码审查类别；检查决定、原调用与人工回退记录仍可追溯。
+自动审核属于权限系统的内部模型调用，记录名为 `authorization.check`。它不创建子 Agent 或子会话，不占子 Agent 并发槽，也不进入子 Agent 列表。代码审查可作为通用协作者的任务，不需要独立默认角色；检查决定、原调用与人工回退记录仍可追溯。
 
 Native 浏览器的内置操控在三种模式下均不经过自动审核或用户审批，不追加页面接管确认。宿主仍核实能力可用、准确页面／任务／控制权、取消与未知结果，不从页面文字取得指令或控制权。自动化完成或需要用户处理时释放控制、保留网页并正常回复说明；不创建人工等待或“继续并通知”流程。用户处理后发送新消息，Agent在新任务中重新绑定页面并获取新快照；旧句柄、元素和截图引用不能沿用。
 
@@ -124,7 +124,7 @@ Shell 网络范围目前只有 none 和 internet，没有仅本机或指定域�
 
 文件范围只有 workspace_write 和 full_access，没有按单一路径授予的 Shell 范围。普通工作区外绝对路径仍是本地目标，不能仅因其超出默认范围而升级高危；实际破坏和安全配置变更另行判断。风险分类不改变目标、原请求或受保护资源边界。
 
-explore／plan／review 接收明确的只读任务指导，工具集合也比普通协作者少；Shell 继承父会话当前的审批策略和沙箱。`cat`、复合命令及管道可以按普通权限链执行，不受角色专属的三命令限制。rg 执行 hooks、外部解压及未知选项不能仅凭名称取得免审资格；正常搜索内容中的选项名称不被当成执行选项。前台与后台 Shell 均说明默认请求范围及显式联网申请，审批不替调用补齐缺失的联网能力。
+新默认 `explore` 接收明确的只读任务指导，工具集合也比 `general` 少；除原读取／Shell／知识工具外，允许在父选中集合内使用消息、Shell 停止、执行证据和网页读取，不因此获得协作者列表、追问或中断工具。子 Agent 不提供事件等待工具，发送成功后继续工作或结束；主 Agent 保留等待子任务结果的能力。旧分析角色继续使用原冻结集合，不自动补新工具。Shell 继承父会话当前的审批策略和沙箱。`cat`、复合命令及管道可以按普通权限链执行，不受角色专属的三命令限制。rg 执行 hooks、外部解压及未知选项不能仅凭名称取得免审资格；正常搜索内容中的选项名称不被当成执行选项。前台与后台 Shell 均说明默认请求范围及显式联网申请，审批不替调用补齐缺失的联网能力。角色实现与验证范围见[Task owner](../../../packages/agent/src/extensions/task/README.md)。
 
 只读是子角色的任务要求，不构成独立 Shell 禁写／禁网沙箱。业务 Agent 保持业务源码、配置和数据不变；必要探索可在原工具权限内使用临时脚本、临时产物，优先私有临时目录。新默认 Auto 只判断 Shell 高危效果，不代替任务合规检查；请求批准和 Full 沿各自策略执行，Full 不承诺技术上阻止子角色写入。主会话 Planning 上限、真实工具交集、极危险拒绝和平台保护继续生效。
 

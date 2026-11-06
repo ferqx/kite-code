@@ -319,6 +319,7 @@ export function desktopToolMessage(
       | 'authorization'
       | 'decisionRefresh'
       | 'fileMissing'
+      | 'agentMessageAccepted'
       | 'shellInput'
       | 'shellResultVerified'
       | 'label'
@@ -337,6 +338,12 @@ export function desktopToolMessage(
     ...(shell ? { shell } : {}),
     ...(fact.ask ? { ask: fact.ask } : {}),
     ...(fact.fileMissing && fact.status === 'succeeded' ? { fileMissing: true } : {}),
+    ...(fact.agentMessageAccepted &&
+    fact.definitionId === 'task.message' &&
+    fact.definitionVersion === '1' &&
+    fact.status === 'succeeded'
+      ? { presentation: 'hidden' as const }
+      : {}),
     ...(fact.status === 'failed' && fact.decisionRefresh
       ? { decisionRefresh: fact.decisionRefresh }
       : {}),
@@ -721,6 +728,7 @@ export class NativeToolPresentation {
       execution: NativeToolExecution & Partial<Pick<Execution, 'toolInput'>>;
     }[],
     boundary?: { bridge: unknown; key: string },
+    pendingMessageIds?: ReadonlySet<string>,
   ): DesktopMessage[] {
     if (boundary && (boundary.bridge !== this.bridge || boundary.key !== this.boundary)) {
       this.bridge = boundary.bridge;
@@ -772,6 +780,15 @@ export class NativeToolPresentation {
       }
       const prior = this.complete.get(key)?.message;
       if (!prior) return [];
+      // Wait for this exact receipt before falling back to its completed live row:
+      // Main may classify it as a redundant Task acknowledgment. Failed reads
+      // clear pending admission and retain the original unverified fallback.
+      if (
+        pendingMessageIds?.has(message.id) &&
+        prior.toolName === 'send_agent_message' &&
+        prior.status === 'completed'
+      )
+        return [];
       return [
         {
           ...prior,

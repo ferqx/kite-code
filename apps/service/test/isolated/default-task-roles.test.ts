@@ -23,7 +23,13 @@ function input(role: string, tools: string[]) {
           ? 'builtin.shell'
           : id.startsWith('planning.')
             ? 'builtin.planning'
-            : 'fixture',
+            : id.startsWith('task.')
+              ? 'builtin.task'
+              : id === 'execution_evidence.read'
+                ? 'builtin.execution-evidence'
+                : id === 'web_fetch'
+                  ? 'builtin.web'
+                  : 'fixture',
   }));
   return {
     configurationId: role,
@@ -35,22 +41,10 @@ function input(role: string, tools: string[]) {
   >[0];
 }
 
-test('default Task roles preserve worker and bind implementation plus three read-only roles to actual parent definitions', async () => {
-  expect(defaultTaskRoles.map((role) => role.id)).toEqual([
-    'worker',
-    'code',
-    'explore',
-    'plan',
-    'review',
-  ]);
+test('default general and explore bind only actual parent definitions', async () => {
+  expect(defaultTaskRoles.map((role) => role.id)).toEqual(['general', 'explore']);
   const task = createTaskConfiguration(defaultTaskRoles);
-  expect(task.snapshot.roles.map((role) => role.id)).toEqual([
-    'worker',
-    'code',
-    'explore',
-    'plan',
-    'review',
-  ]);
+  expect(task.snapshot.roles.map((role) => role.id)).toEqual(['general', 'explore']);
   expect([...task.tools.keys()].sort()).toEqual([
     'task.events',
     'task.follow_up',
@@ -60,11 +54,11 @@ test('default Task roles preserve worker and bind implementation plus three read
     'task.spawn',
   ]);
   const spawn = task.tools.get('task.spawn')!;
-  expect(spawn.description).toContain('Default role worker: General delegated work');
+  expect(spawn.description).toContain('Default role general: General delegated work');
   expect(spawn.inputSchema).toMatchObject({
     properties: {
       preset: {
-        enum: ['code', 'explore', 'plan', 'review'],
+        enum: ['general', 'explore'],
         description: expect.stringContaining('Shell uses the inherited permissions and sandbox'),
       },
     },
@@ -85,17 +79,17 @@ test('default Task roles preserve worker and bind implementation plus three read
     'mcp.unreviewed',
     'planning.update',
   ];
-  for (const role of ['worker', 'code']) {
+  for (const role of ['general']) {
     const result = await configured.resolveChildRunConfiguration!(input(role, parent));
     expect(result.modelId).toBe('actual-parent');
     expect(result.toolIds).toEqual(parent);
   }
-  for (const role of ['explore', 'plan', 'review']) {
+  for (const role of ['explore']) {
     const readonly = await configured.resolveChildRunConfiguration!(input(role, parent));
-    expect(readonly.toolIds).toEqual(['files.read', 'shell.launch', 'shell.read']);
+    expect(readonly.toolIds).toEqual(['files.read', 'shell.launch', 'shell.stop', 'shell.read']);
     expect(readonly.modelId).toBe('actual-parent');
   }
-  expect(configured.childConfigurations![2]!.inputSchema).toMatchObject({
+  expect(configured.childConfigurations![1]!.inputSchema).toMatchObject({
     additionalProperties: false,
     properties: {
       name: { type: 'string', minLength: 1, maxLength: 120 },
@@ -111,7 +105,7 @@ test('default children exclude the exact root clarification tool while retaining
       return { model, snapshot: null, modelId: selection.modelId, toolIds: selection.role.toolIds };
     },
   });
-  for (const role of ['worker', 'code', 'explore', 'plan', 'review']) {
+  for (const role of ['general', 'explore']) {
     const request = input(role, ['ask_user', 'planning.read', 'files.read', 'shell.launch']);
     const tools = (request.parentRun!.configuration as { tools: { extensionId: string }[] }).tools;
     tools[0]!.extensionId = 'builtin.ask-user';
@@ -137,7 +131,7 @@ test('public spawn presets retain current builtin file discovery definitions and
       return { model, snapshot: null, modelId: selection.modelId, toolIds: selection.role.toolIds };
     },
   });
-  for (const role of ['explore', 'plan', 'review']) {
+  for (const role of ['explore']) {
     let selected: string | undefined;
     const result = await spawn.execute({ prompt: 'Inspect the current files.', preset: role }, {
       executionId: `spawn-${role}`,
@@ -205,12 +199,12 @@ test('default role binding fails closed on missing parent facts and mutable/unkn
     },
   });
   await expect(
-    unknown.resolveChildRunConfiguration!(input('code', ['files.read'])),
+    unknown.resolveChildRunConfiguration!(input('general', ['files.read'])),
   ).rejects.toMatchObject({ code: 'child_tool_binding_mismatch' });
 });
 
-test('all read-only roles reject unknown owners, future versions and prepared mutation additions', async () => {
-  for (const role of ['explore', 'plan', 'review']) {
+test('explore rejects unknown owners, future versions and prepared mutation additions', async () => {
+  for (const role of ['explore']) {
     const configured = createChildConfiguration({
       roles: defaultTaskRoles,
       async resolve(_input, selection) {
@@ -266,4 +260,122 @@ test('all read-only roles reject unknown owners, future versions and prepared mu
     ).rejects.toMatchObject({ code: 'child_tool_binding_mismatch' });
     expect(disposed).toBe(1);
   }
+});
+
+test('general is both the omitted default and an explicit preset while removed presets never start work', async () => {
+  const task = createTaskConfiguration([...defaultTaskRoles].reverse());
+  const spawn = task.tools.get('task.spawn')!;
+  const selected: string[] = [];
+  const context = {
+    executionId: 'select-role',
+    operations: {
+      async ensure({ request }) {
+        if (request.kind !== 'agent') throw new Error('expected_agent_request');
+        selected.push(request.configurationId);
+        return { childSessionId: `child-${selected.length}` };
+      },
+    },
+  } as ToolContext;
+  for (const preset of [undefined, 'general', 'explore']) {
+    expect(
+      (
+        await spawn.execute(
+          { prompt: 'Inspect this task.', ...(preset ? { preset } : {}) },
+          context,
+        )
+      ).outcome,
+    ).toBe('succeeded');
+  }
+  expect(selected).toEqual(['general', 'general', 'explore']);
+  for (const preset of ['worker', 'code', 'plan', 'review']) {
+    expect(await spawn.execute({ prompt: 'Do not start this.', preset }, context)).toMatchObject({
+      outcome: 'failed',
+      details: { accepted: false, error: { code: 'invalid_request' } },
+    });
+  }
+  expect(selected).toHaveLength(3);
+});
+
+test('explore retains parent-selected communication, cancellation, evidence and Web with exact builtin identities', async () => {
+  const configured = createChildConfiguration({
+    roles: defaultTaskRoles,
+    async resolve(_input, selection) {
+      expect(selection.inheritDynamicMcp).toBe(false);
+      return { model, snapshot: null, modelId: selection.modelId, toolIds: selection.role.toolIds };
+    },
+  });
+  const retained = [
+    'task.message',
+    'task.events',
+    'shell.stop',
+    'execution_evidence.read',
+    'web_fetch',
+  ];
+  const request = input('explore', [
+    ...retained,
+    'task.spawn',
+    'task.list',
+    'task.follow_up',
+    'task.interrupt',
+    'files.write',
+    'mcp.unreviewed',
+  ]);
+  expect((await configured.resolveChildRunConfiguration!(request)).toolIds).toEqual(retained);
+  expect((await configured.resolveChildRunConfiguration!(input('explore', []))).toolIds).toEqual(
+    [],
+  );
+  for (const override of [{ extensionId: 'custom.same-name' }, { version: 'future' }]) {
+    const parentTools = request.parentTools!.map((tool) => ({ ...tool, ...override }));
+    expect(
+      (await configured.resolveChildRunConfiguration!({ ...request, parentTools })).toolIds,
+    ).toEqual([]);
+  }
+});
+
+test('trusted callers can reconstruct an older default and preset catalogue without changing the snapshot shape', async () => {
+  const declarations = [
+    { id: 'worker', version: '1' },
+    { id: 'review', version: '1' },
+  ];
+  const task = createTaskConfiguration(declarations, {
+    defaultRole: 'worker',
+    presets: ['review'],
+  });
+  const spawn = task.tools.get('task.spawn')!;
+  expect(spawn.description).toContain('Default role worker:');
+  expect(spawn.inputSchema).toMatchObject({ properties: { preset: { enum: ['review'] } } });
+  expect(Object.keys(task.snapshot)).toEqual(['available', 'roles', 'tools']);
+  expect(task.snapshot.roles).toEqual(
+    declarations.map(({ id, version }) => ({
+      id,
+      configurationId: id,
+      configurationVersion: version,
+    })),
+  );
+  const explicitReview = createTaskConfiguration(declarations, { defaultRole: 'review' });
+  const reviewSpawn = explicitReview.tools.get('task.spawn')!;
+  expect(reviewSpawn.description).toContain('Default role review:');
+  expect(reviewSpawn.inputSchema).toMatchObject({ properties: { preset: { enum: ['review'] } } });
+  const selected: string[] = [];
+  const context = {
+    executionId: 'trusted-explicit-review',
+    operations: {
+      async ensure({ request }) {
+        if (request.kind !== 'agent') throw Error('expected_agent_request');
+        selected.push(request.configurationId);
+        return { childSessionId: 'trusted-review' };
+      },
+    },
+  } as ToolContext;
+  expect(
+    (await reviewSpawn.execute({ prompt: 'Review the assigned work.' }, context)).outcome,
+  ).toBe('succeeded');
+  expect(
+    await reviewSpawn.execute(
+      { prompt: 'Do not accept a worker preset.', preset: 'worker' },
+      context,
+    ),
+  ).toMatchObject({ outcome: 'failed' });
+  expect(selected).toEqual(['review']);
+  expect(createTaskConfiguration([]).snapshot).toEqual({ available: false, roles: [], tools: [] });
 });

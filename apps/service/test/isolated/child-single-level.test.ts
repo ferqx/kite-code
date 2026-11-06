@@ -204,7 +204,7 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         for (const tools of childDirectories) {
           expect(tools).not.toContain('spawn_agent');
           expect(tools).toContain('send_agent_message');
-          expect(tools).toContain('wait_agent_events');
+          expect(tools).not.toContain('wait_agent_events');
           expect(tools).toContain('list_agents');
           expect(tools).toContain('follow_up_agent');
           expect(tools).toContain('interrupt_agent');

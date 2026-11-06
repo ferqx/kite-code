@@ -1,10 +1,13 @@
 import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
 import type { Extension, Json, ToolContext, ToolResult } from '../index';
+import { currentTaskMessageDescription } from './message-description';
 import { isChildPreparationFailure } from './preparation-failure';
+import { defaultTaskRoleId } from './roles';
 
 export { createDefaultTaskRequestClassifier } from '../../permissions/task-request';
 export {
+  defaultTaskRoleId,
   defaultTaskRoles,
   isReadOnlyTaskTool,
   isRootOnlyTaskTool,
@@ -61,7 +64,8 @@ export function createTaskExtension(options: TaskOptions): Extension {
     roles.set(role.id, Object.freeze(role));
   }
   const defaultRole =
-    options.defaultRole ?? (roles.has('worker') ? 'worker' : [...roles.keys()][0]!);
+    options.defaultRole ??
+    (roles.has(defaultTaskRoleId) ? defaultTaskRoleId : [...roles.keys()][0]!);
   if (!roles.has(defaultRole) || options.presets?.some((id) => !roles.has(id)))
     throw new AgentError('invalid_task_roles');
   const presets = options.presets ?? [];
@@ -282,7 +286,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.message',
         'send_agent_message',
-        'Queue a complete message to a direct child or parent. Idle recipients stay idle; use follow_up_agent when an idle child must resume concrete remaining work. Accepted/received/prepared are distinct. If a child needs a reply to proceed, wait at most one explicit finite 30000ms observation window; without a valid reply, finish with an honest pending-decision result containing the complete question and completed/unfinished facts. Do not wait indefinitely for an idle parent.',
+        currentTaskMessageDescription,
         {
           ...object({ agentId, target: { enum: ['parent'] }, content }, ['content']),
           oneOf: [

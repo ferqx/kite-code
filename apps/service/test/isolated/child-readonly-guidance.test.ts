@@ -21,7 +21,7 @@ import { defaultTaskRoles } from '../../src/task-configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const sourceId = 'builtin.task:read-only-assignment';
-const roles = ['worker', 'code', 'explore', 'plan', 'review'] as const;
+const roles = ['general', 'explore'] as const;
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
   reason: 'stop',
@@ -88,7 +88,7 @@ async function scenario(recoverSource: boolean, legacyParent = false) {
         createFixedModel([
           call('spawn_agent', {
             prompt: 'Read source.txt and report the actual value.',
-            ...(role === 'worker' ? {} : { preset: role }),
+            ...(role === 'general' ? {} : { preset: role }),
           }),
           [finish],
         ]),
@@ -185,7 +185,7 @@ async function scenario(recoverSource: boolean, legacyParent = false) {
         if (Date.now() > deadline) throw Error(`child_guidance_deadline:${role}`);
         await Bun.sleep(5);
       }
-      const readonly = !['worker', 'code'].includes(role);
+      const readonly = role === 'explore';
       expect(parents.get(role)!.requests).toHaveLength(2);
       expect(children.get(role)!.requests).toHaveLength(2);
       for (const request of parents.get(role)!.requests)

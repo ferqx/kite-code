@@ -143,9 +143,9 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
     ? host
     : createDefaultProcessConfiguration({ ...hostOptions, browser: false });
   const roles = !childBrowserAvailable
-    ? ['worker']
+    ? ['general']
     : selectedSkills === undefined
-      ? ['explore', 'review', 'plan', 'worker']
+      ? ['explore', 'general']
       : ['explore'];
   const parents = new Map(
     roles.map((role) => [
@@ -153,7 +153,7 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
       createFixedModel([
         call('spawn_agent', {
           prompt: 'Read source.txt and report it without modifying anything.',
-          ...(role === 'worker' ? {} : { preset: role }),
+          ...(role === 'general' ? {} : { preset: role }),
         }),
         [finish],
         [finish],
@@ -324,7 +324,7 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
       ))!;
       const childSnapshot = object(object(childRun.configuration).snapshot);
       const binding = object(childSnapshot.configuration);
-      const readonly = role !== 'worker';
+      const readonly = role === 'explore';
       for (const tool of object(binding.actualCapabilities).tools as Json[])
         expect(parentFacts.tools as Json[]).toContainEqual(tool);
       expect(childSnapshot.skillSelection).toEqual({
@@ -360,7 +360,7 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
 }
 
 test.skipIf(process.platform !== 'darwin')(
-  'default browser-capable parent starts explore/review/plan without inherited browser skill; worker retains it',
+  'default browser-capable parent starts explore without inherited browser skill; general retains it',
   () => defaultScenario(),
   20000,
 );

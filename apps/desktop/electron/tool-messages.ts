@@ -1,4 +1,10 @@
-import { type AgentClient, ClientError, type Execution, type Message } from '@kite-ai/client';
+import {
+  type AgentClient,
+  ClientError,
+  type Execution,
+  type Message,
+  type Run,
+} from '@kite-ai/client';
 import {
   modelUsageMessageKey,
   type NativeContextUsagePage,
@@ -361,6 +367,7 @@ export class NativeToolMessages {
       this.check(lease);
       const entries: NativeToolMessagePage['entries'] = [];
       const labels = new Map<string, Promise<string | undefined>>();
+      const receiptRuns = new Map<string, Run | undefined>();
       for (const id of input.executionIds ?? []) {
         const observed = this.liveExecutions().find((execution) => execution.id === id);
         if (
@@ -413,17 +420,36 @@ export class NativeToolMessages {
           signal: lease.abort.signal,
         });
         this.check(lease);
+        let receiptRun: Run | undefined;
+        if (
+          execution.runId &&
+          execution.status === 'succeeded' &&
+          ((execution.definitionId === 'task.message' && execution.definitionVersion === '1') ||
+            (execution.definitionId === 'files.read' &&
+              ['4', '5'].includes(execution.definitionVersion) &&
+              object(object(execution.result)?.details)?.exists === false))
+        ) {
+          receiptRun = receiptRuns.get(execution.runId);
+          if (
+            !receiptRuns.has(execution.runId) ||
+            (!receiptRun && execution.definitionId !== 'task.message')
+          ) {
+            try {
+              receiptRun = await this.client.getRun(execution.runId, {
+                signal: lease.abort.signal,
+              });
+              this.check(lease);
+            } catch (cause) {
+              this.check(lease);
+              // Optional acknowledgment classification cannot withdraw the original Tool result.
+              if (execution.definitionId !== 'task.message') throw cause;
+            }
+            receiptRuns.set(execution.runId, receiptRun);
+          }
+        }
         const fact = nativeToolMessageFact({
           execution,
-          ...(execution.definitionId === 'files.read' &&
-          ['4', '5'].includes(execution.definitionVersion) &&
-          execution.status === 'succeeded' &&
-          object(object(execution.result)?.details)?.exists === false &&
-          execution.runId
-            ? {
-                run: await this.client.getRun(execution.runId, { signal: lease.abort.signal }),
-              }
-            : {}),
+          ...(receiptRun ? { run: receiptRun } : {}),
           message,
           messages: this.messages().values(),
           sessionId: scope.sessionId,

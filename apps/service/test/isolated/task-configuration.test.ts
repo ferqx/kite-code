@@ -109,7 +109,7 @@ async function fixture(
     roles?: boolean;
     mode?: 'full' | 'accept_edits';
     deny?: 'task' | 'carrier';
-    defaultRole?: 'plan' | 'review';
+    defaultRole?: 'explore';
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-default-task-'));
@@ -597,8 +597,8 @@ test('selected collaboration additions expose exact closed schemas to the real S
   }
 }, 10000);
 
-test('default plan and review run through the real Task carrier and expose only frozen parent-selected reads', async () => {
-  for (const role of ['plan', 'review'] as const) {
+test('default explore runs through the real Task carrier and exposes only frozen parent-selected reads', async () => {
+  for (const role of ['explore'] as const) {
     const f = await fixture({ defaultRole: role });
     try {
       await f.submit();
@@ -619,8 +619,11 @@ test('default plan and review run through the real Task carrier and expose only 
       const child = await f.store.getView(carrier.childSessionId!);
       expect(child.session.parentSessionId).toBe('s');
       expect(child.runs[0]!.configuration).toMatchObject({
-        snapshot: { roleId: role, roleVersion: '1', roleToolIds: ['files.read'] },
-        tools: [{ id: 'files.read', version: '5', extensionId: 'builtin.files' }],
+        snapshot: { roleId: role, roleVersion: '1', roleToolIds: ['task.events', 'files.read'] },
+        tools: [
+          { id: 'task.events', version: '1', extensionId: 'builtin.task' },
+          { id: 'files.read', version: '5', extensionId: 'builtin.files' },
+        ],
       });
       const childRequests = f.a.requests.filter((request) =>
         (request.messages as { role: string; content: unknown }[]).some(

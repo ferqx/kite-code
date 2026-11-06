@@ -45,8 +45,14 @@ type Mode =
   | 'unsupported'
   | 'mixed'
   | 'image'
-  | 'image-batch';
+  | 'image-batch'
+  | 'mail'
+  | 'mail-unverified'
+  | 'mail-failed'
+  | 'mail-unknown';
 function fixture(mode: Mode, testDiagnostics = false) {
+  const isMail = mode.startsWith('mail');
+  const receiptContent = isMail ? '{"accepted":true,"delivery":"queued"}' : original;
   const isImage = mode === 'image' || mode === 'image-batch';
   const imageCount = mode === 'image-batch' ? 10 : 1;
   const restoreWorker = isImage ? installImagePreviewWorker() : () => {};
@@ -122,12 +128,12 @@ function fixture(mode: Mode, testDiagnostics = false) {
             role: 'assistant',
             status: 'complete',
             runId: null,
-            content: '',
+            content: isMail ? receiptContent : '',
             firstOutput: 'tool_calls',
             toolCalls: [
               {
                 id: 'call',
-                name: isImage ? 'files.view_images' : 'files.read',
+                name: isMail ? 'task.message' : isImage ? 'files.view_images' : 'files.read',
                 arguments: JSON.stringify({ path: 'MODEL_ARGS_SENTINEL' }),
               },
             ],
@@ -141,7 +147,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
             runId: null,
             sourceIds: ['execution'],
             toolCallId: 'call',
-            content: original,
+            content: receiptContent,
             ...(mode === 'unsupported' ? { contentFormat: 'unsupported' as const } : {}),
           },
           ...(mode === 'mixed'
@@ -280,22 +286,31 @@ function fixture(mode: Mode, testDiagnostics = false) {
                         ]
                       : []
                   : request.method === 'toolMessages.list' &&
-                      ['known', 'future', 'future-unknown', 'image', 'image-batch'].includes(mode)
+                      (isMail ||
+                        ['known', 'future', 'future-unknown', 'image', 'image-batch'].includes(
+                          mode,
+                        ))
                     ? [
                         {
                           messageId: 'receipt',
                           executionId: 'execution',
-                          definitionId: isImage
-                            ? 'files.view_images'
-                            : mode === 'known'
-                              ? 'files.read'
-                              : 'future.tool',
-                          definitionVersion: isImage ? '1' : mode === 'known' ? '4' : '99',
+                          definitionId: isMail
+                            ? 'task.message'
+                            : isImage
+                              ? 'files.view_images'
+                              : mode === 'known'
+                                ? 'files.read'
+                                : 'future.tool',
+                          definitionVersion:
+                            isMail || isImage ? '1' : mode === 'known' ? '4' : '99',
                           status:
-                            mode === 'future-unknown'
-                              ? ('outcome_unknown' as const)
-                              : ('succeeded' as const),
+                            mode === 'mail-failed'
+                              ? ('failed' as const)
+                              : mode === 'future-unknown' || mode === 'mail-unknown'
+                                ? ('outcome_unknown' as const)
+                                : ('succeeded' as const),
                           resultRevision: '1',
+                          ...(mode === 'mail' ? { agentMessageAccepted: true as const } : {}),
                           target: 'README.md',
                           ...(isImage
                             ? {
@@ -473,6 +488,37 @@ test('actual NativeDesktop keeps a raw tool receipt hidden while metadata reader
     await f.close();
   }
 });
+
+for (const mode of ['mail', 'mail-unverified', 'mail-failed', 'mail-unknown'] as const) {
+  test(`actual NativeDesktop ${mode} acknowledgment respects Main verification and preserves identical Model text`, async () => {
+    const f = fixture(mode);
+    const content = '{"accepted":true,"delivery":"queued"}';
+    try {
+      await f.render();
+      expect(f.host.querySelector('.tool-activity')).toBeNull();
+      expect(f.host.querySelector('.tool-detail')).toBeNull();
+      expect(f.host.textContent).toContain(content);
+      await f.flush();
+      await f.settlePresentation();
+      expect(f.host.textContent).toContain(content);
+      if (mode === 'mail') {
+        expect(f.host.querySelector('.tool-activity')).toBeNull();
+        expect(f.host.querySelector('.tool-detail')).toBeNull();
+      } else {
+        expect(f.host.querySelector('.tool-activity')).not.toBeNull();
+        await f.toggle();
+        expect(f.host.querySelector('.tool-detail')!.textContent).toBe(content);
+        if (mode === 'mail-unknown') expect(f.host.textContent).toContain('结果未知');
+        if (mode === 'mail-failed')
+          expect(f.host.querySelector('.tool-activity')!.getAttribute('aria-label')).toContain(
+            '失败',
+          );
+      }
+    } finally {
+      await f.close();
+    }
+  });
+}
 
 for (const mode of ['known', 'mixed', 'image'] as const)
   test(`actual NativeDesktop keeps the ${mode} tool icon through cached return and held metadata`, async () => {

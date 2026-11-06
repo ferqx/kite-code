@@ -543,7 +543,7 @@ KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=inpu
 | titles | S01、S02、S03 | 未决原文及空白兜底、准确澄清后一次 AI 命名、真实命名响应在途时手动改名 CAS |
 | task-presets | A11-trusted-read-only-preset-same-child-followup、A11-trusted-catalogue-omitted-preset-default-same-child-followup | 非空可信目录中明确选择read_only或省略preset使用worker；同一child两轮保持原配置与实际工具上限，完整结果进入父实际输入 |
 | questions | R02、R09 | 父普通结束后的唯一后继、活动父真实提问/正式测试答案/同 child 续作及 Blue 文件效果 |
-| idle-question | R08-idle-parent-one-real-30000ms-question-observation-pending、R08-idle-parent-30000ms-pending-then-human-Blue-same-child-current-baseline | 父已idle后的真实缺项提问、一次原Task 30秒等待与诚实pending结果；独立Blue用例随后经正式人类输入让同child新轮重读当前基线、一次Blue编辑，并核原待决结果不变和问题不重复投递；通用附着Job/unknown另列 |
+| idle-question | R08-idle-parent-one-real-30000ms-question-observation-pending、R08-idle-parent-30000ms-pending-then-human-Blue-same-child-current-baseline | 父已idle后的真实缺项提问，子只取得发送成功回执后交回完整pending事实、目录与记录零事件等待；独立Blue用例随后经正式人类输入让同child新轮重读当前基线、一次Blue编辑，并核原待决结果不变和问题不重复投递。case ID及旧 `observedFiniteWaits` 报告字段保留历史兼容，后者固定为空数组，不再维护子等待计时状态；其中30000ms不再表示当前子流程；通用附着Job/unknown另列 |
 | notification-reliability | R12-all-optional-observers-absent、R12-slow-throwing-observer-disabled-durable-report | 可选观察全部缺省，或真实慢回调抛错后停用；原carrier结算与持久Source独立接纳，不代证队列溢出或所有Job清理 |
 | attached-shell | L03-real-attached-Shell-after-child-Model-EOF-natural-settlement、C05-real-attached-Shell-observation-fault-unknown-original-stop-no-replay | 实际附着POSIX Shell在child Model/Run结束后仍运行；自然terminal/EOF后结算，或原观察异常由Runtime判unknown并停止原进程组；不代证未确认清理或queued分支 |
 | files | F01 | 两真实 child 旧基线竞争、实际冲突、重读与合并；真实 Files，明确 owned-fixture 权限 |

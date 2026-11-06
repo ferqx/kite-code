@@ -1,5 +1,5 @@
 import { AgentError } from '@kite-ai/agent';
-import { createTaskExtension } from '@kite-ai/agent/task';
+import { createTaskExtension, defaultTaskRoleId } from '@kite-ai/agent/task';
 
 import type { ChildRole } from './child-configuration';
 
@@ -14,13 +14,27 @@ const taskIds = new Set([
   'task.interrupt',
 ]);
 /** Pure host composition; Task roles and their child bindings never originate in JSONC. */
-export function createTaskConfiguration(declarations: readonly ChildRole[]) {
+export function createTaskConfiguration(
+  declarations: readonly ChildRole[],
+  options: { readonly defaultRole?: string; readonly presets?: readonly string[] } = {},
+) {
   const roles = declarations.map(({ id, version, description }) => ({ id, version, description }));
+  const hasGeneralRole = roles.some((role) => role.id === defaultTaskRoleId);
+  const defaultRole =
+    options.defaultRole ??
+    (hasGeneralRole
+      ? defaultTaskRoleId
+      : roles.some((role) => role.id === 'worker')
+        ? 'worker'
+        : (roles[0]?.id ?? defaultTaskRoleId));
+  const presets =
+    options.presets ??
+    roles.filter((role) => hasGeneralRole || role.id !== 'worker').map((role) => role.id);
   const extension =
     roles.length && roles.length <= 64
       ? createTaskExtension({
-          defaultRole: roles.some((role) => role.id === 'worker') ? 'worker' : roles[0]!.id,
-          presets: roles.filter((role) => role.id !== 'worker').map((role) => role.id),
+          defaultRole,
+          presets,
           roles: roles.map(({ id, description }) => ({
             id,
             configurationId: id,
@@ -34,6 +48,7 @@ export function createTaskConfiguration(declarations: readonly ChildRole[]) {
   return {
     extension,
     tools,
+    defaultRole,
     snapshot: {
       available: !!extension,
       roles: roles.map(({ id, version }) => ({

@@ -370,7 +370,6 @@ const MessageItem = memo(function MessageItem({
               : '助手消息'
       }
     >
-      {agentMessage && <p className="message-label">{agentMessage.name} Agent 发送</p>}
       {agentResult && (
         <p className="message-label">
           {agentResult.name} Agent 发送
@@ -389,10 +388,13 @@ const MessageItem = memo(function MessageItem({
       )}
       {message.role === 'user' && !agentResult && !agentMessage && renderAttachments?.(message)}
       <CodeCopyEligibilityContext.Provider value={Boolean(copyText)}>
-        {message.role === 'user' && !agentResult && !agentMessage ? (
+        {(message.role === 'user' && !agentResult) || agentMessage ? (
           <div className="user-message-body">
+            {agentMessage && <p className="message-label">{agentMessage.name} Agent 发送</p>}
             {renderContent ? (
               renderContent(message)
+            ) : agentMessage ? (
+              message.text && <MessageContent text={message.text} openFile={openFile} />
             ) : (
               <>
                 {message.text && <p className="user-text">{message.text}</p>}
@@ -410,10 +412,13 @@ const MessageItem = memo(function MessageItem({
                 )}
               </>
             )}
+            {agentMessage && !agentMessage.contentComplete && (
+              <p role="status">消息正文暂不可完整读取。</p>
+            )}
           </div>
         ) : renderContent ? (
           renderContent(message)
-        ) : message.role === 'assistant' || agentResult || agentMessage ? (
+        ) : message.role === 'assistant' || agentResult ? (
           message.text && (
             <MessageContent
               text={message.text}
@@ -440,9 +445,6 @@ const MessageItem = memo(function MessageItem({
         )}
       </CodeCopyEligibilityContext.Provider>
       {agentResult && !agentResult.contentComplete && <p role="status">消息正文未完整展示。</p>}
-      {agentMessage && !agentMessage.contentComplete && (
-        <p role="status">消息正文暂不可完整读取。</p>
-      )}
       {responding && !showMetadata && (
         <small className="response-status" role="status">
           <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">

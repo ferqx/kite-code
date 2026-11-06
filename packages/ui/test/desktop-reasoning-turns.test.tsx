@@ -374,7 +374,7 @@ test('only exact Turn guidance joins the process; first input and failed or unkn
   expect(onlyGuidance.document.querySelector('.message.user:not([data-input-kind])')).toBeNull();
 });
 
-test('two interleaved steers stay in one process from local sending through persistence, completion and cold expansion with exact copy bodies', async () => {
+test('interleaved steers and child mail share input bubbles in one process through persistence, completion and cold expansion with exact copy boundaries', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -431,6 +431,21 @@ test('two interleaved steers stay in one process from local sending through pers
       { id: 'before', turnId: 'run', role: 'assistant', text: '模型前段', settled: true },
       steerOne,
       tool('tool-a', '工具A'),
+      {
+        id: 'saved-agent-mail',
+        turnId: 'run',
+        role: 'system',
+        systemKind: 'agent_message',
+        text: '**子消息完整正文**\n\n邮件末行 CHILD',
+        settled: true,
+        agentMessage: {
+          messageId: 'original-agent-mail',
+          sourceSessionId: 'child-session',
+          sourceExecutionId: 'mail-tool',
+          name: '线索检索',
+          contentComplete: true,
+        },
+      },
       { id: 'middle', turnId: 'run', role: 'assistant', text: '模型中段', settled: true },
       guide('saved-steer-two', secondBody),
       tool('tool-b', '工具B'),
@@ -481,12 +496,34 @@ test('two interleaved steers stay in one process from local sending through pers
     expect(steers[0]!.querySelector('.typeset-chat strong')!.textContent).toBe('引导一完整正文');
     expect(steers[0]!.textContent).toContain('最后一行 ONE');
     expect(steers[1]!.textContent).toContain('末尾 TWO');
+    const mail = host.querySelector('[data-agent-message-id="original-agent-mail"]')!;
+    expect(mail.closest('.agent-turn-process-messages')).not.toBeNull();
+    expect(mail.classList.contains('user')).toBe(false);
+    expect(mail.classList.contains('agent-result')).toBe(false);
+    expect(mail.querySelectorAll('.user-message-body')).toHaveLength(1);
+    expect(mail.querySelector('.user-message-body > .message-label')!.textContent).toBe(
+      '线索检索 Agent 发送',
+    );
+    expect(mail.querySelector('.typeset-chat strong')!.textContent).toBe('子消息完整正文');
+    expect(mail.textContent).toContain('邮件末行 CHILD');
+    expect(host.querySelectorAll('[data-agent-message-id="original-agent-mail"]')).toHaveLength(1);
+    expect(mail.querySelectorAll('.message-meta,.message-copy,button,input')).toHaveLength(0);
+    for (const input of [host.querySelector('[data-message-id="first"]')!, ...steers])
+      expect(input.querySelectorAll('.user-message-body')).toHaveLength(1);
     const process = host.querySelector('.agent-turn-process-messages')!;
     expect(process.querySelectorAll('.message.assistant .message-meta')).toHaveLength(0);
     expect(host.querySelector('[data-message-id="first"] .message-meta')).not.toBeNull();
     expect(steers[1]!.querySelector('.message-meta')).not.toBeNull();
     if (finished) expect(host.querySelector('.agent-turn-final .message-meta')).not.toBeNull();
-    const expected = ['模型前段', '引导一完整正文', '工具A', '模型中段', '引导二完整正文', '工具B'];
+    const expected = [
+      '模型前段',
+      '引导一完整正文',
+      '工具A',
+      '子消息完整正文',
+      '模型中段',
+      '引导二完整正文',
+      '工具B',
+    ];
     const positions = expected.map((text) => process.textContent!.indexOf(text));
     expect(positions.every((value) => value >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));

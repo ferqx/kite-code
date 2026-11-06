@@ -23,6 +23,7 @@ import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 
+// Retain the existing selector; current execution proves pending without a child wait.
 const id = 'R08-idle-parent-one-real-30000ms-question-observation-pending' as const;
 export type LiveIdleQuestionCaseId = typeof id;
 interface Options {
@@ -81,7 +82,7 @@ class Boundary extends Error {
     this.point = point;
   }
 }
-/** Idle parent question via original Task parent target and genuine finite observation timer. */
+/** Idle parent question via queue acceptance and an immediate honest pending result. */
 export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Result[] }> {
   if (options.caseIds && !options.caseIds.includes(id)) return { cases: [] };
   if (
@@ -117,8 +118,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
     storeClosed = false,
     filesClosed = false,
     heldRead: { sessionId: string; runId: string; executionId: string } | undefined,
-    parentInitialModelCount = 0,
-    openFiniteWaits = 0;
+    parentInitialModelCount = 0;
   const reads: {
     sessionId: string;
     runId: string;
@@ -133,22 +133,8 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
     executionId: string;
     input: Json;
     result: Json;
-  }[] = [];
-  const observations: {
-    sessionId: string;
-    runId: string | null;
-    executionId: string;
-    input: Json;
-    result?: Json;
-    startedEpochMs: number;
-    elapsedMs?: number;
-    completed: boolean;
-    failure?: 'original_Task_observation_failed' | 'observation_aborted';
-    rootIdleBefore: boolean;
-    rootIdleAfter?: boolean;
-    questionSavedBeforeWait: boolean;
-    rootModelsBefore: number;
-    rootModelsAfter?: number;
+    rootIdleAfterQueue: boolean;
+    rootModelsAfterQueue: number;
   }[] = [];
   const streams = new Map<string, { finish: boolean; eof: boolean }>();
   const assert = (value: unknown, point: string) => {
@@ -221,7 +207,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
           id: 'worker',
           configurationId: 'worker',
           description:
-            'Inspect missing human choice, one bounded parent observation, then truthful business-pending result.',
+            'Inspect missing human choice, queue the complete parent question, then return a truthful business-pending result without waiting for acknowledgment.',
         },
       ],
     });
@@ -238,61 +224,20 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
         (tool): ToolDefinition => ({
           ...tool,
           async execute(input, context) {
-            if (tool.id === 'task.events' && context.sessionId !== 'root') {
-              const priorMessage = messages.find(
-                (message) => message.sessionId === context.sessionId,
-              );
-              const savedQuestion = priorMessage
-                ? await owned.getExecution(priorMessage.executionId)
-                : null;
-              const before = await owned.getView('root'),
-                start = performance.now();
-              const observation = {
-                sessionId: context.sessionId,
-                runId: context.runId,
-                executionId: context.executionId,
-                input: structuredClone(input),
-                startedEpochMs: Date.now(),
-                completed: false,
-                rootIdleBefore: before.runs.every((run) => !run.isActive),
-                questionSavedBeforeWait: savedQuestion?.status === 'succeeded',
-                rootModelsBefore: before.executions.filter((row) => row.kind === 'model').length,
-              } as (typeof observations)[number];
-              observations.push(observation);
-              openFiniteWaits++;
-              try {
-                const result = await tool.execute(input, context);
-                observation.elapsedMs = performance.now() - start;
-                observation.result = structuredClone(result) as unknown as Json;
-                const after = await owned.getView('root');
-                observation.rootIdleAfter = after.runs.every((run) => !run.isActive);
-                observation.rootModelsAfter = after.executions.filter(
-                  (row) => row.kind === 'model',
-                ).length;
-                // Publish completion only after both original observation and
-                // post-observation facts are ready. No await follows this write;
-                // the synchronous finally releases its finite-wait count first.
-                observation.completed = true;
-                return result;
-              } catch (error) {
-                observation.failure =
-                  options.signal.aborted || context.signal.aborted
-                    ? 'observation_aborted'
-                    : 'original_Task_observation_failed';
-                throw error;
-              } finally {
-                openFiniteWaits--;
-              }
-            }
             const result = await tool.execute(input, context);
-            if (tool.id === 'task.message')
+            if (tool.id === 'task.message') {
+              const afterQueue = await owned.getView('root');
               messages.push({
                 sessionId: context.sessionId,
                 runId: context.runId,
                 executionId: context.executionId,
                 input: structuredClone(input),
                 result: structuredClone(result) as unknown as Json,
+                rootIdleAfterQueue: afterQueue.runs.every((run) => !run.isActive),
+                rootModelsAfterQueue: afterQueue.executions.filter((row) => row.kind === 'model')
+                  .length,
               });
+            }
             return result;
           },
         }),
@@ -320,7 +265,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       },
     };
     const rootToolIds = [...fileTools.map((tool) => tool.id), ...visible.map((tool) => tool.id)],
-      childToolIds = [...fileTools.map((tool) => tool.id), 'task.message', 'task.events'];
+      childToolIds = [...fileTools.map((tool) => tool.id), 'task.message'];
     const binding = (): RunConfiguration => ({
       model,
       modelId: options.modelId,
@@ -397,10 +342,10 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       commandId: 'create',
       sessionId: 'root',
       workspaceId: 'w',
-      title: 'Idle parent finite question',
+      title: 'Idle parent pending question',
     });
     const childPrompt =
-      'Read requirements.txt completely exactly once using read_file. The content may identify a missing human color choice. If missing, send EXACTLY ONE send_agent_message with target:"parent" and full question asking Blue or Green, including the complete source nonce read from the file. Then invoke wait_agent_events EXACTLY ONCE with wait_ms:30000 and after_seq:"0". This is a finite thirty-second real observation, never omit/null wait_ms, never poll or repeat. If it times out without a genuine human answer, finish this ordinary turn with BUSINESS_PENDING, the EXACT full message question verbatim, the actual source nonce, completed inspection and the unfinished color edit. Technical end is not business completion. Do not choose a color, edit/write files, delegate, cancel, follow up or issue another wait. Do not invent human approval or response.';
+      'Read requirements.txt completely exactly once using read_file. The content may identify a missing human color choice. If missing, send EXACTLY ONE send_agent_message with target:"parent" and full question asking Blue or Green, including the complete source nonce read from the file. After the tool confirms accepted:true and delivery:"queued", immediately finish this ordinary turn with BUSINESS_PENDING, the EXACT full message question verbatim, the actual source nonce, completed inspection and the unfinished color edit. Queue acceptance is not recipient receipt, reading or a human answer. Do not wait for an additional acknowledgment or call wait_agent_events. Technical end is not business completion. Do not choose a color, edit/write files, delegate, cancel, follow up or wait. Do not invent human approval or response.';
     await live.startRun('root', {
       expectedStoreId,
       commandId: 'A',
@@ -434,8 +379,8 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
     };
     materialGate.release();
     await until(
-      async () => (messages.length === 1 && observations.length === 1 ? true : undefined),
-      'real_one_parent_question_and_explicit_30s_observation_not_reached',
+      async () => (messages.length === 1 ? true : undefined),
+      'real_one_parent_question_queue_acceptance_not_reached',
     );
     branch(reads.length === 1, 'one_actual_original_requirements_read_not_reached');
     let completeMaterial: Record<string, Json> = {};
@@ -449,11 +394,6 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
         object(completeMaterial.baseline).hash === hash(Buffer.from(requirements)) &&
         object(completeMaterial.baseline).size === Buffer.byteLength(requirements),
       'actual_Files_complete_requirements_bytes_and_baseline_after_parent_idle',
-    );
-    branch(
-      object(observations[0]!.input).waitMs === 30000 &&
-        object(observations[0]!.input).afterSeq === '0',
-      'Model_did_not_generate_exact_finite_30000ms_observation_input',
     );
     const sent = messages[0]!;
     branch(
@@ -500,42 +440,14 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
     assert(
       mailBody === question &&
         mail!.targetRunId === null &&
-        (await owned.getView('root')).runs.every((run) => !run.isActive) &&
+        sent.rootIdleAfterQueue &&
+        sent.rootModelsAfterQueue === parentInitialModelCount &&
         readFileSync(join(workspace, 'settings.ini'), 'utf8') === initial,
       'actual_full_question_queued_to_idle_parent_without_wakeup_or_color_effect',
     );
-    await until(async () => {
-      const observation = observations[0];
-      if (observation?.failure) throw new Boundary('branch_not_reached', observation.failure);
-      return observation?.completed ? true : undefined;
-    }, 'original_finite_30000ms_observation_did_not_complete');
-    const observation = observations[0]!;
-    let waitBody: Record<string, Json> = {};
-    try {
-      waitBody = object(JSON.parse(String(object(observation.result).content)));
-    } catch {
-      /* No fake timeout payload. */
-    }
-    branch(
-      observations.length === 1 &&
-        object(observation.input).waitMs === 30000 &&
-        object(observation.input).afterSeq === '0' &&
-        waitBody.reason === 'timeout' &&
-        Array.isArray(waitBody.events) &&
-        waitBody.events.length === 0,
-      'actual_Model_explicit_one_30000ms_timeout_branch_not_reached',
-    );
     assert(
-      observation.elapsedMs !== undefined &&
-        observation.elapsedMs >= 29_900 &&
-        observation.elapsedMs < 90_000 &&
-        observation.questionSavedBeforeWait &&
-        observation.rootIdleBefore &&
-        observation.rootIdleAfter &&
-        observation.rootModelsBefore === parentInitialModelCount &&
-        observation.rootModelsAfter === parentInitialModelCount &&
-        openFiniteWaits === 0,
-      'real_30s_Task_timer_no_extra_parent_Model_no_Model_response_hold',
+      sent.rootIdleAfterQueue && sent.rootModelsAfterQueue === parentInitialModelCount,
+      'queue_acknowledgment_needs_no_child_wait_or_extra_parent_Model',
     );
     const final = await until(async () => {
       const rootView = await owned.getView('root'),
@@ -593,13 +505,12 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       final.child.runs.length === 1 &&
         final.child.runs[0]!.id === held.runId &&
         final.child.runs[0]!.status === 'completed' &&
-        final.child.executions.filter((row) => row.kind === 'tool').length === 3 &&
+        final.child.executions.filter((row) => row.kind === 'tool').length === 2 &&
         final.child.executions.filter((row) => row.definitionId === 'files.read').length === 1 &&
         final.child.executions.filter((row) => row.definitionId === 'task.message').length === 1 &&
-        final.child.executions.filter((row) => row.definitionId === 'task.events').length === 1 &&
-        messages.length === 1 &&
-        observations.length === 1,
-      'one_original_child_Run_three_real_Tools_no_infinite_wait_or_guessed_edit',
+        final.child.executions.filter((row) => row.definitionId === 'task.events').length === 0 &&
+        messages.length === 1,
+      'one_original_child_Run_read_and_message_only_no_wait_or_guessed_edit',
     );
     const source = final.carrier.resultAcceptance!,
       successor = final.rootView.runs.find((run) => run.id === source.runId);
@@ -657,7 +568,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
     let checked = 0,
       completeReadPrepared = false,
       completeSourcePrepared = false,
-      timeoutPrepared = false;
+      queueAcknowledgmentPrepared = false;
     const parentAnswers: string[] = [];
     const canonicalModelEvidence = [];
     for (const view of [final.rootView, final.child])
@@ -702,10 +613,14 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
                   JSON.stringify(String(object(reads[0]!.result).content)).slice(1, -1),
                 )),
           );
-          timeoutPrepared ||= saved.request.messages.some(
+          assert(
+            !saved.request.tools.some((tool) => tool.id === 'wait_agent_events'),
+            'actual_child_Model_catalogue_excludes_event_wait',
+          );
+          queueAcknowledgmentPrepared ||= saved.request.messages.some(
             (message) =>
-              message.sourceIds?.includes(observation.executionId) &&
-              message.content.includes('timeout'),
+              message.sourceIds?.includes(sent.executionId) &&
+              message.content === String(object(sent.result).content),
           );
         }
         if (row.sessionId === 'root' && row.runId === source.runId) {
@@ -735,7 +650,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       }
     assert(
       completeReadPrepared &&
-        timeoutPrepared &&
+        queueAcknowledgmentPrepared &&
         completeSourcePrepared &&
         parentAnswers.some(
           (answer) =>
@@ -744,9 +659,9 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
             /Blue/.test(answer) &&
             /Green/.test(answer),
         ),
-      'real_child_read_timeout_and_parent_complete_pending_answer_prepared',
+      'real_child_read_queue_ack_and_parent_complete_pending_answer_prepared',
     );
-    for (const item of [reads[0]!, sent, { ...observation, result: observation.result! }]) {
+    for (const item of [reads[0]!, sent]) {
       const saved = await owned.getExecution(item.executionId);
       assert(
         saved?.status === 'succeeded' &&
@@ -757,7 +672,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
           saved.resultRevision === '1' &&
           isDeepStrictEqual(saved.input, item.input) &&
           isDeepStrictEqual(saved.result, item.result),
-        `exact_original_question_Timer_read_input_result_scope_${hash(item.executionId).slice(0, 12)}`,
+        `exact_original_question_read_input_result_scope_${hash(item.executionId).slice(0, 12)}`,
       );
     }
     const before = {
@@ -770,8 +685,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       isDeepStrictEqual(await live.getExecution(final.carrier.id), publicCarrier) &&
         isDeepStrictEqual(await owned.getExecution(final.carrier.id), before.carrier) &&
         (await owned.getMetadata()).lastChangeCursor === before.cursor &&
-        options.requests().length === before.requests &&
-        openFiniteWaits === 0,
+        options.requests().length === before.requests,
       'repeat_pending_result_read_zero_Timer_Model_Source_consumption_or_replay',
     );
     assert(
@@ -790,9 +704,9 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       successorRunIdentitySha256: hash(successor!.id),
       readResultSha256: digest(reads[0]!.result),
       questionToolResultSha256: digest(sent.result),
-      waitToolInputSha256: digest(observation.input),
-      waitToolResultSha256: digest(observation.result),
-      observedWaitMs: observation.elapsedMs,
+      childWaitExecutions: 0,
+      parentIdleAtQuestionQueue: sent.rootIdleAfterQueue,
+      parentModelsAtQuestionQueue: sent.rootModelsAfterQueue,
       actualParentOutputSha256: parentAnswers.map(hash),
       settingsBytesSha256: hash(Buffer.from(initial)),
       modelInputsChecked: checked,
@@ -856,22 +770,8 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       } catch {
         closed = false;
       }
-    stages.observedFiniteWaits = observations.map((observation) => ({
-      sessionIdentitySha256: hash(observation.sessionId),
-      executionIdentitySha256: hash(observation.executionId),
-      inputSha256: digest(observation.input),
-      resultSha256: observation.result ? digest(observation.result) : null,
-      startedEpochMs: observation.startedEpochMs,
-      elapsedMs: observation.elapsedMs,
-      completed: observation.completed,
-      failure: observation.failure,
-      rootIdleBefore: observation.rootIdleBefore,
-      rootIdleAfter: observation.rootIdleAfter,
-      questionSavedBeforeWait: observation.questionSavedBeforeWait,
-      rootModelsBefore: observation.rootModelsBefore,
-      rootModelsAfter: observation.rootModelsAfter,
-    }));
-    checks.resourcesClosed = closed && openFiniteWaits === 0;
+    stages.observedFiniteWaits = [];
+    checks.resourcesClosed = closed;
     if (!checks.resourcesClosed) {
       status = 'failed';
       reason = 'cleanup_failed';
@@ -908,7 +808,7 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
         semanticReviewRequired: true,
         coverage: [
           'real_parent_ordinary_idle_before_child_actual_requirements_read',
-          'actual_supported_parent_message_one_real_30000ms_Task_timeout_no_Model_hold',
+          'actual_supported_parent_message_queue_ack_then_pending_without_child_wait',
           'technical_child_success_business_pending_original_Source_one_parent_successor_zero_color_effect',
           'owned_allow_real_Files_Task_Model_saved_inputs_EOF_and_closed_Timer_resources',
           'not_contract73_attached_child_Job_unknown_cleanup_or_Blue_followup_compression_default_UI_qualification',

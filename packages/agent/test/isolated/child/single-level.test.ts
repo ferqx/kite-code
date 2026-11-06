@@ -7,6 +7,7 @@ import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/a
 import type { Extension, OperationRef } from '../../../src/extensions';
 import { createTaskExtension } from '../../../src/extensions/task';
 import { isChildPreparationFailure } from '../../../src/extensions/task/preparation-failure';
+import { isRootAgentObservationTaskTool } from '../../../src/extensions/task/roles';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import { AgentError } from '../../../src/storage';
@@ -16,6 +17,22 @@ const finish: ModelEvent = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
+
+test('root-only Task observation matches the exact builtin identity', () => {
+  expect(
+    isRootAgentObservationTaskTool({
+      extensionId: 'builtin.task',
+      id: 'task.events',
+      version: '1',
+    }),
+  ).toBe(true);
+  for (const binding of [
+    { extensionId: 'custom.task', id: 'task.events', version: '1' },
+    { extensionId: 'builtin.task', id: 'task.events', version: '2' },
+    { extensionId: 'builtin.task', id: 'task.message', version: '1' },
+  ])
+    expect(isRootAgentObservationTaskTool(binding)).toBe(false);
+});
 
 for (const { dynamic, builtin } of [
   { dynamic: false, builtin: true },
@@ -29,6 +46,15 @@ for (const { dynamic, builtin } of [
     const refs: OperationRef[] = [];
     const rejected: { code: string; trusted: boolean }[] = [];
     const childDirectories: string[][] = [];
+    const parentDirectories: string[][] = [];
+    const eventQueries: string[] = [];
+    const forcedWaits: { before: number; after: number; result: unknown }[] = [];
+    const genericWaits: string[] = [];
+    const listAgentEvents = store.listAgentEvents.bind(store);
+    store.listAgentEvents = async (input) => {
+      eventQueries.push(input.sessionId);
+      return listAgentEvents(input);
+    };
     const worked: string[] = [];
     let rootResolutions = 0;
     let nestedResolutions = 0;
@@ -64,12 +90,17 @@ for (const { dynamic, builtin } of [
         }
         childDirectories.push(request.tools.map((tool) => tool.id));
         const results = request.messages.filter((message) => message.role === 'tool');
-        if (results.length < 2) {
+        if (results.length < (builtin ? 3 : 2)) {
           yield {
             type: 'tool_call',
             id: `child-step-${results.length}`,
-            name: results.length ? 'fixture.work' : 'fixture.try_nested',
-            arguments: '{}',
+            name:
+              results.length === 2
+                ? 'wait_agent_events'
+                : results.length
+                  ? 'fixture.work'
+                  : 'fixture.try_nested',
+            arguments: results.length === 2 ? '{"wait_ms":0}' : '{}',
           };
           yield { ...finish, reason: 'tool_calls' };
         } else yield finish;
@@ -142,6 +173,33 @@ for (const { dynamic, builtin } of [
           description: 'Continue ordinary child work after a failed tool.',
           inputSchema: { type: 'object', additionalProperties: false },
           async execute(_input, context) {
+            // Third-party extensions retain their ordinary observation API.
+            await context.operations.waitAgentEvents!({ waitMs: 0 });
+            genericWaits.push(context.sessionId);
+            if (builtin) {
+              const before = eventQueries.filter(
+                (sessionId) => sessionId === context.sessionId,
+              ).length;
+              // Bypass the Model catalogue using a real runless Tool operation.
+              const ref = await context.operations.ensure({
+                key: 'force-builtin-events',
+                request: {
+                  kind: 'tool',
+                  definitionId: 'task.events',
+                  definitionVersion: '1',
+                  input: { waitMs: 0 },
+                },
+              });
+              const result = await context.operations.wait(ref, {
+                signal: context.signal,
+                timeoutMs: 3000,
+              });
+              forcedWaits.push({
+                before,
+                after: eventQueries.filter((sessionId) => sessionId === context.sessionId).length,
+                result: result.result,
+              });
+            }
             worked.push(context.sessionId);
             return { outcome: 'succeeded', content: 'Original assigned work continued.' };
           },
@@ -149,6 +207,19 @@ for (const { dynamic, builtin } of [
       ],
     };
     const parent = createFixedModel([
+      ...(builtin
+        ? [
+            [
+              {
+                type: 'tool_call',
+                id: 'root-observe',
+                name: 'wait_agent_events',
+                arguments: '{"wait_ms":0}',
+              },
+              { ...finish, reason: 'tool_calls' },
+            ] as ModelEvent[],
+          ]
+        : []),
       [
         { type: 'tool_call', id: 'root-delegate', name: 'fixture.delegate', arguments: '{}' },
         { ...finish, reason: 'tool_calls' },
@@ -157,7 +228,12 @@ for (const { dynamic, builtin } of [
     ]);
     const runtime = createRuntime({
       store,
-      model: parent,
+      model: {
+        async *stream(request, context) {
+          parentDirectories.push(request.tools.map((tool) => tool.id));
+          yield* parent.stream(request, context);
+        },
+      },
       modelId: 'parent',
       modelConcurrency: 2,
       maxConcurrentSubagents: 3,
@@ -169,7 +245,12 @@ for (const { dynamic, builtin } of [
           version: '1',
           model: child,
           modelId: 'child',
-          toolIds: ['task.spawn', 'fixture.try_nested', 'fixture.work'],
+          toolIds: [
+            'task.spawn',
+            ...(builtin ? ['task.events'] : []),
+            'fixture.try_nested',
+            'fixture.work',
+          ],
           snapshot: {},
         },
       ],
@@ -181,7 +262,12 @@ for (const { dynamic, builtin } of [
               return {
                 model: child,
                 modelId: 'child',
-                toolIds: ['task.spawn', 'fixture.try_nested', 'fixture.work'],
+                toolIds: [
+                  'task.spawn',
+                  ...(builtin ? ['task.events'] : []),
+                  'fixture.try_nested',
+                  'fixture.work',
+                ],
                 snapshot: {},
               };
             },
@@ -221,12 +307,27 @@ for (const { dynamic, builtin } of [
       expect(nextLevelModels).toBe(0);
       if (dynamic) expect(rootResolutions).toBeGreaterThanOrEqual(2);
       expect(new Set(worked)).toEqual(new Set(refs.map((ref) => ref.childSessionId!)));
-      expect(childDirectories.length).toBe(6);
+      expect(childDirectories.length).toBe(builtin ? 8 : 6);
       for (const tools of childDirectories) expect(tools.includes('spawn_agent')).toBe(!builtin);
+      for (const tools of childDirectories) expect(tools).not.toContain('wait_agent_events');
+      expect(new Set(genericWaits)).toEqual(new Set(refs.map((ref) => ref.childSessionId!)));
+      if (builtin) {
+        for (const tools of parentDirectories) expect(tools).toContain('wait_agent_events');
+        expect(eventQueries).toContain('s');
+        expect(forcedWaits).toHaveLength(2);
+        for (const wait of forcedWaits) {
+          expect(wait.after).toBe(wait.before);
+          expect(wait.result).toMatchObject({ outcome: 'failed' });
+          expect(JSON.parse((wait.result as { content: string }).content)).toMatchObject({
+            error: { code: 'permission_denied' },
+          });
+        }
+      }
       for (const ref of refs) {
         const original = (await store.getExecution(ref.executionId!))!;
         const frozen = original.childConfiguration!.snapshot as { tools: { id: string }[] };
         expect(frozen.tools.some((tool) => tool.id === 'task.spawn')).toBe(true);
+        expect(frozen.tools.some((tool) => tool.id === 'task.events')).toBe(builtin);
         const executions = await store.listExecutions(ref.childSessionId!);
         expect(executions.filter((execution) => execution.childSessionId)).toEqual([]);
         expect(

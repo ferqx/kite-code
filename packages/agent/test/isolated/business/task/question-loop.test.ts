@@ -31,7 +31,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 }
 
 for (const carried of [true, false])
-  test(`idle parent question ${carried ? 'carried by result' : 'adopted as original mail'} closes through a finite pending result, human clarification and stable-child follow-up without observers`, async () => {
+  test(`idle parent question ${carried ? 'carried by result' : 'adopted as original mail'} returns pending without child waiting, then closes through human clarification and stable-child follow-up without observers`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-question-loop-')));
     const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
     const store = await openSqliteStore(profile),
@@ -91,7 +91,7 @@ for (const carried of [true, false])
           case 0:
             events = call('spawn_agent', {
               prompt:
-                'Inspect inputs, then ask parent which palette is required. If no answer arrives after one finite wait, report exactly what remains undecided.',
+                'Inspect inputs, then ask parent which palette is required. After queue acceptance, return the complete pending question and completed/unfinished facts without waiting for an acknowledgment.',
             });
             break;
           case 1:
@@ -160,6 +160,7 @@ for (const carried of [true, false])
           return;
         }
         childRequests.push(structuredClone(request));
+        expect(request.tools.map((tool) => tool.id)).not.toContain('wait_agent_events');
         const tool = request.messages.filter((message) => message.role === 'tool').at(-1);
         let events: ModelEvent[];
         switch (childCalls++) {
@@ -168,12 +169,8 @@ for (const carried of [true, false])
             events = call('send_agent_message', { target: 'parent', content: question });
             break;
           case 1:
-            expect(JSON.parse(tool!.content)).toMatchObject({ accepted: true, delivery: 'queued' });
-            events = call('wait_agent_events', { wait_ms: 25 });
-            break;
-          case 2:
             if (carried) expect(JSON.stringify(request.messages)).toContain(summary);
-            else expect(JSON.parse(tool!.content)).toMatchObject({ reason: 'timeout' });
+            else expect(JSON.parse(tool!.content)).toEqual({ accepted: true, delivery: 'queued' });
             events = [{ type: 'text_delta', text: pending }, finish];
             break;
           default:
@@ -209,7 +206,9 @@ for (const carried of [true, false])
             carried &&
             !compressionTriggered &&
             input.session.parentSessionId !== null &&
-            input.messages.some((message) => message.content.includes('"reason":"timeout"'))
+            input.messages.some(
+              (message) => message.content === '{"accepted":true,"delivery":"queued"}',
+            )
           );
         },
         async prepare(input) {
@@ -241,7 +240,9 @@ for (const carried of [true, false])
           version: '1',
           model: child,
           modelId: 'child',
-          toolIds: task.tools!.filter((tool) => !tool.model?.hidden).map((tool) => tool.id),
+          toolIds: task
+            .tools!.filter((tool) => !tool.model?.hidden && tool.id !== 'task.events')
+            .map((tool) => tool.id),
           snapshot: {},
         },
       ],
@@ -327,8 +328,16 @@ for (const carried of [true, false])
       const waits = beforeAnswer.executions.filter(
         (execution) => execution.definitionId === 'task.events',
       );
-      expect(waits).toHaveLength(1);
-      expect(waits[0]!.input).toMatchObject({ waitMs: 25 });
+      expect(waits).toHaveLength(0);
+      const sent = beforeAnswer.executions.filter(
+        (execution) => execution.definitionId === 'task.message',
+      );
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.result).toEqual({
+        outcome: 'succeeded',
+        content: '{"accepted":true,"delivery":"queued"}',
+        details: { accepted: true, delivery: 'queued' },
+      });
       const mail = (await store.listAgentMessages({ ...identity })).items[0]!;
       expect(mail.targetRunId).toBeNull();
       expect(mail.receivedMessageId === null).toBe(carried);

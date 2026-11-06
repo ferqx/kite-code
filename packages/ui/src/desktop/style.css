@@ -846,7 +846,7 @@ body {
     overflow-wrap: anywhere;
     min-width: 0;
   }
-  .message:is(.user, .agent-result) {
+  .message:is(.user, .agent-result, .agent-message) {
     position: relative;
     margin-left: auto;
     background: var(--accent);
@@ -855,10 +855,10 @@ body {
     max-width: 85%;
     width: fit-content;
   }
-  .message:is(.user, .agent-result) {
+  .message:is(.user, .agent-result, .agent-message) {
     margin-bottom: 32px;
   }
-  .message.user {
+  .message:is(.user, .agent-message) {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -977,6 +977,12 @@ body {
     font-size: 12px;
     color: var(--muted-foreground);
     margin-bottom: 8px;
+  }
+  .message.agent-message .message-label {
+    margin-top: 0;
+  }
+  .message.agent-message .user-message-body > [role="status"] {
+    margin: 8px 0 0;
   }
   .message-status {
     color: var(--muted-foreground);
@@ -1888,7 +1894,7 @@ body {
     .conversation-footer {
       padding: 0 12px 12px;
     }
-    .message:is(.user, .agent-result) {
+    .message:is(.user, .agent-result, .agent-message) {
       max-width: 95%;
     }
     .hint {
@@ -3435,7 +3441,8 @@ body {
 .kite-client .agent-turn-process-messages > * + * {
   margin-top: var(--conversation-block-gap);
 }
-.kite-client .agent-turn-process-messages .message.assistant {
+.kite-client .agent-turn-process-messages .message.assistant,
+.kite-client .agent-turn-process-messages .message.agent-message:not(:has(> .message-meta)) {
   margin-block: 0;
 }
 .kite-client .agent-turn:has(> .agent-turn-final) .agent-turn-process-messages,

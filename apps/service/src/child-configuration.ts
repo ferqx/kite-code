@@ -62,6 +62,7 @@ export interface ChildSelection {
 
 export function createChildConfiguration(options: {
   roles?: readonly ChildRole[];
+  resolveRole?(input: ChildInput, declared: ChildRole): ChildRole;
   resolve(input: ChildInput, selection: ChildSelection): Promise<RunConfiguration>;
 }): Pick<RuntimeOptions, 'childConfigurations' | 'resolveChildRunConfiguration'> {
   const roles = new Map<string, ChildRole>();
@@ -125,14 +126,36 @@ export function createChildConfiguration(options: {
     })),
     async resolveChildRunConfiguration(input) {
       input.signal.throwIfAborted();
-      const role = roles.get(input.configurationId);
-      if (!role) throw new AgentError('child_configuration_unavailable');
+      const declared = roles.get(input.configurationId);
+      if (!declared) throw new AgentError('child_configuration_unavailable');
+      const role = options.resolveRole?.(input, declared) ?? declared;
       const original = input.parentRun?.configuration;
       const parentModelId =
         original && typeof original === 'object' && !Array.isArray(original)
           ? original.modelId
           : undefined;
-      const modelId = role.modelId ?? parentModelId;
+      const saved = input.originalConfiguration?.snapshot;
+      const marker =
+        saved && typeof saved === 'object' && !Array.isArray(saved) ? saved.snapshot : undefined;
+      if (
+        input.originalConfiguration &&
+        (!saved ||
+          typeof saved !== 'object' ||
+          Array.isArray(saved) ||
+          !marker ||
+          typeof marker !== 'object' ||
+          Array.isArray(marker) ||
+          input.originalConfiguration.id !== role.id ||
+          input.originalConfiguration.version !== role.version ||
+          marker.roleId !== role.id ||
+          marker.roleVersion !== role.version ||
+          marker.roleModelId !== (role.modelId ?? null))
+      )
+        throw new AgentError('child_configuration_unavailable');
+      const modelId =
+        input.originalConfiguration && saved && typeof saved === 'object' && !Array.isArray(saved)
+          ? saved.modelId
+          : (role.modelId ?? parentModelId);
       if (typeof modelId !== 'string' || !modelId) throw new AgentError('child_model_unavailable');
       let selectedRole = role;
       if (role.toolPolicy) {
@@ -148,7 +171,7 @@ export function createChildConfiguration(options: {
           )
         )
           throw new AgentError('child_tool_source_unavailable');
-        const toolIds = parentTools
+        let toolIds = parentTools
           .filter(
             (tool) =>
               !isRootOnlyTaskTool(tool as Record<string, Json>) &&
@@ -157,6 +180,22 @@ export function createChildConfiguration(options: {
               (!role.toolIds || role.toolIds.includes((tool as { id: string }).id)),
           )
           .map((tool) => (tool as { id: string }).id);
+        if (
+          input.originalConfiguration &&
+          marker &&
+          typeof marker === 'object' &&
+          !Array.isArray(marker)
+        ) {
+          const frozenIds = marker.roleToolIds;
+          if (
+            !Array.isArray(frozenIds) ||
+            frozenIds.some((id) => typeof id !== 'string') ||
+            new Set(frozenIds).size !== frozenIds.length ||
+            frozenIds.some((id) => !toolIds.includes(id as string))
+          )
+            throw new AgentError('child_tool_unavailable');
+          toolIds = frozenIds as string[];
+        }
         selectedRole = Object.freeze({ ...role, toolIds: Object.freeze([...new Set(toolIds)]) });
       }
       const configuration = await options.resolve(input, {

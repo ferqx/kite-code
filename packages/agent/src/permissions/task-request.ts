@@ -1,13 +1,25 @@
 import { createHash } from 'node:crypto';
 import type { AuthorizationRequest, Json } from '../extensions';
-import { defaultTaskRoles, type TrustedTaskRole } from '../extensions/task/roles';
+import {
+  defaultTaskRoleId,
+  defaultTaskRoles,
+  type TrustedTaskRole,
+} from '../extensions/task/roles';
 import { canonicalJson } from '../json';
 import type { CapabilityDescription } from './index';
 
-/** Only the unchanged finite builtin role declarations qualify; custom names/overrides do not. */
-export function createDefaultTaskRequestClassifier(selectedRoles: readonly TrustedTaskRole[]) {
+/** Exact finite trusted builtins only; prior catalogues must be verified by the calling host. */
+export function createDefaultTaskRequestClassifier(
+  selectedRoles: readonly TrustedTaskRole[],
+  options: {
+    readonly trustedRoles?: readonly TrustedTaskRole[];
+    readonly defaultRole?: string;
+  } = {},
+) {
+  const trustedRoles = options.trustedRoles ?? defaultTaskRoles;
+  const defaultRole = options.defaultRole ?? defaultTaskRoleId;
   const roles = structuredClone(selectedRoles).filter((selected) =>
-    defaultTaskRoles.some(
+    trustedRoles.some(
       (trusted) =>
         canonicalJson(selected as unknown as Json) === canonicalJson(trusted as unknown as Json),
     ),
@@ -22,7 +34,7 @@ export function createDefaultTaskRequestClassifier(selectedRoles: readonly Trust
       !Array.isArray(input)
         ? typeof input.preset === 'string'
           ? input.preset
-          : 'worker'
+          : defaultRole
         : request.kind === 'job' && request.definitionId.startsWith('agent/')
           ? request.definitionId.slice('agent/'.length)
           : undefined;

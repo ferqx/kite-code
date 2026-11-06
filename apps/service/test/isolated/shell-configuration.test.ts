@@ -47,7 +47,7 @@ function endpoint(
   background = false,
   child = false,
   review?: 'approve_once' | 'reject' | 'ask_user',
-  childPreset?: 'explore' | 'plan' | 'review',
+  childPreset?: 'explore',
   reviewDelayMs = 0,
 ) {
   let actualCommand = command;
@@ -208,7 +208,7 @@ async function fixture(
     persistentPermissions?: boolean;
     hostBoundary?: boolean;
     child?: boolean;
-    childPreset?: 'explore' | 'plan' | 'review';
+    childPreset?: 'explore';
     codexHome?: 'missing' | 'present' | 'relative' | 'empty' | 'nul';
   } = {},
 ) {
@@ -553,7 +553,7 @@ nativeTest(
     const childJob = () =>
       until(async () => {
         const child = (await f.store.listExecutions('s'))
-          .filter((row) => row.childSessionId && row.definitionId === 'agent/worker')
+          .filter((row) => row.childSessionId && row.definitionId === 'agent/general')
           .at(-1);
         if (!child?.childSessionId) return undefined;
         const job = (await f.store.listExecutions(child.childSessionId)).find(
@@ -593,7 +593,7 @@ nativeTest(
         (await f.store.listExecutions('s')).filter(
           (row) =>
             row.rootWorkCommandId === 'grant-child' &&
-            ['task.spawn', 'agent/worker'].includes(row.definitionId),
+            ['task.spawn', 'agent/general'].includes(row.definitionId),
         ),
       ).toEqual([
         expect.objectContaining({
@@ -601,7 +601,7 @@ nativeTest(
           authorization: { dispatched: true },
         }),
         expect.objectContaining({
-          definitionId: 'agent/worker',
+          definitionId: 'agent/general',
           authorization: { dispatched: true },
         }),
       ]);
@@ -640,7 +640,7 @@ nativeTest(
         const view = await f.store.getView('s');
         const carrier = view.executions.find(
           (execution) =>
-            execution.definitionId === 'agent/worker' &&
+            execution.definitionId === 'agent/general' &&
             execution.rootWorkCommandId === 'grant-child',
         );
         if (carrier?.status !== 'succeeded' || view.runs.some((run) => run.isActive))
@@ -941,7 +941,7 @@ nativeTest(
         hostBoundary: true,
         persistentPermissions: true,
         child: true,
-        childPreset: 'review',
+        childPreset: 'explore',
         review: 'approve_once',
       });
       try {
@@ -951,7 +951,7 @@ nativeTest(
         await f.done();
         const carrier = await until(async () => {
           const child = (await f.store.listExecutions('s')).find(
-            (row) => row.definitionId === 'agent/review',
+            (row) => row.definitionId === 'agent/explore',
           );
           return child?.childSessionId && child.status === 'succeeded' ? child : undefined;
         });
@@ -1004,7 +1004,7 @@ nativeTest(
         hostBoundary: true,
         persistentPermissions: true,
         child: true,
-        childPreset: 'review',
+        childPreset: 'explore',
         review: 'reject',
       });
       try {
@@ -1017,7 +1017,7 @@ nativeTest(
         await f.done();
         const carrier = await until(async () => {
           const child = (await f.store.listExecutions('s')).find(
-            (row) => row.definitionId === 'agent/review',
+            (row) => row.definitionId === 'agent/explore',
           );
           return child?.childSessionId && child.status === 'succeeded' ? child : undefined;
         });

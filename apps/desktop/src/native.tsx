@@ -2897,6 +2897,7 @@ function NativeDesktopContent({
             bridge,
             key: JSON.stringify([state?.generation, directory?.storeId ?? selection?.storeId]),
           },
+          toolMessages.pendingMessageIds,
         );
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
@@ -3006,6 +3007,7 @@ function NativeDesktopContent({
     directory?.storeId,
     transcript.messages,
     toolMessages.entries,
+    toolMessages.pendingMessageIds,
     liveTools,
     pendingInputModels,
     inputDeliveries,

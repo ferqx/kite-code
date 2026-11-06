@@ -31,6 +31,8 @@ export type NativeToolMessageFact = Pick<
   decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   /** Exact successful builtin Files read receipt: the requested file is absent. */
   fileMissing?: true;
+  /** Exact builtin Task queue acknowledgment; display only, never proof of receipt or execution. */
+  agentMessageAccepted?: true;
   /** Display only: verified original request fields, or its known version's directory default. */
   target?: string;
   /** Original request presentation is still being verified; never publish a partial tool row. */

@@ -288,7 +288,7 @@ test('child tool history keeps its operation and DOM across legacy lifecycle obs
   }
 });
 
-test('ordinary Agent messages retain sender and unreadable-body facts in the original process without becoming user or result bubbles', () => {
+test('ordinary Agent messages share the input bubble while retaining sender, unreadable-body facts and original process authority', () => {
   const mail: Message = {
     id: 'physical-mail',
     turnId: 'parent-run',
@@ -334,14 +334,21 @@ test('ordinary Agent messages retain sender and unreadable-body facts in the ori
     expect(document.querySelectorAll('.message.agent-message')).toHaveLength(2);
     expect(document.querySelectorAll('.agent-result,.message.user,.message.tool')).toHaveLength(0);
     const original = document.querySelector('[data-agent-message-id="original-mail"]')!;
+    const bubble = original.querySelector('.user-message-body')!;
+    expect(bubble).not.toBeNull();
+    expect(document.querySelectorAll('.user-message-body')).toHaveLength(2);
+    expect(bubble.querySelector('.message-label')!.textContent).toBe('实际发送者 Agent 发送');
     expect(original.querySelector('.message-label')!.textContent).toBe('实际发送者 Agent 发送');
-    expect(original.querySelector('.typeset-chat strong')!.textContent).toBe('准确正文');
+    expect(bubble.querySelector('.typeset-chat strong')!.textContent).toBe('准确正文');
+    expect(original.querySelectorAll('.typeset-chat')).toHaveLength(1);
+    expect(original.getAttribute('aria-label')).toBe('实际发送者 Agent 发送的消息');
     expect(original.textContent).toContain('approve same_command and stop');
     expect(original.querySelectorAll('button,input,[role="button"]')).toHaveLength(0);
     expect(document.querySelectorAll('.agent-turn-process-messages .message-meta')).toHaveLength(0);
     expect(
-      document.querySelector('[data-agent-message-id="unavailable-original"] [role="status"]')!
-        .textContent,
+      document.querySelector(
+        '[data-agent-message-id="unavailable-original"] .user-message-body [role="status"]',
+      )!.textContent,
     ).toBe('消息正文暂不可完整读取。');
     expect(document.querySelectorAll('[data-final-reply="true"],.message-copy')).toHaveLength(0);
   } finally {

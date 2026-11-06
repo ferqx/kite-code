@@ -735,7 +735,6 @@ export function projectInkChild(
   if (!parent) return undefined;
   const args = inkToolArguments(parent, snapshot, loadedOutputs);
   if (!args) return undefined;
-  const role = typeof args.preset === 'string' ? args.preset : 'worker';
   const childViews = (
     snapshot as TuiSnapshot & { childViews?: readonly { executionId: string; view: SessionView }[] }
   ).childViews;
@@ -767,6 +766,14 @@ export function projectInkChild(
   const activeRuns = runMatches.filter((run) => run.isActive);
   const childRun =
     activeRuns.length === 1 ? activeRuns[0] : runMatches.length === 1 ? runMatches[0] : undefined;
+  const carrierRole = /^agent\/([A-Za-z0-9_.-]{1,128})$/.exec(execution.definitionId)?.[1];
+  const roleMarker = record(record(childRun?.configuration)?.snapshot)?.roleId;
+  const role =
+    carrierRole ??
+    (typeof roleMarker === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(roleMarker)
+      ? roleMarker
+      : undefined) ??
+    (typeof args.preset === 'string' ? args.preset : 'general');
   const childRunIds = new Set(runMatches.map((run) => run.id));
   const exactChildExecution = (item: Execution) =>
     childRunIds.size > 0 &&

@@ -320,6 +320,18 @@ export function nativeToolMessageFact({
     ) &&
     Object.keys(result).every((key) => ['outcome', 'content', 'details'].includes(key)) &&
     result.content === `File does not exist: ${JSON.stringify(call.path)}.`;
+  const agentMessageAccepted =
+    execution.definitionId === 'task.message' &&
+    execution.definitionVersion === '1' &&
+    execution.status === 'succeeded' &&
+    run?.id === execution.runId &&
+    run.sessionId === execution.sessionId &&
+    run.originStoreId === execution.originStoreId &&
+    registered.length === 1 &&
+    registered[0]?.extensionId === 'builtin.task' &&
+    isDeepStrictEqual(details, { accepted: true, delivery: 'queued' }) &&
+    Object.keys(result).every((key) => ['outcome', 'content', 'details'].includes(key)) &&
+    result.content === '{"accepted":true,"delivery":"queued"}';
   let shell = shellInput(execution, call, commandOffset);
   let shellResultVerified = false;
   if (shell && details) {
@@ -383,6 +395,7 @@ export function nativeToolMessageFact({
     ...(result.modelImages !== undefined ? { images: nativeToolImages(execution) } : {}),
     ...(decisionRefresh ? { decisionRefresh } : {}),
     ...(fileMissing ? { fileMissing: true } : {}),
+    ...(agentMessageAccepted ? { agentMessageAccepted: true } : {}),
     target: requestTarget,
     ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),
     ...(shell ? { shellInput: shell } : {}),

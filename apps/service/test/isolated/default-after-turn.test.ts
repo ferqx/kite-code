@@ -427,7 +427,7 @@ async function fixture(
               allowed: [
                 { kind: 'model', definitionId: 'parent', definitionVersion: '1' },
                 { kind: 'tool', definitionId: 'task.spawn', definitionVersion: '1' },
-                { kind: 'job', definitionId: 'agent/worker', definitionVersion: '1' },
+                { kind: 'job', definitionId: 'agent/general', definitionVersion: '1' },
                 ...(planning
                   ? ['planning.write', 'planning.review', 'planning.update'].map(
                       (definitionId) => ({
@@ -551,7 +551,7 @@ async function fixture(
       const original =
         request.definitionVersion === '1' &&
         ((request.kind === 'tool' && request.definitionId === 'task.spawn') ||
-          (request.kind === 'job' && request.definitionId === 'agent/worker'));
+          (request.kind === 'job' && request.definitionId === 'agent/general'));
       if (!decision.allowed || !original) return decision;
       return {
         ...decision,
@@ -775,7 +775,7 @@ test('default factory honors an explicit human ceiling independently for origina
     await f.start();
     const tool = await f.approve('task.spawn');
     expect(f.childCalls).toBe(0);
-    const carrier = await f.approve('agent/worker');
+    const carrier = await f.approve('agent/general');
     expect(carrier.executionId).not.toBe(tool.executionId);
     await until(async () => (f.childCalls === 1 ? true : undefined));
     await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
@@ -821,7 +821,7 @@ test('trusted denied idle completion authority preserves ordinary child work wit
     try {
       await f.start();
       await f.approve('task.spawn');
-      await f.approve('agent/worker');
+      await f.approve('agent/general');
       await until(async () => (f.childCalls === 1 ? true : undefined));
       f.release();
       await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
@@ -843,7 +843,7 @@ test('default current policy/trust drift after parent completion defers original
     try {
       await f.start();
       await f.approve('task.spawn');
-      await f.approve('agent/worker');
+      await f.approve('agent/general');
       await until(async () => (f.childCalls === 1 ? true : undefined));
       await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
       f.drift(trusted);
@@ -888,7 +888,7 @@ test('default report final source digest rejects changed original Tool intent wh
   try {
     await f.start();
     const tool = await f.approve('task.spawn');
-    await f.approve('agent/worker');
+    await f.approve('agent/general');
     await until(async () => (f.childCalls === 1 ? true : undefined));
     await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
     const originalTool = (await f.store.getExecution(tool.executionId))!;
@@ -940,7 +940,7 @@ async function plannedReport(singleSlot: boolean, driftPlan = false, continued =
       answer: { kind: 'plan_review', decision: 'approve', mode: 'accept_edits' },
     });
     const task = await f.approve('task.spawn');
-    const carrier = await f.approve('agent/worker');
+    const carrier = await f.approve('agent/general');
     expect(carrier.executionId).not.toBe(task.executionId);
     await until(async () => (f.childCalls === 1 ? true : undefined));
     if (singleSlot) {

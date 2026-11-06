@@ -7,7 +7,7 @@
 | `spawn_agent` | `task.spawn` | 以 `prompt` 创建异步 child，可选 `task_name` 和可信 `preset` |
 | `send_agent_message` | `task.message` | 给直接 child 或 parent 排队消息，不自行开新轮 |
 | `follow_up_agent` | `task.follow_up` | 给 queued/running child 引导，或在 idle child 原 Session 开始明确新轮 |
-| `wait_agent_events` | `task.events` | 观察事件摘要和游标，不取消 child 或接纳结果 |
+| `wait_agent_events` | `task.events` | 仅主 Agent 观察自身邮箱的事件摘要和游标，不取消 child 或接纳结果 |
 | `list_agents` | `task.list` | 读取稳定协作者目录和完整来源，不改变执行或已读事实 |
 | `interrupt_agent` | `task.interrupt` | 请求取消首次受理选中的准确 carrier |
 
@@ -17,11 +17,21 @@
 
 `agent_id` 是稳定 child Session ID。同一协作者可以经历多轮工作；普通父轮次结束不取消已受理 child。每次 Tool invocation 派生受理身份，准确重试查询原持久回执，不重复创建工作或将迟到中断改投新轮。
 
-角色来自可信宿主注册；默认通用 child，preset 只列实际开放项。默认 worker/code 可执行工作，explore/plan/review 只读分析。[roles.ts](roles.ts)核准确 extension owner、ID 与版本；未知定义、同名自定义工具、未来版本和写入不能借角色名称取得资格。描述帮助选择，不替代冻结定义、父子权限和当前工具交集。
+角色来自可信宿主注册；新默认只有 `general`、`explore`，`preset` 省略或显式 `general` 等价，旧 `worker/code/plan/review` 不作为新默认目录别名。通用协作者的具体实现、测试、规划或审查职责由父任务正文说明；`explore` 保持只读任务指导与收缩工具集合。父子默认共享工作区，没有 fresh／fork 参数或新的任务模板。[roles.ts](roles.ts)核准确 extension owner、ID 与版本；未知定义、同名自定义工具、未来版本和写入不能借角色名称取得资格。描述帮助选择，不替代冻结定义、父子权限和当前工具交集。
 
 委派正文须保留完成子任务所需的准确目标、字段或标识符、内容转换、一次性效果与 fallback 条件；不能用“按用户要求”代替子模型未收到的正文。父级按原任务比对实际关键交付，已有原文和回执直接比较，只有影响结论的缺口才补读取。成功读到文件、child 正常结束或自报完成不等于内容满足要求；审批事实只在决定允许分支时核对，不为收尾机械追加历史读取或报告。
 
-三个文件检索工具已移除，分析角色通过准确的 `shell.execute@1`／`shell.launch@1` 查询。只读要求作为可信任务指导进入 explore／plan／review 的模型输入，并随原配置快照冻结；工具集合继续收窄，Shell 则继承父会话当前权限策略和沙箱。`cat`、复合命令和管道不因角色身份被固定命令表拒绝，仍按实际内容走普通权限链。只读角色不提供独立的 Shell 禁写／禁网保证，Full 下只读属于模型须遵循的任务约束。[默认角色回归](../../../../../apps/service/test/isolated/default-task-roles.test.ts)核工具交集，[指导输入回归](../../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核实际子模型输入，[Service 检索回归](../../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核继承的三模式执行。
+三个文件检索工具已移除，分析角色通过准确的 `shell.execute@1`／`shell.launch@1` 查询。只读要求作为可信任务指导进入 `explore` 的模型输入，并随原配置快照冻结；工具集合继续收窄，Shell 则继承父会话当前权限策略和沙箱。`cat`、复合命令和管道不因角色身份被固定命令表拒绝，仍按实际内容走普通权限链。只读角色不提供独立的 Shell 禁写／禁网保证，Full 下只读属于模型须遵循的任务约束。[默认角色回归](../../../../../apps/service/test/isolated/default-task-roles.test.ts)核工具交集，[指导输入回归](../../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核实际子模型输入，[Service 检索回归](../../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核继承的三模式执行。
+
+`general` 的模型工具来自父当前选中集合，继续去除根专属创建、邮箱等待和 `ask_user`。`explore` 在原准确只读绑定外增加 `builtin.task/task.message@1`、`builtin.shell/shell.stop@1`、`builtin.execution-evidence/execution_evidence.read@1`、`builtin.web/web_fetch@1`；每项仍需当前父集合及准确定义支持，不补 `task.list/follow_up/interrupt`，Skills 和 MCP 继承策略保持。消息成功入队即返回原回执，不再等待收件确认，也不自行续轮；子 Agent 的模型目录和实际内置调用入口均不开放 `task.events@1`，主 Agent 保留观察能力。静态绑定与旧冻结快照可保留原定义供身份核验，恢复不授予新的子等待调用。Shell 停止须核原句柄与真实终态，证据读取不重跑效果，网页继续受联网权限约束。
+
+[Service 历史目录](../../../../../apps/service/src/task-history.ts)只按可信原快照重建有限的旧 root 角色目录和 schema；旧 child 保留 role／Model／工具集合和原 Source，旧 `explore` 不因新绑定表扩权。普通新调用不能用参数伪造历史资格；Runtime 在恢复或原协作者续作时重读并核准确 carrier、Store、直接父子及根会话关系，再提供冻结原配置。无法重建明确失败，未知不重跑；旧身份可恢复不表示取得旧审批，当前模式、信任和准确定义资格仍检查。
+
+已完成 Model 的待执行工具批次恢复时，[Runtime](../../runtime.ts)仅对本次两个已知变更重建历史等价目录后进行整目录严格比较：准确内置消息工具的[旧完整说明](message-description.ts)，以及旧 child 目录中原有的准确 `task.events@1` 声明。原 Model 请求、Source、能力快照和指纹不改写；其他 owner、版本、schema 或说明变化仍拒绝。下一次新 Model 使用新目录，子等待调用仍由 Host 拒绝。[真实冷恢复回归](../../../test/isolated/recovery/child-message-resume.test.ts)核原 Model、审批与唯一效果，以及无关漂移拒绝。
+
+每 Run 的可信 `extensionOverrides` 使原 Task factory 与原快照一致，只允许替换已注册同 owner ID／版本／API major 的 Extension，保留全局顺序，拒绝重复或新 owner；不接收模型参数。Model、step 刷新、child 及恢复均使用实际替换对象，完整父子 Tool／Job 身份仍比较 description、schema、resources 等，不因 owner／版本相同而放宽。实现归[Runtime](../../runtime.ts)，[独立回归](../../../test/isolated/execution/run-extension-overrides.test.ts)核真实目录、执行及越父零效果。
+
+旧协作者的明确 follow-up 产生新的 MCP 因果 lineage，仍须由真实新父 Run／Execution 派生；仅该新轮比较时排除顶层 `inheritance`，原选中 server、scope、scopeDigest 和 readSet 必须相等，实际 Source／执行仍核完整持久 lineage。冷恢复原轮不使用该例外。完整装配归[Service owner](../../../../../apps/service/README.md)。
 
 根 ask_user 不下放，只有主 Agent 可以新建直接子 Agent。Core 的子模型目录按真实 Session 去除准确内置 `task.spawn@1`；模型目录和新建准入分别核验，内部工具注册不授予创建权限。Host 在原回执查询之后、准备新配置之前核持久会话关系，子会话通过普通 `operations.ensure` 申请新 Agent 时明确拒绝。该限制独立于三种审批模式，静态配置或自定义工具不能扩大创建层级；普通 Tool→自身 Job 不受影响。精确原回执和直接协作者的消息、观察、停止与续作沿原路径处理，不把新建限制加到共用配置 resolver。原因与取舍见[单层委派决定](../../../../../.agents/notes/implemented/bug-fix/2026-11-05-single-level-agent-delegation.md)，回归归[Core](../../../test/isolated/child/single-level.test.ts)及[Service](../../../../../apps/service/test/isolated/child-single-level.test.ts)。合法 Planning 工具仍由 Service 核原父冻结身份和当前注册后装配，显式禁用仍拒绝。child 有自己的会话文件上下文，不从父路径字符串继承可写目录或计划授权。实际效果仍核原 requirements、parent AND current permission 与准确取消边界。
 
@@ -45,7 +55,7 @@ accepted/state/mode 是受理时事实，不是完成证明。wait_agent_events 
 
 list_agents 按首次创建 Command 的不可变 seq 每个 Session 只列一次；follow-up 不移动锚点。过滤先整体核归属，Decimal64 上界固定分页；完整职责、最近引导和结果通过受验证正文或当前 Tool scope Artifact 交付。当前工作状态与最近终态结果分别展示，不能把上一轮结果当作当前轮完成。
 
-错误只公开有限 code/message/next_action。写命令 accepted:true/false/null 区分有证明、明确未受理和不可核实；未知不自动换身份重放。只读取消不误报回执未知。需要父／人类答复的 child 只进行一次明确有限观察，没有答复时如实交付待决结果。
+错误只公开有限 code/message/next_action。写命令 accepted:true/false/null 区分有证明、明确未受理和不可核实；未知不自动换身份重放。只读取消不误报回执未知。需要父／人类答复的 child 发送完整问题后交回待决结果，列明已完成／未完成事实；父级取得答复后可用原协作者续作。
 
 公开错误的 message 按准确类别说明参数、游标、目标、权限、恢复或回执问题，并把 accepted:false 的明确未受理与 accepted:null 的可能已受理分别说清；next_action 的原机器值保持，观察取消不声称整个子任务已停止。[协作表面回归](../../../test/isolated/business/task/collaboration-surface.test.ts)核真实受理边界的原因进入下一模型、一次受理尝试及私有异常不外泄。
 
@@ -64,3 +74,5 @@ list_agents 按首次创建 Command 的不可变 seq 每个 Session 只列一次
 旧 resultRequirement 参数在 Host／Store 明确拒绝，不会忽略旧义务后悄悄开始工作。持久取舍及旧决定的部分替代归[退役决定](../../../../../.agents/notes/implemented/architecture/2026-11-02-retire-legacy-task.md)。
 
 [六工具](../../../test/isolated/business/task/collaboration-surface.test.ts)、[邮件](../../../test/isolated/business/task/mailbox.test.ts)、[idle 接纳](../../../test/isolated/business/task/mail-adoption.test.ts)、[问题与引导](../../../test/isolated/business/task/question-loop.test.ts)、[attached Job](../../../test/isolated/business/task/attached-job-settlement.test.ts)和[执行组恢复](../../../test/isolated/recovery/run-resume-group-runtime.test.ts)分别核实际 Core／SQLite／模型输入和失败边界。旧 Task 测试夹具已删除，不能用历史工具测试替代当前接口验收。工具、存储与 native runner 版本未因本次移除升级。
+
+2026-11-06，当前工作树在 Windows／Bun 1.4.4 运行上述 Run override 独立整文件，6 项／41 断言通过；[历史角色回归](../../../../../apps/service/test/isolated/task-role-history.test.ts)使用固定原生产修订夹具，6 项／107 断言核原根／child、真实读取、当前父工具收紧、非法目录、损坏 Source 和 SIGKILL 恢复。两组证据只证明对应受控行为，不代替真实模型任务质量或其他平台发布资格。根临时 effort 与子配置的实际跨轮边界及普通 Desktop 的失败修复、续作、取消恢复观察归[Service owner](../../../../../apps/service/README.md)。

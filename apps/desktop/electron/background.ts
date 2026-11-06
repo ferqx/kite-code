@@ -564,6 +564,7 @@ export class NativeBackground {
         throw new ClientError('background_child_binding_changed');
       let presentation: NativeBackgroundChild['presentation'];
       if (lease.scope.rootSessionId) {
+        const receiptRuns = new Map(final.runs.map((run) => [run.id, run]));
         const runs = new Map(
           final.runs
             .filter((run) => presentableRun(run, lease.scope.storeId, childId))
@@ -579,8 +580,10 @@ export class NativeBackground {
             this.check(lease);
             if (run.id !== message.runId || run.sessionId !== childId)
               throw new ClientError('background_child_history_mismatch');
-            if (presentableRun(run, lease.scope.storeId, childId))
+            if (presentableRun(run, lease.scope.storeId, childId)) {
               runs.set(run.id, nativeRunFact(run));
+              receiptRuns.set(run.id, run);
+            }
           }
           for (const message of messages) {
             if (!nativeToolMessageEligible(message)) continue;
@@ -588,6 +591,7 @@ export class NativeBackground {
             this.check(lease);
             const fact = nativeToolMessageFact({
               execution,
+              run: receiptRuns.get(execution.runId ?? ''),
               message,
               messages,
               sessionId: childId,
@@ -598,6 +602,7 @@ export class NativeBackground {
                 (commandOffset) =>
                   nativeToolMessageFact({
                     execution,
+                    run: receiptRuns.get(execution.runId ?? ''),
                     message,
                     messages,
                     sessionId: childId,

@@ -300,7 +300,7 @@ async function fixture(scenario: Scenario) {
         !driftedAtAuthorization &&
         decision.allowed &&
         request.kind === 'job' &&
-        request.definitionId === 'agent/worker' &&
+        request.definitionId === 'agent/general' &&
         request.definitionVersion === '1' &&
         request.sessionId === 'parent'
       ) {
@@ -534,7 +534,7 @@ async function fixture(scenario: Scenario) {
     async assertRecordOnlyCreation(sessionId: string) {
       const executions = await store.listExecutions(sessionId);
       const task = executions.find((execution) => execution.definitionId === 'task.spawn')!;
-      const carrier = executions.find((execution) => execution.definitionId === 'agent/worker')!;
+      const carrier = executions.find((execution) => execution.definitionId === 'agent/general')!;
       expect(task).toBeDefined();
       expect(carrier).toBeDefined();
       expect(task.id).not.toBe(carrier.id);
@@ -617,7 +617,7 @@ async function fixture(scenario: Scenario) {
 }
 
 test(
-  'default worker role uses inherited raw source through real SDK policy and independently approved child Tool/Job/remote effect',
+  'default general role uses inherited raw source through real SDK policy and independently approved child Tool/Job/remote effect',
   async () => {
     const f = await fixture('allowed');
     try {
@@ -626,12 +626,12 @@ test(
       expect(f.effects).toBe(1);
       expect(cards.filter((card) => card.definitionId === 'mcp.connect')).toHaveLength(2);
       expect(cards.filter((card) => card.definitionId === 'mcp.source.connection')).toHaveLength(2);
-      expect(cards.some((card) => ['task.spawn', 'agent/worker'].includes(card.definitionId))).toBe(
-        false,
-      );
+      expect(
+        cards.some((card) => ['task.spawn', 'agent/general'].includes(card.definitionId)),
+      ).toBe(false);
       await f.assertRecordOnlyCreation('parent');
       const carrier = (await f.store.listExecutions('parent')).find(
-        (execution) => execution.definitionId === 'agent/worker',
+        (execution) => execution.definitionId === 'agent/general',
       )!;
       expect(carrier.status).toBe('succeeded');
       const child = (await f.store.getView(carrier.childSessionId!)).runs[0]!;
@@ -671,16 +671,16 @@ test(
 );
 
 test(
-  'default worker waits for exact completion results with original source scopes and independent MCP Tool and connection approvals',
+  'default general waits for exact completion results with original source scopes and independent MCP Tool and connection approvals',
   async () => {
     const f = await fixture('completion');
     try {
       const cards = await f.run();
       expect(f.elapsedMs).toBeLessThan(process.platform === 'win32' ? 180000 : 30000);
       expect(cards).toHaveLength(5);
-      expect(cards.some((card) => ['task.spawn', 'agent/worker'].includes(card.definitionId))).toBe(
-        false,
-      );
+      expect(
+        cards.some((card) => ['task.spawn', 'agent/general'].includes(card.definitionId)),
+      ).toBe(false);
       expect(f.opens).toBe(2);
       expect(f.effects).toBe(1);
       expect(f.counts).toEqual({ parent: 3, child: 3 });
@@ -697,7 +697,7 @@ test(
         ).toBe(2);
       const parentExecutions = await f.store.listExecutions('parent');
       const carrier = parentExecutions.find(
-        (execution) => execution.definitionId === 'agent/worker',
+        (execution) => execution.definitionId === 'agent/general',
       )!;
       const childExecutions = await f.store.listExecutions(carrier.childSessionId!);
       await f.assertRecordOnlyCreation('parent');
@@ -870,7 +870,7 @@ test(
         expect(f.effects).toBe(0);
         expect(f.opens).toBe(1);
         const carrier = (await f.store.listExecutions('parent')).find(
-          (execution) => execution.definitionId === 'agent/worker',
+          (execution) => execution.definitionId === 'agent/general',
         )!;
         const child = (await f.store.getView(carrier.childSessionId!)).runs[0]!;
         if (scenario === 'cold') {

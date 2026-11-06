@@ -312,7 +312,7 @@ test('source-free default collaboration preserves full child result and emits ex
         }),
       );
       const carrier = held.executions.find(
-        (execution) => execution.definitionId === 'agent/worker',
+        (execution) => execution.definitionId === 'agent/general',
       )!;
       expect(carrier.childSessionId).toBeTruthy();
       expect(carrier.runId).toBeNull();
