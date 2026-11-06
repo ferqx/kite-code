@@ -7,8 +7,64 @@ import { nativeRootPage } from './native-root-page.fixture';
 import { promptText } from './prompt-editor-text.fixture';
 
 const [candidate, home, control] = process.argv.slice(2) as [string, string, string];
-let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
+let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
+let child: { pid: number; identity: string } | undefined;
 const locks = async () => await (await fetch(`${control}/locks`)).json();
+const stage = (name: string, facts: unknown) =>
+  console.log(`native_quit_stage:${JSON.stringify({ stage: name, at: Date.now(), facts })}`);
+const remaining = (start: number) => Math.max(0, start + 5000 - Date.now());
+async function exitWithin(pending: Promise<number | null>, start: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(Error('quit_exceeded_five_seconds')), remaining(start));
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+const dead = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+};
+const candidateProcesses = () =>
+  String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
+    .trim()
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.slice(2).join(' ').startsWith(`${candidate}/`))
+    .map((parts) => ({
+      pid: Number(parts[0]),
+      ppid: Number(parts[1]),
+      command: parts.slice(2).join(' '),
+    }));
+const identity = (pid: number) =>
+  String(execFileSync('/bin/ps', ['-p', String(pid), '-o', 'pid=,lstart=,comm='])).trim();
+function ownedChild(mainPid: number) {
+  const children = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
+    .trim()
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter(
+      (parts) =>
+        Number(parts[1]) === mainPid &&
+        parts.slice(2).join(' ') === join(candidate, 'terminal/runtime/bun'),
+    );
+  assert.equal(children.length, 1);
+  const pid = Number(children[0]![0]);
+  return { pid, identity: identity(pid) };
+}
+function signalOwned(signal: NodeJS.Signals) {
+  if (!child || identity(child.pid) !== child.identity) throw Error('quit_child_identity_changed');
+  process.kill(child.pid, signal);
+}
 async function until(read: () => Promise<boolean>, milliseconds: number, message: string) {
   const deadline = Date.now() + milliseconds;
   while (!(await read())) {
@@ -16,8 +72,8 @@ async function until(read: () => Promise<boolean>, milliseconds: number, message
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
-try {
-  app = await _electron.launch({
+async function launch() {
+  return _electron.launch({
     executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
@@ -25,24 +81,17 @@ try {
       HOME: home,
       PATH: '/usr/bin:/bin',
       LANG: 'C.UTF-8',
-      ...loopbackModelEnvironment(new URL(control!)),
+      ...loopbackModelEnvironment(new URL(control)),
     },
     timeout: 10000,
   });
+}
+try {
+  app = await launch();
   const page = await nativeRootPage(app, 10000);
   page.setDefaultTimeout(10000);
   await page.locator('.session-header').waitFor();
-  const children = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
-    .trim()
-    .split('\n')
-    .map((line) => line.trim().split(/\s+/))
-    .filter(
-      (parts) =>
-        Number(parts[1]) === app!.process().pid &&
-        parts.slice(2).join(' ') === join(candidate, 'terminal/runtime/bun'),
-    );
-  assert.equal(children.length, 1);
-  childPid = Number(children[0]![0]);
+  child = ownedChild(app.process().pid!);
   const count = await (await fetch(`${control}/count`)).text();
   assert.deepEqual(await locks(), { outer: true, inner: true });
   const draft = page.getByRole('textbox', { name: '新对话草稿', exact: true });
@@ -52,180 +101,233 @@ try {
     await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
     false,
   );
-  process.kill(childPid, 0);
-  await app.evaluate(({ app }) => {
-    app.emit('activate');
-  });
+  signalOwned('SIGCONT');
+  await app.evaluate(({ app }) => app.emit('activate'));
   assert.equal(
     await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
     true,
   );
   assert.equal(await promptText(draft), '关闭和退出仍保留原草稿\n雪🙂');
-
-  await app.evaluate(({ dialog }) => {
-    Object.assign(globalThis, { ownedQuitPrompts: [] });
-    dialog.showMessageBox = (async (...args: unknown[]) => {
-      const options = args.at(-1) as { buttons: string[]; defaultId: number; cancelId: number };
-      (Reflect.get(globalThis, 'ownedQuitPrompts') as unknown[]).push(options);
-      return { response: 0, checkboxChecked: false };
-    }) as typeof dialog.showMessageBox;
+  stage('ordinary-close-activate', {
+    main: app.process().pid,
+    child,
+    locks: await locks(),
+    visible: true,
   });
-  process.kill(childPid, 'SIGSTOP');
-  const inspectionStart = Date.now();
-  await app.evaluate(({ app }) => app.quit());
-  await until(
-    () =>
-      app!.evaluate(() => (Reflect.get(globalThis, 'ownedQuitPrompts') as unknown[]).length === 1),
-    10000,
-    'unknown quit inspection did not reach its confirmation',
-  );
-  assert.ok(Date.now() - inspectionStart >= 1800);
-  const prompt = await app.evaluate(
-    () =>
-      (
-        Reflect.get(globalThis, 'ownedQuitPrompts') as {
-          buttons: string[];
-          defaultId: number;
-          cancelId: number;
-        }[]
-      )[0]!,
-  );
-  assert.deepEqual(prompt.buttons, ['保留服务', '退出']);
-  assert.equal(prompt.defaultId, 0);
-  assert.equal(prompt.cancelId, 0);
-  process.kill(childPid, 'SIGCONT');
-  await until(
-    () =>
-      page.evaluate(async () => {
-        try {
-          await window.kiteNative!.request({ method: 'state', generation: 1 });
-          return true;
-        } catch {
-          return false;
-        }
-      }),
-    10000,
-    'cancelled quit did not preserve the original caller',
-  );
-  assert.equal(await promptText(draft), '关闭和退出仍保留原草稿\n雪🙂');
-  assert.deepEqual(await locks(), { outer: true, inner: true });
-  console.log(
-    'native_quit_stage: original close/activate, bounded unknown inspection, default retention and exact draft',
-  );
 
-  // Faults stay inside the owned fixture process: production candidate and Service
-  // bytes remain unchanged. Record dialog, window and Service close order across
-  // Main exit; SIGSTOP alone holds the real owned Service cleanup in progress.
   let quitEvents = '';
   app.process().stdout!.on('data', (chunk: Buffer) => {
     quitEvents += chunk.toString();
   });
   await app.evaluate(({ dialog, BaseWindow }, pid) => {
-    const record = (event: string, options?: unknown) => {
-      process.stdout.write(
-        `owned_quit_event:${JSON.stringify({ event, at: Date.now(), options })}\n`,
-      );
-    };
+    const record = (event: string, facts?: unknown) =>
+      process
+        .getBuiltinModule('node:fs')
+        .writeSync(1, `owned_quit_event:${JSON.stringify({ event, at: Date.now(), facts })}\n`);
     type Child = { pid?: number; once(event: string, callback: () => void): void };
-    const children = (process as unknown as { _getActiveHandles(): Child[] })._getActiveHandles();
-    const owned = children.find((child) => child.pid === pid);
+    const owned = (process as unknown as { _getActiveHandles(): Child[] })
+      ._getActiveHandles()
+      .find((child) => child.pid === pid);
     if (!owned) throw Error('owned_paired_child_unavailable');
+    Reflect.set(globalThis, 'ownedObservedPairedChild', owned);
     owned.once('close', () => record('service-closed'));
     BaseWindow.getAllWindows()[0]!.once('hide', () => record('window-hidden'));
     BaseWindow.getAllWindows()[0]!.once('closed', () => record('window-closed'));
     Reflect.set(globalThis, 'ownedRecordQuitEvent', record);
     Reflect.set(globalThis, 'ownedQuitPromptCount', 0);
-    dialog.showMessageBox = (async (...args: unknown[]) => {
-      const options = args.at(-1) as { buttons: string[] };
-      record('prompt', options);
+    dialog.showMessageBox = (async () => {
       Reflect.set(
         globalThis,
         'ownedQuitPromptCount',
         Number(Reflect.get(globalThis, 'ownedQuitPromptCount')) + 1,
       );
-      return await new Promise((resolve) =>
-        Reflect.set(globalThis, 'ownedConfirmQuit', () => {
-          record('confirmed');
-          resolve({ response: 1, checkboxChecked: false });
-        }),
-      );
+      throw Error('explicit_quit_must_not_prompt');
     }) as typeof dialog.showMessageBox;
-  }, childPid);
-  process.kill(childPid, 'SIGSTOP');
-  await app.evaluate(({ app }) => app.quit());
-  await until(
-    () => app!.evaluate(() => Number(Reflect.get(globalThis, 'ownedQuitPromptCount')) === 1),
-    10000,
-    'unknown Service state did not request its single quit confirmation',
-  );
-  await app.evaluate(({ app }) => {
-    app.quit();
-    app.quit();
-  });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(await app.evaluate(() => Reflect.get(globalThis, 'ownedQuitPromptCount')), 1);
-  assert.deepEqual(await locks(), { outer: true, inner: true });
+  }, child.pid);
+  const stoppedProcesses = candidateProcesses();
+  signalOwned('SIGSTOP');
   const quitProcess = app.process();
   const exit = new Promise<number | null>((resolve) => quitProcess.once('close', resolve));
-  await app.evaluate(() => {
-    (Reflect.get(globalThis, 'ownedConfirmQuit') as () => void)();
-  });
   const committedAt = Date.now();
-  await until(
-    () =>
-      app!.evaluate(({ BaseWindow }) => {
-        const windows = BaseWindow.getAllWindows();
-        return windows.length === 1 && windows.every((window) => !window.isVisible());
-      }),
-    1000,
-    'confirmed quit did not immediately hide the application window',
-  );
+  const returned = await app.evaluate(({ app, BaseWindow }) => {
+    const record = Reflect.get(globalThis, 'ownedRecordQuitEvent') as (
+      event: string,
+      facts?: unknown,
+    ) => void;
+    record('quit-requested', { visible: BaseWindow.getAllWindows()[0]!.isVisible() });
+    app.quit();
+    const facts = {
+      windows: BaseWindow.getAllWindows().length,
+      visible: BaseWindow.getAllWindows().some((window) => window.isVisible()),
+      dock: app.dock?.isVisible() ?? false,
+      prompts: Reflect.get(globalThis, 'ownedQuitPromptCount'),
+    };
+    record('quit-returned', facts);
+    return facts;
+  });
+  assert.deepEqual(returned, { windows: 1, visible: false, dock: false, prompts: 0 });
   assert.equal(page.isClosed(), false, 'original renderer must remain alive for lease release');
-  assert.ok(Date.now() - committedAt < 1000, 'confirmed quit kept UI visible for one second');
-  assert.equal(await app.evaluate(({ app }) => app.dock?.isVisible() ?? false), false);
+  assert.ok(Date.now() - committedAt < 1000, 'explicit quit kept UI visible for one second');
   process.kill(quitProcess.pid!, 0);
-  process.kill(childPid, 0);
   assert.deepEqual(await locks(), { outer: true, inner: true });
-  await app.evaluate(({ app }) => {
-    app.quit();
-    app.emit('activate');
-    app.quit();
+  stage('explicit-quit-returned', {
+    ...returned,
+    elapsedMs: Date.now() - committedAt,
+    locks: await locks(),
   });
-  assert.equal(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
-  assert.equal(
-    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
-    false,
-  );
-  assert.equal(await app.evaluate(() => Reflect.get(globalThis, 'ownedQuitPromptCount')), 1);
-  // Cross the former 20-second force deadline with the real Service still stopped.
-  // Main must own the original page and leases while every application window stays hidden.
-  const resumeAfter = committedAt + 20500;
-  while (Date.now() < resumeAfter) {
-    assert.equal(quitProcess.exitCode, null, 'background cleanup force-exited at its old deadline');
-    await new Promise((resolve) => setTimeout(resolve, Math.min(100, resumeAfter - Date.now())));
-  }
-  process.kill(quitProcess.pid!, 0);
-  process.kill(childPid, 0);
-  assert.deepEqual(await locks(), { outer: true, inner: true });
-  await app.evaluate(({ app }) => {
-    app.emit('activate');
-    app.quit();
-  });
-  assert.equal(await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
-  assert.equal(
-    await app.evaluate(({ BaseWindow }) => BaseWindow.getAllWindows()[0]!.isVisible()),
-    false,
-  );
-  assert.equal(await app.evaluate(() => Reflect.get(globalThis, 'ownedQuitPromptCount')), 1);
-  await app.evaluate(() => {
-    (Reflect.get(globalThis, 'ownedRecordQuitEvent') as (event: string) => void)(
-      'service-resuming',
+
+  for (const point of [0, 1000, 2500]) {
+    while (Date.now() - committedAt < point)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    await app.evaluate(({ app }) => {
+      app.quit();
+      app.emit('activate');
+      app.quit();
+    });
+    const state: { windows: number; visible: boolean; prompts: unknown } = await app.evaluate(
+      ({ BaseWindow }) => ({
+        windows: BaseWindow.getAllWindows().length,
+        visible: BaseWindow.getAllWindows().some((window) => window.isVisible()),
+        prompts: Reflect.get(globalThis, 'ownedQuitPromptCount'),
+      }),
     );
-  });
-  process.kill(childPid, 'SIGCONT');
-  assert.equal(await exit, 0);
+    assert.deepEqual(state, { windows: 1, visible: false, prompts: 0 });
+    assert.equal(identity(child.pid), child.identity);
+    assert.ok(
+      String(execFileSync('/bin/ps', ['-p', String(child.pid), '-o', 'state='])).includes('T'),
+    );
+    assert.deepEqual(await locks(), { outer: true, inner: true });
+    stage('stopped-service-deadline-pending', {
+      ...state,
+      elapsedMs: Date.now() - committedAt,
+      serviceStillStopped: true,
+      locks: await locks(),
+    });
+  }
+  assert.equal(await exitWithin(exit, committedAt), 1);
   app = undefined;
+  const mainExitedMs = Date.now() - committedAt;
+  await until(
+    async () => stoppedProcesses.every((process) => dead(process.pid)),
+    remaining(committedAt),
+    'owned Main, Service or helper survived the five-second exit budget',
+  );
+  child = undefined;
+  await until(
+    async () => {
+      const state = await locks();
+      return !state.outer && !state.inner;
+    },
+    remaining(committedAt),
+    'forced exit did not release both candidate locks within five seconds',
+  );
+  assert.ok(Date.now() - committedAt < 5000);
   const events = quitEvents
+    .split('\n')
+    .filter((line) => line.startsWith('owned_quit_event:'))
+    .map(
+      (line) => JSON.parse(line.slice('owned_quit_event:'.length)) as { event: string; at: number },
+    );
+  const hidden = events.filter(({ event }) => event === 'window-hidden');
+  assert.equal(hidden.length, 1);
+  assert.ok(hidden[0]!.at - events[0]!.at < 1000);
+  assert.equal(
+    events.some(({ event }) => event === 'service-resuming'),
+    false,
+  );
+  assert.equal(await (await fetch(`${control}/count`)).text(), count);
+  stage('stopped-service-forced-exit-complete', {
+    exitCode: 1,
+    mainExitedMs,
+    allOwnedProcessesGoneAndLocksFreeMs: Date.now() - committedAt,
+    processes: stoppedProcesses,
+    locks: await locks(),
+    events,
+    unexpectedModelRequests: count,
+  });
+
+  app = await launch();
+  const normalPage = await nativeRootPage(app, 10000);
+  await normalPage.locator('.session-header').waitFor();
+  await until(
+    () => normalPage.getByRole('button', { name: '项目空间', exact: true }).isEnabled(),
+    10000,
+    'normal quit sample did not finish initial project preparation',
+  );
+  child = ownedChild(app.process().pid!);
+  const normalProcesses = candidateProcesses();
+  let normalEvents = '';
+  app.process().stdout!.on('data', (chunk: Buffer) => {
+    normalEvents += chunk.toString();
+  });
+  await app.evaluate(({ dialog, BaseWindow }, pid) => {
+    const record = (event: string, facts?: unknown) =>
+      process
+        .getBuiltinModule('node:fs')
+        .writeSync(1, `owned_quit_event:${JSON.stringify({ event, at: Date.now(), facts })}\n`);
+    type Child = { pid?: number; once(event: string, callback: () => void): void };
+    const owned = (process as unknown as { _getActiveHandles(): Child[] })
+      ._getActiveHandles()
+      .find((child) => child.pid === pid);
+    if (!owned) throw Error('owned_paired_child_unavailable');
+    Reflect.set(globalThis, 'ownedObservedPairedChild', owned);
+    owned.once('close', () => record('service-closed'));
+    BaseWindow.getAllWindows()[0]!.once('hide', () => record('window-hidden'));
+    BaseWindow.getAllWindows()[0]!.once('closed', () => record('window-closed'));
+    Reflect.set(globalThis, 'ownedRecordQuitEvent', record);
+    Reflect.set(globalThis, 'ownedQuitPromptCount', 0);
+    dialog.showMessageBox = (async () => {
+      Reflect.set(
+        globalThis,
+        'ownedQuitPromptCount',
+        Number(Reflect.get(globalThis, 'ownedQuitPromptCount')) + 1,
+      );
+      throw Error('explicit_quit_must_not_prompt');
+    }) as typeof dialog.showMessageBox;
+  }, child.pid);
+  const normalExit = new Promise<number | null>((resolve) => app!.process().once('close', resolve));
+  const normalCommittedAt = Date.now();
+  await app.evaluate(({ app, BaseWindow }) => {
+    setTimeout(() => {
+      const record = Reflect.get(globalThis, 'ownedRecordQuitEvent') as (
+        event: string,
+        facts?: unknown,
+      ) => void;
+      record('quit-requested', { visible: BaseWindow.getAllWindows()[0]!.isVisible() });
+      app.quit();
+      record('quit-returned', {
+        windows: BaseWindow.getAllWindows().length,
+        visible: BaseWindow.getAllWindows().some((window) => window.isVisible()),
+        dock: app.dock?.isVisible() ?? false,
+        prompts: Reflect.get(globalThis, 'ownedQuitPromptCount'),
+      });
+    }, 0);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  if (app.process().exitCode === null) {
+    const pending = await app.evaluate(() => {
+      const owned = Reflect.get(globalThis, 'ownedObservedPairedChild') as {
+        stdin: { writableEnded: boolean };
+        exitCode: number | null;
+        signalCode: string | null;
+      };
+      return {
+        serviceEofRequested: owned.stdin.writableEnded,
+        serviceExitCode: owned.exitCode,
+        serviceSignalCode: owned.signalCode,
+      };
+    });
+    stage('ordinary-cleanup-pending', { elapsedMs: Date.now() - normalCommittedAt, ...pending });
+  }
+  const normalCode = await exitWithin(normalExit, normalCommittedAt);
+  stage('normal-quit-observed', {
+    exitCode: normalCode,
+    elapsedMs: Date.now() - normalCommittedAt,
+    normalEvents,
+  });
+  assert.ok(normalCode === 0 || normalCode === 1);
+  app = undefined;
+  const normalTrace = normalEvents
     .split('\n')
     .filter((line) => line.startsWith('owned_quit_event:'))
     .map(
@@ -233,126 +335,130 @@ try {
         JSON.parse(line.slice('owned_quit_event:'.length)) as {
           event: string;
           at: number;
-          options?: { buttons: string[]; defaultId: number; cancelId: number };
+          facts?: unknown;
         },
     );
-  assert.deepEqual(
-    events.map(({ event }) => event),
-    ['prompt', 'confirmed', 'window-hidden', 'service-resuming', 'service-closed', 'window-closed'],
+  if (normalCode === 0)
+    assert.deepEqual(
+      normalTrace.filter(({ event }) => event !== 'window-hidden').map(({ event }) => event),
+      ['quit-requested', 'quit-returned', 'service-closed', 'window-closed'],
+    );
+  else {
+    assert.ok(Date.now() - normalCommittedAt >= 4000);
+    assert.ok(normalTrace.some(({ event }) => event === 'window-closed'));
+  }
+  assert.deepEqual(normalTrace.find(({ event }) => event === 'quit-returned')!.facts, {
+    windows: 1,
+    visible: false,
+    dock: false,
+    prompts: 0,
+  });
+  await until(
+    async () => normalProcesses.every((process) => dead(process.pid)),
+    remaining(normalCommittedAt),
+    'normal exit left an owned process beyond five seconds',
   );
-  assert.deepEqual(events[0]!.options!.buttons, ['保留服务', '退出']);
-  assert.equal(events[0]!.options!.defaultId, 0);
-  assert.equal(events[0]!.options!.cancelId, 0);
-  assert.ok(
-    events[2]!.at - events[1]!.at < 1000,
-    'window did not hide immediately after confirmation',
-  );
-  assert.ok(
-    events[3]!.at - events[1]!.at >= 20500,
-    'Service was resumed before the old force deadline',
-  );
-  assert.throws(() => process.kill(childPid!, 0));
-  childPid = undefined;
+  child = undefined;
   await until(
     async () => {
-      const state = (await locks()) as { outer: boolean; inner: boolean };
+      const state = await locks();
       return !state.outer && !state.inner;
     },
-    5000,
-    'natural background cleanup did not release owned candidate leases',
+    remaining(normalCommittedAt),
+    'normal exit did not release candidate locks',
   );
   assert.equal(await (await fetch(`${control}/count`)).text(), count);
-  console.log(
-    'native_quit_stage: confirmed window hides immediately and is destroyed only after original Service exit, one prompt despite repeats/activate, stopped Service owned beyond 20 seconds, natural background exit=0, both leases free and zero Model replay',
-  );
-  app = await _electron.launch({
-    executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
-    args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
-    cwd: home,
-    env: {
-      HOME: home,
-      PATH: '/usr/bin:/bin',
-      LANG: 'C.UTF-8',
-      ...loopbackModelEnvironment(new URL(control!)),
-    },
-    timeout: 10000,
+  stage('ordinary-request-exit-complete', {
+    exitCode: normalCode,
+    cleanupConfirmed: normalCode === 0,
+    elapsedMs: Date.now() - normalCommittedAt,
+    locks: await locks(),
+    events: normalTrace,
+    unexpectedModelRequests: count,
   });
+
+  app = await launch();
   const failedPage = await nativeRootPage(app, 10000);
-  failedPage.setDefaultTimeout(10000);
   await failedPage.locator('.session-header').waitFor();
-  const failedChildren = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
-    .trim()
-    .split('\n')
-    .map((line) => line.trim().split(/\s+/))
-    .filter(
-      (parts) =>
-        Number(parts[1]) === app!.process().pid &&
-        parts.slice(2).join(' ') === join(candidate, 'terminal/runtime/bun'),
-    );
-  assert.equal(failedChildren.length, 1);
-  childPid = Number(failedChildren[0]![0]);
+  child = ownedChild(app.process().pid!);
   let failedEvents = '';
   app.process().stdout!.on('data', (chunk: Buffer) => {
     failedEvents += chunk.toString();
   });
   await app.evaluate(({ dialog, BaseWindow }, pid) => {
-    BaseWindow.getAllWindows()[0]!.once('closed', () => {
-      process.stdout.write('owned_failed_window_closed\n');
-    });
+    const record = (event: string) => process.stdout.write(`owned_failed_event:${event}\n`);
+    BaseWindow.getAllWindows()[0]!.once('hide', () => record('window-hidden'));
+    BaseWindow.getAllWindows()[0]!.once('closed', () => record('window-closed'));
     type Child = { pid?: number; once(event: string, callback: () => void): void };
     const owned = (process as unknown as { _getActiveHandles(): Child[] })
       ._getActiveHandles()
       .find((child) => child.pid === pid);
     if (!owned) throw Error('owned_paired_child_unavailable');
-    owned.once('close', () => {
-      process.stdout.write('owned_failed_service_closed\n');
-    });
-    dialog.showMessageBox = (async (...args: unknown[]) => {
-      process.stdout.write(`owned_failed_prompt:${JSON.stringify(args.at(-1))}\n`);
-      return { response: 1, checkboxChecked: false };
+    owned.once('close', () => record('service-closed'));
+    dialog.showMessageBox = (async () => {
+      record('unexpected-prompt');
+      throw Error('explicit_quit_must_not_prompt');
     }) as typeof dialog.showMessageBox;
-  }, childPid);
-  process.kill(childPid, 'SIGKILL');
+  }, child.pid);
+  signalOwned('SIGKILL');
   await until(
-    async () => failedEvents.includes('owned_failed_service_closed'),
+    async () => failedEvents.includes('owned_failed_event:service-closed'),
     5000,
     'nonzero Service exit was not observed before quit',
   );
   const failedExit = new Promise<number | null>((resolve) => app!.process().once('close', resolve));
-  // Schedule quit after the evaluate reply, as failed cleanup may exit immediately.
-  await app.evaluate(({ app }) => {
-    setTimeout(() => app.quit(), 0);
+  // Failed cleanup can end Main immediately; schedule after the evaluate response.
+  const failedCommittedAt = Date.now();
+  await app.evaluate(({ app, BaseWindow }) => {
+    setTimeout(() => {
+      app.quit();
+      const returned = {
+        windows: BaseWindow.getAllWindows().length,
+        visible: BaseWindow.getAllWindows().some((window) => window.isVisible()),
+        dock: app.dock?.isVisible() ?? false,
+      };
+      // The nonzero exit may precede macOS's asynchronous hide notification.
+      // Record the synchronous visibility boundary before background cleanup runs.
+      process
+        .getBuiltinModule('node:fs')
+        .writeSync(1, `owned_failed_quit_returned:${JSON.stringify(returned)}\n`);
+    }, 0);
   });
-  assert.equal(await failedExit, 1);
+  assert.equal(await exitWithin(failedExit, failedCommittedAt), 1);
   app = undefined;
-  const failedPrompts = failedEvents
+  assert.ok(Date.now() - failedCommittedAt < 1000, 'failed Service quit did not exit immediately');
+  const returnedFailure = failedEvents
     .split('\n')
-    .filter((line) => line.startsWith('owned_failed_prompt:'))
-    .map((line) => JSON.parse(line.slice('owned_failed_prompt:'.length)) as { buttons: string[] });
-  assert.ok(
-    failedEvents.includes('owned_failed_window_closed'),
-    'failed Service quit did not destroy its window',
-  );
-  assert.ok(failedPrompts.length <= 1, 'failed Service quit displayed repeated dialogs');
-  for (const options of failedPrompts) assert.deepEqual(options.buttons, ['保留服务', '退出']);
-  assert.throws(() => process.kill(childPid!, 0));
-  childPid = undefined;
+    .find((line) => line.startsWith('owned_failed_quit_returned:'));
+  assert.ok(returnedFailure, 'failed quit did not record its synchronous presentation state');
+  assert.deepEqual(JSON.parse(returnedFailure.slice('owned_failed_quit_returned:'.length)), {
+    windows: 1,
+    visible: false,
+    dock: false,
+  });
+  assert.ok(failedEvents.includes('owned_failed_event:window-closed'));
+  assert.equal(failedEvents.includes('owned_failed_event:unexpected-prompt'), false);
+  assert.throws(() => process.kill(child!.pid, 0));
+  child = undefined;
   await until(
     async () => {
-      const state = (await locks()) as { outer: boolean; inner: boolean };
+      const state = await locks();
       return !state.outer && !state.inner;
     },
-    5000,
+    remaining(failedCommittedAt),
     'failed cleanup exit did not release owned leases',
   );
   assert.equal(await (await fetch(`${control}/count`)).text(), count);
-  console.log(
-    'native_quit_stage: actual nonzero Service exit, automatic exit=1, at most one initial prompt and no cleanup warning, both leases free and zero Model replay',
-  );
+  stage('failed-service-exit-complete', {
+    exitCode: 1,
+    locks: await locks(),
+    failedEvents,
+    unexpectedModelRequests: count,
+  });
 } finally {
-  if (childPid) {
+  if (child) {
     try {
-      process.kill(childPid, 'SIGKILL');
+      signalOwned('SIGKILL');
     } catch {}
   }
   if (app) {

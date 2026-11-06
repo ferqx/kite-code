@@ -3,8 +3,8 @@ import { JSDOM } from 'jsdom';
 import { act, type ReactNode, Suspense, startTransition, useLayoutEffect, useState } from 'react';
 import {
   humanReadableOperationError,
-  NativeMessage,
-  type NativeMessageProps,
+  NativeToast,
+  type NativeToastProps,
 } from '../../src/native-message';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
@@ -33,13 +33,17 @@ async function fixture() {
   const host = document.getElementById('root')!;
   const root = createRoot(host);
   const dismissed: number[] = [];
-  let replace!: (message: NativeMessageProps['message']) => void;
+  let replace!: (message: NativeToastProps['message']) => void;
+  let relocate!: (value: HTMLElement | undefined) => void;
   function Harness() {
-    const [message, setMessage] = useState<NativeMessageProps['message']>();
+    const [message, setMessage] = useState<NativeToastProps['message']>();
+    const [container, setContainer] = useState<HTMLElement>();
     replace = setMessage;
+    relocate = setContainer;
     return (
-      <NativeMessage
+      <NativeToast
         message={message}
+        container={container}
         onDismiss={(id) => {
           dismissed.push(id);
           setMessage((current) => (current?.id === id ? undefined : current));
@@ -53,10 +57,12 @@ async function fixture() {
     host,
     dismissed,
     render: (content: ReactNode) => act(() => root.render(content)),
-    show: (id: number, text = '工作区暂不可用，请检查目录是否仍存在且可以访问。') =>
+    show: (id: number, text = '本地数据暂时无法读取或保存，请先查看当前状态。') =>
       act(() => replace({ id, text })),
+    relocate: (value?: HTMLElement) => act(() => relocate(value)),
     advance: (ms: number) => act(() => jest.advanceTimersByTime(ms)),
-    closeButton: () => host.querySelector<HTMLButtonElement>('[aria-label="关闭提示"]')!,
+    closeButton: () =>
+      dom.window.document.querySelector<HTMLButtonElement>('[aria-label="关闭提示"]')!,
     async close() {
       await act(() => root.unmount());
       dom.window.close();
@@ -86,7 +92,7 @@ async function suspenseFixture(sameId: boolean) {
     }, []);
     return (
       <Suspense fallback={<p>Waiting for B</p>}>
-        <NativeMessage
+        <NativeToast
           message={{ id: context === 'A' || sameId ? 101 : 202, text: `${context}提示` }}
           onDismiss={(id) => events.push({ context, id })}
         />
@@ -114,8 +120,10 @@ for (const sameId of [false, true])
     try {
       await f.advance(5000);
       await f.transitionB();
-      expect(f.host.querySelector('[role="status"]')?.textContent).toContain('A提示');
-      expect(f.host.textContent).not.toContain('B提示');
+      expect(f.dom.window.document.querySelector('[role="status"]')?.textContent).toContain(
+        'A提示',
+      );
+      expect(f.dom.window.document.body.textContent).not.toContain('B提示');
       expect(f.host.textContent).not.toContain('Waiting for B');
       const oldClose = f.closeButton();
       await act(() => oldClose.click());
@@ -126,7 +134,9 @@ for (const sameId of [false, true])
         { context: 'A', id: 101 },
       ]);
       await f.commitB();
-      expect(f.host.querySelector('[role="status"]')?.textContent).toContain('B提示');
+      expect(f.dom.window.document.querySelector('[role="status"]')?.textContent).toContain(
+        'B提示',
+      );
       if (!sameId) {
         await act(() => oldClose.click());
         await f.advance(5999);
@@ -144,21 +154,26 @@ for (const sameId of [false, true])
     }
   });
 
-test('a readable local status preserves focus and dismisses automatically after six seconds', async () => {
+test('a viewport toast outside the application root preserves focus and dismisses automatically after six seconds', async () => {
   jest.useFakeTimers();
   const f = await fixture();
   try {
     const outside = document.getElementById('outside')!;
     outside.focus();
     await f.show(1);
-    expect(f.host.querySelector('[role="status"]')?.textContent).toContain('工作区暂不可用');
+    expect(f.dom.window.document.querySelector('[role="status"]')?.textContent).toContain(
+      '本地数据暂时无法读取或保存',
+    );
+    const toast = document.querySelector('.native-toast')!;
+    expect(toast.parentElement).toBe(document.body);
+    expect(f.host.contains(toast)).toBe(false);
     expect(document.activeElement).toBe(outside);
     expect(document.querySelector('[role="dialog"], [aria-modal="true"], [inert]')).toBeNull();
     expect(document.body.style.overflow).toBe('');
     await f.advance(5999);
-    expect(f.host.querySelector('[role="status"]')).not.toBeNull();
+    expect(f.dom.window.document.querySelector('[role="status"]')).not.toBeNull();
     await f.advance(1);
-    expect(f.host.querySelector('[role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="status"]')).toBeNull();
     expect(f.dismissed).toEqual([1]);
     expect(document.activeElement).toBe(outside);
   } finally {
@@ -173,7 +188,7 @@ test('hover and keyboard focus both pause the remaining reading time until both 
   try {
     await f.show(2);
     await f.advance(2000);
-    const card = f.host.querySelector('.native-message-card')!;
+    const card = f.dom.window.document.querySelector('.native-toast-card')!;
     await act(() =>
       card.dispatchEvent(new f.dom.window.MouseEvent('mouseover', { bubbles: true })),
     );
@@ -192,10 +207,40 @@ test('hover and keyboard focus both pause the remaining reading time until both 
     expect(f.dismissed).toEqual([]);
     await act(() => document.getElementById('outside')!.focus());
     await f.advance(3999);
-    expect(f.host.querySelector('[role="status"]')).not.toBeNull();
+    expect(f.dom.window.document.querySelector('[role="status"]')).not.toBeNull();
     await f.advance(1);
     expect(f.dismissed).toEqual([2]);
-    expect(f.host.querySelector('[role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="status"]')).toBeNull();
+  } finally {
+    await f.close();
+    jest.useRealTimers();
+  }
+});
+
+test('moving into the active dialog preserves the remaining time and releases detached focus', async () => {
+  jest.useFakeTimers();
+  const f = await fixture();
+  try {
+    await f.show(8);
+    await f.advance(2000);
+    await act(() => f.closeButton().focus());
+    await f.advance(7000);
+    expect(f.dismissed).toEqual([]);
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.append(dialog);
+    await f.relocate(dialog);
+    const toast = f.dom.window.document.querySelector<HTMLElement>('.native-toast')!;
+    expect(toast.parentElement).toBe(dialog);
+    expect(toast.hidden).toBe(false);
+    expect(toast.hasAttribute('inert')).toBe(false);
+    expect(document.querySelectorAll('.native-toast')).toHaveLength(1);
+    await f.advance(3999);
+    expect(f.dismissed).toEqual([]);
+    await f.advance(1);
+    expect(f.dismissed).toEqual([8]);
+    await f.relocate();
+    expect(f.dom.window.document.querySelector('.native-toast')).toBeNull();
   } finally {
     await f.close();
     jest.useRealTimers();
@@ -213,8 +258,8 @@ test('a replacement gets its own reading time and retired timers or close contro
     await act(() => oldClose.click());
     await f.advance(100);
     expect(f.dismissed).toEqual([]);
-    expect(f.host.querySelector('[role="status"]')?.textContent).toContain('新提示');
-    expect(f.host.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(f.dom.window.document.querySelector('[role="status"]')?.textContent).toContain('新提示');
+    expect(f.dom.window.document.querySelectorAll('[role="status"]')).toHaveLength(1);
     await f.advance(5899);
     expect(f.dismissed).toEqual([]);
     await f.advance(1);
@@ -222,7 +267,7 @@ test('a replacement gets its own reading time and retired timers or close contro
     await f.show(5);
     await act(() => f.closeButton().click());
     expect(f.dismissed).toEqual([4, 5]);
-    expect(f.host.querySelector('[role="status"]')).toBeNull();
+    expect(f.dom.window.document.querySelector('[role="status"]')).toBeNull();
     await f.advance(6000);
     expect(f.dismissed).toEqual([4, 5]);
   } finally {
@@ -238,7 +283,9 @@ test('repeated occurrences with identical text remain independently dismissible'
     await f.show(6, '相同提示');
     await act(() => f.closeButton().click());
     await f.show(7, '相同提示');
-    expect(f.host.querySelector('[role="status"]')?.textContent).toContain('相同提示');
+    expect(f.dom.window.document.querySelector('[role="status"]')?.textContent).toContain(
+      '相同提示',
+    );
     await f.advance(6000);
     expect(f.dismissed).toEqual([6, 7]);
   } finally {
@@ -247,33 +294,34 @@ test('repeated occurrences with identical text remain independently dismissible'
   }
 });
 
-test('operation errors expose finite readable copy and never echo an unknown cause, stack or token', () => {
-  expect(humanReadableOperationError('permission_denied')).toContain('权限');
-  expect(humanReadableOperationError('workspace_not_found')).toContain('工作区已不存在');
-  expect(humanReadableOperationError('workspace_unavailable')).toContain('工作区暂不可用');
-  expect(humanReadableOperationError('workspace_untrusted')).toContain('尚未受信任');
-  expect(humanReadableOperationError('branch_not_found')).toContain('分支已不存在');
-  expect(humanReadableOperationError('native_directory_unavailable')).toContain('目录暂时无法读取');
-  expect(humanReadableOperationError('network_unavailable')).toContain('连接暂不可用');
-  expect(humanReadableOperationError('read_only')).toContain('只读');
+test('missing project records do not imply deletion', () => {
+  const missing = humanReadableOperationError('workspace_not_found');
+  expect(missing).toContain('未找到所选项目');
+  expect(missing).not.toContain('已不存在');
+});
+
+test('ordinary local data and service failures make no unproven claim about the business outcome', () => {
+  const storage = humanReadableOperationError('draft_storage_unavailable');
+  expect(storage).toContain('本地数据暂时无法读取或保存');
+  for (const unsupported of ['草稿', '输入已保留', '重试'])
+    expect(storage).not.toContain(unsupported);
+  const service = humanReadableOperationError('service_unavailable');
+  expect(service).toContain('服务处理此操作时遇到问题');
+  for (const unsupported of ['未能完成', '重新连接', '重试'])
+    expect(service).not.toContain(unsupported);
+});
+
+test('unclassified failures never invent an unknown outcome or echo private causes', () => {
   for (const code of [
+    undefined,
     'unexpected_code',
     'constructor',
     '__proto__',
     'token=private\n at cause:7',
   ]) {
-    expect(humanReadableOperationError(code)).toBe('这一步未能完成，请稍后重试。');
-    expect(humanReadableOperationError(code, '切换分支')).toBe('切换分支未能完成，请稍后重试。');
-  }
-  for (const code of [
-    'network_outcome_unknown',
-    'conversation_response_unknown',
-    'result_unknown',
-  ]) {
-    const message = humanReadableOperationError(code, '发送');
-    expect(message).toContain('核对原操作结果');
-    expect(message).toContain('避免重复提交');
-    expect(message).not.toContain('重试');
-    expect(message).not.toContain(code);
+    expect(humanReadableOperationError(code)).toBe('此操作遇到问题，请先查看当前状态。');
+    expect(humanReadableOperationError(code, '移除空间')).toBe(
+      '移除空间遇到问题，请先查看当前状态。',
+    );
   }
 });

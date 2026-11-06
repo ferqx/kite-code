@@ -23,11 +23,7 @@ import {
   Tray,
   WebContentsView,
 } from 'electron';
-import {
-  type NativeWindowAppearance,
-  nativeEventChannel,
-  nativeQuitConfirmationFailureChannel,
-} from '../src/native-bridge';
+import { type NativeWindowAppearance, nativeEventChannel } from '../src/native-bridge';
 import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
 import { listenBrowserPageHost } from './browser-page-channel';
@@ -69,7 +65,7 @@ import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
 import { ensureDesktopProfilePermissions } from './profile-permissions';
 import { canonicalProtectedPath } from './protected-path';
-import { inspectNativeQuitWork, settleDesktopQuit } from './quit-settlement';
+import { settleDesktopQuit } from './quit-settlement';
 import { ScheduledTaskRunner } from './scheduled-task-runner';
 import { assertNativeSqliteEngine } from './sqlite-engine';
 import { loadWindowsAccess } from './windows-access';
@@ -175,22 +171,12 @@ let artifactAccess: { close(): void }[] = windowsHandoff ? [acquireFormalWindows
 let startupDiagnostic: ServiceStartupDiagnostic | undefined;
 let quitting = false,
   exitAllowed = false;
-let quitDecision: Promise<void> | undefined;
-let resolveQuitDecision: (() => void) | undefined;
 let developmentReload: Promise<void> | undefined;
 let switchingService = false;
-function finishQuitDecision() {
-  const resolve = resolveQuitDecision;
-  quitDecision = undefined;
-  resolveQuitDecision = undefined;
-  resolve?.();
-}
-function setQuitting(value: boolean) {
-  quitting = value;
-  if (!value) finishQuitDecision();
-  if (value) void scheduledTasks?.stop().catch(() => {});
-  else scheduledTasks?.start();
-  sendLifecycle(value);
+function setQuitting() {
+  quitting = true;
+  void scheduledTasks?.stop().catch(() => {});
+  sendLifecycle(true);
 }
 function sendLifecycle(value: boolean) {
   try {
@@ -291,7 +277,6 @@ async function openCaller(): Promise<NativeCaller> {
           }
         : {}),
     });
-    if (quitDecision) await quitDecision;
     if (quitting || switchingService) {
       await paired.close();
       throw Error('native_draining');
@@ -299,7 +284,6 @@ async function openCaller(): Promise<NativeCaller> {
     if (process.platform === 'win32' && !paired.bootstrap.storeId)
       throw Error('native_profile_store_unavailable');
     privateAccess ??= await acquirePrivateAccess();
-    if (quitDecision) await quitDecision;
     if (quitting || switchingService) {
       privateAccess.close();
       await paired.close();
@@ -393,27 +377,27 @@ function closeNativeResources(): Promise<void> {
 }
 function stopNativeProcess(code = 0): void {
   if (exitAllowed || stoppingNativeProcess) return;
-  setQuitting(true);
-  finishQuitDecision();
-  stoppingNativeProcess = Promise.resolve()
-    .then(async () => {
-      // Close visible UI immediately, but retain the original page/lease owner
-      // until Service can revoke, detach and confirm its actual resource drain.
-      const closingWindow = window;
-      window = undefined;
-      tray?.destroy();
-      tray = undefined;
-      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.hide();
-      if (process.platform === 'darwin') {
-        app.hide();
-        app.dock?.hide();
-      }
-      const outcome = await settleDesktopQuit({
-        closeService: async () => {
-          await developmentReload?.catch(() => {});
-          await closeNativeResources();
-        },
-      });
+  const deadlineAbort = new AbortController();
+  // Start the hard deadline at the request, before presentation retirement.
+  const settlement = settleDesktopQuit({
+    signal: deadlineAbort.signal,
+    closeService: async () => {
+      if (exitAllowed) return;
+      await developmentReload?.catch(() => {});
+      if (exitAllowed) return;
+      await closeNativeResources();
+    },
+  });
+  setQuitting();
+  // Retire presentation synchronously. Keep the exact original window and its
+  // page/lease owner alive until the Service confirms resource release.
+  const closingWindow = window;
+  window = undefined;
+  const closingTray = tray;
+  tray = undefined;
+  stoppingNativeProcess = settlement
+    .then((outcome) => {
+      if (exitAllowed) return;
       if (outcome === 'force') {
         forceExit();
         return;
@@ -422,7 +406,32 @@ function stopNativeProcess(code = 0): void {
       exitAllowed = true;
       app.exit(code);
     })
-    .catch(() => forceExit());
+    .catch(() => {
+      if (!exitAllowed) forceExit();
+    });
+  let presentationFailed = false;
+  const retire = (action: () => void) => {
+    try {
+      action();
+    } catch {
+      presentationFailed = true;
+    }
+  };
+  retire(() => globalDialogOwner?.dismiss());
+  retire(() => closingTray?.destroy());
+  retire(() => {
+    if (closingWindow && !closingWindow.isDestroyed()) closingWindow.hide();
+  });
+  if (process.platform === 'darwin') {
+    retire(() => app.hide());
+    retire(() => app.dock?.hide());
+  }
+  // A presentation failure must not leave an app the user has already quit.
+  // The existing fallback only targets the exact child owned by this Main.
+  if (presentationFailed) {
+    deadlineAbort.abort();
+    forceExit();
+  }
 }
 const terminateNativeProcess = () => stopNativeProcess();
 process.on('SIGINT', terminateNativeProcess);
@@ -444,7 +453,6 @@ async function reloadDevelopmentService(request: DevelopmentServiceReload) {
   sendLifecycle(true);
   const reloading = (async () => {
     await closeNativeResources();
-    if (quitDecision) await quitDecision;
     if (quitting) throw Error('native_draining');
     activeAssets = next;
     switchingService = false;
@@ -849,70 +857,15 @@ app.on('window-all-closed', () => {
 app.on('before-quit', (event) => {
   if (exitAllowed) return;
   event.preventDefault();
-  if (quitting) return;
-  quitDecision = new Promise<void>((resolve) => {
-    resolveQuitDecision = resolve;
-  });
-  setQuitting(true);
-  globalDialogOwner?.dismiss();
-  const ownsQuit = () => !stoppingNativeProcess && !exitAllowed;
-  void (async () => {
-    if (window && !window.isDestroyed()) {
-      window.show();
-      window.focus();
-    }
-    const active = developmentReload
-      ? true
-      : caller
-        ? await inspectNativeQuitWork((signal) => caller!.hasActiveWork(signal), 2000)
-        : !!opening;
-    if (!ownsQuit()) return;
-    if (active) {
-      const options = {
-        type: 'warning' as const,
-        message: '仍有活动工作，或尚不能完整核实。退出会停止本应用拥有的服务。',
-        detail: '确认后立即关闭窗口，未完成的任务清理将在后台继续。',
-        buttons: ['保留服务', '退出'],
-        defaultId: 0,
-        cancelId: 0,
-      };
-      let confirmed: boolean;
-      try {
-        const result =
-          window && !window.isDestroyed()
-            ? await dialog.showMessageBox(window, options)
-            : await dialog.showMessageBox(options);
-        confirmed = result.response === 1;
-      } catch (error) {
-        if (!ownsQuit()) return;
-        if (!window || window.isDestroyed()) throw error;
-        setQuitting(false);
-        try {
-          if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
-            window.webContents.send(nativeQuitConfirmationFailureChannel);
-        } catch {
-          // Notification delivery cannot reverse the decision to retain the Service.
-        }
-        return;
-      }
-      if (!ownsQuit()) return;
-      if (!confirmed) {
-        setQuitting(false);
-        return;
-      }
-    }
-    stopNativeProcess();
-  })().catch(() => {
-    if (!ownsQuit()) return;
-    stopNativeProcess(1);
-  });
+  stopNativeProcess();
 });
 
 function forceExit() {
+  if (exitAllowed) return;
+  exitAllowed = true;
   try {
     ownedPairedChild?.kill('SIGKILL');
   } finally {
-    exitAllowed = true;
     app.exit(1);
   }
 }

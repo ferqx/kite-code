@@ -976,49 +976,55 @@ try {
     (await (await fetch(`${control}/quit-facts`)).json()) as Record<string, unknown>,
   );
   const exitChoicePath = join(home, 'plan-review-exit-choice.json');
-  // Test port for the production warning; this does not qualify the OS modal UI.
-  await owned.evaluate(({ dialog, BaseWindow }, path) => {
-    const assert: typeof import('node:assert').strict =
-      process.getBuiltinModule('node:assert').strict;
+  // The explicit quit path must never ask a second question after the user exits.
+  await owned.evaluate(({ dialog }) => {
+    Reflect.set(globalThis, 'ownedExitPromptCount', 0);
+    dialog.showMessageBox = (async () => {
+      Reflect.set(
+        globalThis,
+        'ownedExitPromptCount',
+        Number(Reflect.get(globalThis, 'ownedExitPromptCount')) + 1,
+      );
+      throw Error('explicit_quit_must_not_prompt');
+    }) as typeof dialog.showMessageBox;
+  });
+  const explicitQuitStarted = Date.now();
+  stage('quit_requested', { electronPid: owned.process().pid, childPid });
+  await owned.evaluate(({ app, BaseWindow }, path) => {
     const write = process.getBuiltinModule('node:fs')
       .writeFileSync as typeof import('node:fs').writeFileSync;
-    const original = dialog.showMessageBox;
-    const windows = BaseWindow.getAllWindows();
-    assert.equal(windows.length, 1);
-    const originalWindow = windows[0]!;
-    let calls = 0;
-    dialog.showMessageBox = async (_window, options?: import('electron').MessageBoxOptions) => {
-      calls += 1;
-      assert.equal(calls, 1);
-      assert.equal(_window, originalWindow);
-      assert.ok(options, 'Production before-quit must supply its actual window and exact options');
-      assert.deepEqual(options, {
-        type: 'warning',
-        message: '仍有活动工作，或尚不能完整核实。退出会停止本应用拥有的服务。',
-        detail: '确认后立即关闭窗口，未完成的任务清理将在后台继续。',
-        buttons: ['保留服务', '退出'],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      dialog.showMessageBox = original;
-      write(
-        path,
-        JSON.stringify({ calls, options, response: 1, via: 'one-shot-fixture-dialog-port' }),
-      );
-      return { response: 1, checkboxChecked: false };
-    };
+    app.quit();
+    write(
+      path,
+      JSON.stringify({
+        calls: Reflect.get(globalThis, 'ownedExitPromptCount'),
+        visible: BaseWindow.getAllWindows().some((window) => window.isVisible()),
+        via: 'synchronous-explicit-quit',
+      }),
+    );
   }, exitChoicePath);
-  stage('quit_requested', { electronPid: owned.process().pid, childPid });
-  await owned.evaluate(({ app }) => app.quit());
   stage('quit_call_returned');
-  await exit;
-  stage('quit_completed', { childPid });
+  let quitDeadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      exit,
+      new Promise<never>((_resolve, reject) => {
+        quitDeadline = setTimeout(
+          () => reject(Error('explicit_quit_exceeded_five_seconds')),
+          Math.max(0, explicitQuitStarted + 5000 - Date.now()),
+        );
+      }),
+    ]);
+  } finally {
+    if (quitDeadline) clearTimeout(quitDeadline);
+  }
+  stage('quit_completed', { childPid, elapsedMs: Date.now() - explicitQuitStarted });
   app = undefined;
   assert.throws(() => process.kill(childPid!, 0));
   stage('owned_service_closed', { childPid });
   const exitChoice = JSON.parse(readFileSync(exitChoicePath, 'utf8'));
-  assert.equal(exitChoice.calls, 1);
-  assert.equal(exitChoice.response, 1);
+  assert.equal(exitChoice.calls, 0);
+  assert.equal(exitChoice.visible, false);
   stage('explicit_exit_choice', exitChoice);
   assert.equal(
     Number(await (await fetch(`${control}/count`)).text()),

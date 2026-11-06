@@ -105,7 +105,7 @@ import { readNativeInteractionAttachment } from './native-interaction-attachment
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
-import { humanReadableOperationError, NativeMessage } from './native-message';
+import { humanReadableOperationError, NativeToast } from './native-message';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
 import { NativeModelOutputMessage } from './native-model-output-message';
@@ -263,6 +263,7 @@ function NativeDesktopContent({
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsEditorHost, setSettingsEditorHost] = useState<HTMLDivElement | null>(null);
+  const [settingsToastHost, setSettingsToastHost] = useState<HTMLDivElement | null>(null);
   const settingsEditorControl = useRef<{ close: () => void } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
@@ -418,25 +419,17 @@ function NativeDesktopContent({
   const errorSequence = useRef(0);
   const [operationFailure, setOperationFailure] = useState<{
     id: number;
-    message: string;
+    message?: string;
     operation?: string;
   }>();
-  const error = operationFailure?.message ?? '';
-  const setError = useCallback((message: string, operation?: string) => {
-    setOperationFailure(message ? { id: ++errorSequence.current, message, operation } : undefined);
+  const setError = useCallback((message: string | undefined, operation?: string) => {
+    setOperationFailure(
+      message !== '' ? { id: ++errorSequence.current, message, operation } : undefined,
+    );
   }, []);
   const dismissOperationFailure = useCallback((id: number) => {
     setOperationFailure((current) => (current?.id === id ? undefined : current));
   }, []);
-  const [businessError, setBusinessError] = useState(false);
-  useEffect(
-    () =>
-      bridge.watchQuitConfirmationFailure?.(() => {
-        setBusinessError(true);
-        setError('quit_confirmation_unavailable');
-      }),
-    [bridge, setError],
-  );
   const [failedReads, setFailedReads] = useState<{
     state?: string;
     directory?: string;
@@ -667,18 +660,18 @@ function NativeDesktopContent({
     business: boolean | string = false,
   ) {
     try {
-      if (clearError) {
+      if (clearError && business) {
         setError('');
-        setBusinessError(!!business);
       }
       return await action();
     } catch (cause) {
+      if (!business) return undefined;
       const code =
-        (cause as { code?: string; message?: string }).code ??
-        (cause as { message?: string }).message;
-      setBusinessError(!!business);
+        cause && typeof cause === 'object'
+          ? ((cause as { code?: unknown }).code ?? (cause as { message?: unknown }).message)
+          : undefined;
       setError(
-        code && /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : '结果待核实；请查询原命令。',
+        typeof code === 'string' && /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : undefined,
         typeof business === 'string' ? business : undefined,
       );
       return undefined;
@@ -1134,14 +1127,11 @@ function NativeDesktopContent({
             ? newWorkspace
             : initialDirectory.workspaces[0].id,
           initialDirectory,
-        );
+        ).catch(() => {});
     })().catch(async (cause) => {
       if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
       const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
-      if (startupPhase.current === 'ready') {
-        setError(/^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code! : '目录状态待核实。');
-        return;
-      }
+      if (startupPhase.current === 'ready') return;
       startupDirectoryUnavailable.current = false;
       startupPhase.current = 'failed';
       setStartupError(
@@ -1426,7 +1416,7 @@ function NativeDesktopContent({
     ),
     submissions: state?.callerSubmissions,
     onChanged: async () => {
-      await report(refresh, false);
+      await refresh().catch(() => {});
     },
     onOpenChild: (sessionId, executionId, title, childAgentIdentity) => {
       setChildTabRequest({
@@ -1769,7 +1759,7 @@ function NativeDesktopContent({
     } finally {
       writing.current = false;
       setPending(false);
-      await report(refresh, false);
+      await refresh().catch(() => {});
     }
   }
   async function writeInput(action: () => Promise<unknown>, requiresHistory = true) {
@@ -1945,7 +1935,8 @@ function NativeDesktopContent({
     if (target !== newWorkspace || newBranch?.storeId !== directory?.storeId)
       setNewBranch(undefined);
     setTargetBranch(undefined);
-    if (target) void report(() => chooseWorkspace(target), true, '读取项目分支');
+    // Optional branch discovery stays quiet; an invalid project observation still gates sending.
+    if (target) void chooseWorkspace(target).catch(() => {});
     else {
       contextIntent.current++;
       setContextBusy(false);
@@ -1997,10 +1988,10 @@ function NativeDesktopContent({
         generation: current,
         workspaceId,
       });
-      if (generation.current === current) await acceptWorkspaceRemoval(value);
+      if (generation.current === current) await acceptWorkspaceRemoval(value).catch(() => {});
     } finally {
       setRemovingWorkspace(undefined);
-      await report(refresh, false);
+      await refresh().catch(() => {});
     }
   }
   async function lookupWorkspaceRemoval(commandId: string) {
@@ -2010,8 +2001,8 @@ function NativeDesktopContent({
       generation: generation.current,
       commandId,
     });
-    await acceptWorkspaceRemoval(value);
-    await refresh();
+    await acceptWorkspaceRemoval(value).catch(() => {});
+    await refresh().catch(() => {});
   }
   async function addWorkspace() {
     if (!bridge) return;
@@ -2020,7 +2011,6 @@ function NativeDesktopContent({
         const current = generation.current,
           page = pageIntent.current;
         const picked = await bridge.request({ method: 'workspace.pick', generation: current });
-        await readDirectory();
         if (
           current !== generation.current ||
           page !== pageIntent.current ||
@@ -2030,29 +2020,19 @@ function NativeDesktopContent({
           !('workspaceId' in picked)
         )
           return;
+        const observedDirectory = await readDirectory().catch(() => undefined);
+        if (current !== generation.current || page !== pageIntent.current || !observedDirectory)
+          return;
         rememberDraft();
         setPreparing(true);
         setScheduledTasksView(false);
         setToolsOpen(false);
         setAgentBrowserOpen(false);
-        // The host returns the actual registered identity, never a guessed new directory item.
-        const value = await bridge.request({
-          method: 'conversation.branch',
-          generation: current,
-          workspaceId: picked.workspaceId,
-        });
-        if (
-          current === generation.current &&
-          page === pageIntent.current &&
-          value &&
-          'kind' in value &&
-          value.kind === 'conversation.branch' &&
-          'repository' in value
-        ) {
-          setNewWorkspace(value.workspaceId);
-          setNewBranch(value);
-          setTargetBranch(undefined);
-        }
+        // Registration has succeeded; optional branch reads must not report that add as failed.
+        setNewWorkspace(picked.workspaceId);
+        setNewBranch(undefined);
+        setTargetBranch(undefined);
+        await chooseWorkspace(picked.workspaceId, observedDirectory).catch(() => {});
       },
       false,
       '添加空间',
@@ -2147,10 +2127,6 @@ function NativeDesktopContent({
       newDraftRevision.current === original.preparationRevision
     )
       setNewDraft((draft) => draft || original.draft.content);
-    if (value.code && value.code !== 'conversation_continue_explicit') {
-      setBusinessError(false);
-      setError(value.code);
-    }
   }
   function sendFirst() {
     if (
@@ -4480,9 +4456,10 @@ function NativeDesktopContent({
         </>
       }
       beforeConversation={
-        <NativeMessage
+        <NativeToast
+          container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
           message={
-            operationFailure && (diagnostics || businessError)
+            operationFailure
               ? {
                   id: operationFailure.id,
                   text: humanReadableOperationError(
@@ -4716,11 +4693,10 @@ function NativeDesktopContent({
                   }
                 : undefined,
               busy: contextBusy || pending,
-              onProject: (id) => void report(() => chooseWorkspace(id), true, '读取项目分支'),
+              onProject: (id) => void chooseWorkspace(id).catch(() => {}),
               onAddProject: () => void addWorkspace(),
               onBranch: setTargetBranch,
-              onRefreshBranch: () =>
-                void report(() => chooseWorkspace(newWorkspace), true, '刷新分支'),
+              onRefreshBranch: () => void chooseWorkspace(newWorkspace).catch(() => {}),
             }
           : undefined
       }
@@ -5219,6 +5195,7 @@ function NativeDesktopContent({
           modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
         >
           <DialogContent
+            ref={setSettingsToastHost}
             portalled={false}
             className="desktop-settings-dialog translate-x-0 translate-y-0"
             style={
@@ -5300,15 +5277,6 @@ function NativeDesktopContent({
               <div className="client-content-frame settings-content-frame">
                 <div className="settings-content-panels">
                   <div className="settings-content">
-                    {error && (
-                      <p className="notice error" role="alert">
-                        {humanReadableOperationError(
-                          error,
-                          operationFailure?.operation ?? '设置操作',
-                        )}
-                      </p>
-                    )}
-
                     {settingsPage === 'general' ? (
                       <NativeGeneralSettings
                         bridge={bridge}
