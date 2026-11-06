@@ -4,6 +4,7 @@ import {
   Delete02Icon,
   Folder01Icon,
   Folder02Icon,
+  GitBranchIcon,
   Home03Icon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
@@ -201,6 +202,7 @@ const SessionRow = memo(function SessionRow({
             [
               awaitingInteraction ? '待用户输入' : statusLabel,
               session.hasUnreadTurn && '有新结束的回复',
+              session.hasCreatedWorktree && '已创建 Git 工作树',
             ]
               .filter(Boolean)
               .join('，') || undefined
@@ -218,6 +220,14 @@ const SessionRow = memo(function SessionRow({
           <span className="nav-copy">
             <strong>{session.displayName}</strong>
           </span>
+          {session.hasCreatedWorktree && (
+            <HugeiconsIcon
+              className="session-worktree-icon"
+              icon={GitBranchIcon}
+              role="img"
+              aria-label="已创建 Git 工作树"
+            />
+          )}
           {awaitingInteraction ? (
             <Badge>待用户输入</Badge>
           ) : session.status === 'running' || session.status === 'waiting_execution' ? (
@@ -230,6 +240,7 @@ const SessionRow = memo(function SessionRow({
       </TooltipTrigger>
       <TooltipContent className="kite-client directory-tooltip" side="right" sideOffset={8}>
         <strong>{session.displayName}</strong>
+        {session.hasCreatedWorktree && <span>已创建 Git 工作树</span>}
         {sessionTime(session.updatedAt) && <span>{sessionTime(session.updatedAt)}</span>}
       </TooltipContent>
     </Tooltip>

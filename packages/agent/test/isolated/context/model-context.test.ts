@@ -66,6 +66,12 @@ test('read-only task and automatic rejection guidance remain one deterministic t
   );
   expect(contract.content).toContain('report that limitation instead of falling back to Shell');
   expect(contract.content).toContain(
+    'even spawn EPERM or EACCES does not prove an approval rejection',
+  );
+  expect(contract.content).toContain('Git started and returned a nonzero exit code');
+  expect(contract.content).toContain('Do not repeat identical calls, change keys or parameters');
+  expect(contract.content).toContain('Partial or unknown effects, or unconfirmed cleanup');
+  expect(contract.content).toContain(
     'The child receives the assignment, not everything visible to the parent',
   );
   expect(contract.content).toContain('use follow_up_agent on the same child');
@@ -130,6 +136,34 @@ test('normal, summary and expanded admission preserve stable prefix, exact Tool 
   expect(refreshed[0]).toEqual(input[0]);
   expect(refreshed.slice(1, 4)).toEqual(history);
   expect(refreshed.at(-1)?.content).toContain('plan_requirement: approved');
+});
+
+test('worktree exit guidance requires client navigation evidence and explicit target deletion intent', () => {
+  const contract = agentContractSource('/source-checkout');
+  expect(contract.content).toContain(
+    'exit or leave a Git worktree, or switch back from it, means client navigation',
+  );
+  expect(contract.content).toContain(
+    'does not authorize git_worktree.remove, Shell deletion, pruning worktree registrations, or changing branches or refs',
+  );
+  expect(contract.content).toContain('Creating a worktree did not move the original Session cwd');
+  expect(contract.content).toContain(
+    'if the current Session already uses the source checkout, no Git change is needed',
+  );
+  expect(contract.content).toContain('Use only explicitly available client navigation');
+  expect(contract.content).toContain('report a switch only after the client confirms it');
+  expect(contract.content).toContain(
+    'If the source is unknown or client navigation is unavailable',
+  );
+  expect(contract.content).toContain(
+    'without deleting anything or claiming that the project, session or cwd changed',
+  );
+  expect(contract.content).toContain(
+    'Invoke git_worktree.remove only when the user explicitly requests deletion of the specific target',
+  );
+  expect(contract.content).toContain(
+    'Even when Auto mode skips approval, that does not supply user task authorization for deletion or expand the execution scope',
+  );
 });
 
 test('legacy source placement remains prefix and invalid, elevated or duplicate runtime placements fail closed', () => {

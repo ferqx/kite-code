@@ -2814,6 +2814,7 @@ export type SessionDirectoryPage = {
     };
     activity?: {
       updatedAt: number | null;
+      hasCreatedWorktree?: boolean;
       executionOwner?: 'held' | 'unheld' | 'unknown';
       run: {
         id: string;
@@ -2831,10 +2832,12 @@ export type SessionDirectoryPage = {
       queued: boolean;
       pendingInteractions: number;
     };
+    worktreeSource?: { sessionId: string; workspaceId: string };
   }>;
 };
 export type SessionDirectoryActivity = {
   updatedAt: number | null;
+  hasCreatedWorktree?: boolean;
   executionOwner?: 'held' | 'unheld' | 'unknown';
   run: {
     id: string;

@@ -4,6 +4,20 @@ import { nativeToolRequestTarget } from './tool-request-target';
 /** Budget for added command fragments; existing metadata retains the original IPC response cap. */
 export const nativeToolMessagePageBytes = 524288;
 export const nativeShellCommandChunkBytes = 8192;
+/** Display-only failure facts from the exact registered Git worktree receipt. */
+export type NativeWorktreeFailure = {
+  category:
+    | 'process_start'
+    | 'permission_denied'
+    | 'git_command'
+    | 'verification'
+    | 'authorization_denied'
+    | 'unclassified';
+  mutation: 'not_started' | 'completed' | 'partial' | 'unknown';
+  errno?: string;
+  exitCode?: number;
+  cleanupUnconfirmed?: true;
+};
 export type NativeShellInput = {
   operation: 'execute' | 'launch' | 'read' | 'wait' | 'stop';
   shellId?: string;
@@ -44,6 +58,7 @@ export type NativeToolMessageFact = Pick<
   inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };
   /** Exact known Shell result content equals its saved structured details. */
   shellResultVerified?: boolean;
+  worktreeFailure?: NativeWorktreeFailure;
   /** Original image/PDF metadata, loaded through the same bounded image reader. */
   images?: { name: string; reference: { mediaType: string; size: string } }[];
   /** Read-only original Execution authorization; never a grant or answer capability. */

@@ -580,6 +580,48 @@ test('directory activity updates and unavailable observations retain the exact p
   expect(projection.project(directory)[2]!.state).toBe('loaded');
 });
 
+test('a confirmed worktree creation updates only its original session and survives refresh, selection and cold projection', () => {
+  const { directory, selection } = projectionFixture();
+  const projection = new NativeDirectoryProjection();
+  const before = projection.project(directory);
+  expect(before[1]!.sessions[0]).not.toHaveProperty('hasCreatedWorktree');
+  const confirmed: NativeDirectory = {
+    ...directory,
+    sessions: directory.sessions.map((session) =>
+      session.id === 'b'
+        ? {
+            ...session,
+            activity: {
+              updatedAt: null,
+              executionOwner: 'held',
+              run: null,
+              queued: false,
+              pendingInteractions: 0,
+              hasCreatedWorktree: true,
+            },
+          }
+        : session,
+    ),
+  };
+  const created = projection.project(confirmed);
+  expect(created[0]).toBe(before[0]);
+  expect(created[2]).toBe(before[2]);
+  expect(created[1]).not.toBe(before[1]);
+  expect(created[1]!.sessions[0]!.hasCreatedWorktree).toBe(true);
+  expect(created[1]!.sessions[0]).not.toHaveProperty('updatedAt');
+  const refreshed = structuredClone(confirmed);
+  expect(projection.project(refreshed)).toBe(created);
+  expect(projection.project(refreshed, selection('b'))).toBe(created);
+  expect(projection.project(refreshed, selection('a'))[1]).toBe(created[1]);
+  expect(
+    projection.project({ ...refreshed, unavailable: true })[1]!.sessions[0]!.hasCreatedWorktree,
+  ).toBe(true);
+  const reopened = new NativeDirectoryProjection().project(structuredClone(confirmed));
+  expect(reopened[1]!.sessions[0]!.hasCreatedWorktree).toBe(true);
+  const anotherStore = projection.project({ ...directory, storeId: 'another-store' });
+  expect(anotherStore[1]!.sessions[0]).not.toHaveProperty('hasCreatedWorktree');
+});
+
 test('Sidebar leaves unrelated workspace rows untouched while selection and callbacks stay current', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',

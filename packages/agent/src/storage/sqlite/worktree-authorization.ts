@@ -90,7 +90,13 @@ function policy(snapshot: Json, planCeiling = false): Json {
     data.workspaceTrust !== true ||
     capability.hardAllowed !== true ||
     capability.safeRead !== false ||
-    capability.autoReview !== undefined ||
+    (capability.autoReview !== undefined &&
+      !(
+        data.mode === 'auto' &&
+        capability.kind === 'tool' &&
+        capability.definitionId === 'git.worktree' &&
+        capability.autoReview === 'none'
+      )) ||
     !['auto', 'accept_edits', 'full'].includes(String(data.mode)) ||
     !['git.worktree', 'shell.command'].includes(String(capability.definitionId)) ||
     capability.definitionVersion !== '1'

@@ -216,6 +216,8 @@ export interface TurnActivity {
 }
 
 export interface SessionSummary {
+  /** Host-confirmed successful worktree creation history; not a live path check. */
+  readonly hasCreatedWorktree?: boolean;
   /** Host-confirmed latest terminal turn has not been read in this client. */
   readonly hasUnreadTurn?: boolean;
   readonly sessionId: string;

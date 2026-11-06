@@ -67,6 +67,8 @@ export interface DesktopSnapshot {
   readonly context?: SelectedContextPage;
   readonly activeCommand?: Command;
   readonly permissions?: DesktopPermissionFacts;
+  /** Persisted history is readable, but this Workspace's current directory identity is absent. */
+  readonly workspaceUnavailable?: boolean;
 }
 export interface DesktopOptions {
   readonly admittedClient: AgentClient;
@@ -358,10 +360,19 @@ export class DesktopController {
         this.client.serverInfo?.capabilities?.includes('permission_controls')
           ? Promise.all([
               this.client.getPermissionMode(selection.sessionId, { storeId: view.storeId, signal }),
-              this.client.getWorkspaceTrust(view.session.workspaceId, {
-                storeId: view.storeId,
-                signal,
-              }),
+              this.client
+                .getWorkspaceTrust(view.session.workspaceId, {
+                  storeId: view.storeId,
+                  signal,
+                })
+                .catch((error: unknown) => {
+                  if (
+                    error instanceof ClientError &&
+                    error.code === 'workspace_identity_unavailable'
+                  )
+                    return undefined;
+                  throw error;
+                }),
             ])
           : undefined,
         this.options.readActiveCommandOnSelect && activeRun
@@ -373,7 +384,7 @@ export class DesktopController {
       this.validateInteractionPage(page, view, afterId);
       if (afterId && 'snapshotCursor' in page && page.snapshotCursor !== view.snapshotCursor)
         throw new ClientError('interaction_page_observation_changed');
-      const permissions = permissionFacts
+      const permissions = permissionFacts?.[1]
         ? {
             observationId: ++this.permissionObservation,
             mode: permissionFacts[0],
@@ -405,6 +416,7 @@ export class DesktopController {
         context,
         activeCommand,
         permissions,
+        ...(permissionFacts && !permissionFacts[1] ? { workspaceUnavailable: true } : {}),
       };
       // Only the current read may contribute display data or a cached snapshot.
       check();
@@ -618,6 +630,7 @@ export class DesktopController {
     const snapshot = this.current;
     if (!selection || !snapshot || snapshot.generation !== this.generation)
       throw new ClientError('view_not_ready');
+    if (snapshot.workspaceUnavailable) throw new ClientError('workspace_identity_unavailable');
     // A user explicitly invoking an offered action creates one new stable intent.
     const intent: ExtensionCommandRequest = {
       expectedStoreId: snapshot.view.storeId,
@@ -706,6 +719,8 @@ export class DesktopController {
     if (previous?.promise) return previous.promise;
     if (previous) return Promise.reject(new ClientError('interaction_answer_already_saved'));
     const snapshot = this.current;
+    if (snapshot?.workspaceUnavailable)
+      return Promise.reject(new ClientError('workspace_identity_unavailable'));
     if (
       !snapshot ||
       snapshot.generation !== this.generation ||
@@ -944,6 +959,7 @@ export class DesktopController {
   }
   private contextReady(allowActive = false): DesktopSnapshot {
     const snapshot = this.current;
+    if (snapshot?.workspaceUnavailable) throw new ClientError('workspace_identity_unavailable');
     if (!snapshot?.context || snapshot.generation !== this.generation)
       throw new ClientError('view_not_ready');
     if (snapshot.context.selection.id !== snapshot.view.session.contextSelectionId)

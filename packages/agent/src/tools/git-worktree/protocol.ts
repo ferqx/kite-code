@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from 'node:path';
 import type { Json } from '../../extensions';
 import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
+import { validWorktreeFailure } from './errors';
 
 export const limits = Object.freeze({
   payloadBytes: 32 * 1024,
@@ -541,6 +542,7 @@ function validateDetails(value: Record<string, Json>, phase: WorktreePhase): boo
       'owner',
       'gitExitCode',
       'diagnostic',
+      'failure',
     ])
   )
     return false;
@@ -573,6 +575,7 @@ function validateDetails(value: Record<string, Json>, phase: WorktreePhase): boo
   for (const key of ['detached', 'removed'])
     if (value[key] !== undefined && typeof value[key] !== 'boolean') return false;
   if (value.gitExitCode !== undefined && !Number.isInteger(value.gitExitCode)) return false;
+  if (value.failure !== undefined && !validWorktreeFailure(value.failure)) return false;
   if (
     value.repository !== undefined &&
     (!jsonObject(value.repository) ||
@@ -678,6 +681,7 @@ export function validateFrame(
   )
     return false;
   if (value.businessOutcome === 'failed' && !strictText(value.details.code, 128)) return false;
+  if (value.businessOutcome !== 'failed' && value.details.failure !== undefined) return false;
   if (value.businessOutcome === 'succeeded') {
     const details = value.details;
     if (!jsonObject(details.repository)) return false;

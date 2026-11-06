@@ -1,12 +1,13 @@
 import { expect, test } from 'bun:test';
 import { createConfigurationSnapshot } from '@kite-ai/agent/config';
-import type { Message, Run, Session } from '@kite-ai/client';
+import type { Execution, Interaction, Message, Run, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type {
   NativeBridge,
   NativeCallerMetadata,
   NativeConversationResult,
+  NativeDirectory,
   NativeDraft,
   NativeRequest,
   NativeResult,
@@ -74,6 +75,9 @@ function fixture(
     storeId?: string;
     contextSelectionId?: string;
     unselectedModel?: boolean;
+    workspaceUnavailable?: boolean | string;
+    interactions?: Interaction[];
+    executions?: Execution[];
   } = {},
 ) {
   const fixtureStoreId = options.storeId ?? 'store';
@@ -171,6 +175,8 @@ function fixture(
   let workspaceRemovalUnavailable = false;
   let releaseWorkspaceRemoval: ((result: NativeWorkspaceRemoval) => void) | undefined;
   let viewGeneration = 1;
+  const unavailableWorkspace = () =>
+    options.workspaceUnavailable === true || options.workspaceUnavailable === selected;
   const state = (): NativeState => ({
     generation: 1,
     creationSubmissions: [],
@@ -188,10 +194,11 @@ function fixture(
           viewSelection: 1,
           session: sessions.find((session) => session.id === selected)!,
           runs: runs.filter((run) => run.sessionId === selected),
-          executions: [],
-          interactions: [],
+          executions: options.executions ?? [],
+          interactions: options.interactions ?? [],
           interactionsAfterId: null,
-          ...(withPermissions
+          ...(unavailableWorkspace() ? { workspaceUnavailable: true } : {}),
+          ...(withPermissions && !unavailableWorkspace()
             ? {
                 permissions: {
                   observationId: selected === 'a' ? 1 : 2,
@@ -684,6 +691,416 @@ function fixture(
     },
   };
 }
+
+/** The bridge supplies persisted directory provenance only; Native owns navigation and draft retention. */
+function worktreeNavigationFixture(unavailableSession?: string, unselectedModel = false) {
+  const f = fixture(true, true, 'auto', {
+    workspaceUnavailable: unavailableSession,
+    unselectedModel,
+  });
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request.bind(bridge);
+  let directoryStore = 'store',
+    sourceVisible = true,
+    sourceCreated = true;
+  let relation: { sessionId: string; workspaceId: string } | undefined = {
+    sessionId: 'a',
+    workspaceId: 'w',
+  };
+  let holdDirectory = false,
+    releaseDirectory: (() => void) | undefined;
+  const third: Session = {
+    id: 'c',
+    workspaceId: 'w',
+    rootSessionId: 'c',
+    parentSessionId: null,
+    title: 'Third C',
+    nextSeq: '0',
+    deletedAt: null,
+    controlRevision: '0',
+    contextSelectionId: 'context',
+  };
+  const patchDirectory = (value: NativeDirectory): NativeDirectory => ({
+    ...value,
+    storeId: directoryStore,
+    workspaces: [
+      { id: 'w', name: 'Workspace', rootUri: 'file:///workspace' },
+      { id: 'worktree', name: 'Worktree project', rootUri: 'file:///worktree' },
+    ],
+    sessions: [
+      ...value.sessions
+        .filter((session) => sourceVisible || session.id !== 'a')
+        .map((session) =>
+          session.id === 'b'
+            ? {
+                ...session,
+                workspaceId: 'worktree',
+                ...(relation ? { worktreeSource: relation } : {}),
+              }
+            : {
+                ...session,
+                ...(sourceCreated
+                  ? {
+                      activity: {
+                        updatedAt: null,
+                        run: null,
+                        queued: false,
+                        pendingInteractions: 0,
+                        hasCreatedWorktree: true,
+                      },
+                    }
+                  : {}),
+              },
+        ),
+      third,
+    ],
+  });
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'submit')
+      return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+    if (unselectedModel && value && 'kind' in value && value.kind === 'settings.models')
+      return { ...value, defaultModelId: null, selectedModelId: undefined, models: [] };
+    if (input.method === 'directory') {
+      const result = patchDirectory(value as NativeDirectory);
+      if (holdDirectory) {
+        holdDirectory = false;
+        await new Promise<void>((resolve) => {
+          releaseDirectory = resolve;
+        });
+      }
+      return result;
+    }
+    if (input.method === 'draft.read')
+      return { ...(value as NativeDraft), workspaceId: input.sessionId === 'b' ? 'worktree' : 'w' };
+    if (value && 'generation' in value) {
+      const state = value as NativeState;
+      const selection = state.selection;
+      const id = selection?.session?.id ?? f.selected();
+      return {
+        ...state,
+        ...(state.directory ? { directory: patchDirectory(state.directory) } : {}),
+        ...(selection
+          ? {
+              selection: {
+                ...selection,
+                session:
+                  id === 'c'
+                    ? third
+                    : { ...selection.session, workspaceId: id === 'b' ? 'worktree' : 'w' },
+                ...(selection.permissions
+                  ? {
+                      permissions: {
+                        ...selection.permissions,
+                        trust: {
+                          ...selection.permissions.trust,
+                          workspaceId: id === 'b' ? 'worktree' : 'w',
+                        },
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+      };
+    }
+    return value;
+  };
+  return {
+    ...f,
+    setSourceVisible: (value: boolean) => {
+      sourceVisible = value;
+    },
+    setSourceCreated: (value: boolean) => {
+      sourceCreated = value;
+    },
+    setRelation: (value: typeof relation) => {
+      relation = value;
+    },
+    setDirectoryStore: (value: string) => {
+      directoryStore = value;
+    },
+    holdNavigationDirectory: () => {
+      holdDirectory = true;
+    },
+    directoryHeld: () => !!releaseDirectory,
+    releaseNavigationDirectory: () =>
+      act(async () => {
+        releaseDirectory?.();
+        releaseDirectory = undefined;
+      }),
+  };
+}
+
+const worktreeBusinessMethods = new Set([
+  'conversation.send',
+  'submit',
+  'caller.prepare',
+  'caller.submit',
+  'extensions.invoke',
+  'workspace.remove',
+  'permission.mode',
+  'permission.trust',
+  'fileRecovery.begin',
+  'fileRecovery.continue',
+  'input.queue.steer',
+]);
+
+async function sendWorktreeExitInput(f: ReturnType<typeof worktreeNavigationFixture>) {
+  const button = f.host.querySelector<HTMLButtonElement>('.composer [aria-label="退出工作树"]');
+  expect(button?.disabled).toBe(false);
+  await act(async () => button!.click());
+}
+
+test('exiting a worktree via its header only returns to the original source and preserves both drafts', async () => {
+  const f = worktreeNavigationFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Other B');
+    await f.until(() => !!f.input('当前会话私有草稿'));
+    await f.edit('工作树里尚未发送的草稿', '当前会话私有草稿');
+    expect(f.host.querySelector('[aria-label="退出工作树"]')?.getAttribute('title')).toContain(
+      'Original A',
+    );
+    await f.click('退出工作树');
+    await f.until(() => f.selected() === 'a' && !!f.input('当前会话私有草稿'));
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved A');
+    expect(f.host.querySelector('[aria-label="工作树导航"]')?.textContent).toContain(
+      '已返回来源会话',
+    );
+    await f.click('Other B');
+    await f.until(() => promptValue(f.input('当前会话私有草稿')) === '工作树里尚未发送的草稿');
+    expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('standalone worktree exit input navigates without sending the command or deleting, including an unavailable directory', async () => {
+  for (const unavailable of [undefined, 'b', 'a']) {
+    const f = worktreeNavigationFixture(unavailable);
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Other B');
+      await f.until(() => !!f.input('当前会话私有草稿'));
+      await f.edit('退出工作树', '当前会话私有草稿');
+      await sendWorktreeExitInput(f);
+      await f.until(() => f.selected() === 'a');
+      expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+      if (unavailable === 'a')
+        expect(f.host.querySelector('[aria-label="工作区目录不可用"]')).not.toBeNull();
+      await f.click('Other B');
+      await f.until(() => promptValue(f.input('当前会话私有草稿')) === '退出工作树');
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('worktree exit needs no configured model and the header remains available from a missing workspace', async () => {
+  for (const inputCommand of [true, false]) {
+    const f = worktreeNavigationFixture('b', true);
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Other B');
+      await f.until(() => !!f.host.querySelector('[aria-label="工作区目录不可用"]'));
+      if (inputCommand) {
+        await f.edit('返回来源会话', '当前会话私有草稿');
+        await sendWorktreeExitInput(f);
+      } else {
+        expect(f.host.querySelector<HTMLButtonElement>('[aria-label="退出工作树"]')?.disabled).toBe(
+          false,
+        );
+        await f.click('退出工作树');
+      }
+      await f.until(() => f.selected() === 'a');
+      expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('exit input already at the creation source stays there and unavailable provenance preserves the command draft', async () => {
+  const f = worktreeNavigationFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('leave worktree', '当前会话私有草稿');
+    await sendWorktreeExitInput(f);
+    await f.until(() => !!f.host.querySelector('[aria-label="工作树导航"]'));
+    expect(f.selected()).toBe('a');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('leave worktree');
+    expect(f.host.querySelector('[aria-label="工作树导航"]')?.textContent).toContain(
+      '未改变本会话',
+    );
+    await f.click('Other B');
+    f.setRelation(undefined);
+    await f.edit('exit worktree', '当前会话私有草稿');
+    await sendWorktreeExitInput(f);
+    await f.until(
+      () => !!f.host.querySelector('[aria-label="工作树导航"]')?.textContent?.includes('无法核实'),
+    );
+    expect(f.selected()).toBe('b');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('exit worktree');
+    expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('worktree exit rechecks vanished, cross-Store and mismatched source relationships before selecting', async () => {
+  for (const invalid of ['missing', 'foreign-store', 'wrong-workspace'] as const) {
+    const f = worktreeNavigationFixture();
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Other B');
+      await f.edit('保留目标会话草稿', '当前会话私有草稿');
+      if (invalid === 'missing') f.setSourceVisible(false);
+      if (invalid === 'foreign-store') f.setDirectoryStore('another-store');
+      if (invalid === 'wrong-workspace') f.setRelation({ sessionId: 'a', workspaceId: 'worktree' });
+      await f.click('退出工作树');
+      await f.until(
+        () =>
+          !!f.host.querySelector('[aria-label="工作树导航"]')?.textContent?.includes('无法核实'),
+      );
+      expect(f.selected()).toBe('b');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('保留目标会话草稿');
+      expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('late worktree exit directory results cannot override a later explicit session selection', async () => {
+  const f = worktreeNavigationFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Other B');
+    await f.edit('工作树草稿保留', '当前会话私有草稿');
+    f.holdNavigationDirectory();
+    await f.click('退出工作树');
+    await f.until(f.directoryHeld);
+    await f.click('Third C');
+    await f.releaseNavigationDirectory();
+    await f.until(() => f.selected() === 'c' && !!f.input('当前会话私有草稿'));
+    expect(f.host.querySelector('.breadcrumb strong')?.textContent).toBe('Third C');
+    expect(f.host.querySelector('[aria-label="工作树导航"]')).toBeNull();
+    await f.click('Other B');
+    await f.until(() => promptValue(f.input('当前会话私有草稿')) === '工作树草稿保留');
+    expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a pending worktree exit directory read keeps the draft editable and restores the latest edit after returning', async () => {
+  const f = worktreeNavigationFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Other B');
+    await f.edit('目录读取前的工作树草稿', '当前会话私有草稿');
+    f.holdNavigationDirectory();
+    await f.click('退出工作树');
+    await f.until(f.directoryHeld);
+    expect(f.input('当前会话私有草稿')?.getAttribute('contenteditable')).toBe('true');
+    expect(f.host.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(false);
+    expect(
+      f.host.querySelector<HTMLButtonElement>('.session-header [aria-label="退出工作树"]')
+        ?.disabled,
+    ).toBe(true);
+    await f.edit('读取期间继续编辑的最新草稿', '当前会话私有草稿');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('读取期间继续编辑的最新草稿');
+    expect(
+      f.host.querySelector<HTMLButtonElement>('[aria-label="发送明确的新轮次"]')?.disabled,
+    ).toBe(true);
+    await f.click('发送明确的新轮次');
+    expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+    await f.releaseNavigationDirectory();
+    await f.until(() => f.selected() === 'a');
+    await f.click('Other B');
+    await f.until(() => promptValue(f.input('当前会话私有草稿')) === '读取期间继续编辑的最新草稿');
+    expect(f.calls.filter((call) => worktreeBusinessMethods.has(call.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const content of [
+  '请解释退出工作树会发生什么。',
+  '```\nexit worktree\n```',
+  '"退出工作树"',
+  '删除工作树 D:/example/worktree',
+]) {
+  test(`ordinary text remains model input instead of a local worktree exit: ${content}`, async () => {
+    const f = worktreeNavigationFixture();
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Other B');
+      await f.edit(content, '当前会话私有草稿');
+      await f.click('发送明确的新轮次');
+      await f.until(() => f.calls.some((call) => call.method === 'submit'));
+      expect(f.calls.find((call) => call.method === 'submit')).toMatchObject({
+        sessionId: 'b',
+        intent: {
+          kind: 'run.start',
+          content: content.startsWith('```') ? expect.stringContaining('exit worktree') : content,
+        },
+      });
+      expect(f.selected()).toBe('b');
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('a standalone worktree exit with a file attachment remains ordinary model input', async () => {
+  const f = worktreeNavigationFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Other B');
+    (f.dom.window.kiteNative! as NativeBridge).fileReferences = () => [
+      { name: 'context.pdf', uri: 'file:///synthetic/context.pdf' },
+    ];
+    await act(async () =>
+      f.host.querySelector('[aria-label="添加附件"]')!.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    await act(async () => f.host.querySelector<HTMLElement>('[aria-label="添加文件"]')!.click());
+    const picker = f.host.querySelector<HTMLInputElement>('input[aria-label="选择文件"]')!;
+    Object.defineProperty(picker, 'files', {
+      value: [new f.dom.window.File(['context'], 'context.pdf', { type: 'application/pdf' })],
+    });
+    await act(async () =>
+      picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
+    );
+    await f.until(
+      () => f.host.querySelector('.composer-attachment-name')?.textContent === 'context.pdf',
+    );
+    await f.edit('退出工作树', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    await f.until(() => f.calls.some((call) => call.method === 'submit'));
+    expect(f.calls.find((call) => call.method === 'submit')).toMatchObject({
+      sessionId: 'b',
+      intent: {
+        kind: 'run.start',
+        content: '退出工作树',
+        files: [{ name: 'context.pdf', uri: 'file:///synthetic/context.pdf' }],
+      },
+      fileIds: [expect.any(String)],
+    });
+    expect(f.selected()).toBe('b');
+    expect(f.host.querySelector('[aria-label="工作树导航"]')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
 
 function savedPromptFixture(
   options: { unknown?: boolean; holdSubmit?: boolean; callerOnly?: boolean } = {},
@@ -1949,6 +2366,147 @@ test('switching from a Session to global or project preparation retains the inpu
     expect(
       f.calls.some((call) =>
         ['conversation.send', 'submit', 'permission.mode'].includes(call.method),
+      ),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a missing workspace keeps its cold history and editable draft while new execution and permission controls remain closed', async () => {
+  const f = fixture(true, false, 'auto', {
+    workspaceUnavailable: 'a',
+    messages: [
+      {
+        id: 'original-history',
+        sessionId: 'a',
+        runId: null,
+        seq: '1',
+        status: 'complete',
+        role: 'user',
+        content: '已保存且可阅读的原历史',
+      },
+    ],
+  });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.until(() => !!f.host.body.textContent?.includes('已保存且可阅读的原历史'));
+    expect(f.host.querySelector('[aria-label="工作区目录不可用"]')?.textContent).toContain(
+      '恢复原目录',
+    );
+    await f.edit('保留新的草稿', '当前会话私有草稿');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('保留新的草稿');
+    expect(
+      f.host.querySelector<HTMLButtonElement>('[aria-label="发送明确的新轮次"]')?.disabled,
+    ).toBe(true);
+    await f.click('发送明确的新轮次');
+    expect(
+      f.calls.some((call) =>
+        ['submit', 'permission.mode', 'permission.trust'].includes(call.method),
+      ),
+    ).toBe(false);
+    expect(f.calls.some((call) => call.method === 'messages')).toBe(true);
+    f.holdSelection();
+    await f.click('Other B');
+    expect(f.host.querySelector('[aria-label="工作区目录不可用"]') === null).toBe(true);
+    await f.releaseSelection();
+    expect(f.host.querySelector('[aria-label="工作区目录不可用"]') === null).toBe(true);
+    await f.click('Original A');
+    expect(f.host.querySelector('[aria-label="工作区目录不可用"]')).not.toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('保留新的草稿');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a pending interaction in a missing workspace retains the original Run stop action while approvals remain closed', async () => {
+  const run = {
+    id: 'waiting-run',
+    configuration: chatRunConfiguration(),
+    sessionId: 'a',
+    originStoreId: 'store',
+    originCommandId: 'original-waiting-command',
+    status: 'waiting_interaction',
+    isActive: true,
+    createdAt: 1,
+    finishedAt: null,
+    reason: null,
+  } as Run;
+  const interaction = {
+    id: 'original-approval',
+    originStoreId: 'store',
+    sessionId: 'a',
+    presentationSessionId: 'a',
+    ancestry: ['a'],
+    runId: run.id,
+    executionId: 'waiting-tool',
+    attempt: 1,
+    kind: 'question',
+    definitionId: 'ask_user',
+    definitionVersion: '1',
+    inputDigest: 'digest',
+    policyRevision: 'policy',
+    requiredRefs: [],
+    request: { prompt: '原问题等待回答' },
+    answer: null,
+    revision: '1',
+    acceptedDecisionRevision: null,
+    state: 'pending',
+  } as Interaction;
+  const f = fixture(true, false, 'auto', {
+    workspaceUnavailable: true,
+    runs: [run],
+    interactions: [interaction],
+    executions: [
+      {
+        id: 'waiting-tool',
+        sessionId: 'a',
+        runId: run.id,
+        originStoreId: 'store',
+        kind: 'tool',
+        definitionId: 'ask_user',
+        definitionVersion: '1',
+        status: 'running',
+        result: null,
+        resultRevision: '0',
+        cancelRequestedAt: null,
+      },
+    ],
+    messages: [
+      {
+        id: 'before-approval',
+        sessionId: 'a',
+        runId: run.id,
+        sourceIds: [run.originCommandId],
+        seq: '1',
+        status: 'complete',
+        role: 'user',
+        content: '原任务等待审批',
+      },
+    ],
+  });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.until(
+      () => f.host.querySelector<HTMLButtonElement>('[aria-label="停止任务"]')?.disabled === false,
+    );
+    await f.click('停止任务');
+    expect(f.calls.find((call) => call.method === 'caller.prepare')).toMatchObject({
+      sessionId: 'a',
+      intent: {
+        kind: 'command.cancel',
+        targetCommandId: run.originCommandId,
+        expectedStoreId: 'store',
+      },
+    });
+    expect(f.calls.some((call) => call.method === 'caller.submit')).toBe(true);
+    expect(
+      f.calls.some((call) =>
+        ['interaction.answer', 'submit', 'permission.trust', 'permission.mode'].includes(
+          call.method,
+        ),
       ),
     ).toBe(false);
   } finally {

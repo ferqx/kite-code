@@ -134,11 +134,11 @@ Windows 默认 Git Bash 的本机执行、审批与取消资格归 [Windows acti
 
 [Shell 工厂](shell.ts)固定 Bun/Git/worker/config/空 hooks 的身份和摘要，把完整 profile 纳入命令摘要及 snapshot，批准后到 start 前重核。规范化命令只接受一个完整闭合 payload，不能附加赋值、重定向或命令；worker 不能自报 safeRead。启动环境由可信允许集合构造，禁止 preload、动态加载及 Shell 初始化注入；macOS launchd 再启动仍继承相同保护参数。Bun1.4.4 的配置参数按实测使用 `--config=<absolute>`，不是分开的两个参数。
 
-固定 worker 的实际文件/网络范围取原 Job 申请与已接纳证明的交集，network 恒为 none；不会因 Full 把默认 workspace_write 扩为外部写入。Auto 的固定 Worktree 调用走现有通用 authorization checker，不将 base64 命令误作普通 Shell 风险材料，也不授免审变更。资产缺失或变化局部拒绝，不阻断普通 Session。具体 [Worktree 边界](../tools/git-worktree/README.md)和[安全回归](../../test/isolated/tools/git-worktree/launch-security.test.ts)保留 legacy list-only、自定义 Shell 和平台限制。
+固定 worker 的实际文件/网络范围取原 Job 申请与已接纳证明的交集，network 恒为 none；不会因 Full 把默认 workspace_write 扩为外部写入。Auto 下仅准确可信 `builtin.shell/git.worktree@1` Tool 使用 `autoReview:none`，不创建自动审核或人工审批；内部 Job 仍须证明来自该原 Tool，不能仅因命令能解析为 worker 就免审。资产缺失或变化局部拒绝，不阻断普通 Session。具体 [Worktree 边界](../tools/git-worktree/README.md)和[安全回归](../../test/isolated/tools/git-worktree/launch-security.test.ts)保留 legacy list-only、自定义 Shell 和平台限制。
 
-Worktree 的一次业务批准精确覆盖原 Tool 两个冻结内部步骤，正常手动创建／删除各一张卡，Auto 各一次 generic check。[决策封存](worktree-authorization.ts)仅绑定默认策略与受验证的父子／Planning 组合，额外自定义人工条件改写决策后不能沿旧封存复用；它不是秘密签名或授权本体。[SQLite 边界](../storage/sqlite/worktree-authorization.ts)核真实 builtin.shell 注册、原 owner 与 executable 记录、完整步骤 input/ref/token、范围和期限；mutation 从原 prepare 的完整连续零丢块输出核其原计划。最终派发重新核原 interaction/check/grant、控制上下文及冻结步骤，原 same_command 撤销、取消和 unknown 处理保持。没有把 Job 直接标为 allowed 或免审，也没有改变普通 Shell 的手动分层合同。
+手动模式 Worktree 的一次业务批准精确覆盖原 Tool 两个冻结内部步骤，正常创建／删除各一张卡；Auto 的两个步骤只继承准确原 Tool 已封存的免审来源，零 generic check 和人工卡。[决策封存](worktree-authorization.ts)仅绑定默认策略与受验证的父子／Planning 组合，额外自定义人工条件改写决策后不能沿旧封存复用；它不是秘密签名或授权本体。[SQLite 边界](../storage/sqlite/worktree-authorization.ts)核真实 builtin.shell 注册、原 owner 与 executable 记录、完整步骤 input/ref/token、范围和期限；mutation 从原 prepare 的完整连续零丢块输出核其原计划。最终派发重新核原 interaction/check/grant 或真实 Auto 免审来源、控制上下文及冻结步骤，原 same_command 撤销、取消和 unknown 处理保持。没有把任意 Job 直接标为 allowed，也没有改变普通 Shell 的手动分层合同。
 
-复用不扩展到其他业务 Execution、兄弟 Agent 或独立 Shell。原已接纳效果的恢复仍只观察原 ref，合法原 owner resume 才可逐字续接；首次未获批准或独立人工要求继续按原路径处理。对应[真实 Runtime/SQLite 回归](../../test/isolated/execution/worktree-authorization.test.ts)与[Service 原生 Git 装配](../../../../apps/service/test/isolated/git-worktree-permissions.test.ts)分别验证封存、防伪、最终派发竞争和正常两卡／两次审核。
+复用不扩展到其他业务 Execution、兄弟 Agent 或独立 Shell。原已接纳效果的恢复仍只观察原 ref，合法原 owner resume 才可逐字续接；首次未获批准或独立人工上限继续按原路径处理。对应[真实 Runtime/SQLite 回归](../../test/isolated/execution/worktree-authorization.test.ts)与[Service 原生 Git 装配](../../../../apps/service/test/isolated/git-worktree-permissions.test.ts)分别验证封存、防伪、最终派发竞争、手动业务卡及 Auto 零审核。免审批不代表用户已授权删除；退出只做客户端来源导航。
 
 macOS新worker首次装配固定经过系统所有权、祖先无链接/非group/world可写、Mach-O及摘要核验的实际Git。系统developer选择和固定CLT/Xcode路径只读发现，不能由模型、PATH或DEVELOPER_DIR改选；缺可信native Git局部不可用。接受后不会因失败切换程序。原始worker输出在各平台可信profile分支严格UTF-8解码，普通Shell路径保持；错误仍经原Job停止/unknown机制结算。
 

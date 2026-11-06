@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { PermissionDecision } from '../../extensions';
 import { canonicalJson } from '../../json';
 import { dispatchScopeLeaves } from '../../permissions/dispatch-scope';
+import { isAutoWorktreeDecision } from '../../permissions/worktree-authorization';
 import { isShellRiskRequest } from '../../shell-risk-review';
 import type { AutoAuthorizationEvidence, DispatchInput, Store } from '../port';
 import { AgentError, type ExecutionAuthorizationObservation, type Json } from '../types';
@@ -492,7 +493,7 @@ function evidence(
       !sameWorktreeJson(payload.controlReads, decision.controlReads)
     )
       throw new AgentError('authorization_policy_changed');
-    verifyWorktreeSource(db, boundary.parent, boundary.accepted);
+    verifyWorktreeSource(db, boundary.parent, boundary.accepted, boundary.original);
   } else if (source.kind === 'check') {
     const sourceTarget = db.row(
       'SELECT * FROM execution WHERE id=?',
@@ -664,13 +665,19 @@ function verifyWorktreeSource(
   db: SqliteOperations,
   parent: Row,
   accepted: Record<string, Json>,
+  original: PermissionDecision,
 ): void {
   if (
     accepted.worktreeAuthorizationContext !== autoAuthorizationContext(db, parent) ||
     (!accepted.interactionId &&
       !accepted.checkExecutionId &&
       !accepted.policyEvidenceId &&
-      !accepted.grant) ||
+      !accepted.grant &&
+      !isAutoWorktreeDecision({
+        ...original,
+        worktreeDecisionSeal:
+          accepted.worktreeDecisionSeal as unknown as PermissionDecision['worktreeDecisionSeal'],
+      })) ||
     accepted.reviewExecutionId
   )
     throw new AgentError('authorization_policy_changed');
@@ -694,7 +701,7 @@ export function resolveWorktreeAuthorization(
     let boundary: ReturnType<typeof worktreeAuthorizationBoundary>;
     try {
       boundary = worktreeAuthorizationBoundary(db, target, input.decision);
-      verifyWorktreeSource(db, boundary.parent, boundary.accepted);
+      verifyWorktreeSource(db, boundary.parent, boundary.accepted, boundary.original);
     } catch {
       return null;
     }

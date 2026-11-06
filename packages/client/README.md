@@ -161,6 +161,10 @@ Native `listWorkspaceDirectory({storeId,afterSeq?,upperSeq?,limit?},{signal?})` 
 
 [SDK 目录反例](test/directory.test.ts) 核对高于 Number 精度的固定上界、闭合输入、未来字段、错误身份/重复项、dispose 后迟到页，另核快照漂移／缺事实／坏时间和持续变化；[真实目录链路](../../tests/isolated/unified-agent/directory.test.ts) 另用实际创建的超过 200 项验证 Native/Browser 的完整身份、workspace SQL 过滤、真实事件时间与冷 readonly 读取。
 
+目录 activity 的可选 `hasCreatedWorktree` 传递原 Session 已确认创建过 Git 工作树的历史事实；缺失保持缺失，不从 cwd、聊天文本或子会话猜测。它不表示目标仍存在，也不授予访问或执行权。生成 DTO／validator 与 Service 同源，原目录分页、身份和 snapshotCursor 合同保持。
+
+目录条目的可选 `worktreeSource:{sessionId,workspaceId}` 传递同 Store／主体可见的唯一创建来源，供客户端只读导航。SDK 保留该字段及其缺失，不根据路径或历史标记生成关系，不新增查询或写入；原生成协议、分页与连接作用域检查保持。
+
 
 Native 配置管理以可选 `configuration_management` 能力开放 `getConfiguration`、`patchConfiguration`、`repairConfiguration`、`putCredential`、`revokeCredential` 和 `getHostMutation`。可用数据读写固定原 Store 与 connection generation；只在数据不可用的诊断连接中，用户配置读允许省略 Store，坏 JSONC 保留 `raw/effective/snapshot:null` 和准确 ETag/错误。Workspace 请求只含已有 Workspace ID，没有文件路径。
 

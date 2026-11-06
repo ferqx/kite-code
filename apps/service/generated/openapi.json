@@ -19773,6 +19773,9 @@
                         }
                       ]
                     },
+                    "hasCreatedWorktree": {
+                      "type": "boolean"
+                    },
                     "executionOwner": {
                       "type": "string",
                       "enum": ["held", "unheld", "unknown"]
@@ -19824,6 +19827,25 @@
                   },
                   "required": ["updatedAt", "run", "queued", "pendingInteractions"],
                   "additionalProperties": false
+                },
+                "worktreeSource": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "required": ["sessionId", "workspaceId"],
+                  "additionalProperties": false
                 }
               },
               "required": ["seq", "session"],
@@ -19856,6 +19878,9 @@
                 "type": "null"
               }
             ]
+          },
+          "hasCreatedWorktree": {
+            "type": "boolean"
           },
           "executionOwner": {
             "type": "string",

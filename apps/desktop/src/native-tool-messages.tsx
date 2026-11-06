@@ -33,6 +33,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'shell.read': [['1'], '读取后台 Shell'],
   'shell.wait': [['1'], '等待后台 Shell'],
   'shell.stop': [['1'], '请求停止后台 Shell'],
+  'git.worktree': [['1'], 'Git 工作树'],
   ask_user: [['1'], '询问用户'],
   web_fetch: [['1'], '读取网页'],
   'task.spawn': [['1'], '创建子 Agent'],
@@ -322,12 +323,14 @@ export function desktopToolMessage(
       | 'agentMessageAccepted'
       | 'shellInput'
       | 'shellResultVerified'
+      | 'worktreeFailure'
       | 'label'
     >,
   id: string,
   text: string,
 ): DesktopMessage {
   const shell = desktopShell(fact, text);
+  const worktreeIssue = desktopWorktreeFailure(fact);
   return {
     id,
     role: 'tool',
@@ -336,6 +339,7 @@ export function desktopToolMessage(
     ...desktopToolPresentation(fact),
     target: fact.target,
     ...(shell ? { shell } : {}),
+    ...(worktreeIssue ? { toolResult: { ok: false, stderr: worktreeIssue } } : {}),
     ...(fact.ask ? { ask: fact.ask } : {}),
     ...(fact.fileMissing && fact.status === 'succeeded' ? { fileMissing: true } : {}),
     ...(fact.agentMessageAccepted &&
@@ -366,6 +370,43 @@ export function desktopToolMessage(
                 ? 'running'
                 : fact.status,
   };
+}
+
+function desktopWorktreeFailure(
+  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status'> &
+    Pick<Partial<NativeToolMessageFact>, 'worktreeFailure'>,
+): string | undefined {
+  const failure = fact.worktreeFailure;
+  if (
+    !failure ||
+    typeof failure.category !== 'string' ||
+    fact.definitionId !== 'git.worktree' ||
+    fact.definitionVersion !== '1' ||
+    !['failed', 'outcome_unknown'].includes(fact.status)
+  )
+    return;
+  const category = {
+    process_start:
+      'Git 进程启动失败。请检查 Git 安装、可执行路径和系统进程启动限制；进程启动错误本身不能说明用户拒绝授权。',
+    permission_denied:
+      'Git 工作树权限拒绝（文件系统）。请检查来源仓库、Git 公共目录和目标路径的实际访问权限。',
+    git_command: `Git 命令执行失败${failure.exitCode === undefined ? '' : `（退出码 ${failure.exitCode}）`}。Git 进程已启动，请核对仓库、分支和目标目录的状态。`,
+    verification: 'Git 工作树操作未通过核验。请保留并核对原操作记录和实际仓库状态。',
+    authorization_denied:
+      '当前权限策略未批准本次 Git 工作树调用。该记录只确认策略未批准，未记录用户明确拒绝；请核对该调用的授权原因和原请求范围。',
+    unclassified: '旧记录未提供失败分类。请核对原操作记录和 Job，保留原始错误。',
+  }[failure.category];
+  if (!category || !['not_started', 'completed', 'partial', 'unknown'].includes(failure.mutation))
+    return;
+  const effects =
+    fact.status === 'outcome_unknown' || failure.mutation === 'unknown'
+      ? '本次变更结果仍未确认；请只核对原操作 key 和 Job，不要重复创建或删除。'
+      : failure.mutation === 'partial'
+        ? '本次已发生部分变更；请先核对原操作 key、Job、目录和分支，不要重复创建或删除。'
+        : failure.mutation === 'completed'
+          ? '本次已有完成的变更；请核对原操作 key 和 Job 的结果，不要重复创建或删除。'
+          : '本次观察确认尚未开始工作树变更；请先核对原操作记录，修复原因本身不代表可以自动重试。';
+  return `${category}${failure.errno ? ` 系统错误：${failure.errno}。` : ''}${failure.cleanupUnconfirmed ? ' 相关进程或输出资源的清理尚未确认。' : ''}\n${effects}`;
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>

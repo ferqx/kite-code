@@ -222,6 +222,14 @@ Task carrier成功继续要求原child的attached效果域结算，child Model�
 
 全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和最后已保存对话消息的更新时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理，SSE 只触发 GET，迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
 
+同一目录的可选 `activity.hasCreatedWorktree` 只读投影原 Session 原生 worktree 创建稳定成功记录，用于 Native 右侧历史图标。它不证明实时路径存在、不迁移 cwd，不从 child／Fork 或消息文本推造；后续移除不擦除已发生的创建。生成 schema／Client 保持字段可选，省略不补造标记，原目录快照和执行准入边界不变；具体来源归上述 Store owner 与[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
+
+Worktree 新失败的可选分类由实际失败阶段产生，仍属于原版本1回执，不改变输入、权限或 Job 身份。spawn 失败与明确访问拒绝、Git 非零退出分开，旧 generic 不追溯猜测；清理未确认保主因与原 mutation。Native 仅从准确原消息／Execution／Run 注册投影有限可读说明，完整配置不进入展示 IPC。默认模型指导不得因错误码猜用户拒绝、自动扩权或换 key／参数／工具重放；原稳定记录、未知效果只查原 Job 的恢复合同保持，当前范围与验证归[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
+
+退出工作树属于客户端导航，不能映射为 remove／Shell 清理或改 refs。原目录新增可选 `worktreeSource`，只按同 Store／主体可见、唯一且完整的原生稳定 create 关系给出来源 Session／Workspace；它不证明实时路径或派发资格。Native 对独立无附件退出命令及明确按钮刷新目录、核当前选择代次后复用原 select，保草稿和原任务，不提交业务输入。Auto 下准确 worktree Tool 及其有证明的内部 Job 不走审核，手动、父子／Planning 上限、原申请范围和最终派发检查保持；普通 Shell 不继承该免审。当前实现与实际范围分别归[Native owner](../../apps/desktop/README.md)和[权限 owner](../../packages/agent/src/permissions/README.md#git-worktree-的准确权限)。
+
+Native 在已核实 Store／Session 选择后，只有准确的 `workspace_identity_unavailable` 可转为内部 `workspaceUnavailable`，保留保存的消息、原 Model 输出与只读 Context，并撤下该轮权限事实和依赖目录的新执行资格。网络、主体或 Store 身份失败不沿此路径降级；恢复后重新读取实际目录身份及信任，不重发原任务。该状态不授予执行或文件访问权，具体读取／控制分离及验证由[Desktop owner](../../apps/desktop/README.md#native-项目会话目录)负责。
+
 正式[Web目录](../../apps/web/README.md)也消费同一完整Browser摘要，按最后对话消息更新时间排序与分批展示，原Tooltip仅承载详情。未读数量／未知时间不补造，读取失败明确保上次事实；Refresh与可见性／已核bfcache恢复只触发GET。页面同步暂停标志、原signal和实际document可见性共同约束数据／错误发布，迟到读取不得更新暂停页；目录成功与所选会话Run执行继续分离。原身份便利reader的兼容用途保持，公共Core／生成API／Store格式没有变化。
 
 Web 后台目录复用现有 `BackgroundExecutionQuery/Page`，仅增加 Cookie Gateway 的具名 GET `/browser/v1/background-executions`；Store 由已准入 Gateway 注入，浏览器不能提交 Store 或主体 authority。Browser 固定网络代次与完整目录水位，核执行、所属 Session／root／Workspace、原 Run 和实际 child 关系后发布；准确子会话链接只切换阅读。完整输出沿已有 Job reader 和固定上界覆盖校验，隐藏、暂停、关闭及切会话只释放所属读取。目录序号不冒充输出水位，成功终态不冒充清理确认，缺少公开事实时明确不可用；没有新增 Core schema、监督模型或执行操作。负责实现与验证归 [Web](../../apps/web/README.md)、[Client](../../packages/client/README.md)及 [Gateway](../../apps/service/README.md)。

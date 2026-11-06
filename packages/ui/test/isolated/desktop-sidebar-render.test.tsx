@@ -110,6 +110,19 @@ async function fixture() {
       );
       props.workspaces = workspaces;
     },
+    changeSession(id: string, updates: Partial<WorkspaceSummary['sessions'][number]>) {
+      workspaces = workspaces.map((workspace) =>
+        workspace.sessions.some((entry) => entry.sessionId === id)
+          ? {
+              ...workspace,
+              sessions: workspace.sessions.map((entry) =>
+                entry.sessionId === id ? { ...entry, ...updates } : entry,
+              ),
+            }
+          : workspace,
+      );
+      props.workspaces = workspaces;
+    },
     async render(updates: Partial<typeof props> = {}) {
       Object.assign(props, updates);
       await act(async () => root.render(<Sidebar {...props} />));
@@ -185,6 +198,55 @@ test('row and header memo boundaries preserve current callbacks, keyboard naviga
     expect(f.host.querySelector('[aria-label="在 Workspace a 中新建对话"]')).toBeNull();
     await act(async () => row.click());
     expect(f.calls).toEqual(['latest:a1', 'latest-new:a']);
+  } finally {
+    await f.close();
+  }
+});
+
+test('confirmed worktree history appears once and persists beside running, input and unread states', async () => {
+  const f = await fixture();
+  const marker = '[role="img"][aria-label="已创建 Git 工作树"]';
+  try {
+    await f.render();
+    const originalRow = f.row('a0');
+    expect(f.host.querySelector(marker)).toBeNull();
+    f.changeSession('a0', { hasCreatedWorktree: false, status: 'running' });
+    await f.render();
+    expect(originalRow.querySelector(marker)).toBeNull();
+    expect(originalRow.querySelector('[role="status"]')).not.toBeNull();
+
+    f.changeSession('a0', { hasCreatedWorktree: true });
+    await f.render();
+    const icon = originalRow.querySelector(marker);
+    expect(icon).not.toBeNull();
+    expect(f.row('a0')).toBe(originalRow);
+    expect(originalRow.querySelector('[role="status"]')).not.toBeNull();
+    expect(originalRow.getAttribute('aria-description')).toContain('已创建 Git 工作树');
+    expect(f.row('a1').querySelector(marker)).toBeNull();
+
+    // A fresh directory value and status changes retain the original row and marker.
+    f.changeSession('a0', { status: 'waiting_execution' });
+    await f.render({ selected: 'b0' });
+    expect(f.row('a0')).toBe(originalRow);
+    expect(originalRow.querySelector(marker)).toBe(icon);
+    expect(originalRow.querySelectorAll(marker)).toHaveLength(1);
+
+    f.changeSession('a0', { pendingInteractions: 1, hasUnreadTurn: true });
+    await f.render();
+    expect(originalRow.textContent).toContain('待用户输入');
+    expect(originalRow.querySelector(marker)).toBe(icon);
+    expect(originalRow.querySelector('.session-unread-dot')).not.toBeNull();
+    expect(originalRow.getAttribute('aria-description')).toBe(
+      '待用户输入，有新结束的回复，已创建 Git 工作树',
+    );
+    f.changeSession('a0', { status: 'completed', pendingInteractions: 0 });
+    await f.render();
+    expect(originalRow.querySelector('[role="status"]')).toBeNull();
+    expect(originalRow.querySelector(marker)).toBe(icon);
+    await act(() => originalRow.focus());
+    expect(document.querySelector('[data-slot="tooltip-content"]')?.textContent).toContain(
+      '已创建 Git 工作树',
+    );
   } finally {
     await f.close();
   }

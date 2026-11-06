@@ -12,6 +12,98 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+const worktreeErrnos = new Set([
+  'EACCES',
+  'EPERM',
+  'ENOENT',
+  'ENOTDIR',
+  'ENOEXEC',
+  'EAGAIN',
+  'ENOMEM',
+  'EMFILE',
+  'ENFILE',
+  'E2BIG',
+  'EINVAL',
+  'EIO',
+  'ENOSPC',
+  'EROFS',
+  'EBUSY',
+  'EEXIST',
+  'ENOTEMPTY',
+  'ELOOP',
+  'ENAMETOOLONG',
+  'ETXTBSY',
+  'ECANCELED',
+]);
+
+function worktreeFailure(
+  execution: Execution,
+  run: Run | undefined,
+  details: Record<string, unknown> | undefined,
+): NativeToolMessageFact['worktreeFailure'] {
+  if (
+    execution.definitionId !== 'git.worktree' ||
+    execution.definitionVersion !== '1' ||
+    !['failed', 'outcome_unknown'].includes(execution.status) ||
+    !details ||
+    run?.id !== execution.runId ||
+    run.sessionId !== execution.sessionId ||
+    run.originStoreId !== execution.originStoreId
+  )
+    return;
+  const tools = object(run.configuration)?.tools;
+  const registrations = Array.isArray(tools)
+    ? tools.map(object).filter((tool) => tool?.id === 'git.worktree' && tool.version === '1')
+    : [];
+  if (registrations.length !== 1 || registrations[0]?.extensionId !== 'builtin.shell') return;
+  const mutation =
+    execution.status !== 'outcome_unknown' &&
+    typeof details.mutation === 'string' &&
+    ['not_started', 'completed', 'partial', 'unknown'].includes(details.mutation)
+      ? (details.mutation as NonNullable<NativeToolMessageFact['worktreeFailure']>['mutation'])
+      : 'unknown';
+  if (details.failure === undefined && details.code === 'git_operation_failed')
+    return { category: 'unclassified', mutation };
+  if (
+    details.failure === undefined &&
+    details.code === 'permission_denied' &&
+    execution.status === 'failed' &&
+    details.adapterAttempted === false &&
+    details.dispatchCommitted === false
+  )
+    return {
+      category: 'authorization_denied',
+      mutation: details.mutation === undefined ? 'not_started' : mutation,
+    };
+  const failure = object(details.failure);
+  if (
+    !failure ||
+    Object.keys(failure).some(
+      (key) => !['category', 'errno', 'exitCode', 'cleanupUnconfirmed'].includes(key),
+    ) ||
+    typeof failure.category !== 'string' ||
+    !['process_start', 'permission_denied', 'git_command', 'verification'].includes(
+      failure.category,
+    ) ||
+    (failure.errno !== undefined &&
+      (typeof failure.errno !== 'string' || !worktreeErrnos.has(failure.errno))) ||
+    (failure.exitCode !== undefined &&
+      (!Number.isInteger(failure.exitCode) ||
+        Number(failure.exitCode) < -2147483648 ||
+        Number(failure.exitCode) > 2147483647 ||
+        failure.exitCode === 0)) ||
+    (failure.cleanupUnconfirmed !== undefined && failure.cleanupUnconfirmed !== true) ||
+    (failure.category === 'git_command' && failure.exitCode === undefined)
+  )
+    return;
+  return {
+    category: failure.category as NonNullable<NativeToolMessageFact['worktreeFailure']>['category'],
+    mutation,
+    ...(failure.errno === undefined ? {} : { errno: failure.errno as string }),
+    ...(failure.exitCode === undefined ? {} : { exitCode: failure.exitCode as number }),
+    ...(failure.cleanupUnconfirmed === true ? { cleanupUnconfirmed: true } : {}),
+  };
+}
 const source = (message: Message) =>
   message.originMessage
     ? { sessionId: message.originMessage.sessionId, runId: message.originMessage.runId }
@@ -294,6 +386,7 @@ export function nativeToolMessageFact({
   )
     call = undefined;
   const details = object(result.details);
+  const worktreeIssue = worktreeFailure(execution, run, details);
   const configuration = object(run?.configuration);
   const registered = Array.isArray(configuration?.tools)
     ? configuration.tools
@@ -413,6 +506,7 @@ export function nativeToolMessageFact({
         }
       : {}),
     ...(shellResultVerified ? { shellResultVerified: true } : {}),
+    ...(worktreeIssue ? { worktreeFailure: worktreeIssue } : {}),
     ...(!message.originMessage && execution.authorization
       ? { authorization: execution.authorization }
       : {}),

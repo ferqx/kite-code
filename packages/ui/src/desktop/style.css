@@ -1997,9 +1997,14 @@ body {
   flex: none;
 }
 .kite-client .space-heading :is(.space-new-session, .space-more) > svg,
+.kite-client .session-row > .session-worktree-icon,
 .kite-client .session-row > svg[role="status"] {
   width: var(--ui-icon-size);
   height: var(--ui-icon-size);
+}
+.kite-client .session-row > .session-worktree-icon {
+  flex: none;
+  color: var(--muted-foreground);
 }
 .kite-client .session-row > svg[role="status"] {
   animation-duration: 2.4s;

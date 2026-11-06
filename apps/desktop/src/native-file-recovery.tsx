@@ -67,6 +67,7 @@ export function NativeFileRecoveryPanel({
   const readonly =
     !selection ||
     selection.permissionUnavailable ||
+    selection.workspaceUnavailable ||
     selection.viewLoading ||
     selection.session.parentSessionId !== null ||
     selection.session.deletedAt !== null;

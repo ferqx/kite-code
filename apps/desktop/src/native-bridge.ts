@@ -184,6 +184,7 @@ export type NativeSelection = {
   readonly canReadModelInput?: boolean;
   readonly canReadPermissionGrants?: boolean;
   readonly permissionUnavailable?: boolean;
+  readonly workspaceUnavailable?: boolean;
   readonly viewLoading?: boolean;
   readonly viewGeneration: number;
   readonly viewSelection?: number;
@@ -433,7 +434,11 @@ export type NativeDirectory = {
   /** Main's persisted local read receipts, independent of the renderer origin. */
   readTurns?: readonly (readonly [string, string])[];
   workspaces: Workspace[];
-  sessions: (Session & { activity?: SessionDirectoryActivity })[];
+  sessions: (Session & {
+    activity?: SessionDirectoryActivity;
+    /** Historical create provenance, only for returning to a visible source conversation. */
+    worktreeSource?: { sessionId: string; workspaceId: string };
+  })[];
   unavailable?: boolean;
 };
 export type NativeWorkspaceRemoval = {

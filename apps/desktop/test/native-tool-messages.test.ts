@@ -114,6 +114,172 @@ function fixture() {
   };
 }
 
+test('Git worktree failure details require exact builtin registration and preserve cause, effects and original text', async () => {
+  const f = fixture();
+  const run = {
+    id: 'worktree-run',
+    sessionId: 's',
+    originStoreId: 'store',
+    configuration: { tools: [{ id: 'git.worktree', version: '1', extensionId: 'builtin.shell' }] },
+  } as unknown as Run;
+  let runReads = 0;
+  f.client.getRun = async () => {
+    runReads++;
+    return run;
+  };
+  const cases = [
+    {
+      id: 'spawn',
+      details: {
+        code: 'git_process_start_failed',
+        mutation: 'not_started',
+        failure: { category: 'process_start', errno: 'EPERM' },
+      },
+      text: 'Git 进程启动失败',
+    },
+    {
+      id: 'filesystem',
+      details: {
+        code: 'git_permission_denied',
+        mutation: 'not_started',
+        failure: { category: 'permission_denied', errno: 'EACCES' },
+      },
+      text: 'Git 工作树权限拒绝（文件系统）',
+    },
+    {
+      id: 'command',
+      details: {
+        code: 'git_operation_failed',
+        mutation: 'partial',
+        failure: { category: 'git_command', exitCode: 128 },
+      },
+      text: '退出码 128',
+    },
+    {
+      id: 'cleanup',
+      details: {
+        code: 'worktree_output_cleanup_unconfirmed',
+        mutation: 'partial',
+        failure: { category: 'process_start', errno: 'EPERM', cleanupUnconfirmed: true },
+      },
+      text: '清理尚未确认',
+    },
+    {
+      id: 'policy',
+      details: { code: 'permission_denied', adapterAttempted: false, dispatchCommitted: false },
+      text: '当前权限策略未批准',
+    },
+    {
+      id: 'old',
+      details: { code: 'git_operation_failed', mutation: 'not_started' },
+      text: '旧记录未提供失败分类',
+    },
+    {
+      id: 'malformed',
+      details: {
+        code: 'git_operation_failed',
+        mutation: 'not_started',
+        failure: { category: 'git_command', exitCode: 0 },
+      },
+      text: undefined,
+    },
+  ];
+  for (const item of cases) {
+    f.add(item.id, 'failed', 'worktree-run', 'git.worktree');
+    const execution = f.executions.get(`execution-${item.id}`)!;
+    execution.result = {
+      outcome: 'failed',
+      content: `original-${item.id}`,
+      details: JSON.parse(JSON.stringify(item.details)),
+    };
+  }
+  const before = structuredClone([...f.executions.values()]);
+  const page = await f.list(cases.map((item) => item.id));
+  expect(runReads).toBe(1);
+  for (const [index, item] of cases.entries()) {
+    const message = desktopToolMessage(page.entries[index]!, item.id, `original-${item.id}`);
+    expect(message.text).toBe(`original-${item.id}`);
+    expect(message.status).toBe('failed');
+    if (item.text) expect(message.toolResult?.stderr).toContain(item.text);
+    else expect(message.toolResult).toBeUndefined();
+    if (item.id === 'spawn') expect(message.toolResult?.stderr).not.toContain('扩大');
+    if (item.id === 'command' || item.id === 'cleanup')
+      expect(message.toolResult?.stderr).toContain('已发生部分变更');
+  }
+  expect([...f.executions.values()]).toEqual(before);
+  f.client.getRun = async () => {
+    throw Error('run_metadata_unavailable');
+  };
+  expect((await f.list(['spawn'])).entries[0]?.worktreeFailure).toBeUndefined();
+  f.client.getRun = async () =>
+    ({
+      ...run,
+      configuration: { tools: [{ id: 'git.worktree', version: '1', extensionId: 'custom' }] },
+    }) as unknown as Run;
+  expect((await f.list(['spawn'])).entries[0]?.worktreeFailure).toBeUndefined();
+  f.client.getRun = async () => run;
+  const original = f.executions.get('execution-spawn')!;
+  for (const failure of [
+    { category: 'future' },
+    { category: 'process_start', errno: 'SECRET' },
+    { category: 'process_start', cleanupUnconfirmed: false },
+    { category: 'process_start', extra: true },
+    { category: { toString: null, valueOf: null } },
+  ]) {
+    original.result = {
+      outcome: 'failed',
+      content: 'original-spawn',
+      details: { failure: JSON.parse(JSON.stringify(failure)) },
+    };
+    expect((await f.list(['spawn'])).entries[0]?.worktreeFailure).toBeUndefined();
+  }
+  original.result = {
+    outcome: 'outcome_unknown',
+    content: 'original-spawn',
+    details: { mutation: 'not_started', failure: { category: 'process_start', errno: 'EPERM' } },
+  };
+  original.status = 'outcome_unknown';
+  const unknown = desktopToolMessage(
+    (await f.list(['spawn'])).entries[0]!,
+    'spawn',
+    'original-spawn',
+  );
+  expect(unknown.status).toBe('unknown');
+  expect(unknown.toolResult?.stderr).toContain('变更结果仍未确认');
+  expect(unknown.toolResult?.stderr).not.toContain('尚未开始');
+  original.status = 'failed';
+  original.result = {
+    outcome: 'failed',
+    content: 'original-spawn',
+    details: {
+      mutation: { toString: null, valueOf: null },
+      failure: { category: 'process_start', errno: 'EPERM' },
+    },
+  };
+  expect((await f.list(['spawn'])).entries[0]?.worktreeFailure?.mutation).toBe('unknown');
+  original.status = 'failed';
+  for (const mutation of ['partial', 'unknown', 'completed'] as const) {
+    original.result = {
+      outcome: 'failed',
+      content: 'original-spawn',
+      details: {
+        code: 'permission_denied',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+        mutation,
+      },
+    };
+    const fact = (await f.list(['spawn'])).entries[0]!;
+    expect(fact.worktreeFailure?.mutation).toBe(mutation);
+    expect(desktopToolMessage(fact, 'spawn', 'original-spawn').toolResult?.stderr).not.toContain(
+      '尚未开始',
+    );
+  }
+  original.definitionVersion = 'future';
+  original.result = { ...original.result!, outcome: 'failed' };
+  expect((await f.list(['spawn'])).entries[0]?.worktreeFailure).toBeUndefined();
+});
+
 test('a missing-file read keeps its original successful receipt and exact builtin registration through the Main reader and reopen', async () => {
   const f = fixture();
   f.add('absent', 'succeeded', 'absent', 'files.read');

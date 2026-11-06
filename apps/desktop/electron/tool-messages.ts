@@ -421,18 +421,23 @@ export class NativeToolMessages {
         });
         this.check(lease);
         let receiptRun: Run | undefined;
+        const worktreeIssue =
+          execution.definitionId === 'git.worktree' &&
+          execution.definitionVersion === '1' &&
+          ['failed', 'outcome_unknown'].includes(execution.status);
         if (
           execution.runId &&
-          execution.status === 'succeeded' &&
-          ((execution.definitionId === 'task.message' && execution.definitionVersion === '1') ||
-            (execution.definitionId === 'files.read' &&
-              ['4', '5'].includes(execution.definitionVersion) &&
-              object(object(execution.result)?.details)?.exists === false))
+          (worktreeIssue ||
+            (execution.status === 'succeeded' &&
+              ((execution.definitionId === 'task.message' && execution.definitionVersion === '1') ||
+                (execution.definitionId === 'files.read' &&
+                  ['4', '5'].includes(execution.definitionVersion) &&
+                  object(object(execution.result)?.details)?.exists === false))))
         ) {
           receiptRun = receiptRuns.get(execution.runId);
           if (
             !receiptRuns.has(execution.runId) ||
-            (!receiptRun && execution.definitionId !== 'task.message')
+            (!receiptRun && execution.definitionId !== 'task.message' && !worktreeIssue)
           ) {
             try {
               receiptRun = await this.client.getRun(execution.runId, {
@@ -442,7 +447,7 @@ export class NativeToolMessages {
             } catch (cause) {
               this.check(lease);
               // Optional acknowledgment classification cannot withdraw the original Tool result.
-              if (execution.definitionId !== 'task.message') throw cause;
+              if (execution.definitionId !== 'task.message' && !worktreeIssue) throw cause;
             }
             receiptRuns.set(execution.runId, receiptRun);
           }

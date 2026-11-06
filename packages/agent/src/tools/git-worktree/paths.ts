@@ -16,17 +16,11 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, parse, posix, relative, resolve, sep } from 'node:path';
 import { defaultWindowsPathSecurity } from '../../platform/windows-path-security';
+import { normalizeWorktreeError, WorktreeError } from './errors';
 import { limits } from './protocol';
 
-export class WorktreeError extends Error {
-  readonly code: string;
-  readonly facts: Record<string, unknown>;
-  constructor(code: string, message: string, facts: Record<string, unknown> = {}) {
-    super(message);
-    this.code = code;
-    this.facts = facts;
-  }
-}
+export { WorktreeError } from './errors';
+
 export function fail(code: string, message: string, facts: Record<string, unknown> = {}): never {
   throw new WorktreeError(code, message, facts);
 }
@@ -104,10 +98,11 @@ export function inspectPath(path: string, directory?: boolean): void {
         if (!samePath(realpathSync(path), path))
           fail('unsafe_reparse_point', 'A Windows entry redirects to a different physical path.');
       } else fail('unsafe_reparse_point', 'The Windows entry has an unsupported or reparse type.');
-    } catch {
+    } catch (error) {
       fail(
         'unsafe_reparse_point',
         'A Windows path or ancestor is a reparse point or could not be verified.',
+        { failure: normalizeWorktreeError(error).facts.failure },
       );
     }
   }

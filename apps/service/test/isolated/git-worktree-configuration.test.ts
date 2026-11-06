@@ -7,6 +7,7 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ChangeEvent } from '@kite-ai/agent/storage';
+import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   closeWorktreeFixture,
@@ -14,6 +15,7 @@ import {
   worktreeToolContents,
 } from '../../../../tests/fixtures/worktree-execution-evidence';
 import { persistentWorktreeDirectory } from '../../../../tests/fixtures/worktree-filesystem';
+import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createWorktreeHost } from '../../src/worktree-host';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -123,6 +125,8 @@ native(
     });
     let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let runtime: AgentRuntime | undefined;
+    let directoryService: Awaited<ReturnType<typeof startService>> | undefined;
+    let directoryClient: ReturnType<typeof createClient> | undefined;
     let bodyError: unknown;
     try {
       writeFileSync(
@@ -205,6 +209,24 @@ native(
         nativeShellRead: true,
       });
       const results = [];
+      const publicProfile = {
+        dataRoot: profile.dataRoot,
+        name: profile.profile,
+        accessKey: 'worktree-directory',
+      };
+      directoryService = await startService({
+        runtime,
+        profile: publicProfile,
+        buildId: 'worktree-directory',
+        subjectId: 'owner',
+      });
+      directoryClient = createClient({
+        endpoint: directoryService.endpoint,
+        token: directoryService.bootstrap.token,
+        bootstrap: directoryService.bootstrap,
+        expected: { profile: publicProfile, apiMajor: 1, requiredCapabilities: ['sessions'] },
+      });
+      await directoryClient.connect();
       for (const action of ['list', 'scopeDenied', 'create', 'remove']) {
         let after = (await store.getMetadata()).lastChangeCursor;
         const timeline: ChangeEvent[] = [];
@@ -322,6 +344,9 @@ native(
             { cwd: source },
           );
           expect(branch.exitCode).toBe(1);
+          expect(
+            (await directoryClient.listAllSessionDirectory())[0]?.activity?.hasCreatedWorktree,
+          ).toBeUndefined();
           continue;
         }
         expect(tool.result, JSON.stringify({ action, result: tool.result })).toMatchObject({
@@ -336,6 +361,10 @@ native(
           expect(git(target, 'symbolic-ref', 'HEAD')).toBe('refs/heads/fixture-branch');
           expect(readFileSync(join(target, 'tracked.txt'), 'utf8')).toBe('committed\n');
         }
+        expect(
+          (await directoryClient.listAllSessionDirectory()).find((item) => item.session.id === 's')
+            ?.activity?.hasCreatedWorktree,
+        ).toBe(action === 'create' || action === 'remove' ? true : undefined);
       }
       expect(results).toHaveLength(4);
       expect(existsSync(target)).toBe(false);
@@ -365,6 +394,14 @@ native(
     } catch (error) {
       bodyError = error;
     } finally {
+      directoryClient?.disposeNetwork();
+      try {
+        await directoryService?.close();
+      } catch (error) {
+        bodyError = bodyError
+          ? new AggregateError([bodyError, error], 'worktree_directory_close_failed')
+          : error;
+      }
       await closeWorktreeFixture({ runtime, store, server }, bodyError);
     }
     // Retain the owned repository on disk so failure evidence is never recursively deleted.

@@ -939,6 +939,8 @@ export interface BackgroundExecutionPage {
 export interface SessionDirectoryActivity {
   /** Last persisted message update time; control changes and observation do not advance it. */
   updatedAt: number | null;
+  /** This Session has a persisted successful create receipt; the path may no longer exist. */
+  hasCreatedWorktree?: boolean;
   /** Current root lock observation for an unfinished Run; neither liveness nor cleanup proof. */
   executionOwner?: 'held' | 'unheld' | 'unknown';
   run: {
@@ -951,7 +953,13 @@ export interface SessionDirectoryActivity {
 }
 export interface SessionDirectoryPage {
   storeId: string;
-  items: { seq: string; session: SessionRecord; activity: SessionDirectoryActivity }[];
+  items: {
+    seq: string;
+    session: SessionRecord;
+    activity: SessionDirectoryActivity;
+    /** Unique visible successful create provenance for this project's root; navigation only. */
+    worktreeSource?: { sessionId: string; workspaceId: string };
+  }[];
   highWaterSeq: string;
   upperSeq: string;
   nextAfterSeq: string | null;

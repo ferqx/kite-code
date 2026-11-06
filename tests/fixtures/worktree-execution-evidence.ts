@@ -134,15 +134,26 @@ export async function verifyWorktreeExecutionEvidence(
         assert(output.frame, 'worktree_original_frame_missing');
         const details = object(object(job.result).details);
         assert.equal(details.processTreeStopped, true, 'worktree_process_tree_not_stopped');
-        assert.equal(details.groupStopped, true, 'worktree_process_group_not_stopped');
+        if (process.platform === 'win32')
+          assert.equal(details.cleanupConfirmed, true, 'worktree_job_cleanup_unconfirmed');
+        else assert.equal(details.groupStopped, true, 'worktree_process_group_not_stopped');
       }
       referenced.push(job.id);
       phases.push(step.request.phase);
     }
     if (steps.length && value.stableResult) {
-      const operation = object(object(object(value.stableResult).details).operation);
+      const stable = object(value.stableResult);
+      const details = object(stable.details);
+      const operation = object(details.operation);
       assert.equal(operation.ownerExecutionId, owner.id);
-      assert.deepEqual(operation.ref, object(steps.at(-1)).ref);
+      if (operation.ref !== undefined) assert.deepEqual(operation.ref, object(steps.at(-1)).ref);
+      else {
+        // Host occupancy may refuse between a successful prepare and mutation admission.
+        assert.equal(stable.outcome, 'failed', 'worktree_missing_final_ref');
+        assert.equal(details.mutation, 'not_started', 'worktree_unreferenced_mutation');
+        assert.equal(object(value.steps).mutation, undefined, 'worktree_unreferenced_mutation');
+        assert.match(String(object(object(steps.at(-1)).request).phase), /^prepare_/);
+      }
     }
   }
   const jobs = executions.filter(

@@ -16,7 +16,9 @@
 
 ## 业务授权与创建通知
 
-一次创建／删除批准覆盖原 Tool 的两个封闭内部步骤，正常手动外部范围只需各一张业务卡，Auto 只需各一次 generic check。prepare 仍按所属变更分类，不改 safeRead，也不免除 Job 派发检查。[准确资产描述](../../permissions/shell.ts)在核验实际 worker 后封存配置身份；[授权边界](../../storage/sqlite/worktree-authorization.ts)核实际 builtin.shell 注册、同 Store／Session／root work／owner、原记录和步骤、权限、期限及原 prepare 的完整输出。mutation 必须使用其实际成功 prepared frame 的原 plan/digest。原批准、当前父子／Planning 策略、控制读集与撤销在最终派发事务再验；自定义独立人工要求不被父批准吸收。原 same_command 和普通 Shell 手动分层合同保持。
+Auto 下准确 `builtin.shell/git.worktree@1` Tool 不调用 generic check 或人工审批，封闭内部 Job 只继承经 Store 完整核实的原 Auto 免审来源；普通 Shell 即使命令相同也不取得该例外。手动模式的一次创建／删除批准仍覆盖原 Tool 的两个封闭步骤，正常外部范围各一张业务卡。prepare 仍按所属变更分类，不改 safeRead，也不免除 Job 派发检查。[准确资产描述](../../permissions/shell.ts)在核验实际 worker 后封存配置身份；[授权边界](../../storage/sqlite/worktree-authorization.ts)核实际 builtin.shell 注册、同 Store／Session／root work／owner、原记录和步骤、权限、期限及原 prepare 的完整输出。mutation 必须使用其实际成功 prepared frame 的原 plan/digest。原来源、当前父子／Planning 策略、控制读集与撤销在最终派发事务再验；自定义独立人工上限不被吸收。原 same_command 和普通 Shell 手动分层合同保持。
+
+退出工作树不属于本工具三个 action：它只返回客户端来源项目／会话，不删除目录、登记或分支。模型须按[默认合同](../../model-context.ts)区分导航与明确目标的删除意图；创建未改变原 Session cwd，不能以 remove 模拟退出。
 
 [通知 helper](notification.ts)只在原创建 owner 已保存稳定成功后，沿现有 sendStableAgentMessage 向 parent 排队确定正文；用实际执行组根关系区分根与子会话，不以 quiescent 作为通知门槛。原 owner 合法恢复可续接同一正文和持久消息身份，新 Execution 历史回执不另发。单次 Tool 回执的 parentNotification 区分 queued/accepted:true、预检或稳定记录保存失败的 failed/accepted:false，以及入队受理不可核实的 outcome_unknown/accepted:null；只表示消息情况，Git outcome 保持。稳定操作记录保存原 Git 回执，消息受理继续由原邮箱 command 持久化；没有队列确认不能宣称父已收到。
 
@@ -28,11 +30,15 @@
 
 ## 记录与恢复
 
+普通 Native 会话列表通过[Store 目录](../../storage/README.md#目录分页)的 `activity.hasCreatedWorktree` 展示原 Session 曾成功创建工作树的历史标记，来源为下述原生成功 create 稳定记录。无需新工作树数据库、目录探测或工具版本升级；remove 不清除历史，Fork 沿原 omit 规则不继承，子会话创建不回填父会话。图标不表示目标当前存在，不改变 cwd 或访问授权。
+
 [工具编排](../git-worktree.ts)在原 Session 的 `git-worktree/` namespace 用 CAS 首次写入 `executable:true`，记录 Fork 为 omit。冻结来源、意图、权限、原 owner Execution、绝对期限、prepare/mutation 的完整 Job input 与 key。每次 ensure 之前先保存冻结步骤；已保存 ref 时始终 get/wait/readOutput 原 Job。
 
 同 key 的不同意图返回 conflict。新的 Tool Execution 不能接管 accepted/prepared，也不能在 ref 未落盘时重新 ensure；只有 Runtime 对原 owner 的合法 resume 可逐字续接原 input。原 owner 独占执行记录的后续 CAS；其他 Execution 只观察原记录和 Job，不保存 prepare 计划、lastObservation 或 stableResult，避免观察抢写打断活跃 owner。观察者仍可从原 mutation 的完整输出返回确定结果，原 owner 恢复后负责保存稳定回执和原通知身份。prepare 成功只表示计划已冻结。原 owner 将未知结果保存为 unresolved/lastObservation，后续仍能从原 ref 得到确定证据；prepare已确定完成且尚未保存mutation步骤时的期限耗尽返回已知未开始，mutation接纳窗口仍保持未知；不能永久缓存 unknown，更不能换 key 重跑已接纳效果。历史成功回执保留原 observedAt，不保证路径今天仍存在；同路径重建不会被旧删除 key 再删。
 
 [完整输出 reader](read-output.ts)验证原 Store/Session/Execution/Job 身份、真实终态和相符结果，固定高水位完整分页；拒绝输出丢失、游标异常、多帧、错误 token/phase、非法 UTF-8，以及 `droppedBytes:null`。可信worker的原始stdout/stderr在首层监督进程严格解码UTF-8，避免先被替换成U+FFFD再进入记录；合法的U+FFFD仍可保真。普通Shell的原解码行为保持。不使用前台 Shell 预览作为 Git 机器结果。冷重启后的原 Shell Job没有进程重连能力，不能验证时保留 `outcome_unknown`。取消及超时只作用于原 attached Job，Runtime 未确认停止时不能宣称 cancelled；残留目录、登记和分支如实返回。
+
+[错误分类](errors.ts)只给新观察到的失败增加可选 `details.failure`，工具和协议仍为1。`process_start` 来自实际 spawn 失败，`git_permission_denied/permission_denied` 来自明确文件访问拒绝，`git_command` 来自已启动 Git 的非零退出码；其余检查为 `verification`。保留有限 errno、退出码与原业务 code，不从 stderr 文本或旧 `git_operation_failed` 推测审批拒绝。新回执不发布 Git 原始 stderr，避免其中的路径、URL 或凭据进入诊断。外层 Runtime 的权限拒绝继续使用原事实，不伪造 worker 帧。清理失败保留主因及 `cleanupUnconfirmed`，mutation 和原 Job 不降级为未执行。工具回执与[默认模型合同](../../model-context.ts)要求查准确原因、不扩权、不换 key／参数／Shell 重试；稳定失败回读仍只观察原操作。
 
 ## 删除保护
 
@@ -51,6 +57,8 @@ prepare 结束后、首次 remove ensure 之前，工具要求 `readRunExecution
 这不是跨 Run 全局占用租约，也不检测外部进程、未登记目录或其他 Run 经 Shell 临时 cd 的占用。用户需先停止使用目标；检测到的变化一律拒绝。工作树共享对象和 refs，不是安全沙箱。
 
 ## 可信资产与验证
+
+Windows 的 Git 子调用由[文件句柄捕获](windows-process.ts)替代 stdio pipe：本机 Bun1.4.4 的 pipe 创建在原 `workspace_write` 受限 token 下会因 `uv_spawn EPERM` 失败，相同原宿主继承普通 FD 可成功。本实现只在所属 Job 私有 TEMP 中独占创建文件，64KiB增量读取，保原 stdout 16MiB／stderr 256KiB、精确 hash 长度和最终 EOF／代际核验；借用 inputFd 不关闭，定点清理无法核实则保留失败。权限、环境允许集合、Git 安全配置、进程取消和工具／协议版本均未放宽，原因与备选见[取舍](../../../../../.agents/notes/implemented/bug-fix/2026-11-06-windows-worktree-git-stdio.md)。
 
 [构建](build-assets.ts)发布独立 `worker.js`、无 preload 的 `empty-bunfig.toml`、空 `empty-hooks/` 及 SHA256 manifest。Host 固定 Bun/Git/worker、cwd、配置身份和环境允许集合；严格识别规范化单一命令，派发前重验。macOS在首次装配只读核验root所有且祖先不可被group/world写入的系统native Git，不把`/usr/bin/git`的Apple调度桩当作实际实现身份；不依赖其沙箱外xcrun缓存写入。Bun1.4.4 实测使用 `--no-env-file --config=<absolute>`，分开的 config 参数会空执行，不能仅靠退出码断言成功。macOS 外层 supervisor 和 launchd 再启动、Linux 首次解释器以及 Windows 原生入口均应用该 profile；项目 .env/bunfig 和环境 preload 不得先执行。
 
