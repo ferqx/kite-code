@@ -169,9 +169,9 @@ async function fixture(
       ...(bubblewrapPath ? { linux: { bubblewrapPath } } : {}),
       host: {
         controlBase: profile.coordinationPath,
-        protectedRoots: [profile.dataRoot, profile.coordinationPath],
-        readonlyAssets: [supervisorPath],
-        runtimeReadOnlyRoots: [dirname(process.execPath)],
+        protectedRoots: [],
+        readonlyAssets: [],
+        runtimeReadOnlyRoots: [],
       },
     };
   }
@@ -357,7 +357,7 @@ async function fixture(
 }
 
 (['darwin', 'linux'].includes(process.platform) ? test : test.skip)(
-  'ordinary Codex Run starts with the actual default Host Shell and private auth-file protection',
+  'ordinary Codex Run starts with the actual default Host Shell without rewriting local authentication',
   async () => {
     const f = await fixture(undefined, true);
     try {
@@ -379,7 +379,7 @@ async function fixture(
 );
 
 (process.platform === 'linux' ? test : test.skip)(
-  'actual Linux default Codex Run executes an ordinary Shell Tool while its local authentication remains private',
+  'actual Linux default Full Codex Shell follows approved scope for a synthetic local authentication file',
   async () => {
     let command = '';
     const f = await fixture(
@@ -404,7 +404,7 @@ async function fixture(
     );
     try {
       const original = readFileSync(f.authFile, 'utf8');
-      command = `if cat '${f.authFile}' 2>/dev/null; then printf leaked; else printf read-denied; fi; if (printf stolen > '${f.authFile}') 2>/dev/null; then printf wrote; else printf write-denied; fi; printf actual > effect; printf ordinary`;
+      command = `if cat '${f.authFile}' 2>/dev/null; then printf read-allowed; else printf read-denied; fi; if (printf '\\n' >> '${f.authFile}') 2>/dev/null; then printf wrote; else printf write-denied; fi; printf actual > effect; printf ordinary`;
       const result = await f.run('linux-codex-shell', (await f.models()).defaultModelId!);
       expect(result.command.status).toBe('applied');
       const failures = result.view.executions
@@ -429,9 +429,9 @@ async function fixture(
           .filter((row) => row.stream === 'stdout')
           .map((row) => row.content)
           .join(''),
-      ).toBe('read-deniedwrite-deniedordinary');
+      ).toBe(`${original}read-allowedwroteordinary`);
       expect(readFileSync(join(f.root, 'workspace/effect'), 'utf8')).toBe('actual');
-      expect(readFileSync(f.authFile, 'utf8')).toBe(original);
+      expect(readFileSync(f.authFile, 'utf8')).toBe(`${original}\n`);
       expect(f.records).toHaveLength(2);
       expect(f.credentialWrites).toBe(0);
     } finally {

@@ -106,6 +106,7 @@ export interface DispatchInput extends OwnedWrite {
   /** Captured by the trusted Host, not extension result or caller input. */
   readSet?: import('./types').DispatchReadSet;
   authorization: {
+    worktreeDecisionSeal?: import('../permissions/worktree-authorization').WorktreeDecisionSeal;
     grant?: { grantId: string; revision: string; commandDigest?: string };
     snapshot?: { namespace: string; version: string; data: Json };
     controlReads?: readonly PermissionControlRead[];
@@ -819,6 +820,12 @@ export interface Store {
   ensureAuthorizationCheck(input: EnsureAuthorizationCheckInput): Promise<AuthorizationCheckFact>;
   resolveAutoAuthorization(
     input: ResolveAutoAuthorizationInput,
+  ): Promise<AutoAuthorizationEvidence | null>;
+  resolveWorktreeAuthorization(
+    input: OwnedWrite & {
+      targetExecutionId: string;
+      decision: import('../extensions').PermissionDecision;
+    },
   ): Promise<AutoAuthorizationEvidence | null>;
   readExecutionEvidence(
     input: ExecutionEvidenceStoreInput,

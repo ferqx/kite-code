@@ -44,6 +44,18 @@ export {
 export { stageWindowsGitBash } from './windows-git-bash';
 export { createWindowsShellJob, windowsShellAssets } from './windows-shell';
 
+/** Host-only launch profile. Command payloads cannot provide environment or Bun flags. */
+export interface TrustedWorkerLaunch {
+  readonly version: 1;
+  readonly env: Readonly<Record<string, string>>;
+  readonly bunFlags: readonly string[];
+  readonly digest: string;
+}
+export type TrustedWorkerLaunchResolver = (
+  command: string,
+  context: JobContext,
+) => TrustedWorkerLaunch | undefined;
+
 export interface ShellJobOptions {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
@@ -56,6 +68,7 @@ export interface ShellJobOptions {
   readonly linux?: { readonly bubblewrapPath: string; readonly initExecutable: string };
   /** Trusted macOS host only; never supplied by the command input. */
   readonly supervision?: { readonly kind: 'macos-launchd-coalition'; readonly controlBase: string };
+  readonly trustedWorkerLaunch?: TrustedWorkerLaunchResolver;
 }
 interface QueueItem {
   event: JobEvent;
@@ -295,20 +308,22 @@ function shellJob(
       const shell = configuration.shellExecutable ?? '/bin/sh';
       if (![supervisor, bun, shell].every((path) => isAbsolute(path) && existsSync(path)))
         throw new Error('shell_supervisor_asset_unavailable');
+      const trusted = configuration.trustedWorkerLaunch?.(value.command, context);
       const confined = prepare?.(value.command, shell, context);
       const launch = confined ?? {
         executable: shell,
         argv: ['-c', value.command],
         cwd: configuration.cwd,
       };
+      const launchEnv = trusted?.env ?? configuration.env;
       const env = confined
         ? Object.fromEntries(
-            Object.entries(configuration.env).filter(
+            Object.entries(launchEnv).filter(
               ([key]) =>
                 !/^(?:DYLD_|LD_|BASH_ENV$|ENV$|ZDOTDIR$|NODE_OPTIONS$|BUN_OPTIONS$)/.test(key),
             ),
           )
-        : configuration.env;
+        : launchEnv;
       const childEnv = confined
         ? {
             ...env,
@@ -318,9 +333,9 @@ function shellJob(
             TEMP: confined.temp,
           }
         : env;
-      const proc = spawn(bun, [supervisor], {
+      const proc = spawn(bun, [...(trusted?.bunFlags ?? []), supervisor], {
         cwd: configuration.cwd,
-        env: configuration.env,
+        env: launchEnv,
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

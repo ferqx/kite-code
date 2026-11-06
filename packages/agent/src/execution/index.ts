@@ -955,6 +955,9 @@ export class UnifiedExecution {
       executionId,
       ...(readSet === undefined ? {} : { readSet }),
       authorization: {
+        ...(decision.worktreeDecisionSeal
+          ? { worktreeDecisionSeal: structuredClone(decision.worktreeDecisionSeal) }
+          : {}),
         ...(decision.grant === undefined ? {} : { grant: structuredClone(decision.grant) }),
         ...(decision.snapshot === undefined
           ? {}

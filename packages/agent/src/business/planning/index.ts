@@ -288,6 +288,7 @@ export function createPlanningValidation(
   planFiles?: PlanFiles,
   readExecutionInput?: (executionId: string) => Promise<Json>,
   isReadOnlyShell?: (input: Json) => Promise<boolean>,
+  isReadOnlyGitWorktree?: (execution: Readonly<PublicExecution>, input: Json) => Promise<boolean>,
 ) {
   if (
     Object.keys(inputOptions).some(
@@ -325,6 +326,50 @@ export function createPlanningValidation(
       return false;
     const input = await readExecutionInput(actual.id);
     return (await digest(input)) === actual.inputDigest && (await isReadOnlyShell(input));
+  }
+  async function isGitWorktreeList(
+    read: ConditionReadContext,
+    boundary: import('../../extensions').NecessaryConditionContext['boundary'],
+  ) {
+    if (
+      !isReadOnlyGitWorktree ||
+      !readExecutionInput ||
+      !boundary.executionId ||
+      boundary.definitionVersion !== '1' ||
+      !(
+        (boundary.kind === 'tool' && boundary.definitionId === 'git.worktree') ||
+        (boundary.kind === 'job' && boundary.definitionId === 'shell.command')
+      )
+    )
+      return false;
+    const actual = await read.getExecution(boundary.executionId);
+    if (
+      !actual ||
+      actual.id !== boundary.executionId ||
+      actual.sessionId !== read.sessionId ||
+      actual.sessionId !== boundary.sessionId ||
+      actual.runId !== boundary.runId ||
+      actual.attempt !== boundary.attempt ||
+      actual.kind !== boundary.kind ||
+      actual.definitionId !== boundary.definitionId ||
+      actual.definitionVersion !== boundary.definitionVersion
+    )
+      return false;
+    const input = await readExecutionInput(actual.id);
+    if ((await digest(input)) !== actual.inputDigest) return false;
+    // These observations carry no dispatch authority. The trusted Host must still
+    // identify this exact mixed Tool action or canonical readonly worker launch.
+    const frozenInput = structuredClone(input);
+    const freeze = (value: Json): void => {
+      if (value && typeof value === 'object') {
+        for (const child of Object.values(value)) freeze(child);
+        Object.freeze(value);
+      }
+    };
+    freeze(frozenInput);
+    return (
+      (await isReadOnlyGitWorktree(Object.freeze(structuredClone(actual)), frozenInput)) === true
+    );
   }
   async function isFileEdit(
     read: ConditionReadContext,
@@ -1159,6 +1204,14 @@ export function createPlanningValidation(
               ) {
                 outcome = 'satisfied';
                 reason = 'planning_read_only_shell_search';
+              }
+              if (
+                phase === 'dispatch' &&
+                !inheritedPlanContinuation &&
+                (await isGitWorktreeList(read, boundary))
+              ) {
+                outcome = 'satisfied';
+                reason = 'planning_read_only_git_worktree';
               }
               if (
                 phase === 'dispatch' &&

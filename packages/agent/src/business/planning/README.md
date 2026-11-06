@@ -48,3 +48,5 @@ Plan 原记录和历史审阅正文不随当前文件变化；恢复保留实际
 
 
 Shell 检索在计划批准前仅接受宿主核实的单个字面只读命令（内置 rg、固定 ls、pwd），拒绝重定向、展开、包装器及 rg 外部执行钩子；实际执行改用固定资产并关闭 rg 配置。Tool 和其普通 Job 分别核原输入摘要与当前权限，不能把整个 Shell 定义标成只读。
+
+`git_worktree` 是混合工具，不进入静态 readOnlyDefinitions。批准前的list由同一现有dispatch必要条件的可信Host回调动态核定：Planning先核真实Execution的Session/Run/attempt/定义和原input SHA，Service再核准确builtin.shell owner/version、原父Tool、封存与当前可信资产以及规范化list命令。仅dispatch的原计划可豁免，create/remove、completion和继承续接不获额外资格。[定向回归](../../../test/isolated/business/planning-git-worktree.test.ts)核正反边界，[Service真实链路](../../../../../apps/service/test/isolated/git-worktree-permissions.test.ts)核待批准计划下list成功而create变更前拒绝；普通Shell检索与原计划批准规则保持。

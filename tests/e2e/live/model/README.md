@@ -6,6 +6,78 @@
 
 子 Agent 协作 V1.1 按[69 个主用例](collaboration-v1.1-cases.md)区分自然输入、正常产品操作和精确交错。当前已迁移六工具 smoke，并新增独立 Service/Client live 驱动；实际执行结果、失败修复和未覆盖变体以用例文档的执行记录为准，局部通过不代表整张矩阵通过。
 
+## Git 工作树与直接子 Agent
+
+[工作树 runner](git-worktree.live.ts)使用当前已配置的默认真实模型、实际 Service／HTTP Client／SQLite 和 macOS 原生 Shell。`primary` 验证 list、新分支 create、正常 remove，以及删除后由测试操作员重建同路径实体时的原 key 历史回执；`child-approval` 通过实际默认可写子 Agent 完成三个 action，要求创建／删除各一张业务卡且内部 Job 精确复用；`child-auto` 要求两次原业务审核且无重复内部审核；`child-notification` 验证工具成功通知沿 parent 原消息进入模型，再由 parent 转给已存在的可写 B，B 在新树实际读／写／读回；`child-readonly` 通过实际 explore 子 Agent 查询并解释角色边界。`child-default` 保留普通 Shell 能力，要求默认 child 省略 create.path，再按真实回执路径删除。静态只读证明只覆盖字面量闭集；复杂 Shell 进入 `reviewRequirements` 并保留 needs_review，由独立原文／SQL 复核其实际效果，不能自动当作违规或通过，也不提前中止其他业务、审批及消费断言。实际 Shell 创建或删除仍违反该场景的工具路线。模型事件和回复不改写，不设置累计请求数、整场或额外 HTTP 期限；操作员中止不算通过。
+
+```bash
+KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=primary --output=/absolute/path/to/kite-code/dist/acceptance/new-primary
+KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-approval --output=/absolute/path/to/kite-code/dist/acceptance/new-child-approval
+KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-readonly --output=/absolute/path/to/kite-code/dist/acceptance/new-child-readonly
+KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-auto --output=/absolute/path/to/kite-code/dist/acceptance/new-child-auto
+KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-notification --output=/absolute/path/to/kite-code/dist/acceptance/new-child-notification
+KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-default --output=/absolute/path/to/kite-code/dist/acceptance/new-child-default
+```
+
+输出必须是 runner 所在仓库 `dist/acceptance/` 下不存在的新绝对目录，不随调用 cwd 改变。现存路径、dangling entry、链接祖先和物理路径不一致均拒绝，子进程独占创建最终目录，不合并旧证据。只有合成仓库传给模型；原请求、事件、wire、canonical、完整分页输出、SQLite、意图记录及失败／替代工作树均保留，不递归清理、不 force、不自动删分支。真实 Shell Job 的集合须与唯一保存 ref 完全对应；允许模型追加只读 list 核验，但每个变更及其 prepare 仍各执行一次。完整回执送达不代替逐份业务语义复核。
+
+所有 case 都由启动器在子进程启动前设置隔离 HOME／USERPROFILE，HOME 是 `${output}.home`；原 Provider 配置只传原绝对路径并在内存解析，不复制凭据。macOS 的 Bun homedir 缓存启动位置；Windows 会随后续环境变化，夹具另外冻结模块首次读取的 HOME，并与当前值及两个环境变量比较，不能靠进程内修改环境冒充启动隔离。父进程要求 output 和相邻 home 均未存在，子进程在 Provider／Git 前核上述 HOME、实际默认根与输出位置；原生依赖预创建的私有 Library 只允许本次已检查的普通 owner 目录。
+
+随后[原生预检](git-worktree-native-preflight.ts)经相同 Bun／supervisor／controlBase 和既有权限、Job、监管执行一次固定只读 printf，准确范围为 workspace_write／none。独立 preflight Store 保存原 ref／Command、完整输出、原生停止证明、Runtime close 和冷读静止；确认后才读取源码 Git 摘要、初始化合成仓库并构造 Provider。失败、取消或关闭不确定即保留报告并停止；close／cold-read 间隙的取消也不能返回通过。`--launch-preflight` 只运行这一启动与原生链路，零 Git／零 Provider，不授予工作树业务资格。该独立固定模型／只读 Job 不计入业务真实模型请求或 Worktree Job 集合，原报告保存在 `native-preflight/report.json`。
+
+[证据 helper](git-worktree-evidence.ts)负责普通只读 Shell 的闭集、原引用与完整分页输出；Shell／worker 仅接收原 stdout/stderr，Agent Job 的原 progress 单独完整保存，不能混作 worker 帧，也不能静默丢弃。业务采证、关闭和冷读全部结束后才核最终验收；`operatorNotCancelled` 按 signal.aborted 判定，即使取消原因为 null，也不能把收尾间隙的中止报告为 assertions_passed。[共享 Worktree 证据夹具](../../../fixtures/worktree-execution-evidence.ts)复用生产 request/frame 和完整输出解析，核原记录、封闭 ref、Command、准确 payload／Job、唯一集合及停止证明。自动回归由[证据故障](../../../isolated/unified-agent/git-worktree-live-evidence.test.ts)、[完整启动器](../../../isolated/unified-agent/git-worktree-live-launch.test.ts)、[原生取消及缺资产](../../../isolated/unified-agent/git-worktree-native-preflight.test.ts)和[Service 两文件](../../../../apps/service/test/isolated/git-worktree-configuration.test.ts)维护，覆盖错误 ref、输出缺块／零丢字节伪区间、200条以上分页、模型结果未消费、启动 HOME、链接与旧目录。Service 初始化及测试主体失败仍单次关闭原 Runtime 和 HTTP listener，主体错误与关闭错误同时保留。
+
+可写子场景沿真实 `accept_edits` 和默认父子权限交集。测试夹具明确充当可信测试用户／操作员，逐张核准原子会话、根展示、准确业务意图后，通过实际 Client 提交 `approve_once`；内部 prepare／mutation 不再答卡，若出现即保留失败；这证明审批路由和执行边界，不证明业务父／子 Agent 具有审批权，也不冒充真实人工或安装客户端体验验收。批准每张业务卡之前核源内容、索引、目标和分支尚未提前变更；Auto 精确核原检查与内部派生来源。通知场景允许两名可写 child 沿原消息和 follow-up 协作，通知本身不新增权限或迁移 cwd。只读场景不伪造变更调用，硬拒绝资格仍由 [Service 权限回归](../../../../apps/service/test/isolated/git-worktree-permissions.test.ts)维护。
+
+当前可执行夹具使用 `general/explore`，省略 preset 的可写协作者核实为 `agent/general`。通知场景的 B 发送 ready 并取得排队回执后立即交回完整 `BUSINESS_PENDING`，不调用子端事件等待；父收到原 B 的待决结果和 A 的准确工具通知后，明确 follow-up 同一个 B 开始新轮。夹具继续核通知／待决结果进入父实际模型输入、准确路径进入原 B 新轮、子目录及执行记录零等待和文件读／写／读回效果。该当前流程尚未重跑付费模型；下文冻结样本中的 `worker` 和运行中消息证据保留原事实，不据此宣称已覆盖新的 idle 续轮流程。
+
+2026-11-06 分支整合在 Windows x64／Bun1.4.4 运行[采证回归](../../../isolated/unified-agent/git-worktree-live-evidence.test.ts)，12项／81断言通过，链接专项1项按原平台条件跳过。修正 Windows HOME 后变更未被识别与解析器资产使用 POSIX 分隔符的两个平台假设；首次失败保留为本次修复依据。该离线验证不调用 Git 或付费模型，不代替通知场景或原生平台资格。
+
+2026-11-06 测试专项修复在 `8e350f99` 加当前差量、macOS arm64／Bun1.4.4／Git2.54.0 验证：下列四文件20项／164断言通过。包含从仓库外 cwd 启动的完整主任务预检、默认 child 预检、拒绝复用旧目录、真实原生停止后收证／关闭间隙取消，以及 null 原因不得被误记为成功的故障例。这组验证只执行受管只读 printf，不调用 Git／外部 Provider；Git 元数据快照也在原生预检之后读取。模型证据指导要求不从成功或未见提示推断免审批，不授新权限。
+
+```bash
+bun test --parallel=1 --max-concurrency=1 \
+  tests/isolated/unified-agent/git-worktree-live-evidence.test.ts \
+  tests/isolated/unified-agent/git-worktree-live-launch.test.ts \
+  tests/isolated/unified-agent/git-worktree-native-preflight.test.ts \
+  packages/agent/test/isolated/context/model-context.test.ts
+```
+
+本次真实样本 `dist/acceptance/worktree-tests-20261106-child-default-r1/` 为12次 HTTP200。原 needs_review 暴露两处测试缺陷：把真实 `agent/worker` progress 当作 Shell 错流，以及静态闭集无法判断合法只读校验脚本并提前中止后续业务断言。独立复核原 SQL、canonical／wire、全部10个 Job，确认三个 action 与两张卡／四个派生步骤成立；原父子终稿却都声称没有审批提示，这是实际报告错误，未将该样本语义判绿。完整补证保存在 `evidence/semantic-review.json` 与 `supplemental-job-evidence.json`，原报告不改。
+
+补充通用审批证据指导后的 `worktree-tests-20261106-child-default-r2/` 为10次 HTTP200；原运行前后非 Markdown 摘要同为 `095c0808ef46b13076f2f401aa3b874472a58e3ab2a5ece618368b835470648a`。指导实际出现在全部10份原系统输入；父不再虚构免审批，明确可见证据不足而不判断来源。原运行 failures 为空、业务／授权／原引用／全输出／关闭检查全真，机械状态仍为 needs_review，仅一条实际字面量只读 Shell 未被当时闭集覆盖。随后对 `--no-optional-locks` 等已知只读查询补闭集及写入反例；仅重读原命令离线验证，checker SHA256 为 `22ba8245670dd2c6c8b2b1c4f066c4e2e41a9d107a0d8cb594c370fe2b52f2be`，不是新一轮模型或 Git 执行。`evidence/oracle-recheck.json` 与 `semantic-review.json` 分开保存这一版本区别，原 result 字节未改。
+
+r2 独立25项检查核全部原 SQL、canonical／wire、两张用户卡、四个派生步骤、六个 Worktree Job/ref、全部八个 Job 输出、通知因果和私有源文件／索引前后基线，确认本机实际业务与授权资格。模型没有可见的事前 tag/status/stash 基线，父“均与操作前一致”等措辞仍超出其公开证据；实际保全另由私有前后哈希证明，不承诺整篇报告无条件准确。该样本不覆盖安装 UI、Linux／Windows 或真实 unknown 恢复。此前两份真实 HOME 残留的原 Job 无恢复 manifest／完整终态，最新只读复核仍保留 unknown，位于 `dist/acceptance/worktree-default-home-first-failure/unknown-residue-readonly-review.json`；当前测试通过不替它们作结论。
+
+以下为业务批准复用实施前的历史批次，不代表当前两卡／两次 Auto 审核资格。2026-11-06，`8e350f99` 加本任务差量，macOS arm64／Bun1.4.4／Git2.54.0，实际沿现有默认 `deepseek-v4-flash`／chat-completions／medium／4096 运行。证据保存在本机 `dist/acceptance/git-worktree-model-20261106-*/`，各目录的原报告、canonical、wire 和独立 `evidence/semantic-review.json` 保留；每份报告分别记录执行前后非 Markdown 摘要，不把不同冻结批次合成同版本通过率。
+
+`child-approval` 的8次真实请求及 `child-readonly` 的5次请求均 HTTP200、机械通过；共同摘要为 `0d1e67d0bf5e4101d0eba7019c8d799dc3366ecea472d52761002105f6bbc2ad`。可写子实际执行 list/create/remove/list，对应6个 Shell Job，六张卡均绑定原 child、根展示和派发前用户答案；父只 spawn/wait，未代执行或签发授权。目标正常删除、新分支保留，源内容/index/HEAD/status 的独立快照一致。只读子只执行一次 list，正确区分“目标未登记”和“磁盘存在性未核实”，无变更或审批。可写报告仍有“未创建任何文件”的不准确表述，并以 cwdChanged=false 推断来源保全；实际保全由独立哈希证明。生成的“同 key 的 list”恢复建议不合法但未被执行，本样本无 unknown，不据此取得未知恢复资格。
+
+参数 schema 修正后的 `primary-current` 共11次 HTTP200、机械通过，摘要 `008c3a5ac02bfe94360999943696c81c058e5ad1c6aa7c9d9eb50c8f48c9c022`。实际 wire 保留新的 action 条件 schema；7次 Tool 对应8个原 Shell Job，四次只读查询和创建／删除各一次 prepare、mutation，保存 ref 与实际 Job 完全一致。原删除 key 重放保留旧 owner/ref/observedAt，未再派发该删除 Job；操作员重建的 detached 新实体全部代际字段保持。模型最终准确区分旧回执和当前实体；完整原结果进入后续真实模型，原生执行树终止、冷态静止、源内容/index/HEAD/status 保持。首次 list 的说明仍把未登记推成物理不存在，超出该回执证据；来源配置未另做独立字节审计。单次业务通过不承诺所有模型陈述准确。
+
+早期三个原失败均保留：`primary` 的5次请求已真实完成创建，夹具错误地拒绝额外验证 list 而提前停止；`primary-verified` 的2次请求中，模型为 list 多传 key/path，被权限层以 invalid_worktree_arguments 拒绝，随后误报为需扩权，零 Job／零变更；`primary-schema` 的11次请求已完成全部业务，但夹具错误要求目录只有 git_worktree，未计正式 Service 自动提供的 ask_user。修正只读查询及目录断言后，仍禁止实际无关工具和任何意外答卡；参数组合改由 [Runtime 回归](../../../../packages/agent/test/isolated/tools/git-worktree/schema-runtime.test.ts)证明在授权前按 invalid_tool_arguments 反馈，零 Job／零记录，随后合法调用能执行。旧报告没有改绿；各次补验使用独立合成仓库，没有重发原已接纳变更或用重跑解释未知副作用。
+
+上述资格属于真实 adapter 注入的源码 Service／Client 和本次合成数据；不覆盖安装客户端 UI、默认 SDK transport、其他平台／模型，或真实拒绝、unknown、取消、Auto 审核及兄弟授权转移。子例在参数 schema 修正前的冻结批次执行；修后重验本机完整定向回归和主模型链路，未追加同一子样本的付费重跑。
+
+
+业务批准复用首次联验的 `dist/acceptance/worktree-business-20261106-{manual,auto,notification}/` 原失败全部保留。manual 在原业务 Tool 批准后遇到内部 prepare 卡，未取得创建完成资格；Auto 实际创建和删除，但 SQL 为六次审核，其中两个内部审核沿既有 `timeout_continue`，不能计作两次明确批准。根因是 Runtime 的独立 childPermissions 合成器漏传准确 Worktree 决策封存，主任务受控测试没有覆盖该接缝。通知组21次 HTTP200 已完成 A→parent→B 的消息和实际读／写／读回，末尾取邮件使用 limit200 超过原 Store 上限100而保留 needs_review；本机 `evidence/semantic-review.json` 核原 Tool 来源、唯一消息、模型消费和 B 文件字节成立。父模型将夹具顺序称为“工具规则”、将通知 kind 说成 create 回执字段及“工作树未改动”的措辞不准确，未改写原文或扩成产品限制。修复接线与夹具后按新冻结批次补验，不重发这些原已接纳意图，也不以新样本解释旧 unknown。
+
+修复后 `worktree-business-20261106-manual-r2`／`auto-r2` 分别为11／12次真实请求，全部 HTTP200，机械断言通过；共同非 Markdown 摘要为 `e908ed611c6c9f6c91b7ba9c0880b36f7e447c3198e35e1bae21676cffc586cc`。两例均由唯一默认可写子会话执行 list/create/remove/list；手动仅两张原 Tool 卡，Auto 仅两次原通用 checker 且均实际 approve_once，无人工或 timeout_continue。四个变更内部 Job 的原 policy 分别指向对应 Tool／原 check，完整输出、ref 唯一集合、来源 HEAD/索引/本地内容和冷读静止均通过。父实际消费完整子结果；手动创建和删除分别批准，不能从模型“无需审批”的误述推翻 SQL 两卡事实。子报告另有“未创建任何文件”、父“无 Shell 记录”和 Auto 将 root/commonDir 混写等不准确或过宽表述；业务与授权资格分别核实，不作全文准确性承诺。
+
+`notification-r2` 的18次 HTTP200 已实际完成创建、转发和 B 读写，但父在 B 的初始任务里给了目标示例，违反该例“不提前给路径”的因果断言；转发称“新增授权范围”也不准确。澄清原任务后的 `notification-r3` 为20次 HTTP200，父又自行执行 list/read 验证，违反该例“父只协调”约定，最终还误称未读和使用了 follow-up（实际为 message）。两份原失败及独立语义审查保留；这些场景职责用于隔离消息因果，不改变产品中主 Agent 的原读取权限或协作能力。
+
+最终 `worktree-business-20261106-notification-r4` 共22次真实请求、全部 HTTP200，机械断言通过，执行前后非 Markdown 摘要均为 `6d0c76ba415d173eac565ec58a2c8861c2cf6cacb67db6a6c0834aa6c8256cea`。此前两次窄澄清只修改本例提示词，不改产品代码、原协调／路径因果断言或手动／Auto 场景输入；上述业务批准证据继续适用。两个默认可写 child 沿原权限工作：B 先就绪，A 仅一次 create；唯一原 Tool 通知真实入队并被父模型消费，父才用现有 message 转给原 B。B 收到原消息后实际读 tracked.txt、写 handoff.txt、读回，两个文件均为准确的19字节 `committed baseline\n`、相同 SHA-256；父消费原 child 完整结果与文件工具观察后交付，未自行执行 Git 或文件操作。A 后续普通状态报告不替代 Tool 通知。源内容／索引／HEAD/cwd 保持，三个原 Shell Jobs 的 ref 集合与完整输出相符，工作树和交付文件保留。
+
+每份最终样本的 `evidence/semantic-review.json` 分别核 canonical 原文、真实输入／输出、SQL 原授权与消息出处、路径和文件字节。r4 的 B 中间报告仍有一次手抄 hash 漏字符，原 Files 回执和父最终报告使用正确 hash；入队不代表已读、消息不新增权限、相同文件字节与完整模型理解也分别核验。三份最终样本只取得本机默认模型的实际业务／授权／通知资格，不承诺任意模型报告全文准确；实际均走运行中消息，未取得真实模型 idle follow-up、断线重开或取消／unknown 故障资格，这些恢复与独立要求由受控回归另证。未覆盖安装客户端 UI、其他平台或其他模型。
+
+默认目录新批次仍为 `8e350f99` 加本任务差量、macOS arm64／Bun1.4.4／Git2.54.0，沿实际默认 DeepSeek-v4-flash／chat-completions／medium／4096。`dist/acceptance/worktree-default-launch-preflight-20261106-r2/` 通过启动 HOME 只读预检，重复 output 被拒且原字节未变；`worktree-default-20261106-final` 在 Provider／Git 前发现依赖预建 Library 与 output 冲突，保留零业务调用的启动失败。修正为相邻隔离 HOME 后，`final-r2` 的10次 HTTP200 已真实创建和删除，但旧 oracle 误拒普通只读 Shell 验证，原报告仍为 needs_review；独立复核另保留父子终稿“无审批卡”的错误，实际 SQL 有两张原业务卡，不能将该样本全文语义判通过。
+
+最终 `worktree-default-20261106-final-r3` 为10次真实请求、全部 HTTP200，机械断言通过；执行前后非 Markdown 摘要同为 `8421f2b0dc6c38c1b14ae85f662ad5ec73e8cf73f48ddb81a75c0105b76da8a3`。唯一默认 worker 保留普通 Shell 能力，实际只调用 list/create/remove/list；create 省略 path，原记录及 prepare 冻结的解析目标与隔离启动 HOME 下 `.kite-code/worktrees/` 的稳定派生路径相同，remove 使用真实回执路径。两张外层业务卡由可信测试用户／操作员通过原 Client 回答，四个内部步骤精确复用；没有内部审核或额外变更。六个 Worktree Job 与原 ref 集合唯一对应，完整输出进入后续真实模型，创建通知在 remove 前被父模型消费。父追加一次实际只读 Shell 核验，未代执行创建或删除；源内容／索引／HEAD 的独立哈希保持，目标正常删除，分支保留，进程静止。
+
+r3 的 `evidence/semantic-review.json` 对照全部 canonical／wire 原文、SQL、原授权、路径与文件字节；父子未再虚构“无审批”，但子终稿开头说“三次”后实际列四个 action，父以 status 推断精确内容及索引保全超出该公开回执证据，实际保全另由夹具哈希证明。普通 Shell 原 reference／Tool 回执／Job／Command 的唯一闭合在随后窄补 runner 后，以原 r3 SQLite 和完整输出离线验证，6个伪造负探针全部拒绝，记录在 `evidence/readonly-shell-reference-review.json`；没有改写原报告或追加模型／Git 调用，不称原现场已执行新增断言。这些证据取得本机源码 Service／Client 的默认落点、提示词遵循和实际两卡批准资格，不覆盖安装 UI、其他模型／平台、任意间接程序硬拦截或真实 unknown／取消故障。
+
+默认目录测试的早期夹具曾在进程内修改 HOME，Bun 缓存使四份合成树落在真实 `~/.kite-code/worktrees/`；原样本保存在本机 `dist/acceptance/worktree-default-home-first-failure/evidence.json`。其中两份已知成功样本随后通过原工具、完整删除检查和正常 remove 清理，证据在 `dist/acceptance/worktree-default-home-cleanup/remaining/result.json`。另一个原 create 中断样本缺失终态，以及首次清理在 prepare_remove 监管失败后留下的 unknown，均保留原记录和目录，不以新 Execution 重发、不用新样本通过推断旧结果。当前启动隔离和只读预检已修复该夹具问题；未知现场没有递归、force 或分支清理。
+
 ## 审批策略与原生 Shell 执行
 
 当前[执行驱动](approval-execution.live.ts)不设置累计模型请求数、整场案例时限或测试额外 HTTP 时限；真实模型按现有 Loop 运行至结算，不能用提高有限预算替代完整观察。Shell 自身的执行期限、审批超时策略、父子取消和资源清理保持原产品语义。操作人可用 SIGINT／SIGTERM 显式中止，驱动保留失败与采证并执行原清理；中止不算业务通过。原 wire 请求和模型事件持续追加到各案例的私有 NDJSON，最终仍封存 canonical、SQLite、完整回执及业务结果。执行目录按固定日志水位分页取得全部原执行，避免公开列表的200条上限截断长案例和子任务证据。

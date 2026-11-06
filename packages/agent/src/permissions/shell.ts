@@ -1,20 +1,29 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, lstat, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute } from 'node:path';
+import { access, lstat, open, readdir, readFile, readlink, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
   createLinuxHostShellJob,
   createMacosHostShellJob,
   createShellJob,
   createWindowsShellJob,
   ripgrepAsset,
+  type TrustedWorkerLaunch,
 } from '@kite-ai/agent/jobs/shell';
-import { createShellExtension } from '@kite-ai/agent/shell';
+import { createShellExtension, gitWorktreeAssetDirectory } from '@kite-ai/agent/shell';
 import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
 import { JobStartError } from '../extensions';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
 import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
+import type { GitWorktreeHost } from '../tools/git-worktree';
+import {
+  digest,
+  type GitWorktreeConfiguration,
+  parseGitWorktreeInput,
+  parseWorkerCommand,
+} from '../tools/git-worktree/protocol';
 import { shellToolCapability as describe } from './capabilities';
 import { dispatchScopeLeaves } from './dispatch-scope';
 import type { CapabilityDescription } from './index';
@@ -56,6 +65,7 @@ export const shellToolIds = [
   'shell.read',
   'shell.wait',
   'shell.stop',
+  'git.worktree',
 ] as const;
 /** Interpret only the original accepted default-policy tree, including delegated AND policies. */
 function acceptedScopeLeaves(context: JobContext, definitionId: string) {
@@ -223,11 +233,252 @@ async function asset(path: string, executable: boolean, signal?: AbortSignal) {
   if (fact.canonical !== selected) throw new AgentError('shell_asset_unavailable');
   return { path: selected, digest: fact.digest! };
 }
+/** Allowlist is applied before the guardian, shell, or worker interpreter can execute. */
+function workerEnvironment(options: ShellConfigurationOptions, git: string, bun: string) {
+  const result: Record<string, string> = {};
+  const allowed = new Set(
+    options.platform === 'win32'
+      ? [
+          'SYSTEMROOT',
+          'WINDIR',
+          'COMSPEC',
+          'USERPROFILE',
+          'LOCALAPPDATA',
+          'HOMEDRIVE',
+          'HOMEPATH',
+          'HOME',
+          'TEMP',
+          'TMP',
+        ]
+      : ['HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ'],
+  );
+  for (const [key, value] of Object.entries(options.env).sort(([a], [b]) => a.localeCompare(b)))
+    if (allowed.has(options.platform === 'win32' ? key.toUpperCase() : key)) result[key] = value;
+  result.PATH =
+    options.platform === 'win32'
+      ? [
+          dirname(git),
+          dirname(bun),
+          dirname(options.shellExecutable),
+          join(result.SystemRoot ?? result.SYSTEMROOT ?? 'C:\\Windows', 'System32'),
+        ].join(';')
+      : '/usr/bin:/bin:/usr/sbin:/sbin';
+  return Object.freeze(result);
+}
+/** Apple's /usr/bin/git dispatcher's hash does not identify the selected Git,
+ * and dispatch can write xcrun caches. Freeze a protected native binary instead. */
+async function macosGitCandidates(): Promise<string[]> {
+  const rootOwnedPath = async (path: string, file = false) => {
+    for (let current = path; ; current = dirname(current)) {
+      const fact = await lstat(current);
+      if (
+        fact.isSymbolicLink() ||
+        fact.uid !== 0 ||
+        (fact.mode & 0o022) !== 0 ||
+        (current === path && file ? !fact.isFile() : !fact.isDirectory())
+      )
+        return false;
+      if (dirname(current) === current) return true;
+    }
+  };
+  const candidates: string[] = [];
+  try {
+    const pointer = '/private/var/db/xcode_select_link';
+    if (await rootOwnedPath(dirname(pointer))) {
+      const fact = await lstat(pointer);
+      const target = fact.isSymbolicLink() && fact.uid === 0 ? await readlink(pointer) : '';
+      if (isAbsolute(target) && !target.includes('\0') && Buffer.byteLength(target) <= 4096)
+        candidates.push(join(target, 'usr/bin/git'));
+    }
+  } catch {
+    /* Missing or untrusted selection does not prevent fixed discovery. */
+  }
+  candidates.push(
+    '/Library/Developer/CommandLineTools/usr/bin/git',
+    '/Applications/Xcode.app/Contents/Developer/usr/bin/git',
+  );
+  const verified: string[] = [];
+  for (const candidate of new Set(candidates)) {
+    try {
+      if (
+        candidate === '/usr/bin/git' ||
+        candidate === '/bin/git' ||
+        !(await rootOwnedPath(candidate, true))
+      )
+        continue;
+      const handle = await open(candidate, 'r');
+      let magic: string;
+      try {
+        const prefix = Buffer.alloc(4);
+        const { bytesRead } = await handle.read(prefix, 0, 4, 0);
+        magic = bytesRead === 4 ? prefix.toString('hex') : '';
+      } finally {
+        await handle.close();
+      }
+      if (
+        [
+          'cffaedfe',
+          'cefaedfe',
+          'feedfacf',
+          'feedface',
+          'cafebabe',
+          'bebafeca',
+          'cafebabf',
+          'bfbafeca',
+        ].includes(magic)
+      )
+        verified.push(candidate);
+    } catch {
+      /* Optional capability candidates fail closed. */
+    }
+  }
+  return verified;
+}
+async function worktreeAssets(
+  options: ShellConfigurationOptions,
+  cwd: string,
+  bun: ShellAsset,
+  signal?: AbortSignal,
+) {
+  const root = gitWorktreeAssetDirectory();
+  const unavailable = (code: string) => ({
+    configuration: {
+      configurationId: options.configurationId,
+      sourceCwd: cwd,
+      defaultRoot: join(homedir(), '.kite-code', 'worktrees'),
+      bunPath: bun.path,
+      workerPath: join(root, 'worker.js'),
+      configPath: join(root, 'empty-bunfig.toml'),
+      git: { path: '', sha256: '' },
+      hooksPath: join(root, 'empty-hooks'),
+      unavailable: code,
+    } satisfies GitWorktreeConfiguration,
+    assets: [] as ShellAsset[],
+    profile: undefined as TrustedWorkerLaunch | undefined,
+    async verify(_signal?: AbortSignal) {
+      throw new AgentError(code);
+    },
+  });
+  try {
+    if (
+      options.platform !== 'win32' &&
+      !['sh', 'bash', 'dash'].includes(basename(await realpath(options.shellExecutable)))
+    )
+      return unavailable('unsupported_shell_configuration');
+    const manifestPath = join(root, 'manifest.json');
+    const manifestAsset = await asset(manifestPath, false, signal);
+    const bytes = await readFile(manifestAsset.path);
+    if (bytes.length > 8192) throw new AgentError('worktree_asset_changed');
+    const manifest = JSON.parse(bytes.toString('utf8'));
+    if (
+      manifest.schemaVersion !== 1 ||
+      manifest.emptyHooks !== 'empty-hooks' ||
+      Object.keys(manifest).sort().join(',') !== 'emptyHooks,files,schemaVersion' ||
+      !manifest.files ||
+      Object.keys(manifest.files).sort().join(',') !== 'empty-bunfig.toml,worker.js'
+    )
+      throw new AgentError('worktree_asset_changed');
+    const worker = await asset(join(root, 'worker.js'), false, signal);
+    const config = await asset(join(root, 'empty-bunfig.toml'), false, signal);
+    if (
+      manifest.files['worker.js'] !== worker.digest ||
+      manifest.files['empty-bunfig.toml'] !== config.digest
+    )
+      throw new AgentError('worktree_asset_changed');
+    const hooks = join(root, 'empty-hooks');
+    const hookIdentity = await launchIdentityAsync(hooks, false, signal);
+    if (
+      !(await lstat(hooks)).isDirectory() ||
+      (await lstat(hooks)).isSymbolicLink() ||
+      (await readdir(hooks)).length !== 0
+    )
+      throw new AgentError('worktree_asset_changed');
+    const candidates =
+      options.platform === 'win32'
+        ? [join(dirname(options.windows!.fullShellExecutable), '../../mingw64/bin/git.exe')]
+        : options.platform === 'darwin'
+          ? await macosGitCandidates()
+          : ['/usr/bin/git', '/bin/git'];
+    let git: ShellAsset | undefined;
+    for (const candidate of candidates) {
+      try {
+        git = await asset(candidate, true, signal);
+        break;
+      } catch {
+        signal?.throwIfAborted();
+      }
+    }
+    if (!git) return unavailable('git_not_found');
+    const configuration: GitWorktreeConfiguration = {
+      configurationId: options.configurationId,
+      defaultRoot: join(homedir(), '.kite-code', 'worktrees'),
+      sourceCwd: cwd,
+      bunPath: bun.path,
+      workerPath: worker.path,
+      configPath: config.path,
+      git: { path: git.path, sha256: git.digest },
+      hooksPath: hookIdentity.canonical,
+    };
+    const profileBase = {
+      version: 1 as const,
+      env: workerEnvironment(options, git.path, bun.path),
+      bunFlags: Object.freeze(['--no-env-file', `--config=${config.path}`]),
+    };
+    const profile: TrustedWorkerLaunch = Object.freeze({
+      ...profileBase,
+      digest: createHash('sha256')
+        .update(JSON.stringify({ ...profileBase, config, bun }))
+        .digest('hex'),
+    });
+    const captured = [worker, config, git, manifestAsset];
+    configuration.identity = createHash('sha256')
+      .update(
+        JSON.stringify({
+          configuration,
+          assets: [...captured, bun],
+          hooks: hookIdentity,
+          profile,
+        }),
+      )
+      .digest('hex');
+    Object.freeze(configuration.git);
+    Object.freeze(configuration);
+    for (const item of captured) Object.freeze(item);
+    Object.freeze(captured);
+    return {
+      configuration,
+      assets: captured,
+      profile,
+      async verify(verificationSignal?: AbortSignal) {
+        const actual = await mapAssetVerification(
+          captured,
+          (item, readSignal, index) => asset(item.path, index === 2, readSignal),
+          verificationSignal,
+        );
+        if (actual.some((item, index) => item.digest !== captured[index]!.digest))
+          throw new AgentError('worktree_asset_changed');
+        const current = await launchIdentityAsync(hooks, false, verificationSignal);
+        if (
+          JSON.stringify(current) !== JSON.stringify(hookIdentity) ||
+          !(await lstat(hooks)).isDirectory() ||
+          (await lstat(hooks)).isSymbolicLink() ||
+          (await readdir(hooks)).length !== 0
+        )
+          throw new AgentError('worktree_asset_changed');
+      },
+    };
+  } catch (error) {
+    signal?.throwIfAborted();
+    return unavailable(error instanceof AgentError ? error.code : 'worktree_asset_changed');
+  }
+}
 export async function createShellConfiguration(input: {
   workspaceRoot: string;
   toolIds: readonly string[];
   options?: ShellConfigurationOptions;
   signal?: AbortSignal;
+  /** Programmatic host reader; functions never enter cloned ShellConfigurationOptions. */
+  worktreeHost?: GitWorktreeHost;
 }) {
   const selected = input.toolIds.filter((id) =>
     shellToolIds.includes(id as (typeof shellToolIds)[number]),
@@ -242,6 +493,8 @@ export async function createShellConfiguration(input: {
       ): Promise<Partial<CapabilityDescription> | undefined> => undefined,
       commandDigest: (_request: AuthorizationRequest): string | undefined => undefined,
       prepareRiskReview: async (_request: AuthorizationRequest) => null,
+      worktreeRequest: (_request: AuthorizationRequest) =>
+        undefined as { action: string; phase?: string } | undefined,
     };
   if (!input.options) throw new AgentError('shell_unavailable');
   const options = structuredClone(input.options);
@@ -260,26 +513,38 @@ export async function createShellConfiguration(input: {
       signal: input.signal,
     });
     const searchAsset = await asset(ripgrepAsset(), true, input.signal);
-    const host = options.host && {
-      ...options.host,
-      readonlyAssets: [
-        ...options.host.readonlyAssets,
-        searchAsset.path,
-        dirname(searchAsset.path),
-        ...commandPolicy.assets.map((item) => item.path),
-      ],
+    const worktree = selected.includes('git.worktree')
+      ? await worktreeAssets(options, cwd, bun, input.signal)
+      : undefined;
+    const worktreeRequest = (request: AuthorizationRequest) => {
+      if (request.definitionVersion !== '1') return undefined;
+      if (request.kind === 'tool' && request.definitionId === 'git.worktree') {
+        const value = parseGitWorktreeInput(request.input);
+        return value ? { action: value.action } : undefined;
+      }
+      if (request.kind !== 'job' || request.definitionId !== 'shell.command' || !worktree?.profile)
+        return undefined;
+      const value = commandRequest(request, true);
+      const worker = value && parseWorkerCommand(value.command, worktree.configuration);
+      return worker
+        ? {
+            action:
+              worker.phase === 'list'
+                ? 'list'
+                : worker.phase.includes('create')
+                  ? 'create'
+                  : 'remove',
+            phase: worker.phase,
+          }
+        : undefined;
     };
+    const host = options.host;
     const riskPreparer = createShellRiskPreparer({
       cwd,
       env: options.env,
       rgPath: searchAsset.path,
       interpreterPaths: [shell.path, bun.path],
-      protectedPaths: [
-        ...(host ? [host.controlBase, ...host.protectedRoots, ...(host.protectedFiles ?? [])] : []),
-        ...assets.map((item) => item.path),
-        ...commandPolicy.assets.map((item) => item.path),
-        searchAsset.path,
-      ],
+      protectedPaths: [],
       binding: {
         cwd,
         env: Object.entries(options.env).sort(([a], [b]) => a.localeCompare(b)),
@@ -297,12 +562,34 @@ export async function createShellConfiguration(input: {
         ) !== undefined,
     });
     const riskSnapshots = new Map<string, readonly ShellRiskSnapshot[]>();
+    const workerScopes = new Map<
+      string,
+      { filesystem: 'workspace_write' | 'full_access'; network: 'none' }
+    >();
+    const executionScope = (context: JobContext) => {
+      const accepted = hostExecutionScope(context);
+      const requested = workerScopes.get(context.executionId);
+      return requested
+        ? {
+            filesystem:
+              accepted.filesystem === 'workspace_write' ||
+              requested.filesystem === 'workspace_write'
+                ? ('workspace_write' as const)
+                : ('full_access' as const),
+            network: 'none' as const,
+          }
+        : accepted;
+    };
     const jobOptions = {
       cwd,
       env: options.env,
       supervisorPath: supervisor.path,
       bunExecutable: bun.path,
       shellExecutable: shell.path,
+      trustedWorkerLaunch: (command: string) =>
+        worktree?.profile && parseWorkerCommand(command, worktree.configuration)
+          ? worktree.profile
+          : undefined,
       ...(options.graceMs !== undefined ? { graceMs: options.graceMs } : {}),
       ...(options.maxQueuedBytes !== undefined ? { maxQueuedBytes: options.maxQueuedBytes } : {}),
       ...(bubblewrap
@@ -318,7 +605,7 @@ export async function createShellConfiguration(input: {
               coreutilsPath: coreutils.path,
               fullShellExecutable: options.windows!.fullShellExecutable,
               stateRoot: options.windows!.stateRoot,
-              executionScope: hostExecutionScope,
+              executionScope,
             },
             input.signal,
           )
@@ -328,18 +615,26 @@ export async function createShellConfiguration(input: {
               ...host,
               bubblewrapPath: bubblewrap.path,
               filesystemScope: hostFilesystemScope,
-              executionScope: hostExecutionScope,
+              executionScope,
             })
           : host
             ? createMacosHostShellJob({
                 ...jobOptions,
                 ...host,
                 filesystemScope: hostFilesystemScope,
-                executionScope: hostExecutionScope,
+                executionScope,
               })
             : createShellJob(jobOptions);
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
+      ...(worktree
+        ? {
+            gitWorktree: {
+              configuration: worktree.configuration,
+              worktreeHost: input.worktreeHost,
+            },
+          }
+        : {}),
       async classifyPresentation(command) {
         const classified = await commandPolicy.classify(command);
         return classified.hardDenied
@@ -348,7 +643,7 @@ export async function createShellConfiguration(input: {
       },
       job: {
         ...job,
-        ...(host
+        ...(host || worktree
           ? {
               inputSchema: {
                 type: 'object',
@@ -385,6 +680,46 @@ export async function createShellConfiguration(input: {
                 ? value.command
                 : undefined;
             if (typeof command !== 'string') throw new AgentError('invalid_shell_arguments');
+            const worker = worktree?.profile && parseWorkerCommand(command, worktree.configuration);
+            if (worker) {
+              if (!host && worker.phase !== 'list')
+                throw new AgentError('worktree_permission_denied');
+              await worktree!.verify(context.signal);
+              context.signal.throwIfAborted();
+              dispatched = true;
+              const requested = commandRequest(
+                {
+                  kind: 'job',
+                  sessionId: context.sessionId,
+                  runId: null,
+                  executionId: context.executionId,
+                  definitionId: 'shell.command',
+                  definitionVersion: '1',
+                  input: value,
+                  signal: context.signal,
+                },
+                true,
+              )?.executionScope;
+              if (requested?.network !== 'none')
+                throw new JobStartError(undefined, 'worktree_permission_denied');
+              workerScopes.set(context.executionId, {
+                filesystem: requested.filesystem,
+                network: 'none',
+              });
+              try {
+                return await job.start({ command }, context);
+              } finally {
+                workerScopes.delete(context.executionId);
+              }
+            }
+            if (
+              !host &&
+              value &&
+              typeof value === 'object' &&
+              !Array.isArray(value) &&
+              'permissions' in value
+            )
+              throw new AgentError('invalid_shell_arguments');
             const classified = await commandPolicy.classify(command, context.signal);
             context.signal.throwIfAborted();
             const search = readOnlySearchCommand(
@@ -437,6 +772,22 @@ export async function createShellConfiguration(input: {
           ...(coreutils ? { coreutils } : {}),
           parser: [...commandPolicy.assets],
           ripgrep: searchAsset,
+          ...(worktree
+            ? {
+                gitWorktree: {
+                  configuration: worktree.configuration,
+                  assets: worktree.assets,
+                  profile: worktree.profile
+                    ? {
+                        version: worktree.profile.version,
+                        digest: worktree.profile.digest,
+                        bunFlags: worktree.profile.bunFlags,
+                        envKeys: Object.keys(worktree.profile.env).sort(),
+                      }
+                    : null,
+                },
+              }
+            : {}),
         },
         ...(options.host ? { host: options.host, scope: 'final_dispatch_authorization' } : {}),
         envKeys: Object.keys(options.env).sort(),
@@ -446,11 +797,14 @@ export async function createShellConfiguration(input: {
         job: { id: job.id, definitionVersion: job.version },
       },
       describe,
+      worktreeRequest,
       async prepareRiskReview(request: AuthorizationRequest) {
         const kind = shellCommandKind(request);
         if (!kind) return null;
         const value = commandRequest(request, !!host);
         if (!value) return null;
+        if (worktree?.profile && parseWorkerCommand(value.command, worktree.configuration))
+          return null;
         if (kind === 'job') riskSnapshots.delete(request.executionId);
         const prepared = await riskPreparer.prepare(
           value.command,
@@ -468,6 +822,69 @@ export async function createShellConfiguration(input: {
       async describeRequest(
         request: AuthorizationRequest,
       ): Promise<Partial<CapabilityDescription> | undefined> {
+        const worktreeCall = worktreeRequest(request);
+        if (
+          request.kind === 'tool' &&
+          request.definitionId === 'git.worktree' &&
+          request.definitionVersion === '1' &&
+          !worktreeCall
+        )
+          return { hardAllowed: false, denialReason: 'invalid_worktree_arguments' };
+        if (worktreeCall) {
+          if (!host && worktreeCall.action !== 'list')
+            return { hardAllowed: false, denialReason: 'worktree_permission_denied' };
+          if (!worktree?.profile)
+            return {
+              hardAllowed: false,
+              denialReason: worktree?.configuration.unavailable ?? 'worktree_asset_changed',
+            };
+          try {
+            await worktree.verify(request.signal);
+          } catch {
+            request.signal.throwIfAborted();
+            return { hardAllowed: false, denialReason: 'worktree_asset_changed' };
+          }
+          const parsed = request.kind === 'tool' ? parseGitWorktreeInput(request.input) : null;
+          const scope =
+            parsed && parsed.action !== 'list'
+              ? parsed.permissions
+              : (commandRequest(request, true)?.executionScope ?? {
+                  filesystem: 'workspace_write' as const,
+                  network: 'none' as const,
+                });
+          if (scope.network !== 'none')
+            return { hardAllowed: false, denialReason: 'worktree_permission_denied' };
+          return {
+            // A fixed worker retains the ordinary generic authorization checker;
+            // its structured action is not an ordinary Shell risk-review program.
+            autoReview: undefined,
+            safeRead: worktreeCall.action === 'list',
+            effects:
+              worktreeCall.action === 'list'
+                ? ['read']
+                : ['process', 'workspace_write', 'record_write'],
+            executionScope: scope,
+            autoTimeoutScope: scope,
+            hardAllowed: true,
+            ...(worktreeCall.action === 'list'
+              ? {}
+              : {
+                  worktreeAuthorization: {
+                    configurationIdentity: digest(worktree.configuration),
+                  },
+                }),
+            autoReviewKey: createHash('sha256')
+              .update(
+                JSON.stringify({
+                  request: request.input,
+                  configuration: worktree.configuration,
+                  assets: worktree.assets,
+                  profile: worktree.profile.digest,
+                }),
+              )
+              .digest('hex'),
+          };
+        }
         if (!shellCommandKind(request)) return undefined;
         const value = commandRequest(request, !!host);
         if (!value) return { hardAllowed: false, denialReason: 'invalid_shell_arguments' };
@@ -502,6 +919,24 @@ export async function createShellConfiguration(input: {
         };
       },
       commandDigest(request: AuthorizationRequest): string | undefined {
+        const worktreeCall = worktreeRequest(request);
+        if (worktreeCall && worktree?.profile)
+          return createHash('sha256')
+            .update(
+              JSON.stringify({
+                namespace: 'builtin.shell.git-worktree-permission',
+                version: 1,
+                kind: request.kind,
+                definitionId: request.definitionId,
+                definitionVersion: request.definitionVersion,
+                input: request.input,
+                configuration: worktree.configuration,
+                assets: worktree.assets,
+                launchProfile: worktree.profile,
+                host: options.host ?? null,
+              }),
+            )
+            .digest('hex');
         const value = commandRequest(request, !!host);
         if (!value) return undefined;
         // A logical ensure key selects a new operation; it does not change this command's

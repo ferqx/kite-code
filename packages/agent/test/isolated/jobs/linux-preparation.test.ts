@@ -64,6 +64,47 @@ function mount(launch: LinuxLaunch, flag: string, source: string, destination: s
       arg === flag && args[index + 1] === source && args[index + 2] === destination,
   );
 }
+test('ordinary Full has no implicit control or runtime-directory protection and still binds exact executable identities', () =>
+  fixture((options, shell) => {
+    const control = join(options.workspaceRoot!, 'coordination');
+    privateDirectory(control);
+    const prepare = captureLinuxLaunch(
+      {
+        ...options,
+        controlBase: control,
+        protectedRoots: [],
+        readonlyAssets: [],
+        runtimeReadOnlyRoots: [],
+        filesystemScope: 'full_access',
+      },
+      [shell],
+    );
+    const launch = prepare('unused', shell, context);
+    try {
+      expect(launch.maskedRoots).toEqual([]);
+      expect(launch.bubblewrapArgs).not.toContain('--tmpfs');
+      expect(mount(launch, '--bind', '/', '/')).toBe(true);
+      expect(mount(launch, '--ro-bind', control, control)).toBe(false);
+      expect(
+        mount(
+          launch,
+          '--ro-bind',
+          options.runtimeReadOnlyRoots![0]!,
+          options.runtimeReadOnlyRoots![0]!,
+        ),
+      ).toBe(false);
+      expect(mount(launch, '--ro-bind', shell, shell)).toBe(true);
+      expect(launch.identities.some((fact) => fact.canonical === control)).toBe(true);
+      expect(launch.identities.find((fact) => fact.canonical === shell)?.digest).toMatch(
+        /^[a-f0-9]{64}$/,
+      );
+    } finally {
+      launch.cleanup();
+    }
+    writeFileSync(shell, 'changed executable');
+    expect(() => prepare('never dispatched', shell, context)).toThrow('confined_launch_changed');
+    expect(readdirSync(options.temporaryRoot!)).toEqual([]);
+  }));
 test('host scopes keep the original Workspace write boundary independently of execution cwd and mask private roots last', () =>
   fixture((options, shell) => {
     const prepare = captureLinuxLaunch(options, [shell]);

@@ -55,7 +55,7 @@ export function shellToolCapability(id: string): {
   safeRead: boolean;
 } {
   if (id === 'shell.read' || id === 'shell.wait') return { effects: ['read'], safeRead: true };
-  if (id === 'shell.execute' || id === 'shell.launch')
+  if (id === 'shell.execute' || id === 'shell.launch' || id === 'git.worktree')
     return { effects: ['process', 'unknown', 'record_write'], safeRead: false };
   return { effects: ['process', 'unknown'], safeRead: false };
 }

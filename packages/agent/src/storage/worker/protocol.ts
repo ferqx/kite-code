@@ -120,6 +120,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'finishInternalModel',
   'ensureAuthorizationCheck',
   'resolveAutoAuthorization',
+  'resolveWorktreeAuthorization',
   'readExecutionEvidence',
   'prepareAuthorizationCheck',
   'dispatchAuthorizationCheck',

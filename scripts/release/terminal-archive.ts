@@ -19,6 +19,7 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
   readWindowsTerminalRuntimeFile,
   retainWindowsTerminalRuntimeFiles,
+  terminalEmptyAssetDirectories,
 } from '@kite-ai/service/runtime-assets';
 import {
   parseTerminalBundleManifest,
@@ -294,6 +295,11 @@ export function unpackTerminalBundle(input: {
           closeSync(fd);
         }
       }
+    for (const directory of terminalEmptyAssetDirectories(manifest)) {
+      const target = join(destination, directory);
+      if (process.platform === 'win32') privateDirectory(target);
+      else mkdirSync(target, { recursive: true, mode: 0o700 });
+    }
     for (const link of manifest.links) {
       const target = join(destination, link.path);
       mkdirSync(dirname(target), { recursive: true, mode: 0o700 });

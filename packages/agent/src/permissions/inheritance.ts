@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { PermissionDecision, Permissions } from '../extensions';
 import { autoCheckOptions } from './auto-check';
+import { sealWorktreeDecision } from './worktree-authorization';
 
 /** Current root policy AND a trusted capability ceiling; neither can widen the other. */
 export function intersectPermissionPolicies(
@@ -49,31 +50,34 @@ export function intersectPermissionPolicies(
       if (!base.allowed && !base.approval && !base.check) return { ...base, ...proof };
       if (!injected.allowed && !injected.approval && !injected.check)
         return { ...injected, ...proof };
-      if (injected.allowed) return { ...base, ...proof };
-      if (base.allowed) return { ...injected, ...proof };
+      if (injected.allowed) return sealWorktreeDecision({ ...base, ...proof }, [base, injected]);
+      if (base.allowed) return sealWorktreeDecision({ ...injected, ...proof }, [base, injected]);
       const decisions = [base, injected];
       const checks = decisions.filter((decision) => decision.check);
-      return {
-        allowed: false,
-        ...proof,
-        approval: {
-          request: { policies: decisions.map((decision) => decision.approval?.request ?? null) },
-        },
-        ...(checks.length
-          ? {
-              check: {
-                ...autoCheckOptions(checks.map((decision) => decision.check!)),
-                request: {
-                  policies: decisions.map((decision) => decision.check?.request ?? null),
+      return sealWorktreeDecision(
+        {
+          allowed: false,
+          ...proof,
+          approval: {
+            request: { policies: decisions.map((decision) => decision.approval?.request ?? null) },
+          },
+          ...(checks.length
+            ? {
+                check: {
+                  ...autoCheckOptions(checks.map((decision) => decision.check!)),
+                  request: {
+                    policies: decisions.map((decision) => decision.check?.request ?? null),
+                  },
+                  requireApproval: decisions.some(
+                    (decision) =>
+                      decision.check?.requireApproval || (!!decision.approval && !decision.check),
+                  ),
                 },
-                requireApproval: decisions.some(
-                  (decision) =>
-                    decision.check?.requireApproval || (!!decision.approval && !decision.check),
-                ),
-              },
-            }
-          : {}),
-      };
+              }
+            : {}),
+        },
+        [base, injected],
+      );
     },
   };
 }

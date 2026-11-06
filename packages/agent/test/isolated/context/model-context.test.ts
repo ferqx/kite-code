@@ -60,6 +60,11 @@ test('read-only task and automatic rejection guidance remain one deterministic t
     'does not authorize retrying the denied effect through another tool or path',
   );
   expect(contract.content).toContain('original task that are already authorized');
+  expect(contract.content).toContain('Create Git worktrees only with git_worktree');
+  expect(contract.content).toContain(
+    'never place worktree code in an operating-system temporary directory',
+  );
+  expect(contract.content).toContain('report that limitation instead of falling back to Shell');
   expect(contract.content).toContain(
     'The child receives the assignment, not everything visible to the parent',
   );
@@ -71,6 +76,9 @@ test('read-only task and automatic rejection guidance remain one deterministic t
   );
   expect(contract.content).toContain('Compare facts already present directly');
   expect(contract.content).toContain('a path or execution error is not an approval rejection');
+  expect(contract.content).toContain('User approvals may be handled outside your visible messages');
+  expect(contract.content).toContain('does not prove that no approval occurred');
+  expect(contract.content).toContain('otherwise leave it unspecified');
   expect(contract.content).toContain('Planning is a plan mode, not an Agent execution phase');
   expect(contract.content).not.toContain('actual phase');
   expect(contract.content).toContain(

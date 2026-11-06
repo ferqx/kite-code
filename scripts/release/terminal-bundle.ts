@@ -30,6 +30,7 @@ import {
   verifyTerminalBundle,
 } from '../../apps/cli/host/terminal-artifact';
 import { serviceBundledDependencies } from '../../apps/service/bundled-dependencies';
+import { terminalEmptyAssetDirectories } from '../../apps/service/src/runtime-assets';
 import { createTrustedAssets } from '../../apps/web/src/assets';
 import { agentBundledDependencies } from '../../packages/agent/scripts/bundled-dependencies';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
@@ -340,6 +341,28 @@ export async function buildTerminalBundle(input: {
         await run(runtime, args, item.source);
       }
       verifyBundledDependencies(item.destination, item.bundledDependencies);
+      if (item.name === '@kite-ai/agent') {
+        const directory = join(item.destination, 'tools/git-worktree');
+        const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
+        if (
+          manifest.schemaVersion !== 1 ||
+          manifest.emptyHooks !== 'empty-hooks' ||
+          Object.keys(manifest).sort().join(',') !== 'emptyHooks,files,schemaVersion' ||
+          !manifest.files ||
+          Object.keys(manifest.files).sort().join(',') !== 'empty-bunfig.toml,worker.js'
+        )
+          error('worktree_assets_invalid');
+        for (const name of ['worker.js', 'empty-bunfig.toml'])
+          if (sha(readFileSync(join(directory, name))) !== manifest.files[name])
+            error('worktree_assets_invalid');
+        const hooks = join(directory, 'empty-hooks');
+        if (
+          !lstatSync(hooks).isDirectory() ||
+          lstatSync(hooks).isSymbolicLink() ||
+          readdirSync(hooks).length
+        )
+          error('worktree_assets_invalid');
+      }
       if (item.bundledDependencies.length) {
         const notices = terminalBundledNotices({
           repositoryRoot: repository,
@@ -600,6 +623,7 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
       entries,
       ...(await inventory(root)),
     };
+    if (terminalEmptyAssetDirectories(manifest).length !== 1) error('worktree_assets_invalid');
     writeFileSync(join(root, 'terminal-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', {
       mode: 0o644,
     });

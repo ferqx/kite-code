@@ -477,13 +477,13 @@ macTest(
 );
 
 macTest(
-  'a Full command cannot hardlink an asset or private secret into the writable Workspace',
+  'explicit Full host protection prevents hardlink writes to readonly assets and private secrets',
   async () => {
     const before = readFileSync(guardian);
     const linked = join(workspace, 'guardian-link');
     try {
       const events = await run(
-        createMacosHostShellJob(options(true)),
+        createMacosHostShellJob({ ...options(true), readonlyAssets: [guardian] }),
         `/bin/ln ${quote(guardian)} ${quote(linked)}; printf bad > ${quote(linked)}; /bin/ln ${quote(join(root, 'private', 'secret'))} private-link; /bin/cat private-link`,
       );
       terminal(events);
@@ -501,9 +501,45 @@ macTest(
 );
 
 macTest(
-  'Full scope permits actual outside write while the host private control and runtime assets remain protected',
+  'ordinary Full can write control and runtime data without implicit root or executable-parent protection',
   async () => {
-    const job = createMacosHostShellJob(options(true));
+    const controlFile = join(control, 'approved-full-effect');
+    const runtimeFile = join(assets, 'approved-full-effect');
+    const profileFile = join(root, 'private', 'approved-full-effect');
+    const job = createMacosHostShellJob({
+      ...options(true),
+      protectedRoots: [],
+      readonlyAssets: [],
+      runtimeReadOnlyRoots: [],
+    });
+    try {
+      const events = await run(
+        job,
+        `printf control > ${quote(controlFile)}; printf runtime > ${quote(runtimeFile)}; printf profile > ${quote(profileFile)}; /bin/cat ${quote(join(root, 'private', 'secret'))}`,
+      );
+      expect(terminal(events)).toMatchObject({ result: { outcome: 'succeeded' } });
+      expect(readFileSync(controlFile, 'utf8')).toBe('control');
+      expect(readFileSync(runtimeFile, 'utf8')).toBe('runtime');
+      expect(readFileSync(profileFile, 'utf8')).toBe('profile');
+      expect(
+        events
+          .filter((event) => event.type === 'output')
+          .map((event) => event.content)
+          .join(''),
+      ).toContain('private');
+      // The Job still closes its original supervised registration and runtime temp.
+      expect(readdirSync(control)).toEqual(['approved-full-effect']);
+      expect(readdirSync(tempBase)).toEqual([]);
+    } finally {
+      for (const path of [controlFile, runtimeFile, profileFile]) rmSync(path, { force: true });
+    }
+  },
+);
+
+macTest(
+  'explicit host private roots and readonly assets remain limits on approved Full scope',
+  async () => {
+    const job = createMacosHostShellJob({ ...options(true), readonlyAssets: [guardian] });
     const outside = join(root, 'full-effect');
     const before = readFileSync(guardian);
     const events = await run(

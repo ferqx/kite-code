@@ -70,7 +70,7 @@ Service 的[权限装配](../../../../apps/service/src/permission-configuration.
 
 [check-context.ts](check-context.ts) 的 `createPermissionCheckContextReader` 通过只读 Runtime 接口核实际 Execution／Run／Command／Session／Workspace、主体、root work 和真实 carrier 父子链，形成 `rootUserTask/parentUserTask/isChild/role` 及准确计划观察。身份或来源不完整时返回 unknown，不按同名任务、客户端标签或 fixture 元数据推导。读取前后核取消；审阅材料只保存稳定 Run 身份，不把自身审批等待进度纳入请求绑定；Core 仍独立核当前 active／取消／fencing。历史拒绝只取同范围中其他执行的已保存拒绝，不将当前被审核执行的结果反向加入自身请求，保证完成后的绑定复核仍是同一审阅材料。task、plan 和历史拒绝原因始终是低信任审阅材料，不是授权或派发命令。
 
-父子权限交集沿 [Runtime.childPermissions](../runtime.ts) 保留每一方的实际策略。自动审核策略同时提供 check 和审核不可用时的人工 fallback；fallback 不表示每次审核成功后还必须人工批准。只有某一方明确 `approval` 且没有 check，或 check 明确 `requireApproval=true`，才形成强制人工 ceiling，与原 [constraints](constraints.ts) 的组合规则一致。真实 checker 的 `approve_once` 仍不能覆盖硬拒绝、父人工要求或 Workflow minimum；已配置审核器的技术失败交回工具结果；有效ask_user或真正未配置审核器才沿原人工fallback，不制造自动成功。
+父子权限交集沿 [Runtime.childPermissions](../runtime.ts) 保留每一方的实际策略。准确 Worktree 的完整决策封存也经此真实 child 合成器核来源后重新绑定；它与普通 Host 权限组合是不同接缝，不能只在后者保留原批准证明。自动审核策略同时提供 check 和审核不可用时的人工 fallback；fallback 不表示每次审核成功后还必须人工批准。只有某一方明确 `approval` 且没有 check，或 check 明确 `requireApproval=true`，才形成强制人工 ceiling，与原 [constraints](constraints.ts) 的组合规则一致。真实 checker 的 `approve_once` 仍不能覆盖硬拒绝、父人工要求或 Workflow minimum；已配置审核器的技术失败交回工具结果；有效ask_user或真正未配置审核器才沿原人工fallback，不制造自动成功。
 
 子 Agent 的“本次会话批准”沿同一交集保留：每个未获准策略都须明确提供 `same_command`、命令摘要相同且没有独立必需 checker，才向原审批卡提供该选项。所有策略均未提供摘要时，仍按完整 input 匹配；摘要缺失不一致、摘要冲突、任一方仅单次或纯 checker 都收窄为单次。合成 revision 绑定各方原 revision、控制读集、审批范围与摘要；允许会话批准时，每次调用的 Auto 审阅正文不充当会话授权撤销，实际 checker 仍由 InteractionGate 单独核完整正文与原执行。授权存储和派发继续绑定发起工具的真实 Session，不能借父展示根、兄弟或后代授权；手动模式 Shell Tool 与 Job 仍各自批准，新默认 Auto 的准确自身 Job 依据复用见上文及[授权存储 owner](../storage/sqlite/permission-grants.README.md)。
 
@@ -112,7 +112,7 @@ Planning 默认宿主直接调用 `createPlanningPermissionPolicy` 并提供原�
 
 Shell 工厂通过本包既有 `@kite-ai/agent/jobs/shell` 与 `/shell` 公共入口装配，保留 Job 的独立构建和资产位置。这里用包内相对导入会使 Bun splitting 将 supervisor 定位函数提升到根共享 chunk，破坏基于 `import.meta.url` 的原相对路径；真实源码树外制品测试已证此失败。保留 public entry，而非增加资产回退或放宽校验。
 
-可信 host 的 `protectedRoots` 仍只接受目录；可缺失或正常轮换的私有认证名称独立经 `protectedFiles` 交给同一 Jobs 边界，既不读取秘密正文，也不改变授权或恢复语义。macOS 核父目录身份并在 Seatbelt 持续拒绝准确名称；Linux 沿原 namespace 保护专用物理认证目录，保留正常 Shell，冻结 qualification 为 `linux_owned_pid_namespace_bubblewrap_private_directories`。缺失目录仅在真正已授权 Job 派发时受控预留，宽根重叠或可重定向来源仅拒绝原 Job，不是普通 Run 的全局门禁。详情与实际环境归[Jobs owner](../jobs/README.md#linux-宿主与严格补偿源码)。
+默认普通 Shell 不再自动添加路径保护，风险材料读取也不因 Profile/config/运行资产位置额外拒绝；仍仅捕获原 Workspace 内有限直接脚本并核资产身份，现有非常危险系统命令兜底保持。自定义可信 host 的 `protectedRoots` 仍只接受目录；可缺失或正常轮换的私有认证名称独立经 `protectedFiles` 交给同一 Jobs 边界，既不读取秘密正文，也不改变授权或恢复语义。macOS 核父目录身份并在 Seatbelt 持续拒绝准确名称；Linux 沿原 namespace 保护专用物理认证目录，保留正常 Shell，冻结 qualification 为 `linux_owned_pid_namespace_bubblewrap_private_directories`。缺失目录仅在真正已授权 Job 派发时受控预留，宽根重叠或可重定向来源仅拒绝原 Job，不是普通 Run 的全局门禁。详情与实际环境归[Jobs owner](../jobs/README.md#linux-宿主与严格补偿源码)。
 
 Shell 与私有文件适配器的最终证明共用内部 [dispatch-scope](dispatch-scope.ts) 遍历器，只解释原 permission-intersection 的 version、parent/child 顺序与最多8192节点。普通外部只读不再消费该遍历器。Shell 继续核 Job 和 filesystem/network 交集，私有引用继续核原准确范围；遍历结果不建立新 grant。[消费者回归](../../test/isolated/permissions/dispatch-scope.test.ts)核双上界、叶身份、8192边界、错误顺序及原错误码。
 
@@ -127,3 +127,19 @@ Shell 与私有文件适配器的最终证明共用内部 [dispatch-scope](dispa
 Windows 默认 Git Bash 的本机执行、审批与取消资格归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)，其他平台的实际执行范围归 [Jobs owner](../jobs/README.md)。发布 RSS 稳定性、完整 Runtime 观测资格及 V1.3 阶段退出门禁保留；源码迁移和本机通过不解除这些门禁。
 
 [真实 pending approval SIGKILL 回归](../../test/isolated/recovery/live-approval-crash.test.ts)在审批卡和原 planned Tool 已耐久后杀死自有进程（核 SIGKILL/137），只读重开保持原卡/Run/执行和 cursor、模型 ledger 不增长。随后持久根模式由请求批准改为 Full，冷 Runtime 观察仍不准备 Provider；错误主体显式恢复被拒，准确原 Run 显式恢复才读取当前 applied control revision、同事务失效旧卡并派发原 Tool。外置 ledger 核原效果一次、已成功原 Model 不重放、重复同一恢复不增效果；原 request/source 不变、answer 仍 null，唯一失效回执保准确原revision/当前controls。该 fixture只验证这一实际进程丢失与模式变化边界，不替代其他平台或所有自动审核崩溃场景。
+
+## Git Worktree 的准确权限
+
+`git.worktree@1` 仍是混合读写工具，不加入整个 hostReadOnlyTool 白名单；只有真实 `builtin.shell` 绑定的合法 list 和准确匹配固定 worker list 命令可返回 safeRead。prepare 按原变更 action 的保守效果执行；create/remove 不因内层准备只读而取得分析角色或 Planning 权限。[Service](../../../../apps/service/src/permission-configuration.ts)按真实装配对只读子任务拒绝 Worktree 变更，原普通 Shell 的任务指引和三模式保持。
+
+[Shell 工厂](shell.ts)固定 Bun/Git/worker/config/空 hooks 的身份和摘要，把完整 profile 纳入命令摘要及 snapshot，批准后到 start 前重核。规范化命令只接受一个完整闭合 payload，不能附加赋值、重定向或命令；worker 不能自报 safeRead。启动环境由可信允许集合构造，禁止 preload、动态加载及 Shell 初始化注入；macOS launchd 再启动仍继承相同保护参数。Bun1.4.4 的配置参数按实测使用 `--config=<absolute>`，不是分开的两个参数。
+
+固定 worker 的实际文件/网络范围取原 Job 申请与已接纳证明的交集，network 恒为 none；不会因 Full 把默认 workspace_write 扩为外部写入。Auto 的固定 Worktree 调用走现有通用 authorization checker，不将 base64 命令误作普通 Shell 风险材料，也不授免审变更。资产缺失或变化局部拒绝，不阻断普通 Session。具体 [Worktree 边界](../tools/git-worktree/README.md)和[安全回归](../../test/isolated/tools/git-worktree/launch-security.test.ts)保留 legacy list-only、自定义 Shell 和平台限制。
+
+Worktree 的一次业务批准精确覆盖原 Tool 两个冻结内部步骤，正常手动创建／删除各一张卡，Auto 各一次 generic check。[决策封存](worktree-authorization.ts)仅绑定默认策略与受验证的父子／Planning 组合，额外自定义人工条件改写决策后不能沿旧封存复用；它不是秘密签名或授权本体。[SQLite 边界](../storage/sqlite/worktree-authorization.ts)核真实 builtin.shell 注册、原 owner 与 executable 记录、完整步骤 input/ref/token、范围和期限；mutation 从原 prepare 的完整连续零丢块输出核其原计划。最终派发重新核原 interaction/check/grant、控制上下文及冻结步骤，原 same_command 撤销、取消和 unknown 处理保持。没有把 Job 直接标为 allowed 或免审，也没有改变普通 Shell 的手动分层合同。
+
+复用不扩展到其他业务 Execution、兄弟 Agent 或独立 Shell。原已接纳效果的恢复仍只观察原 ref，合法原 owner resume 才可逐字续接；首次未获批准或独立人工要求继续按原路径处理。对应[真实 Runtime/SQLite 回归](../../test/isolated/execution/worktree-authorization.test.ts)与[Service 原生 Git 装配](../../../../apps/service/test/isolated/git-worktree-permissions.test.ts)分别验证封存、防伪、最终派发竞争和正常两卡／两次审核。
+
+macOS新worker首次装配固定经过系统所有权、祖先无链接/非group/world可写、Mach-O及摘要核验的实际Git。系统developer选择和固定CLT/Xcode路径只读发现，不能由模型、PATH或DEVELOPER_DIR改选；缺可信native Git局部不可用。接受后不会因失败切换程序。原始worker输出在各平台可信profile分支严格UTF-8解码，普通Shell路径保持；错误仍经原Job停止/unknown机制结算。
+
+Worktree create省略path时，可信Host默认根为homedir()下`.kite-code/worktrees`；默认根不改变filesystem申请或父子权限交集。原调用意图保省略状态，默认目标另行冻结；SQLite从准确原Run的root／child Shell资产配置核完整configurationIdentity、默认根、稳定目标和原步骤，继续在最终派发核原批准、完整prepared输出、取消与期限。临时路径策略见[共享helper](worktree-path-policy.ts)，Shell创建约束由模型指导表达，不新增AST兜底或任意脚本拦截承诺。

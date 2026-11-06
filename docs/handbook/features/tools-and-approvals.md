@@ -2,7 +2,7 @@
 
 工具可以读取、执行命令、修改文件或访问外部系统。可发现、可请求、获准执行和执行成功是不同状态。
 
-普通 CLI、TUI 和 Desktop 默认提供文件读写、图片读取、`ask_user`、`read_execution_evidence`、`web_fetch` 和主 Agent 的六个协作工具。具备合格 Shell 后端时基础模型目录共17项，否则13项；浏览器能力另按宿主配置提供。`read_file` 同时接受准确工作区外绝对路径，不加载外部项目指令；有效 Full 模式下，`write_file` 和 `edit_file` 也可直接修改普通外部绝对路径，其他模式的外部修改仍使用经过原权限检查的 Shell。专用 `read_user_file/write_user_file/edit_user_file` 已移除。显式禁用或移除仍不向后续 Run 提供工具，实际调用继续核当前权限、工作区信任和平台能力。
+普通 CLI、TUI 和 Desktop 默认提供文件读写、图片读取、`ask_user`、`read_execution_evidence`、`web_fetch` 和主 Agent 的六个协作工具。具备合格 Shell 后端时基础模型目录共18项，否则13项；浏览器能力另按宿主配置提供。`read_file` 同时接受准确工作区外绝对路径，不加载外部项目指令；有效 Full 模式下，`write_file` 和 `edit_file` 也可直接修改普通外部绝对路径，其他模式的外部修改仍使用经过原权限检查的 Shell。专用 `read_user_file/write_user_file/edit_user_file` 已移除。显式禁用或移除仍不向后续 Run 提供工具，实际调用继续核当前权限、工作区信任和平台能力。
 
 `view_images({paths:[...]})` 按文件只读权限一次读取1至10张本地 PNG、JPEG、WebP 或 GIF，也兼容单图 `view_images({path})`，两种参数不能同时传入，列表不能含重复路径。支持工作区路径、允许的外部绝对路径和当前有效的上传原件，不接受 URL。每张原图最多16MiB、3200万像素、单边16384；应用 EXIF，动画取首帧，最长边缩至2048且不放大，每张PNG结果最多8MiB、整批最多16MiB，实际缩放在结果中说明。按请求顺序处理和交图；任一图片失败、取消或超限，整批不向模型交付部分图片。失败不会授予换路径或绕过权限的许可。所选历史中该工具图片合计超过32MiB时明确失败，不静默删图。工具读取不提供编辑基线。
 
@@ -18,6 +18,20 @@ Windows Shell 在后台执行，不弹出额外终端窗口。首次工作区权
 
 派发前仍完整检查运行资产，校验以异步方式进行，其他会话可继续执行和停止任务。在校验中取消的命令不会启动；停止会等待已开始的读取结束并关闭文件。
 
+`git_worktree` 提供 `list/create/remove`。list 是来源 checkout 所属仓库的实时登记快照，不代表目录干净或可以删除。create 必须给出 key；省略 path 时默认在 `~/.kite-code/worktrees/` 下按来源、Session 和 key 稳定分配目录，也可显式给出不存在的原生绝对路径。创建目标不能位于系统临时目录或其真实路径别名内。默认从来源 HEAD 的固定提交创建 detached 工作树；`baseRef` 指定起点，`newBranch` 创建新的本地分支。创建不复制未提交/未跟踪/忽略内容，不 fetch、不安装依赖，保留当前 Session cwd。变更默认 `permissions:{filesystem:"workspace_write",network:"none"}`；仓库公共元数据和目标均须在授权范围内，外部目标须明确请求 full_access 并获准，不能自动扩大权限。
+
+模型指导要求所有工作树创建只通过 `git_worktree`，不通过 Shell 或脚本兜底；工具不可用时如实报告。此要求由提示词传达，普通 Shell 没有新增 Git 命令拦截器。list 和 prepare 不创建默认根；缺失父目录只在获批 mutation Job 中逐级创建，失败残留及未知效果继续保留。普通 Shell 不再自动遮挡 `~/.kite-code`、Profile、配置、认证或运行目录；原审批、文件／网络申请范围和非常危险系统级命令兜底保持。
+
+remove 只接受同仓库的 linked worktree，保护主树、当前来源、已登记 Workspace 根、未确认任务、locked/prunable、所有本地内容（含 ignored 和额外空目录）、索引特殊标志、子模块、链接与挂载边界。当前 HEAD 及完整 HEAD reflog 的 old/new 提交必须由本地分支或 tag 保留；仅远程引用或 detached HEAD 不够。扫描、历史或占用证据不完整时拒绝，删除保留分支和 tag，不 force、prune 或递归清理。
+
+默认可写 `general` 子 Agent 可以在父子工具与权限交集内使用这三个 action。子 Agent 的审批显示在主会话，仍归属原子会话和原调用；父 Agent 的委派文字不授予额外权限。一次创建或删除的业务批准覆盖该原工具唯一的 prepare／mutation 两个内部步骤；正常手动外部范围场景各批准一次，Auto 各审核一次。每个 Job 继续独立核当前权限、原批准、固定步骤和最终派发，已有独立人工要求仍会显示准确审批。原有无需审批的范围保持；创建批准不自动批准后续删除、其他命令或其他 Agent 的操作。只读 `explore` 子 Agent 和未批准计划下可以执行 list；`explore` 的 create/remove 是工具硬限制，Full 也不解除。
+
+子 Agent 创建真实成功并保存稳定回执后，通过现有持久消息通知主 Agent，包含准确路径、HEAD、分支及原操作出处。主 Agent 沿既有消息或明确 follow-up 将信息转给需要该路径的子 Agent；排队成功不代表对方已读。通知失败或结果未知只描述消息状态，不改写 Git 已成功事实，也不重跑创建。两个可写子 Agent 可以共享或分别使用工作树；通知不改变默认 cwd、编辑权限或现有并行能力，Files／Shell 继续明确使用真实路径。
+
+审批可能在业务模型可见消息之外由用户处理；成功回执或模型未见弹窗，不能证明没有审批。模型只在原始证据支持时报告审批来源或次数，否则不作该结论。内部步骤复用原批准也不等于整项操作免审批；实际批准与派发仍按原记录核验。
+
+变更 key 只用于观察同一次意图。改参数会冲突；旧成功回执保留原时间，即使路径重建也不再执行。结果未知时只观察原操作，不能换 key 重跑。中断可能留下目录、登记、分支或锁，工具如实报告且不自动清理。工作树共享 Git 对象与 refs，不是安全沙箱；删除前应停止使用目标。支持范围、具体错误和平台证据见 [Worktree owner](../../../packages/agent/src/tools/git-worktree/README.md)。
+
 ## 模型工具名称
 
 模型使用以下名称调用能力；实际提供的集合仍由宿主、当前 Run 配置与平台资格决定。公开名称和参数不扩大原授权范围。只有浏览器执行的新模型调用须填写最多10字的 `description`，用简短动作说明这次要做什么；加载技能和读取技能资料不接受这个入参。说明只表达目的，执行状态仍以实际结果为准。
@@ -27,6 +41,7 @@ Windows Shell 在后台执行，不弹出额外终端窗口。首次工作区权
 | 工作区文件 | `read_file` | `path` 以工作区根目录为基准；读取用 `start_line`、`max_lines` |
 | 本地图片 | `view_images` | `paths` 按序指定1至10张本地图片；也兼容单图 `path`，两者互斥 |
 | 文件修改 | `write_file`、`edit_file` | 保留 `base` 原完整文件基线；新建使用 `base:null`；精确编辑用 `old_text`、`new_text`、`expected_matches` |
+| Git 工作树 | `git_worktree` | `action:list/create/remove`；变更要求 `key/path`，创建可选 `baseRef/newBranch`，不迁移 cwd |
 | Shell | `shell_execute`、`shell_read`、`shell_wait`、`shell_stop` | 统一执行以 `background:true` 选择后台；运行时管理执行身份，读取、等待和停止使用返回的原 `shell_id` |
 | 问题与网页 | `ask_user`、`web_fetch` | 普通问题只收集信息；网页时限用 `timeout_ms` |
 | 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 新默认 `preset:general/explore`，省略与显式 `general` 等价；稳定 `agent_id`，消息只排队，显式追问才续轮 |
@@ -64,13 +79,13 @@ Windows Shell 在后台执行，不弹出额外终端窗口。首次工作区权
 
 工作区信任确认项目及已展示的历史额外读取范围，不等同于批准任意命令。开发期 Native Shell 在命令获准后默认具有宿主权限允许的广泛只读视图；文件工具和封存生产执行仍按各自的路径范围。运行环境和平台能力限制也不因用户批准而消失。
 
-当前统一链路的 macOS 默认 Shell 使用宿主工具链，允许命令派生子进程并保留宿主 HOME。请求批准默认允许当前 Workspace 与本次私有临时目录写入，并关闭网络；Shell 可为本次调用明确请求外部写入或联网，取得准确批准后分别开放。外部写入批准不附带网络，联网批准不附带外部写入。Auto 按实际模型决定使用同一请求范围，Full 允许宿主权限内的普通外部写入及联网。macOS 所有范围仍保护实际 Profile、协调目录和运行资产，不能通过移动父目录绕过保护；私有临时目录中的 native 程序不能直接执行或映射，Workspace 网络范围也拒绝 Unix socket 绑定与外连。缺可信资产、最终范围或可核实监督后端时调用失败。各平台原生资格独立核验，不由 macOS 结果推定。
+当前统一链路的 macOS 默认 Shell 使用宿主工具链，允许命令派生子进程并保留宿主 HOME。请求批准默认允许当前 Workspace 与本次私有临时目录写入，并关闭网络；Shell 可为本次调用明确请求外部写入或联网，取得准确批准后分别开放。外部写入批准不附带网络，联网批准不附带外部写入。Auto 按实际模型决定使用同一请求范围，Full 允许宿主权限内的普通外部写入及联网。普通默认 Shell 不再额外遮挡 Profile、配置、认证、协调目录或整运行目录，`~/.kite-code` 也不再是 Shell 保护根；SDK 自定义宿主显式提供的限制及 confined 模式仍按各自合同执行。私有临时目录中的 native 程序不能直接执行或映射，Workspace 网络范围也拒绝 Unix socket 绑定与外连。可信资产身份、最终范围或可核实监督后端缺失时调用失败。各平台原生资格独立核验，不由 macOS 结果推定。
 
 Windows x64 的 Bun Service 已接入无账户 Git Bash：默认写范围限制在 Workspace 和本次临时目录，读取沿宿主权限；离线范围提供常见工具的环境提示，不承诺系统级断网。审批后的完整文件范围可实际写入工作区外，网络范围单独批准；Full 绕过沙箱。业务放行或拒绝由统一权限层决定，Shell 不按默认范围再拒绝已获批的操作。当前已在本机验证命令、子进程、审批、取消与清理；完整安装及发布资格仍独立核验。Git Bash 来自本机 Git for Windows，rg 随客户端内置。
 
 复杂 Shell 不能靠命令名称保证只读或无网络。正式入口使用有限字面量语法解析和固定极危险拒绝，其他脚本由已授权系统范围限制，所有子进程继承该范围。越界失败可能已有其他部分效果，不自动扩权重跑；极危险的关键系统删除等操作在三种策略下都先拒绝。
 
-Linux 默认 Shell 与调用 Shell 的 Task 已接入对应范围的源码后端，实际 Linux 运行资格仍待上述验证。Skill Workflow 验证及补偿已移除；普通 Shell 的 Profile 与运行资产保护保持。源码接入不代替平台验收。
+Linux 默认 Shell 与调用 Shell 的 Task 已接入对应范围的源码后端，实际 Linux 运行资格仍待上述验证。Skill Workflow 验证及补偿已移除；普通默认 Shell 同样不附加 Profile 或整运行目录保护，原生启动所需的准确可执行文件只读挂载和资产身份核验保留。源码接入不代替平台验收。
 
 Shell 启动、读取、等待和停止使用同一个持久 Job。提交停止只表示取消已受理；确认停止必须核实本次命令的完整后代，包括脱离原进程组的后代。Shell 自然退出和所属 Service 退出也执行这项清理。输出丢失区间和未知结果如实保存，冷读取不会重新运行旧命令。
 

@@ -1,15 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type { PermissionDecision } from '../../extensions';
 import { canonicalJson } from '../../json';
 import { dispatchScopeLeaves } from '../../permissions/dispatch-scope';
 import { isShellRiskRequest } from '../../shell-risk-review';
 import type { AutoAuthorizationEvidence, DispatchInput, Store } from '../port';
 import { AgentError, type ExecutionAuthorizationObservation, type Json } from '../types';
-import { authorizationCheckFact } from './authorization-check';
+import { authorizationCheckFact, verifyAuthorizationCheckDispatch } from './authorization-check';
 import { assertCurrentChildPurpose } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { verifyInteractionDispatch } from './interaction-operations';
 import type { SqliteOperations } from './operations';
 import { verifyPermissionGrantDispatch } from './permission-grants';
+import { worktreeAuthorizationBoundary } from './worktree-authorization';
 
 type Row = Record<string, string | number | bigint | null>;
 const hash = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
@@ -103,7 +105,10 @@ export function autoAuthorizationContext(db: SqliteOperations, target: Row): str
 
 function currentTarget(
   db: SqliteOperations,
-  input: Parameters<Store['resolveAutoAuthorization']>[0],
+  input: Pick<
+    Parameters<Store['resolveAutoAuthorization']>[0],
+    'expectedStoreId' | 'owner' | 'targetExecutionId'
+  >,
 ) {
   db.identity(input.expectedStoreId);
   const target = db.row('SELECT * FROM execution WHERE id=?', input.targetExecutionId);
@@ -472,7 +477,23 @@ function evidence(
     throw new AgentError('authorization_policy_changed');
   const source = obj(payload.source);
   let riskReviewApproved = false;
-  if (source.kind === 'check') {
+  if (source.kind === 'worktree') {
+    const decision = obj(payload.worktreeDecision) as unknown as PermissionDecision;
+    const boundary = worktreeAuthorizationBoundary(db, target, decision);
+    if (
+      payload.reason !== 'parent_review' ||
+      source.targetExecutionId !== boundary.parent.id ||
+      source.recordKey !== boundary.recordKey ||
+      source.stepKind !== boundary.stepKind ||
+      source.stepDigest !== boundary.stepDigest ||
+      source.planDigest !== boundary.planDigest ||
+      payload.policyRevision !== decision.revision ||
+      !sameWorktreeJson(payload.snapshot, decision.snapshot) ||
+      !sameWorktreeJson(payload.controlReads, decision.controlReads)
+    )
+      throw new AgentError('authorization_policy_changed');
+    verifyWorktreeSource(db, boundary.parent, boundary.accepted);
+  } else if (source.kind === 'check') {
     const sourceTarget = db.row(
       'SELECT * FROM execution WHERE id=?',
       String(source.targetExecutionId),
@@ -634,6 +655,122 @@ function evidence(
     riskReviewApproved = true;
   } else throw new AgentError('authorization_policy_unverifiable');
   return { payload, target, ...(riskReviewApproved ? { riskReviewApproved: true as const } : {}) };
+}
+
+const sameWorktreeJson = (a: unknown, b: unknown) =>
+  canonicalJson((a ?? null) as Json) === canonicalJson((b ?? null) as Json);
+
+function verifyWorktreeSource(
+  db: SqliteOperations,
+  parent: Row,
+  accepted: Record<string, Json>,
+): void {
+  if (
+    accepted.worktreeAuthorizationContext !== autoAuthorizationContext(db, parent) ||
+    (!accepted.interactionId &&
+      !accepted.checkExecutionId &&
+      !accepted.policyEvidenceId &&
+      !accepted.grant) ||
+    accepted.reviewExecutionId
+  )
+    throw new AgentError('authorization_policy_changed');
+  const input = {
+    expectedStoreId: String(parent.origin_store_id),
+    executionId: String(parent.id),
+    authorization: accepted,
+  } as unknown as DispatchInput;
+  verifyInteractionDispatch(db, parent, input);
+  verifyPermissionGrantDispatch(db, input);
+  verifyAuthorizationCheckDispatch(db, input);
+}
+
+/** This business intent has already been approved; the frozen internal stages get no new authority. */
+export function resolveWorktreeAuthorization(
+  db: SqliteOperations,
+  input: Parameters<Store['resolveWorktreeAuthorization']>[0],
+): AutoAuthorizationEvidence | null {
+  return db.tx(() => {
+    const target = currentTarget(db, input);
+    let boundary: ReturnType<typeof worktreeAuthorizationBoundary>;
+    try {
+      boundary = worktreeAuthorizationBoundary(db, target, input.decision);
+      verifyWorktreeSource(db, boundary.parent, boundary.accepted);
+    } catch {
+      return null;
+    }
+    const payload: Json = {
+      targetExecutionId: String(target.id),
+      inputDigest: hash(JSON.parse(String(target.intent_json))),
+      sourceDigest: hash(JSON.parse(String(target.decision_source_json))),
+      ownerGeneration: String(target.owner_generation),
+      policyRevision: input.decision.revision,
+      operationKey: hash({ parent: String(boundary.parent.id), step: boundary.stepDigest }),
+      autoContext: autoAuthorizationContext(db, target),
+      worktreeDecision: input.decision as unknown as Json,
+      controlReads: (input.decision.controlReads as unknown as Json) ?? null,
+      snapshot: input.decision.snapshot as unknown as Json,
+      requestedSnapshot: input.decision.snapshot as unknown as Json,
+      reason: 'parent_review',
+      source: {
+        kind: 'worktree',
+        targetExecutionId: String(boundary.parent.id),
+        recordKey: boundary.recordKey,
+        stepKind: boundary.stepKind,
+        stepDigest: boundary.stepDigest,
+        planDigest: boundary.planDigest,
+      },
+    };
+    const key = `policy/${hash(payload)}`;
+    let command = db.row(
+      "SELECT * FROM command WHERE kind='authorization.policy' AND session_id=? AND operation_key=?",
+      target.session_id!,
+      key,
+    );
+    if (!command) {
+      const id = randomUUID(),
+        request: Json = {
+          kind: 'authorization.policy',
+          parentExecutionId: String(target.id),
+          input: payload,
+        };
+      const origin = db.row('SELECT * FROM command WHERE id=?', target.origin_command_id!)!;
+      db.allocateSessionSequence(String(target.session_id));
+      const seq = db.row('SELECT next_seq FROM session WHERE id=?', target.session_id!)!.next_seq!;
+      db.run(
+        "INSERT INTO command(id,session_id,seq,kind,subject_id,request_digest,request_json,status,receipt_json,origin_store_id,root_work_command_id,root_work_seq,extension_id,scope_kind,scope_id,operation_key) VALUES(?,?,?,'authorization.policy',?,?,?,'applied',?,?,?,?,?,'execution',?,?)",
+        id,
+        target.session_id!,
+        seq,
+        origin.subject_id!,
+        hash(request),
+        canonicalJson(request),
+        canonicalJson({ policyEvidenceId: id }),
+        target.origin_store_id!,
+        target.root_work_command_id!,
+        target.root_work_seq!,
+        '__authorization_policy__',
+        target.id!,
+        key,
+      );
+      db.event(String(target.session_id), String(target.id), 'authorization.policy', {
+        targetExecutionId: String(target.id),
+        policyEvidenceId: id,
+        reason: 'parent_review',
+        source: obj(payload).source!,
+        requestedScope:
+          (publicScope(input.decision.snapshot as unknown as Json) as unknown as Json) ?? null,
+        effectiveScope:
+          (publicScope(input.decision.snapshot as unknown as Json) as unknown as Json) ?? null,
+      });
+      command = db.row('SELECT * FROM command WHERE id=?', id)!;
+    }
+    evidence(db, String(command.id));
+    return {
+      policyEvidenceId: String(command.id),
+      reason: 'parent_review',
+      snapshot: input.decision.snapshot,
+    };
+  });
 }
 
 export function resolveAutoAuthorization(
@@ -1030,6 +1167,30 @@ export function authorizationPolicyObservation(
       sourceExecutionId: string | undefined,
       checkExecutionId: string | undefined;
     for (let depth = 0; depth < 5; depth++) {
+      if (source.kind === 'worktree') {
+        sourceExecutionId = String(source.targetExecutionId);
+        const parent = db.row(
+          'SELECT dispatch_authorization_json FROM execution WHERE id=?',
+          sourceExecutionId,
+        );
+        const accepted =
+          parent?.dispatch_authorization_json && parsed(parent.dispatch_authorization_json);
+        if (accepted && typeof accepted.checkExecutionId === 'string')
+          checkExecutionId = accepted.checkExecutionId;
+        else if (accepted && typeof accepted.policyEvidenceId === 'string') {
+          const inherited = db.row(
+            "SELECT request_json FROM command WHERE id=? AND kind='authorization.policy'",
+            accepted.policyEvidenceId,
+          );
+          if (inherited) {
+            const previous = obj(parsed(inherited.request_json).input),
+              origin = obj(previous.source);
+            if (origin.kind === 'check' && typeof origin.id === 'string')
+              checkExecutionId = origin.id;
+          }
+        }
+        break;
+      }
       if (source.kind === 'grant') {
         sourceExecutionId = String(source.targetExecutionId);
         break;

@@ -13,11 +13,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import type { ProfileBackup, ProfileRestoreResult } from '@kite-ai/agent/maintenance';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../fixtures/test-filesystem';
+import { persistentWorktreeDirectory } from '../../fixtures/worktree-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 function verifyLocalLinks(root: string) {
@@ -37,30 +38,150 @@ function verifyLocalLinks(root: string) {
   visit(root);
   return links;
 }
-async function execute(argv: string[], cwd: string, home: string) {
+async function execute(
+  argv: string[],
+  cwd: string,
+  home: string,
+  gracefulProbe?: { evidencePath: string; deadlines?: readonly [number, number, number] },
+) {
   const child = Bun.spawn(argv, {
     cwd,
-    env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8' },
+    env: {
+      PATH: '/usr/bin:/bin',
+      HOME: home,
+      LANG: 'C.UTF-8',
+      // The owned loopback fixture must not consult an unrelated OS SOCKS proxy.
+      HTTP_PROXY: 'http://127.0.0.1:9',
+      NO_PROXY: '*',
+    },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const timer = setTimeout(() => child.kill('SIGKILL'), 20000);
+  const termination = {
+    timedOut: false,
+    interruptSent: false,
+    termSent: false,
+    hardStopped: false,
+  };
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const deadlines = gracefulProbe?.deadlines ?? [20000, 40000, 60000];
+  const interrupt = () => {
+    if (child.exitCode !== null || termination.interruptSent) return;
+    termination.interruptSent = true;
+    child.kill('SIGINT');
+  };
+  timers.push(
+    setTimeout(() => {
+      if (child.exitCode !== null) return;
+      termination.timedOut = true;
+      if (!gracefulProbe) {
+        termination.hardStopped = true;
+        child.kill('SIGKILL');
+        return;
+      }
+      interrupt();
+    }, deadlines[0]),
+  );
+  if (gracefulProbe) {
+    timers.push(
+      setTimeout(() => {
+        if (child.exitCode !== null) return;
+        termination.termSent = true;
+        child.kill('SIGTERM');
+      }, deadlines[1]),
+    );
+    timers.push(
+      setTimeout(() => {
+        if (child.exitCode !== null) return;
+        termination.hardStopped = true;
+        child.kill('SIGKILL');
+      }, deadlines[2]),
+    );
+  }
   try {
     const [code, stdout, stderr] = await Promise.all([
       child.exited,
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ]);
-    return { code, stdout, stderr };
+    return { code, stdout, stderr, termination };
   } finally {
-    clearTimeout(timer);
     if (child.exitCode === null) {
-      child.kill('SIGKILL');
+      if (gracefulProbe) interrupt();
+      else child.kill('SIGKILL');
       await child.exited;
+    }
+    for (const timer of timers) clearTimeout(timer);
+    if (gracefulProbe) {
+      let facts: Record<string, unknown> = {};
+      if (existsSync(gracefulProbe.evidencePath)) {
+        const original = readFileSync(gracefulProbe.evidencePath, 'utf8');
+        try {
+          facts = JSON.parse(original);
+        } catch {
+          facts = { unreadableChildEvidence: original };
+        }
+      }
+      writeFileSync(
+        gracefulProbe.evidencePath,
+        `${JSON.stringify(
+          {
+            ...facts,
+            termination,
+            ...(termination.hardStopped
+              ? { outcome: 'outcome_unknown', cleanupConfirmed: false }
+              : {}),
+          },
+          null,
+          2,
+        )}\n`,
+      );
     }
   }
 }
+
+for (const responsive of [true, false])
+  test.skipIf(process.platform === 'win32')(
+    `owned probe timeout ${responsive ? 'allows signal cleanup and preserves original evidence' : 'retains unknown after a hard stop'}`,
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-probe-timeout-')));
+      const evidencePath = join(root, 'probe-result.json');
+      const script = join(root, 'probe.mjs');
+      const originalRef = { executionId: 'synthetic-owned-reference' };
+      writeFileSync(
+        script,
+        `
+import {writeFileSync} from 'node:fs';
+const path=${JSON.stringify(evidencePath)},originalRef=${JSON.stringify(originalRef)};
+const facts={stage:'running',originalRef,closeConfirmed:false};
+const save=()=>writeFileSync(path,JSON.stringify(facts));
+const timer=setInterval(()=>{},100);save();
+const stop=()=>{${responsive ? "facts.stage='cancelled';facts.closeConfirmed=true;save();clearInterval(timer);process.exitCode=1;" : ''}};
+process.on('SIGINT',stop);process.on('SIGTERM',stop);
+`,
+      );
+      try {
+        const result = await execute([process.execPath, '--no-env-file', script], root, root, {
+          evidencePath,
+          deadlines: [500, 800, 1100],
+        });
+        expect(result.code).not.toBe(0);
+        expect(result.termination.timedOut).toBe(true);
+        expect(result.termination.interruptSent).toBe(true);
+        expect(result.termination.hardStopped).toBe(!responsive);
+        const facts = JSON.parse(readFileSync(evidencePath, 'utf8'));
+        expect(facts.originalRef).toEqual(originalRef);
+        expect(facts.closeConfirmed).toBe(responsive);
+        if (responsive) expect(facts.stage).toBe('cancelled');
+        else expect(facts).toMatchObject({ outcome: 'outcome_unknown', cleanupConfirmed: false });
+      } finally {
+        // This fixture has no Git repository or business process.
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    5000,
+  );
 
 test('sealed terminal bundle remains independent after archive relocation and temporary installation', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-bundle-')));
@@ -70,6 +191,8 @@ test('sealed terminal bundle remains independent after archive relocation and te
   const legacy = join(home, '.kite-code', 'unified-agent', 'default', 'config.jsonc');
   privateDirectory(join(home, '.kite-code', 'unified-agent', 'default'));
   writeFileSync(legacy, 'LEGACY_PROFILE_MUST_NOT_BE_READ', { mode: 0o600 });
+  let completed = false;
+  let worktreeRoot: string | undefined;
   try {
     // Build/install are production APIs; runtime children below receive neither source imports nor NODE_PATH.
     const {
@@ -133,10 +256,167 @@ test('sealed terminal bundle remains independent after archive relocation and te
       'platform/process/shell-supervisor.js',
       'mcp/stdio-guardian.js',
       'tools/web-fetch/extractor-worker.js',
+      'tools/git-worktree/worker.js',
+      'tools/git-worktree/empty-bunfig.toml',
+      'tools/git-worktree/manifest.json',
+      'tools/git-worktree/empty-hooks',
     ])
       expect(existsSync(join(candidate, 'node_modules/@kite-ai/agent', asset))).toBe(true);
     const workspace = join(root, 'workspace');
     privateDirectory(workspace);
+    // Native Worktree execution is currently qualified only on macOS. Other
+    // platforms retain the archive/asset assertions above without simulated success.
+    if (process.platform === 'darwin') {
+      worktreeRoot = persistentWorktreeDirectory('kite-installed-worktree-');
+      const worktreeSource = join(worktreeRoot, 'source');
+      privateDirectory(worktreeSource);
+      const gitHome = join(worktreeRoot, 'git-home');
+      const emptyGit = join(worktreeRoot, 'empty-git');
+      privateDirectory(gitHome);
+      privateDirectory(emptyGit);
+      const emptyConfig = join(gitHome, 'empty-config');
+      writeFileSync(emptyConfig, '', { mode: 0o600 });
+      const fixtureGit = (args: string[]) =>
+        Bun.spawnSync(
+          [
+            '/usr/bin/git',
+            '-c',
+            `core.hooksPath=${emptyGit}`,
+            '-c',
+            'core.fsmonitor=false',
+            '-c',
+            'commit.gpgSign=false',
+            '-c',
+            'tag.gpgSign=false',
+            ...args,
+          ],
+          {
+            env: {
+              PATH: '/usr/bin:/bin',
+              HOME: gitHome,
+              XDG_CONFIG_HOME: gitHome,
+              LANG: 'C',
+              GIT_CONFIG_NOSYSTEM: '1',
+              GIT_CONFIG_SYSTEM: emptyConfig,
+              GIT_CONFIG_GLOBAL: emptyConfig,
+              GIT_TERMINAL_PROMPT: '0',
+              GIT_ASKPASS: '/usr/bin/false',
+              SSH_ASKPASS: '/usr/bin/false',
+            },
+            stdin: 'ignore',
+            stdout: 'pipe',
+            stderr: 'pipe',
+          },
+        );
+      const gitInit = fixtureGit(['init', `--template=${emptyGit}`, '-qb', 'main', worktreeSource]);
+      expect(gitInit.exitCode).toBe(0);
+      writeFileSync(join(worktreeSource, 'committed.txt'), 'packaged worktree probe\n');
+      for (const args of [
+        ['-C', worktreeSource, 'add', 'committed.txt'],
+        [
+          '-C',
+          worktreeSource,
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.invalid',
+          'commit',
+          '-qm',
+          'packaged',
+        ],
+      ])
+        expect(fixtureGit(args).exitCode).toBe(0);
+      const worktreeProbe = join(home, 'worktree-probe.mjs');
+      const probeEvidence = join(worktreeRoot, 'probe-result.json');
+      const fromCandidate = (name: string) => JSON.stringify(join(candidate, 'node_modules', name));
+      writeFileSync(
+        worktreeProbe,
+        `
+import assert from 'node:assert/strict';
+import {existsSync,mkdirSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createRuntime} from ${fromCandidate('@kite-ai/agent/index.js')};
+import {openSqliteStore} from ${fromCandidate('@kite-ai/agent/sqlite.js')};
+import {createShellConfiguration} from ${fromCandidate('@kite-ai/agent/permissions/shell.js')};
+import {createPermissionPolicy,builtinCapability} from ${fromCandidate('@kite-ai/agent/permissions/index.js')};
+import {createFixedModel} from ${fromCandidate('@kite-ai/ai/index.js')};
+const base=${JSON.stringify(join(worktreeRoot, 'probe'))},workspace=${JSON.stringify(worktreeSource)};
+mkdirSync(base,{mode:0o700});mkdirSync(join(base,'control'),{mode:0o700});mkdirSync(join(base,'data'),{mode:0o700});
+const evidencePath=${JSON.stringify(probeEvidence)};
+const facts={stage:'starting',source:workspace,target:join(base,'created'),closeConfirmed:false,cancellationRequested:null,completedActions:[],executions:[],records:[]};
+const save=()=>{writeFileSync(evidencePath+'.pending',JSON.stringify(facts,null,2)+'\\n',{mode:0o600});renameSync(evidencePath+'.pending',evidencePath);};
+let store,agent,closing;
+async function checkpoint(stage){facts.stage=stage;if(store){facts.executions=(await store.listExecutions('s')).filter(e=>e.kind==='tool'||e.kind==='job');facts.records=await store.listExtensionRecords({extensionId:'builtin.shell',sessionId:'s',limit:20});}save();}
+function close(){return closing??=(async()=>{try{if(agent){const shutdown=agent.tryBeginShutdown('cancel',{beforeResourceClose:()=>checkpoint('effects_settled')});assert.equal(shutdown.accepted,true);await shutdown.completion;}else if(store)await store.close();facts.closeConfirmed=true;save();}catch(error){facts.outcome='outcome_unknown';facts.closeError=error instanceof Error?error.message:String(error);try{await checkpoint('close_unconfirmed');}catch{save();}throw error;}})();}
+const interrupt=signal=>{facts.cancellationRequested??=signal;facts.outcome='outcome_unknown';save();process.exitCode=1;if(agent)void close().catch(()=>{});};
+process.on('SIGINT',()=>interrupt('SIGINT'));process.on('SIGTERM',()=>interrupt('SIGTERM'));save();
+try{
+const configuration=await createShellConfiguration({workspaceRoot:workspace,toolIds:['git.worktree'],worktreeHost:{async readRegisteredWorkspaceRoots(){const {storeId}=await store.getMetadata();const page=await store.listWorkspaceDirectory({expectedStoreId:storeId,limit:200});assert.equal(page.nextAfterSeq,null);const roots=[];for(const item of page.items){const current=await store.getWorkspace(item.workspace.id);assert.equal(current.rootUri,item.workspace.rootUri);roots.push(realpathSync(fileURLToPath(current.rootUri)));}return {originStoreId:page.storeId,complete:true,roots,snapshotCursor:page.snapshotCursor};}},options:{platform:process.platform,configurationId:'installed-worktree',env:{PATH:'/usr/bin:/bin',HOME:${JSON.stringify(home)}},bunExecutable:process.execPath,shellExecutable:'/bin/sh',supervisorPath:${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/platform/process/shell-supervisor.js'))},host:{controlBase:join(base,'control'),protectedRoots:[join(base,'control'),join(base,'data')],readonlyAssets:[${JSON.stringify(candidate)}],runtimeReadOnlyRoots:[${JSON.stringify(dirname(runtime))}]}}});
+assert.equal(configuration.snapshot.available,true);
+store=await openSqliteStore({dataRoot:join(base,'data'),profile:'probe'});
+const target=join(base,'created'),permissionsInput={filesystem:'full_access',network:'none'};
+const intents=[{action:'list'},{action:'create',key:'installed-create',path:target,newBranch:'installed-branch',permissions:permissionsInput},{action:'remove',key:'installed-remove',path:target,permissions:permissionsInput}];
+const model=createFixedModel(intents.flatMap(input=>[[{type:'tool_call',id:input.action,name:'git_worktree',arguments:JSON.stringify(input)},{type:'finish',reason:'tool_calls',usage:{inputTokens:1,outputTokens:1}}],[{type:'finish',reason:'stop',usage:{inputTokens:1,outputTokens:1}}]]));
+const permissions=createPermissionPolicy({readPolicy:()=>({mode:'full',workspaceTrust:true,revision:'installed-probe',allowed:[{kind:'model',definitionId:'fixed',definitionVersion:'1'},{kind:'tool',definitionId:'git.worktree',definitionVersion:'1'},{kind:'job',definitionId:'shell.command',definitionVersion:'1'}]}),describeCapability:async(request)=>({kind:request.kind,definitionId:request.definitionId,definitionVersion:request.definitionVersion,revision:'installed-probe',hardAllowed:true,...builtinCapability('builtin.shell',request.definitionId,request.kind,'builtin.planning',request.definitionVersion),...await configuration.describeRequest(request)})});
+agent=createRuntime({store,model,modelId:'fixed',permissions,extensions:configuration.extensions,toolIds:['git.worktree']});
+assert.equal(facts.cancellationRequested,null,'cancelled before admission');
+ const {storeId}=await store.getMetadata();const scope={expectedStoreId:storeId,sessionId:'s',subjectId:'fixture'};
+ await agent.createWorkspace({expectedStoreId:storeId,id:'w',rootUri:pathToFileURL(workspace).href,name:'packaged'});
+ await agent.createSession({...scope,workspaceId:'w',commandId:'session',title:'probe'});
+ for(const input of intents){
+  assert.equal(facts.cancellationRequested,null,'cancelled before the next action');
+  await checkpoint('before_'+input.action);
+  await agent.submitCommand({...scope,commandId:input.action,request:{kind:'run.start',content:'Observe installed '+input.action}});
+  await agent.waitForCommand(input.action,{timeoutMs:10000});
+  const executions=await store.listExecutions('s');const tool=executions.filter(e=>e.definitionId==='git.worktree').at(-1);
+  assert.equal(tool?.result?.outcome,'succeeded',JSON.stringify(executions.filter(e=>e.kind!=='model').map(e=>({id:e.id,kind:e.kind,definitionId:e.definitionId,status:e.status,result:e.result}))));
+  assert.equal(tool.result.details.cwdChanged,false);
+  if(input.action==='list')assert.equal(tool.result.details.worktrees[0].path,workspace);
+  if(input.action==='create')assert.equal(readFileSync(join(target,'committed.txt'),'utf8'),'packaged worktree probe\\n');
+  facts.completedActions.push(input.action);await checkpoint('after_'+input.action);
+ }
+ assert.equal(existsSync(target),false);
+ assert.equal((await store.listExecutions('s')).filter(e=>e.definitionId==='shell.command').length,5);
+ const git=configuration.snapshot.assets.gitWorktree.configuration.git.path;
+ assert.equal(Bun.spawnSync([git,'show-ref','--verify','--quiet','refs/heads/installed-branch'],{cwd:workspace,env:${JSON.stringify({ PATH: '/usr/bin:/bin', HOME: gitHome, XDG_CONFIG_HOME: gitHome, LANG: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_SYSTEM: emptyConfig, GIT_CONFIG_GLOBAL: emptyConfig, GIT_TERMINAL_PROMPT: '0' })}}).exitCode,0);
+ facts.outcome='succeeded';await checkpoint('actions_completed');
+ console.log('INSTALLED_WORKTREE_JOB_OK');
+}catch(error){facts.failure=error instanceof Error?error.message:String(error);facts.outcome='outcome_unknown';save();throw error;}finally{await close();}
+`,
+      );
+      const worktreeResult = await execute(
+        [
+          runtime,
+          '--no-env-file',
+          `--config=${join(candidate, 'node_modules/@kite-ai/agent/tools/git-worktree/empty-bunfig.toml')}`,
+          worktreeProbe,
+        ],
+        workspace,
+        home,
+        { evidencePath: probeEvidence },
+      );
+      writeFileSync(join(worktreeRoot, 'probe-stdout.log'), worktreeResult.stdout);
+      writeFileSync(join(worktreeRoot, 'probe-stderr.log'), worktreeResult.stderr);
+      expect(worktreeResult.code, worktreeResult.stderr).toBe(0);
+      expect(worktreeResult.termination).toEqual({
+        timedOut: false,
+        interruptSent: false,
+        termSent: false,
+        hardStopped: false,
+      });
+      expect(JSON.parse(readFileSync(probeEvidence, 'utf8'))).toMatchObject({
+        outcome: 'succeeded',
+        closeConfirmed: true,
+        cancellationRequested: null,
+        completedActions: ['list', 'create', 'remove'],
+      });
+      expect(worktreeResult.stdout).toContain('INSTALLED_WORKTREE_JOB_OK');
+    } else {
+      console.log(
+        `INSTALLED_WORKTREE_NATIVE_PROBE_SKIPPED ${process.platform}: macOS qualification only`,
+      );
+    }
     const dataRoot = join(home, '.kite-code', 'unified-agent');
     const setup = join(home, 'setup.mjs');
     writeFileSync(
@@ -582,9 +862,11 @@ finally:
         await execute([cli, 'server', 'stop', '--server', socket], workspace, home);
       provider.stop(true);
     }
+    completed = true;
   } finally {
-    if (process.env.KITE_TERMINAL_TEST_KEEP_BUNDLE === '1')
+    if (!completed || process.env.KITE_TERMINAL_TEST_KEEP_BUNDLE === '1') {
       console.log(`OWNED_TERMINAL_TEST_ROOT ${root}`);
-    else rmSync(root, { recursive: true, force: true });
+      if (worktreeRoot) console.log(`OWNED_WORKTREE_TEST_ROOT ${worktreeRoot}`);
+    } else rmSync(root, { recursive: true, force: true });
   }
-}, 120000);
+}, 180000);

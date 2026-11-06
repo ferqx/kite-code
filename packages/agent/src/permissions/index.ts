@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { AuthorizationRequest, PermissionDecision, Permissions } from '../extensions';
 import type { Json } from '../storage';
 import { isBuiltinBrowserApprovalExempt } from './capabilities';
+import { sealWorktreeDecision } from './worktree-authorization';
 
 export { shellRiskReviewContractDigest } from '../shell-risk-review';
 
@@ -32,6 +33,8 @@ export interface PermissionPolicySnapshot {
 }
 /** Supplied by actual trusted host registration, never by a Tool description or remote text. */
 export interface CapabilityDescription extends CapabilityIdentity {
+  /** Trusted fixed worktree implementation, after canonical command and asset verification. */
+  readonly worktreeAuthorization?: { readonly configurationIdentity: string };
   /** Trusted default-host review contract; absent preserves custom and historical policies. */
   readonly autoReview?: 'shell_risk' | 'none';
   /** Trusted exact execution semantics, never a remote/Model supplied grant key. */
@@ -135,6 +138,13 @@ function validDescription(description: CapabilityDescription) {
     text(description.revision) &&
     typeof description.hardAllowed === 'boolean' &&
     typeof description.safeRead === 'boolean' &&
+    (description.worktreeAuthorization === undefined ||
+      (description.worktreeAuthorization !== null &&
+        Object.keys(description.worktreeAuthorization).join() === 'configurationIdentity' &&
+        /^[a-f0-9]{64}$/.test(description.worktreeAuthorization.configurationIdentity) &&
+        description.definitionVersion === '1' &&
+        ((description.kind === 'tool' && description.definitionId === 'git.worktree') ||
+          (description.kind === 'job' && description.definitionId === 'shell.command')))) &&
     (description.autoReview === undefined ||
       description.autoReview === 'shell_risk' ||
       description.autoReview === 'none') &&
@@ -198,6 +208,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.internalRecordOnly ?? null,
           ...(description.approvalExempt ? [description.approvalExempt] : []),
           ...(description.autoReview ? [description.autoReview] : []),
+          ...(description.worktreeAuthorization ? [description.worktreeAuthorization] : []),
         ],
       }),
     )
@@ -206,7 +217,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
 
 /** Pure classification over freshly read host facts; import/factory creation performs no I/O. */
 export function createPermissionPolicy(options: PermissionPolicyOptions): Permissions {
-  return {
+  const policy: Permissions = {
     toolDispatchOrder: 'model',
     async authorize(request): Promise<PermissionDecision> {
       request.signal.throwIfAborted();
@@ -239,6 +250,19 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
             mode: policy.mode,
             workspaceTrust: policy.workspaceTrust,
             policyRevision: policy.revision,
+            ...(description?.worktreeAuthorization
+              ? {
+                  worktreeAllowedDigest: createHash('sha256')
+                    .update(
+                      JSON.stringify(
+                        policy.allowed
+                          .map((entry) => [entry.kind, entry.definitionId, entry.definitionVersion])
+                          .sort(),
+                      ),
+                    )
+                    .digest('hex'),
+                }
+              : {}),
             capability: description
               ? {
                   kind: description.kind,
@@ -248,6 +272,9 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
                   effects: [...description.effects],
                   hardAllowed: description.hardAllowed,
                   safeRead: description.safeRead,
+                  ...(description.worktreeAuthorization
+                    ? { worktreeAuthorization: description.worktreeAuthorization }
+                    : {}),
                   ...(description.autoReview ? { autoReview: description.autoReview } : {}),
                   ...(description.internalRecordOnly ? { internalRecordOnly: true } : {}),
                   ...(description.approvalExempt
@@ -361,6 +388,12 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
               }),
         },
       };
+    },
+  };
+  return {
+    toolDispatchOrder: policy.toolDispatchOrder,
+    async authorize(request) {
+      return sealWorktreeDecision(await policy.authorize(request));
     },
   };
 }

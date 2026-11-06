@@ -60,6 +60,8 @@ Execution 的可选 `authorization.check` 由[权限检查 owner](sqlite/authori
 
 [原授权回归](../../test/isolated/execution/authorization-check.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
+准确 Worktree 内部 Job 复用原业务批准时，沿现有 `authorization.policy` 返回 `parent_review`、原 Tool 的 `sourceExecutionId`，Auto 还保留原 `checkExecutionId`；人工批准不伪造模型检查 ID。[专用边界](sqlite/worktree-authorization.ts)从实际原行、冻结步骤和完整 prepare 输出核资格，并在最终派发事务复核，公开观察字段本身不授予权限。普通 Shell 及旧记录解释不变，完整规则归[权限 owner](../permissions/README.md#git-worktree-的准确权限)。
+
 ## Store 关闭未确认时的锁归属
 
 [公共 SQLite Store](../sqlite.ts)的 `close()` 同步封住新请求并缓存原完成 Promise。Worker 排空原请求、释放语句且 `db.close(true)` 返回成功 ACK后，macOS 还须由[原 Worker owner](../platform/process/owned-worker.ts)确认原 Mach thread right 已变死名且准确释放，才能归还原 Session owner、恢复 lease 和 Profile 使用锁。打开失败的成功构造 Worker 也先完成这一收尾再归还 Profile。关闭错误、Worker 不可用或关闭请求未被接纳时，仍请求 terminate 并拒绝 pending，但保留原锁与 ownership；原业务错误和收尾错误同时存在时保两者及原 cause。这类未确认关闭保持同一失败 Promise，不补造确认，未确认锁由原宿主进程实际退出归还。

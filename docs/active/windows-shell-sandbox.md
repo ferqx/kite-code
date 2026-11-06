@@ -294,3 +294,9 @@ baseline 不再因为命令名进入全量人工审批，已知 external/sensiti
 review。命中 [Agent Note 0134](../../.agents/notes/implemented/simplification/2026-08-24-closed-read-only-git-shell-grammar.md) read-only classifier 的命令仍可使用 hardened environment，并固定关闭 external
 config、prompt、pager、optional locks 与 fsmonitor；该分类不跳过 mode/policy review。raw Git token 不被
 硬拒绝；删除 Git 专用资格不构成 Windows 平台生产资格通过的证据。
+
+## Git Worktree worker 的新增范围
+
+`builtin.shell/git.worktree@1` 沿既有 `shell.command@1` 运行固定 Bun worker，不增加 Job/Runtime 或平台协议版本。首次解释器前应用环境允许集合与 `--no-env-file --config=<absolute>`，封存 Bun/Git/worker/config/空 hooks 及摘要，start 前重核；仅准确固定 list 为只读。Full 不扩大该 worker 的原申请，network 固定 none。Windows 仍沿原 Git Bash/native Job监管和读取/离线实际边界，不据网络参数声称新增系统级断网。
+
+2026-11-06，本次新 worker 已在 macOS arm64／Bun1.4.4／Git2.54.0 验证真实三个 action、launchd 启动保护和发行资产搬迁后的实际Job；Linux和Windows本次未有对应实机环境，原平台的普通Shell证据不授予该新worker的监管、Windows reparse或完整发行资格。具体算法和不支持配置由 [Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)维护，Windows删除仍遵循[只读清理门禁](../development/worktree-safety.md)。

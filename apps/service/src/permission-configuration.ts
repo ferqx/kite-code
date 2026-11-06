@@ -368,6 +368,8 @@ export function createDefaultPermissionConfiguration(options: {
     taskDefaultRole?: string;
     taskTrustedRoles?: readonly ChildRole[];
     taskExtension?: Extension;
+    /** Narrow action guard for the mixed read/write Git Worktree tool. */
+    readOnlyTask?: boolean;
   }): Pick<RunConfiguration, 'permissions' | 'initializeRequirements'> {
     const {
       command,
@@ -649,6 +651,15 @@ export function createDefaultPermissionConfiguration(options: {
     const permissions: RuntimeOptions['permissions'] = {
       toolDispatchOrder: planningPermissions.toolDispatchOrder,
       async authorize(request) {
+        if (input.readOnlyTask) {
+          const worktree = shell.worktreeRequest(request);
+          if (worktree && worktree.action !== 'list')
+            return {
+              allowed: false,
+              revision: 'builtin.shell:git.worktree:read-only-task:1',
+              reason: 'worktree_read_only_task',
+            };
+        }
         if (
           'assertExecutionScope' in selectedSources &&
           typeof selectedSources.assertExecutionScope === 'function'
