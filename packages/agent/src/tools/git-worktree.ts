@@ -15,6 +15,7 @@ import {
   inspectTemporaryWorktreeTarget,
 } from '../permissions/worktree-path-policy';
 import { AgentError } from '../storage/types';
+import { failureGuidance } from './git-worktree/errors';
 import { notifyWorktreeCreated } from './git-worktree/notification';
 import {
   buildWorkerCommand,
@@ -164,11 +165,30 @@ function makeResult(
       : outcome === 'failed'
         ? ' Inspect the stated cause and preserved operation evidence before submitting a new intent.'
         : '';
-  return { outcome, content: canonicalJson(full) + instruction, details: full };
+  const guidance =
+    outcome === 'failed' || outcome === 'outcome_unknown'
+      ? failureGuidance(details.failure, details.mutation)
+      : '';
+  const permission =
+    outcome === 'failed' && details.code === 'permission_denied'
+      ? ' This request was denied under the existing authorization or capability policy. Do not infer the user refused it or automatically expand permissions.'
+      : '';
+  return {
+    outcome,
+    content: canonicalJson(full) + instruction + guidance + permission,
+    details: full,
+  };
 }
 function replay(result: ToolResult): ToolResult {
-  const details = { ...(jsonObject(result.details) ? result.details : {}), replayed: true };
-  return { ...structuredClone(result), details, content: canonicalJson(details) };
+  const details: Record<string, Json> = {
+    ...(jsonObject(result.details) ? result.details : {}),
+    replayed: true,
+  };
+  return {
+    ...structuredClone(result),
+    details,
+    content: canonicalJson(details) + failureGuidance(details.failure, details.mutation),
+  };
 }
 function recordValue(
   record: ExtensionRecord,

@@ -10,6 +10,16 @@ import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '../../../apps/service/src';
 import { startDevelopmentWeb } from '../../../apps/service/src/development-web';
 import { semanticDigest } from '../../../packages/agent/src/json';
+import type { Json } from '../../../packages/agent/src/storage/types';
+import { gitWorktreeRecordDefinition } from '../../../packages/agent/src/tools/git-worktree';
+import {
+  buildWorkerCommand,
+  digest,
+  parseGitWorktreeInput,
+  resolveDefaultWorktreeTarget,
+  type WorktreePlan,
+  type WorktreeRequest,
+} from '../../../packages/agent/src/tools/git-worktree/protocol';
 import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
 async function errorCode(promise: Promise<unknown>) {
@@ -477,6 +487,710 @@ test('cold readonly directory preserves original allocation upper and Store/subj
     expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
   } finally {
     await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('worktree creation history reaches HTTP directories, survives removal and cold reads, and excludes unconfirmed, unrelated and Fork records', async () => {
+  // This fixture seeds persisted receipts only; it does not create or remove Git worktrees.
+  const root = temporaryDirectory('kite-directory-worktree-');
+  const options = { dataRoot: root, profile: 'test' };
+  const store = await openSqliteStore(options);
+  let models = 0;
+  const runtime = createRuntime({
+    store,
+    model: {
+      async *stream() {
+        models++;
+        yield { type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+    },
+    extensions: [
+      {
+        id: 'builtin.shell',
+        version: '1',
+        apiMajor: 1,
+        records: [gitWorktreeRecordDefinition],
+      },
+    ],
+    permissions: {
+      async authorize() {
+        return { allowed: false, revision: 'deny' };
+      },
+    },
+  });
+  let db: Database | undefined;
+  let service: Awaited<ReturnType<typeof startService>> | undefined;
+  let client: ReturnType<typeof createClient> | undefined;
+  try {
+    const storeId = (await store.getMetadata()).storeId;
+    await store.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      name: 'w',
+      rootUri: pathToFileURL(root).href,
+    });
+    const names = [
+      'created',
+      'none',
+      'unknown',
+      'failed',
+      'unfinished',
+      'list',
+      'remove',
+      'wrong-extension',
+      'wrong-key',
+      'wrong-type',
+      'wrong-version',
+      'fork-copy',
+      'wrong-owner',
+      'malformed',
+      'invalid-schema',
+      'parent',
+      'child',
+    ];
+    for (const sessionId of names)
+      await store.createSession({
+        expectedStoreId: storeId,
+        subjectId: 'owner',
+        commandId: `create-${sessionId}`,
+        sessionId,
+        workspaceId: 'w',
+        title: sessionId,
+      });
+    db = new Database(join(root, 'test', 'core.db'));
+    db.run("UPDATE session SET parent_id='parent',root_id='parent' WHERE id='child'");
+    const receipt = (action = 'create') => ({
+      schemaVersion: 1,
+      ownerExecutionId: 'original-tool',
+      requestDigest: 'request',
+      request: { action, key: 'original' },
+      configurationIdentity: 'configuration',
+      acceptedAt: '2026-11-06T00:00:00.000Z',
+      deadlineAt: '2026-11-06T00:02:00.000Z',
+      phase: 'completed',
+      steps: {},
+      stableResult: {
+        outcome: 'succeeded',
+        content: 'original receipt',
+        details: {
+          action,
+          key: 'original',
+          mutation: 'completed',
+          cwdChanged: false,
+          operation: { ownerExecutionId: 'original-tool' },
+        },
+      },
+    });
+    const insert = (
+      sessionId: string,
+      value: unknown,
+      overrides: {
+        extension?: string;
+        key?: string;
+        type?: string;
+        version?: number;
+        fork?: string;
+      } = {},
+    ) =>
+      db!.run(
+        "INSERT INTO extension_record(extension_id,scope_kind,scope_id,key,revision,content_type,content_version,origin_store_id,json,fork_provenance_json) VALUES(?,'session',?,?,1,?,?,?,?,?)",
+        [
+          overrides.extension ?? 'builtin.shell',
+          sessionId,
+          overrides.key ?? 'git-worktree/original',
+          overrides.type ?? gitWorktreeRecordDefinition.contentType,
+          overrides.version ?? 1,
+          storeId,
+          typeof value === 'string' ? value : JSON.stringify(value),
+          overrides.fork ?? null,
+        ],
+      );
+    for (const sessionId of ['created', 'child']) insert(sessionId, receipt());
+    for (const outcome of ['outcome_unknown', 'failed']) {
+      const value = receipt();
+      value.stableResult.outcome = outcome;
+      insert(outcome === 'failed' ? 'failed' : 'unknown', value);
+    }
+    const unfinished = receipt();
+    unfinished.phase = 'unresolved';
+    insert('unfinished', unfinished);
+    insert('list', receipt('list'));
+    insert('remove', receipt('remove'));
+    insert('wrong-extension', receipt(), { extension: 'fixture' });
+    insert('wrong-key', receipt(), { key: 'ordinary-shell/original' });
+    insert('wrong-type', receipt(), { type: 'fixture.result' });
+    insert('wrong-version', receipt(), { version: 2 });
+    insert('fork-copy', receipt(), { fork: '{}' });
+    const wrongOwner = receipt();
+    wrongOwner.stableResult.details.operation.ownerExecutionId = 'another-tool';
+    insert('wrong-owner', wrongOwner);
+    insert('malformed', '{');
+    insert('invalid-schema', { ...receipt(), schemaVersion: true });
+    const read = () => store.listSessionDirectory({ expectedStoreId: storeId, subjectId: 'owner' });
+    const beforeRead = await store.getMetadata();
+    expect(
+      (await read()).items
+        .filter((item) => item.activity.hasCreatedWorktree)
+        .map((item) => item.session.id),
+    ).toEqual(['created']);
+    expect(await store.getMetadata()).toEqual(beforeRead);
+    // A later remove receipt does not erase the original create history.
+    insert('created', receipt('remove'), { key: 'git-worktree/remove' });
+    await runtime.forkSession({
+      expectedStoreId: storeId,
+      subjectId: 'owner',
+      commandId: 'fork-created',
+      sourceSessionId: 'created',
+      expectedContextSelectionId: (await store.getSession('created'))!.contextSelectionId,
+      newSessionId: 'forked',
+      title: 'forked',
+    });
+    expect(
+      await store.listExtensionRecords({ extensionId: 'builtin.shell', sessionId: 'forked' }),
+    ).toEqual([]);
+    const profile = { dataRoot: root, name: 'test', accessKey: 'worktree-directory' };
+    service = await startService({
+      runtime,
+      profile,
+      buildId: 'worktree-directory',
+      subjectId: 'owner',
+    });
+    client = createClient({
+      endpoint: service.endpoint,
+      token: service.bootstrap.token,
+      bootstrap: service.bootstrap,
+      expected: { profile, apiMajor: 1, requiredCapabilities: ['sessions'] },
+    });
+    await client.connect();
+    const metadata = await store.getMetadata();
+    const publicItems = await client.listAllSessionDirectory();
+    expect(
+      publicItems
+        .filter((item) => item.activity?.hasCreatedWorktree)
+        .map((item) => item.session.id),
+    ).toEqual(['created']);
+    expect(
+      publicItems.find((item) => item.session.id === 'created')!.activity!.updatedAt,
+    ).toBeNull();
+    expect(publicItems.some((item) => item.session.id === 'child')).toBe(false);
+    expect(await store.getMetadata()).toEqual(metadata);
+    const cold = await openSqliteStore({ ...options, mode: 'readonly' });
+    try {
+      const coldItems = (
+        await cold.listSessionDirectory({ expectedStoreId: storeId, subjectId: 'owner' })
+      ).items;
+      expect(
+        coldItems.filter((item) => item.activity.hasCreatedWorktree).map((item) => item.session.id),
+      ).toEqual(['created']);
+      expect(await cold.getMetadata()).toEqual(metadata);
+    } finally {
+      await cold.close();
+    }
+    expect(models).toBe(0);
+  } finally {
+    client?.disposeNetwork();
+    await service?.close();
+    db?.close();
+    await runtime.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('worktree navigation provenance requires a unique visible original create and survives cold HTTP reads without granting execution', async () => {
+  // Seed persisted Tool/Job receipts, not a Git repository or a new filesystem mutation.
+  const root = temporaryDirectory('kite-directory-worktree-source-');
+  const options = { dataRoot: root, profile: 'test' };
+  const store = await openSqliteStore(options);
+  const storeId = (await store.getMetadata()).storeId;
+  const db = new Database(join(root, 'test', 'core.db'));
+  let models = 0;
+  const runtime = createRuntime({
+    store,
+    model: {
+      async *stream() {
+        models++;
+        yield { type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+    },
+    permissions: {
+      async authorize() {
+        return { allowed: false, revision: 'deny' };
+      },
+    },
+  });
+  let service: Awaited<ReturnType<typeof startService>> | undefined;
+  let client: ReturnType<typeof createClient> | undefined;
+  try {
+    const sourcePath = join(root, 'source with spaces');
+    const targetPath = join(root, 'linked with spaces');
+    for (const [id, path] of [
+      ['source-w', sourcePath],
+      ['target-w', targetPath],
+      ['nested-w', join(targetPath, 'nested')],
+    ])
+      await store.createWorkspace({
+        expectedStoreId: storeId,
+        id: id!,
+        name: id!,
+        rootUri: pathToFileURL(path!).href,
+      });
+    for (const [id, workspaceId, subjectId] of [
+      ['source', 'source-w', 'owner'],
+      ['another-source', 'source-w', 'owner'],
+      ['foreign-source', 'source-w', 'other'],
+      ['target', 'target-w', 'owner'],
+      ['target-two', 'target-w', 'owner'],
+      ['nested', 'nested-w', 'owner'],
+    ])
+      await store.createSession({
+        expectedStoreId: storeId,
+        commandId: `create-${id}`,
+        sessionId: id!,
+        workspaceId: workspaceId!,
+        title: id!,
+        subjectId: subjectId!,
+      });
+    const seed = async (sessionId: string, key: string, implicit = false) => {
+      const defaultRoot = join(root, 'default-worktrees');
+      const createdPath = implicit
+        ? resolveDefaultWorktreeTarget({ defaultRoot, sourceCwd: sourcePath, sessionId, key })
+        : targetPath;
+      const commandId = `work-${key}`,
+        toolId = `tool-${key}`;
+      await store.acceptCommand({
+        expectedStoreId: storeId,
+        commandId,
+        sessionId,
+        subjectId: sessionId === 'foreign-source' ? 'other' : 'owner',
+        request: { kind: 'run.start', content: 'saved worktree create' },
+      });
+      const owner = (await store.acquireSessionOwner(sessionId, 'directory-fixture'))!;
+      const run = await store.startRun({
+        expectedStoreId: storeId,
+        owner,
+        commandId,
+        configuration: {
+          tools: [{ id: 'git.worktree', version: '1', extensionId: 'builtin.shell' }],
+          extensions: [{ id: 'builtin.shell', version: '1' }],
+        },
+      });
+      const request = parseGitWorktreeInput({
+        action: 'create',
+        key,
+        // Real Windows calls may preserve forward slashes while the worker freezes resolve(path).
+        ...(!implicit
+          ? { path: process.platform === 'win32' ? createdPath.replaceAll('\\', '/') : createdPath }
+          : {}),
+      })!;
+      const requestDigest = digest({ input: request, sourceCwd: sourcePath });
+      const recordKey = `git-worktree/${key}`;
+      const token = digest({ sessionId, executionId: toolId, key: recordKey, requestDigest });
+      const identity = { dev: '1', ino: '2', ctimeNs: '3', birthtimeNs: '4' };
+      const plan: WorktreePlan = {
+        action: 'create',
+        sourceCwd: sourcePath,
+        sourceRoot: sourcePath,
+        commonDir: join(sourcePath, '.git'),
+        targetPath: createdPath,
+        baseRef: 'HEAD',
+        baseOid: 'f'.repeat(40),
+        evidence: {
+          repository: {
+            root: sourcePath,
+            gitDir: join(sourcePath, '.git'),
+            commonDir: join(sourcePath, '.git'),
+            bare: false,
+            rootIdentity: identity,
+            commonIdentity: identity,
+          },
+          parent: {
+            path: root,
+            identity,
+            ...(implicit ? { defaultRoot, missingParents: [] } : {}),
+          },
+        },
+      };
+      const configuration = {
+        configurationId: 'fixture',
+        sourceCwd: sourcePath,
+        bunPath: join(root, 'bun'),
+        workerPath: join(root, 'worker.js'),
+        configPath: join(root, 'bunfig.toml'),
+        hooksPath: join(root, 'hooks'),
+        git: { path: join(root, 'git'), sha256: 'a'.repeat(64) },
+      };
+      const worker: WorktreeRequest = {
+        schemaVersion: 1,
+        configurationId: 'fixture',
+        operationToken: token,
+        phase: 'create',
+        sourceCwd: sourcePath,
+        git: configuration.git,
+        hooksPath: configuration.hooksPath,
+        plan,
+        planDigest: digest(plan),
+      };
+      const input = {
+        command: buildWorkerCommand(configuration, worker),
+        permissions: { filesystem: 'workspace_write', network: 'none' },
+      };
+      await store.planExecution({
+        expectedStoreId: storeId,
+        owner,
+        executionId: toolId,
+        sessionId,
+        runId: run.id,
+        originCommandId: commandId,
+        stepId: toolId,
+        callId: toolId,
+        kind: 'tool',
+        definitionId: 'git.worktree',
+        definitionVersion: '1',
+        input: request as unknown as Json,
+        decisionSource: {},
+      });
+      db.run("UPDATE execution SET state='running',dispatched=1 WHERE id=?", [toolId]);
+      const operationKey = `git-worktree-${digest({ token, kind: 'mutation' })}`;
+      const ref = await store.ensureOperation({
+        expectedStoreId: storeId,
+        owner,
+        sessionId,
+        extensionId: 'builtin.shell',
+        originCommandId: commandId,
+        parentExecutionId: toolId,
+        operationKey,
+        request: { kind: 'job', definitionId: 'shell.command', definitionVersion: '1', input },
+      });
+      await store.planExecution({
+        expectedStoreId: storeId,
+        owner,
+        executionId: ref.executionId!,
+        sessionId,
+        runId: null,
+        originCommandId: ref.commandId,
+        parentExecutionId: toolId,
+        stepId: `operation-${ref.commandId}`,
+        callId: ref.commandId,
+        kind: 'job',
+        definitionId: 'shell.command',
+        definitionVersion: '1',
+        input,
+        decisionSource: {},
+      });
+      const stableResult = {
+        outcome: 'succeeded',
+        content: 'original success',
+        details: {
+          action: 'create',
+          key,
+          path: createdPath,
+          head: 'f'.repeat(40),
+          baseCommit: 'f'.repeat(40),
+          baseRef: 'HEAD',
+          branch: null,
+          detached: true,
+          mutation: 'completed',
+          cwdChanged: false,
+          observedAt: '2026-11-06T00:00:01.000Z',
+          repository: { root: sourcePath, commonDir: join(sourcePath, '.git') },
+          observed: { pathExists: true, registered: true },
+          operation: { ownerExecutionId: toolId, ref },
+        },
+      };
+      const value = {
+        schemaVersion: 1,
+        ownerExecutionId: toolId,
+        requestDigest,
+        request,
+        ...(implicit ? { resolvedTarget: { path: createdPath, defaultRoot } } : {}),
+        configurationIdentity: digest(configuration),
+        acceptedAt: '2026-11-06T00:00:00.000Z',
+        deadlineAt: '2026-11-06T00:02:00.000Z',
+        phase: 'completed',
+        plan,
+        planDigest: digest(plan),
+        steps: {
+          mutation: {
+            operationKey,
+            request: worker,
+            input,
+            inputDigest: digest(input),
+            timeoutMs: 120000,
+            ref,
+          },
+        },
+        stableResult,
+      };
+      db.run("UPDATE execution SET state='succeeded',dispatched=1,result_json=? WHERE id=?", [
+        JSON.stringify(stableResult),
+        toolId,
+      ]);
+      db.run("UPDATE execution SET state='succeeded',dispatched=1,result_json=? WHERE id=?", [
+        JSON.stringify({ outcome: 'succeeded', content: 'original Job completion' }),
+        ref.executionId!,
+      ]);
+      db.run("UPDATE run SET status='completed',is_active=0 WHERE id=?", [run.id]);
+      db.run(
+        "INSERT INTO extension_record(extension_id,scope_kind,scope_id,key,revision,content_type,content_version,origin_store_id,json) VALUES('builtin.shell','session',?,?,1,?,1,?,?)",
+        [
+          sessionId,
+          recordKey,
+          gitWorktreeRecordDefinition.contentType,
+          storeId,
+          JSON.stringify(value),
+        ],
+      );
+      await store.releaseSessionOwner(owner);
+      return {
+        value,
+        toolId,
+        runId: run.id,
+        jobId: ref.executionId!,
+        recordKey,
+        sessionId,
+        createdPath,
+      };
+    };
+    const saved = await seed('source', 'original');
+    const read = () =>
+      store.listSessionDirectory({
+        expectedStoreId: storeId,
+        subjectId: 'owner',
+        workspaceId: 'target-w',
+        limit: 1,
+      });
+    const source = { sessionId: 'source', workspaceId: 'source-w' };
+    expect((await read()).items[0]!.worktreeSource).toEqual(source);
+    expect(
+      (
+        await store.listSessionDirectory({
+          expectedStoreId: storeId,
+          subjectId: 'owner',
+          workspaceId: 'nested-w',
+        })
+      ).items[0]!.worktreeSource,
+    ).toBeUndefined();
+    const first = await read();
+    expect(
+      (
+        await store.listSessionDirectory({
+          expectedStoreId: storeId,
+          subjectId: 'owner',
+          workspaceId: 'target-w',
+          afterSeq: first.nextAfterSeq!,
+          upperSeq: first.upperSeq,
+          snapshotCursor: first.snapshotCursor,
+        })
+      ).items[0]!.worktreeSource,
+    ).toEqual(source);
+    const negative = async (sql: string, args: (string | number | null)[], undo: () => void) => {
+      db.run(sql, args);
+      try {
+        expect((await read()).items[0]!.worktreeSource).toBeUndefined();
+      } finally {
+        undo();
+      }
+      expect((await read()).items[0]!.worktreeSource).toEqual(source);
+    };
+    const restoreRecord = () =>
+      db.run(
+        "UPDATE extension_record SET json=?,origin_store_id=?,fork_provenance_json=NULL,content_version=1 WHERE scope_id='source' AND key=?",
+        [JSON.stringify(saved.value), storeId, saved.recordKey],
+      );
+    for (const [fields, replacement] of [
+      [['stableResult', 'outcome'], 'outcome_unknown'],
+      [['stableResult', 'details', 'mutation'], 'partial'],
+      [['stableResult', 'details', 'path'], join(targetPath, 'other')],
+      [['stableResult', 'details', 'cwdChanged'], true],
+      [['stableResult', 'details', 'operation', 'ownerExecutionId'], 'different'],
+      [['steps', 'mutation', 'ref', 'executionId'], 'different'],
+      [['schemaVersion'], true],
+      [['plan', 'action'], { toString: null, valueOf: null }],
+      [['plan'], undefined],
+      [['stableResult', 'details', 'observedAt'], undefined],
+      [['stableResult', 'details', 'head'], undefined],
+    ] as [string[], Json | undefined][]) {
+      const value = structuredClone(saved.value) as unknown as Record<string, Json>;
+      let nested = value;
+      for (const field of fields.slice(0, -1)) nested = nested[field] as Record<string, Json>;
+      if (replacement === undefined) delete nested[fields.at(-1)!];
+      else nested[fields.at(-1)!] = replacement;
+      await negative(
+        "UPDATE extension_record SET json=? WHERE scope_id='source' AND key=?",
+        [JSON.stringify(value), saved.recordKey],
+        restoreRecord,
+      );
+    }
+    for (const [column, value] of [
+      ['origin_store_id', 'old-store'],
+      ['fork_provenance_json', '{}'],
+      ['content_version', 2],
+    ] as const)
+      await negative(
+        `UPDATE extension_record SET ${column}=? WHERE scope_id='source' AND key=?`,
+        [value, saved.recordKey],
+        restoreRecord,
+      );
+    await negative('UPDATE execution SET dispatched=0 WHERE id=?', [saved.toolId], () =>
+      db.run('UPDATE execution SET dispatched=1 WHERE id=?', [saved.toolId]),
+    );
+    await negative("UPDATE execution SET state='outcome_unknown' WHERE id=?", [saved.jobId], () =>
+      db.run("UPDATE execution SET state='succeeded' WHERE id=?", [saved.jobId]),
+    );
+    await negative(
+      'UPDATE run SET config_json=? WHERE id=?',
+      [
+        JSON.stringify({ tools: [{ id: 'git.worktree', version: '1', extensionId: 'other' }] }),
+        saved.runId,
+      ],
+      () =>
+        db.run('UPDATE run SET config_json=? WHERE id=?', [
+          JSON.stringify({
+            tools: [{ id: 'git.worktree', version: '1', extensionId: 'builtin.shell' }],
+            extensions: [{ id: 'builtin.shell', version: '1' }],
+          }),
+          saved.runId,
+        ]),
+    );
+    await negative("UPDATE command SET subject_id='other' WHERE id='create-source'", [], () =>
+      db.run("UPDATE command SET subject_id='owner' WHERE id='create-source'"),
+    );
+    await negative("UPDATE session SET delete_requested=1 WHERE id='source'", [], () =>
+      db.run("UPDATE session SET delete_requested=0 WHERE id='source'"),
+    );
+    await negative(
+      "UPDATE session SET parent_id='another-source',root_id='another-source' WHERE id='source'",
+      [],
+      () => db.run("UPDATE session SET parent_id=NULL,root_id='source' WHERE id='source'"),
+    );
+    await negative(
+      "UPDATE workspace SET metadata_json=? WHERE id='source-w'",
+      [JSON.stringify({ removal: { commandId: 'removed' } })],
+      () => db.run("UPDATE workspace SET metadata_json='{}' WHERE id='source-w'"),
+    );
+    await negative(
+      "UPDATE workspace SET root_uri=? WHERE id='source-w'",
+      [pathToFileURL(join(sourcePath, 'different')).href],
+      () =>
+        db.run("UPDATE workspace SET root_uri=? WHERE id='source-w'", [
+          pathToFileURL(sourcePath).href,
+        ]),
+    );
+    await negative(
+      "UPDATE workspace SET root_uri='https://example.invalid/linked' WHERE id='target-w'",
+      [],
+      () =>
+        db.run("UPDATE workspace SET root_uri=? WHERE id='target-w'", [
+          pathToFileURL(targetPath).href,
+        ]),
+    );
+    // Original Tool resume changes its generation; the settled Job retains the original one.
+    db.run('UPDATE execution SET owner_generation=owner_generation+1 WHERE id=?', [saved.toolId]);
+    expect((await read()).items[0]!.worktreeSource).toEqual(source);
+    const recoveredCold = await openSqliteStore({ ...options, mode: 'readonly' });
+    try {
+      expect(
+        (
+          await recoveredCold.listSessionDirectory({
+            expectedStoreId: storeId,
+            subjectId: 'owner',
+            workspaceId: 'target-w',
+          })
+        ).items[0]!.worktreeSource,
+      ).toEqual(source);
+    } finally {
+      await recoveredCold.close();
+    }
+    await negative('UPDATE execution SET parent_execution_id=NULL WHERE id=?', [saved.jobId], () =>
+      db.run('UPDATE execution SET parent_execution_id=? WHERE id=?', [saved.toolId, saved.jobId]),
+    );
+    await negative("UPDATE execution SET adapter_id='fixture/job' WHERE id=?", [saved.jobId], () =>
+      db.run("UPDATE execution SET adapter_id='shell.command' WHERE id=?", [saved.jobId]),
+    );
+    await seed('source', 'same-relation');
+    expect((await read()).items[0]!.worktreeSource).toEqual(source);
+    await seed('foreign-source', 'foreign-relation');
+    expect((await read()).items[0]!.worktreeSource).toEqual(source);
+    const implicit = await seed('source', 'implicit', true);
+    await store.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'implicit-w',
+      name: 'implicit',
+      rootUri: pathToFileURL(implicit.createdPath).href,
+    });
+    await store.createSession({
+      expectedStoreId: storeId,
+      commandId: 'create-implicit-target',
+      sessionId: 'implicit-target',
+      workspaceId: 'implicit-w',
+      title: 'implicit target',
+      subjectId: 'owner',
+    });
+    expect(
+      (
+        await store.listSessionDirectory({
+          expectedStoreId: storeId,
+          subjectId: 'owner',
+          workspaceId: 'implicit-w',
+        })
+      ).items[0]!.worktreeSource,
+    ).toEqual(source);
+    const ambiguous = await seed('another-source', 'ambiguous');
+    expect((await read()).items[0]!.worktreeSource).toBeUndefined();
+    db.run('DELETE FROM extension_record WHERE scope_id=? AND key=?', [
+      ambiguous.sessionId,
+      ambiguous.recordKey,
+    ]);
+    const profile = { dataRoot: root, name: 'test', accessKey: 'worktree-source-directory' };
+    service = await startService({
+      runtime,
+      profile,
+      buildId: 'worktree-source-directory',
+      subjectId: 'owner',
+    });
+    client = createClient({
+      endpoint: service.endpoint,
+      token: service.bootstrap.token,
+      bootstrap: service.bootstrap,
+      expected: { profile, apiMajor: 1, requiredCapabilities: ['sessions'] },
+    });
+    await client.connect();
+    const before = await store.getMetadata();
+    const publicItems = await client.listAllSessionDirectory();
+    expect(publicItems.find((item) => item.session.id === 'target')!.worktreeSource).toEqual(
+      source,
+    );
+    expect(
+      publicItems.find((item) => item.session.id === 'source')!.worktreeSource,
+    ).toBeUndefined();
+    expect(
+      publicItems.find((item) => item.session.id === 'source')!.activity!.hasCreatedWorktree,
+    ).toBe(true);
+    expect(JSON.stringify(publicItems)).not.toMatch(
+      /original success|operationToken|sourceCwd|worker\.js|PRIVATE_/,
+    );
+    const cold = await openSqliteStore({ ...options, mode: 'readonly' });
+    try {
+      expect(
+        (
+          await cold.listSessionDirectory({
+            expectedStoreId: storeId,
+            subjectId: 'owner',
+            workspaceId: 'target-w',
+          })
+        ).items.every((item) => JSON.stringify(item.worktreeSource) === JSON.stringify(source)),
+      ).toBe(true);
+    } finally {
+      await cold.close();
+    }
+    expect(await store.getMetadata()).toEqual(before);
+    expect(models).toBe(0);
+  } finally {
+    client?.disposeNetwork();
+    await service?.close();
+    db.close();
+    await runtime.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

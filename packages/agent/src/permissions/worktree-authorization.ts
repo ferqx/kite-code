@@ -51,6 +51,37 @@ export function validWorktreeDecision(decision: PermissionDecision): boolean {
   );
 }
 
+/** All policy leaves must have independently allowed the exact registered Tool. */
+export function isAutoWorktreeDecision(decision: PermissionDecision): boolean {
+  if (!decision.allowed || decision.approval || decision.check || !validWorktreeDecision(decision))
+    return false;
+  try {
+    let auto = false;
+    for (const { namespace, data } of dispatchScopeLeaves(
+      decision.snapshot,
+      'worktree_authorization_unavailable',
+    )) {
+      const capability = object(data.capability) ? data.capability : null;
+      if (
+        namespace !== 'builtin.permissions' ||
+        data.workspaceTrust !== true ||
+        !capability ||
+        capability.kind !== 'tool' ||
+        capability.definitionId !== 'git.worktree' ||
+        capability.definitionVersion !== '1' ||
+        capability.hardAllowed !== true ||
+        capability.safeRead !== false
+      )
+        return false;
+      if (data.mode === 'auto' && capability.autoReview === 'none') auto = true;
+      else if (data.mode !== 'full' || capability.autoReview !== undefined) return false;
+    }
+    return auto;
+  } catch {
+    return false;
+  }
+}
+
 /** Only default worktree policy and verified existing AND/Planning composition call this. */
 export function sealWorktreeDecision(
   decision: PermissionDecision,

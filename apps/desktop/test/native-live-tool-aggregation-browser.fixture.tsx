@@ -75,6 +75,7 @@ const run: Run = {
 };
 const executions: Execution[] = [];
 const facts = new Map<string, Execution>();
+let worktreeErrorsEnabled = false;
 type NativeShellCase =
   | 'launch'
   | 'read'
@@ -318,7 +319,7 @@ const bridge: NativeBridge = {
       result.kind === 'toolMessages.page' &&
       'scope' in result
     ) {
-      if (nativeShellCases.size) {
+      if (nativeShellCases.size || worktreeErrorsEnabled) {
         if (nativeShellMetadataHeld)
           await new Promise<void>((resolve) => nativeShellMetadataPending.push(resolve));
         const response = await fetch('/native-shell-metadata', {
@@ -334,6 +335,7 @@ const bridge: NativeBridge = {
             ),
             messages,
             executions: [...facts.values()],
+            runs: [run],
           }),
         });
         if (!response.ok) throw Error(`fixture_native_shell_metadata_${response.status}`);
@@ -443,6 +445,8 @@ const bridge: NativeBridge = {
   },
 };
 export interface LiveAggregationFixture {
+  worktreeErrors(): void;
+  refreshWorktreeErrors(): void;
   requests: NativeRequest[];
   settings(
     action:
@@ -509,6 +513,152 @@ declare global {
 }
 window.liveAggregationFixture = {
   requests,
+  worktreeErrors() {
+    worktreeErrorsEnabled = true;
+    messages.splice(0, messages.length, {
+      id: 'worktree-user',
+      sessionId: 'a',
+      runId: run.id,
+      seq: '1',
+      role: 'user',
+      status: 'complete',
+      content: '核对 Git 工作树失败原因与原操作结果。',
+    });
+    executions.length = 0;
+    facts.clear();
+    const configuration =
+      run.configuration &&
+      typeof run.configuration === 'object' &&
+      !Array.isArray(run.configuration)
+        ? run.configuration
+        : {};
+    run.configuration = {
+      ...configuration,
+      tools: [{ id: 'git.worktree', version: '1', extensionId: 'builtin.shell' }],
+    };
+    const cases = [
+      {
+        id: 'process',
+        label: '进程启动失败',
+        status: 'failed',
+        details: {
+          code: 'git_process_start_failed',
+          mutation: 'not_started',
+          failure: { category: 'process_start', errno: 'EPERM' },
+        },
+      },
+      {
+        id: 'permission',
+        label: '文件访问权限失败',
+        status: 'failed',
+        details: {
+          code: 'git_permission_denied',
+          mutation: 'not_started',
+          failure: { category: 'permission_denied', errno: 'EACCES' },
+        },
+      },
+      {
+        id: 'git',
+        label: 'Git 命令失败',
+        status: 'failed',
+        details: {
+          code: 'git_operation_failed',
+          mutation: 'not_started',
+          failure: { category: 'git_command', exitCode: 128 },
+        },
+      },
+      {
+        id: 'policy',
+        label: '框架权限拒绝',
+        status: 'failed',
+        details: {
+          code: 'permission_denied',
+          adapterAttempted: false,
+          dispatchCommitted: false,
+          mutation: 'partial',
+        },
+      },
+      {
+        id: 'legacy',
+        label: '旧失败记录',
+        status: 'failed',
+        details: { code: 'git_operation_failed', mutation: 'not_started' },
+      },
+      {
+        id: 'partial',
+        label: '部分变更与清理未确认',
+        status: 'failed',
+        details: {
+          code: 'worktree_output_cleanup_unconfirmed',
+          mutation: 'partial',
+          failure: { category: 'process_start', errno: 'EPERM', cleanupUnconfirmed: true },
+        },
+      },
+      {
+        id: 'unknown',
+        label: '结果未知',
+        status: 'outcome_unknown',
+        details: {
+          code: 'git_process_start_failed',
+          mutation: 'unknown',
+          failure: { category: 'process_start', errno: 'EPERM' },
+        },
+      },
+    ];
+    for (const entry of cases) {
+      const id = `worktree-${entry.id}`,
+        toolInput = { action: 'create', key: id, path: `D:\\fixture\\${id}` };
+      const details = { action: 'create', key: id, cwdChanged: false, ...entry.details };
+      const content = `${JSON.stringify(details)} Inspect the original operation before any new intent.`;
+      const execution: Execution = {
+        id,
+        originStoreId: 'store',
+        sessionId: 'a',
+        kind: 'tool',
+        runId: run.id,
+        definitionId: 'git.worktree',
+        definitionVersion: '1',
+        status: entry.status as Execution['status'],
+        toolCallId: `call-${id}`,
+        toolInput,
+        result: { outcome: entry.status, content, details: JSON.parse(JSON.stringify(details)) },
+        resultRevision: '1',
+        cancelRequestedAt: null,
+      };
+      facts.set(id, execution);
+      executions.push(execution);
+      messages.push({
+        id: `model-${id}`,
+        sessionId: 'a',
+        runId: run.id,
+        seq: String(messages.length + 1),
+        role: 'assistant',
+        status: 'complete',
+        content: `${entry.label}。`,
+        toolCalls: [
+          { id: execution.toolCallId!, name: 'git.worktree', arguments: JSON.stringify(toolInput) },
+        ],
+      });
+      messages.push({
+        id: `receipt-${id}`,
+        sessionId: 'a',
+        runId: run.id,
+        seq: String(messages.length + 1),
+        role: 'tool',
+        status: 'complete',
+        sourceIds: [id],
+        toolCallId: execution.toolCallId,
+        content,
+      });
+    }
+    run.status = 'completed';
+    run.isActive = false;
+    run.finishedAt = Date.now();
+    control.publish();
+  },
+  refreshWorktreeErrors() {
+    control.publish();
+  },
   async settings(action) {
     if (action === 'start') settingsEnabled = true;
     return (await settingsRequest(undefined, action)).state;

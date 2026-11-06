@@ -151,7 +151,8 @@ export function NativeContextView({
   const unresolved = submissions.some((value) =>
     ['saved', 'submitting', 'unknown', 'queued'].includes(value.phase),
   );
-  const writable = !unresolved && !selection.permissionUnavailable;
+  const writable =
+    !unresolved && !selection.permissionUnavailable && !selection.workspaceUnavailable;
   const compressionPending = compressionSubmissions.some((value) =>
     ['saved', 'submitting', 'unknown', 'accepted'].includes(value.phase),
   );

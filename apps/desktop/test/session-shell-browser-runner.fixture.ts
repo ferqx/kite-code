@@ -15,6 +15,8 @@ import {
   verifySessionShellGeometry,
   verifySettingsGeometry,
   verifySwitchGeometry,
+  verifyWorktreeIndicator,
+  verifyWorktreeNavigation,
 } from './session-shell-geometry.fixture';
 
 // Explicit standalone fixture; it never loads Service, user data or the production diagnostics.
@@ -107,17 +109,29 @@ const writes = new Set([
   'draft.write',
 ]);
 try {
-  report.cases.push(
-    ...(await verifyFormControlStyles(browser, server.url.toString(), artifact)),
-    ...(await verifySwitchGeometry(browser, server.url.toString(), artifact)),
-    ...(await verifySessionShellGeometry(browser, server.url.toString(), artifact)),
-    ...(await verifyColdSessionToolbarWidth(browser, server.url.toString(), artifact)),
-    ...(await verifySettingsGeometry(browser, server.url.toString(), artifact)),
-    ...(await verifyMcpSettingsProduct(browser, server.url.toString(), artifact)),
-    ...(await verifyMcpFailureFeedback(browser, server.url.toString(), artifact)),
-    ...(await verifyMcpCustomForms(browser, server.url.toString(), artifact)),
-  );
-  for (const theme of ['light', 'dark'] as const) {
+  const worktreeOnly = process.argv.includes('--worktree-indicator');
+  const navigationOnly = process.argv.includes('--worktree-navigation');
+  const focusedWorktree = worktreeOnly || navigationOnly;
+  if (navigationOnly) {
+    report.cases.push(
+      ...(await verifyWorktreeNavigation(browser, server.url.toString(), artifact)),
+    );
+  }
+  if (worktreeOnly) {
+    report.cases.push(...(await verifyWorktreeIndicator(browser, server.url.toString(), artifact)));
+  }
+  if (!focusedWorktree)
+    report.cases.push(
+      ...(await verifyFormControlStyles(browser, server.url.toString(), artifact)),
+      ...(await verifySwitchGeometry(browser, server.url.toString(), artifact)),
+      ...(await verifySessionShellGeometry(browser, server.url.toString(), artifact)),
+      ...(await verifyColdSessionToolbarWidth(browser, server.url.toString(), artifact)),
+      ...(await verifySettingsGeometry(browser, server.url.toString(), artifact)),
+      ...(await verifyMcpSettingsProduct(browser, server.url.toString(), artifact)),
+      ...(await verifyMcpFailureFeedback(browser, server.url.toString(), artifact)),
+      ...(await verifyMcpCustomForms(browser, server.url.toString(), artifact)),
+    );
+  for (const theme of focusedWorktree ? [] : (['light', 'dark'] as const)) {
     const page = await browser.newPage({
       // This segment exercises the docked environment controls; narrow layouts are covered above.
       viewport: { width: 1920, height: 1000 },
@@ -555,15 +569,17 @@ try {
     await page.close();
   }
   await Bun.write(
-    process.argv[2] ?? path.join(artifact, 'report.json'),
+    process.argv.find((value, index) => index > 1 && !value.startsWith('--')) ??
+      path.join(artifact, 'report.json'),
     JSON.stringify(report, null, 2),
   );
   console.log(
     JSON.stringify({
       browser: report.browser,
       themes: 2,
-      switches: 200,
-      heldFrames: 192,
+      ...(focusedWorktree
+        ? { worktreeCases: report.cases.length }
+        : { switches: 200, heldFrames: 192 }),
       artifact,
     }),
   );

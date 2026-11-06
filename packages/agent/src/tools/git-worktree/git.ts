@@ -2,6 +2,12 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
+  gitCommandFailure,
+  processEventFailure,
+  processStartFailure,
+  type WorktreeFailure,
+} from './errors';
+import {
   canonicalDirectory,
   exists,
   fail,
@@ -15,6 +21,7 @@ import {
   validPath,
 } from './paths';
 import { limits } from './protocol';
+import { runWindowsGitProcess } from './windows-process';
 
 export interface Repository {
   root: string;
@@ -42,6 +49,7 @@ export interface GitResult {
   stdout: Buffer;
   stderr: Buffer;
   stdoutHash?: string;
+  failure?: WorktreeFailure;
 }
 export function nulRecords(bytes: Buffer): string[] {
   if (!bytes.length) return [];
@@ -223,75 +231,83 @@ export class Git {
         : []),
       ...args,
     ];
-    const result = await new Promise<GitResult>((resolve, reject) => {
-      const child = spawn(this.path, argv, {
-        cwd,
-        env,
-        detached: false,
-        stdio: [options.inputFd ?? 'pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-      const stdout: Buffer[] = [],
-        stderr: Buffer[] = [];
-      const hash = options.outputHash
-        ? createHash(options.outputHash.algorithm).update(options.outputHash.prefix)
-        : undefined;
-      let hashedSize = 0n;
-      let outSize = 0,
-        errSize = 0,
-        overflow = false;
-      child.stdout!.on('data', (data: Buffer) => {
-        if (hash && options.outputHash) {
-          hashedSize += BigInt(data.length);
-          if (hashedSize > options.outputHash.bytes) {
-            overflow = true;
-            child.kill();
-          } else hash.update(data);
-          return;
-        }
-        outSize += data.length;
-        if (outSize > limits.gitStdoutBytes) {
-          overflow = true;
-          child.kill();
-        } else stdout.push(data);
-      });
-      child.stderr!.on('data', (data: Buffer) => {
-        errSize += data.length;
-        if (errSize > limits.gitStderrBytes) {
-          overflow = true;
-          child.kill();
-        } else stderr.push(data);
-      });
-      child.on('error', reject);
-      child.on('close', (code) =>
-        overflow
-          ? reject(new Error('inspection_limit'))
-          : resolve({
-              exitCode: code ?? -1,
-              stdout: Buffer.concat(stdout),
-              stderr: Buffer.concat(stderr),
-              ...(hash && options.outputHash && hashedSize === options.outputHash.bytes
-                ? { stdoutHash: hash.digest('hex') }
-                : {}),
-            }),
-      );
-      if (child.stdin) {
-        child.stdin.on('error', () => {});
-        child.stdin.end(options.input ?? '');
-      }
-    }).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-        return fail('git_not_found', 'The trusted Git executable is unavailable.');
+    const result = await (process.platform === 'win32'
+      ? runWindowsGitProcess(this.path, argv, { cwd, env, ...options })
+      : new Promise<GitResult>((resolve, reject) => {
+          let child: ReturnType<typeof spawn>;
+          try {
+            child = spawn(this.path, argv, {
+              cwd,
+              env,
+              detached: false,
+              stdio: [options.inputFd ?? 'pipe', 'pipe', 'pipe'],
+              windowsHide: true,
+            });
+          } catch (error) {
+            reject(processStartFailure(error));
+            return;
+          }
+          const stdout: Buffer[] = [],
+            stderr: Buffer[] = [];
+          const hash = options.outputHash
+            ? createHash(options.outputHash.algorithm).update(options.outputHash.prefix)
+            : undefined;
+          let hashedSize = 0n;
+          let outSize = 0,
+            errSize = 0,
+            overflow = false;
+          child.stdout!.on('data', (data: Buffer) => {
+            if (hash && options.outputHash) {
+              hashedSize += BigInt(data.length);
+              if (hashedSize > options.outputHash.bytes) {
+                overflow = true;
+                child.kill();
+              } else hash.update(data);
+              return;
+            }
+            outSize += data.length;
+            if (outSize > limits.gitStdoutBytes) {
+              overflow = true;
+              child.kill();
+            } else stdout.push(data);
+          });
+          child.stderr!.on('data', (data: Buffer) => {
+            errSize += data.length;
+            if (errSize > limits.gitStderrBytes) {
+              overflow = true;
+              child.kill();
+            } else stderr.push(data);
+          });
+          child.on('error', (error) => reject(processEventFailure(error, child.pid !== undefined)));
+          child.on('close', (code) =>
+            overflow
+              ? reject(new Error('inspection_limit'))
+              : resolve({
+                  exitCode: code ?? -1,
+                  stdout: Buffer.concat(stdout),
+                  stderr: Buffer.concat(stderr),
+                  ...(hash && options.outputHash && hashedSize === options.outputHash.bytes
+                    ? { stdoutHash: hash.digest('hex') }
+                    : {}),
+                }),
+          );
+          if (child.stdin) {
+            child.stdin.on('error', () => {});
+            child.stdin.end(options.input ?? '');
+          }
+        })
+    ).catch((error: unknown) => {
       if (error instanceof Error && error.message === 'inspection_limit')
         return fail('inspection_limit', 'Git output exceeded the complete inspection limit.');
       throw error;
     });
-    if (result.exitCode !== 0 && !options.allowFailure)
-      fail(
-        'git_operation_failed',
-        'Git failed; inspect the bounded diagnostic and original operation.',
-        { gitExitCode: result.exitCode, diagnostic: utf8(result.stderr).slice(0, 4096) },
-      );
+    // Validate complete diagnostics without publishing untrusted paths, URLs or credentials.
+    utf8(result.stderr);
+    if (result.exitCode !== 0) {
+      const failure = gitCommandFailure(result.exitCode);
+      if (!options.allowFailure) throw failure;
+      return { ...result, failure: failure.facts.failure as WorktreeFailure };
+    }
     return result;
   }
   async text(
@@ -309,6 +325,7 @@ export class Git {
       fail(
         'unsupported_git_version',
         'The trusted Git must support --no-lazy-fetch; install a supported Git without removing the safety flags.',
+        { failure: capability.failure },
       );
     const probe = await this.run(cwd, ['rev-parse', '--is-bare-repository'], {
       allowFailure: true,
@@ -317,6 +334,7 @@ export class Git {
       fail(
         'not_git_repository',
         'The trusted execution directory is not a readable Git repository.',
+        { failure: probe.failure },
       );
     const bareText = utf8(probe.stdout);
     if (!['true\n', 'false\n'].includes(bareText))
@@ -348,7 +366,6 @@ export class Git {
       fail(
         'worktree_protocol_error',
         'Git reported an incomplete or anomalous worktree registration read.',
-        { diagnostic: utf8(result.stderr).slice(0, 4096) },
       );
     return parseWorktrees(result.stdout, repository.root);
   }
@@ -361,7 +378,6 @@ export class Git {
       fail(
         'unsupported_repository_configuration',
         'Git configuration could not be read without anomalies.',
-        { diagnostic: utf8(result.stderr).slice(0, 4096) },
       );
     const output = result.stdout;
     return nulRecords(output).map((field) => {
@@ -421,6 +437,7 @@ export class Git {
       fail(
         'unsupported_repository_configuration',
         'The source checkout must have a readable committed HEAD.',
+        { failure: head.failure },
       );
     return this.filterOverrides(config);
   }
@@ -445,13 +462,19 @@ export class Git {
     const checked = await this.run(cwd, ['check-ref-format', '--branch', branch], {
       allowFailure: true,
     });
-    if (
-      checked.exitCode !== 0 ||
-      utf8(checked.stdout) !== `${branch}\n` ||
-      (await this.run(cwd, ['check-ref-format', `refs/heads/${branch}`], { allowFailure: true }))
-        .exitCode !== 0
-    )
+    if (checked.exitCode !== 0)
+      fail('invalid_branch_name', 'The new branch name is not a literal valid local branch.', {
+        failure: checked.failure,
+      });
+    if (utf8(checked.stdout) !== `${branch}\n`)
       fail('invalid_branch_name', 'The new branch name is not a literal valid local branch.');
+    const qualified = await this.run(cwd, ['check-ref-format', `refs/heads/${branch}`], {
+      allowFailure: true,
+    });
+    if (qualified.exitCode !== 0)
+      fail('invalid_branch_name', 'The new branch name is not a literal valid local branch.', {
+        failure: qualified.failure,
+      });
     const existing = await this.run(
       cwd,
       ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`],
@@ -460,7 +483,9 @@ export class Git {
     if (existing.exitCode === 0)
       fail('branch_exists', 'The requested branch already exists; choose a new name.');
     if (existing.exitCode !== 1)
-      fail('git_operation_failed', 'Existing branch state could not be verified.');
+      fail('git_operation_failed', 'Existing branch state could not be verified.', {
+        failure: existing.failure,
+      });
     // show-ref reports a dangling symbolic reference as absent. Git branch creation
     // would follow that reference and mutate a different, unrequested branch.
     const symbolic = await this.run(
@@ -471,7 +496,9 @@ export class Git {
     if (symbolic.exitCode === 0)
       fail('branch_exists', 'The requested branch already exists; choose a new name.');
     if (symbolic.exitCode !== 1)
-      fail('git_operation_failed', 'Existing symbolic branch state could not be verified.');
+      fail('git_operation_failed', 'Existing symbolic branch state could not be verified.', {
+        failure: symbolic.failure,
+      });
   }
   assertRepository(expected: Repository, actual: Repository): void {
     if (

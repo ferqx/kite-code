@@ -11,6 +11,7 @@ import {
   type Message as NativeMessage,
   type ProviderSettingsRequest,
   type ProviderSettingsView,
+  type Run,
 } from '@kite-ai/client';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -92,6 +93,7 @@ const handoff = process.env.KITE_AGGREGATION_SCENARIO === 'model-handoff';
 const longGroup = process.env.KITE_AGGREGATION_SCENARIO === 'long-group';
 const toolDetails = process.env.KITE_AGGREGATION_SCENARIO === 'tool-details';
 const nativeShell = process.env.KITE_AGGREGATION_SCENARIO === 'native-shell';
+const worktreeErrors = process.env.KITE_AGGREGATION_SCENARIO === 'worktree-errors';
 const settingsNav = process.env.KITE_AGGREGATION_SCENARIO === 'settings-nav';
 const settingsModels = process.env.KITE_AGGREGATION_SCENARIO === 'settings-models';
 const nativeShellCase = process.env.KITE_NATIVE_SHELL_CASE;
@@ -609,6 +611,7 @@ const server = Bun.serve({
         messages: NativeMessage[];
         executions: Execution[];
         observedExecutions: Execution[];
+        runs?: Run[];
         scope: NativeToolMessageScope;
         input: Extract<NativeToolMessageRequest, { method: 'toolMessages.list' }>;
       };
@@ -619,6 +622,11 @@ const server = Bun.serve({
             const execution = fixture.executions.find((value) => value.id === id);
             if (!execution) throw Error('fixture_native_execution_unavailable');
             return execution;
+          },
+          async getRun(id: string) {
+            const run = fixture.runs?.find((value) => value.id === id);
+            if (!run) throw Error('fixture_native_run_unavailable');
+            return run;
           },
         } as unknown as AgentClient,
         () => fixture.scope,
@@ -642,8 +650,9 @@ const server = Bun.serve({
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel: 'chrome' });
 const report = {
   browser: browser.version(),
-  scenario:
-    settingsNav || settingsModels
+  scenario: worktreeErrors
+    ? 'worktree-errors'
+    : settingsNav || settingsModels
       ? settingsModels
         ? 'settings-models'
         : 'settings-nav'
@@ -677,7 +686,7 @@ try {
         { theme: 'light' as const, width: 550 },
         { theme: 'dark' as const, width: 550 },
       ]
-    : handoff || longGroup || toolDetails || nativeShell
+    : handoff || longGroup || toolDetails || nativeShell || worktreeErrors
       ? [
           { theme: 'light' as const, width: 1280 },
           { theme: 'dark' as const, width: 780 },
@@ -918,6 +927,132 @@ try {
         assert.ok(box.height >= hit.minHeight, `${name} hit height shrank`);
       iconChecks.push({ name, graphic, control: box });
     };
+    if (worktreeErrors) {
+      await stage('worktree-before');
+      await page.evaluate(() => window.liveAggregationFixture.worktreeErrors());
+      const process = page.getByRole('button', { name: /展开本轮处理过程/ });
+      await process.waitFor();
+      await process.click();
+      await stage('worktree-process-open');
+      const groups = page.locator('.conversation:visible .tool-activity-aggregate');
+      await page.waitForFunction(
+        () => document.querySelectorAll('.tool-activity-aggregate').length === 7,
+      );
+      await stage('worktree-failures-collapsed');
+      const expected = [
+        { id: 'process', text: 'Git 进程启动失败' },
+        { id: 'permission', text: 'Git 工作树权限拒绝（文件系统）' },
+        { id: 'git', text: '退出码 128' },
+        { id: 'policy', text: '当前权限策略未批准' },
+        { id: 'legacy', text: '旧记录未提供失败分类' },
+        { id: 'partial', text: '已发生部分变更' },
+        { id: 'unknown', text: '变更结果仍未确认' },
+      ];
+      const verified: { id: string; text: string; rawOccurrences: number }[] = [];
+      for (const [index, entry] of expected.entries()) {
+        const group = groups.nth(index);
+        await group.locator(':scope > .tool-activity-summary').click();
+        const activity = group.locator('.tool-activity-steps > .tool-activity').first();
+        const summary = activity.locator(':scope > .tool-activity-summary');
+        await summary.waitFor();
+        assert.ok((await summary.innerText()).includes('Git 工作树'));
+        await stage(`worktree-${entry.id}-group-open`);
+        if ((await summary.getAttribute('aria-expanded')) !== 'true') await summary.click();
+        await page.waitForFunction(
+          (needle) => document.body.textContent?.includes(needle),
+          entry.text,
+        );
+        const text = await activity.innerText();
+        assert.ok(
+          text.includes(entry.text),
+          `${entry.id}: classified failure missing from its own disclosure`,
+        );
+        const rawOccurrences = (text.match(new RegExp(`"key":"worktree-${entry.id}"`, 'g')) ?? [])
+          .length;
+        assert.equal(rawOccurrences, 1, `${entry.id}: original receipt repeated or missing`);
+        if (entry.id === 'legacy')
+          assert.ok(
+            !/Git 进程启动失败|权限拒绝（文件系统）|退出码|权限策略未批准/.test(text),
+            'legacy code acquired an invented cause',
+          );
+        if (entry.id === 'partial')
+          assert.ok(text.includes('清理尚未确认'), 'partial cleanup was lost');
+        if (entry.id === 'unknown' || entry.id === 'partial' || entry.id === 'policy')
+          assert.ok(
+            !text.includes('尚未开始工作树变更'),
+            `${entry.id}: uncertain effects became not-started`,
+          );
+        assert.equal(
+          await activity.getByRole('button', { name: /重试|重新执行|扩大权限/ }).count(),
+          0,
+        );
+        verified.push({ id: entry.id, text, rawOccurrences });
+        await stage(`worktree-${entry.id}-expanded`);
+      }
+      const firstDetail = await page.locator('.tool-detail').first().elementHandle();
+      assert.ok(firstDetail);
+      const viewport = page.locator('.conversation-viewport');
+      const readingPosition = await viewport.evaluate((node) => {
+        node.scrollTop = Math.min(90, node.scrollHeight - node.clientHeight);
+        return node.scrollTop;
+      });
+      await stage('worktree-reading-position');
+      await page.evaluate(() => window.liveAggregationFixture.refreshWorktreeErrors());
+      await stage('worktree-refreshed');
+      assert.ok(
+        await firstDetail.evaluate((node) => node === document.querySelector('.tool-detail')),
+        'ordinary refresh replaced its detail node',
+      );
+      assert.ok(
+        Math.abs((await viewport.evaluate((node) => node.scrollTop)) - readingPosition) <= 1,
+        'ordinary refresh moved the reading position',
+      );
+      await page.getByRole('button', { name: 'Session B', exact: true }).click();
+      await stage('worktree-other-session');
+      assert.equal(
+        await page.locator('.conversation:visible .tool-detail').count(),
+        0,
+        'old failures leaked into the other Session',
+      );
+      await page.getByRole('button', { name: 'Session A', exact: true }).click();
+      await stage('worktree-returned');
+      await page.waitForFunction(() => document.body.textContent?.includes('Git 进程启动失败'));
+      const requests = await page.evaluate(() => window.liveAggregationFixture.requests);
+      assert.ok(
+        !requests.some((request) =>
+          [
+            'submit',
+            'caller.prepare',
+            'caller.submit',
+            'permission.mode',
+            'permission.trust',
+          ].includes(request.method),
+        ),
+        'reading failures issued a mutation',
+      );
+      const samples = await page.evaluate(() => window.liveAggregationSamples);
+      assert.equal(errors.length, 0, errors.join('\n'));
+      assert.ok(
+        !samples.some((sample) => sample.overflow || sample.conversationOverflow),
+        'failure details overflowed the page',
+      );
+      report.cases.push({
+        theme,
+        width,
+        errors,
+        screenshotFrames,
+        samples,
+        verification: {
+          verified,
+          readingPosition,
+          requests: requests.map((request) => request.method),
+        },
+      });
+      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      console.log(JSON.stringify({ worktreeErrors, theme, width, screenshotFrames, errors }));
+      await page.close();
+      continue;
+    }
     if (settingsNav || settingsModels) {
       // The fixture uses the Darwin host name; the native CSS contract uses macos.
       await page.evaluate(() => {

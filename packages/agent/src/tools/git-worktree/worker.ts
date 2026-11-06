@@ -15,6 +15,7 @@ import {
   captureTemporaryWorktreeRoots,
   inspectTemporaryWorktreeTarget,
 } from '../../permissions/worktree-path-policy';
+import { normalizeWorktreeError } from './errors';
 import { Git, type ListedWorktree, nulRecords, type Repository } from './git';
 import {
   acquireLock,
@@ -153,7 +154,9 @@ async function prepareCreate(
     { allowFailure: true },
   );
   if (base.exitCode !== 0)
-    fail('invalid_base_ref', 'The requested base reference is not a readable commit.');
+    fail('invalid_base_ref', 'The requested base reference is not a readable commit.', {
+      failure: base.failure,
+    });
   const baseOid = oid(utf8(base.stdout).replace(/\n$/, ''));
   const parent = allocation.parent ?? {
     path: dirname(target),
@@ -228,7 +231,9 @@ async function linkedTarget(
     allowFailure: true,
   });
   if (![0, 1].includes(branchResult.exitCode))
-    fail('worktree_verification_failed', 'The target branch could not be verified.');
+    fail('worktree_verification_failed', 'The target branch could not be verified.', {
+      failure: branchResult.failure,
+    });
   const branch = branchResult.exitCode === 0 ? utf8(branchResult.stdout).replace(/\n$/, '') : null;
   if (head !== item.head || branch !== item.branch)
     fail('target_identity_changed', 'The target HEAD or registration changed during inspection.');
@@ -452,6 +457,7 @@ async function protectedCommits(
     fail(
       'unsupported_reflog_backend',
       'Strict removal requires a verified files reference backend.',
+      { ...(backend.failure ? { failure: backend.failure } : {}) },
     );
   const objectFormat = await git.text(target, ['rev-parse', '--show-object-format']);
   if (!['sha1', 'sha256'].includes(objectFormat))
@@ -471,6 +477,7 @@ async function protectedCommits(
     fail(
       'unsupported_reflog',
       'The complete ordinary HEAD reflog is unavailable; preserve the worktree.',
+      { failure: normalizeWorktreeError(error).facts.failure },
     );
   }
   const text = utf8(bytes);
@@ -866,17 +873,13 @@ export async function executeWorktreeRequest(request: WorktreeRequest): Promise<
     try {
       lock.release();
     } catch (error) {
-      failure = error;
+      failure = failure
+        ? new AggregateError([failure, error], 'worktree_output_cleanup_unconfirmed')
+        : error;
     }
   }
   if (failure) {
-    const known =
-      failure instanceof WorktreeError
-        ? failure
-        : new WorktreeError(
-            'git_operation_failed',
-            'The worker could not complete this operation; inspect the original result before another intent.',
-          );
+    const known = normalizeWorktreeError(failure);
     return {
       protocolVersion: 1,
       operationToken: request.operationToken,

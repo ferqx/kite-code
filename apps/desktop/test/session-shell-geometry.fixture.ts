@@ -3,6 +3,431 @@ import path from 'node:path';
 import type { Browser } from 'playwright';
 import type {} from './session-shell-browser.fixture';
 
+/** Exercises the real Native navigation branch, including its delayed reads, without a Service. */
+export async function verifyWorktreeNavigation(browser: Browser, url: string, artifact: string) {
+  const cases = [];
+  for (const theme of ['light', 'dark'] as const) {
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 800 },
+      colorScheme: theme,
+      locale: 'zh-CN',
+    });
+    page.setDefaultTimeout(10000);
+    const errors: string[] = [],
+      phases: unknown[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    try {
+      await page.goto(`${url}?worktree-navigation=1`);
+      const row = (id: string) =>
+        page.getByRole('button', { name: `Session ${id.toUpperCase()}`, exact: true });
+      const ready = (id: string) =>
+        page.waitForFunction(
+          (id) =>
+            document.querySelector('.breadcrumb strong')?.textContent ===
+              `Session ${id.toUpperCase()}` &&
+            !document.querySelector('.composer')?.hasAttribute('data-session-loading'),
+          id,
+        );
+      const phase = async (name: string) => {
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+        const snapshot = await page.evaluate(() => {
+          const editor = document.querySelector<HTMLElement>('.composer [role="textbox"]');
+          const messages = [...document.querySelectorAll<HTMLElement>('article.message')]
+            .filter((node) => node.getBoundingClientRect().height > 0)
+            .map((node) => ({ id: node.dataset.messageId, text: node.textContent }));
+          const exit = document.querySelector<HTMLButtonElement>(
+            '.session-header [aria-label="退出工作树"]',
+          );
+          const model = document.querySelector<HTMLButtonElement>('[data-model-trigger]');
+          return {
+            title: document.querySelector('.breadcrumb strong')?.textContent,
+            editor: editor?.innerText,
+            editorState: editor
+              ? {
+                  editable: editor.isContentEditable,
+                  color: getComputedStyle(editor).color,
+                  opacity: getComputedStyle(editor).opacity,
+                }
+              : null,
+            modelState: model
+              ? {
+                  disabled: model.disabled,
+                  color: getComputedStyle(model).color,
+                  opacity: getComputedStyle(model).opacity,
+                }
+              : null,
+            editorRect: editor
+              ? {
+                  x: editor.getBoundingClientRect().x,
+                  y: editor.getBoundingClientRect().y,
+                  width: editor.getBoundingClientRect().width,
+                  height: editor.getBoundingClientRect().height,
+                }
+              : null,
+            messages,
+            notice: document.querySelector('[aria-label="工作树导航"]')?.textContent ?? null,
+            missing: !!document.querySelector('[aria-label="工作区目录不可用"]'),
+            exit: exit ? { disabled: exit.disabled, title: exit.title } : null,
+            scrollTop:
+              [...document.querySelectorAll<HTMLElement>('.conversation-viewport')].find(
+                (node) => node.getBoundingClientRect().height > 0,
+              )?.scrollTop ?? null,
+          };
+        });
+        assert.equal(
+          new Set(snapshot.messages.map((message) => message.id)).size,
+          snapshot.messages.length,
+        );
+        const screenshot = path.join(artifact, `worktree-navigation-${theme}-${name}.png`);
+        await page.screenshot({ path: screenshot });
+        phases.push({ name, screenshot, ...snapshot });
+        return snapshot;
+      };
+      await row('a').click();
+      await ready('a');
+      const source = await phase('01-source');
+      assert.equal(source.title, 'Session A');
+      assert.equal(source.editor, 'Draft A');
+      await page.evaluate(() => {
+        const observation = {
+          active: true,
+          frames: [] as {
+            title: string | null;
+            messages: string[];
+            welcome: boolean;
+          }[],
+        };
+        Object.assign(window, { worktreeNavigationObservation: observation });
+        const tick = () => {
+          if (!observation.active) return;
+          observation.frames.push({
+            title: document.querySelector('.breadcrumb strong')?.textContent ?? null,
+            messages: [...document.querySelectorAll<HTMLElement>('article.message')]
+              .filter((node) => node.getBoundingClientRect().height > 0)
+              .map((node) => node.dataset.messageId ?? ''),
+            welcome: !!document.querySelector('.new-conversation-welcome'),
+          });
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      await row('b').click();
+      await ready('b');
+      const editor = page.locator('.composer [role="textbox"]');
+      await editor.fill('工作树草稿：保留阅读与输入位置');
+      const target = await phase('02-worktree-draft');
+      assert.equal(target.editor, '工作树草稿：保留阅读与输入位置');
+      await page.evaluate(() => window.sessionShellFixture.holdNavigationDirectory());
+      await page.getByRole('button', { name: '退出工作树', exact: true }).click();
+      await page.waitForFunction(() => window.sessionShellFixture.navigationDirectoryHeld());
+      const latestDraft = '目录读取期间继续编辑的最新工作树草稿';
+      await editor.fill(latestDraft);
+      const pending = await phase('03-directory-pending');
+      assert.equal(pending.title, target.title);
+      assert.equal(pending.editor, latestDraft);
+      assert.equal(pending.editorState?.editable, true);
+      assert.deepEqual(pending.editorState, target.editorState);
+      assert.deepEqual(pending.modelState, target.modelState);
+      assert.deepEqual(pending.editorRect, target.editorRect);
+      assert.deepEqual(pending.messages, target.messages);
+      assert.equal(pending.scrollTop, target.scrollTop);
+      await page.evaluate(() => {
+        window.sessionShellFixture.hold();
+        window.sessionShellFixture.releaseNavigationDirectory();
+      });
+      await page.waitForFunction(() => window.sessionShellFixture.pending('selection') > 0);
+      await phase('04-selection-pending');
+      await page.evaluate(() => window.sessionShellFixture.release('selection'));
+      await page.waitForFunction(() => window.sessionShellFixture.pending('history') > 0);
+      const loading = await phase('05-source-history-pending');
+      assert.ok(loading.messages.every((message) => !['u-b', 'm-b'].includes(message.id ?? '')));
+      await page.evaluate(() => window.sessionShellFixture.resume());
+      await ready('a');
+      await page.getByRole('status', { name: '工作树导航' }).waitFor();
+      const returned = await phase('06-returned-source');
+      assert.equal(returned.editor, 'Draft A');
+      assert.match(returned.notice ?? '', /已返回来源会话/);
+      assert.deepEqual(returned.messages, source.messages);
+      await row('b').click();
+      await ready('b');
+      const restored = await phase('07-restored-worktree-draft');
+      assert.equal(restored.editor, latestDraft);
+      await page.evaluate(() => {
+        window.sessionShellFixture.unavailableWorkspace('b', true);
+        window.sessionShellFixture.unavailableWorkspace('a', true);
+      });
+      await page.getByRole('status', { name: '工作区目录不可用' }).waitFor();
+      await phase('08-missing-worktree');
+      await editor.fill('退出工作树');
+      await page.locator('.composer [aria-label="退出工作树"]').click();
+      await ready('a');
+      const missing = await phase('09-returned-missing-source');
+      assert.equal(missing.missing, true);
+      assert.equal(missing.editor, 'Draft A');
+      assert.match(missing.notice ?? '', /已返回来源会话/);
+      await page.evaluate(() => {
+        window.sessionShellFixture.unavailableWorkspace('a', false);
+        window.sessionShellFixture.unavailableWorkspace('b', false);
+      });
+      await row('b').click();
+      await ready('b');
+      await page.evaluate(() => window.sessionShellFixture.navigationSource(false));
+      await page.locator('.session-header [aria-label="退出工作树"]').click();
+      await page.waitForFunction(() =>
+        document.querySelector('[aria-label="工作树导航"]')?.textContent?.includes('无法核实'),
+      );
+      const unknown = await phase('10-source-unavailable');
+      assert.equal(unknown.title, 'Session B');
+      assert.equal(unknown.editor, '退出工作树');
+      await page.evaluate(() => {
+        window.sessionShellFixture.navigationSource(true);
+        window.sessionShellFixture.publish();
+      });
+      await page.locator('.session-header [aria-label="退出工作树"]').waitFor();
+      await page.evaluate(() => window.sessionShellFixture.holdNavigationDirectory());
+      await page.locator('.session-header [aria-label="退出工作树"]').click();
+      await page.waitForFunction(() => window.sessionShellFixture.navigationDirectoryHeld());
+      await row('a').click();
+      await ready('a');
+      const beforeRelease = await phase('11-explicit-selection-during-read');
+      await page.evaluate(() => window.sessionShellFixture.releaseNavigationDirectory());
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      const final = await phase('12-stale-response-ignored');
+      assert.equal(final.title, beforeRelease.title);
+      assert.equal(final.editor, beforeRelease.editor);
+      assert.deepEqual(final.messages, beforeRelease.messages);
+      assert.equal(final.notice, null);
+      const frames = await page.evaluate(() => {
+        const observation = (
+          window as unknown as {
+            worktreeNavigationObservation: {
+              active: boolean;
+              frames: { title: string | null; messages: string[]; welcome: boolean }[];
+            };
+          }
+        ).worktreeNavigationObservation;
+        observation.active = false;
+        return observation.frames;
+      });
+      assert.ok(frames.length > 10);
+      for (const frame of frames) {
+        assert.equal(frame.welcome, false);
+        assert.equal(new Set(frame.messages).size, frame.messages.length);
+        if (frame.title === 'Session A')
+          assert.ok(frame.messages.every((id) => !['u-b', 'm-b'].includes(id)));
+        if (frame.title === 'Session B')
+          assert.ok(frame.messages.every((id) => !['u-a', 'm-a'].includes(id)));
+      }
+      const requests = await page.evaluate(() =>
+        window.sessionShellFixture.requests.map((request) => request.method),
+      );
+      assert.deepEqual(
+        requests.filter((method) =>
+          /^(caller\.|submit$|conversation\.send$|extensions\.invoke$|workspace\.remove$|permission\.|fileRecovery\.)/.test(
+            method,
+          ),
+        ),
+        [],
+      );
+      assert.deepEqual(errors, []);
+      cases.push({ theme, phases, frames, requests, errors });
+    } finally {
+      await page.close();
+    }
+  }
+  return cases;
+}
+
+/** Full Native projection and production CSS, fed only by the isolated fixture's directory. */
+export async function verifyWorktreeIndicator(browser: Browser, url: string, artifact: string) {
+  const cases = [];
+  for (const theme of ['light', 'dark'] as const) {
+    for (const navigationWidth of [200, 300]) {
+      const page = await browser.newPage({
+        viewport: { width: 1280, height: 800 },
+        colorScheme: theme,
+        locale: 'zh-CN',
+      });
+      page.setDefaultTimeout(10000);
+      const errors: string[] = [];
+      const phases: unknown[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      try {
+        await page.addInitScript((width) => {
+          localStorage.setItem('kite.client.navigationWidth', String(width));
+        }, navigationWidth);
+        await page.goto(`${url}?worktree-indicator=1`);
+        const row = (id: string) =>
+          page.getByRole('button', { name: `Session ${id.toUpperCase()}`, exact: true });
+        const ready = (id: string) =>
+          page.waitForFunction(
+            (id) =>
+              document.querySelector('.breadcrumb strong')?.textContent ===
+                `Session ${id.toUpperCase()}` &&
+              !document.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled &&
+              !document.querySelector('.composer')?.hasAttribute('data-session-loading'),
+            id,
+          );
+        const phase = async (name: string) => {
+          await page.evaluate(() => new Promise(requestAnimationFrame));
+          const snapshot = await page.evaluate(() => {
+            const rect = (element: Element | null) => {
+              if (!element) return null;
+              const box = element.getBoundingClientRect();
+              return { x: box.x, y: box.y, width: box.width, height: box.height };
+            };
+            return {
+              selected: document.querySelector('.breadcrumb strong')?.textContent,
+              input: rect(document.querySelector('.composer [role="textbox"]')),
+              rows: ['a', 'b'].map((id) => {
+                const node = document.querySelector(`[aria-label="Session ${id.toUpperCase()}"]`);
+                const icon = node?.querySelector('.session-worktree-icon') ?? null;
+                return {
+                  id,
+                  text: node?.textContent,
+                  description: node?.getAttribute('aria-description'),
+                  row: rect(node),
+                  title: rect(node?.querySelector('.nav-copy') ?? null),
+                  icon: rect(icon),
+                  spinner: !!node?.querySelector('[aria-label="会话运行中"]'),
+                  awaiting: node?.textContent?.includes('待用户输入') ?? false,
+                  unread: !!node?.querySelector('.session-unread-dot'),
+                };
+              }),
+              messages: [...document.querySelectorAll<HTMLElement>('article.message')]
+                .filter((node) => node.getBoundingClientRect().height > 0)
+                .map((node) => ({ id: node.dataset.messageId, text: node.textContent })),
+              scrollTop:
+                [...document.querySelectorAll<HTMLElement>('.conversation-viewport')].find(
+                  (node) => node.getBoundingClientRect().height > 0,
+                )?.scrollTop ?? null,
+            };
+          });
+          for (const entry of snapshot.rows) {
+            if (!entry.icon) continue;
+            assert.equal(entry.icon.width, 14);
+            assert.equal(entry.icon.height, 14);
+            assert.ok(entry.row && entry.title);
+            assert.ok(entry.icon.x >= entry.title.x + entry.title.width - 0.1);
+            assert.ok(entry.icon.x + entry.icon.width <= entry.row.x + entry.row.width);
+          }
+          const screenshot = path.join(
+            artifact,
+            `worktree-${theme}-${navigationWidth}-${name}.png`,
+          );
+          await page.screenshot({ path: screenshot });
+          phases.push({ name, screenshot, ...snapshot });
+          return snapshot;
+        };
+        await row('a').click();
+        await ready('a');
+        const before = await phase('01-before-create');
+        assert.ok(before.rows.every((entry) => !entry.icon));
+        assert.notEqual(before.scrollTop, null);
+        assert.equal(before.messages.filter((message) => message.id === 'u-a').length, 1);
+        await page.evaluate(() => window.sessionShellFixture.createdWorktree('a'));
+        await row('a').locator('.session-worktree-icon').waitFor();
+        const running = await phase('02-created-running');
+        assert.equal(running.rows[0]!.spinner, true);
+        assert.equal(running.rows[1]!.icon, null);
+        assert.deepEqual(running.input, before.input);
+        assert.deepEqual(running.messages, before.messages);
+        assert.equal(running.scrollTop, before.scrollTop);
+        await page.evaluate(() => {
+          const a = document.querySelector('[aria-label="Session A"]')!;
+          const icon = a.querySelector('.session-worktree-icon')!;
+          Object.assign(window, {
+            worktreeIconObservation: { node: icon, changed: 0, frames: 0, active: true },
+          });
+          const tick = () => {
+            const state = (
+              window as unknown as {
+                worktreeIconObservation: {
+                  node: Element;
+                  changed: number;
+                  frames: number;
+                  active: boolean;
+                };
+              }
+            ).worktreeIconObservation;
+            if (!state.active) return;
+            state.frames++;
+            if (
+              document.querySelector('[aria-label="Session A"] .session-worktree-icon') !==
+              state.node
+            )
+              state.changed++;
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+        await page.evaluate(() => window.sessionShellFixture.setPendingInteractions('a', 1));
+        await row('a').getByText('待用户输入').waitFor();
+        const awaiting = await phase('03-awaiting-input');
+        assert.equal(awaiting.rows[0]!.awaiting, true);
+        assert.ok(awaiting.rows[0]!.icon);
+        assert.deepEqual(awaiting.messages, before.messages);
+        assert.equal(awaiting.scrollTop, before.scrollTop);
+        await page.evaluate(() => window.sessionShellFixture.setPendingInteractions('a', 0));
+        await row('b').click();
+        await ready('b');
+        await phase('04-switched-b');
+        await page.evaluate(() => window.sessionShellFixture.setTurn('a', 'completed'));
+        await row('a').locator('.session-unread-dot').waitFor();
+        const completed = await phase('05-completed-unread');
+        assert.equal(completed.rows[0]!.spinner, false);
+        assert.equal(completed.rows[0]!.unread, true);
+        assert.ok(completed.rows[0]!.icon);
+        await page.evaluate(() => window.sessionShellFixture.refresh(true));
+        await phase('06-refreshing');
+        await page.evaluate(() => window.sessionShellFixture.refresh(false));
+        await ready('b');
+        await phase('07-refreshed');
+        await row('a').click();
+        await ready('a');
+        await page.waitForFunction(
+          () => !document.querySelector('[aria-label="Session A"] .session-unread-dot'),
+        );
+        await phase('08-returned-read');
+        await page.mouse.move(1000, 600);
+        await row('a').hover();
+        await page.getByRole('tooltip').filter({ hasText: '已创建 Git 工作树' }).waitFor();
+        await phase('09-tooltip');
+        const observation = await page.evaluate(() => {
+          const state = (
+            window as unknown as {
+              worktreeIconObservation: { changed: number; frames: number; active: boolean };
+            }
+          ).worktreeIconObservation;
+          state.active = false;
+          return { changed: state.changed, frames: state.frames };
+        });
+        assert.equal(observation.changed, 0);
+        assert.ok(observation.frames > 0);
+        await page.evaluate(() => window.remountSessionShellFixture());
+        await ready('a');
+        await row('a').locator('.session-worktree-icon').waitFor();
+        const remounted = await phase('10-remounted');
+        assert.equal(remounted.rows[1]!.icon, null);
+        const requests = await page.evaluate(() =>
+          window.sessionShellFixture.requests.map((request) => request.method),
+        );
+        assert.deepEqual(
+          requests.filter((method) => /^(caller\.|submit$|input\.submit$)/.test(method)),
+          [],
+        );
+        assert.deepEqual(errors, []);
+        cases.push({ theme, navigationWidth, phases, observation, errors });
+      } finally {
+        await page.close();
+      }
+    }
+  }
+  return cases;
+}
+
 type SwitchGeometry = {
   state: string | null;
   width: number;

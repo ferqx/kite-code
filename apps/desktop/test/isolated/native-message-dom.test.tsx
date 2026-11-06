@@ -251,6 +251,10 @@ test('operation errors expose finite readable copy and never echo an unknown cau
   expect(humanReadableOperationError('permission_denied')).toContain('权限');
   expect(humanReadableOperationError('workspace_not_found')).toContain('工作区已不存在');
   expect(humanReadableOperationError('workspace_unavailable')).toContain('工作区暂不可用');
+  for (const code of ['workspace_directory_unavailable', 'workspace_identity_unavailable']) {
+    expect(humanReadableOperationError(code)).toContain('恢复原目录');
+    expect(humanReadableOperationError(code)).toContain('已有历史仍可阅读');
+  }
   expect(humanReadableOperationError('workspace_untrusted')).toContain('尚未受信任');
   expect(humanReadableOperationError('branch_not_found')).toContain('分支已不存在');
   expect(humanReadableOperationError('native_directory_unavailable')).toContain('目录暂时无法读取');

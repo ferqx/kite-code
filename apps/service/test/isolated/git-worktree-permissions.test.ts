@@ -16,6 +16,7 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { Json, ToolResult } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   closeWorktreeFixture,
@@ -28,10 +29,10 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { defaultTaskRoles } from '../../src/task-configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
-const native = process.platform === 'darwin' ? test : test.skip;
+const native = ['darwin', 'win32'].includes(process.platform) ? test : test.skip;
 const receipt = (value: Json | null | undefined) => value as unknown as ToolResult | undefined;
 function nativeWithDefaultHome(name: string, run: () => Promise<void>, timeoutMs: number) {
-  native(
+  (process.platform === 'darwin' ? test : test.skip)(
     name,
     async () => {
       if (process.env.KITE_WORKTREE_HOME_CASE === name) return run();
@@ -73,8 +74,12 @@ function nativeWithDefaultHome(name: string, run: () => Promise<void>, timeoutMs
   );
 }
 type Call = { name: string; arguments: object };
-async function until<T>(read: () => Promise<T | null>, label: string): Promise<T> {
-  const deadline = Date.now() + 20000;
+async function until<T>(
+  read: () => Promise<T | null>,
+  label: string,
+  timeoutMs = 20000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await read();
     if (value !== null) return value;
@@ -104,14 +109,36 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
   const source = join(root, 'source'),
     target = join(root, 'target');
   mkdirSync(source);
+  const windows = process.platform === 'win32' ? await windowsShellFixture() : undefined;
+  const gitExecutable = windows
+    ? join(dirname(windows.fullShell), '../../mingw64/bin/git.exe')
+    : '/usr/bin/git';
+  const environment = windows
+    ? Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] =>
+            typeof entry[1] === 'string' &&
+            [
+              'SYSTEMROOT',
+              'WINDIR',
+              'USERPROFILE',
+              'HOMEDRIVE',
+              'HOMEPATH',
+              'TEMP',
+              'TMP',
+              'PATH',
+            ].includes(entry[0].toUpperCase()),
+        ),
+      )
+    : { PATH: '/usr/bin:/bin' };
   const git = (...args: string[]) => {
-    const result = Bun.spawnSync(['/usr/bin/git', ...args], {
+    const result = Bun.spawnSync([gitExecutable, ...args], {
       cwd: source,
       env: {
-        PATH: '/usr/bin:/bin',
+        ...environment,
         HOME: source,
         GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_GLOBAL: windows ? 'NUL' : '/dev/null',
         GIT_TERMINAL_PROMPT: '0',
       },
       stdout: 'pipe',
@@ -198,6 +225,31 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
             key: 'auto-remove',
             path: target,
             permissions: writeScope,
+          },
+        },
+      ];
+    if (scenario === 'dirty-remove' || scenario === 'registered-remove')
+      return [
+        {
+          name: 'git_worktree',
+          arguments: { action: 'remove', key: scenario, path: target, permissions: writeScope },
+        },
+      ];
+    if (scenario === 'overlap-create' || scenario === 'workspace-create')
+      return [
+        {
+          name: 'git_worktree',
+          arguments: {
+            action: 'create',
+            key: scenario,
+            path:
+              scenario === 'overlap-create'
+                ? join(source, 'nested-worktree')
+                : join(root, 'outside-write-scope'),
+            permissions:
+              scenario === 'workspace-create'
+                ? { filesystem: 'workspace_write', network: 'none' }
+                : writeScope,
           },
         },
       ];
@@ -379,12 +431,21 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
       credentialBackend: createTemporaryCredentialBackend(),
       ...(requirePlan ? { planning: { requirePlan: true } } : {}),
       shell: {
-        platform: 'darwin',
+        platform: windows ? 'win32' : 'darwin',
         configurationId: 'worktree-permission-fixture',
-        env: { PATH: '/usr/bin:/bin', HOME: defaultRootCase ? home : source },
-        supervisorPath: built.outputs[0]!.path,
+        env: { ...environment, HOME: defaultRootCase ? home : source },
+        supervisorPath: windows?.runner ?? built.outputs[0]!.path,
         bunExecutable: process.execPath,
-        shellExecutable: '/bin/sh',
+        shellExecutable: windows?.shell ?? '/bin/sh',
+        ...(windows
+          ? {
+              windows: {
+                coreutilsPath: windows.coreutils,
+                fullShellExecutable: windows.fullShell,
+                stateRoot: windows.stateRoot,
+              },
+            }
+          : {}),
         host: {
           controlBase: control,
           protectedRoots: [],
@@ -434,7 +495,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
         workspaceId: 'source',
         mode,
         trusted: true,
-        nativeShellRead: true,
+        nativeShellRead: process.platform === 'darwin',
       });
       await runtime.submitCommand({
         ...base,
@@ -526,7 +587,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
         workspaceId: 'source',
         mode,
         trusted: true,
-        nativeShellRead: true,
+        nativeShellRead: process.platform === 'darwin',
       });
       await runtime.submitCommand({
         ...base,
@@ -534,56 +595,60 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
         request: { kind: 'run.start', content: `WORKTREE_CASE:${scenario}` },
       });
       const approvals: string[] = [];
-      const result = await until(async () => {
-        const parentExecutions = await store.listExecutions(scenario);
-        const carrier = parentExecutions.find(
-          (row) => row.definitionId === 'agent/general' && row.childSessionId,
-        );
-        const pending = await runtime.listInteractions({
-          expectedStoreId,
-          sessionId: scenario,
-          origin: 'all',
-          state: 'pending',
-        });
-        for (const card of pending.interactions) {
-          expect(mode).toBe('accept_edits');
-          expect(card.kind).toBe('approval');
-          expect(card.definitionId).toBe('git.worktree');
-          expect(card.sessionId).toBe(carrier!.childSessionId!);
-          expect(card.presentationSessionId).toBe(scenario);
-          const execution = (await store.getExecution(card.executionId))!;
-          expect(execution).toMatchObject({
-            kind: 'tool',
-            status: 'planned',
-            authorization: { dispatched: false },
-          });
-          const removing = (execution.input as { action: string }).action === 'remove';
-          if (defaultRootCase) {
-            expect(existsSync(defaultRoot)).toBe(removing);
-            if (removing) expect(existsSync(defaultTarget!)).toBe(true);
-          } else expect(existsSync(target)).toBe(removing);
-          await runtime.answerInteraction({
+      const result = await until(
+        async () => {
+          const parentExecutions = await store.listExecutions(scenario);
+          const carrier = parentExecutions.find(
+            (row) => row.definitionId === 'agent/general' && row.childSessionId,
+          );
+          const pending = await runtime.listInteractions({
             expectedStoreId,
-            commandId: `answer-${card.id}`,
-            presentationSessionId: scenario,
-            interactionId: card.id,
-            expectedRevision: card.revision,
-            subjectId: 'owner',
-            answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+            sessionId: scenario,
+            origin: 'all',
+            state: 'pending',
           });
-          approvals.push(card.id);
-        }
-        if (
-          !carrier?.childSessionId ||
-          !['succeeded', 'failed', 'cancelled'].includes(carrier.status)
-        )
-          return null;
-        return {
-          carrier,
-          parentExecutions,
-          executions: await store.listExecutions(carrier.childSessionId),
-        };
-      }, 'writable general business authorization');
+          for (const card of pending.interactions) {
+            expect(mode).toBe('accept_edits');
+            expect(card.kind).toBe('approval');
+            expect(card.definitionId).toBe('git.worktree');
+            expect(card.sessionId).toBe(carrier!.childSessionId!);
+            expect(card.presentationSessionId).toBe(scenario);
+            const execution = (await store.getExecution(card.executionId))!;
+            expect(execution).toMatchObject({
+              kind: 'tool',
+              status: 'planned',
+              authorization: { dispatched: false },
+            });
+            const removing = (execution.input as { action: string }).action === 'remove';
+            if (defaultRootCase) {
+              expect(existsSync(defaultRoot)).toBe(removing);
+              if (removing) expect(existsSync(defaultTarget!)).toBe(true);
+            } else expect(existsSync(target)).toBe(removing);
+            await runtime.answerInteraction({
+              expectedStoreId,
+              commandId: `answer-${card.id}`,
+              presentationSessionId: scenario,
+              interactionId: card.id,
+              expectedRevision: card.revision,
+              subjectId: 'owner',
+              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+            });
+            approvals.push(card.id);
+          }
+          if (
+            !carrier?.childSessionId ||
+            !['succeeded', 'failed', 'cancelled'].includes(carrier.status)
+          )
+            return null;
+          return {
+            carrier,
+            parentExecutions,
+            executions: await store.listExecutions(carrier.childSessionId),
+          };
+        },
+        'writable general business authorization',
+        process.platform === 'win32' ? 60000 : 20000,
+      );
       await verifyWorktreeExecutionEvidence(
         store,
         result.carrier.childSessionId!,
@@ -704,7 +769,7 @@ native(
 );
 
 native(
-  'Auto list skips review; create/remove use generic original-action authorization through real Shell Jobs',
+  'Auto list/create/remove skip checks and approvals through real native Shell Jobs',
   async () => {
     const f = await fixture();
     let bodyError: unknown;
@@ -714,6 +779,14 @@ native(
       expect(
         list.executions.find((row) => row.definitionId === 'git.worktree')?.result,
       ).toMatchObject({ outcome: 'succeeded' });
+      const listJobs = list.executions.filter((row) => row.definitionId === 'shell.command');
+      expect(listJobs).toHaveLength(1);
+      expect(listJobs[0]!.input).toMatchObject({
+        permissions: { filesystem: 'workspace_write', network: 'none' },
+      });
+      expect(listJobs[0]!.authorization?.check).toBeUndefined();
+      expect(listJobs[0]!.authorization?.human).toBeUndefined();
+      expect(list.approvals).toHaveLength(0);
       expect(f.checks).toHaveLength(0);
       const created = await f.run('auto-create', 'auto');
       expect(created.command.status).toBe('applied');
@@ -727,12 +800,7 @@ native(
         removed.executions.find((row) => row.definitionId === 'git.worktree')?.result,
       ).toMatchObject({ outcome: 'succeeded', details: { mutation: 'completed' } });
       expect(existsSync(f.target)).toBe(false);
-      expect(f.checks).toHaveLength(2);
-      expect(
-        f.checks.every(
-          (check) => check.reviewPurpose === undefined && check.purpose === 'authorization_check',
-        ),
-      ).toBe(true);
+      expect(f.checks).toHaveLength(0);
       expect(
         [...created.executions, ...removed.executions].filter(
           (row) => row.definitionId === 'shell.command',
@@ -742,11 +810,12 @@ native(
         const tool = operation.executions.find((row) => row.definitionId === 'git.worktree')!;
         expect(tool.authorization).toMatchObject({
           dispatched: true,
-          check: { status: 'succeeded', decision: 'approve_once' },
         });
+        expect(tool.authorization?.check).toBeUndefined();
+        expect(tool.authorization?.human).toBeUndefined();
         for (const job of operation.executions.filter(
           (row) => row.definitionId === 'shell.command',
-        ))
+        )) {
           expect(job.authorization).toMatchObject({
             dispatched: true,
             policy: {
@@ -755,8 +824,127 @@ native(
               effectiveScope: { filesystem: 'full_access', network: 'none' },
             },
           });
+          expect(job.input).toMatchObject({
+            permissions: { filesystem: 'full_access', network: 'none' },
+          });
+          expect(job.authorization?.check).toBeUndefined();
+          expect(job.authorization?.human).toBeUndefined();
+        }
         expect(operation.approvals).toHaveLength(0);
       }
+    } catch (error) {
+      bodyError = error;
+    } finally {
+      await f.close(bodyError);
+    }
+  },
+  90000,
+);
+
+native(
+  'actual default general Auto creates and removes an explicit target without checks or cards',
+  async () => {
+    const f = await fixture();
+    let bodyError: unknown;
+    try {
+      const result = await f.runWritableChild('auto');
+      expect(result.carrier.status).toBe('succeeded');
+      expect(result.approvals).toHaveLength(0);
+      expect(f.checks).toHaveLength(0);
+      expect(result.parentExecutions.some((row) => row.definitionId === 'git.worktree')).toBe(
+        false,
+      );
+      const tools = result.executions.filter((row) => row.definitionId === 'git.worktree');
+      const jobs = result.executions.filter((row) => row.definitionId === 'shell.command');
+      expect(tools).toHaveLength(2);
+      expect(jobs).toHaveLength(4);
+      for (const tool of tools) {
+        expect(tool.result).toMatchObject({
+          outcome: 'succeeded',
+          details: { mutation: 'completed', cwdChanged: false },
+        });
+        expect(tool.sessionId).toBe(result.carrier.childSessionId!);
+        expect(tool.authorization?.check).toBeUndefined();
+        expect(tool.authorization?.human).toBeUndefined();
+        for (const job of jobs.filter((row) => row.parentExecutionId === tool.id)) {
+          expect(job.authorization?.policy).toMatchObject({
+            reason: 'parent_review',
+            sourceExecutionId: tool.id,
+            effectiveScope: { filesystem: 'full_access', network: 'none' },
+          });
+          expect(job.authorization?.check).toBeUndefined();
+          expect(job.authorization?.human).toBeUndefined();
+        }
+      }
+      expect(existsSync(f.target)).toBe(false);
+    } catch (error) {
+      bodyError = error;
+    } finally {
+      await f.close(bodyError);
+    }
+  },
+  90000,
+);
+
+native(
+  'Auto exemption retains dirty, registered workspace, overlap and requested write-scope protections',
+  async () => {
+    const f = await fixture();
+    let bodyError: unknown;
+    try {
+      const head = f.git('rev-parse', 'HEAD');
+      for (const scenario of ['overlap-create', 'workspace-create']) {
+        const result = await f.run(scenario, 'auto');
+        const tool = result.executions.find((row) => row.definitionId === 'git.worktree')!;
+        expect(tool.result).toMatchObject({
+          outcome: 'failed',
+          details: { mutation: 'not_started', cwdChanged: false },
+        });
+        if (scenario === 'overlap-create')
+          expect(receipt(tool.result)?.details).toMatchObject({ code: 'unsafe_target_path' });
+        else {
+          const jobs = result.executions.filter((row) => row.definitionId === 'shell.command');
+          expect(jobs).toHaveLength(2);
+          for (const job of jobs)
+            expect(job.input).toMatchObject({
+              permissions: { filesystem: 'workspace_write', network: 'none' },
+            });
+        }
+        expect(result.approvals).toHaveLength(0);
+      }
+      expect(existsSync(join(f.source, 'nested-worktree'))).toBe(false);
+      expect(existsSync(join(f.root, 'outside-write-scope'))).toBe(false);
+      const created = await f.run('auto-create', 'auto');
+      expect(
+        created.executions.find((row) => row.definitionId === 'git.worktree')?.result,
+      ).toMatchObject({ outcome: 'succeeded' });
+      writeFileSync(join(f.target, 'tracked.txt'), 'local dirty contents\n');
+      const dirty = await f.run('dirty-remove', 'auto');
+      expect(
+        dirty.executions.find((row) => row.definitionId === 'git.worktree')?.result,
+      ).toMatchObject({
+        outcome: 'failed',
+        details: { code: 'worktree_dirty', mutation: 'not_started' },
+      });
+      expect(readFileSync(join(f.target, 'tracked.txt'), 'utf8')).toBe('local dirty contents\n');
+      writeFileSync(join(f.target, 'tracked.txt'), readFileSync(join(f.source, 'tracked.txt')));
+      await f.runtime.createWorkspace({
+        expectedStoreId: (await f.store.getMetadata()).storeId,
+        id: 'registered-target',
+        rootUri: pathToFileURL(f.target).href,
+        name: 'registered target',
+      });
+      const registered = await f.run('registered-remove', 'auto');
+      expect(
+        registered.executions.find((row) => row.definitionId === 'git.worktree')?.result,
+      ).toMatchObject({
+        outcome: 'failed',
+        details: { code: 'worktree_registered_workspace', mutation: 'not_started' },
+      });
+      expect(existsSync(f.target)).toBe(true);
+      expect(f.git('rev-parse', 'HEAD')).toBe(head);
+      expect(f.checks).toHaveLength(0);
+      for (const result of [created, dirty, registered]) expect(result.approvals).toHaveLength(0);
     } catch (error) {
       bodyError = error;
     } finally {
@@ -854,8 +1042,7 @@ for (const mode of ['accept_edits', 'auto'] as const)
           defaultRoot: f.defaultRoot,
           sourceCwd: f.source,
         });
-        if (mode === 'auto')
-          expect(f.reviewObservations[0]).toEqual({ rootExists: false, jobs: 0 });
+        if (mode === 'auto') expect(f.reviewObservations).toHaveLength(0);
         const removed = await f.run('default-remove', mode);
         const remove = removed.executions.find((row) => row.definitionId === 'git.worktree')!;
         expect(remove.input).toMatchObject({ action: 'remove', path });
@@ -874,7 +1061,7 @@ for (const mode of ['accept_edits', 'auto'] as const)
         expect(f.git('rev-parse', 'HEAD')).toBe(sourceHead);
         expect(readFileSync(join(f.source, 'tracked.txt'), 'utf8')).toBe(sourceContent);
         expect(readFileSync(f.config, 'utf8')).toBe(configBefore);
-        expect(f.checks).toHaveLength(mode === 'auto' ? 2 : 0);
+        expect(f.checks).toHaveLength(0);
         for (const operation of [created, removed]) {
           expect(operation.command.status).toBe('applied');
           expect(operation.approvals).toHaveLength(mode === 'accept_edits' ? 1 : 0);
@@ -970,18 +1157,14 @@ for (const mode of ['accept_edits', 'auto'] as const)
         expect(existsSync(createdPath)).toBe(false);
         expect(jobs).toHaveLength(4);
         expect(result.approvals).toHaveLength(mode === 'auto' ? 0 : 2);
-        expect(f.checks).toHaveLength(mode === 'auto' ? 2 : 0);
+        expect(f.checks).toHaveLength(0);
         for (const tool of tools) {
           expect(tool.result).toMatchObject({
             outcome: 'succeeded',
             details: { mutation: 'completed', cwdChanged: false },
           });
           expect(tool.sessionId).toBe(result.carrier.childSessionId!);
-          if (mode === 'auto')
-            expect(tool.authorization?.check).toMatchObject({
-              status: 'succeeded',
-              decision: 'approve_once',
-            });
+          if (mode === 'auto') expect(tool.authorization?.check).toBeUndefined();
           else
             expect(tool.authorization?.human).toMatchObject({
               accepted: true,

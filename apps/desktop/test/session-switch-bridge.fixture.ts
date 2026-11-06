@@ -24,6 +24,7 @@ export function sessionSwitchBridge(
     contextUsage?: boolean;
     initialSelection?: boolean;
     holdDraft?: boolean;
+    worktreeNavigation?: boolean;
   } = {},
 ) {
   const base = backgroundShellItem();
@@ -47,7 +48,13 @@ export function sessionSwitchBridge(
   const listeners = new Set<(event: NativeEvent) => void>();
   const requests: NativeRequest[] = [];
   const readTurns = options.readTurns ?? new Map<string, string>();
+  const createdWorktrees = new Set<string>();
+  const pendingInteractions = new Map<string, number>();
   let receiptFailure = false;
+  let navigationSource = true;
+  let heldDirectory = false;
+  const unavailableWorkspaces = new Set<string>();
+  let releaseDirectory: (() => void) | undefined;
   const send = () => {
     for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
   };
@@ -82,20 +89,35 @@ export function sessionSwitchBridge(
   const directory = (): NativeDirectory => ({
     storeId: 'store',
     ...(options.turnNotifications ? { readTurns: [...readTurns] } : {}),
-    sessions: sessions.map((session) =>
-      options.turnNotifications
+    sessions: sessions.map((session) => ({
+      ...session,
+      ...(options.worktreeNavigation && session.id === 'b'
         ? {
-            ...session,
+            workspaceId: 'worktree',
+            ...(navigationSource ? { worktreeSource: { sessionId: 'a', workspaceId: 'w' } } : {}),
+          }
+        : {}),
+      ...(options.turnNotifications || options.worktreeNavigation
+        ? {
             activity: {
               updatedAt: null,
               run: turns.get(session.id)!,
               queued: false,
-              pendingInteractions: 0,
+              pendingInteractions: pendingInteractions.get(session.id) ?? 0,
+              ...(createdWorktrees.has(session.id) ||
+              (options.worktreeNavigation && session.id === 'a')
+                ? { hasCreatedWorktree: true }
+                : {}),
             },
           }
-        : session,
-    ),
-    workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+        : {}),
+    })),
+    workspaces: [
+      { id: 'w', name: 'Workspace', rootUri: 'file:///workspace' },
+      ...(options.worktreeNavigation
+        ? [{ id: 'worktree', name: 'Worktree project', rootUri: 'file:///worktree' }]
+        : []),
+    ],
   });
   const protocol = options.protocol;
   const run = () => ({
@@ -129,7 +151,7 @@ export function sessionSwitchBridge(
     inputSubmissions: [],
     permissionSubmissions: [],
     interactionSubmissions: [],
-    ...(options.turnNotifications ? { directory: directory() } : {}),
+    ...(options.turnNotifications || options.worktreeNavigation ? { directory: directory() } : {}),
     selection:
       selecting || withdrawn || !hasSelection
         ? undefined
@@ -137,7 +159,11 @@ export function sessionSwitchBridge(
             storeId: 'store',
             viewGeneration: revision,
             viewSelection: view,
-            session: session(),
+            session: {
+              ...session(),
+              workspaceId: options.worktreeNavigation && selected === 'b' ? 'worktree' : 'w',
+            },
+            ...(unavailableWorkspaces.has(selected) ? { workspaceUnavailable: true } : {}),
             runs: [run()],
             executions: [],
             interactions: [],
@@ -145,7 +171,7 @@ export function sessionSwitchBridge(
             canReadModelOutput: false,
             viewLoading: refreshing,
             permissionUnavailable: refreshing || failed,
-            ...(!refreshing && !failed
+            ...(!refreshing && !failed && !unavailableWorkspaces.has(selected)
               ? {
                   permissions: {
                     observationId: view,
@@ -160,7 +186,8 @@ export function sessionSwitchBridge(
                     },
                     trust: {
                       storeId: 'store',
-                      workspaceId: 'w',
+                      workspaceId:
+                        options.worktreeNavigation && selected === 'b' ? 'worktree' : 'w',
                       status: 'trusted' as const,
                       trusted: true,
                       revision: '1',
@@ -177,7 +204,7 @@ export function sessionSwitchBridge(
     generation: 1,
     storeId: 'store',
     sessionId: selected,
-    workspaceId: 'w',
+    workspaceId: options.worktreeNavigation && selected === 'b' ? 'worktree' : 'w',
     viewSelection: 'viewSelection' in request ? request.viewSelection : view,
     historyEpoch: 0,
   });
@@ -201,8 +228,16 @@ export function sessionSwitchBridge(
         case 'attach':
         case 'state':
           return state();
-        case 'directory':
-          return directory();
+        case 'directory': {
+          const result = directory();
+          if (heldDirectory) {
+            heldDirectory = false;
+            await new Promise<void>((resolve) => {
+              releaseDirectory = resolve;
+            });
+          }
+          return result;
+        }
         case 'select': {
           hasSelection = true;
           selected = request.sessionId;
@@ -222,7 +257,7 @@ export function sessionSwitchBridge(
           const draft = {
             id: selected,
             storeId: 'store',
-            workspaceId: 'w',
+            workspaceId: options.worktreeNavigation && selected === 'b' ? 'worktree' : 'w',
             rootSessionId: selected,
             revision: 1,
             content: options.drafts?.[selected] ?? `Draft ${selected.toUpperCase()}`,
@@ -427,6 +462,16 @@ export function sessionSwitchBridge(
       revision++;
       send();
     },
+    createdWorktree(sessionId: string) {
+      createdWorktrees.add(sessionId);
+      revision++;
+      send();
+    },
+    setPendingInteractions(sessionId: string, count: number) {
+      pendingInteractions.set(sessionId, count);
+      revision++;
+      send();
+    },
     refresh(value: boolean) {
       refreshing = value;
       revision++;
@@ -442,6 +487,23 @@ export function sessionSwitchBridge(
       receiptFailure = value;
       revision++;
       send();
+    },
+    navigationSource(value: boolean) {
+      navigationSource = value;
+    },
+    unavailableWorkspace(sessionId: string, value: boolean) {
+      if (value) unavailableWorkspaces.add(sessionId);
+      else unavailableWorkspaces.delete(sessionId);
+      revision++;
+      send();
+    },
+    holdNavigationDirectory() {
+      heldDirectory = true;
+    },
+    navigationDirectoryHeld: () => !!releaseDirectory,
+    releaseNavigationDirectory() {
+      releaseDirectory?.();
+      releaseDirectory = undefined;
     },
   };
 }

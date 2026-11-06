@@ -18,6 +18,9 @@ export function humanReadableOperationError(code: string, operation?: string): s
     case 'workspace_unavailable':
     case 'workspace_observation_unavailable':
       return '工作区暂不可用，请检查目录是否仍存在且可以访问。';
+    case 'workspace_directory_unavailable':
+    case 'workspace_identity_unavailable':
+      return '工作区目录已不存在、已移动或无法访问。请恢复原目录，或添加新的项目目录；已有历史仍可阅读。';
     case 'workspace_untrusted':
     case 'workspace_not_trusted':
     case 'workspace_trust_required':

@@ -1681,6 +1681,7 @@ export const WorkspaceDirectoryPageSchema = z.object({
 });
 export const SessionDirectoryActivitySchema = z.object({
   updatedAt: z.number().int().min(0).max(8640000000000000).nullable(),
+  hasCreatedWorktree: z.boolean().optional(),
   executionOwner: z.enum(['held', 'unheld', 'unknown']).optional(),
   run: z.object({ id, status: runStatus, isActive: z.boolean() }).nullable(),
   queued: z.boolean(),
@@ -1694,6 +1695,7 @@ export const SessionDirectoryPageSchema = z.object({
         seq: sequence,
         session: schemas.Session,
         activity: SessionDirectoryActivitySchema.optional(),
+        worktreeSource: z.strictObject({ sessionId: id, workspaceId: id }).optional(),
       }),
     )
     .max(200),

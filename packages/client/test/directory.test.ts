@@ -206,11 +206,24 @@ for (const browser of [false, true])
         value.items[0]!.session.id = after ? 'two' : scans === 1 ? 'discarded-prefix' : 'fresh-one';
         if (mode !== 'missing')
           Object.assign(value.items[0]!, {
+            ...(!after
+              ? {
+                  worktreeSource:
+                    mode === 'bad-source'
+                      ? {
+                          sessionId: 1,
+                          workspaceId: 'source-workspace',
+                          rootUri: 'PRIVATE_PATH',
+                        }
+                      : { sessionId: 'source', workspaceId: 'source-workspace' },
+                }
+              : {}),
             activity: {
               updatedAt: mode === 'bad-time' ? -1 : 1000 + scans,
               run: null,
               queued: false,
               pendingInteractions: 0,
+              hasCreatedWorktree: after ? undefined : true,
             },
           });
         return Response.json(value, { headers: { 'x-kite-web-identity': identity } });
@@ -236,11 +249,18 @@ for (const browser of [false, true])
     const result = await client.listAllSessionDirectory();
     expect(result.map((item) => item.session.id)).toEqual(['fresh-one', 'two']);
     expect(result.every((item) => item.activity?.updatedAt === 1002)).toBe(true);
+    expect(result[0]!.activity?.hasCreatedWorktree).toBe(true);
+    expect(result[1]!.activity?.hasCreatedWorktree).toBeUndefined();
+    expect(result[0]!.worktreeSource).toEqual({
+      sessionId: 'source',
+      workspaceId: 'source-workspace',
+    });
+    expect(result[1]!.worktreeSource).toBeUndefined();
     expect(scans).toBe(2);
     expect(queries[1]).toContain('snapshotCursor=1');
     expect(queries[3]).toContain('snapshotCursor=2');
     expect(queries[3]).toContain('upperSeq=9007199254740994');
-    for (const next of ['drift', 'missing', 'bad-time', 'changing']) {
+    for (const next of ['drift', 'missing', 'bad-time', 'bad-source', 'changing']) {
       mode = next;
       scans = 0;
       queries.length = 0;

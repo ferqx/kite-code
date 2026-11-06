@@ -20,7 +20,10 @@ export const control = sessionSwitchBridge({
   modelNames: { b: 'Model B Extended Reasoning Route' },
   replyParagraphs: new URL(location.href).searchParams.has('long') ? 40 : 0,
   initialSelection: !new URL(location.href).searchParams.has('long'),
-  turnNotifications: new URL(location.href).searchParams.has('turn-notifications'),
+  worktreeNavigation: new URL(location.href).searchParams.has('worktree-navigation'),
+  turnNotifications:
+    new URL(location.href).searchParams.has('turn-notifications') ||
+    new URL(location.href).searchParams.has('worktree-indicator'),
   cacheMetrics: !['none', 'context'].includes(
     new URL(location.href).searchParams.get('metrics') ?? '',
   ),
@@ -31,6 +34,7 @@ export const control = sessionSwitchBridge({
 declare global {
   interface Window {
     sessionShellFixture: typeof control;
+    remountSessionShellFixture: () => void;
   }
 }
 Object.defineProperty(window, 'kiteNative', { value: control.bridge });
@@ -182,7 +186,13 @@ const formControls = new URL(location.href).searchParams.has('form-controls');
 if (formControls)
   document.documentElement.dataset.theme =
     new URL(location.href).searchParams.get('theme') ?? 'light';
-createRoot(document.getElementById('root')!).render(
+let root = createRoot(document.getElementById('root')!);
+window.remountSessionShellFixture = () => {
+  root.unmount();
+  root = createRoot(document.getElementById('root')!);
+  root.render(<NativeDesktop nativeWindow={settingsGeometry} />);
+};
+root.render(
   formControls ? (
     <section className="kite-client" aria-label="公共表单组件" style={{ padding: 24 }}>
       {['normal', 'invalid', 'disabled'].map((state) => (

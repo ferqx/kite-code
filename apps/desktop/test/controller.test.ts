@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { AgentClient, SessionView } from '@kite-ai/client';
+import { type AgentClient, ClientError, type SessionView } from '@kite-ai/client';
 import { createDesktopController } from '../src/controller';
 
 function view(id: string): SessionView {
@@ -21,6 +21,99 @@ function view(id: string): SessionView {
     executions: [],
   };
 }
+
+test('a missing workspace preserves a fresh readable selection without permission facts and recovers only after a new trust read', async () => {
+  let missing = false;
+  let trusted = true;
+  const published: string[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
+    async getView(id: string) {
+      return view(id);
+    },
+    async getPermissionMode() {
+      return { storeId: 'store', sessionId: 'root', revision: 'mode' };
+    },
+    async getWorkspaceTrust() {
+      if (missing) throw new ClientError('workspace_identity_unavailable');
+      return {
+        storeId: 'store',
+        workspaceId: 'w',
+        trusted,
+        revision: 'restored',
+        readScopes: [],
+      };
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot: (snapshot) => published.push(snapshot.sessionId),
+  });
+  expect((await controller.selectSession('root'))?.permissions?.trust.trusted).toBe(true);
+  missing = true;
+  const missingSnapshot = await controller.refreshSession('root');
+  expect(missingSnapshot?.view.session.id).toBe('root');
+  expect(missingSnapshot).toMatchObject({ workspaceUnavailable: true });
+  expect(missingSnapshot?.permissions).toBeUndefined();
+  await expect(controller.setPermissionMode('full', false, 1)).rejects.toMatchObject({
+    code: 'permission_observation_changed',
+  });
+  missing = false;
+  trusted = false;
+  const recovered = await controller.refreshSession('root');
+  expect(recovered).not.toHaveProperty('workspaceUnavailable', true);
+  expect(recovered?.permissions?.trust).toMatchObject({ trusted: false, revision: 'restored' });
+  expect(published).toEqual(['root', 'root', 'root']);
+});
+
+test('only an unavailable workspace identity permits readonly selection; other permission failures remain failures', async () => {
+  let failure = 'workspace_identity_unavailable';
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
+    getView: async (id: string) => view(id),
+    getPermissionMode: async () => ({}),
+    getWorkspaceTrust: async () => {
+      throw new ClientError(failure);
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({ admittedClient: client, onSnapshot() {} });
+  await controller.selectSession('root');
+  for (const code of ['network_unavailable', 'store_identity_mismatch', 'invalid_subject']) {
+    failure = code;
+    await expect(controller.refreshSession('root')).rejects.toMatchObject({ code });
+    expect(controller.snapshot).toBeUndefined();
+  }
+});
+
+test('a retired missing-workspace trust read cannot publish into a later selection', async () => {
+  let rejectOld!: (error: unknown) => void;
+  let reads = 0;
+  const visible: string[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
+    getView: async (id: string) => view(id),
+    getPermissionMode: async () => ({}),
+    getWorkspaceTrust: async () => {
+      if (++reads === 1)
+        return new Promise((_, reject) => {
+          rejectOld = reject;
+        });
+      return { readScopes: [], trusted: false };
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot: (snapshot) => visible.push(snapshot.sessionId),
+  });
+  const old = controller.selectSession('old');
+  while (!rejectOld) await Bun.sleep(1);
+  await controller.selectSession('new');
+  rejectOld(new ClientError('workspace_identity_unavailable'));
+  await old;
+  expect(controller.snapshot?.sessionId).toBe('new');
+  expect(controller.snapshot?.workspaceUnavailable).toBeUndefined();
+  expect(visible).toEqual(['new']);
+});
 
 test('session activation reconciles before publishing history while ordinary refresh remains read-only', async () => {
   const calls: string[] = [];

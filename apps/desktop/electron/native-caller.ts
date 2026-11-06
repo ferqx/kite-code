@@ -670,6 +670,11 @@ export class NativeCaller {
       throw new ClientError('child_session_readonly');
     return snapshot;
   }
+  private availableWorkspaceScope(sessionId: string) {
+    const snapshot = this.writableScope(sessionId);
+    if (snapshot.workspaceUnavailable) throw new ClientError('workspace_identity_unavailable');
+    return snapshot;
+  }
   private releaseReads(includeGlobalSettings = true) {
     this.inputQueue.release();
     this.environment.release();
@@ -747,6 +752,7 @@ export class NativeCaller {
         ? (await this.client.listAllSessionDirectory({ signal: abort.signal })).map((item) => ({
             ...item.session,
             activity: item.activity,
+            ...(item.worktreeSource ? { worktreeSource: item.worktreeSource } : {}),
           }))
         : await this.client.listAllSessions({ signal: abort.signal });
       this.check(generation);
@@ -1108,7 +1114,7 @@ export class NativeCaller {
         ? this.observationUnavailable ||
           snapshot.view.session.deletedAt !== null ||
           (unavailable && !viewLoading)
-        : unavailable || viewLoading)
+        : unavailable || viewLoading || snapshot.workspaceUnavailable)
     )
       return undefined;
     return {
@@ -1127,7 +1133,8 @@ export class NativeCaller {
             canReadExtensions: this.client.serverInfo!.capabilities.includes('extension_queries'),
             canInvokeExtensions:
               this.client.serverInfo!.capabilities.includes('extensions_actions') &&
-              this.client.serverInfo!.capabilities.includes('commands'),
+              this.client.serverInfo!.capabilities.includes('commands') &&
+              !snapshot.workspaceUnavailable,
             canReadModelOutput: this.client.serverInfo!.capabilities.includes('model_outputs'),
             canReadModelInput: this.client.serverInfo!.capabilities.includes('model_inputs'),
             canReadPermissionGrants:
@@ -1175,6 +1182,7 @@ export class NativeCaller {
             interactions: snapshot.interactions,
             interactionsAfterId: snapshot.interactionsAfterId,
             permissions: unavailable ? undefined : snapshot.permissions,
+            ...(snapshot.workspaceUnavailable ? { workspaceUnavailable: true } : {}),
             permissionUnavailable: unavailable,
             viewLoading,
           }
@@ -1317,6 +1325,7 @@ export class NativeCaller {
   ) {
     await this.drainRefresh();
     this.check(request.generation);
+    this.availableWorkspaceScope(this.selected ?? '');
     await this.fileChanges.open(request.changeId, request.editor, perform);
     this.check(request.generation);
   }
@@ -1326,6 +1335,7 @@ export class NativeCaller {
   ) {
     await this.drainRefresh();
     this.check(request.generation);
+    this.availableWorkspaceScope(this.selected ?? '');
     await this.fileChanges.openMessageFile(request, perform);
     this.check(request.generation);
   }
@@ -1433,6 +1443,22 @@ export class NativeCaller {
         ? this.environment
         : this.background;
     let result: NativeResult;
+    if (
+      this.controller.snapshot?.workspaceUnavailable &&
+      [
+        'input.queue.steer',
+        'fileRecovery.begin',
+        'fileRecovery.continue',
+        'extensions.invoke',
+        'fileChanges.open',
+        'messageFile.open',
+        'context.rewind',
+        'context.include',
+        'context.compress',
+        'context.resetCompression',
+      ].includes(request.method)
+    )
+      throw new ClientError('workspace_identity_unavailable');
     switch (request.method) {
       case 'session.markRead': {
         const snapshot = this.selectScope(request.sessionId);
@@ -2341,7 +2367,9 @@ export class NativeCaller {
         };
         break;
       case 'caller.prepare': {
-        this.writableScope(request.sessionId);
+        if (request.intent.kind === 'command.cancel' || request.intent.kind === 'execution.cancel')
+          this.writableScope(request.sessionId);
+        else this.availableWorkspaceScope(request.sessionId);
         const row = await this.requireCaller().prepare(
           request.sessionId,
           request.intent,
@@ -2361,6 +2389,18 @@ export class NativeCaller {
       }
       case 'caller.submit':
       case 'caller.lookup': {
+        const stored = this.requireCaller()
+          .records()
+          .find((row) => row.intent.request.commandId === request.commandId);
+        if (
+          request.method === 'caller.submit' &&
+          stored &&
+          stored.intent.request.kind !== 'command.cancel' &&
+          stored.intent.request.kind !== 'execution.cancel' &&
+          this.controller.snapshot?.workspaceUnavailable &&
+          this.controller.snapshot.sessionId === stored.intent.scope.sessionId
+        )
+          throw new ClientError('workspace_identity_unavailable');
         let verified = true;
         try {
           const original = this.requireCaller()
@@ -2439,7 +2479,7 @@ export class NativeCaller {
         break;
       case 'submit': {
         const originalSelection = this.selection;
-        const snapshot = this.writableScope(request.sessionId);
+        const snapshot = this.availableWorkspaceScope(request.sessionId);
         if (request.intent.expectedStoreId !== snapshot.view.storeId)
           throw new ClientError('store_identity_mismatch');
         if (snapshot.permissions) {
@@ -2582,7 +2622,7 @@ export class NativeCaller {
         break;
       case 'permission.mode':
       case 'permission.trust': {
-        this.writableScope(this.selected ?? '');
+        this.availableWorkspaceScope(this.selected ?? '');
         if (this.permissionUnavailable) throw new ClientError('permission_facts_unavailable');
         if (
           this.conversation.permissionSubmissions.some((row) =>

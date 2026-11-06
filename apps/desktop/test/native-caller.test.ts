@@ -14,7 +14,7 @@ import type {
 } from '@kite-ai/client';
 import { ClientError, canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
-import { callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
+import { callerDigest, callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
 import { createNativeCallerGenerationOwner, NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { inspectNativeQuitWork } from '../electron/quit-settlement';
@@ -72,6 +72,343 @@ function client() {
     },
   } as unknown as AgentClient & { writes: number };
 }
+
+test('a missing workspace remains readable on cold selection while writes are refused until fresh identity and trust return', async () => {
+  const port = client();
+  port.serverInfo!.capabilities.push('permission_controls');
+  let missing = true;
+  Object.assign(port, {
+    getPermissionMode: async () => ({ storeId: 'store', sessionId: 'root', revision: '1' }),
+    getWorkspaceTrust: async () => {
+      if (missing) throw new ClientError('workspace_identity_unavailable');
+      return {
+        storeId: 'store',
+        workspaceId: 'w',
+        trusted: false,
+        revision: 'new',
+        readScopes: [],
+      };
+    },
+    verifyConnection: async () => port.serverInfo!,
+    listMessages: async () => [],
+  });
+  const caller = new NativeCaller(
+    port,
+    () => {},
+    memoryPrivateData(),
+    [],
+    undefined,
+    undefined,
+    undefined,
+    { storeId: 'store', sessionId: 'root' },
+  );
+  try {
+    const attached = (await caller.invoke({ method: 'attach' })) as NativeState;
+    expect(attached.selection).toMatchObject({
+      session: { id: 'root' },
+      workspaceUnavailable: true,
+    });
+    const state = (await caller.invoke({
+      method: 'select',
+      generation: 1,
+      sessionId: 'root',
+    })) as NativeState;
+    expect(state.selection).toMatchObject({
+      workspaceUnavailable: true,
+      permissionUnavailable: false,
+    });
+    expect(state.selection?.permissions).toBeUndefined();
+    const history = {
+      method: 'messages' as const,
+      generation: 1,
+      sessionId: 'root',
+      expectedStoreId: 'store',
+      readId: 'missing-root',
+      afterSeq: '0',
+      upperSeq: '0',
+      limit: 20,
+    };
+    expect(await caller.invoke(history)).toMatchObject({ messages: [], highWaterSeq: '0' });
+    for (const request of [
+      {
+        method: 'submit',
+        generation: 1,
+        sessionId: 'root',
+        intent: {
+          expectedStoreId: 'store',
+          commandId: 'new',
+          kind: 'run.start',
+          content: 'must not start',
+        },
+      },
+      {
+        method: 'permission.mode',
+        generation: 1,
+        observationId: 1,
+        mode: 'full',
+        makeDefault: false,
+      },
+      { method: 'context.rewind', generation: 1, observationId: 1, boundary: null },
+      {
+        method: 'fileRecovery.begin',
+        generation: 1,
+        observationId: 1,
+        scope: 'workspace',
+        title: 'must not modify',
+        inputRevision: 1,
+      },
+    ])
+      await expect(caller.invoke(request as NativeRequest)).rejects.toMatchObject({
+        code: 'workspace_identity_unavailable',
+      });
+    expect(port.writes).toBe(0);
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'other' });
+    await expect(caller.invoke({ ...history, readId: 'retired-root' })).rejects.toMatchObject({
+      code: 'native_selection_changed',
+    });
+    missing = false;
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'root' });
+    expect(caller.state().selection?.workspaceUnavailable).toBeUndefined();
+    expect(caller.state().selection?.permissions?.trust).toMatchObject({
+      trusted: false,
+      revision: 'new',
+    });
+    await caller.invoke({
+      method: 'caller.prepare',
+      generation: 1,
+      sessionId: 'root',
+      intent: {
+        expectedStoreId: 'store',
+        commandId: 'prepared-before-missing',
+        kind: 'run.start',
+        content: 'must remain unsent',
+      },
+    });
+    missing = true;
+    await caller.invoke({ method: 'permission.refresh', generation: 1 });
+    await expect(
+      caller.invoke({
+        method: 'caller.submit',
+        generation: 1,
+        commandId: 'prepared-before-missing',
+      }),
+    ).rejects.toMatchObject({ code: 'workspace_identity_unavailable' });
+    expect(
+      await caller.invoke({
+        method: 'caller.lookup',
+        generation: 1,
+        commandId: 'prepared-before-missing',
+      }),
+    ).toMatchObject({ phase: 'unknown' });
+    const reattached = (await caller.invoke({ method: 'attach' })) as NativeState;
+    expect(reattached.generation).toBeGreaterThan(1);
+    expect(reattached.selection).toMatchObject({
+      session: { id: 'root' },
+      workspaceUnavailable: true,
+    });
+    expect(port.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
+test('a missing workspace preserves local draft CAS and exact Command cancellation without granting new execution', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  const cancelled: string[] = [],
+    withdrawn: string[] = [];
+  port.serverInfo!.capabilities.push('permission_controls', 'pending_input_queue');
+  Object.assign(port, {
+    getPermissionMode: async () => ({}),
+    getWorkspaceTrust: async () => {
+      throw new ClientError('workspace_identity_unavailable');
+    },
+    getCommand: async (id: string) => ({
+      id,
+      sessionId: 'root',
+      originStoreId: 'store',
+      kind: 'run.start',
+      status: 'accepted',
+    }),
+    getExecution: async (id: string) => ({
+      id,
+      sessionId: 'root',
+      originStoreId: 'store',
+      kind: 'job',
+      status: 'running',
+    }),
+    getPendingInputQueue: async () => ({
+      commands: [
+        {
+          id: 'queued-input',
+          sessionId: 'root',
+          originStoreId: 'store',
+          kind: 'run.start',
+          status: 'accepted',
+          request: { kind: 'run.start', content: '原排队内容' },
+        },
+      ],
+      orders: ['1'],
+      revision: 'a'.repeat(64),
+      snapshotCursor: '0',
+      nextAfterOrder: null,
+    }),
+    withdrawPendingInput: async (
+      _session: string,
+      request: import('@kite-ai/client').WithdrawPendingInputRequest,
+    ) => {
+      withdrawn.push(request.targetCommandId);
+      const { expectedStoreId: _store, commandId: _command, ...body } = request;
+      return {
+        id: request.commandId,
+        sessionId: 'root',
+        originStoreId: 'store',
+        subjectId: 'local-user',
+        kind: request.kind,
+        status: 'applied',
+        requestDigest: callerDigest(body),
+        receipt: { outcome: 'input_withdrawn', targetCommandId: request.targetCommandId },
+      };
+    },
+    cancelCommand: async (
+      _session: string,
+      request: { commandId: string; targetCommandId: string },
+    ) => {
+      cancelled.push(request.targetCommandId);
+      return {
+        id: request.commandId,
+        sessionId: 'root',
+        originStoreId: 'store',
+        kind: 'command.cancel',
+        status: 'applied',
+        subjectId: 'local-user',
+        requestDigest: callerTextDigest(
+          canonicalCallerCommandRequest(request as CallerCommandRequest),
+        ),
+        receipt: {
+          kind: 'command.cancel',
+          targetCommandId: request.targetCommandId,
+          outcome: 'cancel_requested',
+        },
+      };
+    },
+    cancelExecution: async (
+      _session: string,
+      request: import('@kite-ai/client').CancelExecutionRequest,
+    ) => {
+      cancelled.push(request.executionId);
+      return {
+        id: request.commandId,
+        sessionId: 'root',
+        originStoreId: 'store',
+        kind: 'execution.cancel',
+        status: 'applied',
+        subjectId: 'local-user',
+        requestDigest: callerTextDigest(canonicalCallerCommandRequest(request)),
+        receipt: {
+          kind: 'execution.cancel',
+          executionId: request.executionId,
+          outcome: 'cancel_requested',
+        },
+      };
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    await caller.invoke({ method: 'attach' });
+    const selected = (await caller.invoke({
+      method: 'select',
+      generation: 1,
+      sessionId: 'root',
+    })) as NativeState;
+    const draft = (await caller.invoke({
+      method: 'draft.read',
+      generation: 1,
+      sessionId: 'root',
+    })) as import('../src/native-bridge').NativeDraft;
+    expect(
+      await caller.invoke({
+        method: 'draft.write',
+        generation: 1,
+        sessionId: 'root',
+        revision: draft.revision,
+        content: '保留本地草稿',
+      }),
+    ).toMatchObject({ content: '保留本地草稿' });
+    await expect(
+      caller.invoke({
+        method: 'draft.write',
+        generation: 1,
+        sessionId: 'root',
+        revision: draft.revision,
+        content: 'stale',
+      }),
+    ).rejects.toThrow('draft_revision_conflict');
+    await caller.invoke({
+      method: 'caller.prepare',
+      generation: 1,
+      sessionId: 'root',
+      intent: {
+        expectedStoreId: 'store',
+        commandId: 'cancel-original',
+        kind: 'command.cancel',
+        targetCommandId: 'original-input',
+      },
+    });
+    expect(
+      await caller.invoke({ method: 'caller.submit', generation: 1, commandId: 'cancel-original' }),
+    ).toMatchObject({ phase: 'applied' });
+    expect(cancelled).toEqual(['original-input']);
+    await caller.invoke({
+      method: 'caller.prepare',
+      generation: 1,
+      sessionId: 'root',
+      intent: {
+        expectedStoreId: 'store',
+        commandId: 'cancel-job',
+        kind: 'execution.cancel',
+        executionId: 'original-job',
+      },
+    });
+    expect(
+      await caller.invoke({ method: 'caller.submit', generation: 1, commandId: 'cancel-job' }),
+    ).toMatchObject({ phase: 'applied' });
+    expect(cancelled).toEqual(['original-input', 'original-job']);
+    const observed = (await caller.invoke({
+      method: 'input.queue.read',
+      generation: 1,
+      viewSelection: selected.selection!.viewSelection!,
+      historyEpoch: selected.historyEpoch!,
+      readId: 'missing-queue',
+    })) as import('../src/input-queue-bridge').NativeInputQueueObservation;
+    expect(
+      await caller.invoke({
+        method: 'input.queue.withdraw',
+        generation: 1,
+        observationId: observed.observationId,
+        targetCommandId: 'queued-input',
+        purpose: 'delete',
+      }),
+    ).toMatchObject({ phase: 'applied' });
+    expect(withdrawn).toEqual(['queued-input']);
+    await expect(
+      caller.invoke({
+        method: 'caller.prepare',
+        generation: 1,
+        sessionId: 'root',
+        intent: {
+          expectedStoreId: 'store',
+          commandId: 'new-input',
+          kind: 'run.start',
+          content: 'must not start',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'workspace_identity_unavailable' });
+    expect(port.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
 
 test('read receipts bind the selected terminal Run and Store, persist locally, and reject guessed or active facts', async () => {
   const port = client(),
@@ -1404,7 +1741,7 @@ test('paired first admission is consumed once; standalone cached identity and re
     server.stop(true);
   }
 });
-test('formal Native reads an observed restored Fork through the original Model provenance and current Store, without rebinding or writes', async () => {
+test('formal Native reads an observed restored Fork with a missing workspace through original Model provenance, without rebinding or writes', async () => {
   const connection = client(),
     content = 'original 雪🙂\r\ncomplete tail',
     output = { content, reasoning: '', toolCalls: [], complete: true },
@@ -1450,7 +1787,13 @@ test('formal Native reads an observed restored Fork through the original Model p
       snapshotCursor: '1',
       output,
     };
-  Object.assign(connection.serverInfo!, { capabilities: ['model_outputs'] });
+  Object.assign(connection.serverInfo!, { capabilities: ['model_outputs', 'permission_controls'] });
+  Object.assign(connection, {
+    getPermissionMode: async () => ({ storeId: 'store', sessionId: 'fork', revision: '1' }),
+    getWorkspaceTrust: async () => {
+      throw new ClientError('workspace_identity_unavailable');
+    },
+  });
   const originalView = connection.getView.bind(connection);
   connection.getView = async (id) => {
     const view = await originalView(id);
@@ -1496,6 +1839,7 @@ test('formal Native reads an observed restored Fork through the original Model p
   try {
     await caller.invoke({ method: 'attach' });
     await caller.invoke({ method: 'select', generation: 1, sessionId: 'fork' });
+    expect(caller.state().selection).toMatchObject({ workspaceUnavailable: true });
     await expect(caller.invoke(request)).rejects.toMatchObject({
       code: 'model_output_message_unavailable',
     });

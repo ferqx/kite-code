@@ -60,7 +60,7 @@ Execution 的可选 `authorization.check` 由[权限检查 owner](sqlite/authori
 
 [原授权回归](../../test/isolated/execution/authorization-check.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
-准确 Worktree 内部 Job 复用原业务批准时，沿现有 `authorization.policy` 返回 `parent_review`、原 Tool 的 `sourceExecutionId`，Auto 还保留原 `checkExecutionId`；人工批准不伪造模型检查 ID。[专用边界](sqlite/worktree-authorization.ts)从实际原行、冻结步骤和完整 prepare 输出核资格，并在最终派发事务复核，公开观察字段本身不授予权限。普通 Shell 及旧记录解释不变，完整规则归[权限 owner](../permissions/README.md#git-worktree-的准确权限)。
+准确 Worktree 内部 Job 复用原业务来源时，沿现有 `authorization.policy` 返回 `parent_review`、原 Tool 的 `sourceExecutionId`。真实 Auto 免审来源不伪造 `checkExecutionId`；旧模型审核及人工批准继续保留各自原证明。[专用边界](sqlite/worktree-authorization.ts)从实际原行、冻结步骤和完整 prepare 输出核资格，并在最终派发事务复核，公开观察字段本身不授予权限。普通 Shell 及旧记录解释不变，完整规则归[权限 owner](../permissions/README.md#git-worktree-的准确权限)。
 
 ## Store 关闭未确认时的锁归属
 
@@ -155,6 +155,12 @@ Workspace 沿用原 profile 范围，核对 expectedStoreId；现有 Workspace �
 Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Run 的 ID/status/isActive/是否仍有必需结果，未取消且越过停止边界的 accepted run.start/follow-up、同主体当前 Store 的 pending presentation Interaction 数量。没有 Run 不伪造完成，排队不替换尚活动的 Run。时间仅来自原 Session 最后 `message.updated` cursor 的私人 `kite.session-log@1.occurredAt`；旧／未知／损坏／非整数时间明确 null，不用读取时钟、Run 开始时间或其他会话时间填补。只读取有限字段，不公开原事件 payload、Run config 或输入。没有新增表／列、baseline checksum、Store major 或维护资产，冷读取不写事件。日志封存理由仍归[原决定](../../../../.agents/notes/implemented/architecture/2026-10-03-bounded-session-log-observation.md)，目录取舍见[本决定](../../../../.agents/notes/implemented/architecture/2026-10-08-session-directory-activity-observation.md)。
 
 活动 Run 的目录摘要另含可选 `executionOwner: held/unheld/unknown`，由 [Store adapter](../sqlite.ts) 在 SQL 快照后，对准确 root Session 的既有排他锁做同步 shared probe。探针只读打开现存私有锁文件，不创建文件、不写 owner generation、不结算历史；确定争用才返回 held，缺失／校验或系统错误保 unknown，成功取得并释放才返回 unheld。释放失败保原锁并使读取失败，不能伪造 unheld。锁观察与 SQL 快照分开，held 不证明模型仍在推进，unheld 不证明外部资源清理完成；恢复／派发继续核原合同。无 active Run 的历史和独立未结算 Job 不增加此字段。
+
+`activity.hasCreatedWorktree` 是同一 SQL 快照中的可选只读历史事实，只从该 Session 的原生 `builtin.shell`／`git-worktree/` 扩展记录中已保存的成功 create 稳定回执投影。失败、未知、其他 namespace 与 Fork 来源记录不提供标记；子会话不归并到父会话。后续 remove 不抹除已发生的创建，不检查实时路径、不迁移 cwd、不写补充记录或改变最近消息时间。字段省略兼容旧 producer；原记录格式和恢复边界归[Worktree owner](../tools/git-worktree/README.md)。
+
+目录条目的可选 `worktreeSource:{sessionId,workspaceId}` 在同一快照中从唯一成功 create 历史关系投影，只供返回来源会话。核真实主体可见的来源根 Session、准确原 Tool／Job／Run、原生非 Fork 稳定记录及冻结 sourceCwd／targetPath；来源 Workspace 根与 sourceCwd、目标登记 Workspace 根与结果 path／plan.targetPath 分别精确相等。重复同一关系去重，多个不同来源、删除或不可见来源、缺证据都不提供关系。它不检查目录是否仍存在，也不授予目标或来源的写权限；普通目录读取不访问文件或 Git、不写新管理记录。
+
+历史关系不要求原 Tool 与已终态 Job 的当前 owner generation 相等：合法原 Tool 恢复会转移其 generation，原 Job 不重启；仍核完整原父链／Store／Session／root work／Run／ref。Windows 显式 path 按原 worker 的 `resolve` 规范化后精确比对，不作前缀或真实路径探测。[目录／HTTP](../../../../tests/isolated/unified-agent/directory.test.ts)与[SDK](../../../client/test/directory.test.ts)两个整文件10项／259断言通过，两项恢复／路径兼容都取得先红后绿；真实旧 Desktop 创建记录的只读投影亦精确返回来源，记录未改。
 
 [原 owner 丢失回归](../../test/isolated/storage/directory-owner-observation.test.ts)核真实双 Store 的 held、关闭原 Store 后冷 readonly unheld、另一 root 仍 held、缺锁 unknown 且零创建，以及完整元数据和原 Run／Execution／Command 零变化；[锁观察回归](../../test/isolated/storage/lock-observation.test.ts)核本机真实争用、私有路径拒绝和非争用系统错误。
 

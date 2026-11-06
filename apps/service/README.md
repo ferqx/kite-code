@@ -1,5 +1,9 @@
 # 本机 Agent Service
 
+公开 Session 目录的 `activity.hasCreatedWorktree` 是可选只读历史标记，沿[同源 schema](src/http/schema/index.ts)进入生成 Client／OpenAPI；Service 不检查 Git 或目录，不补写 Session。来源与快照语义由[Store owner](../../packages/agent/src/storage/README.md#目录分页)负责，普通 Native 图标由[Desktop owner](../desktop/README.md#native-项目会话目录)消费；工具／协议版本及目录能力声明保持。
+
+同一目录条目的可选 `worktreeSource:{sessionId,workspaceId}` 只传递 Store 核实的唯一创建来源，供 Native 返回来源会话，不授予执行或删除权限。缺项保持缺项，不从项目名称、路径前缀或消息补造。准确工作树工具的 Auto 免审批和内部 Job 派发证据归[权限 owner](../../packages/agent/src/permissions/README.md#git-worktree-的准确权限)，手动、父子范围及删除保护继续沿原链核验。
+
 2026-10-26，本轮失败修复已通过21份受影响 Service 完整测试文件。夹具按持久权限控制保存 Full／工作区信任，并保持 Native Shell 的准确读取范围；普通输入沿原 Command 核 Run／Model 来源，显式 steering 与排队 follow-up 分别验证。Files 测试消费当前模型可见的文本回执及完整 baseline，不把呈现当作持久 JSON；原版本绑定、零重放、取消与清理断言保留。真实联验含257次文件读取、4／16槽混合 Shell 压测及公开 HTTP／SDK 读取；上下文预测只在提供准确捕获的呈现定义时取得资格，缺失定义的冷态读取仍明确不可用。该结果不代表全仓全量测试或其他平台资格。
 
 ## 消息历史变更协议

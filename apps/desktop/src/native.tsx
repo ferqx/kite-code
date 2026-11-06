@@ -149,6 +149,10 @@ import { NativeTranscriptDisplay } from './native-transcript-display';
 import { useNativeTurnNotifications } from './native-turn-notifications';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
+import {
+  isNativeWorktreeExitCommand,
+  resolveNativeWorktreeExit,
+} from './native-worktree-navigation';
 import { promptTextForSend } from './prompt-text';
 import { useNativePermissionChange } from './use-native-permission-change';
 
@@ -348,6 +352,13 @@ function NativeDesktopContent({
   >(undefined);
   const [directory, setDirectory] = useState<NativeDirectory>();
   const [directoryProjection] = useState(() => new NativeDirectoryProjection());
+  const [worktreeExitPending, setWorktreeExitPending] = useState(false);
+  const worktreeExitRead = useRef<object | undefined>(undefined);
+  const [worktreeExitNotice, setWorktreeExitNotice] = useState<{
+    key: string;
+    nonce: number;
+    text: string;
+  }>();
   const imageDrafts = useNativeInputImages(bridge, state?.generation, directory?.storeId);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Prepared bytes must not cross a Store boundary.
   const browserNotes = useMemo(
@@ -838,6 +849,54 @@ function NativeDesktopContent({
     setGrantFacts(undefined);
     await readSelection(sessionId, current, nonce, epoch);
   }
+  async function exitWorktree() {
+    if (
+      !selection ||
+      selected.current !== selection.session.id ||
+      preparing ||
+      scheduledTasksView ||
+      worktreeExitRead.current ||
+      readLifecycle.current.quitting
+    )
+      return;
+    const original = selection,
+      current = generation.current,
+      nonce = viewIntent.current,
+      epoch = readLifecycle.current.epoch,
+      operation = {};
+    worktreeExitRead.current = operation;
+    setWorktreeExitPending(true);
+    setWorktreeExitNotice(undefined);
+    try {
+      const fresh = await readDirectory();
+      if (!isCurrentRead(current, epoch, nonce) || selected.current !== original.session.id) return;
+      const target = resolveNativeWorktreeExit(fresh, original);
+      if (target.kind !== 'source') {
+        setWorktreeExitNotice({
+          key: imageScope(original.storeId, original.session.id),
+          nonce,
+          text:
+            target.kind === 'already_source'
+              ? '创建工作树未改变本会话的项目或工作目录，无需删除工作树。查看其他项目时可从侧栏选择会话。'
+              : '无法核实工作树的唯一来源会话。请从侧栏选择来源项目或会话；草稿和工作树均已保留，未发送模型任务。',
+        });
+        return;
+      }
+      pageIntent.current++;
+      await select(target.sessionId);
+      if (isCurrentRead(current, epoch, nonce + 1) && selected.current === target.sessionId)
+        setWorktreeExitNotice({
+          key: imageScope(original.storeId, target.sessionId),
+          nonce: nonce + 1,
+          text: '已返回来源会话；工作树、未发送草稿和原任务均保留。',
+        });
+    } finally {
+      if (worktreeExitRead.current === operation) {
+        worktreeExitRead.current = undefined;
+        setWorktreeExitPending(false);
+      }
+    }
+  }
   async function readSelection(sessionId: string, current: number, nonce: number, epoch: number) {
     if (!isCurrentRead(current, epoch, nonce)) return;
     const original: NonNullable<typeof selectionRead.current> = {
@@ -1295,6 +1354,7 @@ function NativeDesktopContent({
       !(state?.selection?.permissionUnavailable && !state.selection.viewLoading) &&
       (!!state?.selection?.viewLoading || historyState.phase === 'loading'));
   const permissionFailed =
+    state?.selection?.workspaceUnavailable ||
     (state?.selection?.permissionUnavailable && !state.selection.viewLoading) ||
     state?.backgroundUnavailable ||
     state?.callerUnavailable;
@@ -2330,11 +2390,20 @@ function NativeDesktopContent({
     return () => clearTimeout(timer);
   }, [noteSaveSignal]);
   function sendInput() {
-    if (!bridge || !selection) return;
+    if (!bridge || !selection || worktreeExitRead.current) return;
     const images = imageDrafts.get(imageScope(selection.storeId, selection.session.id));
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
     const draftKey = imageScope(selection.storeId, selection.session.id);
     const submittedDraft = draftCache.current.get(draftKey) ?? { content: draft };
+    if (
+      isNativeWorktreeExitCommand(submittedDraft.content) &&
+      !images.length &&
+      !files.length &&
+      !browserNotes.get(draftKey).length
+    ) {
+      void report(exitWorktree, false, '退出工作树');
+      return;
+    }
     let noteBatch: ReturnType<BrowserAnnotationDrafts['capture']>,
       noteDocument: BrowserDraftDocument,
       submittedText: string;
@@ -2590,6 +2659,13 @@ function NativeDesktopContent({
   const hasPendingRootInteraction = nativeRootInteractionBlocksComposer(selection);
   const canCompose =
     !!selection && !selection.session.parentSessionId && !hasPendingRootInteraction;
+  const localWorktreeExit =
+    !!selection &&
+    isNativeWorktreeExitCommand(draft) &&
+    !imageDrafts.get(imageScope(selection.storeId, selection.session.id)).length &&
+    !imageDrafts.files(imageScope(selection.storeId, selection.session.id)).length &&
+    !browserNotes.get(imageScope(selection.storeId, selection.session.id)).length;
+  const worktreeExitTarget = resolveNativeWorktreeExit(directory, selection);
   const cancelCurrentRunBusinessDisabled =
     pending ||
     executionUnconfirmed ||
@@ -3069,6 +3145,7 @@ function NativeDesktopContent({
                     props.disabled ||
                     !!selection.viewLoading ||
                     !!selection.permissionUnavailable ||
+                    !!selection.workspaceUnavailable ||
                     historyState.phase !== 'complete' ||
                     !!directory?.unavailable
                   }
@@ -3114,16 +3191,20 @@ function NativeDesktopContent({
                   draft,
                 })
               }
-              onAnswer={async (_card, answer) => {
-                await bridge.request({
-                  method: 'interaction.answer',
-                  generation: generation.current,
-                  interactionId: interaction.id,
-                  revision: interaction.revision,
-                  answer,
-                });
-                await refresh();
-              }}
+              onAnswer={
+                selection.workspaceUnavailable
+                  ? undefined
+                  : async (_card, answer) => {
+                      await bridge.request({
+                        method: 'interaction.answer',
+                        generation: generation.current,
+                        interactionId: interaction.id,
+                        revision: interaction.revision,
+                        answer,
+                      });
+                      await refresh();
+                    }
+              }
             />
           );
         }}
@@ -4727,6 +4808,19 @@ function NativeDesktopContent({
       scheduledTasks={scheduledTasksView ? scheduledTaskProps : undefined}
       headerActions={
         <>
+          {!preparing && !scheduledTasksView && worktreeExitTarget.kind === 'source' && (
+            <DesktopButton
+              variant="ghost"
+              title={`返回来源会话：${directory?.sessions.find((session) => session.id === worktreeExitTarget.sessionId)?.title || '来源会话'}`}
+              aria-label="退出工作树"
+              disabled={
+                worktreeExitPending || pending || selected.current !== selection?.session.id
+              }
+              onClick={() => void report(exitWorktree, false, '退出工作树')}
+            >
+              退出工作树
+            </DesktopButton>
+          )}
           {!scheduledTasksView && (
             <NativeDiagnostic>
               <DesktopButton
@@ -4749,72 +4843,87 @@ function NativeDesktopContent({
         </>
       }
       statusNotice={
-        diagnostics &&
         !preparing &&
         selection && (
           <>
-            {inputQueue.error && (
-              <div className="queue-operation-notice" role="status">
-                {inputQueue.error}
-                <DesktopButton variant="ghost" onClick={inputQueue.retry}>
-                  重新读取队列
-                </DesktopButton>
-              </div>
-            )}
-            {inputQueue.submissions.map((submission) => (
-              <div className="queue-operation-notice" key={submission.commandId} role="status">
-                {submission.phase === 'applied'
-                  ? '消息已从队列移除，原文尚未放入输入框。'
-                  : '队列操作结果尚未确认。'}
-                <DesktopButton
-                  variant="ghost"
-                  disabled={inputQueue.busy}
-                  onClick={() => void inputQueue.lookup(submission.commandId)}
-                >
-                  {submission.operation === 'edit' ? '核对并取回原文' : '核对原队列操作'}
-                </DesktopButton>
-              </div>
-            ))}
-            {((diagnostics && historyState.phase !== 'loading') ||
-              selection.session.historyPurgedAt !== undefined ||
-              historyState.phase === 'unavailable') && (
-              <p role="status">
-                {selection.session.historyPurgedAt !== undefined
-                  ? '此会话的历史正文已由离线维护清理；原操作回执和执行边界仍保留。'
-                  : historyState.phase === 'complete'
-                    ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
-                    : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
-              </p>
-            )}
-            {historyState.phase === 'unavailable' && (
-              <DesktopButton type="button" onClick={() => void report(refresh)}>
-                重新加载会话
-              </DesktopButton>
-            )}
-            {selection.runs
-              .filter(() => diagnostics)
-              .map((run) => (
-                <p key={run.id}>轮次：{run.status}</p>
+            {worktreeExitNotice?.key === imageScope(selection.storeId, selection.session.id) &&
+              worktreeExitNotice.nonce === viewIntent.current &&
+              selected.current === selection.session.id && (
+                <p className="hint" role="status" aria-label="工作树导航">
+                  {worktreeExitNotice.text}
+                </p>
+              )}
+            {state?.selection?.workspaceUnavailable &&
+              selected.current === state.selection.session.id &&
+              !state.selection.viewLoading && (
+                <p className="hint" role="status" aria-label="工作区目录不可用">
+                  工作区目录已不存在、已移动或无法访问。已有历史仍可阅读；恢复原目录后，请重新打开此会话。
+                </p>
+              )}
+            <NativeDiagnostic>
+              {inputQueue.error && (
+                <div className="queue-operation-notice" role="status">
+                  {inputQueue.error}
+                  <DesktopButton variant="ghost" onClick={inputQueue.retry}>
+                    重新读取队列
+                  </DesktopButton>
+                </div>
+              )}
+              {inputQueue.submissions.map((submission) => (
+                <div className="queue-operation-notice" key={submission.commandId} role="status">
+                  {submission.phase === 'applied'
+                    ? '消息已从队列移除，原文尚未放入输入框。'
+                    : '队列操作结果尚未确认。'}
+                  <DesktopButton
+                    variant="ghost"
+                    disabled={inputQueue.busy}
+                    onClick={() => void inputQueue.lookup(submission.commandId)}
+                  >
+                    {submission.operation === 'edit' ? '核对并取回原文' : '核对原队列操作'}
+                  </DesktopButton>
+                </div>
               ))}
-            {executionUnconfirmed && (
-              <p role="status" aria-label="会话执行状态待核实">
-                {executionOwner === 'unheld'
-                  ? '原执行者已释放，执行状态待核实。'
-                  : '无法核实原执行者，执行状态待核实。'}
-                历史记录已保留，尚未确认的执行结果不会自动重试。
-              </p>
-            )}
-            {diagnostics && (
-              <p role="status" aria-label="当前会话后台状态">
-                后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
-                {executionUnconfirmed ? ' · 执行状态待核实' : ''}
-                {state?.selection?.viewLoading ||
-                state?.selection?.permissionUnavailable ||
-                state?.backgroundUnavailable
-                  ? ' · 上次确认状态'
-                  : ''}
-              </p>
-            )}
+              {((diagnostics && historyState.phase !== 'loading') ||
+                selection.session.historyPurgedAt !== undefined ||
+                historyState.phase === 'unavailable') && (
+                <p role="status">
+                  {selection.session.historyPurgedAt !== undefined
+                    ? '此会话的历史正文已由离线维护清理；原操作回执和执行边界仍保留。'
+                    : historyState.phase === 'complete'
+                      ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
+                      : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
+                </p>
+              )}
+              {historyState.phase === 'unavailable' && (
+                <DesktopButton type="button" onClick={() => void report(refresh)}>
+                  重新加载会话
+                </DesktopButton>
+              )}
+              {selection.runs
+                .filter(() => diagnostics)
+                .map((run) => (
+                  <p key={run.id}>轮次：{run.status}</p>
+                ))}
+              {executionUnconfirmed && (
+                <p role="status" aria-label="会话执行状态待核实">
+                  {executionOwner === 'unheld'
+                    ? '原执行者已释放，执行状态待核实。'
+                    : '无法核实原执行者，执行状态待核实。'}
+                  历史记录已保留，尚未确认的执行结果不会自动重试。
+                </p>
+              )}
+              {diagnostics && (
+                <p role="status" aria-label="当前会话后台状态">
+                  后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
+                  {executionUnconfirmed ? ' · 执行状态待核实' : ''}
+                  {state?.selection?.viewLoading ||
+                  state?.selection?.permissionUnavailable ||
+                  state?.backgroundUnavailable
+                    ? ' · 上次确认状态'
+                    : ''}
+                </p>
+              )}
+            </NativeDiagnostic>
           </>
         )
       }
@@ -4963,7 +5072,10 @@ function NativeDesktopContent({
                 readOnly: selected.current !== selection.session.id,
                 readGate: {
                   send:
-                    !nextModelReady || historyState.phase !== 'complete' || !!selection.viewLoading,
+                    worktreeExitPending ||
+                    (!nextModelReady && !localWorktreeExit) ||
+                    historyState.phase !== 'complete' ||
+                    !!selection.viewLoading,
                   permission: historyState.phase !== 'complete' || !!selection.viewLoading,
                   cancel: historyState.phase !== 'complete' || !!selection.viewLoading,
                 },
@@ -4994,23 +5106,24 @@ function NativeDesktopContent({
                 onPermissionChange: changeCurrentPermission,
                 sendDisabled:
                   sendContentBlocked ||
-                  !nextModelObserved ||
-                  permissionFailed ||
+                  (!localWorktreeExit && (!nextModelObserved || permissionFailed)) ||
                   historyState.phase === 'unavailable',
                 inputLabel: '当前会话私有草稿',
-                sendLabel: activeInputRun
-                  ? planMode
-                    ? '排队新的计划任务'
-                    : executionUnconfirmed
-                      ? '排队后续输入'
-                      : ['context.compress', 'context.compression.reset'].includes(
-                            selection.activeCommand?.kind ?? '',
-                          )
-                        ? '排队压缩后的输入'
-                        : '排队后续输入'
-                  : planMode
-                    ? '发送计划任务'
-                    : '发送明确的新轮次',
+                sendLabel: localWorktreeExit
+                  ? '退出工作树'
+                  : activeInputRun
+                    ? planMode
+                      ? '排队新的计划任务'
+                      : executionUnconfirmed
+                        ? '排队后续输入'
+                        : ['context.compress', 'context.compression.reset'].includes(
+                              selection.activeCommand?.kind ?? '',
+                            )
+                          ? '排队压缩后的输入'
+                          : '排队后续输入'
+                    : planMode
+                      ? '发送计划任务'
+                      : '发送明确的新轮次',
                 options: (
                   <>
                     <NativeModelPicker

@@ -16,6 +16,7 @@ function desktopSessionSummary(
     return {
       sessionId: session.id,
       displayName: session.title || '新对话',
+      ...(session.activity.hasCreatedWorktree ? { hasCreatedWorktree: true } : {}),
       status: directory.unavailable
         ? '上次确认状态'
         : unconfirmed
@@ -104,6 +105,7 @@ function sameSessionSummary(left: SessionSummary | undefined, right: SessionSumm
       left.displayName === right.displayName &&
       left.status === right.status &&
       left.updatedAt === right.updatedAt &&
+      left.hasCreatedWorktree === right.hasCreatedWorktree &&
       left.pendingInteractions === right.pendingInteractions)
   );
 }

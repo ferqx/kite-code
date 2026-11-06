@@ -26,7 +26,7 @@ import {
 } from '../tools/git-worktree/protocol';
 import { shellToolCapability as describe } from './capabilities';
 import { dispatchScopeLeaves } from './dispatch-scope';
-import type { CapabilityDescription } from './index';
+import type { CapabilityDescription, PermissionPolicySnapshot } from './index';
 import { createShellCommandPolicy } from './shell-command-policy';
 import { shellExplorationPresentation } from './shell-presentation';
 import { createShellRiskPreparer, type ShellRiskSnapshot } from './shell-risk-facts';
@@ -490,6 +490,7 @@ export async function createShellConfiguration(input: {
       describe,
       describeRequest: async (
         _request: AuthorizationRequest,
+        _policy?: Readonly<PermissionPolicySnapshot>,
       ): Promise<Partial<CapabilityDescription> | undefined> => undefined,
       commandDigest: (_request: AuthorizationRequest): string | undefined => undefined,
       prepareRiskReview: async (_request: AuthorizationRequest) => null,
@@ -821,6 +822,7 @@ export async function createShellConfiguration(input: {
       },
       async describeRequest(
         request: AuthorizationRequest,
+        policy?: Readonly<PermissionPolicySnapshot>,
       ): Promise<Partial<CapabilityDescription> | undefined> {
         const worktreeCall = worktreeRequest(request);
         if (
@@ -855,9 +857,9 @@ export async function createShellConfiguration(input: {
           if (scope.network !== 'none')
             return { hardAllowed: false, denialReason: 'worktree_permission_denied' };
           return {
-            // A fixed worker retains the ordinary generic authorization checker;
-            // its structured action is not an ordinary Shell risk-review program.
-            autoReview: undefined,
+            // Only the verified Tool is Auto-exempt. Its frozen internal Jobs
+            // derive the original decision through Store, never command text alone.
+            autoReview: request.kind === 'tool' && policy?.mode === 'auto' ? 'none' : undefined,
             safeRead: worktreeCall.action === 'list',
             effects:
               worktreeCall.action === 'list'
