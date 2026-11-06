@@ -1,5 +1,14 @@
 import { expect, setDefaultTimeout, test } from 'bun:test';
-import { existsSync, linkSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
@@ -90,6 +99,41 @@ test('finite Native archive preserves full two manifest bytes, relative link and
       packNativeBundle({ bundleRoot: root, archivePath: join(root, 'inside.tar.gz') }),
     ).rejects.toThrow('terminal_destination_overlaps_bundle');
     expect(existsSync(join(root, 'inside.tar.gz'))).toBe(false);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('Native archive reconstructs the authenticated Terminal worker empty hooks without a manifest upgrade', async () => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-worktree-assets-')));
+  try {
+    const root = finiteNativeFixture(parent);
+    const terminalManifestPath = join(root, 'terminal/terminal-manifest.json');
+    const terminal = JSON.parse(readFileSync(terminalManifestPath, 'utf8'));
+    const directory = 'node_modules/@kite-ai/agent/tools/git-worktree';
+    mkdirSync(join(root, 'terminal', directory), { recursive: true, mode: 0o700 });
+    for (const name of ['worker.js', 'empty-bunfig.toml', 'manifest.json']) {
+      const path = `${directory}/${name}`,
+        bytes = Buffer.from('CLOSED_WORKTREE_ASSET');
+      writeFileSync(join(root, 'terminal', path), bytes, { mode: 0o644 });
+      terminal.files.push({ path, mode: 420, size: bytes.length, sha256: hash(bytes) });
+    }
+    mkdirSync(join(root, 'terminal', directory, 'empty-hooks'), { mode: 0o700 });
+    const bytes = Buffer.from(JSON.stringify(terminal));
+    writeFileSync(terminalManifestPath, bytes);
+    const outerPath = join(root, 'native-manifest.json');
+    const outer = JSON.parse(readFileSync(outerPath, 'utf8'));
+    outer.terminalManifestSha256 = hash(bytes);
+    writeFileSync(outerPath, JSON.stringify(outer));
+    const original = verifyNativeRuntimeBundle(root);
+    const archive = await packNativeBundle({
+      bundleRoot: root,
+      archivePath: join(parent, 'native.tar.gz'),
+    });
+    const moved = unpackNativeBundle({ ...archive, destination: join(parent, 'moved') });
+    expect(moved.digest).toBe(original.digest);
+    expect(moved.terminal.manifest.version).toBe(1);
+    expect(readdirSync(join(moved.root, 'terminal', directory, 'empty-hooks'))).toEqual([]);
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }

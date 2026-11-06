@@ -26,6 +26,7 @@ import {
   verifyLaunchIdentitiesAsync,
 } from './launch-identity';
 import { ripgrepAsset } from './ripgrep';
+import type { TrustedWorkerLaunchResolver } from './shell';
 import type { HostShellExecutionScopeResolver } from './shell-scope';
 import { captureWindowsGitBashRuntime, stageWindowsGitBash } from './windows-git-bash';
 
@@ -88,6 +89,7 @@ export interface WindowsShellOptions {
   controlBase: string;
   executionScope: HostShellExecutionScopeResolver;
   maxQueuedBytes?: number;
+  trustedWorkerLaunch?: TrustedWorkerLaunchResolver;
 }
 /** Live native Job/HANDLE owner; durable references never reconstruct a process from a PID. */
 export async function createWindowsShellJob(
@@ -150,7 +152,7 @@ export async function createWindowsShellJob(
       additionalProperties: false,
     },
     async start(value, context: JobContext) {
-      const { scope, shell, coreutils, searchDirectory, command } = await (async () => {
+      const { scope, shell, coreutils, searchDirectory, command, trusted } = await (async () => {
         try {
           context.signal.throwIfAborted();
           if (
@@ -172,7 +174,8 @@ export async function createWindowsShellJob(
           if (basename(shell.canonical).toLowerCase() !== 'bash.exe')
             throw Error('windows_git_bash_required');
           const searchDirectory = dirname(ripgrepAsset());
-          return { scope, shell, coreutils, searchDirectory, command: value.command };
+          const trusted = options.trustedWorkerLaunch?.(value.command, context);
+          return { scope, shell, coreutils, searchDirectory, command: value.command, trusted };
         } catch (error) {
           throw new JobStartError(
             undefined,
@@ -184,7 +187,7 @@ export async function createWindowsShellJob(
       const temp = realpathSync.native(mkdtempSync(join(options.controlBase, 'shell-')));
       const tempIdentity = launchIdentity(temp);
       const cleanup = () => removeRuntimeTempAsync(tempIdentity);
-      const env = { ...options.env };
+      const env = { ...(trusted?.env ?? options.env) };
       const inheritedPath = Object.hasOwn(env, 'PATH')
         ? env.PATH
         : Object.entries(env).find(([name]) => name.toUpperCase() === 'PATH')?.[1];
@@ -328,6 +331,13 @@ export async function createWindowsShellJob(
         state.wake = undefined;
       };
       const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+      const strictDecoders = trusted
+        ? {
+            stdout: new TextDecoder('utf-8', { fatal: true }),
+            stderr: new TextDecoder('utf-8', { fatal: true }),
+          }
+        : undefined;
+      let outputInvalid = false;
       // Admission has the same finite startup window as the other host backends.
       // A late READY must never release a request after that window has closed.
       const startupTimer = setTimeout(() => {
@@ -342,7 +352,12 @@ export async function createWindowsShellJob(
             const length = pending.readUInt32LE();
             if (length < 1 || length > maximumFrame) throw Error('windows_shell_frame_invalid');
             if (pending.length < 4 + length) break;
-            const frame = JSON.parse(pending.subarray(4, 4 + length).toString('utf8'));
+            const frameBytes = pending.subarray(4, 4 + length);
+            const frame = JSON.parse(
+              trusted
+                ? new TextDecoder('utf-8', { fatal: true }).decode(frameBytes)
+                : frameBytes.toString('utf8'),
+            );
             pending = pending.subarray(4 + length);
             if (
               frame.version !== protocol ||
@@ -353,7 +368,12 @@ export async function createWindowsShellJob(
               terminal
             )
               throw Error('windows_shell_frame_invalid');
-            const payload = JSON.parse(Buffer.from(frame.payloadBase64, 'base64').toString('utf8'));
+            const payloadBytes = Buffer.from(frame.payloadBase64, 'base64');
+            const payload = JSON.parse(
+              trusted
+                ? new TextDecoder('utf-8', { fatal: true }).decode(payloadBytes)
+                : payloadBytes.toString('utf8'),
+            );
             if (!ready) {
               if (
                 frame.type !== 'ready' ||
@@ -373,9 +393,18 @@ export async function createWindowsShellJob(
               }
             } else if (frame.type === 'stdout' || frame.type === 'stderr') {
               if (typeof payload.data !== 'string') throw Error('windows_shell_output_invalid');
-              const content = decoders[frame.type as 'stdout' | 'stderr'].write(
-                Buffer.from(payload.data, 'base64'),
-              );
+              const stream = frame.type as 'stdout' | 'stderr';
+              const bytes = Buffer.from(payload.data, 'base64');
+              let content = '';
+              try {
+                if (!outputInvalid)
+                  content = strictDecoders
+                    ? strictDecoders[stream].decode(bytes, { stream: true })
+                    : decoders[stream].write(bytes);
+              } catch {
+                outputInvalid = true;
+                void cancel().catch(() => {});
+              }
               if (content) enqueue({ type: 'output', stream: frame.type, content });
             } else if (frame.type === 'exit') {
               if (
@@ -426,22 +455,32 @@ export async function createWindowsShellJob(
         }
         state.ended = confirmed;
         for (const stream of ['stdout', 'stderr'] as const) {
-          const content = decoders[stream].end();
-          if (content) enqueue({ type: 'output', stream, content });
+          try {
+            const content = strictDecoders
+              ? strictDecoders[stream].decode()
+              : decoders[stream].end();
+            if (content) enqueue({ type: 'output', stream, content });
+          } catch {
+            outputInvalid = true;
+          }
         }
         const result: ToolResult = {
           outcome: !confirmed
             ? 'outcome_unknown'
-            : terminal?.cancelled || (!released && cancelRequested)
-              ? 'cancelled'
-              : terminal?.exitCode === 0
-                ? 'succeeded'
-                : 'failed',
+            : outputInvalid
+              ? 'failed'
+              : terminal?.cancelled || (!released && cancelRequested)
+                ? 'cancelled'
+                : terminal?.exitCode === 0
+                  ? 'succeeded'
+                  : 'failed',
           content: !confirmed
             ? 'windows_shell_cleanup_unconfirmed'
-            : released
-              ? 'Shell completed'
-              : 'windows_shell_not_dispatched',
+            : outputInvalid
+              ? 'shell_output_invalid_utf8'
+              : released
+                ? 'Shell completed'
+                : 'windows_shell_not_dispatched',
           details: {
             exitCode: (terminal?.exitCode ?? code) as Json,
             cleanupConfirmed: confirmed,

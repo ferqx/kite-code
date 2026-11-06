@@ -49,7 +49,11 @@ import {
   prepareAuthorizationCheck,
   verifyAuthorizationCheckDispatch,
 } from './authorization-check';
-import { resolveAutoAuthorization } from './authorization-policy-evidence';
+import {
+  autoAuthorizationContext,
+  resolveAutoAuthorization,
+  resolveWorktreeAuthorization,
+} from './authorization-policy-evidence';
 import {
   ensureAuthorizationReview,
   executionAuthorizationObservation,
@@ -1124,6 +1128,11 @@ export class SqliteOperations {
           this,
           args[0] as Parameters<Store['resolveAutoAuthorization']>[0],
         );
+      case 'resolveWorktreeAuthorization':
+        return resolveWorktreeAuthorization(
+          this,
+          args[0] as Parameters<Store['resolveWorktreeAuthorization']>[0],
+        );
       case 'readExecutionEvidence':
         return readExecutionEvidence(
           this,
@@ -1881,7 +1890,14 @@ export class SqliteOperations {
           assertDispatchReadSet(this, execution, input);
           this.run(
             "UPDATE execution SET state='dispatching',dispatched=1,dispatch_authorization_json=? WHERE id=?",
-            canonicalJson(input.authorization as unknown as Json),
+            canonicalJson({
+              ...input.authorization,
+              ...(execution.kind === 'tool' &&
+              execution.adapter_id === 'git.worktree' &&
+              input.authorization.worktreeDecisionSeal
+                ? { worktreeAuthorizationContext: autoAuthorizationContext(this, execution) }
+                : {}),
+            } as unknown as Json),
             input.executionId,
           );
           this.event(String(execution.session_id), input.executionId, 'execution.dispatching');

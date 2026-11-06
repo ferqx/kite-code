@@ -114,6 +114,7 @@ import {
   type WebFetchConfigurationOptions,
 } from './web-fetch-configuration';
 import { resolveWebTransport } from './web-fetch-proxy';
+import { createWorktreeHost, readOnlyWorktreeBoundary } from './worktree-host';
 
 export type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
 export type { BrowserConfigurationOptions } from './browser-configuration';
@@ -307,29 +308,7 @@ export function createDefaultProcessConfiguration(options: {
     ),
   });
   const browserTools = new Map((browser.extension.tools ?? []).map((tool) => [tool.id, tool]));
-  let shellOptions = options.shell ? structuredClone(options.shell) : undefined;
-  if (shellOptions?.host)
-    shellOptions = {
-      ...shellOptions,
-      host: {
-        ...shellOptions.host,
-        protectedRoots: [
-          ...new Set([...shellOptions.host.protectedRoots, dirname(userConfiguration.path)]),
-        ],
-        readonlyAssets: [
-          ...new Set([...shellOptions.host.readonlyAssets, ...browser.runtimeAssets]),
-        ],
-        protectedFiles: [
-          ...new Set([
-            ...(shellOptions.host.protectedFiles ?? []),
-            // Linux masks this exact private parent, even before the first Browser Job.
-            join(browser.privateDirectory, 'private'),
-            ...(shellOptions.platform === 'darwin' ? [browser.privateDirectory] : []),
-            ...(codexProtectionPath === undefined ? [] : [codexProtectionPath]),
-          ]),
-        ],
-      },
-    };
+  const shellOptions = options.shell ? structuredClone(options.shell) : undefined;
   const afterTurn = options.afterTurn
     ? Object.freeze({ authorize: options.afterTurn.authorize.bind(options.afterTurn) })
     : undefined;
@@ -391,6 +370,7 @@ export function createDefaultProcessConfiguration(options: {
         ) !== undefined
       );
     },
+    (execution, input) => readOnlyWorktreeBoundary(policyRuntime, shellOptions, execution, input),
   );
   const askUser = createAskUserExtension();
   const executionEvidence = createExecutionEvidenceExtension({
@@ -1012,6 +992,7 @@ export function createDefaultProcessConfiguration(options: {
         toolIds,
         options: shellOptions,
         signal: recovery?.signal,
+        worktreeHost: createWorktreeHost(() => policyRuntime),
       });
       const shellTools = new Map(
         shell.extensions.flatMap((extension) =>
@@ -1211,6 +1192,7 @@ export function createDefaultProcessConfiguration(options: {
           recoveryRunIdentity: recovery?.runIdentity,
           ...(defaultAutoReview ? { defaultAutoReview } : {}),
           trustedExtensions: runExtensions,
+          readOnlyTask: selection?.readOnlyTask === true,
         });
         return {
           ...runPermissions,

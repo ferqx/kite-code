@@ -31,6 +31,10 @@ interface Request {
   controlBase?: string;
 }
 const MAX_FRAME = 1024 * 1024;
+const trustedWorkerRuntime =
+  process.execArgv.length === 2 &&
+  process.execArgv[0] === '--no-env-file' &&
+  process.execArgv[1]?.startsWith('--config=/');
 const launchdOwned = process.argv[2] === '--launchd-owned';
 const coalition = launchdOwned ? claimDarwinOwnedCoalition() : undefined;
 const launchdControl = launchdOwned ? await connectLaunchdControl(process.argv[3]!) : undefined;
@@ -161,7 +165,7 @@ async function terminateGroup(pid: number): Promise<{ confirmed: boolean; forced
   return { confirmed: await waitGroup(pid, 2000), forced: true };
 }
 async function drain(stream: Readable, name: 'stdout' | 'stderr'): Promise<void> {
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder('utf-8', { fatal: trustedWorkerRuntime });
   async function output(text: string) {
     let piece = '';
     let bytes = 0;
@@ -193,6 +197,21 @@ async function start(): Promise<void> {
         frame: input as unknown as Record<string, unknown>,
         controlBase: input.controlBase!,
         includeRegistration: true,
+        // The only caller which supplies these exact interpreter flags is the
+        // trusted worker Job resolver. Preserve them across the launchd hop;
+        // env -i in the launcher excludes launchd's ambient preload variables.
+        ...(trustedWorkerRuntime
+          ? {
+              trustedRuntime: {
+                bunFlags: [...process.execArgv],
+                env: Object.fromEntries(
+                  Object.entries(process.env).filter(
+                    (entry): entry is [string, string] => typeof entry[1] === 'string',
+                  ),
+                ),
+              },
+            }
+          : {}),
         cancelled: () => parentGone,
         async onFrame(frame) {
           if (frame.type === 'ready') await send({ ...frame, broker: brokerIdentity });

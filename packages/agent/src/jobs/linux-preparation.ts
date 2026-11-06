@@ -107,7 +107,10 @@ export function captureLinuxLaunch(
   const tempBase = launchIdentity(options.temporaryRoot ?? tmpdir());
   const control = options.controlBase ? launchIdentity(options.controlBase) : undefined;
   const protectedRoots = [
-    ...new Set([...options.protectedRoots, ...(control ? [control.path] : [])]),
+    ...new Set([
+      ...options.protectedRoots,
+      ...(options.mode === 'confined' && control ? [control.path] : []),
+    ]),
   ].map((path) => launchIdentity(path));
   // Denied private names are not executable assets. Freeze only parent metadata;
   // missing names must not prevent a Model Run from being prepared.
@@ -212,6 +215,9 @@ export function captureLinuxLaunch(
     cwd,
     workspace,
     tempBase,
+    ...(control && !protectedRoots.some((root) => root.canonical === control.canonical)
+      ? [control]
+      : []),
     ...protectedRoots,
     ...readonly,
     ...assets,

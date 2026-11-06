@@ -6,13 +6,18 @@ import { retainWindowsArtifactObjects, type WindowsArtifactScope } from './windo
 export function retainWindowsCandidateFiles(
   root: string,
   relativeFiles: readonly string[],
+  relativeDirectories: readonly string[] = [],
 ): WindowsArtifactScope {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw Error('artifact_scope_platform_unsupported');
   if (!isAbsolute(root) || realpathSync.native(root) !== root || !Array.isArray(relativeFiles))
     throw Error('artifact_scope_denied');
   // The scope checks each final HANDLE path while the entire original ancestry is held.
-  return retainWindowsArtifactObjects(root, windowsArtifactRelativeFiles(relativeFiles));
+  return retainWindowsArtifactObjects(
+    root,
+    windowsArtifactRelativeFiles(relativeFiles),
+    windowsArtifactRelativeFiles(relativeDirectories),
+  );
 }
 
 /** One closed Windows spelling for both original candidate pins and private tree creation. */

@@ -40,9 +40,11 @@ interface State {
   result?: ToolResult;
   ended: boolean;
   cleanupUnknown: boolean;
+  outputInvalid?: true;
   cleanup(): void;
   signal: AbortSignal;
   aborted(): void;
+  completion: Promise<void>;
   disposed?: Promise<void>;
 }
 /** Host assembly only. The ordinary Job owns actual native objects, never a cold PID. */
@@ -128,12 +130,18 @@ export function createLinuxShellJob(
     state.result = {
       outcome: !ended
         ? 'outcome_unknown'
-        : receipt.reason === 'cancel'
-          ? 'cancelled'
-          : receipt.code === 0
-            ? 'succeeded'
-            : 'failed',
-      content: !ended ? 'shell_owned_cleanup_unconfirmed' : 'Shell completed',
+        : state.outputInvalid
+          ? 'failed'
+          : receipt.reason === 'cancel'
+            ? 'cancelled'
+            : receipt.code === 0
+              ? 'succeeded'
+              : 'failed',
+      content: !ended
+        ? 'shell_owned_cleanup_unconfirmed'
+        : state.outputInvalid
+          ? 'shell_output_invalid_utf8'
+          : 'Shell completed',
       details: {
         exitCode: receipt.code,
         signal: receipt.signal,
@@ -154,7 +162,9 @@ export function createLinuxShellJob(
   const cancel = async (state: State): Promise<StopConfirmation> => {
     if (state.ended) return { status: 'already_finished' };
     await state.owner.cancel();
-    // completion's callback runs before this continuation and includes temp cleanup.
+    // Native completion confirms the owner. The adapter also owns output drain
+    // and temporary-directory cleanup, which may finish in later microtasks.
+    await state.completion;
     return { status: state.ended ? 'stopped' : 'unknown' };
   };
   return {
@@ -180,6 +190,7 @@ export function createLinuxShellJob(
         input.command.length > 262144
       )
         throw Error('invalid_shell_input');
+      const trusted = configuration.trustedWorkerLaunch?.(input.command, context);
       let launch: LinuxLaunch;
       let preparationFailure: LinuxPreparationCleanupError | undefined;
       try {
@@ -190,7 +201,7 @@ export function createLinuxShellJob(
         preparationFailure = error;
       }
       const env = Object.fromEntries(
-        Object.entries(configuration.env).filter(
+        Object.entries(trusted?.env ?? configuration.env).filter(
           ([key]) => !/^(?:DYLD_|LD_|BASH_ENV$|ENV$|ZDOTDIR$|NODE_OPTIONS$|BUN_OPTIONS$)/.test(key),
         ),
       );
@@ -243,6 +254,7 @@ export function createLinuxShellJob(
           throw error;
         }
       })();
+      const outputEnds: Promise<void>[] = [];
       const state: State = {
         owner,
         binding: { sessionId: context.sessionId, executionId: context.executionId, nonce },
@@ -257,6 +269,18 @@ export function createLinuxShellJob(
         aborted: () => {
           void owner.cancel();
         },
+        completion: owner.completion.then(
+          async (receipt) => {
+            if (trusted && receipt.confirmed) await Promise.all(outputEnds);
+            complete(state, receipt, launch.cleanup);
+          },
+          () =>
+            complete(
+              state,
+              { confirmed: false, code: null, signal: null, reason: null },
+              launch.cleanup,
+            ),
+        ),
       };
       context.signal.addEventListener('abort', state.aborted, { once: true });
       if (context.signal.aborted) state.aborted();
@@ -265,6 +289,7 @@ export function createLinuxShellJob(
         ['stderr', owner.stderr],
       ] as const) {
         const decoder = new StringDecoder('utf8');
+        const strictDecoder = trusted ? new TextDecoder('utf-8', { fatal: true }) : undefined;
         const output = (text: string) => {
           while (text) {
             let end = Math.min(8192, text.length);
@@ -273,18 +298,46 @@ export function createLinuxShellJob(
             text = text.slice(end);
           }
         };
-        source.on('data', (chunk: Buffer) => output(decoder.write(chunk)));
-        source.once('end', () => output(decoder.end()));
+        const decode = (chunk?: Buffer) => {
+          if (state.outputInvalid) return;
+          try {
+            output(
+              strictDecoder
+                ? strictDecoder.decode(chunk, { stream: chunk !== undefined })
+                : chunk
+                  ? decoder.write(chunk)
+                  : decoder.end(),
+            );
+          } catch {
+            state.outputInvalid = true;
+            void owner.cancel().catch(() => {});
+          }
+        };
+        source.on('data', (chunk: Buffer) => decode(chunk));
+        if (trusted) {
+          let finish!: () => void;
+          let ended = false;
+          outputEnds.push(
+            new Promise<void>((resolve) => {
+              finish = resolve;
+            }),
+          );
+          source.once('end', () => {
+            ended = true;
+            decode();
+            finish();
+          });
+          const failed = () => {
+            state.outputInvalid = true;
+            void owner.cancel().catch(() => {});
+            finish();
+          };
+          source.once('error', failed);
+          source.once('close', () => {
+            if (!ended) failed();
+          });
+        } else source.once('end', () => decode());
       }
-      void owner.completion.then(
-        (receipt) => complete(state, receipt, launch.cleanup),
-        () =>
-          complete(
-            state,
-            { confirmed: false, code: null, signal: null, reason: null },
-            launch.cleanup,
-          ),
-      );
       // A created owner with failed admission still returns its original Job
       // handle and unknown terminal, so Runtime can retain and fence cleanup.
       await owner.ready.catch(() => {});
@@ -336,7 +389,10 @@ export function createLinuxShellJob(
         state.queue = state.queue.filter((item) => item.event.type === 'terminal');
         state.queuedBytes = 0;
         state.gaps.clear();
-      })();
+      })().catch((error) => {
+        state.disposed = undefined;
+        throw error;
+      });
       return state.disposed;
     },
   };

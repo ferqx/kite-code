@@ -72,6 +72,8 @@ export function summarizeLiveToolCalls(
 
 /** Resolve the configured model in memory; never expose endpoint, keys, or payloads in metadata. */
 export async function createLiveModelFixture(options: {
+  /** Isolated live child processes may retain the original user document by absolute path. */
+  userConfigurationPath?: string;
   /** Omit to leave total logical and physical request counts unbounded. */
   requestLimit?: number;
   /** Omit to leave the whole fixture without an execution deadline. */
@@ -144,7 +146,7 @@ export async function createLiveModelFixture(options: {
   const requestContext = new AsyncLocalStorage<string>();
   const metadata: Record<string, unknown> = {};
   const observe = (event: string) => options.observe?.({ event, requests, wire, usage, metadata });
-  const configuration = createUserConfiguration();
+  const configuration = createUserConfiguration(options.userConfigurationPath);
   const value = configuration.read().value;
   const localSource = options.model ? createCodexLocalSource() : undefined;
   const discovery = localSource?.discover();

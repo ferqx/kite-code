@@ -6,7 +6,7 @@
 
 前台期限 `execution_timeout_ms` 单位毫秒、范围1～3600000；省略不设期限。`background:true` 与期限同时填写在模型 Schema 和执行前参数校验中都失败，不创建 Job。`shell_wait` 的 `wait_timeout_ms` 保持0～30000、默认30000，超时不停止 Job。
 
-`filesystem` 和 `network` 是独立的顶层申请，省略分别为 `workspace_write`、`none`；只填一个不会开放另一个。`network:internet` 包括 localhost、127.0.0.1、::1、局域网和互联网；风险通过不为 `network:none` 申请增加联网能力。`filesystem:full_access` 申请外部写入，不切换 Full 审批模式，也不解除受保护路径。原权限模块统一解析新申请与旧 Job 输入，执行器仍只使用最终接纳的授权证明。description 不进入风险模型输入、命令语义指纹或 Job input；原调用参数和完整性绑定仍保真。
+`filesystem` 和 `network` 是独立的顶层申请，省略分别为 `workspace_write`、`none`；只填一个不会开放另一个。`network:internet` 包括 localhost、127.0.0.1、::1、局域网和互联网；风险通过不为 `network:none` 申请增加联网能力。`filesystem:full_access` 申请外部写入，不切换 Full 审批模式，也不自动扩大实际执行范围。默认普通宿主不再额外遮挡 Profile、配置、认证、controlBase 或整目录运行资产；自定义显式保护及 confined 宿主仍沿其原约束。原权限模块统一解析新申请与旧 Job 输入，执行器仍只使用最终接纳的授权证明。description 不进入风险模型输入、命令语义指纹或 Job input；原调用参数和完整性绑定仍保真。
 
 前台期限省略时不设置执行截止时限。显式 `execution_timeout_ms` 从首次观察原 Job 进入 `dispatching/running` 起计算，审批和资源排队的 `planned` 等待不消耗执行预算；主／子 Agent 使用同一前台完成路径。观察派发使用短段等待，会有轮询与宿主调度延迟，不承诺从原生进程实际启动瞬间精确计时或毫秒级硬实时保证。时钟启动后不因后续等待或状态观察而重置；期限到达仍只取消同一原 Job，并继续等待其真实停止证据。未派发就终态拒绝或取消的 Job 直接保留原结果，不误标执行超时。用户取消仍在等待期间生效，不因尚未派发而失去响应。[前台回归](../../test/isolated/tools/shell/foreground.test.ts)使用真实 Runtime／SQLite／POSIX Shell，核人工等待超过执行预算后批准仍只执行一次，以及派发后超预算仍取消并确认原进程组停止；该 POSIX 证据不代替其他平台或完整原生进程树资格。
 
@@ -23,3 +23,13 @@
 本地 `shell/<shell_id>` 记录明确不存在，或记录类型／版本不匹配时，`shell.read/wait/stop` 返回 `failed/shell_reference_not_found`，提示使用原启动回执中的真实 ID。该预查没有启动或取消 Job，普通 Loop 可将失败和同批其他真实结果交给下一次模型纠正。它不重试原命令、不改写目标 Job，也不从反馈字段取得权限。记录读取本身失败、取得原引用后无法核实执行、输出读取或取消异常仍按原未知／失败边界处理，不因错误名称相似而降级。
 
 每次新执行由运行时从原 Tool 身份派生新内部 key，恢复旧输出使用返回的原 `shell_id` 读取；旧可信调用的显式 key 合同保持。`operations.ensure` 确认该 key 已属于其他请求、并在建立新 Command／Job 前返回 `operation_conflict` 时，前台／后台入口均返回准确 `failed`，说明本次没有启动新 Job，并提示先读取原操作。只在这一步捕获这一已知冲突；取得引用后的存储、等待与监督异常，以及实际效果未知，仍按原边界处理。[引用回归](../../test/isolated/tools/shell/reference-runtime.test.ts)核同批正常工具继续、原 Job 不重放、新授权操作可用新 key 执行，以及真实未知不降级。
+
+`git_worktree` 由同一个 `builtin.shell` Extension 的 `git.worktree@1` 提供，只有 `list/create/remove`；选中它也装配内部 `shell.command@1`，不会连带开放模型 Shell。实际算法、冻结意图、原 ref 恢复和删除保护见 [Worktree owner](git-worktree/README.md)。普通 Shell 的参数、版本、前后台和取消契约保持。
+
+可信 Worktree 命令的环境允许集合、Bun `--no-env-file --config=<path>` 和受保护资产在首个解释器前生效；普通命令继续原路径。Full 下该 worker 的实际范围仍不超过本次请求，network 固定 none。缺少 scope-aware host 的 legacy POSIX 装配只提供 list；自定义 zsh 等启动环境不获得该能力。
+
+2026-11-06，起始 `8e350f99` 加本轮差量，macOS arm64／Bun1.4.4／Git2.54.0：[Service 真实链路](../../../../apps/service/test/isolated/git-worktree-configuration.test.ts)2项76断言通过，核只选择该工具、真实三个 action、工作区外默认范围拒绝、明确 full_access 后成功、分支保留、来源内容/cwd不变、原 key 重放保留重建实体。worker 与恢复故障测试见[测试入口](../../test/isolated/tools/git-worktree/README.md)。Linux/Windows 实机和完整三平台发行资格未取得。
+
+可信worker在首层输出解码时拒绝非法或截断UTF-8，不能让替换字符掩盖输出损坏；普通Shell原二进制/替换字符行为不变。[真实原生回归](../../test/isolated/tools/git-worktree/launch-security.test.ts)同时核合法U+FFFD和原监督停止证明。macOS只读发现并封存系统native Git，不使用会向沙箱外写xcrun缓存的Apple调度桩，也不通过额外写范围放行它。
+
+模型指导要求 Git 工作树创建只调用 `git_worktree`，省略 path 使用持久默认根，不通过 Shell／脚本兜底。普通 Shell 不增加工作树 AST 硬拦截，无法据此承诺拦截任意程序间接创建；临时目标的实际拒绝由 Worktree Tool／worker 执行。非常危险系统级命令的现有兜底保留。

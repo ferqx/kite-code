@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -185,9 +185,7 @@ export async function assembleProcessService(
   try {
     const shell = configure
       ? undefined
-      : await measureServiceStartup('shell_runtime', () =>
-          packagedShellAssets(selected, runtimeAssets),
-        );
+      : await measureServiceStartup('shell_runtime', () => packagedShellAssets(selected));
     configuration = await measureServiceStartup('configuration', async () => {
       const configured = configure
         ? await configure(startup, hostContext)
@@ -360,7 +358,6 @@ function packagedMcpSourceAssets() {
 
 async function packagedShellAssets(
   profile: ProfileSelection,
-  runtimeAssets: readonly string[],
 ): Promise<ShellConfigurationOptions | undefined> {
   if (!['darwin', 'linux', 'win32'].includes(process.platform)) return;
   if (process.platform === 'win32' && !process.versions.bun) return;
@@ -394,10 +391,6 @@ async function packagedShellAssets(
       ),
     ),
   );
-  const roots = [...new Set([dirname(process.execPath), ...ripgrep.env.PATH.split(delimiter)])]
-    .filter((path) => isAbsolute(path) && path !== '/' && existsSync(path))
-    .map((path) => realpathSync.native(path))
-    .filter((path) => lstatSync(path).isDirectory());
   return {
     platform: process.platform as 'linux' | 'darwin' | 'win32',
     configurationId: windows
@@ -421,9 +414,9 @@ async function packagedShellAssets(
     ...(bubblewrap ? { linux: { bubblewrapPath: realpathSync.native(bubblewrap) } } : {}),
     host: {
       controlBase: profile.coordinationPath,
-      protectedRoots: [profile.dataRoot, profile.coordinationPath],
-      readonlyAssets: [...runtimeAssets, ripgrep.root],
-      runtimeReadOnlyRoots: [...new Set(roots)],
+      protectedRoots: [],
+      readonlyAssets: [],
+      runtimeReadOnlyRoots: [],
     },
   };
 }

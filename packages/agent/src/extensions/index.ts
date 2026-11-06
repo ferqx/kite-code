@@ -522,6 +522,8 @@ export interface AuthorizationRequest {
   signal: AbortSignal;
 }
 export interface PermissionDecision {
+  /** Worktree-only integrity of trusted policy composition; never itself an authorization. */
+  worktreeDecisionSeal?: import('../permissions/worktree-authorization').WorktreeDecisionSeal;
   /** Optional trusted non-secret explanation. Not an authority or permission mode in Core. */
   snapshot?: { namespace: string; version: string; data: Json };
   /** Trusted host reads rechecked atomically against original dispatch scope. */

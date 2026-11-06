@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -21,6 +22,7 @@ import {
   parseTerminalRuntimeProtection,
   type TerminalBundleManifest,
   terminalBundleEntries,
+  terminalEmptyAssetDirectories,
   verifyTerminalRuntimeBundle,
   verifyTerminalRuntimeProtection,
 } from '../../src/runtime-assets';
@@ -97,6 +99,42 @@ test('pure closed proof parse freezes metadata without probing even an absent ro
     expect(() => parseTerminalRuntimeProtection(invalid)).toThrow(
       'terminal_runtime_protection_invalid',
     );
+});
+
+test('v1 worker closure requires only its fixed empty hooks directory and refuses missing or populated hooks', () => {
+  const f = fixture();
+  try {
+    const directory = 'node_modules/@kite-ai/agent/tools/git-worktree';
+    const files = [...f.manifest.files];
+    for (const name of ['worker.js', 'empty-bunfig.toml', 'manifest.json']) {
+      const path = `${directory}/${name}`,
+        target = join(f.root, path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, 'SEALED_WORKTREE_ASSET', { mode: 0o644 });
+      const bytes = readFileSync(target);
+      files.push({ path, mode: 420, size: bytes.length, sha256: hash(bytes) });
+    }
+    const manifest = { ...f.manifest, files };
+    writeFileSync(f.manifestPath, JSON.stringify(manifest));
+    expect(manifest.version).toBe(1);
+    expect(terminalEmptyAssetDirectories(manifest)).toEqual([`${directory}/empty-hooks`]);
+    const hooks = join(f.root, directory, 'empty-hooks');
+    expect(() => verifyTerminalRuntimeBundle(f.root)).toThrow();
+    mkdirSync(hooks);
+    expect(verifyTerminalRuntimeBundle(f.root).manifest.version).toBe(1);
+    writeFileSync(join(hooks, 'post-checkout'), 'SHOULD_NEVER_EXECUTE');
+    expect(() => verifyTerminalRuntimeBundle(f.root)).toThrow('terminal_bundle_identity_mismatch');
+    unlinkSync(join(hooks, 'post-checkout'));
+    rmdirSync(hooks);
+    expect(() => verifyTerminalRuntimeBundle(f.root)).toThrow();
+    expect(
+      terminalEmptyAssetDirectories({
+        files: files.filter((file) => !file.path.endsWith('/manifest.json')),
+      }),
+    ).toEqual([]);
+  } finally {
+    f.close();
+  }
 });
 
 test('real complete closure with actual Bun and declared internal link binds service and daemon to frozen original proof', () => {

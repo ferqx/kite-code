@@ -14,6 +14,8 @@
 
 [默认模型合同](src/model-context.ts)为主、子 Agent 提供已授权工作推进、可纠正失败、当前入口与可达调用链研究、父结果验收和收束指导。直接回答与适度交付前置，证据规则用于判断而非逐项打印成报告；委派不把约束扩展为额外报告任务。它保留原始要求、来源、压缩与未知结果约束，不添加业务完成状态或第二个 Loop。代码与符号存在不构成当前执行路径证明，子报告不因已接纳而成为正确性或权限证明。
 
+审批可在模型视窗外处理，调用成功或未见提示不能证明“无审批”；内部步骤复用也不是整项操作免审批。合同要求仅按原证据报告来源／次数，缺少证据时不作该结论，不新增审批或权限规则。该指导来自 Worktree 真实父子报告与原两张卡矛盾的实际失败；[模型验证](../../tests/e2e/live/model/README.md#git-工作树与直接子-agent)保留原样本及修后资格。
+
 Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。模型观察中的 `plan_requirement` 表达准确原 Run 的计划批准事实；真实 `plan.required`、准确版本／原批准与独立工具权限仍在派发和完成边界核验。步骤 progress 不混入稳定计划来源，避免本批进度更新使普通兄弟工具失效或使旧成功 receipt 失效；压缩后进度不可见时通过 `read_plan` 找回，原操作引用或结果不可见时按需读当前任务执行证据，不为找结果重跑效果。
 
 工具异常与审批回执的模型可读说明归[结果呈现](src/model-tools.README.md#结果呈现)：原调用、回执和机器状态保留，明确未派发、失败、取消与效果未知分别解释。实际业务原因及部分效果由各工具 owner 提供，通用呈现不公开私有 details 或签发授权。
@@ -27,6 +29,10 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 [Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护文件读改写、内部目录检索 API、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、失败与未知结果记录和 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
 
 设计原因、备选与代价保存在[工具反馈与任务质量决定](../../.agents/notes/implemented/architecture/2026-10-23-agent-feedback-and-task-quality.md)。模型指导已实施，真实样本中仍有冗长和超出证据的表述；机械执行断言与全文质量分别说明，不能据工具全部成功宣称模型结论全部正确。
+
+## Git 工作树工具
+
+[Worktree owner](src/tools/git-worktree/README.md)维护 `builtin.shell/git.worktree@1` 的 `list/create/remove`、原 `shell.command` 可信 worker、冻结意图/原 ref 观察、保守删除和平台限制。创建不迁移 Session cwd；同 key 不重发已接纳变更。工具、Runtime 和协议既有版本保持，新增工具初始定义为1。[隔离验证](test/isolated/tools/git-worktree/README.md)与[Service链路](../../apps/service/test/isolated/git-worktree-configuration.test.ts)分别核故障边界和实际装配，完整平台/发行资格单独判断。
 
 ## 本地图片读取
 

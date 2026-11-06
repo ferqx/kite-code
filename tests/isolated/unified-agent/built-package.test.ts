@@ -1,10 +1,14 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -20,6 +24,85 @@ type Manifest = {
   dependencies?: Record<string, string>;
 };
 const repository = resolve(import.meta.dir, '../../..');
+function assertWorktreeAssetClosure(directory: string) {
+  for (const name of ['manifest.json', 'worker.js', 'empty-bunfig.toml']) {
+    const stat = lstatSync(join(directory, name));
+    expect(stat.isFile()).toBe(true);
+    expect(stat.isSymbolicLink()).toBe(false);
+  }
+  const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
+  expect(Object.keys(manifest).sort()).toEqual(['emptyHooks', 'files', 'schemaVersion']);
+  expect(manifest.schemaVersion).toBe(1);
+  expect(manifest.emptyHooks).toBe('empty-hooks');
+  expect(Object.keys(manifest.files).sort()).toEqual(['empty-bunfig.toml', 'worker.js']);
+  for (const name of ['worker.js', 'empty-bunfig.toml']) {
+    expect(manifest.files[name]).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      createHash('sha256')
+        .update(readFileSync(join(directory, name)))
+        .digest('hex'),
+    ).toBe(manifest.files[name]);
+  }
+  const hooks = join(directory, 'empty-hooks');
+  expect(lstatSync(hooks).isDirectory()).toBe(true);
+  expect(lstatSync(hooks).isSymbolicLink()).toBe(false);
+  expect(readdirSync(hooks)).toEqual([]);
+}
+
+test('packaged Worktree assets reject altered bytes, manifest drift and nonempty or non-directory hooks', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-worktree-asset-check-')));
+  const worker = join(root, 'worker.js');
+  const config = join(root, 'empty-bunfig.toml');
+  const manifestPath = join(root, 'manifest.json');
+  const hooks = join(root, 'empty-hooks');
+  const workerBytes = 'export const inertFixture = true;\n';
+  const configBytes = '# empty fixture\n';
+  const manifest = {
+    schemaVersion: 1,
+    files: Object.fromEntries([
+      ['worker.js', createHash('sha256').update(workerBytes).digest('hex')],
+      ['empty-bunfig.toml', createHash('sha256').update(configBytes).digest('hex')],
+    ]),
+    emptyHooks: 'empty-hooks',
+  };
+  try {
+    writeFileSync(worker, workerBytes);
+    writeFileSync(config, configBytes);
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    mkdirSync(hooks);
+    assertWorktreeAssetClosure(root);
+    for (const path of [worker, config]) {
+      const original = readFileSync(path);
+      writeFileSync(path, Buffer.concat([original, Buffer.from('changed')]));
+      expect(() => assertWorktreeAssetClosure(root)).toThrow();
+      writeFileSync(path, original);
+    }
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, extra: true }));
+    expect(() => assertWorktreeAssetClosure(root)).toThrow();
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    writeFileSync(join(hooks, 'unexpected-hook'), 'must not execute');
+    expect(() => assertWorktreeAssetClosure(root)).toThrow();
+    rmSync(join(hooks, 'unexpected-hook'));
+    rmdirSync(hooks);
+    writeFileSync(hooks, 'ordinary file is not a hooks directory');
+    expect(() => assertWorktreeAssetClosure(root)).toThrow();
+    rmSync(hooks);
+    mkdirSync(hooks);
+    if (process.platform !== 'win32') {
+      const target = join(root, 'other-empty-directory');
+      mkdirSync(target);
+      rmdirSync(hooks);
+      symlinkSync(target, hooks, 'dir');
+      expect(() => assertWorktreeAssetClosure(root)).toThrow();
+      rmSync(hooks);
+      mkdirSync(hooks);
+    }
+    assertWorktreeAssetClosure(root);
+  } finally {
+    // Only inert files: this fixture never creates a Git repository or worktree.
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 async function run(args: string[], cwd: string, env: Record<string, string> = {}) {
   const child = Bun.spawn([process.execPath, ...args], {
     cwd,
@@ -155,6 +238,7 @@ nativeTest(
       expect(existsSync(join(agentPath, 'storage/worker/main.js'))).toBe(true);
       expect(existsSync(join(agentPath, 'storage/migrations/0001-baseline.sql'))).toBe(true);
       expect(existsSync(join(agentPath, 'platform/process/shell-supervisor.js'))).toBe(true);
+      assertWorktreeAssetClosure(join(agentPath, 'tools/git-worktree'));
       expect(existsSync(join(agentPath, 'mcp/stdio-guardian.js'))).toBe(true);
       expect(existsSync(join(agentPath, 'mcp/schema-worker.js'))).toBe(true);
       expect(existsSync(join(agentPath, 'mcp/schema-worker.sha256'))).toBe(true);

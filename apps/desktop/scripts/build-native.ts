@@ -26,6 +26,8 @@ import {
 import {
   readTerminalRuntimeBundleContent,
   retainWindowsTerminalRuntimeFiles,
+  terminalEmptyAssetDirectories,
+  type VerifiedTerminalRuntimeBundle,
   verifyTerminalRuntimeBundle,
 } from '@kite-ai/service/runtime-assets';
 import tailwindcss from '@tailwindcss/vite';
@@ -38,6 +40,18 @@ import { buildWindowsAccess } from './build-windows-access';
 import { patchMacosElectronRuntime } from './macos-electron-runtime';
 import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 import { probeNativeSqliteEngine } from './sqlite-engine';
+
+/** The v1 file inventory omits fixed empty assets; preserve them in file-only copies. */
+export function copyWindowsNativeTerminal(terminal: VerifiedTerminalRuntimeBundle, target: string) {
+  privateDirectory(target);
+  defaultWindowsPathSecurity()!.copyPrivateArtifactFiles(terminal.root, target, [
+    'terminal-manifest.json',
+    ...terminal.manifest.files.map((file) => file.path),
+  ]);
+  for (const directory of terminalEmptyAssetDirectories(terminal.manifest))
+    privateDirectory(join(target, directory));
+}
+
 export async function buildNativeDesktop(
   input: NativeAssets,
   outdir: string,
@@ -270,12 +284,7 @@ export async function buildNativeCandidate(input: {
     } else mkdirSync(input.outdir, { mode: 0o700 });
     const root = realpathSync(input.outdir);
     if (process.platform === 'win32') {
-      const target = join(root, 'terminal');
-      privateDirectory(target);
-      defaultWindowsPathSecurity()!.copyPrivateArtifactFiles(terminal.root, target, [
-        'terminal-manifest.json',
-        ...terminal.manifest.files.map((file) => file.path),
-      ]);
+      copyWindowsNativeTerminal(terminal, join(root, 'terminal'));
     } else copy(terminal.root, join(root, 'terminal'));
     copy(electron, join(root, 'electron'));
     const macosResize =

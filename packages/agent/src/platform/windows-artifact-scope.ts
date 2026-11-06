@@ -45,7 +45,11 @@ export function readWindowsArtifactFile(scope: WindowsArtifactScope, path: strin
 
 /** Public candidate directories are readable assets, not private Profile objects. */
 let backend:
-  | ((root: string, relativeFiles?: readonly string[]) => WindowsArtifactScope)
+  | ((
+      root: string,
+      relativeFiles?: readonly string[],
+      relativeDirectories?: readonly string[],
+    ) => WindowsArtifactScope)
   | undefined;
 export function retainWindowsArtifactScope(root: string): WindowsArtifactScope {
   if (process.platform !== 'win32' || process.arch !== 'x64')
@@ -57,15 +61,17 @@ export function retainWindowsArtifactScope(root: string): WindowsArtifactScope {
 export function retainWindowsArtifactObjects(
   root: string,
   relativeFiles: readonly string[],
+  relativeDirectories: readonly string[] = [],
 ): WindowsArtifactScope {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw Error('artifact_scope_platform_unsupported');
   backend ??= createBackend();
-  return backend(root, relativeFiles);
+  return backend(root, relativeFiles, relativeDirectories);
 }
 function createBackend(): (
   root: string,
   relativeFiles?: readonly string[],
+  relativeDirectories?: readonly string[],
 ) => WindowsArtifactScope {
   const { dlopen, ptr, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
@@ -211,7 +217,7 @@ function createBackend(): (
     const mapped = new Uint16Array(32768);
     // Failed CloseHandle retains the owned collection for retry/diagnosis; DLLs remain live.
     const owned = new Set<object>();
-    return (root, relativeFiles) => {
+    return (root, relativeFiles, relativeDirectories = []) => {
       const entries: {
         path: string;
         handle: bigint | number;
@@ -323,7 +329,10 @@ function createBackend(): (
         }
         if (relativeFiles) {
           const paths = new Map<string, boolean>([[root, false]]);
-          for (const relativeFile of relativeFiles) {
+          for (const [relativeFile, isFile] of [
+            ...relativeFiles.map((path) => [path, true] as const),
+            ...relativeDirectories.map((path) => [path, false] as const),
+          ]) {
             const file = join(root, ...relativeFile.split('/'));
             const parents: string[] = [];
             for (
@@ -336,7 +345,7 @@ function createBackend(): (
             }
             for (const directory of parents.reverse()) paths.set(directory, false);
             if (paths.has(file)) fail();
-            paths.set(file, true);
+            paths.set(file, isFile);
           }
           // Root and all descendants deny WRITE and DELETE sharing. Original ancestry
           // handles keep the existing directory policy and prevent rename/reparse races.

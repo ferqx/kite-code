@@ -24,6 +24,7 @@ import {
   parseTerminalBundleManifest,
   readWindowsTerminalRuntimeFile,
   retainWindowsTerminalRuntimeFiles,
+  terminalEmptyAssetDirectories,
 } from '@kite-ai/service/runtime-assets';
 import { windowsInstallationCoordination } from '../../packages/agent/src/platform/windows-installation-coordination';
 import {
@@ -88,7 +89,12 @@ export function createWindowsNativeArchiveScratch(prefix: string) {
           ...bundle.manifest.files.map((file) => `candidate/${file.path}`),
           ...bundle.terminal.manifest.files.map((file) => `candidate/terminal/${file.path}`),
         ],
-        bundle.manifest.directories.map((path) => `candidate/${path}`),
+        [
+          ...bundle.manifest.directories.map((path) => `candidate/${path}`),
+          ...terminalEmptyAssetDirectories(bundle.terminal.manifest).map(
+            (path) => `candidate/terminal/${path}`,
+          ),
+        ],
       );
     },
     release() {
@@ -287,6 +293,7 @@ export function unpackNativeBundle(input: {
     ...files.keys(),
     ...links.map((link) => link.path),
     ...manifest.directories,
+    ...terminalEmptyAssetDirectories(terminal).map((path) => `terminal/${path}`),
   ];
   const paths = new Set(declarations);
   if (paths.size !== declarations.length) fail();
@@ -334,7 +341,10 @@ export function unpackNativeBundle(input: {
           closeSync(fd);
         }
       }
-    for (const directory of manifest.directories) {
+    for (const directory of [
+      ...manifest.directories,
+      ...terminalEmptyAssetDirectories(terminal).map((path) => `terminal/${path}`),
+    ]) {
       if (process.platform === 'win32') {
         for (const entry of closedWindowsTree([], [directory]))
           if (!lstatSync(join(destination, entry.path), { throwIfNoEntry: false })) {

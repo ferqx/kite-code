@@ -174,6 +174,33 @@ async function run(job: JobDefinition, command: string) {
   }
 }
 linuxTest(
+  'ordinary Full writes Profile, control and runtime data without implicit path masks while exact executables stay verified',
+  () =>
+    fixture(async (f) => {
+      const controlFile = join(f.control, 'approved-full-effect');
+      const runtimeFile = join(f.assets, 'approved-full-effect');
+      const profileFile = join(f.profile, 'approved-full-effect');
+      const result = await run(
+        createLinuxHostShellJob({
+          ...f.options,
+          controlBase: f.control,
+          protectedRoots: [],
+          readonlyAssets: [],
+          runtimeReadOnlyRoots: [],
+          filesystemScope: 'full_access',
+        }),
+        `printf control > ${quote(controlFile)}; printf runtime > ${quote(runtimeFile)}; printf profile > ${quote(profileFile)}; cat ${quote(join(f.profile, 'secret'))}`,
+      );
+      ended(result.events, result.handle, 'succeeded');
+      expect(readFileSync(controlFile, 'utf8')).toBe('control');
+      expect(readFileSync(runtimeFile, 'utf8')).toBe('runtime');
+      expect(readFileSync(profileFile, 'utf8')).toBe('profile');
+      expect(content(result.events)).toContain('PROFILE_SECRET');
+      expect(readdirSync(f.temporaryRoot)).toEqual([]);
+    }),
+  45000,
+);
+linuxTest(
   'private Codex directories preserve real Workspace and Full effects while auth rotates outside the running namespace',
   () =>
     fixture(async (f) => {

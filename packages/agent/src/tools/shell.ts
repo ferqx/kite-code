@@ -1,3 +1,5 @@
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   Extension,
   JobDefinition,
@@ -9,6 +11,11 @@ import type {
 import { canonicalJson } from '../json';
 import { parseShellCommandInput, shellOperationKey } from '../shell-input';
 import { AgentError } from '../storage/types';
+import {
+  createGitWorktreeTool,
+  type GitWorktreeToolOptions,
+  gitWorktreeRecordDefinition,
+} from './git-worktree';
 import { completeForegroundShell } from './shell-foreground';
 
 export interface ShellToolsOptions {
@@ -16,6 +23,14 @@ export interface ShellToolsOptions {
   /** Only trusted scope-aware host assembly registers this optional request. */
   readonly permissionsSchema?: Json;
   readonly classifyPresentation?: (command: string) => Promise<'exploration' | 'standalone'>;
+  readonly gitWorktree?: GitWorktreeToolOptions;
+}
+/** The source client uses built assets; it never executes a project-selected TS worker. */
+export function gitWorktreeAssetDirectory(): string {
+  if (!import.meta.url.endsWith('.js'))
+    return fileURLToPath(new URL('../../dist/tools/git-worktree', import.meta.url));
+  const module = dirname(fileURLToPath(import.meta.url));
+  return join(basename(module) === 'tools' ? module : join(module, 'tools'), 'git-worktree');
 }
 const idSchema = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$' };
 const decimal = { type: 'string', pattern: '^(0|[1-9][0-9]{0,18})$' };
@@ -210,8 +225,10 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     jobs: [job],
     records: [
       { contentType, contentVersion: 1, schema: object({ ref: { type: 'object' } }, ['ref']) },
+      ...(options.gitWorktree ? [gitWorktreeRecordDefinition] : []),
     ],
     tools: [
+      ...(options.gitWorktree ? [createGitWorktreeTool(options.gitWorktree)] : []),
       {
         id: 'shell.execute',
         model: {
@@ -220,7 +237,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
         },
         version: '1',
-        description: `Execute one supervised command. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned shell_id identifies this exact execution. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
+        description: `Execute one supervised command. Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned shell_id identifies this exact execution. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
         inputSchema: schema(true),
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);
@@ -255,7 +272,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         id: 'shell.launch',
         model: { name: 'shell_launch', snakeCase: true, hidden: true },
         version: '1',
-        description: `Start one supervised command. Acceptance is not completion.${scopeGuidance}`,
+        description: `Start one supervised command. Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion.${scopeGuidance}`,
         inputSchema: schema(false),
         async execute(input, context) {
           const launched = await launch(input, context, 'launch');

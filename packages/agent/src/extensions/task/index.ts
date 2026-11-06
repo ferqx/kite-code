@@ -282,7 +282,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.message',
         'send_agent_message',
-        'Queue a complete message to a direct child or parent. Idle recipients stay idle; use follow_up_agent when an idle child must resume concrete remaining work. Accepted/received/prepared are distinct. If a child needs a reply to proceed, wait at most one explicit finite 30000ms observation window; without a valid reply, finish with an honest pending-decision result containing the complete question and completed/unfinished facts. Do not wait indefinitely for an idle parent.',
+        'Queue a complete message to a direct child or parent. When a child worktree creation notice arrives, relay its exact path and relevant task facts only to the direct children that need them; use this tool for active children and follow_up_agent for concrete remaining work in an idle child. A worktree notice neither changes cwd nor grants permission: use the reported path explicitly within existing permissions. Idle recipients stay idle. Accepted/received/prepared are distinct. If a child needs a reply to proceed, wait at most one explicit finite 30000ms observation window; without a valid reply, finish with an honest pending-decision result containing the complete question and completed/unfinished facts. Do not wait indefinitely for an idle parent.',
         {
           ...object({ agentId, target: { enum: ['parent'] }, content }, ['content']),
           oneOf: [

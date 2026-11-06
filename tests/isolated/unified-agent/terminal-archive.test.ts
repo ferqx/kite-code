@@ -4,6 +4,8 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -43,6 +45,9 @@ function fixture() {
   for (const path of [
     ...Object.values(entries),
     'node_modules/example/index.js',
+    ...['worker.js', 'empty-bunfig.toml', 'manifest.json'].map(
+      (name) => `node_modules/@kite-ai/agent/tools/git-worktree/${name}`,
+    ),
     ...(process.platform === 'win32' ? ['node_modules/alias/index.js'] : []),
   ]) {
     const bytes = Buffer.from(
@@ -55,6 +60,7 @@ function fixture() {
     chmodSync(join(bundleRoot, path), mode);
     files.push({ path, size: bytes.length, sha256: hash(bytes), mode });
   }
+  mkdirSync(join(bundleRoot, 'node_modules/@kite-ai/agent/tools/git-worktree/empty-hooks'));
   const manifest: TerminalBundleManifest = {
     version: 1,
     apiMajor: 1,
@@ -174,6 +180,9 @@ test('actual Bun archive roundtrip stores no symlink entries and reconstructs on
       sha256: packed.sha256,
     });
     expect(result.candidateId).toBe(original.candidateId);
+    expect(
+      readdirSync(join(result.root, 'node_modules/@kite-ai/agent/tools/git-worktree/empty-hooks')),
+    ).toEqual([]);
     expect(result.artifact.executable.startsWith(f.destination + sep)).toBe(true);
     expect(lstatSync(join(f.destination, 'node_modules/alias')).isSymbolicLink()).toBe(
       process.platform !== 'win32',

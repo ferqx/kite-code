@@ -13,14 +13,14 @@ export const defaultTaskRoles: readonly TrustedTaskRole[] = Object.freeze([
     version: '1',
     toolPolicy: 'parent' as const,
     description:
-      'General delegated work using only the parent-selected tools and ordinary permissions.',
+      'General delegated work using only the parent-selected tools and ordinary permissions. Create Git worktrees only with git_worktree; never use Shell or scripts as a fallback. Omit path for the durable host default, and never put worktree code in temporary directories. Use reported worktree paths explicitly; a worktree notice does not change cwd or permissions.',
   }),
   Object.freeze({
     id: 'code',
     version: '1',
     toolPolicy: 'parent' as const,
     description:
-      'Implement a concrete scoped change and verify it; effects still require the original parent and child permissions.',
+      'Implement a concrete scoped change and verify it; effects still require the original parent and child permissions. Create Git worktrees only with git_worktree; never use Shell or scripts as a fallback. Omit path for the durable host default, and never put worktree code in temporary directories. Use reported worktree paths explicitly; a worktree notice does not change cwd or permissions.',
   }),
   Object.freeze({
     id: 'explore',
@@ -54,6 +54,7 @@ const readOnlyBindings = [
   ['builtin.shell', 'shell.launch', '1'],
   ['builtin.shell', 'shell.read', '1'],
   ['builtin.shell', 'shell.wait', '1'],
+  ['builtin.shell', 'git.worktree', '1'],
   ['builtin.planning', 'planning.read', '1'],
   ['builtin.skills', 'skills.load', '1'],
   ['builtin.skills', 'skills.resource', '1'],

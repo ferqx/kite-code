@@ -1,6 +1,8 @@
 # 会话内精确命令授权
 
-`same_command` 只能来自原 approval 卡提供的选项及用户明确答案。`approve_once` 或未指定 grant 仅批准原调用；`question`、`plan_review`、Auto 模型批准与 Full 模式不创建会话授权。实际 owner 在 `acceptInteractionDecision` 的同一事务核对原卡、执行、attempt、来源、策略和必要条件后保存授权。保存答案本身尚未创建 grant，客户端不能直接提交任意授权记录。
+`same_command` 只能来自原 approval 卡提供的选项及用户明确答案。`approve_once` 或未指定 grant 仅批准原业务调用；`question`、`plan_review`、Auto 模型批准与 Full 模式不创建会话授权。实际 owner 在 `acceptInteractionDecision` 的同一事务核对原卡、执行、attempt、来源、策略和必要条件后保存授权。保存答案本身尚未创建 grant，客户端不能直接提交任意授权记录。
+
+固定 `git.worktree@1` 的单次业务批准包含原 Tool 唯一的 prepare/mutation 两步骤。[Worktree 授权边界](worktree-authorization.ts)及[原 policy evidence](authorization-policy-evidence.ts)逐项核原批准、可信策略决策封存、真实 Run 注册、原 owner 记录、冻结输入和原 prepare 完整帧；最终派发再次核验。它使用原 policyEvidenceId/parent_review 来源，不创建会话通行授权、不扩展到独立 Shell 或兄弟 Agent，也不覆盖自定义独立人工要求。决策封存只检测可信组合是否被额外改写，不是签名或单独 authority；硬拒绝、控制撤销、取消、期限与 unknown 恢复仍按原规则执行。
 
 授权绑定原 Store、用户、实际 Session、Workspace、执行 kind、定义 ID/版本。父会话与 child 分别保存，不能借展示根的授权；clear 也只清除用户精确选择的实际 Session，不隐式覆盖后代。完整原 inputDigest、Interaction ID/accepted revision、Execution ID 继续保存为批准证明。没有可信 commandDigest 时，后续调用必须匹配完整 inputDigest。
 

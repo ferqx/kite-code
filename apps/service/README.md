@@ -65,7 +65,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 启动、配置准备和 `browser.view` Query 不启动或安装浏览器。默认只定位固定版本包内程序与系统标准位置的 Chrome／Chromium；旧后端的 Linux 边界要求原生 init 与 bubblewrap，macOS 要求 stdio guardian 与固定 Bun，使用独立 Browser launchd coalition。共用被动宿主检查继续拒绝会使上游关闭 Chrome sandbox 的 root／container／CI 环境及不可核实的系统信息。后端不可用时不默认选择依赖它的工具；已显式选择仍由实际 host capability 给出准确原因，不能使整个 Service 启动失败。统一解释器的 `executionAvailable` 另核 macOS、同包已构建 worker 和 guardian；缺资产或平台不支持时，已选统一入口准确 `browser_executor_unavailable`，不自动改选原子工具，内置技能的依赖也不可用。源码宿主定位已构建 worker，不能把未构建 TypeScript 文件当成已具备解释器。
 
-一个 Service 共享原 controller；普通页面与自动化 daemon 仍由 `browser.session` Job、取消和 Runtime 关闭管理，不随客户端面板卸载销毁。统一代码环境另由 `browser.code_session` Job 及原绑定 disposer 收束，退出时沿原controller关闭自己持有的自动化，不销毁用户已有普通页面；它要求所属 Runtime 的总 process 容量至少为2，活跃代码环境以 `floor(totalProcess / 2)` 张票据准入，超出时沿可取消队列等待，为同一环境的解释器与页面 Job 留出容量。票据不借用或释放 Core 的真实 process permit；实际 Job 仍独立申请原资源，代码环境只有确认关闭才归还票据，网页 Job 的原业务 unknown 不因此改写。全局 Extension Query／Action 直接使用现有入口供 Native 面板观察与控制，不新增 SQL、Core 循环或 HTTP 协议。程序资产与私有目录继续进入原 Files／Shell 保护集合，不读取用户日常 Profile／Cookie。底层执行、隔离、动作来源、图像及资源证明归 [Agent Browser](../../packages/agent/src/tools/browser/README.md)。
+一个 Service 共享原 controller；普通页面与自动化 daemon 仍由 `browser.session` Job、取消和 Runtime 关闭管理，不随客户端面板卸载销毁。统一代码环境另由 `browser.code_session` Job 及原绑定 disposer 收束，退出时沿原controller关闭自己持有的自动化，不销毁用户已有普通页面；它要求所属 Runtime 的总 process 容量至少为2，活跃代码环境以 `floor(totalProcess / 2)` 张票据准入，超出时沿可取消队列等待，为同一环境的解释器与页面 Job 留出容量。票据不借用或释放 Core 的真实 process permit；实际 Job 仍独立申请原资源，代码环境只有确认关闭才归还票据，网页 Job 的原业务 unknown 不因此改写。全局 Extension Query／Action 直接使用现有入口供 Native 面板观察与控制，不新增 SQL、Core 循环或 HTTP 协议。程序资产与私有目录继续进入原 Files 保护集合，普通 Shell 不再自动追加这些路径；Browser 自身不读取用户日常 Profile／Cookie。底层执行、隔离、动作来源、图像及资源证明归 [Agent Browser](../../packages/agent/src/tools/browser/README.md)。
 
 [原装配回归](test/isolated/browser-configuration.test.ts)覆盖宿主关闭、无副作用 Query、版本、不可信配置与私有目录保护。[统一入口配置测试](test/isolated/browser-execution-configuration.test.ts)以真实 resolver／Runtime／SQLite、固定模型和隔离执行边界替身核新 Run 的单入口、正式 Skill 正文／资源读取、隐藏原子定义实际派发、显式旧目录与原 snapshot 恢复、缺执行器和宿主关闭；不启动真实 Native、解释器或外部 Provider，不能据此宣称页面操作或发布验收通过。
 
@@ -280,7 +280,7 @@ paired 测试使用真实 Bun child、固定 Model、显式外部效果 ledger �
 
 默认装配通过 `@kite-ai/service/configuration` 导出 `createDefaultProcessConfiguration({profile,hostConfiguration?,credentialBackend?,userConfigurationPath?,localCodex?})`。[用户配置源](src/user-configuration.ts)默认只读写 `~/.kite-code/kite-code.jsonc`，完整移除 Profile `config.jsonc` 的运行配置定位、创建和回退。`userConfigurationPath` 仅供可信嵌入宿主和自有测试夹具指定文件，不接受 HTTP、renderer 或 startup JSON 的路径输入。项目 `kite-agent.jsonc` 继续提供工具和扩展；默认 resolver 剔除其 `models/modelId/provider/model`。可信显式 startup 装配和 command 的准确模型选择仍受原验证。坏 JSONC 或不可用凭据仅拒绝相关 Run，bootstrap、History、Query 和取消保持可用；禁用、未知或不支持模型不回退其他 route。宿主追加 Extension 必须保留工厂返回的全局 registrations。
 
-用户配置父目录加入默认 Files 的读写保护、宿主 Shell 和 Workflow verifier 的 protected roots；即使 Workspace 包含用户目录，也不能经普通模型工具读取配置明文或修改配置。用户设置 API 仍按独立读取集与原意图发布。
+用户配置父目录继续加入默认 Files 的读写保护；普通 Shell 不再自动加入该目录，Shell 在原已批准范围内可以访问配置，Files 不因此获得读写资格。用户设置 API 仍按独立读取集与原意图发布。
 
 默认装配只创建一个用户配置适配器，配置管理与 Skills 目录复用该实例。Provider 保存按本批新增名称一次读取原格式和分配稳定路由，不为每个模型重复读取文件；目标字节 ETag、完整 read-set、凭据存储与最终发布检查保持原顺序。用户文件路径只由[纯路径函数](src/user-configuration-path.ts) `userConfigurationPath(home)` 构造，默认用户源明确传入宿主 homedir，测试必须传入自有 HOME。跨 workspace 的 HOME、路径函数和配对子进程环境通过相对导入 Service 所属的[单一测试辅助](test/fixtures/user-configuration-fixture.ts)提供；源码外 Node 窗口 driver 接收调用方已经算好的同一路径，不引入 Service 测试包。测试辅助不进入产品装配或发行构建。直接指定文件的测试仍显式注入 `userConfigurationPath`，避免测试读取开发者的真实用户配置。
 
@@ -485,6 +485,10 @@ Plan 文件编辑委派到 `planning.write` 后，FileCheckpoint 只从准确父
 现有 Execution／View 响应的可选 `authorization` 直接来自同一 Store 读取，只含原 reviewer 的有限状态／决定／原因、原人工答案的保存／accepted revision 和原派发事实，不增加路由或写操作。[HTTP schema](src/http/schema/index.ts)与生成 API 保持同形，原因上限8192与原 reviewer 答案一致；私有请求、主体、owner、审查全文和上下文不进入响应。停止后读取原决定与当前执行授权分别处理，准确资格归 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。[真实 Client 测试](../../tests/isolated/unified-agent/client-interactions.test.ts)核 pending 与迟到保存／未受理，原审批提交和最终派发门禁保持。
 
 ## 默认 Shell 装配
+
+`git.worktree@1` 通过同一 builtin.shell 装配，默认目录新增模型名 `git_worktree`。只选该工具时仍提供内部 Shell Job 和封存资产，不开放模型 Shell。[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)定义三个 action 和安全/恢复契约；[configuration](src/configuration.ts)从既有 policyRuntime 注入独立 worktreeHost 闭包，不把回调放入结构化克隆的 options。删除首次派发前，[根查询](src/worktree-host.ts)完整分页读取同 Store Workspace Directory、逐条核 getWorkspace 和物理路径，再核最终 cursor/高水位；任何读失败、漂移或不能解释的根都拒绝。登记根不依赖活跃状态。当前 Tool 的 Run safety 由既有 Context读取且必须准确排除自身，不能以整个活动 Run 的 quiescent 代替。
+
+2026-11-06，`8e350f99` 加本轮差量、macOS arm64／Bun1.4.4／Git2.54.0，[模型到Job真实链路](test/isolated/git-worktree-configuration.test.ts)2项76断言通过，覆盖只选择此工具、三个 action、Full 仍不扩大默认范围、源内容/cwd保留、正常删除保留分支、旧 key 对重建实体只重放回执，以及根目录完整分页与漂移拒绝。另[权限链路](test/isolated/git-worktree-permissions.test.ts)7项场景全部通过：Auto list零审核，创建／删除各一次准确通用审核，手动各一张原业务卡；四个内部Job以原policy evidence继承对应原Tool批准且保留full_access/none范围。三个真实只读子角色仅能list，错误owner/version不借用绑定，待批准计划下list可达而create拒绝。Planning的动态只读证据由同一[Host helper](src/worktree-host.ts)核原Run封存资产与当前工厂，不静态放行整个工具。新增两项经实际 task.spawn／默认 worker 子会话核同一两卡／两次审核及四个原 Job，覆盖 Runtime 独立 childPermissions 合成接缝；父不代执行，原父子硬上限仍生效。固定本地 Provider 不调用付费模型。Linux/Windows真实监管、reparse和完整发行资格未取得，普通Shell已获得的原资格不自动覆盖新worker。
 
 Shell 请求描述按准确 kind／定义／版本限定，合法同名 Model 不进入 Shell 参数校验。[同名回归](test/isolated/shell-model-identity.test.ts)在真实 Runtime／SQLite 与受控模型下覆盖三模式、主 Agent、三个分析 preset 和普通 worker。角色只读通过已有 Sources 捕获链进入子模型，原可信 Source 随私有快照保存，恢复按原内容捕获，不以新角色描述重写旧配置；[指导输入回归](test/isolated/child-readonly-guidance.test.ts)核实际请求及 Source 分支，不代表完整子 Run 冷恢复资格。Shell 不再包裹角色专属命令硬拒，直接走继承的普通策略与沙箱；[Shell 整例](test/isolated/shell-configuration.test.ts)和[检索集成](test/isolated/shell-search-configuration.test.ts)核复合查询、Auto 的任务授权判断、普通范围保护与期限摘要。角色专属 OS 降权不实施，Full 不提供角色禁写保证，边界归[权限 owner](../../packages/agent/src/permissions/README.md)。
 
@@ -848,9 +852,9 @@ saved 要求 Command applied、准确原 Execution 状态、非准备下一 atte
 
 ## 本机 Codex 来源
 
-[Codex 私有适配](src/codex-auth.ts)只读绝对 `CODEX_HOME` 或 `~/.codex` 内的 ChatGPT `auth.json`、`models_cache.json` 与 `config.toml`，Codex 根配置的有效 `model_reasoning_effort` 经原 Model preset 校验后进入既有 provider effort 层，用户 `modelOptions` 继续覆盖；以账户和主体摘要生成稳定 alias；同账户 token 轮换不改变 route，账户切换使旧 route 与设置 read-set 失效。目录只采用可见本地 cache 和明确 OpenAI 模型，不调用远端发现、不猜名称。认证读取使用有界 regular-file descriptor 与严格 UTF-8，原 token、id/refresh token、账户原文和 auth 文件内容不进入配置、DTO、快照或日志。来源统一提供合法的私有保护路径：相对、空或含 NUL 的可选目录不进入 Files/Shell 资产边界，也不阻断手动 Provider；合法绝对目录即使尚无认证文件仍受保护。
+[Codex 私有适配](src/codex-auth.ts)只读绝对 `CODEX_HOME` 或 `~/.codex` 内的 ChatGPT `auth.json`、`models_cache.json` 与 `config.toml`，Codex 根配置的有效 `model_reasoning_effort` 经原 Model preset 校验后进入既有 provider effort 层，用户 `modelOptions` 继续覆盖；以账户和主体摘要生成稳定 alias；同账户 token 轮换不改变 route，账户切换使旧 route 与设置 read-set 失效。目录只采用可见本地 cache 和明确 OpenAI 模型，不调用远端发现、不猜名称。认证读取使用有界 regular-file descriptor 与严格 UTF-8，原 token、id/refresh token、账户原文和 auth 文件内容不进入配置、DTO、快照或日志。来源统一提供合法的私有保护路径：相对、空或含 NUL 的可选目录不进入 Files 保护边界，也不阻断手动 Provider；合法绝对目录即使尚无认证文件仍受 Files 保护，普通 Shell 不自动追加该保护。
 
-Shell 的目录保护与私有文件保护分开：`auth.json` 经可信宿主 `protectedFiles` 传入普通 Shell、Workflow verifier 与声明补偿，不进入只接受存在目录的 `protectedRoots`，也不作为可执行资产读取或计算摘要。macOS 沿原 Seatbelt 保护准确名称；Linux 将专用物理认证目录交给既有 namespace mask，保正常 Workspace／Full 执行与原宿主写入，认证叶原子刷新仍不可读写。仅在实际 Shell Job 派发时通过原父 FD／no-follow 受控预留缺失0700目录，不在发现或 Run 准备写文件，不修改或删除既有认证内容。HOME／Workspace／资产祖先重叠或可被业务重定向的别名作为该 Job 的无效布局拒绝；不再因存在本机认证而整体禁用 Linux Shell。具体边界与实际 Linux 证据归[Jobs owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。
+默认普通 Shell 不再自动注入 Profile／coordination、用户配置父目录、Codex auth.json、Browser 私有目录或整目录运行资产的保护。controlBase 仍作原监管 IPC 与身份校验；普通 macOS／Linux host 不再自动 deny／mask 它。自定义宿主显式给出的 protectedRoots／protectedFiles／readonlyAssets 及 confined 模式按原合同保留，Linux 运行验证必需的准确可执行文件 RO 挂载、资产 hash/identity、已批准文件／网络范围、监管、取消及 unknown 保持；这不修改 Files、图片或 Native 文件保护。
 
 未指定 `userConfigurationPath` 的正式默认宿主启用该来源；可信嵌入宿主使用自有文件时，通过 `localCodex` 显式注入或关闭。中立 assembly 格式由嵌入宿主控制，不注入本机目录；用户 provider/model 格式通过[用户源](src/user-configuration.ts)投影虚拟只读连接，偏好写回跳过来源物化，只保存原模型/default/effort 字段。已有默认保持，缺少手动模型时使用可核实的本机选择。坏用户 JSONC 保留原字节并拒绝模型配置，不能借自动来源回退掩盖错误。
 
@@ -972,3 +976,5 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 旧 Run 未包含 Browser snapshot 字段时，恢复绑定保留字段缺失，不补入 `browser: null`；新 Run 明确保存的 null 或 Browser 指纹仍精确保留并核对。该差异由[模型绑定回归](test/isolated/model-transport.test.ts)验证，避免完整 Runtime 配置匹配因升级新增字段误拒。
 
 浏览器新授权的私有请求标识由 Service 生成并持久化一次，携带固定时间范围；冷恢复沿原记录 inspect，不因超时、Main重启或记录丢失重新 prepare。旧格式申请仍按原记录只读恢复，未知结果不能重放。此调整不改变公开工具或协议版本。
+
+2026-11-06 持久默认目录差量：[权限链路](test/isolated/git-worktree-permissions.test.ts)整文件10项／109断言通过（5个启动隔离HOME子进程各自核1pass0fail），验证根与默认 worker child 的手动／Auto 省略 path 流程、批准前零mkdir、四个原Job复用、按原回执删除保留分支，以及 workspace_write 不扩权。默认根为可信 homedir() 下 `.kite-code/worktrees`，Bun会缓存启动HOME，测试必须在子进程启动时隔离并在任何Git变更前核对。

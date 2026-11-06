@@ -8,6 +8,7 @@ import {
   createPermissionPolicy,
   type PermissionPolicySnapshot,
 } from './index';
+import { sealWorktreeDecision } from './worktree-authorization';
 
 const object = (value: Json | undefined): value is Record<string, Json> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -61,8 +62,10 @@ function intersect(
     return { allowed: false, revision, reason: current.reason, ...proof };
   if (!ceiling.allowed && !ceiling.approval && !ceiling.check)
     return { allowed: false, revision, reason: ceiling.reason, ...proof };
-  if (ceiling.allowed) return { ...current, revision, ...proof };
-  if (current.allowed) return { ...ceiling, revision, ...proof };
+  if (ceiling.allowed)
+    return sealWorktreeDecision({ ...current, revision, ...proof }, [current, ceiling]);
+  if (current.allowed)
+    return sealWorktreeDecision({ ...ceiling, revision, ...proof }, [current, ceiling]);
   const decisions = [current, ceiling];
   const approvals = decisions.filter((decision) => decision.approval);
   const checks = decisions.filter((decision) => decision.check);
@@ -79,41 +82,44 @@ function intersect(
         decision.approval?.commandDigest === commandDigest &&
         decision.approval.grants?.includes('same_command'),
     );
-  return {
-    allowed: false,
-    revision,
-    reason: 'planning_mode_ceiling',
-    ...proof,
-    ...(approvals.length
-      ? {
-          approval: {
-            request: { kind: 'planning_mode_ceiling', policies: scopes },
-            ...(sameCommand
-              ? { grants: ['approve_once', 'same_command'] as const, commandDigest }
-              : {}),
-          },
-        }
-      : {}),
-    ...(checks.length
-      ? {
-          check: {
-            ...autoCheckOptions(checks.map((decision) => decision.check!)),
-            request: {
-              kind: 'planning_mode_ceiling',
-              policies: decisions.map((decision, index) => ({
-                scope: index === 0 ? 'current' : 'plan',
-                revision: decision.revision,
-                request: decision.check?.request ?? null,
-              })),
+  return sealWorktreeDecision(
+    {
+      allowed: false,
+      revision,
+      reason: 'planning_mode_ceiling',
+      ...proof,
+      ...(approvals.length
+        ? {
+            approval: {
+              request: { kind: 'planning_mode_ceiling', policies: scopes },
+              ...(sameCommand
+                ? { grants: ['approve_once', 'same_command'] as const, commandDigest }
+                : {}),
             },
-            requireApproval: decisions.some(
-              (decision) =>
-                decision.check?.requireApproval || (!!decision.approval && !decision.check),
-            ),
-          },
-        }
-      : {}),
-  };
+          }
+        : {}),
+      ...(checks.length
+        ? {
+            check: {
+              ...autoCheckOptions(checks.map((decision) => decision.check!)),
+              request: {
+                kind: 'planning_mode_ceiling',
+                policies: decisions.map((decision, index) => ({
+                  scope: index === 0 ? 'current' : 'plan',
+                  revision: decision.revision,
+                  request: decision.check?.request ?? null,
+                })),
+              },
+              requireApproval: decisions.some(
+                (decision) =>
+                  decision.check?.requireApproval || (!!decision.approval && !decision.check),
+              ),
+            },
+          }
+        : {}),
+    },
+    [current, ceiling],
+  );
 }
 
 export function createPlanningPermissionPolicy(options: {

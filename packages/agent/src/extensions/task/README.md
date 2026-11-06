@@ -35,6 +35,8 @@ Host 准备 queued 引导后若最终事务发现目标已结束，返回 target
 
 普通消息持久排队。活动 Run 在安全 checkpoint 接收准确邮件；idle 邮件保存 targetRunId:null，零新 Run／Model。明确 follow-up 按原 predecessor 和双水位接纳当时已确认邮件；同请求重试不扩大集合，晚确认或晚发送的邮件留队。完整正文以原 source IDs 进入模型，发送、接收和 prepared 是不同事实。
 
+子 Agent 的 [Worktree Tool](../../tools/git-worktree/README.md)在原创建稳定成功后，用同一通用持久消息操作通知 parent，正文带准确路径、HEAD、分支及原 Tool/Job 出处。父收到后向原任务中需要路径的直接 child 转发；运行中用现有消息，idle 且确需续作时用 follow-up。就绪邮件不同于整项 child 完成，不等整项任务结束才发送；入队不表示父已读，也不自动全员广播。worker/code 指导说明使用准确路径，通知不改变 cwd 或编辑范围，多个可写 child 的原并行能力保持。
+
 child Run 结束后，carrier 仍须等待该 child 范围的 Model、Tool 和 attached Job，包含排队 Job；detached Job 保持独立。inspectChildSettlement 在短读事务内取得 pending 与 change cursor，Runtime 用原 ChangeWaits 等待，不持 SQLite 事务或额外模型槽。最终 settlement 再核准确事实，unknown 不冒充停止或成功。后台 Shell 继续使用独立 Job 生命周期，不依赖 Task 结果义务。
 
 ## 完成通知与观察
@@ -64,3 +66,5 @@ list_agents 按首次创建 Command 的不可变 seq 每个 Session 只列一次
 旧 resultRequirement 参数在 Host／Store 明确拒绝，不会忽略旧义务后悄悄开始工作。持久取舍及旧决定的部分替代归[退役决定](../../../../../.agents/notes/implemented/architecture/2026-11-02-retire-legacy-task.md)。
 
 [六工具](../../../test/isolated/business/task/collaboration-surface.test.ts)、[邮件](../../../test/isolated/business/task/mailbox.test.ts)、[idle 接纳](../../../test/isolated/business/task/mail-adoption.test.ts)、[问题与引导](../../../test/isolated/business/task/question-loop.test.ts)、[attached Job](../../../test/isolated/business/task/attached-job-settlement.test.ts)和[执行组恢复](../../../test/isolated/recovery/run-resume-group-runtime.test.ts)分别核实际 Core／SQLite／模型输入和失败边界。旧 Task 测试夹具已删除，不能用历史工具测试替代当前接口验收。工具、存储与 native runner 版本未因本次移除升级。
+
+worker/code 的模型指导要求工作树创建只走 git_worktree，不以 Shell 或脚本兜底；省略 path 使用持久默认根，创建不迁移 cwd，也不新增编辑权限。只读角色仍只具 list 能力。

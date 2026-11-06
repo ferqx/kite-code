@@ -78,8 +78,7 @@ effects；Workspace 外固定高危身份由 Tool Policy 分类为 `sensitiveExt
 Windows runner 不得安装第二层 protected-path deny。canonical Workspace member 不得因名称被拒绝。按
 [Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)，Full 直接授权；Auto 模式由自动审批模型选择批准、拒绝或请求真人审批；其他模式请求 exact user
 approval，模型异常或 circuit breaker 也升级真人审批。
-Full 的用户文件系统授权不包含 Kite 自身的 Host-control base：macOS 显式 deny，Linux 对整个 base 投影只读
-空 tmpfs，以隔离当前及并发 invocation 的 supervisor socket、lock 与 identity。
+2026-11-06 用户调整普通 Shell 路径政策：默认不再额外 deny／mask Kite 的 Host-control base、Profile、配置、认证或整个运行目录。原控制身份、私有目录权限、准确进程监督、取消与 unknown 继续验证；自定义显式限制和 confined 模式保原合同。Linux native 运行验证必需的准确执行 binary RO 挂载保持，不能据路径政策变化取消原 executable identity/digest 检查。
 
 Windows 命令语言候选顺序（只在已获准的 native/test execution 内使用）：
 
@@ -239,3 +238,11 @@ stdout/stderr reader 必须持续 drain 子进程管道，以跨 chunk `TextDeco
 因旧的 16 KiB 未终止行缓冲丢失长行，也不能在二进制 frame 边界插入假换行。spool 写入失败必须明确失败；
 进程终态关闭写 FD，每次分页只临时打开读 FD，避免累计执行数耗尽句柄。输出存储由当前 Runtime 生命周期
 管理；目录在首次 Shell 启动时创建，owner 关闭并确认真实清理后回收其全部终态及未读输出，最后一项移除时回收目录。未知清理仍保留恢复事实，不跨宿主重启接管旧进程或旧句柄。长轮询在每个结束分支清理定时器及监听器，预先取消的读取立即返回；本会话 watermark 不受其他 owner 的进度影响。
+
+## Git Worktree worker 的新增范围
+
+`builtin.shell/git.worktree@1` 沿既有 `shell.command@1` 运行固定 Bun worker，不增加 Job/Runtime 或平台协议版本。首次解释器前应用环境允许集合与 `--no-env-file --config=<absolute>`，封存 Bun/Git/worker/config/空 hooks 及摘要，start 前重核；仅准确固定 list 为只读。Full 不扩大该 worker 的原申请，network 固定 none。Windows 仍沿原 Git Bash/native Job监管和读取/离线实际边界，不据网络参数声称新增系统级断网。
+
+2026-11-06，本次新 worker 已在 macOS arm64／Bun1.4.4／Git2.54.0 验证真实三个 action、launchd 启动保护和发行资产搬迁后的实际Job；Linux和Windows本次未有对应实机环境，原平台的普通Shell证据不授予该新worker的监管、Windows reparse或完整发行资格。具体算法和不支持配置由 [Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)维护，Windows删除仍遵循[只读清理门禁](../development/worktree-safety.md)。
+
+当前 Worktree 默认持久位置为可信用户home下`.kite-code/worktrees`，create省略path时冻结实际目标；新临时目标被Tool/worker拒绝。模型指导只经git_worktree创建，不把提示词表述成Shell全程序拦截器。默认选址、父目录副作用和原owner恢复归[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。

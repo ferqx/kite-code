@@ -153,3 +153,7 @@ G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；
 平台 workflow 的源码外 Files/资产/SQLite/锁及 macOS 默认 Shell 诊断只证明报告范围；formal verifier 仍拒完整 effectful platform 缺资格。正式 soak 保固定8外层/≥60分钟/168分钟上界、混合场景、资源观测与后代身份要求；单次 macOS 450秒默认 continuous 组件不能代替整体资格。V1.3 D17 退役旧隐式累计预算，实际显式并发、取消和输出策略场景不重建旧资金账本。runner 保闭合 v2 七类 CI；当前 continuous 的实际默认 producer/时长证据与剩余资源条件归[韧性 owner](runtime-resilience-qualification.md)。失败及未知清理保原证据。
 
 旧 KASD [三平台 run33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)只绑定其历史 implementation head，不证明新八 workspace。旧来源/字段不再用于当前发行。依赖补丁仍由 manifest/lock固定，不能绕过安装补丁。完整 V1.3 的37能力、T001—T114/E01—E14及§35仍由[计划](../plans/unified-agent-refactor-v1.md)与实际能力映射核对，状态保持 implementing。
+
+## Git Worktree 运行资产
+
+Terminal/Native沿原Agent manifest build携带Git Worktree独立worker、无preload配置、空hooks目录和SHA256清单；不升级既有工具、Job、Runtime或manifest版本。空目录只由已封存的准确三文件闭包派生，在解包和 Windows Native 的私有文件复制后重建，完整目录/文件/祖先检查保持；只复制 manifest 文件库存不能取得完整制品。macOS本次源码链路及安装后实际Job已核实，Linux/Windows新worker和完整发行资格仍需各自实机证据；细节与命令归[Terminal owner](../../apps/cli/docs/terminal-release.md)、[Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)及[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。

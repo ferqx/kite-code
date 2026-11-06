@@ -100,6 +100,7 @@ import {
 import { createModelToolSurface, modelToolMessages } from './model-tools';
 import { autoCheckOptions } from './permissions/auto-check';
 import { intersectPermissionPolicies } from './permissions/inheritance';
+import { sealWorktreeDecision } from './permissions/worktree-authorization';
 import { formatShellResult } from './shell-result-presentation';
 import {
   isShellRiskRequest,
@@ -1806,7 +1807,8 @@ export class AgentRuntime {
             reason: denied.reason ?? 'parent_child_permission_denied',
             ...proof,
           };
-        if (!challenges.length) return { allowed: true, revision, ...proof };
+        if (!challenges.length)
+          return sealWorktreeDecision({ allowed: true, revision, ...proof }, decisions);
         const approval = approvals.length
           ? {
               ...(sameCommand
@@ -1841,13 +1843,16 @@ export class AgentRuntime {
                 checks.some((decision) => decision.check?.requireApproval),
             }
           : undefined;
-        return {
-          allowed: false,
-          revision,
-          ...proof,
-          ...(approval ? { approval } : {}),
-          ...(check ? { check } : {}),
-        };
+        return sealWorktreeDecision(
+          {
+            allowed: false,
+            revision,
+            ...proof,
+            ...(approval ? { approval } : {}),
+            ...(check ? { check } : {}),
+          },
+          decisions,
+        );
       },
     };
   }

@@ -292,9 +292,9 @@ async function fixture(
               ? {
                   host: {
                     controlBase: control,
-                    protectedRoots: [profile.dataRoot, control],
-                    readonlyAssets: [join(root, 'assets')],
-                    runtimeReadOnlyRoots: [dirname(process.execPath)],
+                    protectedRoots: [],
+                    readonlyAssets: [],
+                    runtimeReadOnlyRoots: [],
                   },
                 }
               : {}),
@@ -467,7 +467,7 @@ nativeTest(
   20000,
 );
 nativeTest(
-  'default Host Model and Shell start before and after an absent Codex Home appears without exposing its private file',
+  'default Full Host Shell can read and write a synthetic Codex file after its absent Home appears',
   async () => {
     const f = await fixture({
       hostBoundary: true,
@@ -512,9 +512,8 @@ nativeTest(
           .filter((row) => row.stream === 'stdout')
           .map((row) => row.content)
           .join(''),
-      ).toBe('read-deniedwrite-deniedordinary');
-      expect(JSON.stringify(executions)).not.toContain('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
-      expect(readFileSync(auth, 'utf8')).toBe('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+      ).toBe('SYNTHETIC_PRIVATE_AUTH_MATERIALleakedwroteordinary');
+      expect(readFileSync(auth, 'utf8')).toBe('stolen');
     } finally {
       await f.close();
     }
@@ -996,7 +995,7 @@ nativeTest(
   20000,
 );
 nativeTest(
-  'read-only task children retain ordinary workspace and protected-path boundaries; Auto can reject actual writes',
+  'read-only task children retain ordinary approved scopes; Auto can reject actual writes',
   async () => {
     for (const mode of ['accept_edits', 'auto', 'full'] as const) {
       const f = await fixture({
@@ -1011,7 +1010,7 @@ nativeTest(
         const outside = join(f.root, 'outside-role-effect');
         const originalConfig = readFileSync(f.configPath, 'utf8');
         f.a.command(
-          `printf role-effect > role-write.txt; printf outside > '${outside}'; printf blocked > '${f.configPath}'; printf scope-probe-done`,
+          `printf role-effect > role-write.txt; printf outside > '${outside}'; printf '\\n' >> '${f.configPath}'; printf scope-probe-done`,
         );
         await f.submit();
         await f.done();
@@ -1024,7 +1023,9 @@ nativeTest(
         const executions = await f.store.listExecutions(carrier.childSessionId!);
         const launch = executions.find((row) => row.definitionId === 'shell.execute');
         const jobs = executions.filter((row) => row.definitionId === 'shell.command');
-        expect(readFileSync(f.configPath, 'utf8')).toBe(originalConfig);
+        expect(readFileSync(f.configPath, 'utf8')).toBe(
+          mode === 'full' ? `${originalConfig}\n` : originalConfig,
+        );
         expect(f.a.reviews).toHaveLength(mode === 'auto' ? 1 : 0);
         if (mode === 'auto') {
           expect(launch).toMatchObject({
@@ -1972,7 +1973,11 @@ for (const expanded of [false, true])
         expect(readFileSync(join(f.workspace, 'timeout-local.txt'), 'utf8')).toBe('continued');
         expect(existsSync(outside)).toBe(expanded);
         if (expanded) expect(readFileSync(outside, 'utf8')).toBe('allowed');
-        expect(existsSync(join(f.profile.profilePath, 'timeout-protected.txt'))).toBe(false);
+        expect(existsSync(join(f.profile.profilePath, 'timeout-protected.txt'))).toBe(expanded);
+        if (expanded)
+          expect(readFileSync(join(f.profile.profilePath, 'timeout-protected.txt'), 'utf8')).toBe(
+            'forbidden',
+          );
         expect(connections).toBe(expanded ? 1 : 0);
         expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
         expect(

@@ -5,6 +5,7 @@ import type {
   Permissions,
 } from '../extensions';
 import { semanticDigest } from '../json';
+import { validWorktreeDecision } from '../permissions/worktree-authorization';
 import { isShellRiskRequest } from '../shell-risk-review';
 import type {
   AutoAuthorizationEvidence,
@@ -346,6 +347,25 @@ export class InteractionGate {
       throw new AgentError('authorization_check_binding_changed');
     }
     if (!execution.interactionBinding && decision.allowed) return decision;
+    if (
+      !execution.interactionBinding &&
+      request.kind === 'job' &&
+      request.definitionId === 'shell.command' &&
+      request.definitionVersion === '1' &&
+      validWorktreeDecision(decision) &&
+      !decision.check?.requireApproval &&
+      (decision.approval || decision.check)
+    ) {
+      const inherited = await this.store.resolveWorktreeAuthorization({
+        expectedStoreId: scope.expectedStoreId,
+        owner: scope.owner,
+        targetExecutionId: scope.executionId,
+        decision,
+      });
+      scope.signal.throwIfAborted();
+      if (inherited)
+        return { ...decision, allowed: true, policyEvidenceId: inherited.policyEvidenceId };
+    }
     if (!execution.interactionBinding && decision.approval?.grants?.includes('same_command')) {
       const grant = await this.store.getPermissionGrant({
         expectedStoreId: scope.expectedStoreId,
@@ -472,6 +492,9 @@ export class InteractionGate {
         }
         if (checked.decision === 'approve_once' && !decision.check?.requireApproval)
           return {
+            ...(decision.worktreeDecisionSeal
+              ? { worktreeDecisionSeal: decision.worktreeDecisionSeal }
+              : {}),
             allowed: true,
             revision: decision.revision,
             checkExecutionId: checked.checkExecutionId,
@@ -638,6 +661,9 @@ export class InteractionGate {
     )
       throw new AgentError('permission_grant_changed');
     return {
+      ...(decision.worktreeDecisionSeal
+        ? { worktreeDecisionSeal: decision.worktreeDecisionSeal }
+        : {}),
       ...(grant ? { grant } : {}),
       allowed: true,
       revision: decision.revision,

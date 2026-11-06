@@ -61,9 +61,7 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
   const cwd = launchIdentity(options.cwd);
   const workspace = launchIdentity(options.workspaceRoot ?? options.cwd);
   const control = launchIdentity(options.controlBase);
-  const protectedRoots = [...new Set([options.controlBase, ...options.protectedRoots])].map(
-    (path) => launchIdentity(path),
-  );
+  const protectedRoots = [...new Set(options.protectedRoots)].map((path) => launchIdentity(path));
   const tempBase = launchIdentity(options.temporaryRoot ?? tmpdir());
   const privateFiles = captureProtectedFiles(options.protectedFiles ?? []);
   const sourceProjection = captureReadOnlySource({
@@ -86,6 +84,12 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
   const assets = [
     ...new Set([...binaries, '/usr/bin/sandbox-exec', ...(options.readonlyAssets ?? [])]),
   ].map((path) => launchIdentity(path, !lstatSync(realpathSync.native(path)).isDirectory()));
+  // Trusted executables remain identity-bound. Only explicit host limits deny
+  // writes to their paths; ordinary Full does not seal their parent directories.
+  const readonlyAssetPaths = new Set(
+    (options.readonlyAssets ?? []).map((path) => realpathSync.native(path)),
+  );
+  const readonlyAssets = assets.filter((asset) => readonlyAssetPaths.has(asset.canonical));
   const bindings = [
     cwd,
     workspace,
@@ -103,11 +107,9 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
   const renameProtected = [
     ...new Set(
       [
-        control,
-        tempBase,
         ...protectedRoots,
         ...readonly,
-        ...assets,
+        ...readonlyAssets,
         ...(sourceProjection ? [sourceProjection.source] : []),
       ]
         .flatMap((fact) =>
@@ -154,6 +156,13 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
       const assetFilters = assets.map((asset) =>
         asset.digest === null ? subpath(asset.canonical) : literal(asset.canonical),
       );
+      const readonlyFilters = [
+        ...readonlyAssets.map((asset) =>
+          asset.digest === null ? subpath(asset.canonical) : literal(asset.canonical),
+        ),
+        ...readonly.map((root) => subpath(root.canonical)),
+        ...(sourceProjection ? [subpath(sourceProjection.source.canonical)] : []),
+      ];
       // Denies retain precedence. Only this original tree and exact ancestor
       // metadata escape the private read deny; ancestors still cannot be listed.
       const sourceAncestors =
@@ -177,8 +186,14 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
         filesystem === 'full_access'
           ? '(allow file-write* file-write-create file-write-unlink file-ioctl)'
           : `(allow file-write* file-write-create file-write-unlink file-ioctl ${[workspace.canonical, temp].map(subpath).join(' ')})`,
-        `(deny file-write* file-write-create file-write-unlink file-ioctl ${assetFilters.join(' ')} ${readonly.map((root) => subpath(root.canonical)).join(' ')})`,
-        `(deny file-read* file-read-metadata ${privateReadFilters.join(' ')})`,
+        ...(readonlyFilters.length
+          ? [
+              `(deny file-write* file-write-create file-write-unlink file-ioctl ${readonlyFilters.join(' ')})`,
+            ]
+          : []),
+        ...(privateReadFilters.length
+          ? [`(deny file-read* file-read-metadata ${privateReadFilters.join(' ')})`]
+          : []),
         ...(privateFileFilters.length
           ? [
               `(deny file-read* file-read-metadata process-exec file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${privateFileFilters.join(' ')})`,
@@ -191,8 +206,14 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
         ...(sourceAncestors.length
           ? [`(deny file-read-data file-read-xattr ${sourceAncestors.join(' ')})`]
           : []),
-        `(deny process-exec file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${protectedRoots.map((root) => subpath(root.canonical)).join(' ')})`,
-        `(deny file-write-unlink ${renameProtected.map(literal).join(' ')})`,
+        ...(protectedRoots.length
+          ? [
+              `(deny process-exec file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${protectedRoots.map((root) => subpath(root.canonical)).join(' ')})`,
+            ]
+          : []),
+        ...(renameProtected.length
+          ? [`(deny file-write-unlink ${renameProtected.map(literal).join(' ')})`]
+          : []),
         `(deny process-exec file-map-executable ${subpath(temp)})`,
         scope.network === 'internet' ? '(allow network*)' : '(deny network*)',
         ...(filesystem === 'full_access'

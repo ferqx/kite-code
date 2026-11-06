@@ -50,6 +50,18 @@ export interface VerifiedTerminalRuntimeBundle {
   readonly manifest: TerminalBundleManifest;
   readonly digest: string;
 }
+/** Fixed empty installation assets, derived from the authenticated v1 file closure. */
+export function terminalEmptyAssetDirectories(
+  manifest: Pick<TerminalBundleManifest, 'files'>,
+): string[] {
+  const directory = 'node_modules/@kite-ai/agent/tools/git-worktree';
+  const files = new Set(manifest.files.map((file) => file.path));
+  return ['worker.js', 'empty-bunfig.toml', 'manifest.json'].every((name) =>
+    files.has(`${directory}/${name}`),
+  )
+    ? [`${directory}/empty-hooks`]
+    : [];
+}
 export interface TerminalRuntimeProtection {
   readonly kind: 'terminal.candidate';
   readonly root: string;
@@ -303,6 +315,7 @@ export function retainWindowsTerminalRuntimeFiles(root: string): {
       retainWindowsCandidateFiles(
         root,
         manifest.files.map((file) => file.path),
+        terminalEmptyAssetDirectories(manifest),
       ),
     );
     const verify = () => {
@@ -390,7 +403,7 @@ function terminalRuntimeBundleContent(
     const fileHash = createAssetFileHasher(),
       expected = new Map(manifest.files.map((item) => [item.path, item]));
     const links = new Map(manifest.links.map((item) => [item.path, item]));
-    const directories = new Set<string>();
+    const directories = new Set<string>(terminalEmptyAssetDirectories(manifest));
     for (const path of [...expected.keys(), ...links.keys()]) {
       let parent = posix.dirname(path);
       while (parent !== '.') {
@@ -463,6 +476,12 @@ function terminalRuntimeBundleContent(
       }
     }
     walk(root);
+    for (const directory of terminalEmptyAssetDirectories(manifest)) {
+      const path = join(root, directory);
+      const stat = lstatSync(path);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || readdirSync(path).length !== 0)
+        fail('terminal_bundle_identity_mismatch');
+    }
     if (
       actual.size !== expected.size + links.size ||
       [...expected.keys(), ...links.keys()].some((path) => !actual.has(path))
