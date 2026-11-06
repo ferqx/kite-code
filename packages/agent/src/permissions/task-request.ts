@@ -8,18 +8,10 @@ import {
 import { canonicalJson } from '../json';
 import type { CapabilityDescription } from './index';
 
-/** Exact finite trusted builtins only; prior catalogues must be verified by the calling host. */
-export function createDefaultTaskRequestClassifier(
-  selectedRoles: readonly TrustedTaskRole[],
-  options: {
-    readonly trustedRoles?: readonly TrustedTaskRole[];
-    readonly defaultRole?: string;
-  } = {},
-) {
-  const trustedRoles = options.trustedRoles ?? defaultTaskRoles;
-  const defaultRole = options.defaultRole ?? defaultTaskRoleId;
+/** Only exact current builtin role declarations receive internal-record classification. */
+export function createDefaultTaskRequestClassifier(selectedRoles: readonly TrustedTaskRole[]) {
   const roles = structuredClone(selectedRoles).filter((selected) =>
-    trustedRoles.some(
+    defaultTaskRoles.some(
       (trusted) =>
         canonicalJson(selected as unknown as Json) === canonicalJson(trusted as unknown as Json),
     ),
@@ -34,7 +26,7 @@ export function createDefaultTaskRequestClassifier(
       !Array.isArray(input)
         ? typeof input.preset === 'string'
           ? input.preset
-          : defaultRole
+          : defaultTaskRoleId
         : request.kind === 'job' && request.definitionId.startsWith('agent/')
           ? request.definitionId.slice('agent/'.length)
           : undefined;

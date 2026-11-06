@@ -42,7 +42,7 @@ Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认�
 
 [execution projection](execution-projection.tsx)只把已有公共事实转成原 renderer model。Tool input 来自同 Store／Session 的实际执行，或同 Run 唯一 callId／准确结果 sourceIds；正式短 builtin ID 须由冻结 Run 的 extension／definition／version 证明后才使用友好名称。MCP 代理名称只从同 Store／Session 的原 metadata snapshot／index 绑定与准确 definition/version 读取，再核 name hash；当前 Server label 还需 configDigest 匹配，历史使用 MCP 加真实工具名。只读聚合使用原冻结 `readOnlyDefinitions`；Shell 另需准确注册的 builtin/version、同 Scope／Run／原工作、唯一 carrier 和已保存终态结果中的呈现分类，不能从 UI 命令拼写或自定义 Tool 字段猜只读资格。分类由 Agent 的既有参数分析产生，只影响展示，不授文件或执行权限；取消、拒绝和未派发项不计已完成探索。并发使用同 Model 批次的 task／carrier 关系以及实际生命周期交叠。无证明者单列，失败、取消和 unknown 不折成成功。未知工具参数保留有界卡片预览及完整详情，Ctrl+E 可选中间卡片；准确 Job 才取得完整输出、child 阅读和停止入口。
 
-子任务角色标签优先读取原 carrier 的 `agent/<role>`，其次读取准确绑定该 carrier 的 child Run 冻结 `snapshot.roleId`，然后使用原调用的显式 `preset`；都缺失时采用当前默认 `general`。历史 `worker`、`code`、`plan`、`review` 和自定义角色仍按原身份展示，不能因为当前默认目录变化统一改名。角色标签只描述原委派，不授予权限。
+子任务角色标签优先读取原 carrier 的 `agent/<role>`，其次读取准确绑定该 carrier 的 child Run 冻结 `snapshot.roleId`，然后使用原调用的显式 `preset`；都缺失时采用当前默认 `general`。已保存记录和可信自定义角色按原身份展示，不因当前默认目录变化改名。角色标签只描述原委派，不授予权限，也不表示升级前的角色仍可新建、续作或恢复。
 
 2026-11-06，Windows x64／Bun1.4.4，独立合成 workspace/profile 的普通源码 TUI 经真实 ConPTY、私有共享 Service 和已配置 DeepSeek 模型完成 `general` 写入、自读核验及 `explore` 读取、原卡批准消息、父有限等待与结果接管，共13次模型请求，无模型 attempt failure。输入草稿在 Ctrl+B／Esc 后保留；`/exit` 正常退出0，冷客户端重开同一 Session 后角色和结果保持，父会话原16项执行、16条消息及文件事实相同，模型请求不增加，最后 Ctrl+Q 正常退出并关闭所属资源。80×24 的中间 ConPTY/headless 画面存在旧行残留，稳定完成及重开画面恢复；实际保存的父子数据在原 HEAD 与当前完整子任务投影中，两个角色的 planned／running／succeeded 六组输出一致，未由本次角色解析改动引入，尚未区分原生终端输出与观测器解释。原 ANSI、106帧和重开事实保留在本机 `.cache/tui-subagents-1793938654461/`；本证据不扩大正式安装制品、其他终端或其他平台的资格。
 

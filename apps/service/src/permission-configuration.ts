@@ -84,7 +84,6 @@ export function createDefaultPermissionConfiguration(options: {
   afterTurn?: AfterTurnPolicy;
   nativeShellRead: boolean;
   childRoles: readonly ChildRole[];
-  previousChildRoles?: readonly ChildRole[];
   defaultTaskRoles: boolean;
   /** Only the default host reviewer selects the new builtin risk contract. */
   defaultAutoReview?: boolean;
@@ -105,18 +104,6 @@ export function createDefaultPermissionConfiguration(options: {
   const describeDefaultTask = createDefaultTaskRequestClassifier(
     options.defaultTaskRoles ? childRoles : [],
   );
-  const registeredRoles = [
-    ...childRoles,
-    ...(options.previousChildRoles ?? []).filter(
-      (role) => !childRoles.some((current) => current.id === role.id),
-    ),
-  ];
-  const describePreviousTask = options.previousChildRoles
-    ? createDefaultTaskRequestClassifier(options.previousChildRoles, {
-        trustedRoles: options.previousChildRoles,
-        defaultRole: 'worker',
-      })
-    : undefined;
   let managed: PermissionManagementPort | undefined;
   const permissionManagement = (runtime?: AgentRuntime) => {
     const policyRuntime = options.readRuntime();
@@ -237,7 +224,7 @@ export function createDefaultPermissionConfiguration(options: {
     safeRead: false,
   });
   const globalCapabilities = new Map<string, CapabilityDescription>();
-  for (const role of registeredRoles) {
+  for (const role of childRoles) {
     globalCapabilities.set(
       JSON.stringify(['job', `agent/${role.id}`, role.version]),
       childCapability(role),
@@ -309,7 +296,7 @@ export function createDefaultPermissionConfiguration(options: {
   const afterTurn =
     options.afterTurn ??
     createDefaultAfterTurnPolicy({
-      roles: registeredRoles,
+      roles: childRoles,
       async readCurrent(input) {
         input.signal.throwIfAborted();
         if (authority.permissions && !authority.permissionPolicy)
@@ -364,10 +351,6 @@ export function createDefaultPermissionConfiguration(options: {
     defaultAutoReview?: 'shell_risk';
     /** Actual host-owned objects, never extension names or model-provided metadata. */
     trustedExtensions?: readonly Extension[];
-    taskRoles?: readonly ChildRole[];
-    taskDefaultRole?: string;
-    taskTrustedRoles?: readonly ChildRole[];
-    taskExtension?: Extension;
     /** Narrow action guard for the mixed read/write Git Worktree tool. */
     readOnlyTask?: boolean;
   }): Pick<RunConfiguration, 'permissions' | 'initializeRequirements'> {
@@ -414,33 +397,8 @@ export function createDefaultPermissionConfiguration(options: {
         ...(commandDigest ? { commandDigest } : {}),
       };
     };
-    const describeRunTask =
-      input.taskRoles && options.defaultTaskRoles
-        ? createDefaultTaskRequestClassifier(input.taskRoles, {
-            defaultRole: input.taskDefaultRole,
-            trustedRoles: input.taskTrustedRoles,
-          })
-        : describeDefaultTask;
-    const refineTask: RefineCapability = async (request, view) => {
-      if (view !== 'ordinary') return undefined;
-      const current = describeRunTask(request);
-      if (current || !describePreviousTask || request.kind !== 'job') return current;
-      // A retired carrier is eligible only through its actual persisted configuration.
-      const carrier = await options.readRuntime()?.getExecution(request.executionId);
-      const original = carrier?.childConfiguration;
-      if (
-        !carrier ||
-        carrier.sessionId !== request.sessionId ||
-        carrier.kind !== 'job' ||
-        carrier.definitionId !== request.definitionId ||
-        carrier.definitionVersion !== request.definitionVersion ||
-        !original ||
-        `agent/${original.id}` !== request.definitionId ||
-        original.version !== request.definitionVersion
-      )
-        return undefined;
-      return describePreviousTask(request);
-    };
+    const refineTask: RefineCapability = (request, view) =>
+      view === 'ordinary' ? describeDefaultTask(request) : undefined;
     const describeRegistered = async (
       request: AuthorizationRequest,
       view: DescriptionView,
@@ -464,7 +422,7 @@ export function createDefaultPermissionConfiguration(options: {
     const modelDescription = modelCapability(modelId);
     register(modelDescription);
     // Only the exact trusted carrier and its valid Model binding join this Run's policy.
-    for (const role of registeredRoles) {
+    for (const role of childRoles) {
       register(
         {
           ...childCapability(role),
@@ -510,7 +468,7 @@ export function createDefaultPermissionConfiguration(options: {
         ? refineShell
         : extension === files.extension
           ? (request, _view, policy) => files.describeRequest(request, policy)
-          : extension === (input.taskExtension ?? task.extension)
+          : extension === task.extension
             ? refineTask
             : undefined;
       for (const tool of extension.tools ?? []) {

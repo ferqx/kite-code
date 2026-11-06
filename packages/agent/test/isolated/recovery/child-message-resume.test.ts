@@ -4,10 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
-import {
-  currentTaskMessageDescription,
-  previousTaskMessageDescription,
-} from '../../../src/extensions/task/message-description';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { ExecutionRecord, InteractionRecord, SessionView } from '../../../src/storage/types';
@@ -34,7 +30,7 @@ function spawnFixture(directory: string) {
   );
 }
 for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
-  test(`real cold child mailbox transition ${drift === 'none' ? 'preserves its planned effect and original Model' : `rejects unrelated ${drift} drift`}`, async () => {
+  test(`real cold current child recovery ${drift === 'none' ? 'preserves its planned effect and original Model' : `rejects unrelated ${drift} drift`}`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-child-message-resume-')));
     let process_: ReturnType<typeof spawnFixture> | undefined;
     let stdout: Promise<string> | undefined, stderr: Promise<string> | undefined;
@@ -48,7 +44,7 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
         async () => existsSync(join(directory, 'ready.json')) || process_!.exitCode !== null,
       );
       if (!existsSync(join(directory, 'ready.json')))
-        throw Error(`historical fixture exited: ${await stderr}`);
+        throw Error(`current fixture exited: ${await stderr}`);
       const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8')) as {
         pid: number;
         expectedStoreId: string;
@@ -64,12 +60,12 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
       expect(ready.effect.status).toBe('planned');
       expect(ready.effect.callId).toBe('original-effect-call');
       expect(readFileSync(join(directory, 'effects'), 'utf8')).toBe('');
-      const oldRequests = requests(directory);
-      const childRequest = oldRequests.find((row) => row.actor === 'child')!.request;
-      expect(childRequest.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(true);
-      expect(childRequest.tools.find((tool) => tool.id === 'send_agent_message')?.description).toBe(
-        previousTaskMessageDescription,
-      );
+      const originalRequests = requests(directory);
+      const childRequest = originalRequests.find((row) => row.actor === 'child')!.request;
+      expect(childRequest.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(false);
+      expect(
+        childRequest.tools.find((tool) => tool.id === 'send_agent_message')?.description,
+      ).toContain('A successful result acknowledges queue acceptance only');
       const originalModel = ready.child.executions.find((row) => row.kind === 'model')!;
       expect(originalModel.status).toBe('succeeded');
       process_.kill('SIGKILL');
@@ -107,7 +103,7 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
       if (drift !== 'none') {
         const result = await runtime.resumeRun(input).catch((error) => error);
         expect(result.code).toBe('capability_refresh_required');
-        expect(requests(directory)).toEqual(oldRequests);
+        expect(requests(directory)).toEqual(originalRequests);
         expect(readFileSync(join(directory, 'effects'), 'utf8')).toBe('');
         expect(await store.getExecution(originalModel.id)).toEqual(originalModel);
         expect(await canonicalInput()).toEqual(originalInput);
@@ -156,9 +152,7 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
       expect(childRequests[0]!.request).toEqual(childRequest);
       const next = childRequests[1]!.request;
       expect(next.tools.some((tool) => tool.id === 'wait_agent_events')).toBe(false);
-      expect(next.tools.find((tool) => tool.id === 'send_agent_message')?.description).toBe(
-        currentTaskMessageDescription,
-      );
+      expect(next.tools).toEqual(childRequest.tools);
       const parentRequest = requests(directory)
         .filter((row) => row.actor === 'parent')
         .at(-1)!;

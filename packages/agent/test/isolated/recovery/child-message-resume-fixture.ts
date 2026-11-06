@@ -1,12 +1,11 @@
-import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension } from '../../../src/extensions';
 import { createTaskExtension } from '../../../src/extensions/task';
-import { previousTaskMessageDescription } from '../../../src/extensions/task/message-description';
-import type { RunConfiguration, RuntimeOptions } from '../../../src/runtime';
+import { createRuntime, type RunConfiguration, type RuntimeOptions } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
 export type MessageResumeDrift = 'none' | 'description' | 'schema' | 'snapshot';
@@ -17,22 +16,14 @@ const finish: ModelEvent = {
 };
 export function childMessageResumeOptions(
   directory: string,
-  historical: boolean,
+  pauseParent: boolean,
   drift: MessageResumeDrift = 'none',
 ): Omit<RuntimeOptions, 'store' | 'artifacts'> {
-  const original = createTaskExtension({
+  const task = createTaskExtension({
     roles: [
       { id: 'worker', configurationId: 'worker', description: 'Exact recovery collaborator' },
     ],
   });
-  const task: Extension = {
-    ...original,
-    tools: original.tools!.map((tool) =>
-      historical && tool.id === 'task.message'
-        ? { ...tool, description: previousTaskMessageDescription }
-        : tool,
-    ),
-  };
   const effect: Extension = {
     id: 'fixture.child-message',
     version: '1',
@@ -102,9 +93,9 @@ export function childMessageResumeOptions(
         yield { ...finish, reason: 'tool_calls' };
         return;
       }
-      // The old root remains at a recoverable Model boundary, never inside a
+      // Keep the root at a recoverable Model boundary, never inside a
       // non-resumable mailbox Tool. The child already has its own planned Tool.
-      if (historical) await new Promise<void>(() => {});
+      if (pauseParent) await new Promise<void>(() => {});
       yield { type: 'text_delta', text: 'parent preserves the original collaborator' };
       yield finish;
     },
@@ -140,26 +131,6 @@ export function childMessageResumeOptions(
 if (import.meta.main) {
   const [directory] = process.argv.slice(2);
   if (!directory) throw Error('Explicit disposable child-message recovery root required.');
-  const runtimePath = resolve(import.meta.dir, '../../../src/runtime.ts');
-  // Seed the prior released presentation in this isolated process only. Both
-  // requests and decisions are then produced by the ordinary Runtime and Store.
-  Bun.plugin({
-    name: 'historical-child-mailbox-catalogue',
-    setup(build) {
-      build.onLoad({ filter: /[\\/]runtime\.ts$/ }, ({ path }) => {
-        if (resolve(path) !== runtimePath) return undefined;
-        const source = readFileSync(path, 'utf8');
-        const anchor = '![isAgentCreationTaskTool, isRootAgentObservationTaskTool].some';
-        if (source.split(anchor).length !== 2)
-          throw Error('historical_child_catalogue_anchor_changed');
-        return {
-          contents: source.replace(anchor, '![isAgentCreationTaskTool].some'),
-          loader: 'ts',
-        };
-      });
-    },
-  });
-  const { createRuntime } = await import('../../../src/runtime');
   for (const name of ['models', 'effects']) writeFileSync(join(directory, name), '');
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
@@ -181,7 +152,7 @@ if (import.meta.main) {
     commandId: 'create',
     sessionId: 's',
     workspaceId: 'w',
-    title: 'Original child mailbox catalogue',
+    title: 'Current child recovery catalogue',
   });
   await runtime.submitCommand({
     expectedStoreId,
@@ -228,7 +199,7 @@ if (import.meta.main) {
     }
     if (Date.now() >= deadline)
       throw Error(
-        `historical_child_planned_effect_not_reached:${JSON.stringify({
+        `child_planned_effect_not_reached:${JSON.stringify({
           root: root.executions.map(({ definitionId, status }) => ({ definitionId, status })),
           child: child?.executions.map(({ definitionId, status }) => ({ definitionId, status })),
           cards: cards.interactions.length,

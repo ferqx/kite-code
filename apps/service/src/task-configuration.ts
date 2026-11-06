@@ -19,17 +19,12 @@ export function createTaskConfiguration(
   options: { readonly defaultRole?: string; readonly presets?: readonly string[] } = {},
 ) {
   const roles = declarations.map(({ id, version, description }) => ({ id, version, description }));
-  const hasGeneralRole = roles.some((role) => role.id === defaultTaskRoleId);
   const defaultRole =
     options.defaultRole ??
-    (hasGeneralRole
+    (roles.some((role) => role.id === defaultTaskRoleId)
       ? defaultTaskRoleId
-      : roles.some((role) => role.id === 'worker')
-        ? 'worker'
-        : (roles[0]?.id ?? defaultTaskRoleId));
-  const presets =
-    options.presets ??
-    roles.filter((role) => hasGeneralRole || role.id !== 'worker').map((role) => role.id);
+      : (roles[0]?.id ?? defaultTaskRoleId));
+  const presets = options.presets ?? roles.map((role) => role.id);
   const extension =
     roles.length && roles.length <= 64
       ? createTaskExtension({
@@ -48,7 +43,6 @@ export function createTaskConfiguration(
   return {
     extension,
     tools,
-    defaultRole,
     snapshot: {
       available: !!extension,
       roles: roles.map(({ id, version }) => ({

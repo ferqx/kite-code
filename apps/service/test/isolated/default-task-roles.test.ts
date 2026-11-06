@@ -304,15 +304,10 @@ test('explore retains parent-selected communication, cancellation, evidence and 
       return { model, snapshot: null, modelId: selection.modelId, toolIds: selection.role.toolIds };
     },
   });
-  const retained = [
-    'task.message',
-    'task.events',
-    'shell.stop',
-    'execution_evidence.read',
-    'web_fetch',
-  ];
+  const retained = ['task.message', 'shell.stop', 'execution_evidence.read', 'web_fetch'];
   const request = input('explore', [
     ...retained,
+    'task.events',
     'task.spawn',
     'task.list',
     'task.follow_up',
@@ -332,18 +327,17 @@ test('explore retains parent-selected communication, cancellation, evidence and 
   }
 });
 
-test('trusted callers can reconstruct an older default and preset catalogue without changing the snapshot shape', async () => {
+test('trusted custom roles retain their declaration order, explicit default and preset selection', async () => {
   const declarations = [
-    { id: 'worker', version: '1' },
-    { id: 'review', version: '1' },
+    { id: 'custom-first', version: '1' },
+    { id: 'custom-second', version: '1' },
   ];
-  const task = createTaskConfiguration(declarations, {
-    defaultRole: 'worker',
-    presets: ['review'],
-  });
+  const task = createTaskConfiguration(declarations);
   const spawn = task.tools.get('task.spawn')!;
-  expect(spawn.description).toContain('Default role worker:');
-  expect(spawn.inputSchema).toMatchObject({ properties: { preset: { enum: ['review'] } } });
+  expect(spawn.description).toContain('Default role custom-first:');
+  expect(spawn.inputSchema).toMatchObject({
+    properties: { preset: { enum: ['custom-first', 'custom-second'] } },
+  });
   expect(Object.keys(task.snapshot)).toEqual(['available', 'roles', 'tools']);
   expect(task.snapshot.roles).toEqual(
     declarations.map(({ id, version }) => ({
@@ -352,30 +346,35 @@ test('trusted callers can reconstruct an older default and preset catalogue with
       configurationVersion: version,
     })),
   );
-  const explicitReview = createTaskConfiguration(declarations, { defaultRole: 'review' });
-  const reviewSpawn = explicitReview.tools.get('task.spawn')!;
-  expect(reviewSpawn.description).toContain('Default role review:');
-  expect(reviewSpawn.inputSchema).toMatchObject({ properties: { preset: { enum: ['review'] } } });
+  const explicit = createTaskConfiguration(declarations, {
+    defaultRole: 'custom-second',
+    presets: ['custom-second'],
+  });
+  const explicitSpawn = explicit.tools.get('task.spawn')!;
+  expect(explicitSpawn.description).toContain('Default role custom-second:');
+  expect(explicitSpawn.inputSchema).toMatchObject({
+    properties: { preset: { enum: ['custom-second'] } },
+  });
   const selected: string[] = [];
   const context = {
-    executionId: 'trusted-explicit-review',
+    executionId: 'trusted-explicit-custom',
     operations: {
       async ensure({ request }) {
         if (request.kind !== 'agent') throw Error('expected_agent_request');
         selected.push(request.configurationId);
-        return { childSessionId: 'trusted-review' };
+        return { childSessionId: 'trusted-custom' };
       },
     },
   } as ToolContext;
   expect(
-    (await reviewSpawn.execute({ prompt: 'Review the assigned work.' }, context)).outcome,
+    (await explicitSpawn.execute({ prompt: 'Complete the assigned work.' }, context)).outcome,
   ).toBe('succeeded');
   expect(
-    await reviewSpawn.execute(
-      { prompt: 'Do not accept a worker preset.', preset: 'worker' },
+    await explicitSpawn.execute(
+      { prompt: 'Do not accept an unselected preset.', preset: 'custom-first' },
       context,
     ),
   ).toMatchObject({ outcome: 'failed' });
-  expect(selected).toEqual(['review']);
+  expect(selected).toEqual(['custom-second']);
   expect(createTaskConfiguration([]).snapshot).toEqual({ available: false, roles: [], tools: [] });
 });

@@ -62,7 +62,6 @@ export interface ChildSelection {
 
 export function createChildConfiguration(options: {
   roles?: readonly ChildRole[];
-  resolveRole?(input: ChildInput, declared: ChildRole): ChildRole;
   resolve(input: ChildInput, selection: ChildSelection): Promise<RunConfiguration>;
 }): Pick<RuntimeOptions, 'childConfigurations' | 'resolveChildRunConfiguration'> {
   const roles = new Map<string, ChildRole>();
@@ -126,9 +125,8 @@ export function createChildConfiguration(options: {
     })),
     async resolveChildRunConfiguration(input) {
       input.signal.throwIfAborted();
-      const declared = roles.get(input.configurationId);
-      if (!declared) throw new AgentError('child_configuration_unavailable');
-      const role = options.resolveRole?.(input, declared) ?? declared;
+      const role = roles.get(input.configurationId);
+      if (!role) throw new AgentError('child_configuration_unavailable');
       const original = input.parentRun?.configuration;
       const parentModelId =
         original && typeof original === 'object' && !Array.isArray(original)

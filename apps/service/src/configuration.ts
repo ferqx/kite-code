@@ -106,12 +106,6 @@ import {
 import { assertSessionModelProtocol } from './session-model-protocol';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
 import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
-import {
-  previousReadOnlyTaskToolIds,
-  previousTaskRoles,
-  readTaskCatalogue,
-  taskSnapshotFromRun,
-} from './task-history';
 import { createUserConfiguration, withoutProjectModels } from './user-configuration';
 import { createUserMcpManagement } from './user-mcp-management';
 import { disabledUserMcpSources } from './user-mcp-selection';
@@ -175,7 +169,6 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
       browserSnapshot: snapshot.browser ?? null,
       browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
       modelTransportSnapshot: snapshot.modelTransport ?? null,
-      taskSnapshot: snapshot.task,
       ...(Object.hasOwn(snapshot, 'readOnlyTaskSource')
         ? { readOnlyTaskSource: snapshot.readOnlyTaskSource }
         : {}),
@@ -330,14 +323,6 @@ export function createDefaultProcessConfiguration(options: {
   const planningOptions = structuredClone({ completionGuidance: true, ...options.planning });
   const childRoles = structuredClone(options.child ?? defaultTaskRoles);
   const classifyDefaultTasks = !options.child;
-  const registeredChildRoles = classifyDefaultTasks
-    ? [
-        ...childRoles,
-        ...previousTaskRoles.filter(
-          (role) => !childRoles.some((current) => current.id === role.id),
-        ),
-      ]
-    : childRoles;
   const browser = createBrowserConfiguration({
     runtime: () => {
       if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
@@ -635,7 +620,6 @@ export function createDefaultProcessConfiguration(options: {
     afterTurn,
     nativeShellRead: shellOptions?.platform === 'darwin' && process.platform === 'darwin',
     childRoles,
-    previousChildRoles: classifyDefaultTasks ? previousTaskRoles : undefined,
     defaultTaskRoles: classifyDefaultTasks,
     defaultAutoReview: !options.authorizationCheck && !options.permissions,
     readRuntime: () => policyRuntime,
@@ -762,8 +746,6 @@ export function createDefaultProcessConfiguration(options: {
       readOnlyTask?: boolean;
       readOnlyTaskDescription?: string;
       defaultAutoReview?: 'shell_risk' | null;
-      taskSnapshot?: Json;
-      parentTaskSnapshot?: Json;
     },
     recovery?: ReturnType<typeof readServiceRecoverySnapshot>['recovery'] & {
       signal: AbortSignal;
@@ -774,15 +756,6 @@ export function createDefaultProcessConfiguration(options: {
     let modelTransport: Awaited<ReturnType<typeof resolveModelTransport>> | undefined;
     try {
       recovery?.signal.throwIfAborted();
-      const taskCatalogue = readTaskCatalogue(
-        recovery?.taskSnapshot ?? selection?.taskSnapshot,
-        childRoles,
-        classifyDefaultTasks,
-      );
-      const task = createTaskConfiguration(taskCatalogue.roles);
-      const runBuiltinExtensions = builtinExtensions.map((extension) =>
-        extension.id === 'builtin.task' ? task.extension! : extension,
-      );
       const inheritedReview = recovery
         ? recovery.defaultAutoReview
         : selection?.defaultAutoReview === null
@@ -1143,25 +1116,7 @@ export function createDefaultProcessConfiguration(options: {
           skills: assembly.skillConfigurations,
         });
         let mcpResourceSource: ContextSource | null = null;
-        const runExtensions = [...runBuiltinExtensions, ...assembly.extensions];
-        if (selection?.parentTaskSnapshot !== undefined && task.extension) {
-          // Creation is hidden and independently denied in child Sessions. Its internal
-          // binding must still be the exact current parent's definition, including schema.
-          const parentTask = createTaskConfiguration(
-            readTaskCatalogue(selection.parentTaskSnapshot, childRoles, classifyDefaultTasks).roles,
-          );
-          const creation = parentTask.tools.get('task.spawn');
-          if (creation) {
-            const index = runExtensions.findIndex((extension) => extension.id === 'builtin.task');
-            if (index >= 0)
-              runExtensions[index] = {
-                ...task.extension,
-                tools: task.extension.tools?.map((tool) =>
-                  tool.id === 'task.spawn' ? creation : tool,
-                ),
-              };
-          }
-        }
+        const runExtensions = [...builtinExtensions, ...assembly.extensions];
         const readOnlyDefinitions = [...runExtensions, mcpSources.extension].flatMap((extension) =>
           (extension.tools ?? [])
             .filter(
@@ -1299,10 +1254,6 @@ export function createDefaultProcessConfiguration(options: {
           recoveryRunIdentity: recovery?.runIdentity,
           ...(defaultAutoReview ? { defaultAutoReview } : {}),
           trustedExtensions: runExtensions,
-          taskRoles: taskCatalogue.roles,
-          taskDefaultRole: task.defaultRole,
-          taskTrustedRoles: taskCatalogue.previous ? previousTaskRoles : childRoles,
-          taskExtension: runExtensions.find((extension) => extension.id === 'builtin.task'),
           readOnlyTask: selection?.readOnlyTask === true,
         });
         return {
@@ -1336,7 +1287,6 @@ export function createDefaultProcessConfiguration(options: {
           toolIds: assembly.toolIds,
           modelHiddenToolIds,
           extensions: assembly.extensions,
-          extensionOverrides: runExtensions.filter((extension) => extension.id === 'builtin.task'),
           readStepCapabilities: async (
             input: Parameters<NonNullable<RunConfiguration['readStepCapabilities']>>[0],
           ) => {
@@ -1554,22 +1504,7 @@ export function createDefaultProcessConfiguration(options: {
     );
   };
   const child = createChildConfiguration({
-    roles: registeredChildRoles,
-    resolveRole(input, declared) {
-      const original = input.originalConfiguration;
-      const catalogue = readTaskCatalogue(
-        taskSnapshotFromRun(original?.snapshot ?? input.parentRun?.configuration),
-        childRoles,
-        classifyDefaultTasks,
-      );
-      const role = catalogue.roles.find(
-        (entry) => entry.id === declared.id && entry.version === declared.version,
-      );
-      if (!role) throw new AgentError('child_configuration_unavailable');
-      return catalogue.previous && role.toolPolicy === 'read_only'
-        ? { ...role, toolIds: previousReadOnlyTaskToolIds }
-        : role;
-    },
+    roles: childRoles,
     resolve: async (input, selection) => {
       try {
         return await resolveConfigurationBinding(
@@ -1617,10 +1552,6 @@ export function createDefaultProcessConfiguration(options: {
                     input.originalConfiguration?.snapshot ?? input.parentRun!.configuration,
                   )
                 : undefined,
-            taskSnapshot: taskSnapshotFromRun(
-              input.originalConfiguration?.snapshot ?? input.parentRun?.configuration,
-            ),
-            parentTaskSnapshot: taskSnapshotFromRun(input.parentRun?.configuration),
           },
           input.originalConfiguration
             ? (() => {

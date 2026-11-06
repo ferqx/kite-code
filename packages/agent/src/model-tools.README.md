@@ -34,6 +34,8 @@
 
 可信 `RunConfiguration.modelHiddenToolIds` 只收窄该 Run 的模型目录：Runtime 冻结工具副本并设置模型隐藏，内部原定义、版本和每次派发权限保持。Service 在新 Native 统一浏览器配置中用它隐藏原子依赖，同时公开 `browser_execute`；子任务继承与恢复依据原冻结配置，不从今天的默认目录改写旧 Run。调用者的普通 Tool 参数不能声明这个宿主配置。回归见[浏览器配置](../../../apps/service/test/isolated/browser-execution-configuration.test.ts)。
 
+当前 Task 冷恢复逐字核验原 Model 的完整工具目录、能力快照、指纹和 Source，不转换升级前的旧工具声明。说明、schema 或版本变化不能凭同名工具通过恢复；原输入和已完成历史继续按保存的 descriptor 读取，不改写为当前目录。[当前版本冷恢复回归](../test/isolated/recovery/child-message-resume.test.ts)核原审批和唯一效果，以及目录与快照漂移拒绝。
+
 ## 字段转换规则
 
 `snakeCase:true` 只转换 JSON Schema 明确声明的 `properties`，并同步该节点的 `required`；组合分支按本次实际实参选择，仅保留激活且存在的字段规则。`parameterNames` 使用内部字段点路径指定公开 key，例如 `offset → start_line`、`limit → max_lines`，数组元素配置路径用 `*`，实际调用记录具体元素索引，避免改变 opaque 兄弟元素。记录的路径是输入字段位置，不是对象内容的搜索替换。

@@ -4,9 +4,9 @@
 
 Shell 的模型启动入口统一为 `shell_execute`，顶层 filesystem/network 由[共享输入解析](../shell-input.ts)解释为独立请求，省略默认工作区写入／离线；原 Job 仍使用既有 command/permissions 合同。新 description 只用于展示，从风险模型输入移除，命令摘要与批准复用不使用它；完整原 Tool 输入及派发完整性摘要不删字段。前后台使用同一路径，background:true 纳入执行语义摘要，默认前台与旧 shell.launch 摘要保持原算法。运行时派生 key 不参与命令权限摘要，新调用仍有独立执行身份。工具集合、父子交集、最终范围、硬限制及超时规则保持。
 
-新默认 `explore` 的只读要求由可信任务指导和收窄工具集合表达，允许原权限内必要的临时脚本和探索产物，保持业务源码、配置和数据不变；旧分析角色恢复时继续采用原冻结指导和工具。Shell 继承父会话当前模式、权限交集和普通沙箱，不增加角色专属命令表或 OS 禁写。有限 safeRead 只决定普通策略免审，不等于角色允许列表。新默认 Auto 只审 Shell 高危效果，不核任务合规；请求批准和 Full 沿各自普通策略，原 Planning 上限、硬拒绝和最终派发证明保持。
+默认 `explore` 的只读要求由可信任务指导和收窄工具集合表达，允许原权限内必要的临时脚本和探索产物，保持业务源码、配置和数据不变。当前版本同身份续作和冷恢复仍核原冻结指导与工具。Shell 继承父会话当前模式、权限交集和普通沙箱，不增加角色专属命令表或 OS 禁写。有限 safeRead 只决定普通策略免审，不等于角色允许列表。新默认 Auto 只审 Shell 高危效果，不核任务合规；请求批准和 Full 沿各自普通策略，原 Planning 上限、硬拒绝和最终派发证明保持。
 
-[Task 分类](task-request.ts)只细化准确可信角色；新默认目录为 `general／explore`，历史目录只能由宿主核原快照后提供。Service 的[权限装配](../../../../apps/service/src/permission-configuration.ts)绑定实际每 Run Task Extension 对象；退役 carrier 的后备细化只用于可核实的原持久 Job，须匹配 Session、Execution、definition 和 childConfiguration，不让新 Tool 调用凭旧名称取得资格。可信 Run override 不替代完整父子 Tool／Job 身份、当前 mode／trust／allowlist 与最终派发证明；[独立回归](../../test/isolated/execution/run-extension-overrides.test.ts)核同 owner／版本但 schema 超父仍零效果。[历史恢复](../../../../apps/service/test/isolated/task-role-history.test.ts)覆盖原配置，准确验证范围与限制归 [Service owner](../../../../apps/service/README.md)。
+[Task 分类](task-request.ts)只细化当前准确可信角色，默认目录为 `general／explore`；不为升级前旧角色或退役 carrier 提供后备分类。Service 的[权限装配](../../../../apps/service/src/permission-configuration.ts)使用当前注册定义，完整父子 Tool／Job 身份、当前 mode／trust／allowlist 与最终派发证明保持独立核验。当前版本续作和冷恢复仍核真实 carrier 与冻结配置，历史记录或同名角色不授予执行资格；默认装配与验证范围归 [Service owner](../../../../apps/service/README.md)。
 
 新默认 Shell 风险合同由实际注册的宿主选择 `autoReview:shell_risk`，可信其他内置能力选择 `none`；标记参与原 revision，硬拒绝、真实注册、工作区信任和独立人工 ceiling 仍先行。未声明标记保留原自定义／legacy 行为，不按工具名称或 Model 提供的描述取得免审。
 

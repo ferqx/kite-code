@@ -58,7 +58,7 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 
 ## 入口与职责
 
-新默认子 Agent 为 `general／explore`，子 Agent 不开放 `wait_agent_events`，主 Agent 保留等待子任务事件的能力；工具、任务指导及共享工作区边界归 [Task owner](src/extensions/task/README.md)。[Runtime](src/runtime.ts)允许可信宿主用 `RunConfiguration.extensionOverrides` 为原 Run 绑定已注册同 owner ID／版本／API major 的 Extension，保持全局顺序并拒绝新 owner、重复或版本冲突；这不是模型参数，原全局定义保持不变。实际替换传至 Model、step、child、报告与恢复，完整父子工具身份仍逐项核验。同次注册捕获同时交付已封存的 overrides 与工具／Job 目录，Run binding 复用这份结果；后续 Step 仍独立核准确 owner、版本、当前选择及父工具上限。[独立回归](test/isolated/execution/run-extension-overrides.test.ts)覆盖实际执行与子 schema 越父零效果；旧角色／工具／Source 的有限恢复归 [Service owner](../../apps/service/README.md)，不能凭同名角色、历史快照或恢复成功扩大当前权限。
+默认子 Agent 为 `general／explore`，子 Agent 不开放 `wait_agent_events`，主 Agent 保留等待子任务事件的能力；工具、任务指导及共享工作区边界归 [Task owner](src/extensions/task/README.md)。[Runtime](src/runtime.ts)保留当前版本同身份续作与冷恢复，完整父子 Tool／Job 身份、原 Model 请求、权限及 Source 仍严格核验。不重建升级前旧角色目录或转换旧工具声明；定义变化时明确拒绝，不能用同名角色或历史快照扩大当前权限。已完成历史保持原身份只读，不清库、不改写；默认装配归 [Service owner](../../apps/service/README.md)。
 
 [扩展契约](src/extensions/index.ts)的 `lifecycle.beforeRun/beforeRunComplete` 分别在显式任务输入的启动前与正常完成前选择本 namespace 的已注册 Action。Core 在模型配置解析前、最终完成 CAS 前按注册顺序调度普通真实 Action；内部 child 激活和自动 Job report 不进入这两个业务钩子。稳定 Command ID 去重，完成重试和冷读不重复执行，失败保留 Action 自身结果，不替代主 Run 的业务结果。Action 继续通过原受控 operations 请求子执行；`resultDelivery:caller` 仅将普通 child 的自动交付标为调用扩展所有，实际状态、结果与取消证据保持。省略时保留原会话投递；它不能与必要结果义务或 after-turn 自动报告组合。[生命周期测试](test/isolated/execution/run-lifecycle.test.ts)与[结果交付测试](test/isolated/child/result-delivery.test.ts)验证这些通用合同，并核实未安装命名扩展时空标题及控制修订保持不变。
 

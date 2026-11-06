@@ -619,11 +619,8 @@ test('default explore runs through the real Task carrier and exposes only frozen
       const child = await f.store.getView(carrier.childSessionId!);
       expect(child.session.parentSessionId).toBe('s');
       expect(child.runs[0]!.configuration).toMatchObject({
-        snapshot: { roleId: role, roleVersion: '1', roleToolIds: ['task.events', 'files.read'] },
-        tools: [
-          { id: 'task.events', version: '1', extensionId: 'builtin.task' },
-          { id: 'files.read', version: '5', extensionId: 'builtin.files' },
-        ],
+        snapshot: { roleId: role, roleVersion: '1', roleToolIds: ['files.read'] },
+        tools: [{ id: 'files.read', version: '5', extensionId: 'builtin.files' }],
       });
       const childRequests = f.a.requests.filter((request) =>
         (request.messages as { role: string; content: unknown }[]).some(

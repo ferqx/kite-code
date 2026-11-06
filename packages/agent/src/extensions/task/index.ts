@@ -1,7 +1,6 @@
 import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
 import type { Extension, Json, ToolContext, ToolResult } from '../index';
-import { currentTaskMessageDescription } from './message-description';
 import { isChildPreparationFailure } from './preparation-failure';
 import { defaultTaskRoleId } from './roles';
 
@@ -286,7 +285,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.message',
         'send_agent_message',
-        currentTaskMessageDescription,
+        'Queue a complete message to a direct child or parent. When a child worktree creation notice arrives, relay its exact path and relevant task facts only to the direct children that need them; use this tool for active children and follow_up_agent for concrete remaining work in an idle child. A worktree notice neither changes cwd nor grants permission: use the reported path explicitly within existing permissions. A successful result acknowledges queue acceptance only; it does not confirm that the recipient received, read or acted on the message. Do not wait for an additional message acknowledgment after success. Continue independent authorized work. If a child cannot proceed without an answer, finish with an honest pending-decision result containing the complete question and completed/unfinished facts, so the parent can resolve it and explicitly continue the same child. Idle recipients stay idle; use follow_up_agent when an idle child must resume concrete remaining work.',
         {
           ...object({ agentId, target: { enum: ['parent'] }, content }, ['content']),
           oneOf: [

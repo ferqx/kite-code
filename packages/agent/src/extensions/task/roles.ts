@@ -36,7 +36,6 @@ const readOnlyBindings = [
   ['builtin.shell', 'shell.wait', '1'],
   ['builtin.shell', 'shell.stop', '1'],
   ['builtin.task', 'task.message', '1'],
-  ['builtin.task', 'task.events', '1'],
   ['builtin.execution-evidence', 'execution_evidence.read', '1'],
   ['builtin.web', 'web_fetch', '1'],
   ['builtin.shell', 'git.worktree', '1'],
@@ -56,7 +55,7 @@ export function isAgentCreationTaskTool(binding: FrozenTaskTool): boolean {
     binding.extensionId === 'builtin.task' && binding.id === 'task.spawn' && binding.version === '1'
   );
 }
-/** Only root Agents observe the builtin Task event mailbox; frozen bindings remain valid. */
+/** Only root Agents observe the builtin Task event mailbox. */
 export function isRootAgentObservationTaskTool(binding: FrozenTaskTool): boolean {
   return (
     binding.extensionId === 'builtin.task' &&

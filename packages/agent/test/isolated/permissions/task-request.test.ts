@@ -1,8 +1,6 @@
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import type { AuthorizationRequest, Json } from '../../../src/extensions';
 import { createDefaultTaskRequestClassifier, defaultTaskRoles } from '../../../src/extensions/task';
-import { canonicalJson } from '../../../src/json';
 import { type CapabilityDescription, createPermissionPolicy } from '../../../src/permissions';
 
 const request = (
@@ -137,43 +135,20 @@ test('the omitted general and explicit general retain internal-record authorizat
   }
 });
 
-test('only an explicitly trusted prior catalogue restores its original default and revision', () => {
-  const prior = [
+test('custom role declarations cannot grant default internal-record privileges', () => {
+  const custom = [
     {
-      id: 'worker',
+      id: 'custom',
       version: '1',
       toolPolicy: 'parent' as const,
-      description: 'Prior registered builtin default.',
+      description: 'Host-selected custom work.',
     },
+    { ...defaultTaskRoles.find((role) => role.id === 'general')!, modelId: 'custom-model' },
   ];
-  const invocation = request('task.spawn', { prompt: 'ordinary prior task' });
-  expect(createDefaultTaskRequestClassifier(prior)(invocation)).toBeUndefined();
-  const describe = createDefaultTaskRequestClassifier(prior, {
-    trustedRoles: prior,
-    defaultRole: 'worker',
-  });
-  expect(describe(invocation)).toMatchObject({
-    internalRecordOnly: true,
-    revision: `builtin.task.internal:${createHash('sha256')
-      .update(
-        canonicalJson({
-          roles: prior,
-          kind: invocation.kind,
-          definitionId: invocation.definitionId,
-          definitionVersion: invocation.definitionVersion,
-          input: invocation.input,
-        }),
-      )
-      .digest('hex')}`,
-  });
-  expect(describe(request('agent/worker', { content: 'a' }, 'job'))).toMatchObject({
-    internalRecordOnly: true,
-  });
-  expect(describe(request('task.spawn', { preset: 'general', prompt: 'a' }))).toBeUndefined();
-  expect(
-    createDefaultTaskRequestClassifier([{ ...prior[0]!, modelId: 'overridden' }], {
-      trustedRoles: prior,
-      defaultRole: 'worker',
-    })(invocation),
-  ).toBeUndefined();
+  const describe = createDefaultTaskRequestClassifier(custom);
+  expect(describe(request('task.spawn', { prompt: 'ordinary custom work' }))).toBeUndefined();
+  for (const role of custom) {
+    expect(describe(request('task.spawn', { preset: role.id, prompt: 'a' }))).toBeUndefined();
+    expect(describe(request(`agent/${role.id}`, { content: 'a' }, 'job'))).toBeUndefined();
+  }
 });
