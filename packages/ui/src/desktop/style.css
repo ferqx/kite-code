@@ -5209,6 +5209,14 @@ body {
   box-shadow: 0 1px 2px #0000000a;
   transition: none;
 }
+.gem-slider[data-unselected="true"] [data-slot="slider-range"] {
+  visibility: hidden;
+}
+.gem-slider[data-unselected="true"] [data-slot="slider-thumb"] {
+  background: var(--accent);
+  border-color: var(--muted-foreground);
+  box-shadow: none;
+}
 .gem-ticks {
   position: absolute;
   inset: 0 calc((var(--gem-thumb-size) - 2px) / 2);

@@ -101,6 +101,7 @@ export {
   ModelEffortSelector,
   type ModelEffortSelectorProps,
   type ModelOption,
+  resolveThinkingEffort,
   type ThinkingEffort,
 } from './ModelEffortSelector';
 export {

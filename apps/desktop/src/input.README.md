@@ -18,3 +18,5 @@
 
 
 Native 的[输入策略](native-input.ts)可在这次 start/follow-up 携显式下一轮 modelId/reasoningEffort；点击时复制选择，Plan 和压缩后的后继输入也使用该次新选择。普通 active steer 不携这两项，仍只引导原 Run。模型偏好与页面临时档位生命周期归[Native owner](../README.md#native-provider-与下一次模型选择)，便携 DesktopInput 不猜当前界面模型。
+
+2026-11-07，Windows x64／Bun1.4.4，`ad9015854`加当前滑块及发送回归工作树：[完整NativeDesktop发送](../test/isolated/native-new-conversation-dom.test.tsx)105项／2106断言通过，新增用例从真实选择器选择同提供商下的同名模型，逐档操作并点击发送，核准确路由ID与六档effort同时进入原提交；另核首条输入及创建接管、切会话隔离、切模型清除旧临时档位，未临时调整时也将已配置档位或默认medium显式放进原意图，新增用例核首条与后续发送无需触碰滑块即携带medium，创建接管后保持同一默认值。[输入策略](../test/native-input.test.ts)5项通过，保start／排队follow-up的原点击值；[Service实际HTTP](../../service/test/isolated/run-model-selection.test.ts)核四类提供商的36组已配置／显式档位、准确路径与远端模型名、原ModelInput及冻结快照，并核拒绝后的每次重连保同一模型与档位。SDK的[Chat](../../../packages/ai/test/sdk.test.ts)与[Responses](../../../packages/ai/test/responses.test.ts)定向请求核全部档位的`reasoning_effort`／`reasoning.effort`编码。这里的完整桌面出口与下游物理HTTP分别验证，不冒充同一正式安装窗口的端到端录制或真实付费模型执行。

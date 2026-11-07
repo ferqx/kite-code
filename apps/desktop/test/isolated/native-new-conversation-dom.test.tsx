@@ -9,6 +9,7 @@ import type {
   NativeConversationResult,
   NativeDirectory,
   NativeDraft,
+  NativeModelSettingsFacts,
   NativeRequest,
   NativeResult,
   NativeState,
@@ -5422,6 +5423,152 @@ test('a saved Session route restores ahead of a different configured default and
     expect(f.calls.some((call) => ['submit', 'conversation.send'].includes(call.method))).toBe(
       false,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  false,
+  true,
+])('the complete Native send freezes the exact same-name model and displayed effort (new conversation: %s)', async (fresh) => {
+  const f = fixture(true);
+  Object.defineProperty(f.dom.window.HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value: () => null,
+  });
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  const efforts = ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'] as const;
+  const labels = ['轻度', '中', '高', '极高', 'Max', 'Ultar'];
+  const models: NativeModelSettingsFacts['models'] = ['model', 'second', 'global-default'].map(
+    (id) => ({
+      id,
+      provider: 'compatible',
+      model: id === 'global-default' ? 'Different Default' : 'Model',
+      enabled: true,
+      configured: true,
+      diagnostics: [],
+      reasoningEffort: id === 'second' ? 'medium' : 'low',
+      reasoningEffortChoices: [...efforts],
+    }),
+  );
+  bridge.request = async (input) => {
+    const result = await request(input);
+    if (
+      ['input.models.read', 'conversation.models.read'].includes(input.method) &&
+      result &&
+      'kind' in result &&
+      result.kind === 'settings.models'
+    )
+      return { ...result, defaultModelId: 'global-default', models };
+    if (input.method === 'submit')
+      return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+    return result;
+  };
+  async function choose(modelId: string) {
+    await act(async () => f.host.querySelector<HTMLButtonElement>('[data-model-trigger]')!.click());
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('[aria-label^="选择模型，当前 "]')!.click(),
+    );
+    await act(async () =>
+      f.host.querySelector<HTMLElement>(`[aria-label="选择模型 ${modelId}"]`)!.click(),
+    );
+  }
+  async function closePicker() {
+    await act(async () =>
+      f.host
+        .querySelector('[aria-label="模型与思考程度"]')!
+        .dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    );
+  }
+  const sends = () =>
+    f.calls.filter(
+      (call): call is Extract<NativeRequest, { method: 'submit' | 'conversation.send' }> =>
+        call.method === 'submit' || call.method === 'conversation.send',
+    );
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click(fresh ? '在 Workspace 中新建对话' : 'Original A');
+    await choose('second');
+    expect(f.host.querySelector('.effort-value')?.textContent).toBe('中');
+    const values = fresh ? [efforts.length - 1] : efforts.map((_effort, index) => index);
+    for (const index of values) {
+      if (index > 0 && !fresh)
+        await act(async () =>
+          f.host.querySelector<HTMLButtonElement>('[data-model-trigger]')!.click(),
+        );
+      await act(async () =>
+        f.host.querySelector('[role="slider"]')!.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', {
+            key: fresh ? 'End' : index === 0 ? 'Home' : 'ArrowRight',
+            bubbles: true,
+          }),
+        ),
+      );
+      expect(f.host.querySelector('.effort-value')?.textContent).toBe(labels[index]);
+      expect(f.host.querySelector('.model-effort-summary')?.textContent).toBe(labels[index]);
+      await closePicker();
+      await f.edit(`send ${efforts[index]}`, fresh ? '新对话草稿' : '当前会话私有草稿');
+      await f.click(fresh ? '发送首条消息' : '发送明确的新轮次');
+      expect(sends()).toHaveLength(fresh ? 1 : index + 1);
+      expect(sends().at(-1)?.intent).toMatchObject({
+        kind: 'run.start',
+        modelId: 'second',
+        reasoningEffort: efforts[index],
+      });
+      if (!fresh) expect(sends().at(-1)).toMatchObject({ sessionId: 'a' });
+    }
+    if (fresh) {
+      await f.resolve('accepted');
+      await f.until(() => !!f.input('当前会话私有草稿'));
+      expect(f.host.querySelector('.model-effort-summary')?.textContent).toBe('Ultar');
+    } else {
+      await f.click('Other B');
+      expect(f.host.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
+      await f.edit('separate Session', '当前会话私有草稿');
+      await f.click('发送明确的新轮次');
+      expect(sends().at(-1)).toMatchObject({ sessionId: 'b', intent: { modelId: 'model' } });
+      expect(sends().at(-1)?.intent).toMatchObject({ reasoningEffort: 'low' });
+      await f.click('Original A');
+      expect(f.host.querySelector('.model-effort-summary')?.textContent).toBe('Ultar');
+    }
+    await choose('model');
+    expect(f.host.querySelector('.effort-value')?.textContent).toBe('轻度');
+    await closePicker();
+    await f.edit('new model configuration', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    expect(sends().at(-1)?.intent).toMatchObject({ modelId: 'model' });
+    expect(sends().at(-1)?.intent).toMatchObject({ reasoningEffort: 'low' });
+  } finally {
+    await f.close();
+  }
+});
+
+test('the first Native send includes the displayed medium default without touching the effort control', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('send the visible model default');
+    await f.chooseModel();
+    expect(f.host.querySelector('.model-effort-summary')?.textContent).toBe('中');
+    expect(f.host.body.textContent).not.toContain('未指定');
+    await f.click('发送首条消息');
+    const send = f.calls.find((call) => call.method === 'conversation.send');
+    expect(send).toMatchObject({
+      method: 'conversation.send',
+      intent: { modelId: 'model', reasoningEffort: 'medium' },
+    });
+    await f.resolve('accepted');
+    await f.until(() => !!f.input('当前会话私有草稿'));
+    expect(f.host.querySelector('.model-effort-summary')?.textContent).toBe('中');
+    await f.edit('keep that default on the next send', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    expect(f.calls.find((call) => call.method === 'submit')).toMatchObject({
+      method: 'submit',
+      intent: { modelId: 'model', reasoningEffort: 'medium' },
+    });
   } finally {
     await f.close();
   }

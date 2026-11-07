@@ -1,4 +1,4 @@
-import { ModelEffortSelector, ReadGate } from '@kite-ai/ui/desktop';
+import { ModelEffortSelector, ReadGate, resolveThinkingEffort } from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   NativeBridge,
@@ -308,9 +308,13 @@ export function NativeModelPicker({
       ? recommendation?.reasoningEffort
       : undefined;
   const requestEffort = value.reasoningEffort ?? previousEffort ?? recommendedEffort;
-  const effort = requestEffort ?? selected?.reasoningEffort;
+  const modelEffort = selected
+    ? resolveThinkingEffort(selected.reasoningEffort, selected.reasoningEffortChoices)
+    : undefined;
+  const effort = requestEffort ?? modelEffort;
   const allowedEffort =
     requestEffort === undefined ||
+    requestEffort === modelEffort ||
     supported.includes(requestEffort) ||
     (value.reasoningEffort === undefined &&
       (requestEffort === 'none' || requestEffort === 'minimal'));
@@ -340,12 +344,12 @@ export function NativeModelPicker({
       readyId
         ? {
             modelId: readyId,
-            ...(requestEffort === undefined ? {} : { reasoningEffort: requestEffort }),
+            ...(effort === undefined ? {} : { reasoningEffort: effort }),
           }
         : undefined,
       { settled: !reading, display },
     );
-  }, [readKey, ready, readyId, requestEffort, reading, display]);
+  }, [readKey, ready, readyId, effort, reading, display]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reads follow exact scope and settings revision; callbacks and temporary effort do not restart IO.
   useEffect(() => {
     const original = readKey,
@@ -401,17 +405,15 @@ export function NativeModelPicker({
     }
   }
   function choose(modelId: string) {
-    if (
-      !reading &&
-      !error &&
-      !disabled &&
-      !protocol.unavailable &&
-      models.some((model) => model.id === modelId)
-    )
+    const model = models.find((entry) => entry.id === modelId);
+    if (!reading && !error && !disabled && !protocol.unavailable && model)
       remember(
         { modelId },
-        (preparing ? undefined : previousSessionEffort(selection, modelId)) ??
-          models.find((model) => model.id === modelId)?.reasoningEffort,
+        resolveThinkingEffort(
+          (preparing ? undefined : previousSessionEffort(selection, modelId)) ??
+            model.reasoningEffort,
+          model.reasoningEffortChoices,
+        ),
       );
   }
   function setEffort(reasoningEffort: NativeReasoningEffort) {
