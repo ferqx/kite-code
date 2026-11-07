@@ -10,21 +10,7 @@ import type { NativeDraft, NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
 import { nativeRootPage } from './native-root-page.fixture';
 
-// Read editor text without CSS paragraph margins adding visual blank lines.
-// Keep every actual line break and leading/trailing space in the original draft.
-const promptText = (input: import('playwright').Locator) =>
-  input.evaluate((element) => {
-    const text = (node: Node): string =>
-      node.nodeName === 'BR'
-        ? '\n'
-        : node.nodeType === 3
-          ? (node.textContent ?? '')
-          : [...node.childNodes].map(text).join('');
-    return [...element.children]
-      .map((child) => (child.textContent ? text(child) : ''))
-      .join('\n')
-      .replace(/\r\n?/g, '\n');
-  });
+import { promptText } from './prompt-editor-text.fixture';
 
 type ReviewPolicy = {
   review: {

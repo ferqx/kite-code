@@ -18,14 +18,9 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 import type { PlanReviewReport } from '../native-plan-review-electron.fixture';
 
 const require = createRequire(import.meta.url);
-// Lexical stores edited plain underscores as escaped Markdown. Compare the
-// complete source at every boundary; the visible task remains unchanged.
 const planTask = (id: string) =>
-  `${id === 'b' ? '新任务：' : ''}NATIVE_PLAN_${id.toUpperCase()} exact original task`.replaceAll(
-    '_',
-    '\\_',
-  );
-const parentTask = 'NATIVE\\_PARENT\\_B hold original active Run';
+  `${id === 'b' ? '新任务：' : ''}NATIVE_PLAN_${id.toUpperCase()} exact original task`;
+const parentTask = 'NATIVE_PARENT_B hold original active Run';
 const hasOriginalTask = (body: { messages: { role: string; content?: unknown }[] }, task: string) =>
   body.messages.some((message) => message.role === 'user' && message.content === task);
 test.skipIf(process.platform !== 'darwin')(
@@ -535,6 +530,10 @@ test.skipIf(process.platform !== 'darwin')(
       writeFileSync(
         fixture,
         readFileSync(resolve(import.meta.dir, '../native-plan-review-electron.fixture.ts'), 'utf8')
+          .replace(
+            "'./prompt-editor-text.fixture'",
+            JSON.stringify(resolve(import.meta.dir, '../prompt-editor-text.fixture.ts')),
+          )
           .replace(
             "'./native-root-page.fixture'",
             JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),

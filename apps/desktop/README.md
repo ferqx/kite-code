@@ -1643,6 +1643,9 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 
 2026-11-08 本轮整仓复核让该授权目录夹具选择实际主 renderer，避免辅助窗口先出现时未找到会话；全部13条窗口断言和冷读检查通过。默认候选中的权限审批改用独立 Shell 探针，Files 写入继续按当前透明业务权限直接执行，文件读取失败使用真实非普通文件对象；不能再要求普通 Files 自动审核额外弹卡。 同轮默认候选实际已走过 Shell 单次人工批准、唯一自身 Job、Files 写入和真实非普通文件读取失败，但完整 `native-bundle` 仍在缺失文件链接的旧错误提示断言失败：现有 `messageFile.open` 调用经非业务 `report` 吞掉异常，未出现夹具要求的 alertdialog。该调用与通用错误显示行为在基线已相同，本轮未改；本次窗口前缀不能写成完整候选／冷开整例通过。 远端桌面展示接管合并后，原答案 unknown 查询改用 Main 已返回的准确目标 Store／Session，即使 UI 正在保留上一页也独立恢复；读权限和新写入仍等待当前选择核验，原查询不补发答案。恢复继续共用同一选择读取槽，避免该读取占住原答案查询。
 
+同轮最终源码外计划窗口整文件1项／313条Bun断言通过：移除夹具内退役编辑器的重复富文本 reader 和下划线转义补偿，复用当前 textarea 原文读取；真实计划修订／批准、拒绝停止、准确取消、草稿和冷读保持。68张过程帧中复看长附件／反馈、修订后待批、完成接管及取消前状态；普通退出 code0，原 Service 已结束。显式取消已派发 review 的 unknown 保留，不将其写成已知无效果。最终四份 DOM 回归覆盖当前计划权限菜单、原答案恢复与草稿接管，另实际授权目录窗口13条Node断言及冷读通过。普通 `desktop:dev` 同一入口以隔离HOME、诊断关闭构建启动实际窗口，本机本轮5.16秒完成握手与启动；已观察空目录页面、原文草稿输入和正常退出，新开发Profile的formatMajor为1且Run／Execution／Interaction均0。它不代替用户既有Profile、旧数据、完整安装或其他平台资格。
+
+
 当前原窗口首次选择准确会话后，先核原标题并打开私有诊断制品的“会话工具”，再读取授权；后续选择已有的侧栏步骤保持。只补该首次导航，全部原driver字节、13Node断言及预算保留。同一完整文件1pass／10Bun断言通过，Desktop types／Biome通过；本轮默认真实失败与阶段范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不把私有制品窗口资格提升为完整安装或整体退出。
 
 [普通 Native DOM 回归](test/isolated/native-read-ownership-dom.test.tsx)以 `testDiagnostics:false` 从审批方式菜单打开目录，核完整 presentation／scope／bindings／审批与执行来源，清除前确认、双击只提交一次、unknown 原 command 查询，以及切会话拒绝迟到目录，其他诊断入口保持关闭。该测试与实际普通 renderer 逐步观察分别记录资格，DOM 不代证真实窗口完整旅程。
