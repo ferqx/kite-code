@@ -232,19 +232,26 @@ test('restored compression opens the exact sensitive original input through the 
         (value) => value.getAttribute('aria-label') === title,
       );
       expect(target).toBeDefined();
+      const before = calls.length;
       await act(async () => target!.click());
       await settle(() => target!.getAttribute('aria-current') === 'page');
-      // This read-only admitted Main has no Node private UI database. Keep its real draft failure
-      // visible and dismiss the actual non-modal message; neither bridge nor saved input is substituted.
-      await settle(() => !!host.querySelector('.native-message-card[role="status"]'));
-      const message = host.querySelector('.native-message-card[role="status"]')!;
-      expect(message.querySelector('p')?.textContent).toBe(
-        '草稿暂时无法保存或读取，当前输入已保留。请稍后再试。',
-      );
-      const dismiss = message.querySelector<HTMLButtonElement>('button[aria-label="关闭提示"]');
-      expect(dismiss).not.toBeNull();
-      await act(async () => dismiss!.click());
-      expect(host.querySelector('.native-message-card')).toBeNull();
+      // Wait for the real Main selection to finish reconciliation and start its
+      // draft read, rather than using an unrelated transient message as a barrier.
+      await settle(() => {
+        const selected = calls.slice(before).find((request) => request.method === 'select');
+        return (
+          !!selected &&
+          calls
+            .slice(before)
+            .some(
+              (request) =>
+                request.method === 'draft.read' && request.sessionId === selected.sessionId,
+            )
+        );
+      });
+      // The admitted read-only Main has no Node private UI database. A failed
+      // draft read keeps its recovery path without adding a diagnostic-only toast.
+      expect(host.ownerDocument.querySelector('.native-toast-card') === null).toBe(true);
     };
     await act(async () => rendered!.render(<NativeDesktop testDiagnostics />));
     await select('Original compression');

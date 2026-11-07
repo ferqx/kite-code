@@ -100,7 +100,6 @@ export const nativeWindowAppearanceChannel = 'kite:native:window-appearance';
 export const nativeFullPermissionConfirmationChannel = 'kite:native:full-permission-confirmation';
 export const nativeFullPermissionConfirmationCancelChannel =
   'kite:native:full-permission-confirmation-cancel';
-export const nativeQuitConfirmationFailureChannel = 'kite:native:quit-confirmation-failure';
 export const nativeStartupStatusChannel = 'kite:native:startup-status';
 export const nativeStartupDiagnosticSaveChannel = 'kite:native:startup-diagnostic-save';
 export type NativeStartupStatus = { readonly diagnosticAvailable: boolean };
@@ -122,7 +121,6 @@ export interface NativeWindowBridge {
   getWindowAppearance(): Promise<NativeWindowAppearance>;
   confirmFullPermission(input: NativeFullPermissionConfirmationRequest): Promise<boolean>;
   cancelFullPermissionConfirmation(requestId: string): void;
-  watchQuitConfirmationFailure(listener: () => void): () => void;
 }
 export type NativeFullPermissionConfirmationRequest = {
   requestId: string;

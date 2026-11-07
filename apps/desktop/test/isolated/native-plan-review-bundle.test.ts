@@ -614,21 +614,13 @@ test.skipIf(process.platform !== 'darwin')(
         expectedPosts: number;
         childPid: number;
         providerRequestsBeforeCancel: number;
-        exitChoice: { calls: number; response: number; via: string; options: unknown };
+        exitChoice: { calls: number; visible: boolean; via: string };
       };
       expect(report.providerRequestsBeforeCancel).toBe(businessBodies.length);
       expect(report.exitChoice).toEqual({
-        calls: 1,
-        response: 1,
-        via: 'one-shot-fixture-dialog-port',
-        options: {
-          type: 'warning',
-          message: '仍有活动工作，或尚不能完整核实。退出会停止本应用拥有的服务。',
-          detail: '确认后立即关闭窗口，未完成的任务清理将在后台继续。',
-          buttons: ['保留服务', '退出'],
-          defaultId: 0,
-          cancelId: 0,
-        },
+        calls: 0,
+        visible: false,
+        via: 'synchronous-explicit-quit',
       });
       expect(report.management).toHaveLength(0);
       expect(report.filesApprovals).toHaveLength(0);

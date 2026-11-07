@@ -1,36 +1,29 @@
-/** The closed client leaves owned Service cleanup running silently in the background. */
-export async function settleDesktopQuit(input: {
+/** Cleanup has four seconds; the caller retains one second for forced process exit. */
+export function settleDesktopQuit(input: {
   closeService: () => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<'clean' | 'force'> {
-  return Promise.resolve()
-    .then(input.closeService)
-    .then(
-      () => 'clean' as const,
-      () => 'force' as const,
-    );
-}
-
-/** A stalled read is unknown work; only this inspection's GETs are aborted. */
-export async function inspectNativeQuitWork(
-  read: (signal: AbortSignal) => Promise<boolean>,
-  waitMs: number,
-): Promise<boolean> {
-  const abort = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve()
-        .then(() => read(abort.signal))
-        .catch(() => true),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => {
-          abort.abort();
-          resolve(true);
-        }, waitMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    abort.abort();
-  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (outcome: 'clean' | 'force') => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      input.signal?.removeEventListener('abort', abort);
+      resolve(outcome);
+    };
+    const abort = () => finish('force');
+    const timer = setTimeout(() => finish('force'), 4000);
+    if (input.signal?.aborted) {
+      abort();
+      return;
+    }
+    input.signal?.addEventListener('abort', abort, { once: true });
+    void Promise.resolve()
+      .then(input.closeService)
+      .then(
+        () => finish('clean'),
+        () => finish('force'),
+      );
+  });
 }

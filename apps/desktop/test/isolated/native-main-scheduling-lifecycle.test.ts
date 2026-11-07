@@ -53,7 +53,6 @@ type Service = {
 async function mainFixture(
   barrier: Barrier,
   holdServiceClose = false,
-  holdMenu = false,
   rejectServiceClose = false,
   holdRendererLoad = false,
   barrierService = 1,
@@ -77,8 +76,6 @@ async function mainFixture(
   const resources: { service: number; closed: boolean; close(): void }[] = [];
   const lifecyclePhases: string[] = [],
     exitCodes: number[] = [];
-  const menuEntered = deferred(),
-    menuResult = deferred<{ response: number; checkboxChecked: boolean }>();
   const rendererEntered = deferred(),
     rendererLoad = deferred(),
     rendererHeld = deferred();
@@ -91,9 +88,9 @@ async function mainFixture(
   const dialogs: unknown[][] = [];
   const externalUrls: string[] = [];
   let rejectExternalOpen = false;
+  const presentationFailures = new Set<string>();
   let windowOpenHandler!: Parameters<WebContents['setWindowOpenHandler']>[0];
   const windowMessages: string[] = [];
-  let failQuitNotice = false;
   let workInspection: Promise<boolean> | undefined;
   let workspaceDecision: ReturnType<typeof deferred<boolean>> | undefined;
   let confirmWorkspaceRemoval!: (label: string) => Promise<boolean>;
@@ -142,10 +139,12 @@ async function mainFixture(
     setAboutPanelOptions: () => {},
     hide: () => {
       appHides += 1;
+      if (presentationFailures.has('app')) throw Error('fixture_app_hide_failed');
     },
     dock: {
       hide: () => {
         dockHides += 1;
+        if (presentationFailures.has('dock')) throw Error('fixture_dock_hide_failed');
       },
     },
     whenReady: async () => {
@@ -180,8 +179,6 @@ async function mainFixture(
       isDestroyed: () => windowDestroyed,
       send: (channel: string, event?: { kind: string; phase: string }) => {
         windowMessages.push(channel);
-        if (failQuitNotice && channel === 'kite:native:quit-confirmation-failure')
-          throw Error('fixture_notice_delivery_failed');
         if (event?.kind === 'lifecycle') lifecyclePhases.push(event.phase);
       },
       setWindowOpenHandler: (handler: typeof windowOpenHandler) => {
@@ -203,8 +200,9 @@ async function mainFixture(
       trace.push('window:show');
     }
     hide() {
-      windowVisible = false;
       trace.push('window:hide');
+      if (presentationFailures.has('window')) throw Error('fixture_window_hide_failed');
+      windowVisible = false;
     }
     isMinimized() {
       return windowMinimized;
@@ -258,8 +256,9 @@ async function mainFixture(
       this.menu = menu;
     }
     destroy() {
-      this.destroyed = true;
       trace.push('tray:destroy');
+      if (presentationFailures.has('tray')) throw Error('fixture_tray_destroy_failed');
+      this.destroyed = true;
     }
   }
   const fixture = {
@@ -284,9 +283,7 @@ async function mainFixture(
             permissionEntered.resolve();
             return permissionResult.promise;
           }
-          if (!holdMenu) throw Error('unexpected_fixture_dialog');
-          menuEntered.resolve();
-          return menuResult.promise;
+          throw Error('unexpected_fixture_dialog');
         },
       },
       ipcMain: {},
@@ -336,6 +333,7 @@ async function mainFixture(
         active: () => !!workspaceDecision,
         dismiss() {
           trace.push('dialog:dismiss');
+          if (presentationFailures.has('dialog')) throw Error('fixture_dialog_dismiss_failed');
           workspaceDecision?.resolve(false);
           workspaceDecision = undefined;
         },
@@ -492,7 +490,7 @@ async function mainFixture(
       }
       hasActiveWork() {
         trace.push('work:inspect');
-        return workInspection ?? holdMenu;
+        return workInspection ?? false;
       }
       detach() {}
       async close() {
@@ -709,6 +707,7 @@ async function mainFixture(
     errors,
     dialogs,
     externalUrls,
+    failPresentation: (failure: string) => presentationFailures.add(failure),
     rejectExternalOpen: (reject: boolean) => {
       rejectExternalOpen = reject;
     },
@@ -744,9 +743,6 @@ async function mainFixture(
     readyToShow: () => windows.at(-1)?.emit('ready-to-show'),
     lifecyclePhases,
     windowMessages,
-    failQuitNotice() {
-      failQuitNotice = true;
-    },
     holdWorkInspection() {
       const value = deferred<boolean>();
       workInspection = value.promise;
@@ -756,10 +752,6 @@ async function mainFixture(
     confirmPendingWorkspace: () => workspaceDecision?.resolve(true),
     exitCodes,
     quit: () => app.quit(),
-    menuEntered: menuEntered.promise,
-    retainService: () => menuResult.resolve({ response: 0, checkboxChecked: false }),
-    confirmQuit: () => menuResult.resolve({ response: 1, checkboxChecked: false }),
-    rejectMenu: () => menuResult.reject(Error('fixture_cancelled_dialog')),
     rendererEntered: rendererEntered.promise,
     rendererHeld: rendererHeld.promise,
     releaseAppReady: () => appReady.resolve(),
@@ -862,7 +854,7 @@ for (const response of [0, 1]) {
     `Main permission response ${response} gates renderer, Service and database before first launch`,
     async () => {
       let repairs = 0;
-      const f = await mainFixture('none', false, false, false, false, 1, false, 0, {
+      const f = await mainFixture('none', false, false, false, 1, false, 0, {
         path: 'C:\\owned\\data',
         backupPath: 'C:\\owned\\data\\permissions-backup.txt',
         repairable: true,
@@ -1085,7 +1077,7 @@ test('Main grant identity survives a real same-selection Caller refresh while re
 });
 
 test('Main registers its page host before renderer attachment starts the private Service channel', async () => {
-  const f = await mainFixture('none', false, false, false, true);
+  const f = await mainFixture('none', false, false, true);
   try {
     await f.rendererEntered;
     expect(f.services).toHaveLength(0);
@@ -1174,7 +1166,7 @@ test('Main reload drains the original scheduler creation before closing its data
 }, 15000);
 
 test('Main failed replacement renderer load releases only its settled reload latch for a later exact reload', async () => {
-  const f = await mainFixture('none', false, false, false, true, 1, false, 2);
+  const f = await mainFixture('none', false, false, true, 1, false, 2);
   let pending: Promise<unknown> | undefined;
   try {
     await f.open();
@@ -1199,7 +1191,7 @@ test('Main failed replacement renderer load releases only its settled reload lat
 }, 15000);
 
 test('Main settled reload failure retains the original cleanup unknown and cannot launch a replacement', async () => {
-  const f = await mainFixture('none', false, false, true);
+  const f = await mainFixture('none', false, true);
   try {
     await f.open();
     await expect(f.reload(replacement)).rejects.toThrow('fixture_service_close_failed');
@@ -1219,7 +1211,7 @@ test('Main settled reload failure retains the original cleanup unknown and canno
 }, 15000);
 
 test('Main SIGTERM during failed replacement presentation still waits for the exact live Service and cannot revive reload', async () => {
-  const f = await mainFixture('none', false, false, false, true, 1, false, 2),
+  const f = await mainFixture('none', false, false, true, 1, false, 2),
     closing = deferred(),
     release = deferred();
   let pending: Promise<unknown> | undefined;
@@ -1292,132 +1284,81 @@ for (const reason of ['end', 'error', 'close', 'SIGINT', 'SIGTERM'] as const) {
 }
 
 for (const reason of ['SIGINT', 'end'] as const) {
-  for (const answer of ['retain', 'reject'] as const) {
-    test(`Main ${reason} drain cannot be revoked by a late menu ${answer}`, async () => {
-      const f = await mainFixture('none', true, true);
-      try {
-        await f.open();
-        await f.runners[0]!.tick();
-        const posts = f.posts.length;
-        f.quit();
-        await f.menuEntered;
-        if (reason === 'end') f.parent.end();
-        else process.emit('SIGINT');
-        await f.serviceClosing;
-        if (answer === 'retain') f.retainService();
-        else f.rejectMenu();
-        // Flush the actual menu continuation and its catch while Service close stays held.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        expect(f.lifecyclePhases).not.toContain('active');
-        await expect(f.open()).rejects.toThrow('native_draining');
-        expect(f.posts).toHaveLength(posts);
-        expect(f.exitCodes).toEqual([]);
-        expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
-        expect(f.errors).toEqual([]);
-        f.releaseServiceClose();
-        expect(await f.exited).toBe(0);
-        expect(f.exitCodes).toEqual([0]);
-        expect(f.clocks.get(f.services[0]!.client)!.timers.size).toBe(0);
-        expect(f.posts.some((post) => post.afterClose)).toBe(false);
-      } finally {
-        await f.close();
-      }
-    }, 15000);
-  }
-}
-
-test('Main still permits an ordinary menu cancellation to retain the original Service', async () => {
-  const f = await mainFixture('none', false, true);
-  try {
-    const caller = await f.open();
-    await f.runners[0]!.tick();
-    f.quit();
-    await f.menuEntered;
-    f.retainService();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect(f.lifecyclePhases).toEqual(['quitting', 'active']);
-    expect(await f.open()).toBe(caller);
-    expect(f.services[0]!.closed).toBe(false);
-    expect(f.exitCodes).toEqual([]);
-    expect(f.trace).not.toContain('1:service:closing');
-    expect(f.errors).toEqual([]);
-  } finally {
-    await f.close();
-  }
-}, 15000);
-
-test('quit immediately retires a previous workspace confirmation before awaiting activity inspection', async () => {
-  const f = await mainFixture('none', false, true);
-  const held = f.holdWorkInspection();
-  try {
-    await f.open();
-    const workspace = f.confirmWorkspaceRemoval('Workspace');
-    f.quit();
-    f.confirmPendingWorkspace();
-    expect(await workspace).toBe(false);
-    expect(f.trace.indexOf('dialog:dismiss')).toBeLessThan(f.trace.indexOf('work:inspect'));
-    held.resolve(true);
-    await f.menuEntered;
-    f.retainService();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect(f.lifecyclePhases).toEqual(['quitting', 'active']);
-    expect(f.services[0]!.closed).toBe(false);
-  } finally {
-    held.resolve(true);
-    f.retainService();
-    await f.close();
-  }
-}, 15000);
-
-for (const noticeThrows of [false, true])
-  test(`a failed native quit confirmation retains the Service when notice delivery ${noticeThrows ? 'throws' : 'succeeds'}`, async () => {
-    const f = await mainFixture('none', false, true);
-    try {
-      if (noticeThrows) f.failQuitNotice();
-      const caller = await f.open();
-      f.quit();
-      await f.menuEntered;
-      f.rejectMenu();
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      expect(f.lifecyclePhases).toEqual(['quitting', 'active']);
-      expect(await f.open()).toBe(caller);
-      expect(f.services[0]!.closed).toBe(false);
-      expect(f.exitCodes).toEqual([]);
-      expect(
-        f.windowMessages.filter((channel) => channel === 'kite:native:quit-confirmation-failure'),
-      ).toHaveLength(1);
-      expect(f.trace).not.toContain('1:service:closing');
-    } finally {
-      await f.close();
-    }
-  }, 15000);
-
-for (const rejectServiceClose of [false, true]) {
-  test(`Main confirmed quit ${rejectServiceClose ? 'forces exit on rejected cleanup' : 'exits after clean cleanup'} with one prompt`, async () => {
-    const f = await mainFixture('none', true, true, rejectServiceClose);
-    const exitCode = rejectServiceClose ? 1 : 0;
+  test(`Main explicit quit and ${reason} share one immediate background drain`, async () => {
+    const f = await mainFixture('none', true);
+    const inspection = f.holdWorkInspection();
     try {
       await f.open();
       await f.runners[0]!.tick();
+      const posts = f.posts.length;
       f.quit();
-      await f.menuEntered;
+      expect(f.windowVisible()).toBe(false);
+      expect(f.dialogs).toEqual([]);
+      expect(f.trace).not.toContain('work:inspect');
+      if (reason === 'end') f.parent.end();
+      else process.emit('SIGINT');
+      await f.serviceClosing;
+      inspection.resolve(true);
+      await Promise.resolve();
+      expect(f.lifecyclePhases).not.toContain('active');
+      await expect(f.open()).rejects.toThrow('native_draining');
+      expect(f.posts).toHaveLength(posts);
+      expect(f.exitCodes).toEqual([]);
+      expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+      f.releaseServiceClose();
+      expect(await f.exited).toBe(0);
+      expect(f.exitCodes).toEqual([0]);
+      expect(f.clocks.get(f.services[0]!.client)!.timers.size).toBe(0);
+      expect(f.posts.some((post) => post.afterClose)).toBe(false);
+    } finally {
+      inspection.resolve(true);
+      await f.close();
+    }
+  }, 15000);
+}
+
+test('explicit quit synchronously retires a previous workspace confirmation without activity inspection', async () => {
+  const f = await mainFixture('none', true);
+  try {
+    await f.open();
+    f.readyToShow();
+    const workspace = f.confirmWorkspaceRemoval('Workspace');
+    f.quit();
+    expect(f.windowVisible()).toBe(false);
+    f.confirmPendingWorkspace();
+    expect(await workspace).toBe(false);
+    expect(f.trace).not.toContain('work:inspect');
+    expect(f.dialogs).toEqual([]);
+    expect(f.lifecyclePhases).toEqual(['quitting']);
+    await f.serviceClosing;
+    expect(f.services[0]!.closed).toBe(false);
+    f.releaseServiceClose();
+    expect(await f.exited).toBe(0);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const rejectServiceClose of [false, true]) {
+  test(`Main explicit quit immediately hides the window and ${rejectServiceClose ? 'exits nonzero on failed cleanup' : 'waits for actual cleanup in the background'} without prompting`, async () => {
+    const f = await mainFixture('none', true, rejectServiceClose);
+    const exitCode = rejectServiceClose ? 1 : 0;
+    try {
+      await f.open();
+      f.readyToShow();
+      await f.runners[0]!.tick();
+      expect(f.windowVisible()).toBe(true);
       f.quit();
-      expect(f.dialogs).toHaveLength(1);
-      expect(f.dialogs[0]).toHaveLength(2);
-      expect(f.dialogs[0]![1]).toMatchObject({
-        type: 'warning',
-        buttons: ['保留服务', '退出'],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      expect(f.trace).not.toContain('1:service:closing');
-      f.confirmQuit();
+      expect(f.windowVisible()).toBe(false);
+      expect(f.dialogs).toEqual([]);
+      expect(f.trace).not.toContain('work:inspect');
       await f.serviceClosing;
       expect(f.windowCount()).toBe(1);
-      expect(f.windowVisible()).toBe(false);
       expect(f.trace).not.toContain('window:destroy');
       f.quit();
-      expect(f.dialogs).toHaveLength(1);
+      f.activate();
+      f.readyToShow();
+      expect(f.windowVisible()).toBe(false);
       expect(f.exitCodes).toEqual([]);
       expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
       f.releaseServiceClose();
@@ -1425,13 +1366,74 @@ for (const rejectServiceClose of [false, true]) {
       expect(f.exitCodes).toEqual([exitCode]);
       if (!rejectServiceClose)
         expect(f.trace.indexOf('1:service:close')).toBeLessThan(f.trace.indexOf('window:destroy'));
-      expect(f.dialogs).toHaveLength(1);
-      expect(f.errors).toEqual([]);
+      expect(f.dialogs).toEqual([]);
     } finally {
       await f.close(exitCode);
     }
   }, 15000);
 }
+
+for (const completion of ['resolve', 'reject'] as const)
+  test(`Main forces a stalled exit at its deadline and ignores late cleanup ${completion}`, async () => {
+    const f = await mainFixture('none', true, completion === 'reject');
+    const timers = spyOn(globalThis, 'setTimeout');
+    try {
+      await f.open();
+      f.readyToShow();
+      const before = timers.mock.calls.length;
+      f.quit();
+      expect(f.windowVisible()).toBe(false);
+      await f.serviceClosing;
+      const deadlines = timers.mock.calls.slice(before).filter((call) => call[1] === 4000);
+      expect(deadlines).toHaveLength(1);
+      expect(f.exitCodes).toEqual([]);
+      f.quit();
+      expect(timers.mock.calls.slice(before).filter((call) => call[1] === 4000)).toHaveLength(1);
+      (deadlines[0]![0] as () => void)();
+      expect(await f.exited).toBe(1);
+      f.releaseServiceClose();
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+      f.activate();
+      f.readyToShow();
+      expect(f.exitCodes).toEqual([1]);
+      expect(f.windowVisible()).toBe(false);
+      expect(f.dialogs).toEqual([]);
+      expect(f.posts.some((post) => post.afterClose)).toBe(false);
+    } finally {
+      timers.mockRestore();
+      f.releaseServiceClose();
+      await f.close(1);
+    }
+  }, 15000);
+
+for (const failure of [
+  'dialog',
+  'window',
+  ...(process.platform === 'darwin' ? ['app', 'dock'] : []),
+  ...(process.platform === 'win32' ? ['tray'] : []),
+])
+  test(`a ${failure} retirement exception still retires other presentation and exits`, async () => {
+    const f = await mainFixture('none');
+    try {
+      await f.open();
+      f.readyToShow();
+      f.failPresentation(failure);
+      f.quit();
+      expect(f.windowVisible()).toBe(false);
+      expect(await f.exited).toBe(1);
+      expect(f.exitCodes).toEqual([1]);
+      expect(f.trace).toContain('dialog:dismiss');
+      expect(f.trace).toContain('window:hide');
+      if (process.platform === 'darwin') {
+        expect(f.appHides()).toBe(1);
+        expect(f.dockHides()).toBe(1);
+      }
+      expect(f.dialogs).toEqual([]);
+      expect(f.trace).not.toContain('work:inspect');
+    } finally {
+      await f.close(1);
+    }
+  }, 15000);
 
 test.skipIf(process.platform !== 'win32')(
   'Windows tray restores the original window and idle exit drains its Service',
@@ -1474,43 +1476,30 @@ test.skipIf(process.platform !== 'win32')(
   15000,
 );
 
-for (const retain of [true, false]) {
-  test.skipIf(process.platform !== 'win32')(
-    `Windows tray active-work exit ${retain ? 'keeps the tray on cancellation' : 'confirms before removing the tray'}`,
-    async () => {
-      const f = await mainFixture('none', false, true);
-      try {
-        await f.open();
-        const tray = f.trays[0]!;
-        f.trayQuit();
-        await f.menuEntered;
-        f.trayQuit();
-        expect(f.dialogs).toHaveLength(1);
-        expect(tray.destroyed).toBe(false);
-        expect(f.services[0]!.closed).toBe(false);
-        if (retain) {
-          f.retainService();
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          expect(tray.destroyed).toBe(false);
-          f.closeWindow();
-          tray.emit('double-click');
-          expect(f.windowVisible()).toBe(true);
-          expect(f.services[0]!.closed).toBe(false);
-          expect(f.exitCodes).toEqual([]);
-        } else {
-          f.confirmQuit();
-          expect(await f.exited).toBe(0);
-          expect(tray.destroyed).toBe(true);
-          expect(f.services[0]!.closed).toBe(true);
-        }
-        expect(f.errors).toEqual([]);
-      } finally {
-        await f.close();
-      }
-    },
-    15000,
-  );
-}
+test.skipIf(process.platform !== 'win32')(
+  'Windows tray explicit exit immediately removes the tray without checking activity',
+  async () => {
+    const f = await mainFixture('none', true);
+    try {
+      await f.open();
+      const tray = f.trays[0]!;
+      f.trayQuit();
+      expect(tray.destroyed).toBe(true);
+      expect(f.windowVisible()).toBe(false);
+      expect(f.dialogs).toEqual([]);
+      expect(f.trace).not.toContain('work:inspect');
+      f.trayQuit();
+      await f.serviceClosing;
+      expect(f.services[0]!.closed).toBe(false);
+      f.releaseServiceClose();
+      expect(await f.exited).toBe(0);
+      expect(f.services[0]!.closed).toBe(true);
+    } finally {
+      await f.close();
+    }
+  },
+  15000,
+);
 
 test('Main idle quit needs no confirmation', async () => {
   const f = await mainFixture('none');
@@ -1527,38 +1516,26 @@ test('Main idle quit needs no confirmation', async () => {
   }
 }, 15000);
 
-for (const rejectConfirmation of [false, true]) {
-  test(`Main destroyed window uses one windowless confirmation and ${rejectConfirmation ? 'exits when confirmation throws' : 'honors confirmation'}`, async () => {
-    const f = await mainFixture('none', false, true);
-    const exitCode = rejectConfirmation ? 1 : 0;
-    try {
-      await f.open();
-      await f.runners[0]!.tick();
-      f.destroyWindow();
-      f.quit();
-      await f.menuEntered;
-      expect(f.dialogs).toHaveLength(1);
-      expect(f.dialogs[0]).toHaveLength(1);
-      expect(f.dialogs[0]![0]).toMatchObject({ buttons: ['保留服务', '退出'] });
-      if (rejectConfirmation) f.rejectMenu();
-      else f.confirmQuit();
-      expect(await f.exited).toBe(exitCode);
-      expect(f.dialogs).toHaveLength(1);
-      expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
-      expect(f.errors).toEqual([]);
-    } finally {
-      await f.close(exitCode);
-    }
-  }, 15000);
-}
+test('Main explicit quit without a surviving window still drains once without a dialog', async () => {
+  const f = await mainFixture('none', true);
+  try {
+    await f.open();
+    f.destroyWindow();
+    f.quit();
+    await f.serviceClosing;
+    expect(f.dialogs).toEqual([]);
+    expect(f.trace).not.toContain('work:inspect');
+    f.releaseServiceClose();
+    expect(await f.exited).toBe(0);
+    expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+}, 15000);
 
 for (const blocked of ['opening', 'reload'] as const) {
-  test(`Main confirmed quit hides the window while held ${blocked} cleans up in background`, async () => {
-    const f = await mainFixture(
-      blocked === 'opening' ? 'launch' : 'none',
-      blocked === 'reload',
-      true,
-    );
+  test(`Main explicit quit hides the window while held ${blocked} cleans up in background`, async () => {
+    const f = await mainFixture(blocked === 'opening' ? 'launch' : 'none', blocked === 'reload');
     let pending: Promise<unknown> | undefined;
     const timers = spyOn(globalThis, 'setTimeout');
     try {
@@ -1572,9 +1549,7 @@ for (const blocked of ['opening', 'reload'] as const) {
         await f.serviceClosing;
       }
       f.quit();
-      await f.menuEntered;
       expect(f.windowCount()).toBe(1);
-      f.confirmQuit();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       expect(f.windowCount()).toBe(1);
       expect(f.trace.filter((item) => item === 'window:destroy')).toHaveLength(0);
@@ -1584,7 +1559,7 @@ for (const blocked of ['opening', 'reload'] as const) {
         expect(f.dockHides()).toBe(1);
       }
       expect(f.exitCodes).toEqual([]);
-      expect(timers.mock.calls.filter((call) => call[1] === 20000)).toEqual([]);
+      expect(timers.mock.calls.filter((call) => call[1] === 4000)).toHaveLength(1);
       const presentation = f.trace.filter((item) => item.startsWith('window:'));
       f.quit();
       f.activate();
@@ -1593,7 +1568,7 @@ for (const blocked of ['opening', 'reload'] as const) {
       expect(f.trace.filter((item) => item.startsWith('window:'))).toEqual(presentation);
       expect(f.windowCount()).toBe(1);
       expect(f.exitCodes).toEqual([]);
-      expect(f.dialogs).toHaveLength(1);
+      expect(f.dialogs).toEqual([]);
       expect(f.errors).toEqual([]);
       if (blocked === 'reload')
         expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
@@ -1605,7 +1580,7 @@ for (const blocked of ['opening', 'reload'] as const) {
       expect(f.exitCodes).toEqual([0]);
       expect(f.services[0]!.closed).toBe(true);
       expect(f.windowCount()).toBe(0);
-      expect(f.dialogs).toHaveLength(1);
+      expect(f.dialogs).toEqual([]);
     } finally {
       timers.mockRestore();
       f.release();
@@ -1617,34 +1592,32 @@ for (const blocked of ['opening', 'reload'] as const) {
 }
 
 test('Main late renderer startup rejection cannot add a dialog or duplicate background cleanup', async () => {
-  const f = await mainFixture('none', true, true, false, true);
+  const f = await mainFixture('none', true, false, true);
   const timers = spyOn(globalThis, 'setTimeout');
   try {
     await f.rendererEntered;
     await f.open();
     await f.runners[0]!.tick();
     f.quit();
-    await f.menuEntered;
-    f.confirmQuit();
     await f.serviceClosing;
-    const drainDeadlines = () => timers.mock.calls.filter((call) => call[1] === 20000);
-    expect(drainDeadlines()).toHaveLength(0);
+    const drainDeadlines = () => timers.mock.calls.filter((call) => call[1] === 4000);
+    expect(drainDeadlines()).toHaveLength(1);
     f.rejectRendererLoad();
     // Flush the original app.whenReady/loadURL rejection and its catch while
     // the already-authorized Service drain remains pending.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     f.quit();
-    expect(f.dialogs).toHaveLength(1);
+    expect(f.dialogs).toEqual([]);
     expect(f.errors).toEqual([]);
     expect(f.exitCodes).toEqual([]);
-    expect(drainDeadlines()).toHaveLength(0);
+    expect(drainDeadlines()).toHaveLength(1);
     expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
     f.releaseServiceClose();
     expect(await f.exited).toBe(0);
     expect(f.exitCodes).toEqual([0]);
-    expect(f.dialogs).toHaveLength(1);
+    expect(f.dialogs).toEqual([]);
     expect(f.errors).toEqual([]);
-    expect(drainDeadlines()).toHaveLength(0);
+    expect(drainDeadlines()).toHaveLength(1);
     expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
   } finally {
     timers.mockRestore();
@@ -1652,110 +1625,37 @@ test('Main late renderer startup rejection cannot add a dialog or duplicate back
   }
 }, 15000);
 
-test('Main reload resumes after retained quit when original close finishes during confirmation', async () => {
-  const f = await mainFixture('none', true, true);
-  let reloading: Promise<unknown> | undefined;
-  try {
-    await f.open();
-    await f.runners[0]!.tick();
-    let reloadSettled = false;
-    reloading = f.reload(replacement).then(
-      () => {
-        reloadSettled = true;
-        return null;
-      },
-      (error: unknown) => {
-        reloadSettled = true;
-        return error;
-      },
-    );
-    await f.serviceClosing;
-    f.quit();
-    await f.menuEntered;
-    f.releaseServiceClose();
-    // Complete the original drain while the user still owns the unanswered
-    // confirmation. The replacement must wait for that decision, not fail.
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect(reloadSettled).toBe(false);
-    expect(f.services).toHaveLength(1);
-    expect(f.exitCodes).toEqual([]);
-    expect(f.dialogs).toHaveLength(1);
-    f.retainService();
-    expect(await reloading).toBeNull();
-    const caller = await f.open();
-    expect(caller).toBeDefined();
-    expect(await f.open()).toBe(caller);
-    expect(f.services).toHaveLength(2);
-    expect(f.services[0]!.closed).toBe(true);
-    expect(f.services[1]!.closed).toBe(false);
-    await f.runners[1]!.tick();
-    expect(f.posts.some((post) => post.service === 2 && post.kind === 'start')).toBe(true);
-    expect(f.posts.some((post) => post.afterClose)).toBe(false);
-    expect(f.exitCodes).toEqual([]);
-    expect(f.dialogs).toHaveLength(1);
-    expect(f.errors).toEqual([]);
-  } finally {
-    f.retainService();
-    f.releaseServiceClose();
-    await reloading;
-    await f.close();
-  }
-}, 15000);
-
 for (const openingKind of ['initial', 'replacement'] as const) {
   for (const barrier of ['launch', 'profile'] as const) {
-    test(`Main retained quit resumes ${openingKind} caller held at ${barrier}`, async () => {
+    test(`Main explicit quit retires ${openingKind} caller held at ${barrier} without reopening`, async () => {
       const serviceId = openingKind === 'initial' ? 1 : 2;
-      const f = await mainFixture(barrier, false, true, false, false, serviceId);
+      const f = await mainFixture(barrier, false, false, false, serviceId);
       let pending: Promise<unknown> | undefined;
       try {
         if (openingKind === 'replacement') {
           await f.open();
           await f.runners[0]!.tick();
         }
-        let settled = false;
         const operation = openingKind === 'initial' ? f.open() : f.reload(replacement);
-        pending = operation.then(
-          (value) => {
-            settled = true;
-            return { value };
-          },
-          (error: unknown) => {
-            settled = true;
-            return { error };
-          },
-        );
+        pending = operation.catch((error: unknown) => error);
         await f.entered;
         f.quit();
-        await f.menuEntered;
+        expect(f.windowVisible()).toBe(false);
+        expect(f.exitCodes).toEqual([]);
+        expect(f.dialogs).toEqual([]);
+        f.activate();
+        f.readyToShow();
+        expect(f.windowVisible()).toBe(false);
         f.release();
-        // The actual openCaller continuation reaches its quit-decision fence
-        // after the host launch/profile port returns, before closing the Service.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        expect(settled).toBe(false);
-        expect(f.trace).not.toContain(`${serviceId}:service:closing`);
-        expect(f.services[serviceId - 1]!.closed).toBe(false);
-        expect(f.runners).toHaveLength(serviceId - 1);
-        expect(f.exitCodes).toEqual([]);
-        expect(f.dialogs).toHaveLength(1);
-        f.retainService();
-        expect(await pending).not.toHaveProperty('error');
-        const caller = await f.open();
-        expect(caller).toBeDefined();
-        expect(await f.open()).toBe(caller);
+        expect(await pending).toBeInstanceOf(Error);
+        expect(await f.exited).toBe(0);
         expect(f.services).toHaveLength(serviceId);
-        expect(f.services[serviceId - 1]!.closed).toBe(false);
-        expect(f.runners).toHaveLength(serviceId);
-        await f.runners[serviceId - 1]!.tick();
-        expect(f.posts.some((post) => post.service === serviceId && post.kind === 'start')).toBe(
-          true,
-        );
+        expect(f.services[serviceId - 1]!.closed).toBe(true);
+        expect(f.runners).toHaveLength(serviceId - 1);
+        expect(f.posts.some((post) => post.service === serviceId)).toBe(false);
         expect(f.posts.some((post) => post.afterClose)).toBe(false);
-        expect(f.exitCodes).toEqual([]);
-        expect(f.dialogs).toHaveLength(1);
-        expect(f.errors).toEqual([]);
+        expect(f.exitCodes).toEqual([0]);
       } finally {
-        f.retainService();
         f.release();
         await pending;
         await f.close();
@@ -1765,7 +1665,7 @@ for (const openingKind of ['initial', 'replacement'] as const) {
 }
 
 test('Main late app readiness cannot create a client window after committed quit', async () => {
-  const f = await mainFixture('none', false, false, false, false, 1, true);
+  const f = await mainFixture('none', false, false, false, 1, true);
   try {
     expect(f.windowCount()).toBe(0);
     f.quit();
@@ -1787,7 +1687,7 @@ test('Main late app readiness cannot create a client window after committed quit
 
 for (const mode of ['agent', 'human', 'destroyed'] as const) {
   test(`Main shutdown retains the exact ${mode} page lease until real Desktop transport release`, async () => {
-    const f = await mainFixture('none', false, true);
+    const f = await mainFixture('none', false);
     let transport: NativeBrowserTransport | undefined;
     let removePage: (() => void) | undefined;
     let closeResult: { confirmed: boolean } | undefined;
@@ -1836,9 +1736,7 @@ for (const mode of ['agent', 'human', 'destroyed'] as const) {
         await transport!.dispose();
       });
       f.quit();
-      await f.menuEntered;
       if (mode === 'destroyed') f.destroyWindow();
-      f.confirmQuit();
       expect(await f.exited).toBe(expectedExit);
       expect(closeResult).toEqual({ confirmed: mode !== 'destroyed' });
       if (mode !== 'destroyed') {

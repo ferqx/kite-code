@@ -16,7 +16,6 @@ import {
   nativeEventChannel,
   nativeFullPermissionConfirmationCancelChannel,
   nativeFullPermissionConfirmationChannel,
-  nativeQuitConfirmationFailureChannel,
   nativeStartupDiagnosticSaveChannel,
   nativeStartupStatusChannel,
   nativeThemeChannel,
@@ -202,11 +201,6 @@ const bridge: NativeBridge &
   },
   cancelFullPermissionConfirmation(requestId) {
     ipcRenderer.send(nativeFullPermissionConfirmationCancelChannel, { requestId });
-  },
-  watchQuitConfirmationFailure(listener) {
-    const receive = () => listener();
-    ipcRenderer.on(nativeQuitConfirmationFailureChannel, receive);
-    return () => ipcRenderer.off(nativeQuitConfirmationFailureChannel, receive);
   },
   async setTheme(theme) {
     const reply = (await ipcRenderer.invoke(nativeThemeChannel, { theme })) as NativeReply;

@@ -17,7 +17,6 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerDigest, callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
 import { createNativeCallerGenerationOwner, NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
-import { inspectNativeQuitWork } from '../electron/quit-settlement';
 import type {
   NativeBackgroundChildChunk,
   NativeBackgroundChildOpen,
@@ -1883,40 +1882,6 @@ test('formal Native reads an observed restored Fork with a missing workspace thr
     expect(reads).toEqual(['execution:e', 'output:s:e:store', 'execution:e']);
     expect(message.originMessage!.storeId).toBe('original-store');
     expect(connection.writes).toBe(0);
-  } finally {
-    await caller.close();
-  }
-});
-test('quit inspection aborts only its complete directory/view GET when the service does not answer, preserving unknown work and zero writes', async () => {
-  const port = client(),
-    signals: AbortSignal[] = [];
-  Object.assign(port, {
-    async listAllSessions(options: { signal: AbortSignal }) {
-      signals.push(options.signal);
-      return [{ id: 's' }];
-    },
-    async getView(_id: string, options: { signal: AbortSignal }) {
-      signals.push(options.signal);
-      return new Promise((_resolve, reject) =>
-        options.signal.addEventListener('abort', () => reject(Error('inspection_aborted')), {
-          once: true,
-        }),
-      );
-    },
-  });
-  const caller = new NativeCaller(port, () => {}, memoryPrivateData());
-  try {
-    expect(await inspectNativeQuitWork((signal) => caller.hasActiveWork(signal), 10)).toBe(true);
-    expect(signals.length).toBe(2);
-    expect(signals[0]).toBe(signals[1]);
-    expect(signals[0]!.aborted).toBe(true);
-    expect(port.writes).toBe(0);
-    expect(await inspectNativeQuitWork(async () => false, 10)).toBe(false);
-    expect(
-      await inspectNativeQuitWork(async () => {
-        throw Error('query unavailable');
-      }, 10),
-    ).toBe(true);
   } finally {
     await caller.close();
   }

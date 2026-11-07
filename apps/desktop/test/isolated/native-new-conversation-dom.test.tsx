@@ -1331,9 +1331,7 @@ test('an accepted original proof cannot silently rebase over newer nonempty pers
     expect(f.saved.get('a')?.content).toBe('another writer saved this');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('my later edit');
     expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
-      '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
-    );
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
   } finally {
     await f.close();
   }
@@ -1353,9 +1351,7 @@ test('an independent empty saved draft is not mistaken for committed receipt con
     expect(f.saved.get('a')?.content).toBe('');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('my later edit');
     expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
-      '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
-    );
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
   } finally {
     await f.close();
   }
@@ -1383,9 +1379,7 @@ for (const mismatch of [
       expect(f.saved.get('a')?.revision).toBe(2);
       expect(promptValue(f.input('当前会话私有草稿'))).toBe('newer editor text');
       expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
-      expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
-        '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
-      );
+      expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
     } finally {
       await f.close();
     }
@@ -1406,9 +1400,7 @@ test('saved draft reconciliation requires the original consumed-from revision', 
     expect(f.writes().map((input) => input.revision)).toEqual([1]);
     expect(f.saved.get('a')?.revision).toBe(2);
     expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
-      '草稿已在其他地方更新，当前输入已保留。请重新读取草稿后再保存。',
-    );
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
   } finally {
     await f.close();
   }
@@ -1487,7 +1479,7 @@ for (const next of ['other', 'return', 'quitting', 'cancelled-quit'] as const)
     }
   });
 
-test('a current consumed-draft read rejection reports its error and an explicit retry still reconciles', async () => {
+test('a diagnostic consumed-draft read rejection stays silent and an explicit retry still reconciles', async () => {
   const f = savedPromptFixture();
   try {
     await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
@@ -1500,12 +1492,9 @@ test('a current consumed-draft read rejection reports its error and an explicit 
     await f.click('保留草稿');
     expect(f.writes()).toHaveLength(0);
     expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
-      '草稿暂时无法保存或读取，当前输入已保留。请稍后再试。',
-    );
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsaved draft after accepted input');
     f.setReadOverride();
-    await f.click('关闭提示');
     await f.click('保留草稿');
     expect(f.writes().map((input) => input.revision)).toEqual([2]);
     expect(f.saved.get('a')?.content).toBe('unsaved draft after accepted input');
@@ -1514,7 +1503,7 @@ test('a current consumed-draft read rejection reports its error and an explicit 
   }
 });
 
-test('a late draft write rejection remains a mutation error after reconciliation and navigation', async () => {
+test('a diagnostic draft write rejection preserves the newer view without a toast', async () => {
   const f = savedPromptFixture();
   const bridge = f.dom.window.kiteNative! as NativeBridge;
   const request = bridge.request;
@@ -1536,9 +1525,7 @@ test('a late draft write rejection remains a mutation error after reconciliation
     await f.click('Other B');
     await act(async () => rejectWrite?.());
     expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
-    expect(f.host.querySelector('.native-message [role="status"]')?.textContent).toContain(
-      '草稿暂时无法保存或读取，当前输入已保留。请稍后再试。',
-    );
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
   } finally {
     await act(async () => rejectWrite?.());
@@ -3388,7 +3375,20 @@ test('preparation displays its target throughout branch reads and preserves same
   }
 });
 
-test('failed branch verification cannot enable first send from retained project display and can be retried', async () => {
+test('initial optional project discovery stays silent even in the diagnostic fixture', async () => {
+  const f = fixture(false, true, 'auto', { withoutSelection: true });
+  try {
+    f.rejectBranch();
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    expect(f.calls.some((call) => call.method === 'conversation.branch')).toBe(true);
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+    expect(promptValue(f.input())).toBe('');
+  } finally {
+    await f.close();
+  }
+});
+
+test('project and branch metadata failures stay silent without qualifying a first send', async () => {
   const f = fixture();
   try {
     await act(async () => f.root.render(<NativeDesktop />));
@@ -3397,6 +3397,7 @@ test('failed branch verification cannot enable first send from retained project 
     await f.chooseModel();
     f.rejectBranch();
     await f.click('新对话');
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
     expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe('Workspace');
     expect(f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')?.disabled).toBe(
       true,
@@ -3409,6 +3410,114 @@ test('failed branch verification cannot enable first send from retained project 
       false,
     );
     expect(f.host.querySelector('[aria-label="分支"]')?.textContent).toBe('main');
+    await act(async () => {
+      const branch = f.host.querySelector<HTMLButtonElement>('[aria-label="分支"]')!;
+      branch.focus();
+      branch.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    f.rejectBranch();
+    await f.click('刷新分支');
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+    await act(async () => {
+      const project = f.host.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
+      project.focus();
+      project.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    f.rejectBranch();
+    await f.click('Ordinary directory');
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+    expect(promptValue(f.input())).toBe('unsent draft');
+    await act(async () => {
+      const profile = f.host.querySelector<HTMLButtonElement>('[aria-label="用户菜单"]')!;
+      profile.focus();
+      profile.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await f.click('设置');
+    expect(f.dom.window.document.querySelector('.settings-content .notice.error') === null).toBe(
+      true,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('adding a project keeps branch discovery silent and an ordinary directory can send without a branch', async () => {
+  const f = fixture();
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  bridge.request = async (input) => {
+    if (input.method !== 'workspace.pick') return request(input);
+    f.calls.push(input);
+    return { kind: 'workspace.picked', workspaceId: 'empty' };
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('新对话');
+    await f.edit('work in an ordinary folder');
+    f.rejectBranch();
+    await f.click('添加空间');
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+    expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe('Ordinary directory');
+    expect(f.host.querySelector('[aria-label="分支"]')).toBeNull();
+    expect(promptValue(f.input())).toBe('work in an ordinary folder');
+    await f.click('在 Ordinary directory 中新建对话');
+    await f.chooseModel();
+    expect(f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')?.disabled).toBe(
+      false,
+    );
+    await f.click('发送首条消息');
+    const sends = f.calls.filter((input) => input.method === 'conversation.send');
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.creation.workspaceId).toBe('empty');
+    expect(sends[0]?.intent.content).toBe('work in an ordinary folder');
+    expect(sends[0]?.targetBranch).toBeUndefined();
+    await f.resolve('accepted');
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a successful workspace registration is not relabelled by its subsequent directory read failure', async () => {
+  const f = fixture(false, true, 'auto', { withoutSelection: true });
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let failDirectory = false;
+  let failedReads = 0;
+  bridge.request = async (input) => {
+    if (input.method === 'workspace.pick') {
+      f.calls.push(input);
+      failDirectory = true;
+      return { kind: 'workspace.picked', workspaceId: 'empty' };
+    }
+    if (input.method === 'directory' && failDirectory) {
+      f.calls.push(input);
+      failDirectory = false;
+      failedReads++;
+      throw Error('network_outcome_unknown');
+    }
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('keep the unsent draft');
+    await f.click('添加空间');
+    expect(failedReads).toBe(1);
+    expect(f.calls.filter((call) => call.method === 'workspace.pick')).toHaveLength(1);
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+    expect(f.host.body.textContent).not.toContain('添加空间遇到问题');
+    expect(f.host.body.textContent).not.toContain('结果待确认');
+    expect(promptValue(f.input())).toBe('keep the unsent draft');
+    await f.until(() => f.calls.filter((call) => call.method === 'directory').length >= 3);
+    expect(f.calls.filter((call) => call.method === 'workspace.pick')).toHaveLength(1);
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+    expect(promptValue(f.input())).toBe('keep the unsent draft');
   } finally {
     await f.close();
   }
@@ -5034,6 +5143,86 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     ).toBe(false);
   } finally {
     await f.releaseHistory();
+    await f.close();
+  }
+});
+
+for (const [code, message] of [
+  ['workspace_not_found', '未找到所选项目，请重新选择。'],
+  ['draft_storage_unavailable', '本地数据暂时无法读取或保存，请先查看当前状态。'],
+  ['service_unavailable', '服务处理此操作时遇到问题，请先查看当前状态。'],
+])
+  test(`ordinary workspace removal reports ${code} once without sending or replacing the draft`, async () => {
+    const f = fixture(false, true, 'auto', { withoutSelection: true });
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    bridge.request = async (input) => {
+      if (input.method === 'workspace.remove') {
+        f.calls.push(input);
+        throw Error(code);
+      }
+      return request(input);
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.edit('keep this unsent draft');
+      const more = f.host.querySelector<HTMLButtonElement>('.workspace-group .space-more')!;
+      await act(async () => {
+        more.focus();
+        more.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+      });
+      await f.click('移除 Workspace');
+      expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
+      expect(f.dom.window.document.querySelectorAll('.native-toast')).toHaveLength(1);
+      expect(f.dom.window.document.querySelector('.native-toast')?.textContent).toContain(message);
+      expect(f.dom.window.document.querySelector('.native-toast')?.textContent).not.toContain(code);
+      expect(promptValue(f.input())).toBe('keep this unsent draft');
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
+      await act(async () =>
+        f.dom.window.document.querySelector<HTMLButtonElement>('[aria-label="关闭提示"]')!.click(),
+      );
+      expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+      expect(promptValue(f.input())).toBe('keep this unsent draft');
+    } finally {
+      await f.close();
+    }
+  });
+
+test('an applied workspace removal is not relabelled or resubmitted when its directory refresh fails', async () => {
+  const f = fixture(false, true, 'auto', { withoutSelection: true });
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let failDirectory = false;
+  bridge.request = async (input) => {
+    if (input.method === 'directory' && failDirectory) {
+      f.calls.push(input);
+      failDirectory = false;
+      throw Error('network_outcome_unknown');
+    }
+    return request(input);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    const more = f.host.querySelector<HTMLButtonElement>('.workspace-group .space-more')!;
+    await act(async () => {
+      more.focus();
+      more.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await f.click('移除 Workspace');
+    failDirectory = true;
+    await f.finishWorkspaceRemoval('applied');
+    expect(failDirectory).toBe(false);
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+    expect(f.host.body.textContent).not.toContain('移除结果待确认');
+    expect(f.host.body.textContent).not.toContain('移除空间遇到问题');
+    await f.until(() => f.calls.filter((call) => call.method === 'directory').length >= 3);
+    expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
+    expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
+  } finally {
     await f.close();
   }
 });
